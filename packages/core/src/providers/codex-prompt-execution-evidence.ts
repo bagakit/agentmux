@@ -6,7 +6,7 @@ import { nativeProcessFiles, nativeProcessBirth } from '../agent-native-process.
 import type { AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence } from '../types.js'
 import { AgentMuxError } from '../errors.js'
-import { codexFailure } from './codex-errors.js'
+import { codexTurnOutcome, codexTurnRecordId } from './codex-turn-outcome.js'
 
 const TAIL_BYTES = 512 * 1024
 const HEADER_BYTES = 512 * 1024
@@ -44,13 +44,12 @@ export function codexTurnRecordEvidence(value: unknown, sourceId: string, native
     if (event.type === 'item_completed' && (!sameTurn || previous.state === 'ended')) return undefined
     if (state === 'ended' && !sameTurn || state === 'working' && sameTurn && previous.state === 'ended') return undefined
   }
-  const failure = state === 'ended' && event.error != null ? codexFailure(event.error, event.turn_id) : undefined
+  const outcome = codexTurnOutcome(item as Record<string, unknown>, nativeSessionId)
   const observedAt = typeof item.timestamp === 'string' ? Date.parse(item.timestamp) : NaN
   return { sourceId, id: createHash('sha256').update(JSON.stringify([sourceId, item.ordinal, item.type, event.type, event.turn_id])).digest('base64url'),
     nativeTurnId: event.turn_id, nativeOrdinal: Number(item.ordinal), state,
     ...(Number.isSafeInteger(observedAt) && observedAt >= 0 ? { observedAt } : {}),
-    ...(failure ? { endReason: 'failed', failure } : event.type === 'task_complete' ? { endReason: 'completed' } :
-      event.type === 'turn_aborted' && event.reason === 'interrupted' ? { endReason: 'interrupted' } : {}) }
+    ...(outcome ? { endReason: outcome.status, ...(outcome.status === 'failed' ? { failure: outcome.failure } : {}) } : {}) }
 }
 
 /** Current local transport is proven by the exact native source's unique writer
@@ -141,11 +140,14 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
     if (first <= 0 && start) return null
     const lines = tail.subarray(first, completeEnd).toString('utf8').split('\n')
     let latest: AgentPromptExecutionEvidence | null = null
+    let recordOffset = start + first
     for (const line of lines) {
-      const evidence = codexTurnRecordEvidence(JSON.parse(line), sourceId, handle.sessionId, latest)
+      const value = JSON.parse(line)
+      const evidence = codexTurnRecordEvidence(value, sourceId, handle.sessionId, latest)
       // A malformed current boundary cannot resurrect a prior success.
       if (evidence === null) return null
-      if (evidence) latest = evidence
+      if (evidence) latest = { ...evidence, nativeRecordId: codexTurnRecordId(value, recordOffset) }
+      recordOffset += Buffer.byteLength(line) + 1
     }
     if (latest) return currentEvidence(latest)
     // A complete, small new transcript with no turn can prove initial idle. A

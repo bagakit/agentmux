@@ -5,6 +5,7 @@ import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges, NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES } from '../native-jsonl-history-reader.js'
 import { normalizeSessionHistoryMetrics, SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextStartsWith, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
+import { codexTurnOutcome, codexTurnRecordId } from './codex-turn-outcome.js'
 import { codexQuestionAnswers, codexQuestionRequest } from './codex-question.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem } from '../types.js'
@@ -14,9 +15,9 @@ const object = (value: unknown): Record<string, unknown> => value && typeof valu
 const text = (value: unknown) => isNativeText(value) ? value : value === undefined ? '' : nativeJsonStringify(value)
 
 function metrics(record: Record<string, unknown>, payload: Record<string, unknown>, nativeSessionId: string): Pick<NativeHistoryItem, 'metrics' | 'metricsDiagnostic'> {
-  if (record.type === 'event_msg' && (payload.type === 'task_complete' || payload.type === 'turn_aborted')) return normalizeSessionHistoryMetrics({
+  if (record.type === 'event_msg' && (payload.type === 'task_complete' || payload.type === 'turn_aborted')) return payload.duration_ms === undefined ? {} : normalizeSessionHistoryMetrics({
     turnId: payload.turn_id,
-    metrics: { scope: 'turn', status: payload.type === 'task_complete' ? 'completed' : 'interrupted',
+    metrics: { scope: 'turn',
       ...(payload.duration_ms === undefined ? {} : { durationMs: payload.duration_ms }) }
   })
   if (record.type !== 'token_usage_record') return {}
@@ -198,7 +199,8 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     ? userContent.map(part => object(part).type === 'input_text' ? { ...object(part), type: 'text' } : part)
     : userContent) : undefined
   const timestamp = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN
-  const id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
+  const id = codexTurnRecordId(record, start)
+  const turnOutcome = codexTurnOutcome(record, nativeSessionId)
   const directTurnId = typeof payload.turn_id === 'string' && payload.turn_id.length > 0 ? payload.turn_id : undefined
   const metadata = record.type === 'response_item' && (type === 'message' || type === 'agent_message') ? object(payload.internal_chat_message_metadata_passthrough) : {}
   const messageTurnId = typeof metadata.turn_id === 'string' && metadata.turn_id.length > 0 ? metadata.turn_id : undefined
@@ -214,6 +216,7 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     ...(collaboration === undefined ? {} : { collaboration }),
     ...(conversationDiagnostic === undefined ? {} : { conversationDiagnostic }),
     ...metrics(record, payload, nativeSessionId),
+    ...(turnOutcome ? { turnOutcome } : {}),
     ...(kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'final_answer' ? { messagePhase: 'final' as const }
       : kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'commentary' ? { messagePhase: 'progress' as const } : {}),
     ...(questionRequest === undefined ? {} : { questionRequest }),

@@ -29,12 +29,36 @@ const classifications: Record<string, [string, string]> = {
   active_turn_not_steerable: ['AGENT_TURN_NOT_STEERABLE', 'Wait for the current turn or explicitly interrupt it before submitting.']
 }
 
+const publicMessages: Record<string, string> = {
+  AGENT_MODEL_OVERLOADED: 'The selected model is at capacity.',
+  AGENT_RATE_LIMITED: 'The Provider request rate limit was reached.',
+  AGENT_CREDIT_LIMIT: 'The Provider account has insufficient credits.',
+  AGENT_SPEND_LIMIT: 'The Provider spending limit was reached.',
+  AGENT_USAGE_LIMIT: 'The Provider usage limit was reached.',
+  AGENT_MODEL_UNAVAILABLE: 'The selected model service is unavailable.',
+  AGENT_SESSION_BUDGET: 'The Session budget was reached.',
+  AGENT_CONTEXT_LIMIT: 'The conversation exceeds the model context limit.',
+  AGENT_AUTHENTICATION_FAILED: 'Provider authentication failed.',
+  AGENT_INVALID_REQUEST: 'The Provider rejected the request.',
+  AGENT_PROVIDER_INTERNAL_ERROR: 'The Provider encountered an internal error.',
+  AGENT_CONNECTION_FAILED: 'The connection to the Provider failed.',
+  AGENT_STREAM_INTERRUPTED: 'The Provider response stream was interrupted.',
+  AGENT_RETRIES_EXHAUSTED: 'The Provider exhausted its request retries.',
+  AGENT_POLICY_REJECTED: 'The Provider rejected the request under its policy.',
+  AGENT_PERMISSION_DENIED: 'The requested Provider operation was denied.',
+  AGENT_SANDBOX_FAILED: 'The Provider sandbox operation failed.',
+  AGENT_CONVERSATION_OPERATION_FAILED: 'The native conversation operation failed.',
+  AGENT_TURN_NOT_STEERABLE: 'The current native turn does not accept steering.',
+  AGENT_REQUEST_LIMIT: 'The Provider request limit was reached.',
+  AGENT_PROVIDER_UNAVAILABLE: 'The Provider service is unavailable.'
+}
+
 /** Only native error fields are classified; neither messages nor HTTP codes are guessed. */
 export function codexFailure(value: unknown, nativeTurnId: string): AgentFailure {
   const error = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const info = error.codex_error_info ?? error.codexErrorInfo
   const nativeCode = typeof info === 'string' ? info : info && typeof info === 'object' && !Array.isArray(info)
-    ? Object.keys(info)[0] : typeof error.code === 'string' ? error.code : undefined
+    ? (Object.keys(info).length === 1 ? Object.keys(info)[0] : undefined) : typeof error.code === 'string' ? error.code : undefined
   const canonical = nativeCode?.replace(/[A-Z]/gu, letter => `_${letter.toLowerCase()}`)
   const nested = nativeCode && info && typeof info === 'object' ? (info as Record<string, unknown>)[nativeCode] : undefined
   const details = nested && typeof nested === 'object' ? nested as Record<string, unknown> : error
@@ -54,6 +78,9 @@ export function codexFailure(value: unknown, nativeTurnId: string): AgentFailure
     nativeClassification ?? (!nativeCode && httpStatusCode ? httpClassification[httpStatusCode] : undefined) ??
     ['AGENT_PROVIDER_ERROR', 'Inspect the native Provider error before explicitly retrying.']
   return { code, recovery, nativeTurnId,
-    message: typeof error.message === 'string' && error.message.trim() ? error.message : 'The native turn failed without a diagnostic message.',
-    ...(nativeCode ? { nativeCode } : {}), ...(httpStatusCode === undefined ? {} : { httpStatusCode }) }
+    ...(publicMessages[code] ? { publicMessage: publicMessages[code] } : {}),
+    message: typeof error.message === 'string' && error.message.trim()
+      ? error.message.length <= 16_384 ? error.message : 'The native failure details exceed the summary limit. Open the original record.'
+      : 'The native turn failed without a diagnostic message.',
+    ...(nativeCode && nativeCode.length <= 1024 ? { nativeCode } : {}), ...(httpStatusCode === undefined ? {} : { httpStatusCode }) }
 }

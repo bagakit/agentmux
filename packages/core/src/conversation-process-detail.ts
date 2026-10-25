@@ -12,9 +12,9 @@ export type ConversationProcessPart = (
       content?: NonNullable<Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>['content']> }
 ) & Pick<AgentSessionHistoryContentPart, 'contentEligibility' | 'contentRole'>
 export type ConversationProcessHeader =
-  | { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'id' | 'kind' | 'turnId' | 'title' | 'startedAt' | 'completedAt' | 'conversation' | 'metrics' | 'metricsDiagnostic'>;
+  | { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'id' | 'kind' | 'turnId' | 'title' | 'startedAt' | 'completedAt' | 'conversation' | 'metrics' | 'metricsDiagnostic' | 'turnOutcome' | 'turnOutcomeDiagnostic'>;
       parts: ConversationProcessPart[]; collaboration?: AgentSessionHistoryItem['collaboration'] }
-  | { kind: 'captured'; item: Pick<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title' | 'toolName' | 'eventName' | 'activityState' | 'conversation' | 'authorAgentSessionId' | 'authorHuman' | 'authorExternal' | 'sourceChannel'>;
+  | { kind: 'captured'; item: Pick<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title' | 'toolName' | 'eventName' | 'activityState' | 'turnOutcome' | 'conversation' | 'authorAgentSessionId' | 'authorHuman' | 'authorExternal' | 'sourceChannel'>;
       fields: Array<'content' | 'toolInput' | 'toolOutput'> }
 export type ConversationDeferredRecord = Omit<ConversationSourceRecord, 'original'> & {
   original: { kind: 'deferred'; item: ConversationProcessHeader }
@@ -32,7 +32,7 @@ export function deferConversationProcessRecord(record: ConversationSourceRecord)
   let header: ConversationProcessHeader
   if (original.kind === 'native') {
     const item = original.item, collaboration = item.collaboration
-    header = { kind: 'native', item: pick(item, ['id', 'kind', 'turnId', 'title', 'startedAt', 'completedAt', 'conversation', 'metrics', 'metricsDiagnostic']),
+    header = { kind: 'native', item: pick(item, ['id', 'kind', 'turnId', 'title', 'startedAt', 'completedAt', 'conversation', 'metrics', 'metricsDiagnostic', 'turnOutcome', 'turnOutcomeDiagnostic']),
       parts: item.contentParts.map(part => part.kind === 'tool-call' ? pick(part, ['kind', 'name', 'callId', 'contentEligibility', 'contentRole'])
         : part.kind === 'tool-result' ? pick(part, ['kind', 'name', 'callId', 'failed', 'contentEligibility', 'contentRole'])
         : part.kind === 'reasoning' ? pick(part, ['kind', 'redacted', 'contentEligibility', 'contentRole'])
@@ -40,7 +40,7 @@ export function deferConversationProcessRecord(record: ConversationSourceRecord)
       ...(collaboration ? { collaboration: collaboration.kind === 'operation'
         ? (({ prompt: _prompt, ...operation }) => ({ ...operation, agentStates: operation.agentStates.map(({ message: _message, ...state }) => state) }))(collaboration)
         : collaboration } : {}) }
-  } else header = { kind: 'captured', item: pick(original.item, ['id', 'agentSessionId', 'kind', 'status', 'source', 'createdAt', 'updatedAt', 'title', 'toolName', 'eventName', 'activityState', 'conversation', 'authorAgentSessionId', 'authorHuman', 'authorExternal', 'sourceChannel']),
+  } else header = { kind: 'captured', item: pick(original.item, ['id', 'agentSessionId', 'kind', 'status', 'source', 'createdAt', 'updatedAt', 'title', 'toolName', 'eventName', 'activityState', 'turnOutcome', 'conversation', 'authorAgentSessionId', 'authorHuman', 'authorExternal', 'sourceChannel']),
     fields: (['content', 'toolInput', 'toolOutput'] as const).filter(field => original.item[field] !== undefined) }
   // JSON also drops optional undefined properties from collaboration metadata.
   header = JSON.parse(JSON.stringify(header)) as ConversationProcessHeader

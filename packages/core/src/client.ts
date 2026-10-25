@@ -8858,20 +8858,28 @@ export class AgentMuxClient {
             if (watch.controller.signal.aborted) return
             watch.recordId = observation.recordId
             if (observation.sequence !== undefined) watch.sequence = observation.sequence
+            // Preserve the original failure even when a newer turn owns current activity.
+            // The captured record observes this source, not a claim that this Run caused it.
+            if (observation.failure) {
+              const observedAt = observation.nativeObservedAt ?? next.nativeTurnEnds?.turns[observation.nativeTurnId]?.observedAt ?? Date.now()
+              await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: next.agentSessionId, item: {
+                id: JSON.stringify(['native-failure', next.run.runId, observation.recordId]),
+                agentSessionId: next.agentSessionId, kind: 'lifecycle', status: 'failed', source: 'native-transcript',
+                createdAt: observedAt, updatedAt: observedAt, title: observation.failure.message,
+                turnOutcome: { status: 'failed', failure: structuredClone(observation.failure) },
+                ...(observation.nativeRecordId && next.nativeHandle?.kind === 'provider' ? { conversation: {
+                  sameEvent: { hostId: next.hostId, agentSessionId: next.agentSessionId, source: { kind: 'native',
+                    providerId: next.providerId, nativeSessionId: next.nativeHandle.sessionId, recordId: observation.nativeRecordId } }
+                } } : {}),
+                content: JSON.stringify(observation.failure)
+              } }, { source: 'native-transcript', run: { ...next.run }, observedAt }, next.hostId)
+            }
             if (!displayAccepted) { this.publishSession(next); return }
             if (next.activityCommit && !next.activityCommit.latestCommitted) await this.flushAgentActivity(next)
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             if (observation.state === 'working' || ended)
               this.hookTurnPhases.set(session.run.runId, ended ? 'turn-ended' : 'in-turn')
             const status = next.semanticStatus!
-            if (status.failure) {
-              await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: next.agentSessionId, item: {
-                id: JSON.stringify(['native-failure', next.run.runId, observation.recordId]),
-                agentSessionId: next.agentSessionId, kind: 'lifecycle', status: 'failed', source: 'native-transcript',
-                createdAt: status.observedAt, updatedAt: status.observedAt, title: `[${status.failure.code}] ${status.failure.message}`,
-                content: JSON.stringify(status.failure)
-              } }, { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt }, next.hostId)
-            }
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             this.publishSession(next)
             this.publisher.publish({ type: 'agent-status', agentSessionId: next.agentSessionId,

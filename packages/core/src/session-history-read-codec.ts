@@ -1,3 +1,4 @@
+import { parseAgentTurnOutcome, normalizeTurnOutcome } from './turn-outcome.js'
 import { parseExternalConversationAuthor } from './external-conversation.js'
 export { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
@@ -106,8 +107,11 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
         if (!Array.isArray(item.contentParts)) return bad()
         try { for (const part of item.contentParts) { const value = rpcRecord(part, undefined, 'CONTROL_PROTOCOL_ERROR'); normalizeSessionHistoryContentEligibility(value.contentEligibility); normalizeSessionHistoryContentRole(value.contentRole) } } catch { return bad() }
       }
+      if (item.turnOutcome !== undefined) {
+        try { parseAgentTurnOutcome(item.turnOutcome, typeof item.turnId === 'string' ? item.turnId : undefined) } catch { return bad() }
+      }
       const { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = item
-      items.push(input.source === 'native' ? { kind: 'item', item: { ...original, ...normalizeSessionHistoryMetrics(item) } as AgentSessionHistoryItem }
+      items.push(input.source === 'native' ? { kind: 'item', item: { ...original, ...normalizeSessionHistoryMetrics(item), ...normalizeTurnOutcome(item) } as AgentSessionHistoryItem }
         : row as AgentSessionHistoryReadEntry)
     } else if (row.kind === 'fragment') {
       rpcRecord(row, ['kind', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')

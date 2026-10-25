@@ -958,6 +958,7 @@ function semanticStatus(value: unknown): AgentStatus {
         throw new AgentMuxError('Failure HTTP status is invalid.', 'INVALID_AGENT_SESSION_STORE')
       }
       return { code: text(failure.code, 'failure.code'), message: text(failure.message, 'failure.message'),
+        ...(failure.publicMessage === undefined ? {} : { publicMessage: text(failure.publicMessage, 'failure.publicMessage') }),
         recovery: text(failure.recovery, 'failure.recovery'), nativeTurnId: text(failure.nativeTurnId, 'failure.nativeTurnId'),
         ...(failure.nativeCode === undefined ? {} : { nativeCode: text(failure.nativeCode, 'failure.nativeCode') }),
         ...(http === undefined ? {} : { httpStatusCode: Number(http) }) }
