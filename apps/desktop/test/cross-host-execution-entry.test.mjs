@@ -45,3 +45,20 @@ test('dispatch stays sequential, failures stop later work, and passing checks ne
     assert.equal(failed.checksPassed, false); assert.deepEqual(failed.checks.map(item => item.status), ['failed', 'pending'])
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
+
+test('native IPC acceptance requires two real Electron owners and the original Session/binding', () => {
+  const observation = { originalRunRetained: true, rendererBinding: { bindingId: 'binding', agentSessionId: 'session' }, observedBinding: { bindingId: 'binding', agentSessionId: 'session' } }
+  const receipt = { passed: true, cleanup: { errors: [], remaining: [], report: '/private/cleanup.json' }, phases: [
+    { phase: 'tool-workspace', exit: { exitCode: 0, timedOut: false }, native: { passed: true, pid: 101, bindingObservation: observation,
+      toolBinding: { original: { agentSessionId: 'session', run: { runId: 'original-run' }, toolExecution: { bindingId: 'binding' } } } } },
+    { phase: 'tool-workspace-restore', exit: { exitCode: 0, timedOut: false }, native: { passed: true, pid: 202, bindingObservation: observation,
+      toolRestart: { passed: true, noCreateOrResume: true, originalTerminalAttached: true, originalSessionId: 'session', originalRunId: 'original-run', bindingId: 'binding' } } }
+  ] }
+  validateEvidence('native-ipc', receipt)
+  for (const breakReceipt of [value => value.phases.pop(), value => { value.phases[1].native.pid = 101 },
+    value => { value.phases[1].native.toolRestart.noCreateOrResume = false }, value => { value.phases[1].native.toolRestart.originalRunId = 'replacement' },
+    value => { value.cleanup.remaining = [101] }]) {
+    const broken = structuredClone(receipt); breakReceipt(broken)
+    assert.throws(() => validateEvidence('native-ipc', broken))
+  }
+})

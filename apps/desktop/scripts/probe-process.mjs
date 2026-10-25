@@ -183,7 +183,7 @@ export async function runProbeProcess(executable, args, {
     // The original exit/error observers already exist if the receipt sink fails.
     child.once('spawn', () => {
       if (settled) return
-      try { onSpawn({ originalPid: outcome.originalPid }) }
+      try { onSpawn({ originalPid: outcome.originalPid }, child) }
       catch (error) { primary ??= error; stopOriginal() }
     })
   })
