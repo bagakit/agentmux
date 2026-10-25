@@ -112,7 +112,7 @@ it.each(['progress', 'final'] as const)('sends the compact secondary %s author r
     avatarSource: { operationId: 'original-confirmed-upload', attempt: 1, imageKey: 'confirmed-original-portrait' },
     payload: { kind: 'speech', phase, text } })
   const prepared = f.publisher.prepare(original), frozen = JSON.stringify(prepared)
-  expect(prepared.renderVersion).toBe('feishu-conversation-v9')
+  expect(prepared.renderVersion).toBe('feishu-conversation-v10')
   const receipt = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
   expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Author row did not reach native create')
   expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
@@ -157,6 +157,25 @@ it.each([['feishu-conversation-v7', 'POST'], ['feishu-conversation-v7', 'PATCH']
   expect(f.remote.messageCalls()).toHaveLength(1)
 })
 
+it.each(['POST', 'PATCH'] as const)('inspects the frozen v9 Question %s without replacing its form or repeating the effect', async method => {
+  const mapping = { messageId: 'frozen-question-message' }, original = operation()
+  const savedCard = JSON.stringify({ schema: '2.0', config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Question from the Agent' }, template: 'blue' },
+    body: { elements: [{ tag: 'form', name: 'original_question', elements: [{ tag: 'button', name: 'submit_original_answer',
+      text: { tag: 'plain_text', content: 'Submit answers' }, value: { actionRef: 'frozen-original-question', questionFields: [] } }] }] } })
+  const f = await fixture(call => call.method === 'GET' ? { status: 200, body: { code: 0, data: { items: [{
+    message_id: mapping.messageId, chat_id: original.target.externalConversationId, msg_type: 'interactive',
+    sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId }, body: { content: savedCard }
+  }] } } } : undefined)
+  const prepared: PreparedPublication = { adapterId: 'feishu', renderVersion: 'feishu-conversation-v9', requestKey: original.operationId,
+    request: { method, path: method === 'POST' ? '/open-apis/im/v1/messages' : '/open-apis/im/v1/messages/' + mapping.messageId,
+      ...(method === 'POST' ? { query: { receive_id_type: 'chat_id' } } : {}), contentType: 'application/json', body: JSON.stringify({ ...(method === 'POST' ? {
+        receive_id: original.target.externalConversationId, msg_type: 'interactive', uuid: createHash('sha256').update(original.operationId).digest('base64url') } : {}), content: savedCard }) } }
+  const frozen = JSON.stringify(prepared), prepare = vi.spyOn(f.publisher, 'prepare')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', new AbortController().signal, mapping)).toEqual({ state: 'confirmed', mapping })
+  expect(JSON.stringify(prepared)).toBe(frozen); expect(prepare).not.toHaveBeenCalled()
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['GET'])
+})
+
 const feedCases: Array<[string, Partial<PublicationOperation>, string]> = [
   ['progress', { payload: { kind: 'speech', phase: 'progress', text: 'Original progress body' } }, 'Unknown author · Progress · Original progress body'],
   ['final', { payload: { kind: 'speech', phase: 'final', text: 'Original final body' } }, 'Unknown author · Reply · Original final body'],
@@ -164,7 +183,7 @@ const feedCases: Array<[string, Partial<PublicationOperation>, string]> = [
   ['user', { speaker: { kind: 'human' }, payload: { kind: 'speech', text: 'Original human body', relay: { sender: 'application', sources: [{ author: { kind: 'human' },
     part: { record: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'captured', recordId: 'original-user' } }, recordRevision: 'original-user-revision', selector: { kind: 'captured-field', field: 'content' } } }] } } }, 'User · Original human body'],
   ['question', { payload: { kind: 'question', text: 'Original question body', status: 'pending', actionRef: 'original-action',
-    questions: [{ id: 'original-question', prompt: 'Choose an original color', options: [{ id: 'original-option', label: 'Blue' }], acceptsText: true }] } }, 'Question from the Agent · Original question body'],
+    questions: [{ id: 'original-question', prompt: 'Choose an original color', options: [{ id: 'original-option', label: 'Blue' }], acceptsText: true }] } }, 'Question · Original question body'],
   ['permission', { payload: { kind: 'permission', title: 'Read the original file', status: 'pending', disclosure: 'shared', options: [] } }, 'Permission · Read the original file'],
   ['relationship', { payload: { kind: 'binding-lifecycle', event: 'connected', agentSessionId: 'original-session',
     scope: { input: 'all-messages', publication: 'future-shared-conversation' }, synchronization: true } }, 'Conversation connected · Agent original-session'],

@@ -14,10 +14,11 @@ import { startAgentMuxHost } from '../../../../apps/host/src/host.js'
 import { createConnectionServices } from '../../src/connection-services.js'
 import { createPublicationConversationPort } from '../../src/core-conversation-port.js'
 import { createHostedIngressCorePort } from '../../src/core-ingress-port.js'
+import type { PublicationSpeakerReader } from '../../src/publication-speaker.js'
 import { feishuConfig, feishuSdkTransport } from './feishu.js'
 
 /** Original Node Host/Hosted/Core Hook and default Desktop owners. Only Runtime and official SDK I/O are controlled. */
-export async function permissionActionsFixture(initialCoreAvailable = true) {
+export async function permissionActionsFixture(initialCoreAvailable = true, speaker?: PublicationSpeakerReader) {
   const cleanup: Array<() => void | Promise<void>> = []
   const original = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'codex', executorId: 'codex', nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native', transcriptPath: join(root, 'native.jsonl') } }))
   cleanup.push(() => original.close())
@@ -60,9 +61,11 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
     const ingressCore = createHostedIngressCorePort(clients)
     const sdk = feishuSdkTransport(), effects: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
     let lastCard: Record<string, unknown> | undefined, failPatch = false
+    const imageUploads: string[] = []
     const cards = new Map<string, Record<string, unknown>>()
     vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async input => {
       const path = String(input.url), method = String(input.method ?? 'GET').toUpperCase()
+      if (path.endsWith('/im/v1/images') && method === 'POST') { imageUploads.push(path); return { code: 0, data: { image_key: 'original-question-portrait' } } }
       if (path.includes('im/v1/messages')) {
         const inspectedId = path.split('/').at(-1)!, inspectedCard = cards.get(inspectedId)
         if (method === 'GET') return { code: 0, data: { items: inspectedCard && !failPatch ? [{ message_id: inspectedId, chat_id: 'original-room', msg_type: 'interactive', body: { content: JSON.stringify(inspectedCard) } }] : [] } }
@@ -81,7 +84,7 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
     })
     services = await createConnectionServices({ directory: join(original.root, 'connectors'),
       bindings: { spatial, checkpoint: async ref => await hosted.conversationCheckpoint(ref) },
-      publication: createPublicationConversationPort(clients), ingress: { core: hostId => coreAvailable ? ingressCore(hostId) : undefined } })
+      publication: createPublicationConversationPort(clients), ...(speaker ? { speaker } : {}), ingress: { core: hostId => coreAvailable ? ingressCore(hostId) : undefined } })
     cleanup.push(() => services.close())
     const business = new core.AgentMuxControlServer({ socketPath: desktopSocketPath, connections: services.connections, spatialState: spatial, coreClients: original.coreClients })
     await business.start(); cleanup.push(() => business.stop())
@@ -140,9 +143,9 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
       }, null, 2) + '\n')
       await close()
     }
-    return { original, host, hosted, services, rpc, cli, sdk, effects, grant, open, action, buttons, actor, binding: bound.binding,
+    return { original, host, hosted, services, rpc, cli, sdk, effects, imageUploads, grant, open, action, buttons, actor, binding: bound.binding,
       setCoreAvailable: (value: boolean) => { coreAvailable = value },
       disablePermissionSupport: () => { Reflect.deleteProperty(Reflect.get(services.publication!, 'options').connections.publicationAdapter(feishuConfig.connectionId), 'permissionActions') },
-      card: () => lastCard, setFailPatch: (value: boolean) => { failPatch = value }, close: tracedClose }
+      card: (messageId?: string) => messageId ? cards.get(messageId) : lastCard, setFailPatch: (value: boolean) => { failPatch = value }, close: tracedClose }
   } catch (error) { await close(); throw error }
 }
