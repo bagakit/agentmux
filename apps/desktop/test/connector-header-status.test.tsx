@@ -37,12 +37,8 @@ const effects = () => f.platformCalls.filter(call => call.url?.endsWith('/messag
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 8000 }) }
 async function open() { await act(async () => { trigger()!.focus(); trigger()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }); await wait(() => expect(menu()).not.toBeNull()) }
 async function check() { await act(async () => [...menu().querySelectorAll<HTMLElement>('button')].find(node => node.textContent === 'Refresh observations')!.click()) }
-async function bind(shared?: boolean) {
+async function bind() {
   await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_header_status')
-  if (shared !== undefined) {
-    await act(async () => { const select = document.querySelector<HTMLElement>('[aria-label="Group sharing content"]')!; select.focus(); select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
-    await act(async () => document.querySelector<HTMLElement>(`[role="menuitemradio"][data-value="${shared ? 'future-shared-conversation' : 'future-native-user-facing'}"]`)!.click())
-  }
   await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
   await f.button('Connect group'); await wait(() => expect(f.services.bindings!.listActive()).toHaveLength(1))
   const binding = f.services.bindings!.listActive()[0]!
@@ -58,7 +54,7 @@ async function renderHeader(bindings: RoomBinding[], visible = true, version = 0
 }
 
 it('the actual header diagnoses a source gap separately from older unknown platform effects without writes or replay', async () => {
-  const binding = await bind(true); lose = true
+  const binding = await bind(); lose = true
   await appendFile(f.original.transcript, row('unknown-original', 'assistant'))
   await wait(() => expect(speech(binding)[0]?.state).toBe('unknown'))
   await appendFile(f.original.transcript, row('public-unconfirmed', 'user'))
@@ -70,8 +66,8 @@ it('the actual header diagnoses a source gap separately from older unknown platf
   expect(menu().textContent).toContain('unconfirmed')
   expect(menu().textContent).toContain('original results remain unconfirmed')
   const kinds = [...menu().querySelectorAll<HTMLElement>('[data-problem-kind]')].map(node => node.dataset.problemKind)
-  expect(kinds).toContain('content-gap'); expect(kinds).toContain('outgoing-unconfirmed')
-  expect(menu().querySelector('.connector-traffic-summary__tile[aria-label="Conversation → group"]')?.textContent).toContain('not confirmed')
+  expect(kinds).toContain('outgoing-unconfirmed')
+  expect(menu().querySelector('.connector-traffic-summary__tile[aria-label="Conversation → group"] strong')?.textContent).toContain('not shared yet')
   expect(menu().textContent).not.toContain('Needs attention')
   for (const section of ['Configuration', 'Sharing', 'Conversation → group', 'Platform requests', 'Group → Agent', 'Snapshot of bounded local observations']) expect(menu().textContent).toContain(section)
   expect(f.calls.filter(call => call.method === 'connection.diagnose').at(-1)?.input).toEqual({ ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
@@ -231,7 +227,7 @@ it('application access observation stays separate from a healthy source and save
 }, 30_000)
 
 it('recent confirmed deliveries stay neutral while an older unconfirmed original remains visible', async () => {
-  const binding = await bind(true); lose = true
+  const binding = await bind(); lose = true
   await appendFile(f.original.transcript, row('older-unknown', 'assistant'))
   await wait(() => expect(speech(binding)[0]?.state).toBe('unknown'))
   lose = false
@@ -357,7 +353,7 @@ it('a disabled platform action opens the exact bot settings on its original Host
 
 
 it('the actual header explains an unsupported message without blaming member access or losing delivered replies', async () => {
-  const binding = await bind(false); await wait(() => expect(f.ingressTransport!.sockets).toHaveLength(1))
+  const binding = await bind(); await wait(() => expect(f.ingressTransport!.sockets).toHaveLength(1))
   await f.forward('connection.grant', { operationId: 'header-supported-member', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'supported-member-input', expectedRevision: null,
     actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input', 'answer', 'permission'], state: 'active' })
   await appendFile(f.original.transcript, row('supported-original-reply', 'assistant'))
@@ -382,7 +378,7 @@ it('the actual header explains an unsupported message without blaming member acc
   expect(menu().textContent).toContain('Try a text message')
   expect(menu().textContent).toContain('Message not recorded')
   expect(menu().textContent).not.toContain('PRIVATE original image')
-  expect(menu().querySelector('.connector-header-menu__item small')?.getAttribute('title')).toContain('User and Agent-to-Agent messages are not shared')
+  expect(menu().querySelector('.connector-header-menu__item small')?.getAttribute('title')).toContain('Includes new user messages')
   expect(speech(binding).find(value => value.operationId === originalReply.operationId)).toEqual(originalReply)
   expect(effects()).toBe(originalEffects)
   const before = writes(); await check(); await wait(() => expect(menu().textContent).toContain('Message type not supported'))

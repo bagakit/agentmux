@@ -67,7 +67,8 @@ it('exposes one-click member access despite other approved members and distinct 
   await wait(() => expect(panel()?.textContent).toContain('Member request was refused'))
   const overview = panel().querySelector('.connector-traffic-summary')!
   expect(overview.textContent?.match(/Member request was refused/g)).toHaveLength(1)
-  expect(overview.textContent).toContain('5 recent updates delivered')
+  expect(overview.querySelector('[data-direction="outgoing"] strong')?.textContent).toContain('not shared yet')
+  expect(overview.textContent).toContain('5 conversation updates delivered')
   expect(overview.textContent).toContain('not shared yet'); expect(overview.textContent).toContain('Earlier delivery results not confirmed')
   const memberAction = panel().querySelector<HTMLElement>('[data-direction="incoming"] button')!
   expect(memberAction?.textContent).toBe('Member access')
