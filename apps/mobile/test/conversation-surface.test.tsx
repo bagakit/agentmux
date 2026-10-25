@@ -345,6 +345,9 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       options: [{ id: 'exact-allow', label: '原选项', kind: 'allow-once' }, { id: 'exact-deny', label: '拒绝原请求', kind: 'reject-once' }] } }
     f.sessions.set(value.agentSessionId, value); f.respond.mockImplementationOnce(() => answer.promise)
     const view = await mount(<MobileConversationSurface {...props(f)} />)
+    expect(view.element.querySelector('.agent-interaction__status')?.textContent).toBe('需要你答复')
+    expect(button(view.element, '取消')).toBeDefined()
+    expect(view.element.textContent).not.toContain('Needs your answer')
     await click(button(view.element, '原选项'))
     expect(f.respond).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' },
       expectedRequest: value.pendingInteraction.request, operationId: expect.any(String),

@@ -9,8 +9,8 @@ import { computeNoteLiveMerge } from '@agentmux/client-ui/note/note-live-merge.w
 import { MobileRegionContent, type MobileRegionContentProps } from '../src/navigation/MobileRegionContent'
 import { MobileSurveySurface } from '../src/survey/MobileSurveySurface'
 import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobile-presentation'
-import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { NoteFileWriter } from '@agentmux/host/note-file-writer'
+import { FileReadOwner } from '../../host/src/file-read-owner'
+import { NoteFileWriter } from '../../host/src/note-file-writer'
 import { parseFileReadResult } from '../../../packages/core/src/public-rpc-files'
 import { parseSpaceControlSuccessReceipt } from '../../../packages/core/src/space-control-parser'
 
@@ -69,7 +69,7 @@ describe('original Survey mobile slice', () => {
     await view.click('原命名研究')
     expect(view.element.textContent).toContain('tab-original / agent-original')
     expect(view.element.textContent).toContain('display-a'); expect(view.element.textContent).toContain('display-b')
-    await view.click('继续对话')
+    await view.click('原 Agent 名称')
     expect(view.openSession).toHaveBeenCalledWith('session-original', { name: '原 Agent 名称', project: '原项目' })
     await view.click('原关联课题'); expect(view.openTopic).toHaveBeenCalledWith('topic-original')
     expect(view.element.textContent).not.toContain('刷新原 Browser 当前网址')
@@ -83,7 +83,7 @@ describe('original Survey mobile slice', () => {
     view.forwardRpc.mockRejectedValueOnce(new Error('probe failed'))
     await view.click('刷新研究')
     expect(view.element.textContent).toContain('probe failed')
-    await view.click('继续对话'); expect(view.openSession).toHaveBeenCalledTimes(1)
+    await view.click('原 Agent 名称'); expect(view.openSession).toHaveBeenCalledTimes(1)
     const { survey: omitted, ...withoutSurvey } = catalog
     view.forwardRpc.mockResolvedValueOnce({ catalog: parsed(withoutSurvey) })
     await view.click('刷新研究')
@@ -395,7 +395,7 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     await view.click('original.note.md')
     expect(view.element.textContent).toContain('所选原文件不是此引用的 Note')
     await view.click('target.note.md')
-    expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('跨文件引用正文😀')
+    await vi.waitFor(() => expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('跨文件引用正文😀'))
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['original.note.md', 'original.note.md', 'target.note.md'])
     expect(view.rpc).toHaveBeenCalledWith('file.read', { ...view.params, path: 'target.note.md' })
   })

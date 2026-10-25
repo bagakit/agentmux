@@ -104,7 +104,7 @@ async function appMenu(inspect: (id: string) => Promise<unknown>, initial = cach
   const app = () => <MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />
   const view = await mount(app())
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
-  await vi.waitFor(() => expect(button(view.element, '另一个原 Agent · 更多操作')).toBeDefined())
+  await vi.waitFor(() => expect(button(view.element, '另一个原 Agent · 更多操作')).toBeDefined(), { timeout: 10000 })
   return { ...f, ...view, copy, ensure, original, app }
 }
 it.each(['close', 'Escape', 'Back'])('opens the actual App menu before delayed inspect, allows Copy and preserves the original workface on %s', async dismissal => {

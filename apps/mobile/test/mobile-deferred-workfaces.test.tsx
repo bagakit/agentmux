@@ -56,7 +56,10 @@ it('loads only the first requested panel and retains real Goal and Composer inst
 
   await click(button(view.element, '查看终端'))
   expect(observed.counts.terminal).toBe(1)
-  expect(view.element.querySelector('.mobile-terminal-panel')?.textContent).toContain('正在加载终端')
+  const loading = view.element.querySelector('.mobile-terminal-panel [aria-busy="true"]')!
+  expect(loading.getAttribute('aria-label')).toBe('正在加载 终端')
+  expect(loading.querySelectorAll('.mobile-loading-skeleton > span')).toHaveLength(3)
+  expect(loading.querySelectorAll('button')).toHaveLength(1)
   await click(button(view.element, '查看对话'))
   expect(editor(view.element)).toBe(originalEditor)
   expect(originalEditor.textContent).toBe('原草稿仍在当前聊天')

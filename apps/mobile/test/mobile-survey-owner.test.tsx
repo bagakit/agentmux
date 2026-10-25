@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MobileSurveySurface, type MobileSurveyContext, type MobileSurveyProps } from '../src/survey/MobileSurveySurface'
-import { FileReadOwner } from '@agentmux/host/file-read-owner'
+import { FileReadOwner } from '../../host/src/file-read-owner'
 import { WorkspaceFiles } from '../../desktop/src/main/workspace-files'
 import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobile-presentation'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
@@ -89,13 +89,14 @@ describe('T-007 original Survey selected content frame', () => {
     expect(view.changed).toHaveBeenLastCalledWith({ zoneId: view.zone.zoneId, tabId: view.tabId, regionId: 'original-region' })
     const reads = view.fileRead.mock.calls.length
     await view.stepBack(); expect(view.element.querySelector('[aria-label="研究工作面"]')).not.toBeNull()
-    await view.click('original.md'); expect(view.fileRead).toHaveBeenCalledTimes(reads)
+    await view.click('original.md'); await vi.waitFor(() => expect(view.fileRead).toHaveBeenCalledTimes(reads + 1))
+    expect(view.fileRead.mock.calls.at(-1)?.[1]).toBe('docs/original.md')
     view.empty(); await view.click('刷新研究')
     expect(view.element.textContent).toContain('当前绑定尚未重新确认')
     expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
     view.failDirectory(); await view.click('刷新研究')
     expect(view.element.textContent).toContain('原目录观察暂缺')
-    expect(view.fileRead).toHaveBeenCalledTimes(reads)
+    expect(view.fileRead).toHaveBeenCalledTimes(reads + 1)
   })
   it('keeps the exact mounted Note editor and unknown save across Region back and a different Browser, without retrying or selecting the first file', async () => {
     const view = await fixture()
@@ -120,7 +121,8 @@ describe('T-007 original Survey selected content frame', () => {
     expect(view.element.textContent).toContain('不控制 Mac 原 Browser')
     await view.stepBack(); await view.click('original.note.md')
     expect(view.editor()).toBe(originalEditor); expect(view.editor().textContent).toContain('后来编辑不重注册Back')
-    expect(view.fileRead).toHaveBeenCalledTimes(reads); expect(view.fileWrite).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(view.fileRead).toHaveBeenCalledTimes(reads + 1))
+    expect(view.fileRead.mock.calls.at(-1)?.[1]).toBe('docs/original.note.md'); expect(view.fileWrite).toHaveBeenCalledTimes(1)
     expect(view.element.textContent).toContain('保存回执未知')
     expect(Object.keys(localStorage).filter(key => key.startsWith('agentmux-mobile-note-draft:'))).toHaveLength(1)
     await view.render({ connected: false })

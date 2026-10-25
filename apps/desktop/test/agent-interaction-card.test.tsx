@@ -76,6 +76,8 @@ describe('AgentInteractionCard', () => {
     }))
 
     expect(markup).toContain('Allow Bash?')
+    expect(markup).toContain('Needs your answer')
+    expect(markup).toContain('Cancel')
     expect(markup).toContain('Allow once')
     expect(markup).toContain('Deny')
     expect(markup).toContain('pnpm test')
