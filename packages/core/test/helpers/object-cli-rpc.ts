@@ -86,6 +86,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'app.mobile.assets.inspect': ['--input', '-'], 'app.mobile.assets.activate': ['--input', '-'],
     'agent.learning.prepare': ['--input', '-'], 'agent.learning.ls': ['--input', '-'], 'agent.learning.inspect': ['--input', '-'],
     'agent.learning.propose': ['--input', '-'], 'agent.learning.revise': ['--input', '-'], 'agent.learning.continue': ['--input', '-'],
+    'system.metrics.host-profile.capture': ['--host', 'local', '--runtime', 'runtime-original', '--owner', 'owner-original', '--pid', '123', '--duration-ms', '1000'],
     'runtime.network.inspect': ['--runtime', 'runtime-original', '--owner', 'owner-original'],
     'space.mote.connection.create': ['--input', '-'], 'space.mote.connection.sync': ['--input', '-'], 'space.mote.connection.advance': ['--operation-id', 'mote-original'], 'space.mote.connection.inspect': ['--operation-id', 'mote-original'], 'space.mote.connection.ls': ['--input', '-'],
     'connection.metadata.get': ['--input', '-'], 'connection.metadata.refresh': ['--input', '-'], 'connection.metadata.clear': ['--input', '-'], 'connection.metadata.ls': ['--connection', 'metadata-connection', '--kind', 'actor'],

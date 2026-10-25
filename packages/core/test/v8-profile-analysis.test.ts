@@ -8,12 +8,12 @@ import { join, resolve, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 import { analyseV8Profile, parseV8ProfileBytes, summariseV8Profile } from '../src/v8-profile-analysis.js'
 import { analyseLocalV8Profile } from '../src/v8-profile-analysis-cli.js'
-import type { RendererV8Profile } from '../src/renderer-v8-profile.js'
+import type { V8Profile } from '../src/v8-profile.js'
 
 const execute = promisify(execFile), root = resolve(import.meta.dirname, '../../..')
 const frame = (functionName: string, scriptId = '0', url = '', lineNumber = -1, columnNumber = -1) =>
   ({ functionName, scriptId, url, lineNumber, columnNumber })
-function original(): RendererV8Profile {
+function original(): V8Profile {
   return { startTime: 100, endTime: 10100, nodes: [
     { id: 1, callFrame: frame('(root)'), children: [2, 3, 4, 5] },
     { id: 2, callFrame: frame('(idle)') },
