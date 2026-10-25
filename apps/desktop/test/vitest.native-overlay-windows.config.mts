@@ -7,6 +7,10 @@ import original from '../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../..')
 const owner = 'apps/desktop/src/main/native-overlay-windows.ts', hook = 'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', regions = 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts'
 const changes = {
+  permanentBlur: ['apps/desktop/src/preload/index.ts', 'const initialTheme: ThemeBootstrap | null =', "if (process.isMainFrame) window.addEventListener('blur', event => { if (event.target === window && event.isTrusted) ipcRenderer.sendSync(NATIVE_OVERLAY_FOCUS_CHANNEL) }, true)\nconst initialTheme: ThemeBootstrap | null ="],
+  idleBlur: [hook, '() => mayHaveProjection &&', '() => true &&'],
+  pendingRemoval: [hook, 'if (regions.length) mayHaveProjection = true', 'mayHaveProjection = regions.length > 0'],
+  newerProjection: [hook, 'receipt.projected === 0 && !pending', 'receipt.projected === 0'],
   actualWindow: [owner, 'const window = this.windows.windowForDocument(document)\n    if (window.isDestroyed()', 'const window = this.main\n    if (window.isDestroyed()'],
   originalOwner: [owner, 'this.browsers.nativeOwner(browserId, window)', 'this.browsers.nativeOwner(browserId)'],
   originalInput: [owner, 'this.entries.get(this.browsers.windowForView(owner.view))', 'this.entries.get(this.main)'],
