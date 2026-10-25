@@ -12,7 +12,11 @@
 .wf-card--observation > .wf-head > .log-fold__label { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .wf-card--observation > .wf-head:hover { color: var(--text); background: var(--surface-1); }
 .wf-card--observation > .wf-head:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.wf-card--observation > .wf-head .wf-observation__recorded { color: var(--text-2); font-size: var(--fs-meta); }
 .wf-card--observation > .wf-head[aria-expanded='true'] .log-fold__chevron { transform: rotate(90deg); }
+.wf-tool-row--observation .log-row__chevron { opacity: .7; }
+.native-process-observation__issue { display: flex; align-items: baseline; gap: var(--sp-3); margin: var(--sp-1) var(--sp-4) var(--sp-3) calc(var(--conversation-disclosure-padding, var(--sp-4)) + 20px + var(--sp-3)); color: var(--red-text); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.native-process-observation__issue > .semantic-icon { flex: none; align-self: flex-start; margin-top: var(--sp-1); }
 /* Observations keep their top-level origin; only actual process steps indent. */
 .wf-card--observation > .wf-observation__body { margin: var(--sp-1) 0 var(--sp-2); border: 0; padding: 0; }
 /* Only real child slots carry an ownership edge. Interleaved originals remain peers. */

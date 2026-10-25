@@ -21,6 +21,8 @@ type ObservationProps = {
   keepContentVisible?: boolean
   expanded: boolean
   onExpandedChange: (expanded: boolean) => void
+  /** Persistent source-qualified issue, outside the collapsible payload. */
+  notice?: ReactNode
   children: ReactNode
 }
 
@@ -40,12 +42,12 @@ type ObservedToolProps = {
   controls?: string
 }
 
-export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
+export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'interrupted' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
   return <SemanticIcon name={status === 'running' ? recorded ? 'status.running' : 'status.working' : `status.${status}`}
     size={size} animation={status === 'running' && !recorded ? 'work' : 'none'} className={`wf-ico wf-ico--${status}`} />
 }
 
-export function RecordedStepsCard({ observation, compact = false, keepContentVisible = false, expanded, onExpandedChange, children }: ObservationProps) {
+export function RecordedStepsCard({ observation, compact = false, keepContentVisible = false, expanded, onExpandedChange, notice, children }: ObservationProps) {
   const contentId = useId()
   const [readOnce, setReadOnce] = useState(expanded)
   useLayoutEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
@@ -69,13 +71,14 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
         <span className="log-fold__steps">{observation.stepCount} {compact ? observation.countUnit === 'records' || observation.metrics ? '条已加载记录' : '步' : observation.countUnit === 'records' || observation.metrics ? 'loaded records' : 'steps'}</span>
         {observation.elapsed ? <span className="log-fold__elapsed">{observation.elapsed}</span> : null}
         {status === 'running' ? <span className="wf-chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
-        {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
+        {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="interrupted" recorded />Interrupted</span> : null}
         {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
         {observation.streaming ? <span className="wf-chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
         {status === 'complete' || status === 'recorded' ? <span className="wf-observation__recorded">Recorded</span> : null}
         {status === undefined && !observation.metrics && !compact ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       </span>
     </button>
+    {notice}
     {observation.counts ? <div className="wf-observation__summary" aria-label="Recorded step states">
       <span className="wf-observation__caption">Recorded activity</span>
       {observation.counts.complete > 0 ? <span className="wf-observation__stat" data-state="complete"><WorkflowStatusGlyph status="completed" />{observation.counts.complete} complete</span> : null}
@@ -99,7 +102,7 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
     <span className="log-row__meta">
       {status === 'streaming' ? <span className="log-row__chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
       {status === 'running' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
-      {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
+      {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="interrupted" recorded />Interrupted</span> : null}
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
       {status === 'recorded' ? <span className="wf-observation__recorded">Recorded</span> : null}
       {status === undefined ? <span className="wf-observation__recorded">Status not recorded</span> : null}
@@ -126,7 +129,7 @@ export function RecordedAgentRow({ observation }: {
   const detailId = useId()
   const state = observation.state
   const glyph = state === 'running' ? 'running' : state === 'completed' ? 'completed'
-    : state === 'failed' ? 'failed' : state === 'interrupted' || state === 'stopped' ? 'killed'
+    : state === 'failed' ? 'failed' : state === 'interrupted' ? 'interrupted' : state === 'stopped' ? 'killed'
     : state === 'pending' ? 'queued' : 'paused'
   return <>
     <li className="wf-agent wf-agent--observation" data-recorded-agent-id={observation.id}>

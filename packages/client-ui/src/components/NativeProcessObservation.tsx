@@ -9,6 +9,18 @@ import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
+import type { ConversationRecord } from '../lib/conversation-records.js'
+
+/** The recorded failure flag is enough to expose an issue, never to invent its cause. */
+function recordedFailure(record: Pick<ConversationRecord, 'original'>): boolean {
+  const original = record.original.kind === 'deferred' ? record.original.item : record.original
+  if (original.kind === 'captured') return original.item.status === 'failed'
+  const parts = 'parts' in original ? original.parts : original.item.contentParts
+  const collaboration = 'parts' in original ? original.collaboration : original.item.collaboration
+  return original.item.turnOutcome?.status === 'failed'
+    || collaboration?.kind === 'operation' && collaboration.status === 'failed'
+    || parts.some(part => part.kind === 'tool-result' && part.failed === true)
+}
 
 function recordedStatus(item: Pick<AgentSessionHistoryItem, 'collaboration' | 'turnOutcome'>): WorkflowObservationStatus | undefined {
   const collaboration = item.collaboration
@@ -59,6 +71,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   const layout = entries
   const records = sourceRecords.filter(record => !conversationProcessPeer(record))
+  const failureCount = records.filter(record => (record.deferred?.records ?? record.records ?? [record]).some(recordedFailure)).length
   const items = records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [{ ...record.original.item.item, ...(record.original.item.collaboration ? { collaboration: record.original.item.collaboration } : {}) }] : [])
   const anchored = layout.some(entry => entry.kind === 'anchor' || conversationProcessPeer(entry.record))
   const nativeOnly = records.every(record => record.source.kind === 'native')
@@ -77,7 +90,11 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
-    keepContentVisible={anchored} expanded={expanded} onExpandedChange={open => { if (open) setReadOnce(true); setExpanded(open); disclosure?.onExpandedChange(open) }}>
+    keepContentVisible={anchored} expanded={expanded} onExpandedChange={open => { if (open) setReadOnce(true); setExpanded(open); disclosure?.onExpandedChange(open) }}
+    notice={failureCount > 0 ? <p className="native-process-observation__issue" role="status">
+      <SemanticIcon name="status.failed" size={12} />
+      <span>{compact ? `${failureCount} 条已加载记录标记为失败；展开查看原结果。` : `${failureCount} loaded records marked failed. Expand for original details.`}</span>
+    </p> : null}>
     {metrics ? <div className="native-process-observation__metrics" hidden={!expanded}><ConversationMetricsDetails observation={metrics} /></div> : null}
     {layout.map(entry => {
       if (entry.kind === 'anchor') return <div key={JSON.stringify(['anchor', entry.key])}>{entry.content}</div>
