@@ -121,7 +121,7 @@ export function agentPromptNotApplied(
       ? { submissionId: admission.submissionId, run: { ...session.run } } : undefined
   }
   if (admission.intent.plan.kind === 'single-phase') {
-    if (submission) return undefined
+    if (submission || admission.chunks?.some(chunk => chunk.acknowledged)) return undefined
   } else {
     if (!submission || submission.submissionId !== admission.submissionId || submission.run.runId !== session.run.runId) return undefined
     const first = submission.prepare?.interrupt ?? submission.payload
@@ -129,7 +129,8 @@ export function agentPromptNotApplied(
     // independent redraw refusal prove what happened to the original prompt bytes.
     if (admission.operationId !== first.operationId || admission.startByte !== first.inputByteRange.startByte ||
         admission.endByte !== submission.submit.inputByteRange.endByte || submission.prepare?.interrupt?.acknowledged ||
-        submission.payload.acknowledged || submission.submit.acknowledged) return undefined
+        submission.payload.acknowledged || submission.submit.acknowledged ||
+        [submission.prepare?.interrupt, submission.payload, submission.submit].some(phase => phase?.chunks?.some(chunk => chunk.acknowledged))) return undefined
   }
   return { submissionId: admission.submissionId, run: { ...session.run } }
 }

@@ -9,6 +9,7 @@ import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
 import { normalizePromptInputIntent } from './prompt-submission-record.js'
+import { inputChunkBytes, retainedInputFits } from './recoverable-input-frame.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import type { AgentCapabilityBinding } from './agent-capability.js'
 import {
@@ -31,7 +32,9 @@ import type {
   AgentPromptMessageContent,
   AgentFuturePromptOccurrence,
   AgentTerminalPromptDeliveryState,
-  AgentTerminalPromptReadinessState
+  AgentTerminalPromptReadinessState,
+  AgentTerminalInputPhaseState,
+  AgentTerminalInputChunkState
 } from './types.js'
 
 function observeInput<T>(diagnostic: InputPerformanceHandle | undefined, phase: Exclude<InputPerformanceStage, 'queued'>, read: () => Promise<T>): Promise<T> {
@@ -188,6 +191,26 @@ function terminalPromptPhaseOperationIdentity(
       data
     ]))
     .digest('base64url')
+}
+
+function terminalPromptChunkIdentity(operationId: string, startByte: number, endByte: number): string {
+  return createHash('sha256').update(JSON.stringify(['agentmux-terminal-chunk-v1', operationId, startByte, endByte])).digest('base64url')
+}
+
+/** Freeze the complete byte layout in the phase claim, before the first write. */
+function terminalPromptInputPhase(runId: string, ownerInstanceId: string, operationId: string, startByte: number, data: string): AgentTerminalInputPhaseState {
+  const bytes = Buffer.from(data), endByte = startByte + bytes.byteLength
+  const phase: AgentTerminalInputPhaseState = { operationId, inputByteRange: { startByte, endByte }, acknowledged: false }
+  const identity = { ownerInstanceId, operationId, expectedByte: startByte }
+  if (retainedInputFits(runId, identity, bytes)) return phase
+  const limit = inputChunkBytes(runId, { ...identity, operationId: terminalPromptChunkIdentity(operationId, startByte, endByte) })
+  phase.chunks = []
+  for (let start = startByte; start < endByte; start += limit) {
+    const end = Math.min(start + limit, endByte)
+    phase.chunks.push({ operationId: terminalPromptChunkIdentity(operationId, start, end),
+      inputByteRange: { startByte: start, endByte: end }, acknowledged: false })
+  }
+  return phase
 }
 
 type PromptSubmissionDeps = {
@@ -392,7 +415,7 @@ export class AgentPromptSubmissionCoordinator {
             if (originalAdmission.acknowledged && (originalAdmission.transport !== 'native' || originalAdmission.native.outcome === 'admitted')) return structuredClone(intent.message)
             if (agentPromptNotApplied({ run: original!.run, promptCompletionAdmission: originalAdmission,
               ...(original!.terminalPromptSubmission ? { terminalPromptSubmission: original!.terminalPromptSubmission } : {}) })) throw new AgentMuxError(
-              'The original input was not applied. Its operation is final; a new explicit message needs its own identity.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
+              'This delivery attempt was not applied and its receipt is retained. A saved input can be continued through its original input owner.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
             throw new AgentMuxError('The original admission is unknown; its frozen history cannot be replayed through a new terminal claim.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
           }
           const previous = current.promptCompletionAdmission
@@ -438,7 +461,7 @@ export class AgentPromptSubmissionCoordinator {
               if (manual && previous.submissionId === submissionId && previous.intent.admissionIntent === undefined) throw new AgentMuxError(
                 'The original input admission intent is unconfirmed. Its frozen plan is kept and will not be upgraded to a new manual intent.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
               if (previous.submissionId === submissionId && agentPromptNotApplied(current)?.submissionId === submissionId) {
-                throw new AgentMuxError('Core confirmed this whole prompt Input was not applied. This original operation is final; submit a new explicit message to try again. The Agent remains available.',
+                throw new AgentMuxError('Core confirmed this whole delivery attempt was not applied. Its receipt is retained; a saved input can be continued through its original input owner. The Agent remains available.',
                   'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
               }
               if (unfinished) await this.publishDeliveryDegrade(current, {
@@ -817,7 +840,7 @@ export class AgentPromptSubmissionCoordinator {
           const error = new AgentMuxError('The original native request outcome is unknown. Its frozen operation and correlation are retained; it will not be replayed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
           Object.defineProperty(error, 'cause', { value: failure }); throw error
         }
-        if (result.outcome === 'not-applied') throw new AgentMuxError('The original native actor rejected this exact request. Keep its receipt; a new explicit input needs a new key.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+        if (result.outcome === 'not-applied') throw new AgentMuxError('The original native actor rejected this delivery attempt. Its receipt is retained; a saved input can be continued through its original input owner.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
         return
       } finally {
         try { await observeInput(diagnostic, 'provider-cleanup', async () => { await prepared.dispose() }) }
@@ -940,27 +963,32 @@ export class AgentPromptSubmissionCoordinator {
           throw new AgentMuxError('Another Agent prompt operation is incomplete for this Run.', 'AGENT_PROMPT_SUBMISSION_BUSY')
         }
         uncertainTurn = assertTurnBoundary(stored, admitted !== undefined)
-        return claimInput(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data), uncertainTurn)
+        const claimed = claimInput(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data), uncertainTurn)
+        const phase = terminalPromptInputPhase(session.run.runId, intent.ownerInstanceId, operationId, expectedByte, plan.data)
+        if (phase.chunks && claimed.promptCompletionAdmission?.transport !== 'native') claimed.promptCompletionAdmission = {
+          ...claimed.promptCompletionAdmission!, chunks: phase.chunks }
+        return claimed
       })
-      const admitted = current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
+      const admitted = current.promptCompletionAdmission?.transport !== 'native' && current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
       cancelConsumedNativeReadiness(current)
       if (uncertainTurn) await this.publishDeliveryDegrade(session, {
         state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
         submissionId, run: { ...session.run }, observedAt: Date.now()
       })
-      const accepted = await this.applyInput(session, submissionId, {
-        ownerInstanceId: admitted!.intent!.ownerInstanceId,
-        operationId,
-        expectedByte: admitted?.startByte ?? expectedByte,
-        data: plan.data
+      const acceptedInputBytes = await this.applyInputPhase(session, submissionId, {
+        operationId, inputByteRange: { startByte: admitted!.startByte, endByte: admitted!.endByte },
+        acknowledged: false, ...(admitted!.chunks ? { chunks: admitted!.chunks } : {})
+      }, plan.data, expectedByte, async chunk => {
+        await updateSession(session.agentSessionId, session.run, stored => {
+          const original = stored.promptCompletionAdmission
+          if (original?.submissionId !== submissionId || original.operationId !== operationId || !original.chunks?.some(item =>
+            item.operationId === chunk.operationId && isDeepStrictEqual(item.inputByteRange, chunk.inputByteRange))) {
+            throw new AgentMuxError('The original prompt chunk claim changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+          }
+          return { ...stored, promptCompletionAdmission: { ...original, chunks: original.chunks.map(item =>
+            item.operationId === chunk.operationId ? { ...item, acknowledged: true } : item) }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
+        })
       }, undefined, beforeInput, diagnostic)
-      if (accepted.run.acceptedInputBytes === null) {
-        throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
-      }
-      if (accepted.appliedByteRange.startByte !== admitted!.startByte || accepted.appliedByteRange.endByte !== admitted!.endByte ||
-        accepted.run.acceptedInputBytes < admitted!.endByte) {
-        throw new AgentMuxError('CtxMux prompt receipt does not match its frozen Input.', 'AGENT_PROMPT_SUBMISSION_RECEIPT_MISMATCH')
-      }
       await refreshSession(session.agentSessionId, session.run)
       await updateSession(session.agentSessionId, session.run, stored => {
         if (stored.promptCompletionAdmission?.operationId !== operationId) {
@@ -983,7 +1011,7 @@ export class AgentPromptSubmissionCoordinator {
         }
         return next
       })
-      this.deps.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
+      this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
       await publishSettledNotice(uncertainTurn)
       return
     }
@@ -1270,24 +1298,10 @@ export class AgentPromptSubmissionCoordinator {
           ...(readinessEvidence ? { readinessEvidence } : {}),
           outputCursorBytes,
           ...(preparation ? { prepare: { ...preparation,
-            ...(interruptOperationId ? { interrupt: { operationId: interruptOperationId,
-              inputByteRange: { startByte: expectedByte, endByte: expectedByte + interruptBytes }, acknowledged: false } } : {}) } } : {}),
-          payload: {
-            operationId: payloadOperationId,
-            inputByteRange: {
-              startByte: expectedByte + interruptBytes,
-              endByte: expectedByte + interruptBytes + payloadBytes
-            },
-            acknowledged: false
-          },
-          submit: {
-            operationId: submitOperationId,
-            inputByteRange: {
-              startByte: expectedByte + interruptBytes + payloadBytes,
-              endByte: expectedByte + interruptBytes + payloadBytes + submitBytes
-            },
-            acknowledged: false
-          }
+            ...(interruptOperationId ? { interrupt: terminalPromptInputPhase(session.run.runId, intent.ownerInstanceId,
+              interruptOperationId, expectedByte, plan.prepare!.interrupt) } : {}) } } : {}),
+          payload: terminalPromptInputPhase(session.run.runId, intent.ownerInstanceId, payloadOperationId, expectedByte + interruptBytes, plan.payload),
+          submit: terminalPromptInputPhase(session.run.runId, intent.ownerInstanceId, submitOperationId, expectedByte + interruptBytes + payloadBytes, plan.submit)
         },
         updatedAt: Date.now()
       }
@@ -1309,7 +1323,7 @@ export class AgentPromptSubmissionCoordinator {
       state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
       submissionId, run: { ...session.run }, observedAt: Date.now()
     })
-    let acceptedInputBytes = run.acceptedInputBytes
+    let acceptedInputBytes = expectedByte
 
     const applyPhase = async (
       phaseName: 'interrupt' | 'payload' | 'submit',
@@ -1345,24 +1359,23 @@ export class AgentPromptSubmissionCoordinator {
       if (acceptedInputBytes === null || acceptedInputBytes < phase.inputByteRange.endByte) {
         assertInteraction(currentSession)
       }
-      const accepted = await this.applyInput(session, submissionId, {
-        ownerInstanceId: currentSession.promptCompletionAdmission!.intent!.ownerInstanceId,
-        operationId: phase.operationId,
-        expectedByte: phase.inputByteRange.startByte,
-        data
+      acceptedInputBytes = await this.applyInputPhase(session, submissionId, phase, data, acceptedInputBytes, async chunk => {
+          const range = chunk.inputByteRange
+          await updateSession(session.agentSessionId, session.run, stored => {
+            const state = stored.terminalPromptSubmission
+            if (!state) throw new AgentMuxError('The original prompt chunk claim disappeared.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
+            assertSubmission(state)
+            const savedPhase = phaseName === 'interrupt' ? state.prepare?.interrupt : state[phaseName]
+            const saved = savedPhase?.chunks?.find(item => item.operationId === chunk.operationId)
+            if (!saved || saved.inputByteRange.startByte !== range.startByte || saved.inputByteRange.endByte !== range.endByte) {
+              throw new AgentMuxError('The original prompt chunk claim changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+            }
+            const updated = { ...savedPhase!, chunks: savedPhase!.chunks!.map(item => item.operationId === chunk.operationId ? { ...item, acknowledged: true } : item) }
+            return { ...stored, terminalPromptSubmission: phaseName === 'interrupt'
+              ? { ...state, prepare: { ...state.prepare!, interrupt: updated } } : { ...state, [phaseName]: updated },
+              updatedAt: Math.max(stored.updatedAt, Date.now()) }
+          })
       }, phaseName, beforeInput, diagnostic)
-      if (
-        accepted.appliedByteRange.startByte !== phase.inputByteRange.startByte ||
-        accepted.appliedByteRange.endByte !== phase.inputByteRange.endByte ||
-        accepted.run.acceptedInputBytes === null ||
-        accepted.run.acceptedInputBytes < phase.inputByteRange.endByte
-      ) {
-        throw new AgentMuxError(
-          'CtxMux prompt phase receipt does not match the persisted Input claim.',
-          'AGENT_PROMPT_SUBMISSION_RECEIPT_MISMATCH'
-        )
-      }
-      acceptedInputBytes = accepted.run.acceptedInputBytes
       if (phaseName === 'interrupt') {
         await updateSession(session.agentSessionId, session.run, stored => {
           const state = stored.terminalPromptSubmission
@@ -1533,6 +1546,58 @@ export class AgentPromptSubmissionCoordinator {
     await applyPhase('submit', plan.submit)
   }
 
+  private async applyInputPhase(
+    session: AgentMuxAgentSession,
+    submissionId: string,
+    phase: AgentTerminalInputPhaseState,
+    data: string,
+    acceptedInputBytes: number,
+    acknowledgeChunk: (chunk: AgentTerminalInputChunkState) => Promise<void>,
+    phaseName?: 'interrupt' | 'payload' | 'submit',
+    beforeInput?: () => Promise<void>,
+    diagnostic?: InputPerformanceHandle
+  ): Promise<number> {
+    const bytes = phase.chunks ? Buffer.from(data) : undefined
+    for (const chunk of phase.chunks ?? [phase]) {
+      const range = chunk.inputByteRange
+      if (phase.chunks && chunk.operationId !== terminalPromptChunkIdentity(phase.operationId, range.startByte, range.endByte)) {
+        throw new AgentMuxError('The original prompt chunk identity changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      }
+      if (chunk.acknowledged) {
+        if (acceptedInputBytes < range.endByte) throw new AgentMuxError(
+          'CtxMux Input cursor precedes the persisted prompt chunk receipt.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
+        continue
+      }
+      const current = this.deps.requireAgentSession(session.agentSessionId)
+      const accepted = await this.applyInput(session, submissionId, {
+        ownerInstanceId: current.promptCompletionAdmission!.intent!.ownerInstanceId,
+        operationId: chunk.operationId, expectedByte: range.startByte,
+        // Preserve a UTF-8 continuation byte at a chunk edge; never re-encode slices.
+        data: bytes ? bytes.subarray(range.startByte - phase.inputByteRange.startByte, range.endByte - phase.inputByteRange.startByte) : data
+      }, phaseName, beforeInput, diagnostic).catch((error: unknown) => {
+        const admission = current.promptCompletionAdmission
+        const prefix = admission?.transport !== 'native' && admission ? range.startByte - admission.startByte : 0
+        if (!phase.chunks || prefix <= 0 || !(error instanceof AgentMuxError) || error.controlFailure?.disposition !== 'not_applied') throw error
+        // That receipt refuses only the next chunk, never the already applied
+        // logical-input prefix. Keep the original command facts in its cause.
+        const partial = new AgentMuxError('The next input chunk was not applied; the original accepted prefix and exact remaining chunk are retained.',
+          'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown', { disposition: 'unknown', confirmedInputBytes: prefix },
+          error.logId, error.creationFailure, error.storageFailure)
+        Object.defineProperty(partial, 'cause', { value: error, configurable: true })
+        throw partial
+      })
+      if (accepted.appliedByteRange.startByte !== range.startByte || accepted.appliedByteRange.endByte !== range.endByte ||
+          accepted.run.acceptedInputBytes === null || accepted.run.acceptedInputBytes < range.endByte) {
+        throw new AgentMuxError('CtxMux prompt phase receipt does not match the persisted Input claim.', 'AGENT_PROMPT_SUBMISSION_RECEIPT_MISMATCH')
+      }
+      acceptedInputBytes = accepted.run.acceptedInputBytes
+      // Lost ACK / persistence failure rejoins the same frozen chunk. No next
+      // chunk is dispatched until the confirmed prefix is durably acknowledged.
+      if (phase.chunks) await acknowledgeChunk(chunk)
+    }
+    return acceptedInputBytes
+  }
+
   private async applyInput(
     session: AgentMuxAgentSession,
     submissionId: string,
@@ -1565,6 +1630,17 @@ export class AgentPromptSubmissionCoordinator {
             const admission = current.promptCompletionAdmission
             if (admission?.submissionId !== submissionId) return current
             const submission = current.terminalPromptSubmission
+            const phase = phaseName === 'interrupt' ? submission?.prepare?.interrupt
+              : phaseName === 'payload' || phaseName === 'submit' ? submission?.[phaseName] : undefined
+            if ((phase?.chunks ?? admission.chunks)?.some(chunk => chunk.operationId === operation.operationId)) {
+              const effect = [submission?.prepare?.interrupt, submission?.payload, submission?.submit]
+                .some(part => part?.acknowledged || part?.chunks?.some(chunk => chunk.acknowledged)) ||
+                admission.acknowledged || admission.chunks?.some(chunk => chunk.acknowledged)
+              // The refusal concerns this chunk. An accepted prefix remains applied.
+              if (operation.expectedByte !== admission.startByte || effect) return current
+              return { ...current, promptCompletionAdmission: { ...admission, notApplied: true },
+                updatedAt: Math.max(current.updatedAt, Date.now()) }
+            }
             if (phaseName === 'refresh' && admission.frameRefresh?.operationId === operation.operationId) {
               return { ...current, promptCompletionAdmission: { ...admission, notApplied: true,
                 frameRefresh: { ...admission.frameRefresh, notApplied: true } }, updatedAt: Math.max(current.updatedAt, Date.now()) }
@@ -1587,6 +1663,14 @@ export class AgentPromptSubmissionCoordinator {
             return { ...current, promptCompletionAdmission: { ...admission, notApplied: true },
               updatedAt: Math.max(current.updatedAt, Date.now()) }
           })
+          const saved = this.deps.requireAgentSession(session.agentSessionId)
+          if (saved.promptCompletionAdmission?.submissionId === submissionId && !saved.promptCompletionAdmission.notApplied &&
+              (saved.promptCompletionAdmission.chunks?.some(chunk => chunk.operationId === operation.operationId) ||
+                [saved.terminalPromptSubmission?.prepare?.interrupt, saved.terminalPromptSubmission?.payload, saved.terminalPromptSubmission?.submit]
+                  .some(phase => phase?.chunks?.some(chunk => chunk.operationId === operation.operationId)))) {
+            await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
+              reason: 'input-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
+          }
         } else {
           await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
             reason: 'input-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })

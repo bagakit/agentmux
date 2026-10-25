@@ -6,7 +6,7 @@ import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } 
 import { AgentMuxError } from './errors.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { agentInputDeliveryKey, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef } from './agent-input-wait.js'
-import { validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { dequal } from 'dequal'
@@ -71,7 +71,7 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
   const inputKey = parsed.admission?.inputKey
   if (parsed.admission?.intent && parsed.admission.intent.run.runId !== run.runId || inputKey &&
       (inputKey.agentSessionId !== parsed.agentSessionId || inputKey.expectedRun.runId !== run.runId ||
-        (inputKey.kind === 'prompt' ? inputKey.submissionId : inputKey.messageId) !== parsed.admission?.submissionId)) throw new AgentMuxError(
+        agentPromptInputId(inputKey) !== parsed.admission?.submissionId)) throw new AgentMuxError(
     'The original input record changed its Session, Run or logical identity.', 'INVALID_AGENT_SESSION_STORE')
   return parsed
 }
@@ -88,11 +88,33 @@ function terminalInputPhase(
     (source.notApplied !== undefined && (source.notApplied !== true || source.acknowledged))) {
     throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
   }
+  let chunks: NonNullable<AgentMuxStoredAgentSession['terminalPromptSubmission']>['payload']['chunks']
+  if (source.chunks !== undefined) {
+    if (!Array.isArray(source.chunks) || source.chunks.length < 2) throw new AgentMuxError(`${name}.chunks is invalid.`, 'INVALID_AGENT_SESSION_STORE')
+    let through = startByte, unacknowledged = false
+    const ids = new Set<string>([string(source.operationId, `${name}.operationId`)])
+    chunks = source.chunks.map((value, index) => {
+      const chunk = record(value, `${name}.chunks[${index}]`)
+      const range = record(chunk.inputByteRange, `${name}.chunks[${index}].inputByteRange`)
+      const operationId = string(chunk.operationId, `${name}.chunks[${index}].operationId`)
+      const start = timestamp(range.startByte, `${name}.chunks[${index}].startByte`)
+      const end = positiveInteger(range.endByte, `${name}.chunks[${index}].endByte`)
+      if (start !== through || end <= start || end > endByte || ids.has(operationId) ||
+          typeof chunk.acknowledged !== 'boolean' || unacknowledged && chunk.acknowledged ||
+          source.acknowledged && !chunk.acknowledged || source.notApplied && chunk.acknowledged) {
+        throw new AgentMuxError(`${name}.chunks does not preserve its original contiguous phase.`, 'INVALID_AGENT_SESSION_STORE')
+      }
+      ids.add(operationId); through = end; unacknowledged ||= !chunk.acknowledged
+      return { operationId, inputByteRange: { startByte: start, endByte: end }, acknowledged: chunk.acknowledged }
+    })
+    if (through !== endByte) throw new AgentMuxError(`${name}.chunks does not cover its original phase.`, 'INVALID_AGENT_SESSION_STORE')
+  }
   return {
     operationId: string(source.operationId, `${name}.operationId`),
     inputByteRange: { startByte, endByte },
     acknowledged: source.acknowledged,
-    ...(source.notApplied === true ? { notApplied: true as const } : {})
+    ...(source.notApplied === true ? { notApplied: true as const } : {}),
+    ...(chunks ? { chunks } : {})
   }
 }
 
@@ -163,7 +185,7 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
   const admission = record(value, 'promptCompletionAdmission')
   const transport = (() => {
     if (admission.transport === 'native') {
-      if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined) {
+      if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined || admission.chunks !== undefined) {
         throw new AgentMuxError('Native admission cannot contain PTY input facts.', 'INVALID_AGENT_SESSION_STORE')
       }
       const native = record(admission.native, 'native input admission'), plan = nativePromptPlan(native.plan)
@@ -185,7 +207,13 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
     const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
     const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
     if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
-    return { ...(admission.transport === 'pty' ? { transport: 'pty' as const } : {}), startByte, endByte }
+    const chunks = admission.chunks === undefined ? undefined : terminalInputPhase({
+      operationId: admission.operationId, inputByteRange: { startByte, endByte }, acknowledged: admission.acknowledged ?? false,
+      ...(admission.notApplied === true ? { notApplied: true } : {}), chunks: admission.chunks
+    }, 'promptCompletionAdmission').chunks
+    if (chunks && normalizePromptInputIntent(admission.intent).plan.kind !== 'single-phase') throw new AgentMuxError(
+      'Only a single-phase admission owns direct input chunks.', 'INVALID_AGENT_SESSION_STORE')
+    return { ...(admission.transport === 'pty' ? { transport: 'pty' as const } : {}), startByte, endByte, ...(chunks ? { chunks } : {}) }
   })()
   return {
     ...(admission.inputKey === undefined ? {} : { inputKey: validateAgentPromptInputKey(admission.inputKey) }),
