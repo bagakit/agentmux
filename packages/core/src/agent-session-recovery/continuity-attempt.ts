@@ -294,7 +294,7 @@ export async function performAgentContinuity(
     const canonical = await ports.sessions.store.readMetadata(input.agentSessionId), known = canonical?.continuityOperations?.[input.operationId]
     if (!canonical || !known?.newRun || !sameRun(known.newRun, canonical.run)) return null
     current = canonical
-    receipt.newRun = { ...known.newRun }
+    receipt = structuredClone(known)
     if (error instanceof AgentMuxError) receipt.errorCode = error.code
     receipt.error = error instanceof Error ? error.message : String(error)
     return await record({ kind: 'resumed', session: ports.events.projectSession(canonical), previousRun: receipt.previousRun, run: known.newRun,
