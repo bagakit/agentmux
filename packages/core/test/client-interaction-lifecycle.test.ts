@@ -4,7 +4,7 @@ import { fixtureEpoch as _liveTailFixtureEpoch } from "./helpers/fixture-values.
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
+import { AgentMuxMemoryAgentSessionStore, loadAgentSessions, normalizeStoredAgentSession } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
 import type {
   AgentMuxInteractionRequest,
@@ -83,16 +83,17 @@ type Internals = {
   registry: { load(hostId: string): Promise<void> }
 }
 
-async function connectedClient(pending?: AgentMuxInteractionRequest, providerId: 'codex' | 'claude' = 'codex', nativeSessionId?: string): Promise<{
+async function connectedClient(pending?: AgentMuxInteractionRequest, providerId: 'codex' | 'claude' = 'codex', nativeSessionId?: string,
+  existingStore?: AgentMuxMemoryAgentSessionStore): Promise<{
   client: AgentMuxClient
   writes: string[]
   store: AgentMuxMemoryAgentSessionStore
   state: Internals
 }> {
-  const store = new AgentMuxMemoryAgentSessionStore()
+  const store = existingStore ?? new AgentMuxMemoryAgentSessionStore()
   const original = storedSession(pending, providerId)
   original.nativeHandle = { kind: 'provider', providerId, sessionId: nativeSessionId ?? 'lifecycle-native' }
-  await store.compareAndSwap(null, original)
+  if (!existingStore) await store.compareAndSwap(null, original)
   const client = new AgentMuxClient({ store })
   const state = client as unknown as Internals
   await state.registry.load('local')
@@ -107,6 +108,11 @@ async function connectedClient(pending?: AgentMuxInteractionRequest, providerId:
     cursor = operation.expectedByte + Buffer.byteLength(operation.data)
     return { run: runProjection(cursor), appliedByteRange: { startByte: operation.expectedByte, endByte: cursor } }
   }
+  // Raw input now opens the same ordered channel before writing. Keep that Runtime
+  // seam synthetic while delegating to the test's original write/ACK implementation.
+  state.kernel.openInput = async () => ({ run: runProjection(cursor), waitWritable: async () => {},
+    input: async (data: string) => await (state.kernel.input as (_id: string, operation: { expectedByte: number; data: string }) => Promise<unknown>)(
+      RUN_ID, { expectedByte: cursor, data }) })
   ;(client as unknown as { connected: boolean }).connected = true
   return { client, writes, store, state }
 }
@@ -361,6 +367,13 @@ describe('native takeover during typed recovery', () => {
 // synthetic Runtime seam. It does not claim native Provider/PTY completion.
 describe('Claude terminal takeover completion', () => {
   const nativeSessionId = 'native-confirmation-owned-source'
+  const questionInput = { questions: [1, 2].map(n => ({ question: `Question ${n}?`, header: `Q${n}`,
+    options: [{ label: 'A' }, { label: 'B' }] })) }
+  const questionHook = (client: AgentMuxClient, receiptId: string, payload: Record<string, unknown> = {}, runId = RUN_ID) =>
+    (client as unknown as { acceptHookEvent(envelope: import('../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
+      receiptId, agentSessionId: AGENT_SESSION_ID, providerId: 'claude', runId,
+      payload: { session_id: nativeSessionId, hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion',
+        tool_use_id: 'native-question-call', tool_input: questionInput, ...payload } }, new AbortController().signal)
   function request(kind: 'permission' | 'question'): AgentMuxInteractionRequest {
     const evidence = { source: 'native-hook' as const, observedAt: 1, run: { runId: RUN_ID }, hookReceiptId: 'original-claude-request' }
     return kind === 'permission'
@@ -413,6 +426,195 @@ describe('Claude terminal takeover completion', () => {
       expect(h.writes).toEqual([])
     } finally { await h.client.dispose() }
   })
+  // A question answered in the native terminal: Claude announces it with PreToolUse (which carries
+  // tool_use_id) and settles it with PostToolUse for that same call. No AgentMux reply is involved.
+  it.each(['PostToolUse', 'PostToolUseFailure'])('settles duplicate native question reports by their own %s after a terminal answer', async eventName => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    const events: import('../src/types.js').AgentMuxClientEvent[] = []
+    h.client.onEvent(event => events.push(event))
+    try {
+      await questionHook(h.client, 'native-question-asked')
+      // Claude runs every matching PreToolUse hook for the same call; the duplicate is the same question.
+      await expect(questionHook(h.client, 'native-question-asked-again')).resolves.toBeUndefined()
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request).toMatchObject({
+        kind: 'question', id: 'native-question-asked', nativeToolCallId: 'native-question-call' })
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.additionalRequests).toBeUndefined()
+      expect(events.filter(event => event.type === 'interaction').map(event => event.request.id))
+        .toEqual(['native-question-asked', 'native-question-asked'])
+      await questionHook(h.client, 'native-question-answered', { hook_event_name: eventName, tool_response: questionInput })
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toBeUndefined()
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it('deduplicates an additional question while preserving a different kind with the same call id', async () => {
+    const original = { ...request('permission'), nativeToolCallId: 'native-question-call' }
+    const h = await connectedClient(original, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'additional-question')
+      await expect(questionHook(h.client, 'additional-question-again')).resolves.toBeUndefined()
+      const pending = h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!
+      expect(pending.request).toEqual(original)
+      expect(pending.additionalRequests).toHaveLength(1)
+      expect(pending.additionalRequests![0]).toMatchObject({ kind: 'question', id: 'additional-question', nativeToolCallId: 'native-question-call' })
+      await questionHook(h.client, 'additional-question-complete', { hook_event_name: 'PostToolUse' })
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual({ request: original })
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it('preserves a different call when original completion repeats after the next question is promoted', async () => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'first-question')
+      await questionHook(h.client, 'second-question', { tool_use_id: 'second-native-call' })
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.additionalRequests).toHaveLength(1)
+      await questionHook(h.client, 'first-complete', { hook_event_name: 'PostToolUse' })
+      const promoted = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction)
+      expect(promoted?.request).toMatchObject({ id: 'second-question', nativeToolCallId: 'second-native-call' })
+      await questionHook(h.client, 'first-complete-again', { hook_event_name: 'PostToolUse' })
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual(promoted)
+      await questionHook(h.client, 'second-complete', { hook_event_name: 'PostToolUse', tool_use_id: 'second-native-call' })
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it.each([false, true])('settles retained duplicate receipts while preserving the original unsettled response (%s)', async hasResponse => {
+    const primary = request('question'), h = await connectedClient(primary, 'claude', nativeSessionId)
+    const copy = (id: string) => ({ ...primary, id, evidence: { ...primary.evidence, hookReceiptId: id } })
+    const other = { ...copy('retained-other'), nativeToolCallId: 'retained-other-call' }
+    const value: AgentMuxInteractionResponse = { kind: 'question', requestId: primary.id, outcome: 'answered',
+      answers: [{ questionId: 'q', optionId: 'a' }] }
+    const response = { value, responseDigest: createHash('sha256').update(JSON.stringify(value)).digest('base64url'),
+      operationId: 'original-question-response', inputByteRange: { startByte: 0, endByte: 1 }, acknowledged: false }
+    try {
+      const stored = (await loadAgentSessions(h.store))[0]!
+      await h.store.compareAndSwapMetadata(stored, { ...stored, pendingInteraction: { request: primary,
+        additionalRequests: [copy('retained-copy-one'), other, copy('retained-copy-two')], ...(hasResponse ? { response } : {}) } })
+      await h.state.registry.load('local')
+      await complete(h.client, primary, 'PostToolUse')
+      const pending = h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!
+      if (hasResponse) {
+        expect(pending.request).toEqual(primary)
+        expect(pending.response).toEqual(response)
+        expect(pending.nativeCompleted?.hookReceiptId).toBe('claude-terminal-PostToolUse-' + primary.id)
+        expect(pending.additionalRequests).toEqual([other])
+      } else expect(pending).toEqual({ request: other })
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual(pending)
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it.each(['foreign-source', 'child', 'old-run'] as const)('does not admit a same-call report belonging to %s', async changed => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'original-question')
+      const original = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction)
+      await questionHook(h.client, 'unrelated-question', changed === 'foreign-source' ? { session_id: 'another-source' }
+        : changed === 'child' ? { agent_id: 'a-child' } : {}, changed === 'old-run' ? 'old-run' : RUN_ID)
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual(original)
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it('keeps two reports without a native call identity unconfirmed instead of merging by question text', async () => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'unconfirmed-first', { tool_use_id: undefined })
+      await questionHook(h.client, 'unconfirmed-second', { tool_use_id: undefined })
+      const pending = h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!
+      expect(pending.request).toMatchObject({ id: 'unconfirmed-first' })
+      expect(pending.request.nativeToolCallId).toBeUndefined()
+      expect(pending.additionalRequests).toHaveLength(1)
+      expect(pending.additionalRequests![0]!.id).toBe('unconfirmed-second')
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it.each(['completion-first', 'completed-then-duplicate'] as const)('does not reopen a completed native question after Client reconstruction (%s)', async order => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      if (order === 'completed-then-duplicate') await questionHook(h.client, 'original-before-end')
+      await questionHook(h.client, 'original-end', { hook_event_name: 'PostToolUse' })
+      const stored = (await loadAgentSessions(h.store))[0]!
+      expect(stored.pendingInteraction).toBeUndefined()
+      expect(stored.nativeInteractionEnds?.calls[JSON.stringify(['question', 'native-question-call'])])
+        .toMatchObject({ kind: 'question', nativeToolCallId: 'native-question-call', hookReceiptId: 'original-end' })
+      expect(normalizeStoredAgentSession(JSON.parse(JSON.stringify(stored)))).toEqual(stored)
+      expect(h.client.agentSession(AGENT_SESSION_ID)).not.toHaveProperty('nativeInteractionEnds')
+      const reopened = await connectedClient(undefined, 'claude', nativeSessionId, h.store)
+      const events: import('../src/types.js').AgentMuxClientEvent[] = []
+      reopened.client.onEvent(event => events.push(event))
+      try {
+        const status = reopened.client.agentSession(AGENT_SESSION_ID).semanticStatus
+        await expect(questionHook(reopened.client, 'late-report')).resolves.toBeUndefined()
+        const current = reopened.client.agentSession(AGENT_SESSION_ID)
+        expect(current.pendingInteraction).toBeUndefined()
+        expect(current.semanticStatus).toEqual(status)
+        expect(current.hookReceipt).toMatchObject({ id: 'late-report', decision: { activityApplied: false, lifecycleApplied: false } })
+        expect(events.filter(event => event.type === 'interaction')).toEqual([])
+        expect((await loadAgentSessions(h.store))[0]!.nativeInteractionEnds).toEqual(stored.nativeInteractionEnds)
+        await questionHook(reopened.client, 'new-question', { tool_use_id: 'new-native-call' })
+        expect(reopened.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request.id).toBe('new-question')
+        expect(reopened.writes).toEqual([])
+      } finally { await reopened.client.dispose() }
+    } finally { await h.client.dispose() }
+  })
+
+  it.each(['foreign-source', 'child', 'unknown-source', 'old-run'] as const)('an interaction completion from %s cannot suppress a current question', async changed => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'unqualified-end', { hook_event_name: 'PostToolUse',
+        ...(changed === 'foreign-source' ? { session_id: 'foreign' } : changed === 'child' ? { agent_id: 'a-child' }
+          : changed === 'unknown-source' ? { session_id: undefined } : {}) }, changed === 'old-run' ? 'old-run' : RUN_ID)
+      expect((await loadAgentSessions(h.store))[0]!.nativeInteractionEnds).toBeUndefined()
+      await questionHook(h.client, 'current-question')
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request.id).toBe('current-question')
+      expect(h.writes).toEqual([])
+    } finally { await h.client.dispose() }
+  })
+
+  it('does not retain ordinary tool completions as interaction end records', async () => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'ordinary-tool-end', { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'true' } })
+      expect((await loadAgentSessions(h.store))[0]!.nativeInteractionEnds).toBeUndefined()
+    } finally { await h.client.dispose() }
+  })
+
+  it.each(['run', 'source', 'kind'] as const)('does not borrow a retained interaction end from another %s', async changed => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'scoped-end', { hook_event_name: 'PostToolUse' })
+      const stored = (await loadAgentSessions(h.store))[0]!, original = stored.nativeInteractionEnds!
+      const fact = Object.values(original.calls)[0]!
+      const ends = changed === 'run' ? { ...original, run: { runId: 'previous-run' } }
+        : changed === 'source' ? { ...original, nativeHandle: { kind: 'provider' as const, providerId: 'claude', sessionId: 'previous-native-source' } }
+        : { ...original, calls: { [JSON.stringify(['permission', fact.nativeToolCallId])]: { ...fact, kind: 'permission' as const } } }
+      await h.store.compareAndSwapMetadata(stored, { ...stored, nativeInteractionEnds: ends })
+      await h.state.registry.load('local')
+      await questionHook(h.client, 'current-request')
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction?.request.id).toBe('current-request')
+    } finally { await h.client.dispose() }
+  })
+
+  it('validates private native interaction completion identities and exact source fields on storage read', async () => {
+    const h = await connectedClient(undefined, 'claude', nativeSessionId)
+    try {
+      await questionHook(h.client, 'end-for-store', { hook_event_name: 'PostToolUse' })
+      const stored = (await loadAgentSessions(h.store))[0]!, ends = stored.nativeInteractionEnds!
+      for (const invalid of [
+        { ...ends, surprise: true }, { ...ends, run: { ...ends.run, surprise: true } },
+        { ...ends, nativeHandle: { ...ends.nativeHandle, surprise: true } }, { ...ends, providerId: 'different' },
+        { ...ends, calls: { badKey: Object.values(ends.calls)[0] } },
+        { ...ends, calls: { [JSON.stringify(['question', 'native-question-call'])]: { ...Object.values(ends.calls)[0], observedAt: -1 } } }
+      ]) expect(() => normalizeStoredAgentSession({ ...stored, nativeInteractionEnds: invalid })).toThrow()
+    } finally { await h.client.dispose() }
+  })
+
+
 })
 
 it('preserves one exact durable request when a cold terminal-only answer has no responder', async () => {
