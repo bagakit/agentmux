@@ -5,6 +5,7 @@ import { AGENTMUX_CLI_COMMANDS, type AgentMuxCliCommand } from './agentmux-cli-c
 import { AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE, AGENTMUX_BROWSER_TARGET_GUIDE } from './agentmux-cli-browser-guide.js'
 import { AGENTMUX_SETTINGS_RESOURCE_GUIDE, AGENTMUX_TOOLKIT_GUIDE, AGENTMUX_GOAL_CREATE_GUIDE } from './agentmux-cli-resource-guide.js'
 import { AGENT_OPEN_WORKFLOW, NATIVE_RESUME_GUIDE, GIT_GUIDE, DEVICE_GUIDE } from './agentmux-cli-shared-guides.js'
+import { AGENT_EXECUTION_GUIDE } from './agent-execution-guide.js'
 import { agentMuxBaseSkill, agentMuxCliModuleCatalog, agentMuxModuleSkillEntry } from './agentmux-cli-module-skills.js'
 
 export { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
@@ -54,6 +55,7 @@ export function agentMuxCommandHelp(path: string): string | null {
     : path.startsWith('git.') ? 'Read amux git --help for original repository identity, working changes and worktree closeout.'
     : path === 'agent.native' ? NATIVE_RESUME_GUIDE
     : path.startsWith('agent.native.') ? 'Before native discovery or recovery, read amux agent native --help for original source and recovery conditions.'
+    : path === 'agent.execution' ? AGENT_EXECUTION_GUIDE
     : path === 'agent.open' ? `${AGENT_OPEN_WORKFLOW}\nBefore choosing a destination read amux space --skill. Native resume/fork also requires amux agent native --help.`
     : path === 'space.mv' || path === 'file.open' || path === 'browser.open' ? 'Before choosing or changing a work surface, read amux space --skill. Selection, presentation and input focus are separate receipts.'
     : path === 'toolkit' ? AGENTMUX_TOOLKIT_GUIDE
