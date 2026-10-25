@@ -8,6 +8,7 @@ import { ScheduleOperationNotice } from './ScheduleOperationNotice'
 
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 export function scheduleRuleLabel(schedule: ContinuousProgressLoop): string {
+  if (schedule.everyMs !== undefined) return 'Every ' + schedule.everyMs / 60000 + ' minutes'
   if (!schedule.calendar) return 'One-shot countdown'
   const rule = schedule.calendar
   const cadence = rule.kind === 'once' ? rule.date : rule.kind === 'daily' ? 'Every day' : rule.kind === 'weekly'
@@ -18,10 +19,11 @@ export function scheduleStateLabel(schedule: ContinuousProgressLoop, now: number
   return schedule.lastOutcome === 'unknown' ? 'Delivery unconfirmed' : schedule.status === 'stopped' ? 'Ended'
     : schedule.status === 'paused' ? 'Paused' : schedule.nextCheckAt <= now ? 'Due' : 'Active'
 }
-export function ScheduleArrangementRow({ schedule, occurrence, timezone, now, onReceipt, discussion, onOpenDiscussion }: {
+export function ScheduleArrangementRow({ schedule, occurrence, timezone, now, onReceipt, discussion, onOpenDiscussion, quickActions = false }: {
   schedule: ContinuousProgressLoop; occurrence?: ScheduleOccurrence | undefined; timezone: string; now: number
   onReceipt(schedule: ContinuousProgressLoop): void; discussion?: string | undefined
   onOpenDiscussion?: (schedule: ContinuousProgressLoop) => void
+  quickActions?: boolean
 }) {
   const operation = useScheduleOperation('schedule-operation:' + JSON.stringify([schedule.hostId, schedule.loopId]), onReceipt)
   const [inspection, setInspection] = useState<string>()
@@ -49,8 +51,11 @@ export function ScheduleArrangementRow({ schedule, occurrence, timezone, now, on
   return <li className="schedule-arrangement" data-schedule-id={schedule.loopId} data-occurrence-kind={occurrence?.kind ?? 'next-due'}>
     <div className="schedule-arrangement__when"><time dateTime={new Date(at).toISOString()}>{date}</time><span>{phase}</span></div>
     <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p>
-    <div className="schedule-arrangement__caption"><span>{schedule.calendar ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status !== 'stopped' ? ' · ' + relative : '')}</span>
+    <div className="schedule-arrangement__caption"><span>{schedule.calendar || schedule.everyMs !== undefined ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? ' · ' + relative : '')}</span>
       {discussion ? <span>{discussion}</span> : null}</div>
+    {quickActions && schedule.status !== 'stopped' ? <div className="calendar-schedules__actions">
+      <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button>
+    </div> : null}
     <details className="schedule-arrangement__details">
       <summary>Details and controls</summary>
       {schedule.prompt.includes('\n') ? <p className="calendar-schedules__context">{schedule.prompt}</p> : null}
@@ -66,8 +71,8 @@ export function ScheduleArrangementRow({ schedule, occurrence, timezone, now, on
         <button type="button" className="small-button" onClick={() => void inspectSaved()}>Check original arrangement</button>
         {onOpenDiscussion ? <button type="button" className="small-button" onClick={() => onOpenDiscussion(schedule)}>Open original discussion</button> : null}
         {schedule.status !== 'stopped' ? <>
-          <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined}
-            onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause arrangement' : 'Resume arrangement'}</button>
+          {!quickActions ? <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined}
+            onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause arrangement' : 'Resume arrangement'}</button> : null}
           <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate('cancel')}>Cancel arrangement</button>
         </> : null}
       </div>

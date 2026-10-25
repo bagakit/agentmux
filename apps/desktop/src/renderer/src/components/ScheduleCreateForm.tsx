@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
-import { parseAgentScheduleCalendar, parseAgentScheduleAfterMs } from '@agentmux/core/schedule'
+import { parseAgentScheduleCalendar, parseAgentScheduleAfterMs, parseAgentScheduleEveryMs } from '@agentmux/core/schedule'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core/continuous-progress-scheduler'
 import { DateTime } from 'luxon'
 import { useAppStore } from '../store'
@@ -15,18 +15,19 @@ const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satur
 const inputFields = ['timing', 'kind', 'timezone', 'time', 'date', 'weekday', 'day', 'month', 'fold', 'delay', 'delayUnit', 'prompt', 'checkIn', 'context'] as const
 const targetFields = ['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const
 export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage, initialMessageContext, onMessageChange, initialDate, records = [],
-  defaultKind = 'daily', openRequest, onShowSaved }: {
+  defaultKind = 'daily', openRequest, onShowSaved, embedded = false }: {
   draftKey: string; target?: ContinuousProgressTarget | undefined; onReceipt(record: ContinuousProgressLoop): void
   initialMessage?: string | undefined; initialMessageContext?: string | undefined; onMessageChange?: ((value: string) => void) | undefined
   initialDate?: string; defaultKind?: ScheduleFormDraft['kind']
   records?: readonly ContinuousProgressLoop[]
   openRequest?: { sequence: number; date: string; time?: string } | undefined
   onShowSaved?: ((record: ContinuousProgressLoop) => void) | undefined
+  embedded?: boolean
 }) {
   const [fallback] = useState<ScheduleFormDraft>(() => {
     const defaults = resolveAutomationPreferences(useAppStore.getState().config?.automation)
     const timezone = automationCalendarTimezone(defaults)
-    return { open: !!initialMessage, timing: 'calendar', kind: defaultKind,
+    return { open: !!initialMessage, timing: embedded ? 'everyMs' : 'calendar', kind: defaultKind,
       timezone, time: [9, 0].map(value => String(value).padStart(2, '0')).join(':'), date: initialDate ?? DateTime.now().setZone(timezone).toISODate()!, weekday: '1', day: '1', month: '1',
       fold: 'earlier', delay: '5', delayUnit: 'minutes', prompt: initialMessage ?? '', checkIn: false, checkInPolicy: automationCheckInPolicy(defaults),
       ...(target ? { target } : {}), ...(initialMessageContext ? { context: initialMessageContext } : {}) }
@@ -82,7 +83,9 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       setNotice('A quiet follow-up is already saved for this Agent. Review or cancel that arrangement before saving another.'); return
     }
     try {
-      const timing = form.timing === 'afterMs'
+      const timing = form.timing === 'everyMs'
+        ? { everyMs: parseAgentScheduleEveryMs(Number(form.delay) * 60000) }
+        : form.timing === 'afterMs'
         ? { afterMs: parseAgentScheduleAfterMs(Number(form.delay) * ({ seconds: 1000, minutes: 60000, hours: 3600000 }[form.delayUnit])) }
         : { calendar: parseAgentScheduleCalendar({ kind: form.kind, timezone: form.timezone, time: form.time,
           ...(form.kind === 'once' ? { date: form.date } : {}), ...(form.kind === 'weekly' ? { weekday: Number(form.weekday) } : {}),
@@ -97,8 +100,9 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
         prompt: form.context ? form.prompt + '\n\n' + form.context : form.prompt, operationId: 'schedule-' + mintObjectId() } })
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
-  return <><details ref={element} className="continuous-progress-control__details schedule-create" open={form.open} onToggle={event => {
+  return <><details ref={element} className="continuous-progress-control__details schedule-create" data-embedded={embedded || undefined} open={embedded || form.open} onToggle={event => {
     event.stopPropagation()
+    if (embedded) return
     if (event.currentTarget.open !== form.open) {
       const fresh = resolveAutomationPreferences(useAppStore.getState().config?.automation)
       const pristine = !form.prompt.trim() && !operation.pending && isUntouched(form)
@@ -110,12 +114,13 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       update(patch)
     }
   }}>
-    <summary>New arrangement</summary>
+    <summary>{embedded ? 'Scheduled message' : 'New arrangement'}</summary>
     <form className="calendar-schedules__form" onSubmit={event => { event.preventDefault(); create() }}>
       <label>Timing<select aria-label="Arrangement timing" value={form.timing} disabled={locked}
         onChange={event => update({ timing: event.target.value as ScheduleFormDraft['timing'] })}>
-        <option value="calendar">Calendar time</option><option value="afterMs">Countdown</option></select></label>
-      {form.timing === 'afterMs' ? <div className="calendar-schedules__fields">
+        <option value="everyMs">Every few minutes</option><option value="calendar">Calendar time</option><option value="afterMs">Countdown</option></select></label>
+      {form.timing === 'everyMs' ? <label>Every (minutes)<TextInput aria-label="Repeat interval in minutes" type="number" min="1" step="1" value={form.delay} required disabled={locked} onChange={event => update({ delay: event.target.value })} /></label>
+        : form.timing === 'afterMs' ? <div className="calendar-schedules__fields">
         <label>After<TextInput aria-label="Countdown duration" type="number" min="0.001" step="any" value={form.delay} required disabled={locked} onChange={event => update({ delay: event.target.value })} /></label>
         <label>Unit<select aria-label="Countdown unit" value={form.delayUnit} disabled={locked} onChange={event => update({ delayUnit: event.target.value as ScheduleFormDraft['delayUnit'] })}>
           <option value="seconds">Seconds</option><option value="minutes">Minutes</option><option value="hours">Hours</option></select></label>
@@ -141,10 +146,10 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       <label>Message<ComposerTextarea aria-label="Arranged message" rows={3} value={form.prompt} disabled={locked} onValueChange={prompt => update({ prompt })} /></label>
       {form.context ? <details className="calendar-schedules__rules"><summary>Request context</summary><p className="calendar-schedules__context">{form.context}</p></details> : null}
       {!form.target && !target ? <p className="continuous-progress-control__help">Choose an exact discussion to create an arrangement.</p> : null}
-      {form.target ? <p className="continuous-progress-control__help">Original discussion · {form.target.agentSessionId}</p> : null}
+      {form.target && !embedded ? <p className="continuous-progress-control__help">Original discussion · {form.target.agentSessionId}</p> : null}
       {target && form.target && JSON.stringify(target) !== JSON.stringify(form.target) ? <button type="button" className="small-button" disabled={locked} onClick={() => update({ target })}>Use selected discussion</button> : null}
       {notice ? <p className="calendar-schedules__notice" role="status">{notice}</p> : null}
-      <p className="continuous-progress-control__help">The Host must be running. Countdown pause does not stop the clock.</p>
+      <p className="continuous-progress-control__help">The Host must be running.{form.timing === 'afterMs' ? ' Countdown pause does not stop the clock.' : ''}</p>
       <button type="submit" className="small-button" disabled={locked || !form.prompt.trim()}>Save arrangement</button>
     </form>
     <ScheduleOperationNotice operation={operation} />
