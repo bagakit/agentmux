@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config'
 import host from '../../../apps/host/test/connection-owner-consumer.config.mts'
 
 const root = host.root!, mutant = process.env.NATIVE_PORTRAIT_MUTANT
-if (mutant && !['create-blocks-body', 'portrait-overtakes-body', 'legacy-image', 'stale-readback', 'question-create-authority'].includes(mutant)) throw Error('Unknown native portrait mutation')
+if (mutant && !['create-blocks-body', 'portrait-overtakes-body', 'legacy-image', 'stale-readback', 'question-create-authority', 'late-source-disconnected', 'avatar-scope-crossed'].includes(mutant)) throw Error('Unknown native portrait mutation')
 export default defineConfig({ ...host, cacheDir: resolve(root, '.cache/native-portrait-publication'), plugins: [{
   name: 'loaded-native-portrait', enforce: 'pre', resolveId(source) {
     if (source === '@agentmux/client-ui/theme') return resolve(root, 'packages/client-ui/src/theme/index.ts')
@@ -16,6 +16,8 @@ export default defineConfig({ ...host, cacheDir: resolve(root, '.cache/native-po
     if (!/^(?:apps\/host|packages\/(?:core|connectors))\/(?:src|test)\/.+\.[cm]?[jt]s$/u.test(path)) return
     let output = input
     const mutations = {
+      'late-source-disconnected': ['packages/connectors/src/publication-host.ts', 'const retained = this.store.settleAvatarResource(original.operationId, resource)', 'const retained = undefined'],
+      'avatar-scope-crossed': ['packages/connectors/src/publication-store.ts', "AND json_extract(operation_json,'$.target.connectionId')=? AND json_extract(operation_json,'$.target.application.domain')=?\n            AND json_extract(operation_json,'$.target.application.appId')=? AND json_extract(operation_json,'$.speaker.avatar.image.sha256')=?", "AND ? IS NOT NULL AND ? IS NOT NULL AND ? IS NOT NULL AND json_extract(operation_json,'$.speaker.avatar.image.sha256')=?"],
       'create-blocks-body': ['packages/connectors/src/publication-host.ts', "if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }", "if (original.cardPreparation?.receipt.state === 'unknown') return { state: 'unknown', reason: 'effect-unconfirmed' }; if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }"],
       'portrait-overtakes-body': ['packages/connectors/src/publication-store.ts', "if (latest?.operationId !== original.operationId) {", "if (false && latest?.operationId !== original.operationId) {"],
       'stale-readback': ['packages/connectors/src/publication-store.ts', "if (evidence === 'readback' && !this.portraitInspectable(original)) return original", "if (false && evidence === 'readback' && !this.portraitInspectable(original)) return original"],

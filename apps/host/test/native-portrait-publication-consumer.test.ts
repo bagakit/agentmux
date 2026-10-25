@@ -22,7 +22,7 @@ const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 const png = process.env.AGENTMUX_TEST_PROFILE_VISUAL_PNG ? readFileSync(process.env.AGENTMUX_TEST_PROFILE_VISUAL_PNG) : Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')
 const profile = preparePublicUserProfile({displayName: 'Original public person', avatar: 'data:image/png;base64,' + png.toString('base64')})!
-async function fixture(hangPortraitRead = false, providerId: 'claude' | 'codex' = 'claude') {
+async function fixture(portraitRead: boolean | { wait?: () => Promise<void>; unavailable?: true } = false, providerId: 'claude' | 'codex' = 'claude') {
   let portraitReadCount = 0
   const original = await rpcOwnerFixture(['profile-agent'], core, root => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'profile-native', transcriptPath: join(root, 'native.jsonl') } })); cleanup.push(original.close)
   privateHome.directory = original.root
@@ -34,12 +34,18 @@ async function fixture(hangPortraitRead = false, providerId: 'claude' | 'codex' 
   vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(discord.http.makeRequest)
   const factory = connectors.createConnectionServices, opened: connectors.ConnectionServices[] = []
   vi.spyOn(connectors, 'createConnectionServices').mockImplementation(async options => {
-    if (hangPortraitRead && options.publication?.inputResource) {
+    if (options.publication?.inputResource) {
       const read = options.publication.inputResource.bind(options.publication)
-      options.publication.inputResource = (reference, input, signal) => {
+      options.publication.inputResource = async (reference, input, signal) => {
         if (input.purpose !== 'author-avatar') return read(reference, input, signal)
         portraitReadCount++
-        return new Promise((_done, reject) => { signal.addEventListener('abort', () => reject(signal.reason), {once:true}); if(signal.aborted)reject(signal.reason) })
+        if (portraitRead === true || typeof portraitRead === 'object' && portraitRead.wait) {
+          const abort = new Promise<never>((_done, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); if (signal.aborted) reject(signal.reason) })
+          if (portraitRead === true) return abort
+          await Promise.race([portraitRead.wait!(), abort])
+        }
+        if (typeof portraitRead === 'object' && portraitRead.unavailable) return { key: input.key, purpose: input.purpose, index: input.index, revision: input.revision, status: 'unavailable', code: 'INPUT_AUTHOR_AVATAR_UNAVAILABLE', message: 'The original optional resource is unavailable.' }
+        return read(reference, input, signal)
       }
     }
     const service = await factory(options); opened.push(service); return service
@@ -83,7 +89,8 @@ it('default Host completes the sole original user card after a delayed portrait 
   const f = await fixture(), upload = hold()
   f.feishu.controls.beforeUpload = () => upload.promise
   await f.send('Only original user message')
-  await vi.waitFor(() => expect(userOperation(f, 'Only original user message')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Only original user message')?.state).toBe('confirmed')
   const original = userOperation(f, 'Only original user message')!
   expect(original.mapping?.nativeCard).toBeDefined()
   expect(JSON.stringify(bodyOf(f, original.mapping!.messageId))).toContain('Only original user message')
@@ -130,11 +137,13 @@ it.each(['denied', 'unknown', 'late'] as const)('default Host preserves the orig
 it('default Host cached and absent portraits do not create optional entities', async () => {
   const f = await fixture()
   await f.send('Seed confirmed original portrait')
-  await vi.waitFor(() => expect(userOperation(f, 'Seed confirmed original portrait')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Seed confirmed original portrait')?.state).toBe('confirmed')
   const count = nativeCalls(f).length
   await f.send('Cached original portrait', profile, 'cached-input')
   await f.send('No selected portrait', { name: 'Only public name' }, 'no-image-input')
-  await vi.waitFor(() => expect(userOperation(f, 'No selected portrait')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'No selected portrait')?.state).toBe('confirmed')
   expect(nativeCalls(f)).toHaveLength(count)
   expect(JSON.stringify(bodyOf(f, userOperation(f, 'Cached original portrait')!.mapping!.messageId))).toContain('original-image-key-1')
   expect(userOperation(f, 'No selected portrait')?.cardPreparation).toBeUndefined()
@@ -145,7 +154,8 @@ it('default Host keeps the same native message through speech image and speech w
   f.feishu.controls.beforeUpload = async (_bytes, index) => { if (index === 1) await upload.promise }
   f.feishu.controls.beforeCardUpdate = async (_sequence, element) => { if (element) await decoration.promise }
   f.append([{ type: 'text', text: 'Original native body' }])
-  await vi.waitFor(() => expect(userOperation(f, 'Original native body')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Original native body')?.state).toBe('confirmed')
   const first = userOperation(f, 'Original native body')!
   expect(first.mapping?.nativeCard).toBeDefined()
   upload.release()
@@ -165,7 +175,8 @@ it('default Host keeps the same native message through speech image and speech w
   await vi.waitFor(() => expect(f.services().publication!.store.inspect(first.operationId)?.portrait?.state).toBe('not-applied'))
   expect(bodyOf(f, first.mapping!.messageId)).toEqual(picture)
   f.append([{ type: 'text', text: 'New native body after picture' }])
-  await vi.waitFor(() => expect(userOperation(f, 'New native body after picture')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'New native body after picture')?.state).toBe('confirmed')
   expect(userOperation(f, 'New native body after picture')?.mapping).toEqual(first.mapping)
   expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('New native body after picture')
   expect(nativeCalls(f).filter(call => call.method === 'POST')).toHaveLength(1)
@@ -179,12 +190,14 @@ it('default Host gives a previously unknown body priority over a newly available
   const f = await fixture(), upload = hold(), body = hold()
   f.feishu.controls.beforeUpload = () => upload.promise
   f.append([{ type: 'text', text: 'First body before uncertainty' }])
-  await vi.waitFor(() => expect(userOperation(f, 'First body before uncertainty')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'First body before uncertainty')?.state).toBe('confirmed')
   const first = userOperation(f, 'First body before uncertainty')!
   expect(first.mapping?.nativeCard).toBeDefined()
   f.feishu.controls.deferCardBody = body.promise
   f.append([{ type: 'text', text: 'New body accepted with a lost response' }])
-  await vi.waitFor(() => expect(userOperation(f, 'New body accepted with a lost response')?.state).toBe('unknown'))
+  await f.drained()
+  expect(userOperation(f, 'New body accepted with a lost response')?.state).toBe('unknown')
   upload.release()
   await vi.waitFor(() => expect(f.services().publication!.store.inspect(first.operationId)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
   await f.optionalDrained()
@@ -195,18 +208,22 @@ it('default Host gives a previously unknown body priority over a newly available
 })
 
 it('default Host keeps a lost portrait receipt unknown while a newer body uses the confirmed original image', async () => {
-  const f = await fixture(), upload = hold()
+  const f = await fixture(), upload = hold(), read = hold()
   f.feishu.controls.beforeUpload = () => upload.promise
   f.feishu.controls.unknownPortrait = true
   f.append([{ type: 'text', text: 'Original body for unknown portrait' }])
-  await vi.waitFor(() => expect(userOperation(f, 'Original body for unknown portrait')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Original body for unknown portrait')?.state).toBe('confirmed')
   const first = userOperation(f, 'Original body for unknown portrait')!
+  f.feishu.controls.beforeMessageRead = () => read.promise
   upload.release()
   await vi.waitFor(() => expect(f.services().publication!.store.inspect(first.operationId)?.portrait?.state).toBe('unknown'))
   f.append([{ type: 'text', text: 'New body beyond the unknown portrait' }])
-  await vi.waitFor(() => expect(userOperation(f, 'New body beyond the unknown portrait')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'New body beyond the unknown portrait')?.state).toBe('confirmed')
   expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('New body beyond the unknown portrait')
   expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('original-image-key-1')
+  read.release(); await f.optionalDrained()
   const original = f.services().publication!.store.inspect(first.operationId)!
   await f.restart(); await f.optionalDrained()
   expect(f.services().publication!.store.inspect(first.operationId)?.portrait).toEqual(original.portrait)
@@ -218,14 +235,16 @@ it('default Host preserves a direct IM mapping when a later source revision has 
   f.feishu.controls.beforeUpload = () => upload.promise
   f.feishu.controls.rejectCardCreate = true
   f.append([{ type: 'text', text: 'Existing direct message' }])
-  await vi.waitFor(() => expect(userOperation(f, 'Existing direct message')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Existing direct message')?.state).toBe('confirmed')
   const first = userOperation(f, 'Existing direct message')!
   expect(first.mapping?.nativeCard).toBeUndefined()
   upload.release()
   await vi.waitFor(() => expect(f.services().publication!.store.inspect(first.operationId)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
   f.feishu.controls.rejectCardCreate = false
   f.append([{ type: 'text', text: 'Updated existing direct message' }])
-  await vi.waitFor(() => expect(userOperation(f, 'Updated existing direct message')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Updated existing direct message')?.state).toBe('confirmed')
   expect(userOperation(f, 'Updated existing direct message')?.mapping).toEqual(first.mapping)
   expect(nativeCalls(f).filter(call => call.method === 'POST')).toHaveLength(1)
   expect(portraits(f)).toHaveLength(0)
@@ -235,7 +254,8 @@ it.each(['image', 'pause'] as const)('default Host retires unclaimed portrait wo
   const f = await fixture(), upload = hold()
   f.feishu.controls.beforeUpload = async (_bytes, index) => { if (index === 1) await upload.promise }
   f.append([{ type: 'text', text: 'Original body before boundary change' }])
-  await vi.waitFor(() => expect(userOperation(f, 'Original body before boundary change')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Original body before boundary change')?.state).toBe('confirmed')
   const first = userOperation(f, 'Original body before boundary change')!
   if (mode === 'image') {
     f.append([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } }])
@@ -275,16 +295,19 @@ it('default Host does not attribute a newer body portrait to an older readback a
   f.feishu.controls.beforeUpload = () => upload.promise
   f.feishu.controls.unknownPortrait = true
   f.append([{ type: 'text', text: 'Original before in-flight readback' }])
-  await vi.waitFor(() => expect(userOperation(f, 'Original before in-flight readback')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Original before in-flight readback')?.state).toBe('confirmed')
   const first = userOperation(f, 'Original before in-flight readback')!
-  upload.release()
-  await vi.waitFor(() => expect(f.services().publication!.store.inspect(first.operationId)?.portrait?.state).toBe('unknown'))
+  // Hold real readback before releasing the write, so a legitimate early GET cannot race the scenario.
   f.feishu.controls.beforeMessageRead = () => read.promise
   const before = f.feishu.calls.filter(call => call.method === 'GET').length
+  upload.release()
+  await vi.waitFor(() => expect(f.services().publication!.store.inspect(first.operationId)?.portrait?.state).toBe('unknown'))
   f.services().publication!.refresh()
   await vi.waitFor(() => expect(f.feishu.calls.filter(call => call.method === 'GET').length).toBeGreaterThan(before))
   f.append([{ type: 'text', text: 'New body while old readback is held' }])
-  await vi.waitFor(() => expect(userOperation(f, 'New body while old readback is held')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'New body while old readback is held')?.state).toBe('confirmed')
   read.release(); await f.optionalDrained()
   expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('New body while old readback is held')
   expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('original-image-key-1')
@@ -297,7 +320,8 @@ it('default Host exposes the original native presentation through compiled publi
   const f = await fixture(), upload = hold()
   f.feishu.controls.beforeUpload = () => upload.promise
   await f.send('Public delivery presentation')
-  await vi.waitFor(() => expect(userOperation(f, 'Public delivery presentation')?.state).toBe('confirmed'))
+  await f.drained()
+  expect(userOperation(f, 'Public delivery presentation')?.state).toBe('confirmed')
   const first = userOperation(f, 'Public delivery presentation')!
   if(process.env.NATIVE_PORTRAIT_CLI_PROOF) await writeFile(process.env.NATIVE_PORTRAIT_CLI_PROOF, JSON.stringify({ entry:process.env.AGENTMUX_TEST_OBJECT_CLI, sha256:(await import('node:crypto')).createHash('sha256').update(readFileSync(join(process.env.AGENTMUX_TEST_OBJECT_CLI!,'../../dist/agentmux.js'))).digest('hex') }))
   const environment = objectCliEnvironment(f.original.root)
@@ -316,8 +340,99 @@ it('default Host keeps body publication available when the original portrait sou
   await f.drained()
   const first = userOperation(f, 'Readable body with unavailable original portrait')!
   expect(first.state).toBe('confirmed'); expect(f.portraitReadCount()).toBeGreaterThan(0)
-  expect(first.mapping?.nativeCard).toBeUndefined(); expect(nativeCalls(f)).toHaveLength(0)
+  expect(first.mapping?.nativeCard).toBeDefined(); expect(nativeCalls(f).filter(call => call.method === 'POST')).toHaveLength(1)
   expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('Readable body with unavailable original portrait')
+})
+
+
+it('default Host completes a late original avatar resource on its sole confirmed card and reuses its image', async () => {
+  const source = hold(), f = await fixture({ wait: () => source.promise })
+  await f.send('Late original resource')
+  await f.drained()
+  const first = userOperation(f, 'Late original resource')!
+  expect(first.state).toBe('confirmed'); expect(first.mapping?.nativeCard).toBeDefined()
+  expect(first.speaker?.avatar?.image).toBeUndefined()
+  const discord = f.operations().find(op => op.bindingId === 'discord-binding' && op.payload.kind === 'speech')!
+  expect(discord.state).toBe('confirmed'); expect(discord.mapping?.nativeCard).toBeUndefined()
+  source.release(); await f.optionalDrained(); await f.drained(); await f.optionalDrained()
+  const after = f.services().publication!.store.inspect(first.operationId)!
+  expect(after.portrait?.state).toBe('confirmed')
+  expect(after.avatarUploads?.at(-1)?.state).toBe('confirmed'); expect(f.feishu.uploads).toHaveLength(1)
+  expect(after.prepared).toEqual(first.prepared); expect(after.receipt).toEqual(first.receipt)
+  expect(after.mapping).toEqual(first.mapping); expect(after.sourceRevision).toBe(first.sourceRevision)
+  expect(after.reference).toEqual(first.reference); expect(after.speaker?.avatar?.input).toEqual(first.speaker?.avatar?.input)
+  expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('original-image-key-1')
+  expect(portraits(f)).toHaveLength(1)
+  expect(await f.rpc.call('connection.delivery.inspect', { operationId: first.operationId })).toMatchObject({ delivery: { state: 'confirmed', presentation: { portrait: { state: 'confirmed' } }, mapping: first.mapping } })
+  const reads = f.portraitReadCount(), entities = nativeCalls(f).filter(call => call.method === 'POST').length
+  await f.send('Reuse late original image', profile, 'reuse-late-image'); await f.drained()
+  expect(userOperation(f, 'Reuse late original image')?.state).toBe('confirmed')
+  expect(f.portraitReadCount()).toBe(reads); expect(f.feishu.uploads).toHaveLength(1)
+  expect(nativeCalls(f).filter(call => call.method === 'POST')).toHaveLength(entities)
+  expect(JSON.stringify(bodyOf(f, userOperation(f, 'Reuse late original image')!.mapping!.messageId))).toContain('original-image-key-1')
+})
+
+it('default Host resumes the exact pending original avatar resource after restart without resending its body', async () => {
+  const source = hold(), f = await fixture({ wait: () => source.promise })
+  await f.send('Original before source restart'); await f.drained()
+  const first = userOperation(f, 'Original before source restart')!
+  expect(first.state).toBe('confirmed'); expect(first.portrait?.state).toBe('pending')
+  await f.restart(); await f.drained()
+  source.release(); await f.optionalDrained(); await f.drained(); await f.optionalDrained()
+  const after = f.services().publication!.store.inspect(first.operationId)!
+  // Restart truthfully changes the waiting Input's observation, while the same message/entity remains.
+  const current = f.operations().filter(op => op.bindingId === 'feishu-binding' && op.projectionId === first.projectionId).at(-1)!
+  expect(after.portrait?.state).toBe('superseded'); expect(current.portrait?.state).toBe('confirmed')
+  expect(current.speaker?.avatar?.input).toEqual(first.speaker?.avatar?.input); expect(current.mapping).toEqual(first.mapping)
+  expect(after.prepared).toEqual(first.prepared); expect(after.attempt).toBe(first.attempt)
+  expect(f.portraitReadCount()).toBe(2); expect(f.feishu.uploads).toHaveLength(1)
+  expect(nativeCalls(f).filter(call => call.method === 'POST')).toHaveLength(1); expect(portraits(f)).toHaveLength(1)
+})
+
+it.each([true, false])('default Host shares an original avatar read across applications with first audience paused=%s', async paused => {
+  const source = hold(), f = await fixture({ wait: () => source.promise })
+  f.feishu.controls.applicationForRoom = { 'second-avatar-room': 'second-avatar-application' }
+  const owner = (await f.rpc.call('runtime.owner.identity', {})).owner
+  const secret = await f.rpc.call('connection.credential.store', { operationId: 'second-avatar-secret', secret: 'synthetic-second-application-secret' }, { runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
+  await f.rpc.call('connection.configure', { operationId: 'second-avatar-application', expectedRevision: null, connection: { ...feishuConfig, connectionId: 'second-avatar-connection', application: { ...feishuConfig.application, appId: 'second-avatar-application' }, credentialRef: secret.credentialRef } })
+  expect(await f.rpc.call('connection.bind', { operationId: 'second-avatar-room', bindingId: 'avatar-second-binding', connectionId: 'second-avatar-connection', expectedConnectionRevision: 1,
+    executionHostId: 'local', agentSessionId: 'profile-agent', externalConversationId: 'second-avatar-room', expectedSource: { providerId: 'claude', nativeSessionId: 'profile-native' }, scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' } })).toMatchObject({ state: 'applied' })
+  await f.send('Shared original resource'); await f.drained()
+  const second = f.services().publication!.store.list({ bindingId: 'avatar-second-binding', revision: 1 }).find(op => op.payload.kind === 'speech')!
+  expect(second.state).toBe('confirmed'); expect(second.mapping?.nativeCard).toBeDefined()
+  expect(f.portraitReadCount()).toBe(1)
+  if (paused) expect(await f.rpc.call('connection.binding.pause', { operationId: 'pause-first-source-reader', bindingId: 'feishu-binding', expectedRevision: 1 })).toMatchObject({ state: 'applied' })
+  source.release(); await f.optionalDrained(); await f.drained(); await f.optionalDrained()
+  const after = f.services().publication!.store.inspect(second.operationId)!
+  expect(after.portrait?.state).toBe('confirmed'); expect(after.mapping).toEqual(second.mapping)
+  expect(f.portraitReadCount()).toBe(1); expect(f.feishu.uploads).toHaveLength(paused ? 1 : 2); expect(portraits(f)).toHaveLength(paused ? 1 : 2)
+  const uploaded = after.avatarUploads?.at(-1)
+  expect(uploaded?.state).toBe('confirmed')
+  expect(JSON.stringify(bodyOf(f, second.mapping!.messageId))).toContain(uploaded?.state === 'confirmed' ? uploaded.imageKey! : 'missing-original-image')
+})
+
+it('default Host creates no native entity for an already unavailable original avatar resource', async () => {
+  const f = await fixture({ unavailable: true })
+  await f.send('Known unavailable original resource'); await f.drained()
+  const first = userOperation(f, 'Known unavailable original resource')!
+  expect(first.state).toBe('confirmed'); expect(first.speaker?.avatar?.code).toBe('INPUT_AUTHOR_AVATAR_UNAVAILABLE')
+  expect(first.mapping?.nativeCard).toBeUndefined(); expect(nativeCalls(f)).toHaveLength(0); expect(f.feishu.uploads).toHaveLength(0)
+  expect(JSON.stringify(bodyOf(f, first.mapping!.messageId))).toContain('Known unavailable original resource')
+})
+
+
+it('default Host retains a late unavailable avatar observation without rereading it on unrelated body updates', async () => {
+  const source = hold(), f = await fixture({ wait: () => source.promise, unavailable: true })
+  await f.send('Late unavailable original source'); await f.drained()
+  const first = userOperation(f, 'Late unavailable original source')!
+  expect(first.mapping?.nativeCard).toBeDefined(); expect(first.state).toBe('confirmed')
+  source.release(); await f.optionalDrained()
+  expect(f.services().publication!.store.inspect(first.operationId)?.speaker?.avatar?.code).toBe('INPUT_AUTHOR_AVATAR_UNAVAILABLE')
+  const reads = f.portraitReadCount()
+  await f.send('Independent body after source absence', { name: 'Original person' }, 'after-source-absence'); await f.drained(); await f.optionalDrained()
+  expect(userOperation(f, 'Independent body after source absence')?.state).toBe('confirmed')
+  expect(f.portraitReadCount()).toBe(reads); expect(f.feishu.uploads).toHaveLength(0); expect(portraits(f)).toHaveLength(0)
+  expect(f.services().publication!.store.inspect(first.operationId)?.prepared).toEqual(first.prepared)
 })
 
 it('default Host retains complete body fragments across a native entity update at the request budget', async () => {

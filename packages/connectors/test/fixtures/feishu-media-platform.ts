@@ -5,7 +5,7 @@ import { feishuConfig } from './feishu.js'
 
 /** Real SDK serialization and loopback HTTP; only the platform transport is controlled. */
 export async function feishuMediaPlatform() {
-  const controls: { missingUploadKey?: boolean; unknownImageMessage?: boolean; rejectImageMessage?: boolean; beforeUpload?: ((bytes: Buffer, index: number) => Promise<void>) | undefined;
+  const controls: { applicationForRoom?: Record<string, string>; missingUploadKey?: boolean; unknownImageMessage?: boolean; rejectImageMessage?: boolean; beforeUpload?: ((bytes: Buffer, index: number) => Promise<void>) | undefined;
     beforeMessageRead?: () => Promise<void>; rejectCardCreate?: boolean; unknownCardCreate?: boolean; beforeCardCreate?: () => Promise<void>;
     beforeCardUpdate?: (sequence: number, element: boolean) => Promise<void>; unknownPortrait?: boolean; unknownCardBody?: boolean; deferCardBody?: Promise<void> } = {}
   const uploads: Buffer[] = [], calls: Array<{ method: string; path: string; body: unknown }> = [], messages = new Map<string, Record<string, unknown>>()
@@ -69,7 +69,7 @@ export async function feishuMediaPlatform() {
           const content = JSON.parse(body.content), entity = content.type === 'card' ? content.data.card_id : undefined
           if (entity) { if (!cards.has(entity) || [...messageCards.values()].includes(entity)) throw Error('A native entity must exist and be sent only once'); messageCards.set(messageId, entity) }
           const message = { message_id: messageId, chat_id: body.receive_id ?? original?.chat_id, msg_type: body.msg_type ?? original?.msg_type,
-            sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, deleted: false, body: { content: JSON.stringify(entity ? cards.get(entity)!.content : body.msg_type === 'interactive' || original?.msg_type === 'interactive' ? content : content.zh_cn) } }
+            sender: { sender_type: 'app', id_type: 'app_id', id: controls.applicationForRoom?.[String(body.receive_id ?? original?.chat_id)] ?? feishuConfig.application.appId }, deleted: false, body: { content: JSON.stringify(entity ? cards.get(entity)!.content : body.msg_type === 'interactive' || original?.msg_type === 'interactive' ? content : content.zh_cn) } }
           if (!controls.rejectImageMessage || !body.content.includes('img_key')) messages.set(messageId, message)
           result = body.content.includes('img_key') && controls.rejectImageMessage ? { code: 230025 } : controls.unknownImageMessage && body.content.includes('img_key') ? { code: 230049 } : { code: 0, data: message }
         }
