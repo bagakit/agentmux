@@ -119,7 +119,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
     const ref = record.reference
     if (record.original.kind !== 'native' || ref?.source.kind !== 'native' || ref.hostId !== boundary.executionHostId || ref.agentSessionId !== boundary.agentSessionId) continue
     const item = record.original.item
-    if (!item.turnId || item.turnOutcome?.status !== 'completed') continue
+    if (!item.turnId || !item.turnOutcome) continue
     for (const row of started.all(boundary.bindingId, boundary.revision, ref.source.providerId, ref.source.nativeSessionId, item.turnId)) {
       const original = JSON.parse(String(row.operation_json)) as PublicationOperation, witness = original.queryTurn
       if (!witness?.key) continue
@@ -127,7 +127,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
       const key = conversationInputIdentity(witness.record.hostId, witness.key)
       if (accepted.unconfirmed || accepted.ambiguous.has(key) || accepted.byKey.get(key)?.length !== 1) continue
       const query = queryFor(witness)
-      if (query) queueQueryFeedback(store, boundary, query, 'completed', witness, { record: ref, revision: record.revision })
+      if (query) queueQueryFeedback(store, boundary, query, item.turnOutcome.status, witness, { record: ref, revision: record.revision })
     }
   }
 }
