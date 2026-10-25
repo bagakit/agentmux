@@ -146,7 +146,7 @@ if (args[0] === '--prepare') {
     assert.equal(receipt.process.exitCode, 0, receipt.capture.failure?.message)
     assert.equal(receipt.process.timedOut, false)
     assert.equal(receipt.capture.passed, true)
-    assert.equal(receipt.capture.frames.length, first ? 1 : 10, 'Eight task views and two actual Mote Settings comparisons')
+    assert.equal(receipt.capture.frames.length, first ? 1 : 17, 'Fifteen task views and two actual Mote Settings comparisons')
     for (const [file, digest] of Object.entries(compiled)) assert.equal(hash(await readFile(join(directory, file))), digest, 'Captured assets changed')
     await checkInputs()
     assert.deepEqual(await captureDriverHashes(), captureDrivers, 'Actual capture drivers stay fixed through execution')
