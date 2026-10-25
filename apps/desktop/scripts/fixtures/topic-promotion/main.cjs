@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
 const { app, BrowserWindow } = require('electron')
-const [html, temporary, evidence] = process.argv.slice(2)
+const [html, temporary, evidence, scenario] = process.argv.slice(2)
 app.setPath('userData', path.join(temporary, 'user-data')); app.setPath('sessionData', path.join(temporary, 'session-data'))
 const report = { passed: false, pid: process.pid, frames: [], console: [], assertions: [] }
 let win
@@ -38,10 +38,135 @@ app.whenReady().then(async () => { try {
     await until('promotion dialog', 'document.querySelector(".topic-promotion-dialog")!==null')
     await until('promotion inspection', '![...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.includes("读取")||node.textContent.includes("查看中"))')
   }
+  const motionSample = () => read('(' + (() => {
+    const energy = document.querySelector('.topic-promotion__energy')
+    return { at: performance.now(), phase: document.querySelector('.topic-promotion-dialog')?.dataset.phase,
+      energyDisplay: energy ? getComputedStyle(energy).display : null,
+      effects: [...document.querySelectorAll('.topic-promotion__halo,.topic-promotion__particle')].map(node => {
+        const s=getComputedStyle(node),r=node.getBoundingClientRect()
+        return {className:node.className,transform:s.transform,opacity:s.opacity,display:s.display,x:r.x,y:r.y,width:r.width,height:r.height}
+      }), activeAnimations: document.querySelector('.topic-promotion-dialog')?.getAnimations({subtree:true}).filter(item=>item.playState==='running').length ?? 0 }
+  }).toString() + ')()')
+  const noticeFact = topicId => read('(' + (topicId => {
+    const notices=[...document.querySelectorAll('.topic-promotion-notice')]
+    const notice=notices.find(node=>node.dataset.topicId===topicId),previous=notice?.previousElementSibling
+    return {count:notices.length,topicId:notice?.dataset.topicId??null,categorySpaceId:notice?.dataset.categorySpaceId??null,
+      listCategorySpaceId:notice?.closest('.workspace-topic-list')?.dataset.categorySpaceId??null,
+      previousTopicId:previous?.querySelector('.workspace-topic-entry')?.dataset.topicId??null,
+      adjacentItem:previous?.classList.contains('workspace-topic-item')??false,text:notice?.textContent??null}
+  }).toString() + ')('+JSON.stringify(topicId)+')')
+  const checkNotice = async topicId => {
+    const notice = await noticeFact(topicId), category = await read('topicPromotionProbe.category')
+    assert.equal(notice.count,1,'Completion is local to one exact Topic')
+    assert.equal(notice.topicId,topicId); assert.equal(notice.previousTopicId,topicId)
+    assert.equal(notice.adjacentItem,true,'Completion feedback is immediately beside its original Topic item')
+    assert.equal(notice.categorySpaceId,category.spaceId); assert.equal(notice.listCategorySpaceId,category.spaceId)
+    assert.match(notice.text,/已晋升为 Mote/)
+    return notice
+  }
+  const unchanged = (before, after, label) => {
+    for(const key of ['tabs','layouts','drafts','selection','notifications']) assert.deepEqual(after[key],before[key],label+' preserves '+key)
+  }
+  const motionScenario = async () => {
+    await read('topicPromotionProbe.next("complete");topicPromotionProbe.hold()')
+    await openPromotion('示例项目 数据运维')
+    await clickText('.topic-promotion-dialog button','晋升为 Mote')
+    await until('actual held write','document.querySelector(".topic-promotion-dialog")?.dataset.phase==="writing"')
+    assert.equal((await noticeFact('view:quality-0')).count,0,'No success before the completion receipt')
+    // Observe a real continuing wait after the one-time image transition has settled.
+    // These fixture observation waits never delay product completion.
+    await new Promise(done=>setTimeout(done,1100))
+    report.motionTimeline=[]
+    for(const theme of ['dark','light']) {
+      await read('topicPromotionProbe.theme('+JSON.stringify(theme)+')')
+      const samples=[]
+      for(let i=0;i<3;i++) {
+        samples.push(await motionSample())
+        await capture('promotion-motion-'+theme+'-'+i+'.png',theme+'：持续等待的第 '+(i+1)+' 帧，原 Agent 与人格图像保留')
+        if(i<2)await new Promise(done=>setTimeout(done,350))
+      }
+      assert.ok(samples.every(sample=>sample.phase==='writing'&&sample.energyDisplay!=='none'&&sample.effects.length>=7),'Production waiting effect remains visible')
+      const changed=samples.slice(1).some(sample=>sample.effects.some((effect,index)=> {
+        const earlier=samples[0].effects[index]
+        return effect.transform!==earlier.transform||effect.opacity!==earlier.opacity||effect.x!==earlier.x||effect.y!==earlier.y
+      }))
+      report.motionTimeline.push({theme,samples})
+      assert.equal(changed,true,'Waiting motion changes visible geometry or opacity after the initial transition')
+    }
+    unchanged(report.before,await read('topicPromotionProbe.facts()'),'Held operation')
+    await click('.topic-promotion__cancel')
+    await until('dismissed held view','!document.querySelector(".topic-promotion-dialog")')
+    const other=await read('topicPromotionProbe.otherCategory'),category=await read('topicPromotionProbe.category')
+    await click('[data-space-nav="topic-category:'+other.categoryId+'"]')
+    await until('another original category selected','topicPromotionProbe.facts().selection?.spaceId===topicPromotionProbe.otherCategory.spaceId')
+    const later=await read('topicPromotionProbe.facts()')
+    await read('topicPromotionProbe.release()')
+    await until('original write completed','topicPromotionProbe.facts().operations.some(item=>item.topicId==="view:quality-0"&&item.state==="complete")')
+    await paint()
+    unchanged(later,await read('topicPromotionProbe.facts()'),'Late original completion')
+    assert.equal((await noticeFact('view:quality-0')).count,0,'Original-group completion is not broadcast into the later group')
+    assert.equal(await read('document.querySelector(".topic-promotion__energy")===null && document.querySelector(".topic-promotion__activity")===null'),true,'Writing visuals end when the view closes')
+    await capture('promotion-complete-other-group-light.png','在另一个组完成：保留后来选择，不把原组提示广播到这里')
+    await click('[data-space-nav="topic-category:'+category.categoryId+'"]')
+    await until('original category restored','topicPromotionProbe.facts().selection?.spaceId===topicPromotionProbe.category.spaceId && document.querySelectorAll(".workspace-topic-entry").length===3')
+    report.originalGroupNotice=await checkNotice('view:quality-0')
+    await capture('promotion-complete-original-group-light.png','返回原 Topic 组：提示紧邻准确的晋升条目')
+    await read('topicPromotionProbe.theme("dark")')
+    await capture('promotion-complete-original-group-dark.png','深色：同一条目旁的完成反馈')
+    const beforeDismiss=await read('topicPromotionProbe.facts()')
+    await click('[aria-label="关闭晋升提示"]')
+    await paint()
+    unchanged(beforeDismiss,await read('topicPromotionProbe.facts()'),'Dismissing completion')
+    assert.equal((await noticeFact('view:quality-0')).count,0)
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
+    await read('topicPromotionProbe.theme("light");topicPromotionProbe.narrow();topicPromotionProbe.hold()')
+    win.setContentSize(560,760)
+    const beforeReduced=await read('topicPromotionProbe.facts()')
+    await openPromotion('产品发现与用户访谈：记录新方向里的每一次进展与重要决定')
+    await clickText('.topic-promotion-dialog button','晋升为 Mote')
+    await until('reduced-motion held write','document.querySelector(".topic-promotion-dialog")?.dataset.phase==="writing"')
+    await paint()
+    const reducedBefore=await motionSample()
+    await capture('promotion-motion-reduced-narrow-light.png','减少动态效果：长名字与静态等待说明在窄窗口保持清楚')
+    await new Promise(done=>setTimeout(done,350))
+    const reducedAfter=await motionSample()
+    assert.equal(reducedBefore.energyDisplay,'none');assert.equal(reducedAfter.energyDisplay,'none')
+    assert.equal(reducedBefore.activeAnimations,0);assert.equal(reducedAfter.activeAnimations,0)
+    assert.deepEqual(reducedAfter.effects,reducedBefore.effects,'Reduced-motion waiting remains static')
+    report.reducedMotion={before:reducedBefore,after:reducedAfter}
+    assert.equal((await noticeFact('view:quality-1')).count,0)
+    await read('topicPromotionProbe.release()')
+    await paint()
+    assert.equal(await read('document.querySelector(".topic-promotion-dialog")===null'),true,'Completion does not wait for an animation timer')
+    report.reducedNotice=await checkNotice('view:quality-1')
+    unchanged(beforeReduced,await read('topicPromotionProbe.facts()'),'Reduced-motion completion')
+    await capture('promotion-complete-reduced-narrow-light.png','减少动态效果：准确完成后立即回原组，同条目提示')
+    await click('[aria-label="关闭晋升提示"]')
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]})
+    win.setContentSize(1200,760)
+    await read('topicPromotionProbe.theme("dark")')
+    const beforeFast=await read('topicPromotionProbe.facts()')
+    await openPromotion('每周项目复盘')
+    await read('topicPromotionProbe.holdRefresh()')
+    await clickText('.topic-promotion-dialog button','晋升为 Mote')
+    // No held response: the click helper gives exactly two native paint frames.
+    assert.equal(await read('document.querySelector(".topic-promotion-dialog")===null'),true,'Immediate completion is not delayed to play waiting motion')
+    assert.ok((await read('topicPromotionProbe.facts()')).refreshWaits>0,'Original projection refresh is actually held after the completion receipt')
+    report.fastNotice=await checkNotice('view:quality-2')
+    unchanged(beforeFast,await read('topicPromotionProbe.facts()'),'Immediate completion')
+    await capture('promotion-complete-fast-dark.png','即时完成：不为播放动效延迟，原条目仍有局部落定反馈')
+    await read('topicPromotionProbe.releaseRefresh()')
+    report.after=await read('topicPromotionProbe.facts()')
+    assert.deepEqual(report.after.controls,[])
+    report.assertions.push('Continuing wait changes actual effect geometry/opacity; reduced motion stays static',
+      'Completion stays beside exact original Topic in its source category; later selection and notifications remain untouched',
+      'Fast responses complete on normal rendering without a presentation delay, even while the later projection refresh is held')
+  }
   await win.loadFile(html); win.webContents.debugger.attach('1.3')
   await until('original App Topics directory', 'window.topicPromotionProbe?.ready && document.querySelectorAll(".workspace-topic-entry").length===3')
   await until('original workface', 'document.querySelector(".editor-pane")?.textContent.includes("每天从具体的问题开始")')
   report.before = await read('topicPromotionProbe.facts()')
+  if(scenario==='motion') { await motionScenario();report.passed=true;return }
   await click('[aria-label="Actions for 示例项目 数据运维"]')
   await until('original Topic actions menu opened', 'document.querySelectorAll("[role=menuitem]").length>0')
   assert.equal(await read('[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="晋升为 Mote")'),true,'Production Topic menu exposes the promotion action')

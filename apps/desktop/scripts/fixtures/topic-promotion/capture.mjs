@@ -13,9 +13,13 @@ const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..')
 const mainRoot = dirname(resolve(root, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: root, encoding: 'utf8' }).trim()))
 const require = createRequire(join(mainRoot, 'apps/desktop/package.json'))
 const { build } = await import(require.resolve('vite'))
-const mutant = process.argv.includes('--mutant=consumer') ? 'consumer' : null
-assert.ok(process.argv.slice(2).every(value => value === '--mutant=consumer'), 'Only --mutant=consumer is accepted')
-const evidence = join(root, '.tmp/topic-promotion', (mutant ? 'consumer-' : 'visual-') + randomUUID())
+const motion = process.argv.includes('--motion')
+const mutant = process.argv.includes('--mutant=motion') ? 'motion' : process.argv.includes('--mutant=consumer') ? 'consumer' : null
+assert.ok(process.argv.slice(2).every(value => ['--motion', '--mutant=consumer', '--mutant=motion'].includes(value)), 'Use --motion and optionally --mutant=motion, or --mutant=consumer')
+assert.ok(mutant !== 'motion' || motion, 'Motion mutation needs the motion scenario')
+assert.ok(mutant !== 'consumer' || !motion, 'Consumer mutation uses the original scenario')
+const evidenceRoot = join(root, motion ? '.tmp/topic-promotion-motion' : '.tmp/topic-promotion')
+const evidence = join(evidenceRoot, (mutant ? mutant + '-' : 'visual-') + randomUUID())
 const temporary = await mkdtemp(join(tmpdir(), 'amux-topic-promotion-')), compiled = join(temporary, 'renderer')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = {}, mutations = []
 const record = async id => { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/') && existsSync(file)) inputs[relative(root, file)] = hash(await readFile(file)) }
@@ -55,8 +59,14 @@ try {
     },
     async transform(source, id) {
       await record(id)
-      if (!mutant || !id.endsWith('/components/WorkspaceTopicsPanel.tsx')) return
-      const before = 'onPromote: () => setPromotionTarget({ topicId: topic.id, title: topic.title }),'
+      if (mutant === 'motion' && id.endsWith('/styles/topic-promotion.css')) {
+        assert.ok(source.includes('.topic-promotion__particle') && source.includes('.topic-promotion__halo'), 'The production waiting motion is loaded')
+        const changed = source + '\n.topic-promotion-dialog[data-phase="writing"] .topic-promotion__energy * { animation: none !important; }\n'
+        mutations.push({ file: relative(root, id), mutant, count: 1, sourceSHA256: hash(source), loadedSHA256: hash(changed) })
+        return { code: changed, map: null }
+      }
+      if (mutant !== 'consumer' || !id.endsWith('/components/WorkspaceTopicsPanel.tsx')) return
+      const before = 'onPromote: () => setPromotionTarget({ topicId: topic.id, title: topic.title, categorySpaceId }),'
       assert.equal(source.split(before).length - 1, 1, 'Unique actual consumer mutation anchor')
       const changed = source.replace(before, 'onPromote: undefined,')
       mutations.push({ file: relative(root, id), mutant, count: 1, sourceSHA256: hash(source), loadedSHA256: hash(changed) })
@@ -72,7 +82,7 @@ try {
   for (const suffix of ['App.tsx', 'WorkspaceTopicsPanel.tsx', 'TopicContextMenu.tsx', 'TopicPromotionDialog.tsx', 'topic-promotion.css', 'store.ts']) assert.ok(Object.keys(inputs).some(file => file.endsWith('/' + suffix)), 'Production consumer loaded: ' + suffix)
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled, 'index.html'), temporary, evidence],
+  receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(compiled, 'index.html'), temporary, evidence, ...(motion ? ['motion'] : [])],
     { temporaryRoot: temporary, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await writeFile(join(evidence, 'process.log'), logs.join('\n'))
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8'))
@@ -80,12 +90,12 @@ try {
   if (mutant) {
     assert.equal(mutations.length, 1); assert.notEqual(receipt.process.exitCode, 0)
     assert.equal(receipt.actual.failure?.name, 'AssertionError')
-    assert.match(receipt.actual.failure?.message ?? '', /Production Topic menu exposes the promotion action/)
+    assert.match(receipt.actual.failure?.message ?? '', mutant === 'motion' ? /Waiting motion changes visible geometry or opacity after the initial transition/ : /Production Topic menu exposes the promotion action/)
     receipt.assertionRed = true
   } else {
     assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
     receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-    assert.ok(receipt.frames.length >= 8)
+    assert.ok(receipt.frames.length >= (motion ? 9 : 8))
   }
   receipt.sourceDrift = []
   for (const [file, digest] of Object.entries(inputs)) if (hash(await readFile(join(root, file))) !== digest) receipt.sourceDrift.push(file)
@@ -98,6 +108,6 @@ finally {
   receipt.cleanup = { remaining: await listProbeProcesses(-1, temporary) }
   if (!receipt.cleanup.remaining.length) { await rm(temporary, { recursive: true, force: true }); receipt.cleanup.removed = true }
   await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  if (receipt.passed) await writeFile(join(root, '.tmp/topic-promotion', mutant ? 'latest-consumer.json' : 'latest-visual.json'), JSON.stringify({ evidence }, null, 2) + '\n')
+  if (receipt.passed) await writeFile(join(evidenceRoot, mutant ? 'latest-' + mutant + '.json' : 'latest-visual.json'), JSON.stringify({ evidence }, null, 2) + '\n')
   console.log(JSON.stringify({ passed: receipt.passed, evidence, failure: receipt.failure?.message, pendingIndependentVisualReview: !mutant }))
 }
