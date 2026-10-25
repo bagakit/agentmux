@@ -132,6 +132,8 @@
 .global-recall-surface .survey-notebook-home:has(.note-canvas) > header p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); }
 .global-recall-surface .survey-notebook-home:has(.note-canvas) > .recall-view-picker { margin: 0; }
 .global-recall-surface .survey-notebook-home:has(.note-canvas) > :is(.note-canvas, .notebook-find, .notebook-directory-views, .notebook-create-page, .notebook-no-results) { grid-column: 1 / -1; }
+/* A tall canvas may exceed its bounded grid row; keep that overflow below the Notebook heading. */
+.global-recall-surface .survey-notebook-home:has(.note-canvas) > .note-canvas { align-self: start; }
 .global-recall-surface .survey-notebook-home:has(.note-canvas) .note-canvas-stage { height: clamp(360px, calc(100vh - 220px), 820px); }
 .global-recall-surface[data-navigation-stacked="true"] .survey-notebook-home:has(.note-canvas) { grid-template-columns: auto minmax(0, 1fr); }
 .global-recall-surface[data-navigation-stacked="true"] .survey-notebook-home:has(.note-canvas) > .recall-view-picker { grid-column: 1 / -1; justify-self: start; }
