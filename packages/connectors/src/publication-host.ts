@@ -14,6 +14,7 @@ import { isConversationPublicationPart, publicationContent, publicationPartKey }
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
 import { readPublicationA2A, publicationMessageTargets, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
 import { publicationSpeaker, type PublicationSpeaker, type PublicationSpeakerDetails, type PublicationSpeakerReader } from './publication-speaker.js'
+import type { CardCreateReceipt, PortraitReceipt } from './publication-card.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
 export interface PublicationConversationPort extends PublicationOriginalMessagePort {
@@ -33,7 +34,7 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
-type Lane = { queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 
@@ -170,11 +171,14 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (observation) lane.observation = observation
       return
     }
+    const continuedAuthority = lane.querySkipAfter !== undefined && lane.observation.state === 'unavailable' && lane.observation.reason === 'source-unconfirmed' ? lane.observation : undefined
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
     if (!this.authorized(binding)) return
     const adapter = this.options.connections.publicationAdapter(binding.connectionId)
     if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
     this.reconcile(lane, adapter)
+    for (const original of this.store.unconfirmedCards(binding)) if (!this.resourcePreparations.has(original.operationId + ':card'))
+      this.store.settleCard(original.operationId, { state: 'unknown', reason: 'effect-unconfirmed' })
     let permissionProjections: string[] = [], permissionsUnavailable = false, accessUnavailable = false
     try {
       if (adapter.permissionActions === true || adapter.questionActions === true) {
@@ -198,10 +202,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
     if (!signal.aborted && this.authorized(binding)) {
       let effectObservation: PublicationObservation | undefined
-      try { effectObservation = await this.drain(lane, adapter) }
+      try { effectObservation = await this.drain(lane, adapter, undefined, continuedAuthority) }
       catch (error) { effectObservation = { state: 'unavailable', reason: error instanceof AgentMuxError && ['PUBLICATION_ADAPTER_UNAVAILABLE', 'PUBLICATION_PREPARATION_UNCONFIRMED'].includes(error.code) ? 'adapter-unavailable' : 'storage-unconfirmed' } }
       // Original effects may still settle or dispatch; their observation cannot hide an unresolved content gap.
       if (effectObservation && lane.observation.state === 'ready') lane.observation = effectObservation
+      this.completePortraits(lane, adapter)
     }
     if (permissionsUnavailable && (lane.observation.state === 'ready' || accessUnavailable && lane.observation.reason === 'source-unconfirmed' && lane.sourceObservation?.state !== 'unavailable')) lane.observation = { state: 'unavailable', reason: accessUnavailable ? 'access-unconfirmed' : 'source-unconfirmed' }
   }
@@ -555,7 +560,50 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const row = this.store.database.prepare('SELECT record_json FROM connection_ingress_message WHERE ingress_id=?').get(operation.queryFeedback.ingressId)
     return !!row && this.options.queryInput.authorized(JSON.parse(String(row.record_json)), binding)
   }
-  private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
+  private wakePortraitUpload(operationId: string): void {
+    if (this.closed) return
+    for (const audience of this.store.portraitAudiences(operationId)) {
+      const lane = this.lanes.get(audience.bindingId)
+      if (lane?.binding.revision === audience.revision) this.wake(lane)
+    }
+  }
+  /** Optional native effects occupy no body-dispatch slot and never become its predecessor. */
+  private completePortraits(lane: Lane, adapter: PublicationAdapter): void {
+    if (!adapter.cards || this.closed || lane.abort.signal.aborted) return
+    let after = lane.portraitAfter
+    for (let count = 0; count < 16; count++) {
+      const original = this.store.nextPortrait(lane.binding, after)
+      if (!original) { delete lane.portraitAfter; return }
+      after = original.operationId
+      const id = original.operationId + ':portrait'
+      if (this.resourcePreparations.has(id)) continue
+      const work = Promise.resolve().then(async () => {
+        if (!this.authorized(lane.binding) || lane.abort.signal.aborted) return
+        const credential = await this.options.connections.resolveCredential(lane.binding.connectionId)
+        if (!credential || !this.authorized(lane.binding) || lane.abort.signal.aborted) return
+        let current = this.store.inspect(original.operationId)!
+        const authorized = () => this.authorized(lane.binding) && (current.payload.kind !== 'question' || this.options.permissions?.authorized(current) === true)
+        if (!authorized()) return
+        if (current.portrait?.state === 'dispatching') current = this.store.settlePortrait(current.operationId, { state: 'unknown', reason: 'effect-unconfirmed' })
+        const claimed = current.portrait?.state === 'pending' ? this.store.claimPortrait(current.operationId, authorized, adapter) : null
+        if (!claimed && (current.portrait?.state !== 'unknown' || !this.store.portraitInspectable(current))) return
+        const retained = claimed ?? current, portrait = retained.portrait
+        if (!portrait || !('prepared' in portrait) || !retained.mapping) return
+        const signal = AbortSignal.any([lane.abort.signal, AbortSignal.timeout(30_000)])
+        if (!authorized() || signal.aborted) return
+        const effect = claimed ? adapter.cards!.portrait(portrait.prepared, retained.target, credential, signal, retained.mapping)
+          : adapter.cards!.inspectPortrait(portrait.prepared, retained.target, credential, signal, retained.mapping)
+        const settle = (receipt: PortraitReceipt | null) => { if (receipt && !this.closed) this.store.settlePortrait(retained.operationId, receipt, claimed ? 'effect' : 'readback') }
+        effect.then(receipt => { try { settle(receipt) } catch { /* Retain the original authoritative receipt. */ } }, () => {})
+        try { await this.until(effect, signal) }
+        catch { if (claimed) settle({ state: 'unknown', reason: 'effect-unconfirmed' }) }
+      }).catch(() => { /* Optional observation cannot consume or block the original body. */ }).finally(() => { this.resourcePreparations.delete(id) })
+      this.resourcePreparations.set(id, work)
+    }
+    if (after && this.store.nextPortrait(lane.binding, after)) { lane.portraitAfter = after; lane.dirty = true }
+    else delete lane.portraitAfter
+  }
+  private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string, authorityObservation?: PublicationObservation): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
     const authorized = () => lane.notice ? this.noticeAuthorized(lane.notice) : this.authorized(binding)
     const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>()
@@ -565,7 +613,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !authorized()) return
       let original = this.store.next(binding, projectionId, after)
-      if (!original) return this.effectObservation(binding, projectionId)
+      if (!original) return authorityObservation ?? this.effectObservation(binding, projectionId)
       // Authority belongs to this one query; keep its original pending effect
       // and continue independent projections without turning feedback into a lane gate.
       if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
@@ -624,7 +672,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
               const receipt = { state: 'unknown' as const }
               if (!this.closed) this.store.settleResourceUpload(operation.operationId, operation.avatarUploads!.length, receipt, 'avatar')
               return receipt
-            }).catch(() => ({ state: 'unknown' as const })).finally(() => { this.resourcePreparations.delete(id) })
+            }).catch(() => ({ state: 'unknown' as const })).finally(() => { this.resourcePreparations.delete(id); this.wakePortraitUpload(operation.operationId) })
             this.resourcePreparations.set(id, retained)
           }
         }
@@ -632,6 +680,21 @@ export class PublicationHost implements ConnectionDeliveryPort {
         const sourceId = original.avatarSource?.operationId ?? original.operationId
         const sourceAttempt = original.avatarSource?.attempt ?? original.avatarUploads?.length ?? 0
         const effect = this.resourcePreparations.get(attemptKey(sourceId, sourceAttempt))
+        if (effect && adapter.cards && !original.cardPreparation) {
+          const cardAuthorized = () => authorized() && (original!.payload.kind !== 'question' || this.options.permissions?.authorized(original!) === true)
+          const preparation = this.store.claimCard(original.operationId, cardAuthorized, adapter, true)
+          if (preparation?.cardPreparation) {
+            const id = preparation.operationId + ':card', createSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+            const settle = (receipt: CardCreateReceipt) => { if (!this.closed) this.store.settleCard(preparation.operationId, receipt) }
+            const create = Promise.resolve().then(() => cardAuthorized() && !createSignal.aborted
+              ? adapter.cards!.create(preparation.cardPreparation!.prepared, preparation.target, credential, createSignal)
+              : { state: 'not-applied' as const, reason: 'adapter-unavailable' as const })
+            create.then(receipt => { try { settle(receipt) } catch { /* Preserve the original receipt. */ } }, () => {})
+            const observed = this.until(create, createSignal).catch(() => { settle({ state: 'unknown', reason: 'effect-unconfirmed' }) })
+              .catch(() => {}).finally(() => { this.resourcePreparations.delete(id) })
+            this.resourcePreparations.set(id, observed)
+          }
+        }
         if (effect) try {
           // A short optional preparation belongs to this original unprepared wire,
           // not Agent input or a new background polling/decoration lifecycle.
@@ -666,18 +729,21 @@ export class PublicationHost implements ConnectionDeliveryPort {
         }
       }
       if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
-      if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
+      if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) { authorityObservation = { state: 'unavailable', reason: 'source-unconfirmed' }; after = original.operationId; continue }
       const claimed = this.store.claimNext(binding, original.operationId, () => authorized() && this.queryAuthorized(original!, binding) && (!['permission', 'question'].includes(original!.payload.kind) || this.options.permissions?.authorized(original!) === true), adapter, original.projectionId)
       if (!claimed) {
+        if (signal.aborted || !authorized()) return
         if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
+        if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) { authorityObservation = { state: 'unavailable', reason: 'source-unconfirmed' }; after = original.operationId; continue }
         // A concurrent original claim may expose another candidate. Re-enter qualification
         // on the existing lane, but never spin on the same unchanged pending operation.
         const next = this.store.next(binding, projectionId, after)
         if (next && next.operationId !== original.operationId) lane.dirty = true
-        return this.effectObservation(binding, projectionId)
+        return authorityObservation ?? this.effectObservation(binding, projectionId)
       }
       if (!this.queryAuthorized(claimed, binding)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); after = claimed.operationId; continue }
-      if (signal.aborted || !authorized() || ['permission', 'question'].includes(claimed.payload.kind) && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
+      if (signal.aborted || !authorized()) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
+      if (['permission', 'question'].includes(claimed.payload.kind) && !this.options.permissions?.authorized(claimed)) { authorityObservation = { state: 'unavailable', reason: 'source-unconfirmed' }; this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); after = claimed.operationId; continue }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
       try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping, publicationEffectContext(claimed))) }
@@ -696,7 +762,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (projectionId === undefined) lane.querySkipAfter = after
       lane.dirty = true
     }
-    return this.effectObservation(binding, projectionId)
+    return authorityObservation ?? this.effectObservation(binding, projectionId)
   }
   private until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     if (signal.aborted) return Promise.reject(new Error('External effect observation ended.'))

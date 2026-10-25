@@ -8,6 +8,7 @@ import { publicationContent, publicationPartKey, type PublicationContentPlan } f
 import { publicationInputAlias } from './publication-input-alias.js'
 import type { PublicationA2A, PublicationOriginalMessage } from './publication-a2a.js'
 import type { PublicationSpeaker } from './publication-speaker.js'
+import type { PublicationCardAdapter, PublicationCardPreparation, PublicationPortrait, CardCreateReceipt, PortraitReceipt } from './publication-card.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
@@ -81,13 +82,20 @@ export type PublicationOperation = ConnectionDelivery & {
   avatarUploads?: Array<{ state: 'dispatching' } | import('./publication-resource.js').ImageUploadReceipt>
   /** Reuse points at an original upload receipt, never a fabricated second attempt. */
   avatarSource?: { operationId: string; attempt: number; imageKey?: string }
+  cardPreparation?: PublicationCardPreparation
+  /** Reserved in the original entity owner, then frozen with this body's request. */
+  cardSequence?: number
+  portrait?: PublicationPortrait
 }
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, ...delivery } = operation
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
   const last = operation.uploads?.at(-1)
-  return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
+  return parseConnectionDelivery({ ...delivery, ...(cardPreparation || portrait ? { presentation: {
+    ...(cardPreparation ? { entity: { state: cardPreparation.receipt.state, ...('reason' in cardPreparation.receipt ? { reason: cardPreparation.receipt.reason } : {}) } } : {}),
+    ...(portrait ? { portrait: { state: portrait.state, ...('receipt' in portrait && portrait.receipt && 'reason' in portrait.receipt ? { reason: portrait.receipt.reason } : {}) } } : {})
+  } } : {}), ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
 export type PublicationPageOptions = {
   queryFeedback?: true
@@ -223,6 +231,15 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_query_pending
         ON connector_publication_operation(binding_id,binding_revision,ordinal)
         WHERE json_extract(operation_json,'$.queryPending')=1;
+      CREATE INDEX IF NOT EXISTS connector_publication_portrait_pending
+        ON connector_publication_operation(binding_id,binding_revision,ordinal)
+        WHERE json_extract(operation_json,'$.portrait.state') IN ('pending','dispatching','unknown');
+      CREATE INDEX IF NOT EXISTS connector_publication_portrait_source
+        ON connector_publication_operation(json_extract(operation_json,'$.avatarSource.operationId'),binding_id,binding_revision)
+        WHERE json_extract(operation_json,'$.portrait.state')='pending';
+      CREATE INDEX IF NOT EXISTS connector_publication_card_preparation
+        ON connector_publication_operation(binding_id,binding_revision)
+        WHERE json_extract(operation_json,'$.cardPreparation.receipt.state')='dispatching';
       CREATE INDEX IF NOT EXISTS connector_publication_query_turn
         ON connector_publication_operation(binding_id,binding_revision,
           json_extract(operation_json,'$.queryTurn.record.source.providerId'),
@@ -840,7 +857,7 @@ export class PublicationStore {
       const predecessor = this.appliedPredecessor(latest)
       const next: PublicationOperation = { ...latest, operationId, sourceRevision: revision, payload, state: 'pending',
         ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
-      delete next.attempt; delete next.prepared; delete next.mapping
+      delete next.attempt; delete next.prepared; delete next.mapping; delete next.cardPreparation; delete next.cardSequence; delete next.portrait
       this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
         .run(operationId, next.projectionId, revision, next.fragment.ordinal, next.bindingId, next.bindingRevision, encode(next), next.state)
     })
@@ -1050,6 +1067,109 @@ export class PublicationStore {
       this.write(result); return result
     })
   }
+  /** One optional create on a genuinely in-flight original resource; never another body queue. */
+  claimCard(operationId: string, authorized: () => boolean, adapter: PublicationPreparer & { cards?: PublicationCardAdapter }, inFlight: boolean): PublicationOperation | null {
+    return this.transaction(() => {
+      const original = this.inspect(operationId)
+      if (!authorized() || !adapter.cards || !inFlight || !original || original.state !== 'pending' || original.effect !== 'upsert' ||
+          !['speech', 'question'].includes(original.payload.kind) || !original.speaker?.avatar || original.prepared || original.attempt !== undefined || original.cardPreparation || original.mapping) return null
+      const parent = original.predecessorOperationId ? this.inspect(original.predecessorOperationId) : null
+      if (parent && parent.effect !== 'withdraw') return null
+      let prepared: PreparedPublication
+      try { prepared = parsePreparedPublication(adapter.cards.prepareCreate(original), adapter) }
+      catch { return null /* Unsupported optional presentation leaves the original body preparation available. */ }
+      const claimed: PublicationOperation = { ...original, cardPreparation: { prepared, receipt: { state: 'dispatching' }, sequence: 0 } }
+      this.write(claimed); return claimed
+    })
+  }
+  settleCard(operationId: string, receipt: CardCreateReceipt): PublicationOperation {
+    return this.transaction(() => {
+      const original = this.inspect(operationId), card = original?.cardPreparation
+      if (!original || !card) throw new AgentMuxError('The optional card receipt has no original preparation.', 'PUBLICATION_RECEIPT_CONFLICT')
+      if (card.receipt.state !== 'dispatching' && card.receipt.state !== 'unknown') {
+        if (receipt.state === 'unknown' || same(card.receipt, receipt)) return original
+        throw new AgentMuxError('The original card preparation already has another authoritative receipt.', 'PUBLICATION_RECEIPT_CONFLICT')
+      }
+      if (receipt.state === 'confirmed' && (typeof receipt.id !== 'string' || !receipt.id || receipt.id.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(receipt.id)))
+        throw new AgentMuxError('The native card identity is invalid.', 'PUBLICATION_RECEIPT_CONFLICT')
+      const next = { ...original, cardPreparation: { ...card, receipt } }
+      publicDelivery(next); this.write(next); return next
+    })
+  }
+  unconfirmedCards(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): PublicationOperation[] {
+    return this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.cardPreparation.receipt.state')='dispatching'")
+      .all(...scopeKey(boundary)).map(row => this.read(row)!)
+  }
+  portraitAudiences(uploadOperationId: string): Array<{ bindingId: string; revision: number }> {
+    return this.database.prepare(`SELECT binding_id,binding_revision FROM connector_publication_operation WHERE operation_id=?
+      UNION SELECT binding_id,binding_revision FROM connector_publication_operation WHERE json_extract(operation_json,'$.avatarSource.operationId')=? AND json_extract(operation_json,'$.portrait.state')='pending'`)
+      .all(uploadOperationId, uploadOperationId).map(row => ({ bindingId: String(row.binding_id), revision: Number(row.binding_revision) }))
+  }
+  private withPortraitResource(original: PublicationOperation): PublicationOperation {
+    if (!original.avatarSource || original.avatarSource.imageKey) return original
+    const source = this.inspect(original.avatarSource.operationId)?.avatarUploads?.[original.avatarSource.attempt - 1]
+    return source?.state === 'confirmed' ? { ...original, avatarSource: { ...original.avatarSource, imageKey: source.imageKey } } : original
+  }
+  private portraitAvailable(original: PublicationOperation): boolean {
+    return !!original.avatarSource?.imageKey || original.avatarUploads?.at(-1)?.state === 'confirmed'
+  }
+  private reserveCardSequence(operation: PublicationOperation): number {
+    const mapping = operation.mapping?.nativeCard, owner = mapping ? this.inspect(mapping.operationId) : null, card = owner?.cardPreparation
+    if (!mapping || !owner || !card || card.receipt.state !== 'confirmed' || card.receipt.id !== mapping.id || !same(owner.target, operation.target) ||
+        owner.projectionId !== operation.projectionId || owner.fragment.ordinal !== operation.fragment.ordinal || card.sequence >= 2_147_483_647)
+      throw new AgentMuxError('The original native card sequence cannot be reserved.', 'PUBLICATION_PREPARATION_UNCONFIRMED')
+    const sequence = card.sequence + 1, next = { ...card, sequence }
+    this.write({ ...owner, cardPreparation: next })
+    if (operation.operationId === owner.operationId) operation.cardPreparation = next
+    return sequence
+  }
+  /** Indexed optional work on this Binding only, independent of semantic predecessor selection. */
+  nextPortrait(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after?: string): PublicationOperation | null {
+    return this.read(this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation
+      WHERE binding_id=? AND binding_revision=? AND ordinal>COALESCE((SELECT ordinal FROM connector_publication_operation WHERE operation_id=?),0)
+      AND json_extract(operation_json,'$.portrait.state') IN ('pending','dispatching','unknown') ORDER BY ordinal LIMIT 1`).get(...scopeKey(boundary), after ?? ''))
+  }
+  claimPortrait(operationId: string, authorized: () => boolean, adapter: PublicationPreparer & { cards?: PublicationCardAdapter }): PublicationOperation | null {
+    return this.transaction(() => {
+      let original = this.inspect(operationId)
+      if (!authorized() || !adapter.cards || !original || original.portrait?.state !== 'pending' || original.state !== 'confirmed' || !original.mapping?.nativeCard) return null
+      const latest = this.read(this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND fragment_ordinal=? ORDER BY ordinal DESC LIMIT 1').get(original.projectionId, original.fragment.ordinal))
+      if (latest?.operationId !== original.operationId) {
+        // Pending/unknown body has priority. Its eventual confirmed representation retires this intent.
+        if (latest?.state === 'confirmed' || latest?.state === 'cancelled') this.write({ ...original, portrait: { state: 'superseded' } })
+        return null
+      }
+      if (original.effect !== 'upsert' || !['speech', 'question'].includes(original.payload.kind) || !original.speaker?.avatar) {
+        this.write({ ...original, portrait: { state: 'superseded' } }); return null
+      }
+      original = this.withPortraitResource(original)
+      if (!this.portraitAvailable(original)) return null
+      const sequence = this.reserveCardSequence(original)
+      const prepared = parsePreparedPublication(adapter.cards.preparePortrait(original, sequence), adapter)
+      const claimed: PublicationOperation = { ...original, portrait: { state: 'dispatching', prepared, sequence } }
+      this.write(claimed); return claimed
+    })
+  }
+  /** A later body can show the same avatar; that cannot confirm the earlier optional write. */
+  portraitInspectable(operation: PublicationOperation): boolean {
+    if (!operation.mapping?.nativeCard || !operation.portrait || !('prepared' in operation.portrait)) return false
+    const owner = this.inspect(operation.mapping.nativeCard.operationId)
+    return owner?.cardPreparation?.sequence === operation.portrait.sequence
+  }
+  settlePortrait(operationId: string, receipt: PortraitReceipt, evidence: 'effect' | 'readback' = 'effect'): PublicationOperation {
+    return this.transaction(() => {
+      const original = this.inspect(operationId), portrait = original?.portrait
+      if (!original || !portrait || !('prepared' in portrait)) throw new AgentMuxError('The portrait receipt has no original request.', 'PUBLICATION_RECEIPT_CONFLICT')
+      if (portrait.state === 'confirmed' || portrait.state === 'not-applied') {
+        if (receipt.state === 'unknown' || same(portrait.receipt, receipt)) return original
+        throw new AgentMuxError('The original portrait already has another authoritative receipt.', 'PUBLICATION_RECEIPT_CONFLICT')
+      }
+      // A GET begun before a newer body cannot attest to the original optional effect.
+      if (evidence === 'readback' && !this.portraitInspectable(original)) return original
+      const next: PublicationOperation = { ...original, portrait: { ...portrait, state: receipt.state, receipt } }
+      publicDelivery(next); this.write(next); return next
+    })
+  }
   /** Claim only the exact qualified candidate; an unresolved projection cannot hold independent work. */
   claimNext(boundary: PublicationBoundary, expectedOperationId: string, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
     return this.transaction(() => {
@@ -1060,15 +1180,14 @@ export class PublicationStore {
         throw new AgentMuxError('The original publication retains another sharing scope. Inspect its Binding revision without replacing the operation.', 'PUBLICATION_SCOPE_CONFLICT')
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
-      const original = { ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) }
-      if (!original.prepared && original.avatarSource && !original.avatarSource.imageKey) {
-        const source = this.inspect(original.avatarSource.operationId)?.avatarUploads?.[original.avatarSource.attempt - 1]
-        if (source?.state === 'confirmed') original.avatarSource = { ...original.avatarSource, imageKey: source.imageKey }
-      }
+      const original = this.withPortraitResource({ ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) })
 
       if (!adapter.directResources && (original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && original.uploads?.at(-1)?.state !== 'confirmed') return null
       let candidate: unknown = original.prepared
       if (!candidate) {
+        const upload = original.avatarSource ? this.inspect(original.avatarSource.operationId)?.avatarUploads?.[original.avatarSource.attempt - 1] : original.avatarUploads?.at(-1)
+        if (!original.mapping && original.cardPreparation?.receipt.state === 'confirmed' && upload?.state === 'dispatching') original.cardPreparation = { ...original.cardPreparation, useForMessage: true }
+        if (original.mapping?.nativeCard && original.effect === 'upsert') original.cardSequence = this.reserveCardSequence(original)
         try { candidate = adapter.prepare(JSON.parse(encode(original))) }
         catch { throw new AgentMuxError('The adapter could not prepare the original request. No platform effect was dispatched.', 'PUBLICATION_PREPARATION_UNCONFIRMED') }
       }
@@ -1077,6 +1196,8 @@ export class PublicationStore {
         throw new AgentMuxError('The adapter must prepare its declared current render version.', 'PUBLICATION_PREPARATION_UNCONFIRMED')
       if (!authorized()) return null
       const claimed = { ...original, prepared, attempt: (original.attempt ?? 0) + 1, state: 'dispatching' as const }
+      if (original.effect === 'upsert' && ['speech', 'question'].includes(original.payload.kind) && original.speaker?.avatar && !this.portraitAvailable(original) &&
+          (original.mapping?.nativeCard || original.cardPreparation?.useForMessage)) claimed.portrait = { state: 'pending' }
       this.database.prepare('INSERT INTO connector_publication_attempt (operation_id,attempt) VALUES (?,?)').run(claimed.operationId, claimed.attempt)
       this.write(claimed)
       return claimed
