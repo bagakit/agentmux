@@ -231,7 +231,7 @@ it('executes the actual Desktop remote launch method and resolves the target ide
   h.sdk.createHostAgentWithDelivery = create
   h.sdk.sessionTimeline = async () => { throw new Error('unrelated projection unavailable') }
   const attest = vi.fn(async ({ target }) => { order.push('sign'); expect(target.intentDigest).toBe(hostAgentCreationIntent({ agentSessionId: oldId, createOperationId: operation, executorId: 'private', executorRevision: 'original-revision', workspacePath: fixturePath("private-workspace"), prompt: 'first task' })); return { fixture: 'signed-original-intent' } })
-  const context = { trackHostLifecycleOperation: (_host: string, action: () => Promise<unknown>) => action(), connectedClient: async () => h.sdk,
+  const context = { trackHostOperation: (_host: string, action: () => Promise<unknown>) => action(), connectedClient: async () => h.sdk,
     authorizedCallerHost: async () => ({ client: { attestAgentCreation: attest } }), sessionByTarget: async () => { throw new Error('unrelated projection unavailable') } }
   try {
     const result = await launch.call(context, { hostId: 'ssh-target', executorId: 'private', workspacePath: fixturePath("private-workspace"), createOperationId: operation, prompt: 'first task', initialMessage: { callerAgentSessionId: 'source-session', capability: 'fixture-source-capability' } }, { hosts: [{ id: 'ssh-target', kind: 'ssh' }], executors: {}, profile: {} })

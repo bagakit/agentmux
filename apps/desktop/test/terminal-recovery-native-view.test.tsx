@@ -58,7 +58,7 @@ it('[terminal recovery Native restore] a fresh UI and Core process restore the s
   await core.connect()
   try {
     const controller = Object.create(RuntimeController.prototype) as any
-    controller.connectedClient = async () => core; controller.hosts = new Map([['local', { client: core }]]); controller.terminalInputCursors = new Map()
+    controller.connectedClient = async () => core; controller.hosts = new Map([['local', { client: core }]])
     const create = vi.spyOn(core, 'createPreparedTerminal'), stop = vi.spyOn(api.sessions, 'stop')
     vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'repository', icon: null })
     vi.spyOn(api.connections, 'call').mockResolvedValue({ bindings: [] } as never)

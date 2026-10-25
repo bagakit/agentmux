@@ -12,7 +12,7 @@ it('forwards the original retry fence through Desktop Runtime and retains the ty
     JSON.stringify({ preparationWait: wait }), { disposition: 'not_applied', confirmedInputBytes: 0 })
   const submit = vi.fn().mockRejectedValue(refusal)
   const runtime = Object.create(RuntimeController.prototype) as RuntimeController
-  Object.assign(runtime, { trackHostLifecycleOperation: (_host: string, call: () => Promise<void>) => call(),
+  Object.assign(runtime, { trackHostOperation: (_host: string, call: () => Promise<void>) => call(),
     connectedClient: async () => ({ statusAgent: async () => ({ run: { runId: 'original-run', state: 'running' } }), submitAgentPrompt: submit }) })
   const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'original-session', run: { runId: 'original-run' } }
   const condition = { expectedRun: control.run, afterSubmissionId: 'original-predecessor' }

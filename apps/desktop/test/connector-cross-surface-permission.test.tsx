@@ -243,7 +243,7 @@ describe('the original Desktop card and Hosted execution owner', () => {
     useAppStore.setState({ sessions: [session], agentComposerDrafts: { 'original-agent': 'Retain this exact draft 中' } })
     cleanup.push(f.hosted.onEvent(event => { act(() => useAppStore.setState(reduceRuntimeEvent(useAppStore.getState(), { type: 'core', hostId: 'local', event }))) }))
     const runtime = Object.create(RuntimeController.prototype) as RuntimeController
-    Object.assign(runtime, { hostReconfigurationReservations: new Map(), hostLifecycleOperations: new Map(), configuredClient: () => f.hosted })
+    Object.assign(runtime, { hostReconfigurationReservations: new Map(), hostOperations: new Map(), configuredClient: () => f.hosted })
     vi.spyOn(api.sessions, 'respondInteraction').mockImplementation((control, response, intent) => runtime.respondInteraction(control, response, intent))
     vi.spyOn(api.sessions, 'inspectInteraction').mockImplementation((control, operationId) => runtime.inspectInteraction(control, operationId))
     const submit = vi.spyOn(useAppStore.getState(), 'respondInteraction')

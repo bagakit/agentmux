@@ -10,7 +10,6 @@ it('[terminal recovery] actual Desktop recovery passes the original control and 
   const client = { recoverTerminal, createTerminal, terminalCreationRuntimeIdentity: () => ({ runtimeId: 'runtime' }) }
   const controller = Object.create(RuntimeController.prototype) as any
   controller.connectedClient = vi.fn(async () => client)
-  controller.terminalInputCursors = new Map()
   controller.sessionByTarget = vi.fn(async (_client, target, _config, observed) => ({ id: target.runId, kind: 'terminal', workspacePath: observed.workspacePath,
     control: { ...old, runId: observed.runId, run: { runId: observed.runId } } }))
   const outcome = await controller.performRecovery(old, {}, run.workspacePath, 'remounted-op', { trigger: 'startup' }).then((value: unknown) => ({ value }), (error: unknown) => ({ error }))
