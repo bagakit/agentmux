@@ -1,5 +1,6 @@
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
+import { observeRead } from './observation-read.js'
 import { isDeepStrictEqual } from 'node:util'
 import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
@@ -566,10 +567,13 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   /** Refresh one binding without replacing unrelated Sessions or writing an unchanged record. */
-  async refresh(agentSessionId: string, expectedRun?: AgentMuxRunRef, futureIntentId?: string): Promise<AgentMuxStoredAgentSession> {
-    return await this.enqueue(agentSessionId, async () => {
+  async refresh(agentSessionId: string, expectedRun?: AgentMuxRunRef, futureIntentId?: string, signal?: AbortSignal): Promise<AgentMuxStoredAgentSession> {
+    return await this.enqueue(agentSessionId, async readSignal => {
       const previous = this.get(agentSessionId)
-      let current = await this.store.readMetadata(agentSessionId)
+      // Cancelling this reader releases its queue entry, never a Store writer.
+      // The original read owns cleanup; no late result may publish a projection.
+      let current = await observeRead(this.store.readMetadata(agentSessionId), signal ? readSignal : undefined)
+      readSignal.throwIfAborted()
       if (!current) {
         throw new AgentMuxError(
           'The current Session record could not be confirmed. Its Run is kept; refresh the Store before retrying this prompt.',
@@ -579,7 +583,8 @@ export class AgentMuxAgentSessionRegistry {
       if (current.hostId !== previous.hostId) {
         throw new AgentMuxError('Agent Session Host changed before prompt Input.', 'STALE_AGENT_SESSION')
       }
-      current = await this.readStartedResume(current)
+      current = await observeRead(this.readStartedResume(current), signal ? readSignal : undefined)
+      readSignal.throwIfAborted()
       this.assertAvailable(current)
       this.forget(previous)
       this.remember(current)
@@ -587,9 +592,10 @@ export class AgentMuxAgentSessionRegistry {
         throw new AgentMuxError('Agent Session changed before prompt Input.', 'STALE_AGENT_SESSION')
       }
       if (futureIntentId === undefined) return this.get(agentSessionId)
-      const future = await this.store.readFuturePromptIntent(agentSessionId, futureIntentId)
+      const future = await observeRead(this.store.readFuturePromptIntent(agentSessionId, futureIntentId), signal ? readSignal : undefined)
+      readSignal.throwIfAborted()
       return { ...current, ...(future ? { futurePromptIntents: { [futureIntentId]: future } } : {}) }
-    })
+    }, signal)
   }
 
   async delete(agentSessionId: string, expectedCurrentRun?: AgentMuxRunRef): Promise<void> {

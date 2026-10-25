@@ -362,7 +362,10 @@ export class AgentPromptSubmissionCoordinator {
           if (!control?.authorizeDispatch) await this.deps.assertUncontrolledInput?.(originalInputKey)
           completePromptPreparationPhase(boundary)
           beginPromptPreparationPhase(boundary, 'session-refresh')
-          let current = await observeInput(diagnostic, 'session-state', () => this.deps.registry.refresh(session.agentSessionId, session.run))
+          // No claim/rejoin has started in this callback. End only this initial
+          // observation for human input; preserve its raw cancellation reason,
+          // since the exact historical receipt below has not yet been read.
+          let current = await observeInput(diagnostic, 'session-state', () => this.deps.registry.refresh(session.agentSessionId, session.run, undefined, renderSignal))
           completePromptPreparationPhase(boundary)
           beginPromptPreparationPhase(boundary, 'current-run')
           let currentRun = await observeInput(diagnostic, 'current-run', () => this.deps.kernel.status(run.runId))
