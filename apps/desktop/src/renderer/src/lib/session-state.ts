@@ -82,11 +82,18 @@ function isPendingLaunchStorageWait(pending: PendingAgentLaunch | undefined, age
 
 export function pendingAgentLaunchStorageWait(pending: PendingAgentLaunch | undefined, agentSessionId: string):
   Extract<RuntimeEvent['event'], { type: 'agent-error' }> | undefined {
-  if (!pending) return undefined
+  const latest = pendingAgentLaunchResourceDiagnostic(pending, agentSessionId)
+  return latest?.code === 'AGENT_CREATION_WAITING_FOR_STORAGE' ? latest : undefined
+}
+
+/** Display only: this is not permission to create or evidence that a Run exists. */
+export function pendingAgentLaunchResourceDiagnostic(pending: PendingAgentLaunch | undefined, agentSessionId: string):
+  Extract<RuntimeEvent['event'], { type: 'agent-error' }> | undefined {
+  if (!pending || pending.created) return undefined
   for (let index = pending.events.length - 1; index >= 0; index--) {
     const latest = pending.events[index]!
     if (latest.hostId !== pending.request?.hostId || latest.event.type !== 'agent-error' || latest.event.agentSessionId !== agentSessionId) continue
-    return isPendingLaunchStorageWait(pending, agentSessionId, latest) ? latest.event : undefined
+    return latest.event.code === 'AGENT_CREATION_WAITING_FOR_STORAGE' || latest.event.code === 'AGENT_CREATION_RESOURCE_RETRY_STOPPED' ? latest.event : undefined
   }
   return undefined
 }

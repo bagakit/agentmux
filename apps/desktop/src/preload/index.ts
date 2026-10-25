@@ -544,6 +544,7 @@ const api: AgentMuxPreloadApi = {
   },
   sessions: {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
+    continueCreation: input => ipcRenderer.invoke('sessions:continueCreation', input),
     resolveCreationSessionId: (hostId, createOperationId) => ipcRenderer.invoke('sessions:resolveCreationSessionId', hostId, createOperationId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     endpointWarnings: () => ipcRenderer.invoke('sessions:endpointWarnings'),

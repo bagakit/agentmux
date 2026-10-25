@@ -29,6 +29,7 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  * 让本表的键随那个常量一起变。
  */
 export const PRIVILEGED_SENDER_LABELS = {
+  'sessions:continueCreation': 'original creation continuation',
   'sessions:executionBinding': 'original tool execution observation',
   'sessions:rejoinExecutionBinding': 'explicit original tool connection recovery',
   'sessions:observeExecutionBinding': 'original tool execution observation',

@@ -8,7 +8,7 @@ import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
 import { agentRegionExecution, useAppStore, currentCoreSpatialGraph } from '../store'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
@@ -19,7 +19,7 @@ import type { AgentMuxRunExitReason, AgentSessionUserMessage, AgentSessionHistor
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { nativeSourceUnconfirmed, projectNativeSourceFacts } from '../../../shared/agent-native-source'
-import { CONNECTION_UNRECOVERABLE_DETAIL, pendingAgentLaunchStorageWait } from '../lib/session-state'
+import { CONNECTION_UNRECOVERABLE_DETAIL, pendingAgentLaunchResourceDiagnostic } from '../lib/session-state'
 import { originalFrontendRecovery } from '../lib/session-original-recovery'
 import { sessionExitPresentation, sessionFrontendPresentation, sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { currentContinuitySupervision } from '../lib/continuity-supervision'
@@ -159,7 +159,11 @@ export function SessionPane({
   const session = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
-  const storageWait = !session ? pendingAgentLaunchStorageWait(pendingLaunch, sessionId) : undefined
+  const storageDiagnostic = !session ? pendingAgentLaunchResourceDiagnostic(pendingLaunch, sessionId) : undefined
+  const storageWait = storageDiagnostic?.code === 'AGENT_CREATION_WAITING_FOR_STORAGE'
+  const retainedStorageCause = storageDiagnostic && !storageWait ? pendingLaunch?.events.findLast(value =>
+    value.hostId === pendingLaunch.request?.hostId && value.event.type === 'agent-error' &&
+    value.event.agentSessionId === sessionId && value.event.code === 'AGENT_CREATION_WAITING_FOR_STORAGE')?.event : undefined
   const pendingTerminal = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
     const surface = linkOrigin.tabId && linkOrigin.regionId ? state.tabs[linkOrigin.tabId]?.regions[linkOrigin.regionId] : undefined
     return surface?.kind === 'terminal' && surface.phase === 'launching' && surface.sessionId === sessionId
@@ -559,6 +563,15 @@ export function SessionPane({
   const observationActive = useRef(true)
   useEffect(() => { observationActive.current = true; return () => { observationActive.current = false } }, [])
   useEffect(() => { setUnobservedReadError(null) }, [observationScope])
+  const creationScope = JSON.stringify([observationScope, pendingLaunch?.request?.hostId, pendingLaunch?.request?.createOperationId])
+  const creationScopeRef = useRef(creationScope)
+  creationScopeRef.current = creationScope
+  const creationInFlight = useRef<{ scope: string } | null>(null)
+  const [creationAttempt, setCreationAttempt] = useState<{ scope: string } | null>(null)
+  const continuingCreation = creationAttempt?.scope === creationScope
+  const [creationFeedback, setCreationFeedback] = useState<{ scope: string; diagnostic: typeof storageDiagnostic; status: 'woken' | 'not-waiting' | 'unknown'; message: string } | null>(null)
+  const currentCreationFeedback = creationFeedback?.scope === creationScope && creationFeedback.diagnostic === storageDiagnostic ? creationFeedback : null
+  const creationWaiting = storageWait && (!currentCreationFeedback || currentCreationFeedback.status === 'woken')
   const [observationMounted, setObservationMounted] = useState(false)
   const observationRefreshRef = useRef<(() => Promise<void>) | null>(null)
   const bindObservationRefresh = useCallback((refresh: (() => Promise<void>) | null) => {
@@ -643,30 +656,70 @@ export function SessionPane({
     finally { if (observationActive.current) setRefreshing(false) }
   }
 
-  const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => <>
-    {storageWait ? <ServiceWindowNotice summary={{
-      step: 'Waiting for storage',
-      mode: 'The original request and initial prompt are kept.',
-      restore: 'Free storage to continue automatically.' + (unobservedReadError ? ' Latest check unavailable; see details.' : '')
-    }} notice={{ kind: 'indeterminate', notice: {
-      step: storageWait.message,
-      mode: 'The original Session, request and initial prompt are retained.',
-      restore: 'Free storage on this host. This original request will continue automatically.' +
-        (unobservedReadError ? ` Latest read: ${unobservedReadError}` : '')
-    } }} /> : null}
-    {projectionPolicy.allowsRecovery && unobservedIdentity ? <>
-    {!storageWait && (unobservedReadError || unobservedReference?.issue) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-      step: unobservedReadError ?? unobservedReference!.issue!,
-      mode: 'The original Region and drafts are retained. Current Session facts are not confirmed.',
-      restore: 'Re-read this original owner. This action does not start a Run or send input.'
-    } }} /> : null}
-    {recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)} restoring={refreshing}
-      workingLabel="Reading…" restoreLabel="Check original" restoreIcon="action.refresh" onRestore={() => void refreshUnobserved()} />
-      : <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
-        <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
-      </button>}
-    </> : null}
-  </>
+  async function continueOriginalCreation(): Promise<void> {
+    const request = pendingLaunch?.request
+    // Only duplicate clicks in this mount are excluded. Core validates the exact original request.
+    if (creationInFlight.current?.scope === creationScope || !projectionPolicy.allowsRecovery || !unobservedIdentity || !request?.hostId || !request.createOperationId) return
+    const scope = creationScope, attempt = { scope }, diagnostic = storageDiagnostic
+    const current = () => observationActive.current && creationScopeRef.current === scope &&
+      useAppStore.getState().pendingAgentLaunches[sessionId]?.request === request &&
+      !useAppStore.getState().sessions.some(item => item.id === sessionId)
+    creationInFlight.current = attempt
+    setCreationAttempt(attempt)
+    try {
+      const receipt = await api.sessions.continueCreation({ hostId: request.hostId, createOperationId: request.createOperationId, agentSessionId: sessionId })
+      if (current()) setCreationFeedback({ scope, diagnostic, status: receipt.status, message: receipt.status === 'woken'
+        ? 'Continue requested. Waiting for the original result.'
+        : receipt.status === 'not-waiting' ? 'The original request has no active wait. Its result is not confirmed.'
+          : 'The original continuation result is unknown. Check its current state.' })
+    } catch (error) {
+      if (current()) setCreationFeedback({ scope, diagnostic, status: 'unknown', message: `Continue result is unconfirmed: ${presentError(error)}` })
+    } finally {
+      if (creationInFlight.current === attempt) {
+        creationInFlight.current = null
+        if (observationActive.current) setCreationAttempt(null)
+      }
+    }
+  }
+
+  const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => {
+    const canAct = projectionPolicy.allowsRecovery && unobservedIdentity
+    const checkOriginal = <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
+      <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original'}
+    </button>
+    const continueOriginal = <button type="button" className="small-button" disabled={continuingCreation}
+      onClick={() => void continueOriginalCreation()}>{continuingCreation ? 'Requesting…' : 'Continue now'}</button>
+    const recoveryActions = recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource}
+      hideRestore={Boolean(storageDiagnostic && !creationWaiting)} onTakeOver={takeOverAt(origin, displayId)} restoring={refreshing}
+      workingLabel="Reading…" restoreLabel="Check original" restoreIcon="action.refresh" onRestore={() => void refreshUnobserved()} /> : checkOriginal
+    if (storageDiagnostic) return <div className="session-connecting__recovery">
+      {canAct ? creationWaiting && pendingLaunch?.request?.createOperationId ? continueOriginal : checkOriginal : null}
+      <details className="surface-state__details" aria-live="off">
+        <summary><SemanticIcon name="navigation.forward" size={12} />Details and options</summary>
+        <div className="session-connecting__diagnostic">
+          {retainedStorageCause?.type === 'agent-error' ? <p>{retainedStorageCause.message}</p> : null}
+          <p>{storageDiagnostic.message}</p>
+          {currentCreationFeedback ? <p>{currentCreationFeedback.message}</p> : null}
+          {unobservedReadError ? <p>Latest read: {unobservedReadError}</p> : null}
+          {unobservedReference?.issue ? <p>{unobservedReference.issue}</p> : null}
+        </div>
+        <dl>
+          <dt>Host</dt><dd>{pendingLaunch?.request?.hostId ?? 'Unknown'}</dd>
+          <dt>Creation</dt><dd>{pendingLaunch?.request?.createOperationId ?? 'Unknown'}</dd>
+          <dt>Session</dt><dd>{sessionId}</dd>
+        </dl>
+        {canAct ? <>{!creationWaiting && storageWait && pendingLaunch?.request?.createOperationId ? continueOriginal : null}{recoveryActions}</> : null}
+      </details>
+    </div>
+    return <>{canAct ? <>
+      {unobservedReadError || unobservedReference?.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: unobservedReadError ?? unobservedReference!.issue!,
+        mode: 'The original Region and drafts are retained. Current Session facts are not confirmed.',
+        restore: 'Re-read this original owner. This action does not start a Run or send input.'
+      } }} /> : null}
+      {recoveryActions}
+    </> : null}</>
+  }
 
   const unobservedActions = unobservedActionsAt()
 
@@ -897,6 +950,12 @@ export function SessionPane({
     const connectingSurface = <SessionConnectingSurface key={`connecting:${sessionId}`}
           phase={pendingLaunch ? 'launch' : recoveryCandidate && !unobservedIdentity ? 'restore' : 'connect'}
           unknownTerminalCreation={!session && pendingTerminal}
+          creationRecovery={storageDiagnostic ? { waiting: creationWaiting, description: <>
+            {creationWaiting ? 'Your request is kept. It will continue automatically when storage is available.'
+              : 'The original request and initial prompt are kept. Check the original creation status.'}
+            {currentCreationFeedback?.status === 'woken' ? <span className="session-connecting__status">{currentCreationFeedback.message}</span> : null}
+            {unobservedReadError ? <span className="session-connecting__status">Latest check unavailable; see details.</span> : null}
+          </> } : undefined}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
           executor={connectingExecutor}

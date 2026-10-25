@@ -1883,6 +1883,7 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
+    continueCreation(input: import('@agentmux/core').AgentMuxCreationContinueParams): Promise<import('@agentmux/core').AgentMuxCreationContinueResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     historySource(reference: SessionHistorySourceReference): Promise<SessionHistorySourceObservation>
     historySources(): Promise<AgentSessionHistoryDescriptor[]>

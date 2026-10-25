@@ -1612,6 +1612,10 @@ export async function registerIpc(args: {
     return await args.runtime.sessionSpawns(session, options)
   })
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
+  handleWithEvent('sessions:continueCreation', async (event, input: import('@agentmux/core').AgentMuxCreationContinueParams) => {
+    requireTrustedSender('sessions:continueCreation', event)
+    return await args.runtime.continueAgentCreation(input)
+  })
   handle('sessions:resolveCreationSessionId', async (hostId: string, createOperationId: string) => args.runtime.resolveCreationSessionId(hostId, createOperationId))
   handle('sessions:historySource', async (reference: import('../shared/contracts.js').SessionHistorySourceReference) => args.runtime.sessionHistorySource(reference))
   handle('sessions:historySources', async (options?: { observation: true }) => {

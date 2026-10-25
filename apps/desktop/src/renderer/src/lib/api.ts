@@ -993,6 +993,7 @@ const mockApi: AgentMuxDesktopApi = {
       message: 'The web preview has no Runtime storage owner. Storage capacity and persistence state are unknown.'
     }),
     creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
+    continueCreation: async () => { throw new Error('Continuing the original creation requires the Desktop host.') },
     resolveCreationSessionId: async () => { throw new Error('A Core creation binding requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
     endpointWarnings: async () => structuredClone(mockSnapshot.runtimeEndpointWarnings ?? []),

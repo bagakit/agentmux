@@ -16,7 +16,7 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
-export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, actions, visible = true, unknownTerminalCreation = false }: {
+export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, actions, visible = true, unknownTerminalCreation = false, creationRecovery }: {
   phase: 'launch' | 'restore' | 'connect'
   surfaceKind: 'agent' | 'terminal'
   request?: PendingAgentLaunch['request']
@@ -27,11 +27,14 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
   visible?: boolean
   /** Exact retained Terminal Region has no confirmed Run or original creation receipt. */
   unknownTerminalCreation?: boolean
+  /** Presentation of the original pending request; Core owns its continuation decision. */
+  creationRecovery?: { waiting: boolean; description: ReactNode } | undefined
 }) {
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState('')
-  const title = unknownTerminalCreation ? 'Terminal creation is unconfirmed' : phase === 'launch' ? 'Starting your agent' : phase === 'restore' ? 'Restoring your session' : 'Connecting to this session'
+  const title = creationRecovery ? creationRecovery.waiting ? 'Waiting for storage' : 'Creation status is unconfirmed'
+    : unknownTerminalCreation ? 'Terminal creation is unconfirmed' : phase === 'launch' ? 'Starting your agent' : phase === 'restore' ? 'Restoring your session' : 'Connecting to this session'
   const detail = unknownTerminalCreation ? '' : phase === 'launch'
     ? ''
     : phase === 'restore'
@@ -52,9 +55,10 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
     className="session-connecting"
     scope="region"
     visible={visible}
-    phase={unknownTerminalCreation ? 'parked' : phase === 'restore' ? 'recovering' : 'loading'}
+    phase={unknownTerminalCreation || creationRecovery && !creationRecovery.waiting ? 'parked' : phase === 'restore' ? 'recovering' : 'loading'}
     eyebrow={unknownTerminalCreation ? 'Terminal retained' : phase === 'launch' ? 'Launch request' : 'Session connection'}
     title={title}
+    description={creationRecovery?.description}
     detail={detail}
     actions={actions}
     supplement={<div className="session-connecting__body">

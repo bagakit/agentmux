@@ -17,3 +17,9 @@
   .session-connecting__prompt-heading { align-items: flex-start; }
   .session-connecting__copy { min-width: 60px; padding-inline: var(--sp-3); }
 }
+
+/* The pending creation has one primary action; diagnostics and alternatives stay together. */
+.session-connecting__recovery { display: grid; justify-items: start; gap: var(--sp-4); min-width: 0; width: 100%; }
+.session-connecting__diagnostic { color: var(--text-2); overflow-wrap: anywhere; user-select: text; }
+.session-connecting__diagnostic p { margin: var(--sp-4) 0; }
+.session-connecting__status { display: block; margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }

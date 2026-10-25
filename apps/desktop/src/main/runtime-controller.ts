@@ -1,5 +1,6 @@
 import { configuredAgentFallbackLabel as agentFallbackLabel, workspacePresentationLabel as workspaceLabel } from '@agentmux/host/presentation-configuration'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { parseCreationContinueParams, parseCreationContinueResult, type AgentMuxCreationContinueParams } from '@agentmux/core'
 import { executorEnvironmentRevision } from '../shared/executor-probe-context.js'
 import { readInputObservation, type InputObservationReference, type InputPerformanceSender, type InputPerformanceHandle } from '@agentmux/core/control'
 import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
@@ -1272,6 +1273,15 @@ export class RuntimeController {
   async agentCreation(hostId: string, agentSessionId: string) {
     const client = await this.connectedClient(hostId)
     return { ...await client.inspectAgentCreation(agentSessionId), hostId }
+  }
+
+  async continueAgentCreation(input: AgentMuxCreationContinueParams) {
+    const request = parseCreationContinueParams(input)
+    const client = this.configuredClient(request.hostId)
+    const receipt = await client.continueAgentCreation({ createOperationId: request.createOperationId,
+      ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }) })
+    if (this.configuredClient(request.hostId) !== client) throw new AgentMuxError('The original creation Host changed. Its continuation result is unconfirmed.', 'RUNTIME_OWNER_MISMATCH')
+    return parseCreationContinueResult({ ...receipt, hostId: request.hostId }, request)
   }
 
   async observeGoalAgent(hostId: string, agentSessionId: string) {
