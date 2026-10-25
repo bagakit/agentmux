@@ -26,7 +26,7 @@ export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), {
     }
     const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
     if (process.env.AGENTMUX_NOTIFICATION_CAPABILITY_LOADED) appendFileSync(process.env.AGENTMUX_NOTIFICATION_CAPABILITY_LOADED,
-      JSON.stringify({ path: relative(root, file), original: hash(readFileSync(file)), mutated: code !== source }) + '\n')
+      JSON.stringify({ path: relative(root, file), original: hash(readFileSync(file)), transformed: hash(code), mutated: code !== source }) + '\n')
     return code === source ? undefined : { code, map: null }
   }
 }],

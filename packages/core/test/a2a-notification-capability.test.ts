@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentProviderRegistry } from '../src/agent-provider.js'
+import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
@@ -12,6 +12,13 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
   vi.restoreAllMocks(); vi.unstubAllEnvs()
 })
+
+/** Missing input must also remove declarations that require that contribution. */
+function withoutNativeInput(provider: AgentProvider): AgentProvider {
+  const { prepareNativeInput: _input, planQuestionReply: _reply, ...remaining } = provider
+  const { nativeConversationInput: _native, asyncQuestionReply: _question, ...capabilities } = provider.catalog.capabilities
+  return { ...remaining, catalog: { ...provider.catalog, capabilities } }
+}
 
 async function fixture(providerId: 'grok' | 'codex', working = true) {
   const h = await rpcOwnerFixture(['sender', 'recipient'], undefined, () => ({ providerId, executorId: providerId }))
@@ -56,6 +63,7 @@ async function retained(h: Awaited<ReturnType<typeof fixture>>, messageId: strin
   expect(h.client.agentSession('recipient').run).toEqual(h.original.run)
   expect(h.client.agentSession('recipient').semanticStatus).toEqual(h.semanticStatus)
   expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(h.rawInput).not.toHaveBeenCalled()
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 }
 
@@ -69,7 +77,8 @@ it('explains the missing built-in Grok idle notification transport while preserv
   expect(h.diagnostics()[0]?.message).toContain('explicitly notify')
   const ack = await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: h.original.run, source: 'user', data: 'Existing draft' })
   expect(ack.appliedByteRange).toEqual({ startByte: 0, endByte: Buffer.byteLength('Existing draft') })
-  expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
+  expect(h.rawInput).toHaveBeenCalledExactlyOnceWith(h.original.run.runId, 'Existing draft')
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   expect(h.client.agentSession('recipient').semanticStatus).toEqual(h.semanticStatus)
 })
@@ -96,7 +105,7 @@ it('uses the built-in Grok terminal input to explicitly notify an original MID w
 it.each([true, false])('checks the actual native input contribution before waiting on current working=%s', async working => {
   const h = await fixture('codex', working), provider = h.providers.get('codex')
   expect(provider.catalog.capabilities.nativeConversationInput?.managedRuns).toBe(true)
-  h.providers.replace({ ...provider, prepareNativeInput: undefined })
+  h.providers.replace(withoutNativeInput(provider))
   await h.send('missing-implementation'); await retained(h, 'missing-implementation')
   expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
     code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('idle-only') }))
@@ -144,7 +153,7 @@ it('reports a new failure after successful observation or a changed Run without 
 
 it('retains the observed Run when a Provider read rejects after the registry advances', async () => {
   const h = await fixture('codex', false), provider = h.providers.get('codex')
-  h.providers.replace({ ...provider, prepareNativeInput: undefined }); await h.send('read-race')
+  h.providers.replace(withoutNativeInput(provider)); await h.send('read-race')
   let reject!: (error: Error) => void
   const pending = new Promise<never>((_resolve, rejectRead) => { reject = rejectRead })
   const read = vi.fn(() => pending)
@@ -160,7 +169,7 @@ it('retains the observed Run when a Provider read rejects after the registry adv
 
 it('delivers the pending reference through the original owner when the native capability becomes available', async () => {
   const h = await fixture('codex', false), provider = h.providers.get('codex')
-  h.providers.replace({ ...provider, prepareNativeInput: undefined }); await h.send('awaiting-capability')
+  h.providers.replace(withoutNativeInput(provider)); await h.send('awaiting-capability')
   const native = vi.fn(async (_wire: string) => ({ outcome: 'admitted' as const, queuedSubmissionId: 'private-native-notice' }))
   h.inner.kernel.status = vi.fn(async id => ({ ...h.run(id), pid: 1234 }))
   h.providers.replace({ ...provider,
