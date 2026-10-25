@@ -8,7 +8,7 @@ class LoadBoundary extends Component<LoadBoundaryProps, { failure: string | null
   }
   render() {
     if (this.state.failure === null) return this.props.children
-    return <section className="mobile-spatial-notice" role="status">
+    return <section className="mobile-deferred-surface" role="status">
       <p>{this.props.label}暂时无法打开，其他工作面仍可使用。</p>
       <details><summary>加载详情</summary><p>{this.state.failure}</p></details>
       <button type="button" className="mobile-text-button" onClick={this.props.onRetry}>重新加载此面板</button>
@@ -28,7 +28,7 @@ export function deferMobileSurface<P extends object>(label: string, load: () => 
     const Surface = useMemo(() => lazy(load), [revision])
     if (!visited && !loadWhen) return null
     return <LoadBoundary key={revision} label={label} onRetry={retry} onReturn={onLoadReturn}>
-      <Suspense fallback={<section className="mobile-spatial-notice" role="status">
+      <Suspense fallback={<section className="mobile-deferred-surface" role="status">
         <p>正在加载{label}…</p><button type="button" className="mobile-text-button" onClick={onLoadReturn}>返回</button>
       </section>}><Surface {...props as P} /></Suspense>
     </LoadBoundary>
