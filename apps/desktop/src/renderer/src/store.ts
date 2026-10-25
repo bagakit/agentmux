@@ -165,7 +165,6 @@ import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
-import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
   AgentLaunchResult,
@@ -4765,13 +4764,6 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   }
   if ((useAppStore.getState().agentSteerQueues[sessionId]?.filter(entry => !entry.archived).length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
     (onRejected ?? useAppStore.getState().reportError)(new Error(`The active message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Archive queued messages before adding another. Your draft is kept.`))
-    return false
-  }
-  // The shared Core formatter owns byte accounting; transport still keeps body and note separate.
-  if (agentPromptExceedsBudget(composeAgentPrompt(text, agentMuxNote, browserInput?.capture.record.inputContext).text)) {
-    (onRejected ?? useAppStore.getState().reportError)(new Error(
-      `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
-    ))
     return false
   }
   const entry: AgentSteerQueueEntry = {
@@ -10796,7 +10788,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   editQueuedAgentSteer(sessionId, operationId, expectedText, nextText) {
     if (!nextText.trim() || nextText.includes('\0')) {
-      throw controlFailure('INVALID_AGENT_PROMPT', 'The edited message is empty or exceeds the input budget. Your original message is kept.')
+      throw controlFailure('INVALID_AGENT_PROMPT', 'The edited message is empty or contains a null character. Your original message is kept.')
     }
     set(state => {
       const queue = state.agentSteerQueues[sessionId]
@@ -10807,9 +10799,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (entry.text !== expectedText) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This pending message changed while you were editing. The current message is kept.')
-      }
-      if (agentPromptExceedsBudget(composeAgentPrompt(nextText, entry.agentMuxNote).text)) {
-        throw controlFailure('INVALID_AGENT_PROMPT', 'The edited message exceeds the input budget. Your original message is kept.')
       }
       if (entry.text === nextText) return state
       return { agentSteerQueues: { ...state.agentSteerQueues,

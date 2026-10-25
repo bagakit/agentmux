@@ -11,7 +11,7 @@ import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, Agent
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
 import { retryAgentCreationResources, type AgentCreationResourceContext } from './agent-creation-resource-retry.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/resume-contract.js'
-import { assertAgentPromptSize, runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
+import { runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
 import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
@@ -4843,7 +4843,6 @@ export class AgentMuxClient {
       throw new AgentMuxError('Native resume must keep its exact Provider and execution directory, without a fork source.', 'INVALID_AGENT_NATIVE_RESUME_SOURCE')
     }
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use an authenticated initial message.', 'MESSAGE_ENVELOPE_REQUIRED')
-    if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
     if (input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') throw new AgentMuxError('A platform task must be explicit text from its producer.', 'INVALID_AGENT_PROMPT')
     const createOperationId = input.createOperationId ?? mintObjectId()
     const agentSessionId = safeId(input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId), 'Agent Session id')
@@ -4963,7 +4962,6 @@ export class AgentMuxClient {
       const composed = nativeResumeSource && !originalPrompt?.trim() && !input.agentMuxTask?.trim() ? { text: '', systemContext: undefined } : composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
         [forkSource ? agentForkIdentityReminder(agentSessionId, forkSource) : undefined,
           createdBy ? agentSpawnContext(createdBy) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined, input.optionalContext, input.agentMuxTask)
-      assertAgentPromptSize(composed.text)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
         provider.catalog, composed.text
       )
@@ -5767,7 +5765,6 @@ export class AgentMuxClient {
     validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun })
     safeId(input.operationId, 'Agent prompt operation id')
     if (typeof input.prompt !== 'string' || !input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
-    assertAgentPromptSize(composeAgentPrompt(input.prompt, input.agentMuxNote, input.inputContext).text)
   }
 
   private inputSavedEnvironment(session: Pick<AgentMuxAgentSession, 'providerId' | 'executorId' | 'nativeHandle' | 'nativeBinding'>): AgentInputSavedEnvironment {
@@ -6362,7 +6359,6 @@ export class AgentMuxClient {
       input.agentMuxNote !== undefined && typeof input.agentMuxNote !== 'string') throw new AgentMuxError('A future message needs exact content and an explicit active state.', 'INVALID_AGENT_PROMPT')
     const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
     if (!composed.text.trim()) throw new AgentMuxError('A future message needs nonempty original content or AgentMux context.', 'INVALID_AGENT_PROMPT')
-    assertAgentPromptSize(composed.text)
     const session = this.requireAgentSession(input.agentSessionId)
     if (input.expectedRun && !sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original future intent belongs to another Run. No later automatic intent was changed.', 'STALE_AGENT_SESSION')
     await this.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -6562,7 +6558,6 @@ export class AgentMuxClient {
     const retainWire = frozen && (producer === 'message' || isDeepStrictEqual(frozen.message, authored))
     const outbound = retainWire ? frozen.prompt : waitingSource?.promptWire ?? composed.text
     const message = producer === 'message' && frozen?.message ? frozen.message : authored
-    assertAgentPromptSize(outbound)
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
     // 而 `[?u` 是 codex 一次性的启动输出，对一个几分钟前启动的 run 早已不可达，于是一旦拦在

@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import { delimiter, dirname, join } from 'node:path'
-import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { CTXMUX_VERSION } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
@@ -93,13 +92,4 @@ export function terminalEnvironment(
   // reintroduce them.
   removeHostColorSignals(resolved)
   return resolved
-}
-
-export function assertAgentPromptSize(prompt: string): void {
-  if (agentPromptExceedsBudget(prompt)) {
-    throw new AgentMuxError(
-      `Agent prompt exceeds the ${MAX_AGENT_PROMPT_BYTES}-byte limit.`,
-      'INVALID_AGENT_PROMPT'
-    )
-  }
 }
