@@ -23,5 +23,4 @@
 .goal-agent-picker__receipt .goals-button { justify-self: start; }
 .goal-agent-picker form > footer { display: flex; align-items: center; gap: var(--sp-3); padding-top: var(--sp-5); margin-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
 .goal-agent-picker form > footer > span { margin-right: auto; color: var(--text-3); font-size: var(--fs-meta); }
-.goal-agent-picker .confirmation-dialog__heading .icon-button { margin-left: auto; }
 @media (max-width: 520px) { .goal-agent-picker { width: calc(100vw - 24px); } }

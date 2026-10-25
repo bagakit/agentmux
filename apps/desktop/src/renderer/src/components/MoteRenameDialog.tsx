@@ -1,5 +1,7 @@
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
@@ -10,6 +12,8 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** A name edits the original Topic title, never a Session or directory identity. */
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
 export function MoteRenameDialog({ target, onClose, returnFocus }: {
   target: { topic: ScratchTopicSnapshot; workspace: WorkspaceRecord } | null
   onClose(): void; returnFocus?(): HTMLElement | null
@@ -46,14 +50,15 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
           if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
         onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}>
-        <Dialog.Title className="confirmation-dialog__title">Rename Mote</Dialog.Title>
+        <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">Rename Mote</Dialog.Title>
+          <Dialog.Close className="icon-button" disabled={busy} aria-label="Close Mote name editor" title="Close Mote name editor"><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">Choose the name shown in Space and the Mote list. Its discussions and files stay together.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void save() }}>
-          <label className="mote-rename__field">Name<TextInput ref={input} value={name} disabled={busy} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} autoComplete="off" maxLength={SCRATCH_TOPIC_TITLE_MAX_LENGTH}
+          <label className="confirmation-dialog__field mote-rename__field">Name<TextInput ref={input} value={name} disabled={busy} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} autoComplete="off" maxLength={SCRATCH_TOPIC_TITLE_MAX_LENGTH}
             onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault() }} /></label>
           {error ? <p id={errorId} role="alert" className="surface-inline-error">{error}</p> : null}
-          <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button>
-            <button type="submit" className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save name'}</button></footer>
+          <footer><Button className="confirmation-dialog__cancel" disabled={busy} onClick={onClose}>Cancel</Button>
+            <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Saving…' : 'Save name'}</Button></footer>
         </form>
       </Dialog.Content>
     </DocumentOverlayPortal>

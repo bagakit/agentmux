@@ -107,14 +107,14 @@
 .topic-knowledge-panel > .surface-inline-error { flex-shrink: 0; max-height: 30%; overflow: auto; margin: var(--sp-3) var(--sp-5); }
 .topic-knowledge-sources summary, .topic-knowledge-move summary { cursor: pointer; font-size: 11px; color: var(--text-2); }
 .topic-knowledge-move label { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; font-size: 11px; }
-.topic-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+.topic-dialog { --dialog-width: 560px; }
 .topic-dialog .confirmation-dialog__description { overflow-wrap: anywhere; }
 .topic-dialog .surface-inline-error { overflow-wrap: anywhere; }
 .topic-dialog select { width: 100%; min-width: 0; }
-.topic-dialog form, .topic-dialog label { display: flex; flex-direction: column; gap: 6px; }
+.topic-dialog form, .topic-dialog label:not(.confirmation-dialog__field) { display: flex; flex-direction: column; gap: 6px; }
 .topic-dialog form { gap: 12px; }
-.topic-dialog label { font-size: 12px; margin-top: 8px; }
-.topic-dialog input, .topic-dialog select, .topic-dialog textarea, .topic-knowledge-move select { box-sizing: border-box; max-width: 100%; background: var(--surface-1); color: var(--text); border: 1px solid var(--line-soft); border-radius: 5px; padding: 7px 8px; font: inherit; }
+.topic-dialog label:not(.confirmation-dialog__field) { font-size: 12px; margin-top: 8px; }
+.topic-dialog label:not(.confirmation-dialog__field) input, .topic-dialog select, .topic-dialog textarea, .topic-knowledge-move select { box-sizing: border-box; max-width: 100%; background: var(--surface-1); color: var(--text); border: 1px solid var(--line-soft); border-radius: 5px; padding: 7px 8px; font: inherit; }
 .topic-dialog textarea { resize: vertical; min-height: 120px; }
 .topic-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .topic-dialog__row { display: flex; gap: 12px; }

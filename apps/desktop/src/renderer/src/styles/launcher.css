@@ -229,7 +229,6 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
   .launch-surface button, .launch-surface button > svg, .launcher-environment__panel button, .launch-refine__panel button { transition: none; }
 }
 
-.launcher-file-references .confirmation-dialog__heading { justify-content: space-between; }
 .launcher-file-references__directory { display: flex; align-items: center; gap: var(--sp-3); margin-block: var(--sp-4); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-mono); }
 .launcher-file-references__directory span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
