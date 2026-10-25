@@ -48,10 +48,12 @@ export async function connectHostedAgentMux(options: {
   const publicOpenings = new Set<AbortController>()
   let publicReaderEpoch = 0
   let controlOwner: AgentMuxRuntimeOwnerIdentity | undefined, controlConnecting: Promise<void> | undefined, controlEpoch = 0
+  let controlOwnerRejected = false
   let runtimePreparing: Promise<unknown> | undefined
   const acceptOwner = (owner: AgentMuxRuntimeOwnerIdentity): void => {
     if (controlOwner && (controlOwner.runtimeId !== owner.runtimeId || controlOwner.ownerInstanceId !== owner.ownerInstanceId)) controlEpoch++
     controlOwner = structuredClone(owner)
+    controlOwnerRejected = false
   }
   let endpointState: Extract<AgentMuxClientEvent, { type: 'control-endpoint-state' }> | undefined
   let bootstrap: AgentMuxHostedBootstrap | undefined, stream: AgentMuxHostedSubscription | undefined
@@ -89,7 +91,7 @@ export async function connectHostedAgentMux(options: {
   const connectControl = async (refresh = false): Promise<void> => {
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
     if (controlConnecting) return await controlConnecting
-    if (controlOwner && !refresh) return
+    if (controlOwner && !refresh && !controlOwnerRejected) return
     controlConnecting = (async () => {
       const expectedRuntimeId = options.expectedRuntimeId ?? controlOwner?.runtimeId
       const discovered = await discoverControlOwner(expectedRuntimeId)
@@ -193,9 +195,10 @@ export async function connectHostedAgentMux(options: {
     if (method === 'clientPerformanceDiagnostics') {
       if (!stream || !bootstrap) throw new AgentMuxError('Performance owner is not connected.', 'CONTROL_UNAVAILABLE')
     } else {
-      // Raw Agent input discovers the original Host here. Its service invocation
-      // prepares Native at the owner; callers need no separate Native preflight.
-      await observeRead(connectControl(method === 'connectRuntime' || method === 'writeAgent' || method === 'pasteAgent' || method === 'writeTerminalBytes'), sourceSignal)
+      // The original service checks every invocation's exact owner fence and
+      // prepares Native itself. Live input reuses that fence, rather than adding
+      // a second Host round trip before every key. Explicit preparation refreshes.
+      await observeRead(connectControl(method === 'connectRuntime'), sourceSignal)
     }
     if (method === 'runtimeProjection' && !bootstrap) {
       // Main needs the original Provider declarations to present these Subjects.
@@ -238,8 +241,19 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [args[0], value, ...args.slice(2)]
       }
     }
+    const invocationOwner = controlOwner
     const response = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
-      invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) })
+      invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) }).catch(error => {
+      // A definite owner refusal only prepares discovery for a later independent
+      // intent. Never replay this invocation, or let an old refusal revoke a newer
+      // observed owner. Retain runtimeId to reject a different Runtime at this endpoint.
+      if (error instanceof AgentMuxError && error.code === 'RUNTIME_OWNER_CHANGED' && invocationOwner && controlOwner &&
+          controlOwner.runtimeId === invocationOwner.runtimeId && controlOwner.ownerInstanceId === invocationOwner.ownerInstanceId) {
+        controlOwner = { ...controlOwner, availability: 'unverified' }
+        controlOwnerRejected = true
+      }
+      throw error
+    })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
     if (method === 'readAgentMessageQueuePath') return parseHostedMessageQueuePath(decoded)
