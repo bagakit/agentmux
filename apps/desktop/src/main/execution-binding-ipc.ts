@@ -1,12 +1,12 @@
 import { AgentMuxError, type AgentExecutionBindingService } from '@agentmux/core'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ExecutionBindingReaders } from './execution-binding-readers'
-export type ExecutionBindingChannel = 'sessions:executionBinding' | 'sessions:observeExecutionBinding' | 'sessions:releaseExecutionBinding'
-/** Register readers on the existing binding owner. No lifecycle or creation is exposed. */
+export type ExecutionBindingChannel = 'sessions:executionBinding' | 'sessions:rejoinExecutionBinding' | 'sessions:observeExecutionBinding' | 'sessions:releaseExecutionBinding'
+/** Observe or explicitly rejoin the original binding. Agent/helper creation is not exposed. */
 export function registerExecutionBindingIpc(args: {
   handle(channel: ExecutionBindingChannel, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown): void
   assertTrusted(channel: ExecutionBindingChannel, event: IpcMainInvokeEvent): void
-  bindings: Pick<AgentExecutionBindingService, 'inspect'>
+  bindings: Pick<AgentExecutionBindingService, 'inspect' | 'rejoin'>
   readers: ExecutionBindingReaders
 }): void {
   const id = (value: unknown): string => {
@@ -16,6 +16,10 @@ export function registerExecutionBindingIpc(args: {
   args.handle('sessions:executionBinding', (event, bindingId) => {
     args.assertTrusted('sessions:executionBinding', event)
     return args.bindings.inspect(id(bindingId))
+  })
+  args.handle('sessions:rejoinExecutionBinding', (event, bindingId) => {
+    args.assertTrusted('sessions:rejoinExecutionBinding', event)
+    return args.bindings.rejoin(id(bindingId))
   })
   args.handle('sessions:observeExecutionBinding', (event, bindingId, watchId) => {
     args.assertTrusted('sessions:observeExecutionBinding', event)

@@ -12,7 +12,7 @@ export const SETTINGS_GROUPS = [
   { id: 'agents', title: 'Agents', description: 'Agent CLIs and session recovery.' },
   { id: 'browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
   { id: 'message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
-  { id: 'remote', title: 'Remote', description: 'Hosts and device access.' },
+  { id: 'remote', title: 'Remote', description: 'Hosts, remote execution, and device access.' },
   { id: 'conversation-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
   { id: 'toolkit', title: 'Mods', description: 'Tools that extend your workspace.' },
   { id: 'work', title: 'Work', description: 'Spaces for doing, exploring and keeping.' },

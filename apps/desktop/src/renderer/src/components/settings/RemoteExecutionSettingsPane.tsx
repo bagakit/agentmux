@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveAgentName } from '@agentmux/client-ui/display-name'
 import { isScratchWorkspaceId, type SessionSnapshot } from '../../../../shared/contracts'
@@ -15,6 +15,7 @@ import '../../styles/remote-execution-settings.css'
 const AgentIcon = semanticIconComponent('object.agent')
 const ToolsIcon = semanticIconComponent('object.terminal')
 const OpenIcon = semanticIconComponent('action.open-external')
+const BackIcon = semanticIconComponent('navigation.back')
 const ArrowIcon = semanticIconComponent('navigation.disclosure')
 const NO_SESSIONS: SessionSnapshot[] = []
 const NO_NAMES: Record<string, string> = {}
@@ -29,6 +30,25 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   const projects = config.workspaces.filter(workspace => !isScratchWorkspaceId(workspace.id))
   const [projectId, setProjectId] = useState(() => projects.find(workspace => workspace.id === activeWorkspaceId)?.id ?? '')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [view, setView] = useState<'library' | 'detail'>('library')
+  const [narrow, setNarrow] = useState(false)
+  const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
+  const container = useRef<HTMLDivElement>(null)
+  const detailHeading = useRef<HTMLHeadingElement>(null)
+  useLayoutEffect(() => {
+    const element = container.current
+    if (!element) return
+    const measure = () => { const width = element.getBoundingClientRect().width; if (width > 0) setNarrow(width <= 720) }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => {
+    if (!active || !narrow || view !== 'detail') return
+    detailHeading.current?.focus({ preventScroll: true })
+    detailHeading.current?.closest('.remote-execution-bindings')?.scrollIntoView?.({ block: 'start' })
+  }, [active, narrow, view, selectedId])
   const [query, setQuery] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
   const bindings = useMemo(() => sessions.filter((session): session is BoundAgent => session.kind === 'agent' && Boolean(session.toolExecution)), [sessions])
@@ -38,8 +58,23 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     return config.hosts.some(item => item.id !== id && item.label === host.label) ? `${host.label} (${id})` : host.label
   }
   const agentName = (session: BoundAgent) => resolveAgentName({ userName: names[session.id], fallback: session.label }).name
-  const selected = bindings.find(session => session.id === selectedId)
-  const rows = bindings.filter(session => `${agentName(session)} ${session.id} ${session.toolExecution.bindingId} ${hostName(session.control.hostId)} ${session.control.hostId} ${hostName(session.toolExecution.resourceHostId)} ${session.toolExecution.resourceHostId} ${session.toolExecution.workspacePath}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const observedSelected = bindings.find(session => session.id === selectedId)
+  // Visibility ends the reader, not the selected component's inspection or reading state.
+  const retainedSelected = useRef<BoundAgent | undefined>(undefined)
+  if (active) retainedSelected.current = observedSelected
+  const selected = active ? observedSelected : retainedSelected.current
+  const detailVisible = !narrow || view === 'detail'
+  const projectNames = useMemo(() => {
+    const names = new Map<string, string[]>()
+    for (const project of config.workspaces) {
+      const key = JSON.stringify([project.hostId, project.path])
+      names.set(key, [...(names.get(key) ?? []), project.name])
+    }
+    return names
+  }, [config.workspaces])
+  const resourceProject = (session: BoundAgent) => projectNames.get(JSON.stringify([session.toolExecution.resourceHostId, session.toolExecution.workspacePath]))?.join(' · ')
+  const preparedProject = projects.find(project => project.id === projectId)
+  const rows = bindings.filter(session => `${agentName(session)} ${session.id} ${session.toolExecution.bindingId} ${hostName(session.control.hostId)} ${session.control.hostId} ${hostName(session.toolExecution.resourceHostId)} ${session.toolExecution.resourceHostId} ${session.toolExecution.workspacePath} ${resourceProject(session) ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
   function openHost(id: string) {
     if (navigation) navigation.openHost(id)
     else onNavigate('hosts')
@@ -64,8 +99,8 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     if (useAppStore.getState().selectSession(session.id)) onClose()
     else setActionError('The original workface could not be selected. Its Session is retained; check its exact Tab and Region in the workspace notice.')
   }
-  return <div className="settings-pane-stack remote-execution-settings">
-    <section className="remote-execution-intro" aria-label="How remote execution works">
+  return <div ref={container} className="settings-pane-stack remote-execution-settings">
+    <section hidden={narrow && view === 'detail'} className="remote-execution-intro" aria-label="How remote execution works">
       <div className="remote-execution-intro__copy">
         <span className="remote-execution-eyebrow">YOUR WORK, ACROSS MACHINES</span>
         <h3>Keep the project.<br /> Choose where your Agent runs.</h3>
@@ -78,7 +113,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
       </figure>
     </section>
 
-    <section className="settings-group remote-execution-prepare" data-settings-field="prepare">
+    <section hidden={narrow && view === 'detail'} className="settings-group remote-execution-prepare" data-settings-field="prepare">
       <header><span>Start with your project</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts<OpenIcon size={13} /></button></header>
       <p className="settings-group-note">Choose where files and tools belong. Next, select the Agent runtime and configuration in the Launcher, then start when ready.</p>
       {projects.length ? <div className="remote-execution-prepare__controls">
@@ -89,6 +124,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
         </select></label>
         <button type="button" className="primary-button" data-remote-prepare onClick={prepare}>Prepare Agent<ArrowIcon size={14} /></button>
       </div> : <p className="settings-group-note">Register a project in Hosts to choose its files and tools. Existing Agents remain available below.</p>}
+      {preparedProject ? <div className="remote-execution-prepare__target" aria-label="Selected project identity"><strong>{preparedProject.name}</strong><span>{hostName(preparedProject.hostId)} · <code>{preparedProject.hostId}</code></span><code>{preparedProject.path}</code></div> : null}
       <p className="remote-execution-caption">No Agent starts here. Provider support is checked for your selected runtime.</p>
     </section>
 
@@ -96,19 +132,22 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     <section className="settings-group remote-execution-bindings" data-settings-field="bindings">
       <header><span>Your execution bindings</span><small>{bindings.length} retained in this client</small></header>
       <p className="settings-group-note">Open the original work or inspect its two environments. This list reflects this client’s retained Sessions.</p>
+      {narrow && view === 'detail' ? <button type="button" className="small-button remote-execution-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><BackIcon size={14} />Back to bindings</button> : null}
       <div className="remote-execution-bindings__body">
-        <SettingsResourceLibrary label="Execution bindings" query={query} onQuery={setQuery} selectedId={selectedId} focusRequest={null}
-          onSelect={id => { setSelectedId(id); setActionError(null) }} items={rows.map(session => ({ id: session.id, name: agentName(session),
-            detail: `Agent: ${hostName(session.control.hostId)}\nTools: ${hostName(session.toolExecution.resourceHostId)}`,
+        <div hidden={narrow && view === 'detail'} className="remote-execution-library">
+        <SettingsResourceLibrary label="Execution bindings" query={query} onQuery={setQuery} selectedId={selectedId} focusRequest={returnFocus}
+          onSelect={id => { setSelectedId(id); setView('detail'); setActionError(null) }} items={rows.map(session => ({ id: session.id, name: agentName(session),
+            detail: `Agent: ${hostName(session.control.hostId)}\nTools: ${hostName(session.toolExecution.resourceHostId)}\n${resourceProject(session) ? `${resourceProject(session)} · ` : ''}${session.toolExecution.workspacePath}`,
             mark: <ResolvedAgentAvatar label={agentName(session)} providerId={session.providerId} executorId={session.executorId} state={session.status.state} size={26} /> }))} />
-        {selected ? <div className="remote-execution-detail" data-remote-binding={selected.toolExecution.bindingId}>
-          <header><div><h3>{agentName(selected)}</h3><span>Agent · {sessionStatusLabel(selected)}</span></div>
+        </div>
+        {selected ? <div hidden={!detailVisible} className="remote-execution-detail" data-remote-binding={selected.toolExecution.bindingId}>
+          <header><div><h3 ref={detailHeading} tabIndex={-1}>{agentName(selected)}</h3><span>Agent · {sessionStatusLabel(selected)}</span></div>
             <button type="button" className="small-button" data-remote-open onClick={() => openOriginal(selected)}>Open original work<OpenIcon size={13} /></button></header>
           <dl className="remote-execution-endpoints">
             <div><dt><AgentIcon size={16} />Agent runtime</dt><dd><button type="button" onClick={() => openHost(selected.control.hostId)}>{hostName(selected.control.hostId)}<OpenIcon size={12} /></button><code>{selected.control.hostId}</code><span>{selected.workspacePath}</span></dd></div>
             <div><dt><ToolsIcon size={16} />Project &amp; tools</dt><dd><button type="button" onClick={() => openHost(selected.toolExecution.resourceHostId)}>{hostName(selected.toolExecution.resourceHostId)}<OpenIcon size={12} /></button><code>{selected.toolExecution.resourceHostId}</code><span>{selected.toolExecution.workspacePath}</span></dd></div>
           </dl>
-          <AgentToolExecutionNotice key={selected.toolExecution.bindingId} session={selected} visible={active} presentation="inline" />
+          <AgentToolExecutionNotice key={selected.toolExecution.bindingId} session={selected} visible={active && detailVisible} presentation="inline" />
           <details className="remote-execution-identities"><summary>Original identities</summary><dl><dt>Session</dt><dd>{selected.control.agentSessionId}</dd><dt>Binding</dt><dd>{selected.toolExecution.bindingId}</dd></dl></details>
         </div> : <div className="remote-execution-empty"><AgentIcon size={28} aria-hidden="true" /><h3>{selectedId ? 'Binding not observed' : bindings.length ? 'Choose a binding' : 'Your next Agent can work across machines'}</h3><p>{selectedId ? 'This client no longer exposes that reference. No Session has been stopped or replaced.' : bindings.length ? 'See where it runs, where its tools work, and what the original service reports.' : 'Prepare an Agent above. Its execution binding will appear here when this client receives the original Session.'}</p></div>}
       </div>

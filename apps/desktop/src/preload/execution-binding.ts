@@ -4,6 +4,7 @@ import { mintObjectId } from '@agentmux/identity'
 export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'off'>) {
   return {
     executionBinding: (bindingId: string): Promise<AgentExecutionInspection | null> => ipc.invoke('sessions:executionBinding', bindingId),
+    rejoinExecutionBinding: (bindingId: string): Promise<AgentExecutionInspection> => ipc.invoke('sessions:rejoinExecutionBinding', bindingId),
     observeExecutionBinding(bindingId: string, listener: (value: AgentExecutionInspection | null) => void, onError: (error: string) => void) {
       const watchId = mintObjectId()
       let closed = false
