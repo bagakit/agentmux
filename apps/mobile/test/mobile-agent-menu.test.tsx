@@ -75,7 +75,7 @@ it('keeps both native usage scopes readable in one table without repeating metri
   expect([...table.querySelectorAll('thead th')].map(value => value.textContent)).toEqual(['范围', '输入', '输出', '合计'])
   const rows = [...table.querySelectorAll('tbody tr')]
   expect(rows).toHaveLength(2)
-  expect(rows.map(row => row.querySelector('th[scope="row"]')?.textContent)).toEqual(['原生 Session 累计', '最近回复'])
+  expect(rows.map(row => row.querySelector('th[scope="row"]')?.textContent)).toEqual(['本次会话累计', '最近一次回复'])
   expect(rows.map(row => [...row.querySelectorAll('td')].map(value => value.textContent))).toEqual([['100', '30', '130'], ['12', '4', '16']])
 })
 it('distinguishes missing usage scopes and invalid counts from measured zero', async () => {
@@ -83,8 +83,8 @@ it('distinguishes missing usage scopes and invalid counts from measured zero', a
   const f = fixture(); f.sessions.set('session-original', { ...session('session-original'), turnUsage: { ...unscoped, inputTokens: -1, outputTokens: 0 } })
   const view = await mount(<MobileAgentUsage client={f.client} agentSessionId="session-original" connected />)
   const rows = [...view.element.querySelectorAll('table[aria-label="Token 用量"] tbody tr')]
-  expect(rows[0]!.querySelector('td[colspan="3"]')?.textContent).toBe('累计用量尚未上报')
-  expect(rows[1]!.querySelector('th')?.textContent).toBe('最近样本 · 范围未确认')
+  expect(rows[0]!.querySelector('td[colspan="3"]')?.textContent).toBe('尚未上报')
+  expect(rows[1]!.querySelector('th')?.textContent).toBe('最近一次 · 范围未确认')
   expect([...rows[1]!.querySelectorAll('td')].map(value => value.textContent)).toEqual(['未上报', '0', '16'])
 })
 async function appMenu(inspect: (id: string) => Promise<unknown>, initial = cachedUsage) {
@@ -143,13 +143,13 @@ it('shows cached SDK usage immediately and updates from the exact automatic nati
   expect(f.client.forwardRpc).toHaveBeenCalledExactlyOnceWith('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'session-original' } }, {}, { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' })
   await act(async () => read.resolve({ session: usageSession() }))
   expect(view.element.textContent).toContain('50 / 200 tokens')
-  expect(view.element.textContent).toContain('原生 Session 累计'); expect(view.element.textContent).toContain('130')
+  expect(view.element.textContent).toContain('本次会话累计'); expect(view.element.textContent).toContain('130')
 })
 it('does not turn missing native observations or an old unscoped sample into zero or cumulative usage', async () => {
   const f = fixture(); f.client.forwardRpc = vi.fn().mockResolvedValue({ session: { ...session(), turnUsage: { inputTokens: 12, outputTokens: 4, totalTokens: 16, observedAt: 1000 } } })
   const view = await mount(<MobileAgentUsage client={f.client} agentSessionId="session-original" connected />)
   expect(f.client.forwardRpc).toHaveBeenCalledTimes(1)
-  expect(view.element.textContent).toContain('累计用量尚未上报'); expect(view.element.textContent).toContain('范围未确认'); expect(view.element.textContent).toContain('已用量与容量尚未上报')
+  expect(view.element.querySelector('table[aria-label="Token 用量"] tbody tr td[colspan="3"]')?.textContent).toBe('尚未上报'); expect(view.element.textContent).toContain('范围未确认'); expect(view.element.querySelector('.mobile-agent-usage__context strong')?.textContent).toBe('尚未上报')
 })
 it.each(['sid', 'client', 'runtime', 'owner-instance', 'record', 'device-host', 'disconnect', 'closed'])('does not adopt a late native usage reading after %s changes', async change => {
   const a = fixture(), b = fixture(), old = deferred<any>(), next = deferred<any>()
@@ -246,12 +246,12 @@ it('ends an in-flight reading when its actual App menu source is invalidated whi
   let ownerInstanceId = 'original-owner'
   f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-runtime', ownerInstanceId } as never)
   await click(button(f.element, '另一个原 Agent · 更多操作'))
-  expect(document.querySelector('[aria-label="Agent 消耗"]')?.textContent).toContain('正在核对…')
+  expect(document.querySelector('[aria-label="Agent 消耗"]')?.textContent).toContain('正在读取…')
   ownerInstanceId = 'replacement-owner'
   await f.render(f.app())
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
   expect(dialog.textContent).toContain('原菜单的 Host 或工作面来源已变化')
-  expect(dialog.querySelector('[aria-label="Agent 消耗"]')?.textContent).not.toContain('正在核对…')
+  expect(dialog.querySelector('[aria-label="Agent 消耗"]')?.textContent).not.toContain('正在读取…')
   expect(inspect).toHaveBeenCalledTimes(1)
   await click(button(dialog, '复制 Agent 身份链接')); expect(f.copy.mock.calls[0]![0]).toBe('amux://agent/peer')
   await act(async () => read.resolve({ session: usageSession('peer') }))
