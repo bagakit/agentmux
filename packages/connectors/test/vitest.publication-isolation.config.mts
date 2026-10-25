@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.PUBLICATION_ISOLATION_MUTANT, marker = process.env.PUBLICATION_ISOLATION_LOADED
 export const mutations = {
+  recoverable_gap_index: ['packages/connectors/src/publication-store.ts', '      DROP INDEX IF EXISTS connector_publication_content_gap;\n      CREATE INDEX IF NOT EXISTS connector_publication_recoverable_gap ON connector_publication_decision(binding_id,binding_revision)\n        WHERE ${recoverableGapPredicate};\n', "      CREATE INDEX IF NOT EXISTS connector_publication_content_gap ON connector_publication_decision(binding_id,binding_revision)\n      WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';\n"],
   decision_prepare: ['packages/connectors/src/publication-store.ts', 'this.decisionWrite.run(', 'this.database.prepare(this.decisionWrite.sourceSQL).run('],
   selection: ['packages/connectors/src/publication-store.ts', "AND original.state='pending'", "AND original.state='pending' AND NOT EXISTS (SELECT 1 FROM connector_publication_operation blocker WHERE blocker.binding_id=original.binding_id AND blocker.binding_revision=original.binding_revision AND blocker.state IN ('unknown','dispatching'))"],
   claim: ['packages/connectors/src/publication-store.ts', 'first.operationId !== expectedOperationId', 'false'],
