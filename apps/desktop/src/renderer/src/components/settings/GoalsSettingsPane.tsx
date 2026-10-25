@@ -2,6 +2,7 @@ import { useId } from 'react'
 import { DEFAULT_GOALS_COMMON_ACTIONS, GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
+import { GoalsIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-workflows.css'
 import '../../styles/settings-workview-layout.css'
 
@@ -27,6 +28,7 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
     submitted.finish(committed); submittedView.finish(committed); submittedFinished.finish(committed); submittedSupervisor.finish(committed)
   }
   return <div className="settings-pane-stack settings-goals">
+    <GoalsIntroduction />
     <section className="settings-group" data-settings-field="starting-view">
       <header><span>Starting view</span><small>Saved: {savedView.defaultView === 'board' ? 'Board' : 'List'}</small></header>
       <p className="settings-workflows__note">Used when you open a new Goals view. You can still switch views while working.</p>

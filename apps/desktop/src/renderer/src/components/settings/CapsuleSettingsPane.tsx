@@ -8,6 +8,7 @@ import type { CapsuleRuntimeObservation } from '@agentmux/core'
 import { api } from '../../lib/api'
 import { useCapsuleDraft, useCapsuleMutation } from './capsule-settings-draft'
 import { CapsuleRuntimeSettings } from './CapsuleRuntimeSettings'
+import { CapsuleIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-capsule.css'
 
 const configFields = ({ contentRoot, defaultStorageMode, defaultMode, defaultTheme }: CapsuleConfig) => ({ contentRoot, defaultStorageMode, defaultMode, defaultTheme })
@@ -180,6 +181,7 @@ export function CapsuleSettingsPane({ active = true }: { active?: boolean }) {
   }, [active, runtime?.phase])
   const visible = pages.filter(item => `${item.record.title} ${item.record.capsuleId} ${item.record.sourcePath}`.toLowerCase().includes(filter.toLowerCase()))
   return <div className="settings-pane-stack capsule-settings">
+    <CapsuleIntroduction />
     <CapsuleRuntimeSettings active={active} observed={setRuntime} />
     {configIssue ? <p role="alert" className="capsule-settings__issue">Defaults could not be confirmed: {configIssue} <button type="button" className="small-button" onClick={() => void loadConfig()}>Read defaults</button></p> : null}
     {config ? <CapsuleDefaults config={config} onConfirmed={confirmedConfig} refresh={() => void loadConfig()} /> : !configIssue ? <p role="status">{runtime?.phase === 'running' ? 'Reading Capsule defaults…' : runtime?.desired === 'stopped' || runtime?.desired === 'unconfigured' ? 'Start the service to read page defaults and content.' : 'Page defaults remain with the original service. Read service status to reconnect.'}</p> : null}
