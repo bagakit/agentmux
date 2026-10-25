@@ -7,6 +7,25 @@ export type AppServerNativeReadContext = Pick<AgentProviderSessionHistoryContext
 type ReadMethod = 'initialize' | 'thread/read' | 'thread/items/list' | 'hooks/list'
 type ReadPurpose = 'history' | 'hooks'
 
+// Optional native RPC data is local diagnostic content, not a page or a turn result.
+// Keep complete JSON only; code/message already share the reader's total byte budget.
+const NATIVE_READ_ERROR_DATA_MAX_BYTES = 16 * 1024
+function nativeReadError(purpose: ReadPurpose, method: ReadMethod, requestId: number, error: Record<string, unknown>): AgentMuxError {
+  const original = { ...(Object.hasOwn(error, 'code') ? { code: error.code } : {}), ...(Object.hasOwn(error, 'message') ? { message: error.message } : {}) }
+  let data: { data?: unknown; dataOmitted?: { reason: 'byte-budget' | 'serialization-unavailable'; maxBytes: number; byteLength?: number } } = {}
+  if (Object.hasOwn(error, 'data')) {
+    try {
+      const byteLength = Buffer.byteLength(JSON.stringify(error.data))
+      data = byteLength <= NATIVE_READ_ERROR_DATA_MAX_BYTES ? { data: error.data }
+        : { dataOmitted: { reason: 'byte-budget', byteLength, maxBytes: NATIVE_READ_ERROR_DATA_MAX_BYTES } }
+    } catch { data = { dataOmitted: { reason: 'serialization-unavailable', maxBytes: NATIVE_READ_ERROR_DATA_MAX_BYTES } } }
+  }
+  const { dataOmitted, ...retained } = data
+  return new AgentMuxError('Native read request failed.',
+    error.code === -32601 ? code(purpose, 'UNSUPPORTED') : code(purpose, 'UNAVAILABLE'),
+    JSON.stringify({ kind: 'native-read', purpose, method, requestId, error: { ...original, ...retained }, ...(dataOmitted ? { dataOmitted } : {}) }))
+}
+
 function protocolError(purpose: ReadPurpose): AgentMuxError {
   return new AgentMuxError('Native read returned an invalid protocol response.', purpose === 'history'
     ? 'INVALID_AGENT_SESSION_HISTORY_PAGE' : 'INVALID_AGENT_HOOK_RESPONSE')
@@ -36,7 +55,7 @@ export async function withAppServerNativeRead<T>(
   ], {
     cwd: context.workspacePath, env, detached: true, stdio: ['pipe', 'pipe', 'pipe']
   })
-  const pending = new Map<number, { resolve(value: unknown): void; reject(error: unknown): void }>()
+  const pending = new Map<number, { method: ReadMethod; resolve(value: unknown): void; reject(error: unknown): void }>()
   let nextId = 0
   let receivedBytes = 0
   let failure: unknown
@@ -86,13 +105,12 @@ export async function withAppServerNativeRead<T>(
         if (!Object.hasOwn(message, 'id')) continue // Notifications never satisfy a read.
         const request = pending.get(message.id as number)
         if (!request || Object.hasOwn(message, 'method')) throw protocolError(purpose)
-        pending.delete(message.id as number)
         if (Object.hasOwn(message, 'error')) {
           const error = object(message.error, purpose)
-          request.reject(new AgentMuxError('Native read request failed.',
-            error.code === -32601 ? code(purpose, 'UNSUPPORTED') : code(purpose, 'UNAVAILABLE')))
+          fail(nativeReadError(purpose, request.method, message.id as number, error))
         } else if (Object.hasOwn(message, 'result')) request.resolve(message.result)
         else request.reject(protocolError(purpose))
+        pending.delete(message.id as number)
       }
     } catch (error) {
       fail(error instanceof AgentMuxError ? error : protocolError(purpose))
@@ -112,7 +130,7 @@ export async function withAppServerNativeRead<T>(
     if (failure !== undefined) return Promise.reject(failure)
     const id = ++nextId
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject })
+      pending.set(id, { method, resolve, reject })
       child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
     })
   }
