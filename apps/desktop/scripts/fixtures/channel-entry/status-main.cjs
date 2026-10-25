@@ -8,6 +8,7 @@ const popoverClarity = process.argv.includes('--popover-clarity')
 const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
+const inputRecovery = process.argv.includes('--input-recovery')
 const statusPriority = process.argv.includes('--status-priority')
 const statusPriorityDetails = process.argv.includes('--status-priority-details')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -16,7 +17,7 @@ let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -80,6 +81,34 @@ app.whenReady().then(async () => {
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
+    if (inputRecovery) {
+      const group = '.agent-connector-dialog [aria-label="Group delivery"]'
+      for (const narrow of [false, true]) {
+        win.setContentSize(1380, 980); await until('innerWidth===1380'); await layout(narrow)
+        await read('window.channelEntryProof.setTheme(' + JSON.stringify(narrow ? 'light' : 'dark') + ')')
+        await read('window.channelEntryProof.setScenario(' + JSON.stringify(narrow ? 'mixed' : 'healthy') + ')')
+        await open('feishu')
+        await until('document.querySelector(' + JSON.stringify(menu) + ')?.textContent.includes("Input recovery needed")')
+        await until('document.querySelector(' + JSON.stringify(menu) + ')?.textContent.includes("2 message status updates confirmed")')
+        if (!narrow) assert.ok(!(await read('document.querySelector(' + JSON.stringify(menu) + ').textContent')).includes('conversation updates delivered'))
+        await capture('input-recovery-header-' + (narrow ? 'narrow-light' : 'wide-dark'))
+        await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+        await until('document.querySelector(' + JSON.stringify(group) + ')?.textContent.includes("Input recovery needed")')
+        if(narrow){win.setContentSize(520,980);await until('innerWidth===520')}
+        await click(action('Review original input',group+' button'))
+        await click(action('Open original input',group+' button'))
+        await until('document.querySelector("[data-input-wait-action=rejoin]")')
+        await read('document.querySelector("[data-original-input-waiting]").scrollIntoView({block:"center"})');await settle()
+        assert.equal(await read('document.querySelector("[data-input-wait-action=rejoin]").disabled'),false)
+        await capture('input-recovery-original-' + (narrow ? 'narrow-light' : 'wide-dark'))
+        await click('[aria-label="Close group setup"]');await until('!document.querySelector(".agent-connector-dialog")')
+      }
+      result.requests=await read('window.channelEntryProof.requests')
+      assert.ok(result.requests.some(row=>row.method==='connection.ingress.inspect'))
+      assert.ok(!result.requests.some(row=>/rejoin|retry|configure|respond/.test(row.method)))
+      assert.deepEqual(await read('window.channelEntryProof.errors'),[])
+      result.passed=true;return
+    }
     if (statusPriority) {
       const group = '.agent-connector-dialog [aria-label="Group delivery"]'
       for (const scenario of ['mixed', 'healthy']) {
