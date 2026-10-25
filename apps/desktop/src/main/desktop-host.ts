@@ -98,25 +98,21 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
     ...(config.remoteSocketPath ? { remoteSocketPath: config.remoteSocketPath } : {}) } })
   if (!(store instanceof AgentMuxFileAgentSessionStore)) throw new AgentMuxError('The Desktop Host requires the original durable File Store.', 'INVALID_CONTROL_REQUEST')
   const socketPath = defaultAgentMuxControlSocketPath()
-  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
-  const prepare = async (signal?: AbortSignal) => {
-    signal?.throwIfAborted()
-    await observeRead(ensureHost(store.path, socketPath, configuration), signal)
-  }
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath },
+    prepareUnixConnection: async signal => {
+      signal.throwIfAborted()
+      await observeRead(ensureHost(store.path, socketPath, configuration), signal)
+    } })
   const port: AgentMuxHostedRpcPort = {
-    call: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options?: { signal?: AbortSignal }) => {
-      await prepare(options?.signal); return await rpc.call(method, params, options)
-    },
-    subscribe: async <M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>) => {
-      await prepare(handlers.signal); return await rpc.subscribe(method, params, handlers)
-    }
+    call: rpc.call.bind(rpc),
+    subscribe: rpc.subscribe.bind(rpc)
   }
   // Return the connection projection while handshake/retry proceeds. The durable UI can hydrate
   // when the Host is unavailable; each actual operation still requires a confirmed identity.
   const client = await connectHostedAgentMux({ rpc: port, waitForReady: false, expectedStorePath: store.path,
-    subscribeRpc: async (method, params, handlers) => { await prepare(handlers.signal); return await rpc.subscribe(method, params, handlers) } })
+    subscribeRpc: rpc.subscribe.bind(rpc) })
   const originalOwner = async (signal?: AbortSignal) => {
-    await prepare(signal)
+    signal?.throwIfAborted()
     const owner = client.runtimeOwnerIdentity()
     if (!owner || owner.availability !== 'connected') await client.readAgentSessions()
     const confirmed = client.runtimeOwnerIdentity()
