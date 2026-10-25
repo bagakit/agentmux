@@ -95,6 +95,8 @@ export class NativeJsonlHistoryReader {
   private readonly birth: number
   private cache: Buffer = Buffer.alloc(0)
   private cacheStart = 0
+  private forwardCache: Buffer = Buffer.alloc(0)
+  private forwardCacheStart = 0
   private head = ''
   private tail = ''
   private readonly stringSources = new WeakMap<object, Map<string, { value: string | NativeText; start: number; end: number; text?: NativeText }>>()
@@ -196,6 +198,16 @@ export class NativeJsonlHistoryReader {
     this.cacheStart = Math.max(0, end - 64 * 1024)
     this.cache = await this.read(this.cacheStart, end - this.cacheStart)
     return this.cache
+  }
+
+  /** Reuse delimiter bytes within this open snapshot; parsing and integrity checks read the original file. */
+  private async blockStartingAt(start: number): Promise<Buffer> {
+    this.check()
+    if (start < this.forwardCacheStart || start >= this.forwardCacheStart + this.forwardCache.length) {
+      this.forwardCache = await this.read(start, Math.min(64 * 1024, this.cut - start))
+      this.forwardCacheStart = start
+    }
+    return this.forwardCache.subarray(start - this.forwardCacheStart, Math.min(this.forwardCache.length, this.cut - this.forwardCacheStart))
   }
 
   /** Streaming tokens retain small metadata while large strings stay at their exact physical extent. */
@@ -335,7 +347,7 @@ export class NativeJsonlHistoryReader {
   async readFirst(): Promise<Record<string, unknown> | null> {
     let position = 0
     while (position < this.cut) {
-      const block = await this.read(position, Math.min(64 * 1024, this.cut - position))
+      const block = await this.blockStartingAt(position)
       const newline = block.indexOf(10)
       if (newline >= 0) return await this.parseRange(0, position + newline)
       position += block.length
@@ -379,7 +391,7 @@ export class NativeJsonlHistoryReader {
       const start = this.forwardPosition
       let position = start
       while (position < this.cut) {
-        const block = await this.read(position, Math.min(64 * 1024, this.cut - position))
+        const block = await this.blockStartingAt(position)
         const newline = block.indexOf(10)
         if (newline >= 0) {
           const end = position + newline
