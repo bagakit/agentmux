@@ -23,7 +23,7 @@ async function fixture() {
   // admission port before new input; no saved Binding or old input is rewritten.
   Reflect.get(f.services.ingress!, 'options').inputTarget = undefined
   await f.wire.post(f.message('old')); const old = await f.claimed('old')
-  await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: old.ingressId })).inputReceipt?.status).toBe('terminal-confirmed')
+  await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: old.ingressId })).inputReceipt?.status, { timeout: 10000 }).toBe('terminal-confirmed')
   Reflect.get(f.services.ingress!, 'options').inputTarget = originalTarget
   const currentRun = f.inner.kernel.status as (id: string) => Promise<ReturnType<typeof f.run>>
   f.inner.kernel.status = async (id: string) => ({ ...await currentRun(id), acceptedInputBytes: f.run(id).acceptedInputBytes })
@@ -64,8 +64,17 @@ it('an existing private generation keeps its old PTY input and gains real native
   expect(f.generation().generation).toEqual({ ...before.generation, lastActivityAt: expect.any(Number) }); expect(f.generation().binding).toEqual(before.binding); expect(f.start).toHaveBeenCalledOnce()
   expect(vi.mocked(f.inner.kernel.input).mock.calls.length).toBe(bytes)
   expect((await f.services.ingress!.inspect({ ingressId: f.old.ingressId })).inputReceipt?.status).toBe('terminal-confirmed')
-  await f.native(0); await expect.poll(() => f.feedback(q).map(row => row.queryFeedback!.stage), { timeout: 5000 }).toContain('started')
-  await f.native(0, true); await expect.poll(() => f.feedback(q).map(row => row.queryFeedback!.stage)).toContain('completed')
+  await f.native(0)
+  await expect.poll(async () => (await f.client.sessionHistoryPage(q.input!.agentSessionId)).items.some(item =>
+    item.conversation?.adoptedInput?.key.kind === 'message' && item.conversation.adoptedInput.key.messageId === q.input!.messageId), { timeout: 10000 }).toBe(true)
+  const committed = vi.spyOn(f.services.publication!.store, 'commitPage')
+  try {
+    await f.native(0, true)
+    await expect.poll(() => committed.mock.calls.some((call, index) => committed.mock.results[index]?.type === 'return' && call[4]?.queryFeedback === true && call[4].units.some(unit => unit.records.some(record =>
+      record.original.kind === 'native' && record.original.item.turnId === 'turn-1' && record.original.item.turnOutcome?.status === 'completed'))), { timeout: 10000 }).toBe(true)
+    await expect.poll(() => Reflect.get(f.services.publication!, 'lanes').get(f.generation().binding!.bindingId)?.work === undefined).toBe(true)
+  } finally { committed.mockRestore() }
+  expect(f.feedback(q).filter(row => row.effect === 'upsert').map(row => row.queryFeedback!.stage)).toEqual(['received', 'dispatched'])
   expect(f.feedback(q).every(row => row.queryFeedback!.messageId === q.externalMessageId)).toBe(true)
   await f.restart(); expect(f.generation().generation).toEqual({ ...before.generation, lastActivityAt: expect.any(Number) }); expect(f.sends).toHaveLength(1)
 }, 30000)

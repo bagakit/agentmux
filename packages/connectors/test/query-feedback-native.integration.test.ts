@@ -24,7 +24,7 @@ const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' }, turn = 'original-native-turn'
 const jsonl = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
-async function fixture(options: { providerId?: 'codex' | 'claude'; narrow?: boolean; missingCapturedCut?: boolean; beforeBind?: unknown[]; beforeBindCapture?: boolean; response?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined } = {}) {
+async function fixture(options: { providerId?: 'codex' | 'claude'; narrow?: boolean; missingCapturedCut?: boolean; beforeBind?: unknown[]; beforeBindCapture?: boolean; nativeAcknowledgement?: () => Promise<void>; response?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined } = {}) {
   const source = { providerId: options.providerId ?? 'codex', nativeSessionId: 'original-native-thread' }
   const f = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: source.providerId, executorId: source.providerId, nativeHandle: { kind: 'provider', providerId: source.providerId, sessionId: source.nativeSessionId, transcriptPath: join(root, 'native.jsonl') } })); cleanup.push(f.close)
   const transcript = join(f.root, 'native.jsonl'), ref = { hostId: 'local', agentSessionId: 'original-agent' }
@@ -45,10 +45,10 @@ async function fixture(options: { providerId?: 'codex' | 'claude'; narrow?: bool
   vi.spyOn(processLeaves, 'nativeProcessTcpListeners').mockResolvedValue([{ processId: 1234, endpoint }])
   server.on('connection', (socket, request) => {
     expect(request.headers.authorization).toBe('Bearer ' + actor.token)
-    socket.on('message', bytes => { const message = JSON.parse(bytes.toString()); if (!Object.hasOwn(message, 'id')) return
+    socket.on('message', async bytes => { const message = JSON.parse(bytes.toString()); if (!Object.hasOwn(message, 'id')) return
       let result: unknown = {}
       if (message.method === 'thread/read') result = { thread: { id: source.nativeSessionId, canAcceptDirectInput: true, status: { type: 'idle' } } }
-      else if (message.method === 'turn/start') { sends.push(message.params); result = { turn: { id: turn } } }
+      else if (message.method === 'turn/start') { sends.push(message.params); await options.nativeAcknowledgement?.(); result = { turn: { id: turn } } }
       else expect(message.method).toBe('initialize')
       socket.send(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }))
     })
@@ -63,7 +63,8 @@ async function fixture(options: { providerId?: 'codex' | 'claude'; narrow?: bool
   const remote = feishuReactions(), reactions = remote.active
   const http = await feishuPublicationHttp(call => options.response?.(call) ?? remote.handle(call)); cleanup.push(http.close)
   const wire = signedRoomAdapter('feishu'), verify = wire.adapter.ingress!.verify
-  const adapter = { ...wire.adapter, publication: new FeishuAdapter({ http: http.http }).publication, ingress: { ...wire.adapter.ingress!, verify: async (...args: Parameters<typeof verify>) => ({ ...await verify(...args), conversationKind: 'group' as const }) } }
+  const feishu = new FeishuAdapter({ http: http.http })
+  const adapter = { ...wire.adapter, api: feishu.api, publication: feishu.publication, ingress: { ...wire.adapter.ingress!, verify: async (...args: Parameters<typeof verify>) => ({ ...await verify(...args), conversationKind: 'group' as const }) } }
   let missingCapturedCut = options.missingCapturedCut
   const checkpoint = async (input: Parameters<typeof f.client.conversationCheckpoint>[0]) => {
     const page = await f.client.conversationCheckpoint(input)
@@ -114,40 +115,65 @@ async function fixture(options: { providerId?: 'codex' | 'claude'; narrow?: bool
   }
 }
 
-it('default group feeds the real native RPC Provider and publishes five distinct factual milestones through the SDK', async () => {
-  const f = await fixture(); f.inner.connected = false; f.inner.kernel.isConnected = () => false
+async function publishedOutcome(f: Awaited<ReturnType<typeof fixture>>, outcome: 'completed' | 'failed' | 'interrupted', target = turn): Promise<void> {
+  const committed = vi.spyOn(f.services.publication!.store, 'commitPage')
+  try {
+    await f.complete(target, outcome === 'failed' ? { message: 'Original native turn failed' } : undefined, outcome === 'interrupted')
+    await expect.poll(() => committed.mock.calls.some((call, index) => committed.mock.results[index]?.type === 'return' && call[4]?.queryFeedback === true && call[4].units.some(unit => unit.records.some(record =>
+      record.original.kind === 'native' && record.original.item.turnId === target && record.original.item.turnOutcome?.status === outcome))), { timeout: 10000 }).toBe(true)
+    await expect.poll(() => Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId)?.work === undefined).toBe(true)
+  } finally { committed.mockRestore() }
+}
+
+it('default group confirms waiting and delivery through the real Provider while native adoption and completion stay original Core facts', async () => {
+  let confirmNative!: () => void
+  const nativeAck = new Promise<void>(resolve => { confirmNative = resolve })
+  const f = await fixture({ nativeAcknowledgement: () => nativeAck }); cleanup.push(confirmNative)
+  f.inner.connected = false; f.inner.kernel.isConnected = () => false
   const query = await f.send()
-  await expect.poll(f.stages, { timeout: 5000 }).toContain('queued')
-  f.restore(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
+  await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: query.ingressId })).inputReceipt?.status).toBe('waiting')
+  f.restore(); await expect.poll(() => f.sends.length, { timeout: 10000 }).toBe(1)
+  f.services.publication!.refresh()
+  await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type), { timeout: 10000 }).toEqual(['OneSecond'])
+  expect(f.stages()).toEqual(['received'])
+  confirmNative(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
   expect((await f.services.ingress!.inspect({ ingressId: query.ingressId })).inputReceipt?.status).toBe('admitted')
   expect(f.sends).toHaveLength(1); expect(f.inner.kernel.input).not.toHaveBeenCalled()
-  await f.native('valid'); await expect.poll(f.stages, { timeout: 5000 }).toContain('started')
-  await f.complete('other-turn'); await new Promise<void>(resolve => setImmediate(resolve)); expect(f.stages()).not.toContain('completed')
-  await f.complete(); await expect.poll(f.stages, { timeout: 5000 }).toContain('completed')
-  const completed = (await f.client.sessionHistoryPage(f.ref.agentSessionId)).items.find(item => item.turnId === turn && item.turnOutcome?.status === 'completed')
+  await f.native('valid'); await publishedOutcome(f, 'completed', 'other-turn')
+  await publishedOutcome(f, 'completed')
+  const history = await f.client.sessionHistoryPage(f.ref.agentSessionId)
+  const native = history.items.find(item => item.conversation?.nativeInput?.semanticItemId === 'original-native-user')
+  expect(native?.conversation?.nativeInput).toMatchObject({ source, turnId: turn, clientCorrelation: f.sends[0].clientUserMessageId })
+  const completed = history.items.find(item => item.turnId === turn && item.turnOutcome?.status === 'completed')
   expect(completed).toBeDefined(); expect(completed!.metrics).toBeUndefined()
   await expect.poll(() => f.operations().every(value => ['confirmed', 'superseded'].includes(value.state))).toBe(true)
-  expect(f.stages()).toEqual(['received', 'queued', 'dispatched', 'started', 'completed'])
-  await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['DONE'])
+  expect(f.stages()).toEqual(['received', 'dispatched'])
+  await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['Get'])
   expect(f.reactions.every(value => value.path.endsWith('/original-query/reactions'))).toBe(true)
 }, 30000)
 
 it('managed receipt readers consume original upsert and withdrawal through SDK and compiled CLI without bot administration', async () => {
-  const f = await fixture()
+  let confirmNative!: () => void
+  const nativeAck = new Promise<void>(resolve => { confirmNative = resolve })
+  const f = await fixture({ nativeAcknowledgement: () => nativeAck }); cleanup.push(confirmNative)
+  f.inner.connected = false; f.inner.kernel.isConnected = () => false
   const original = (await f.store.readMetadata(f.ref.agentSessionId))!
   await f.store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'foreign-reader', providerId: 'codex', executorId: 'codex',
     hostId: 'local', workspacePath: f.root, run: { runId: 'foreign-run' }, retiredRuns: [], capabilityHash: original.capabilityHash!,
     hookBindingId: 'foreign-hook', hookToken: 'foreign-token', createdAt: original.createdAt, updatedAt: original.updatedAt })
   await f.inner.registry.load('local')
-  await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
-  await f.native('valid'); await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'started')?.state).toBe('confirmed')
-  const started = f.operations().find(value => value.queryFeedback?.stage === 'started')!
+  const query = await f.send()
+  await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: query.ingressId })).inputReceipt?.status).toBe('waiting')
+  f.restore(); await expect.poll(() => f.sends.length, { timeout: 10000 }).toBe(1)
+  f.services.publication!.refresh()
+  await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'received')?.state, { timeout: 10000 }).toBe('confirmed')
+  const waiting = f.operations().find(value => value.queryFeedback?.stage === 'received')!
+  confirmNative(); await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'dispatched')?.state, { timeout: 10000 }).toBe('confirmed')
   await appendFile(f.transcript, jsonl([{ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'receipt-answer', content: [{ type: 'output_text', text: 'Original public answer.' }] } }]))
   f.services.publication!.refresh()
   const answer = () => f.services.publication!.store.list(f.binding, 100).find(value => value.payload.kind === 'speech' && value.payload.text === 'Original public answer.')
   await expect.poll(() => answer()?.state).toBe('confirmed')
-  await f.complete(turn, { message: 'Original failure' })
-  const withdrawal = () => f.services.publication!.store.list(f.binding, 100).find(value => value.predecessorOperationId === started.operationId)
+  const withdrawal = () => f.services.publication!.store.list(f.binding, 100).find(value => value.predecessorOperationId === waiting.operationId)
   await expect.poll(() => withdrawal()?.state).toBe('confirmed')
   const oldBinding = f.binding
   expect(await f.services.connections.ownsEnrollmentConnection?.(oldBinding.connectionId, f.ref.agentSessionId)).toBe(false)
@@ -161,21 +187,21 @@ it('managed receipt readers consume original upsert and withdrawal through SDK a
   const request = { connectionId: oldBinding.connectionId, bindingId: oldBinding.bindingId, bindingRevision: oldBinding.revision, limit: 100 }
   const page = await sdk.call('connection.delivery.ls', request)
   expect(page.deliveries).toEqual(expect.arrayContaining([
-    expect.objectContaining({ operationId: started.operationId, effect: 'upsert', receipt: { state: 'confirmed', mapping: started.mapping } }),
+    expect.objectContaining({ operationId: waiting.operationId, effect: 'upsert', receipt: { state: 'confirmed', mapping: waiting.mapping } }),
     expect.objectContaining({ operationId: withdrawal()!.operationId, effect: 'withdraw', state: 'confirmed' })
   ]))
   const env = objectCliEnvironment(f.root, { AGENTMUX_AGENT_SESSION_ID: f.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.credentials.capability })
   const output = await runCompiledObjectCli(['--endpoint', 'unix:' + socket.path, 'connection', 'delivery', 'inspect', '--operation-id', withdrawal()!.operationId], env)
   expect(output.code, output.stdout + output.stderr).toBe(0)
   const delivery = JSON.parse(output.stdout).result.delivery
-  expect(delivery).toMatchObject({ operationId: withdrawal()!.operationId, effect: 'withdraw', bindingRevision: oldBinding.revision, mapping: started.mapping })
+  expect(delivery).toMatchObject({ operationId: withdrawal()!.operationId, effect: 'withdraw', bindingRevision: oldBinding.revision, mapping: waiting.mapping })
   expect(delivery).not.toHaveProperty('payload'); expect(delivery).not.toHaveProperty('prepared')
   const beforeRead = f.remote.calls.length
   await expect(foreign.call('connection.delivery.ls', request)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  await expect(foreign.call('connection.delivery.inspect', { operationId: started.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(foreign.call('connection.delivery.inspect', { operationId: waiting.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.delivery.ls', { ...request, connectionId: 'foreign-connection' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.delivery.ls', { ...request, bindingRevision: 987 })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  await expect(sdk.call('connection.delivery.retry', { operationId: started.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.delivery.retry', { operationId: waiting.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.ingress.ls', { connectionId: oldBinding.connectionId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.inspect', { connectionId: oldBinding.connectionId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   const inspect = owner.bindings!.inspect.bind(owner.bindings)
@@ -190,7 +216,7 @@ it('managed receipt readers consume original upsert and withdrawal through SDK a
     const value = await inspectDelivery(input)
     return { delivery: value.delivery ? { ...value.delivery, target: { ...value.delivery.target, externalConversationId: 'other-room' } } : null }
   })
-  await expect(sdk.call('connection.delivery.inspect', { operationId: started.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.delivery.inspect', { operationId: waiting.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   receiptRead.mockRestore()
   // A recorded source namespace is not a route or an Agent capability.
   const sourceBinding = vi.spyOn(owner.bindings!, 'inspect').mockImplementation(async input => {
@@ -219,47 +245,40 @@ it('managed receipt readers consume original upsert and withdrawal through SDK a
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
 
-it.each([['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const)('replaces earlier markers with the same terminal phase for an original %s outcome', async (outcome, emoji) => {
-  const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
-  await f.native('valid'); await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'started')?.state).toBe('confirmed')
-  const started = f.operations().find(value => value.queryFeedback?.stage === 'started')!
+it.each([['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const)('native %s keeps delivery separate and preserves an Agent-selected reaction across recovery', async (outcome, emoji) => {
+  const f = await fixture(); await f.send()
+  await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type), { timeout: 10000 }).toEqual(['Get'])
+  const originalEffects = f.operations().map(value => value.operationId)
+  const originalReactionWrites = f.remote.calls.filter(call => call.method === 'POST' || call.method === 'DELETE').length
+  await f.native('valid'); await publishedOutcome(f, outcome)
+  expect(f.stages()).toEqual(['received', 'dispatched'])
+  expect(f.operations().map(value => value.operationId)).toEqual(originalEffects)
+  expect(f.remote.calls.filter(call => call.method === 'POST' || call.method === 'DELETE')).toHaveLength(originalReactionWrites)
+  expect((await f.client.sessionHistoryPage(f.ref.agentSessionId)).items.some(item => item.turnId === turn && item.turnOutcome?.status === outcome)).toBe(true)
+
   const path = '/open-apis/im/v1/messages/original-query/reactions'
   const unrelated = [f.remote.seed(path, 'OnIt', { operator_type: 'user', operator_id: 'another-person' }), f.remote.seed(path, 'SMILE')]
-  await f.complete(turn, outcome === 'failed' ? { message: 'Original native turn failed' } : undefined, outcome === 'interrupted')
-  await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === outcome)?.state, { timeout: 5000 }).toBe('confirmed')
-  const active = () => f.reactions.filter(value => !unrelated.includes(value)).map(value => value.reaction_type.emoji_type)
-  try { await expect.poll(active, { timeout: 5000 }).toEqual([emoji]) }
-  catch (error) { expect(active(), 'A confirmed terminal outcome must retire earlier managed markers').toEqual([emoji]); throw error }
-  const withdrawal = f.services.publication!.store.list(f.binding, 100).find(value => value.predecessorOperationId === started.operationId)!
-  expect(withdrawal).toMatchObject({ effect: 'withdraw', state: 'confirmed', mapping: started.mapping })
-  expect(f.reactions.filter(value => unrelated.includes(value))).toEqual(unrelated)
-  const created = f.remote.calls.findIndex(call => call.method === 'POST' && JSON.parse(call.body).reaction_type.emoji_type === emoji)
-  const deleted = f.remote.calls.findIndex(call => call.method === 'DELETE' && call.path.endsWith('/' + started.mapping!.reactionId))
-  expect(created).toBeGreaterThanOrEqual(0); expect(deleted).toBeGreaterThan(created)
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'agent-reaction.sock'), coreClients: f.coreClients, connections: f.services.connections })
+  await server.start(); cleanup.push(() => server.stop())
+  const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: f.credentials }); cleanup.push(() => sdk.dispose())
+  const discovered = await sdk.call('connection.api.identities', { agentSessionId: f.ref.agentSessionId })
+  expect(discovered.identities).toHaveLength(1)
+  const identity = discovered.identities[0]!
+  const chosen = await sdk.call('connection.api.request', { operationId: 'agent-chosen-' + outcome,
+    identity: { bindingId: identity.bindingId, bindingRevision: identity.bindingRevision, connectionId: identity.connectionId, connectionRevision: identity.connectionRevision },
+    request: { method: 'POST', path, body: { reaction_type: { emoji_type: emoji } } } })
+  expect(chosen).toMatchObject({ state: 'responded', response: { status: 200, body: { format: 'json', value: { code: 0 } } } })
+  const chosenReaction = f.reactions.find(value => value.reaction_type.emoji_type === emoji)!
+  expect(chosenReaction).toBeDefined()
+  expect((await sdk.call('connection.api.inspect', { operationId: chosen.operationId })).operation).toEqual(chosen)
+  await sdk.dispose(); await server.stop()
+  await f.reopen(); await publishedOutcome(f, 'completed', 'later-unrelated-turn')
+  expect(f.reactions).toEqual(expect.arrayContaining([...unrelated, chosenReaction]))
+  expect(f.reactions.filter(value => !unrelated.includes(value)).map(value => value.reaction_type.emoji_type)).toEqual(['Get', emoji])
+  expect(f.operations().map(value => value.operationId)).toEqual(originalEffects)
+  expect(f.remote.calls.filter(call => call.method === 'POST' || call.method === 'DELETE')).toHaveLength(originalReactionWrites + 1)
   expect(f.sends).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
-
-it('a late started acknowledgement cannot retain or downgrade a confirmed failed outcome', async () => {
-  const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
-  let release!: () => void
-  const held = new Promise<void>(resolve => { release = resolve }), request = f.http.http.request.bind(f.http.http)
-  f.http.http.request = async (...args: Parameters<typeof request>) => {
-    const result: any = await request(...args)
-    if (String(args[0].method).toUpperCase() === 'POST' && result?.data?.reaction_type?.emoji_type === 'OnIt') await held
-    return result
-  }
-  try {
-    await f.native('valid'); await expect.poll(() => f.remote.created.some(value => value.reaction_type.emoji_type === 'OnIt')).toBe(true)
-    await f.complete(turn, { message: 'Original native turn failed' })
-    await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'failed')?.state, { timeout: 35000 }).toBe('confirmed')
-    const failed = f.operations().find(value => value.queryFeedback?.stage === 'failed')!
-    release()
-    await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type), { timeout: 5000 }).toEqual(['CrossMark'])
-    expect(f.operations().find(value => value.queryFeedback?.stage === 'failed')).toEqual(failed)
-    expect(f.remote.created.filter(value => value.reaction_type.emoji_type === 'OnIt')).toHaveLength(1)
-    expect(f.sends).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
-  } finally { release() }
-}, 45000)
 
 it.each(['wrong-source', 'ambiguous', 'revoked'] as const)('retains input availability but cannot invent native processing for %s evidence', async kind => {
   const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
@@ -271,23 +290,25 @@ it.each(['wrong-source', 'ambiguous', 'revoked'] as const)('retains input availa
   const publication = f.services.publication!; publication.refresh()
   await expect.poll(() => committed.mock.calls.some(call => call[4]?.units.some(unit => unit.records.some(record => record.original.kind === 'native' && record.original.item.turnId === turn))), { timeout: 5000 }).toBe(true)
   await expect.poll(() => Reflect.get(publication, 'lanes').get(f.binding.bindingId)?.work === undefined).toBe(true)
-  expect(f.stages().filter(stage => stage !== 'queued')).toEqual(['received', 'dispatched']); expect(f.sends).toHaveLength(1)
+  expect(f.stages()).toEqual(['received', 'dispatched']); expect(f.sends).toHaveLength(1)
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 }, 30000)
 
 it.each(['revoked', 'temporarily-unavailable'] as const)('a retained reaction with %s authority cannot block independent speech or lose its original recovery identity', async kind => {
-  const f = await fixture(); f.inner.connected = false; f.inner.kernel.isConnected = () => false
+  const f = await fixture()
   const connections = Reflect.get(f.services.publication!, 'options').connections as import('../src/connection-host.js').ConnectionHost
   const resolveCredential = connections.resolveCredential.bind(connections)
   let release!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
   const credentials = vi.spyOn(connections, 'resolveCredential').mockImplementation(async id => { await held; return await resolveCredential(id) })
   let restoreAuthority: (() => void) | undefined
-  let queuedId = ''
+  let deliveryId = ''
   try {
-    await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('queued')
-    queuedId = f.operations().find(value => value.queryFeedback?.stage === 'queued')!.operationId
-    expect(f.services.publication!.store.inspect(queuedId)?.state).toBe('pending')
+    const query = await f.send()
+    await expect.poll(async () => (await f.services.ingress!.inspect({ ingressId: query.ingressId })).inputReceipt?.status).toBe('admitted')
+    await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
+    deliveryId = f.operations().find(value => value.queryFeedback?.stage === 'dispatched')!.operationId
+    expect(f.services.publication!.store.inspect(deliveryId)?.state).toBe('pending')
     if (kind === 'revoked') await f.revoke()
     else {
       const bindings = Reflect.get(f.services.ingress!, 'options').bindings
@@ -298,13 +319,13 @@ it.each(['revoked', 'temporarily-unavailable'] as const)('a retained reaction wi
   await appendFile(f.transcript, jsonl([{ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'independent-answer', content: [{ type: 'output_text', text: 'Original conversation can still publish an independent answer.' }] } }]))
   f.services.publication!.refresh()
   await expect.poll(() => f.services.publication!.store.list(f.binding, 100).some(value => value.payload.kind === 'speech' && value.state === 'confirmed'), { timeout: 10000 }).toBe(true)
-  expect(f.services.publication!.store.inspect(queuedId)?.state).toBe('pending')
-  expect(f.reactions.some(value => value.reaction_type.emoji_type === 'OneSecond')).toBe(false)
+  expect(f.services.publication!.store.inspect(deliveryId)?.state).toBe('pending')
+  expect(f.reactions.some(value => value.reaction_type.emoji_type === 'Get')).toBe(false)
   if (restoreAuthority) {
     restoreAuthority(); f.services.publication!.refresh()
-    await expect.poll(() => f.services.publication!.store.inspect(queuedId)?.state, { timeout: 5000 }).toBe('confirmed')
-    expect(f.operations().filter(value => value.queryFeedback?.stage === 'queued').map(value => value.operationId)).toEqual([queuedId])
-    expect(f.reactions.filter(value => value.reaction_type.emoji_type === 'OneSecond')).toHaveLength(1)
+    await expect.poll(() => f.services.publication!.store.inspect(deliveryId)?.state, { timeout: 5000 }).toBe('confirmed')
+    expect(f.operations().filter(value => value.queryFeedback?.stage === 'dispatched').map(value => value.operationId)).toEqual([deliveryId])
+    expect(f.reactions.filter(value => value.reaction_type.emoji_type === 'Get')).toHaveLength(1)
   }
 }, 30000)
 
@@ -340,21 +361,21 @@ const failurePosts = (f: Awaited<ReturnType<typeof fixture>>) => f.http.messageC
 
 it('provider outcome publishes capacity failure once through public conversation and the Feishu SDK without DONE, including exact same-event capture and reopen', async () => {
   const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
-  await f.native('valid'); await expect.poll(f.stages).toContain('started'); await f.complete(turn, capacity)
+  await f.native('valid'); await f.complete(turn, capacity)
   await expect.poll(() => failures(f).map(value => value.state), { timeout: 10000 }).toEqual(['confirmed'])
-  await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'failed')?.state).toBe('confirmed')
+  await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'dispatched')?.state).toBe('confirmed')
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'outcome.sock'), connections: f.services.connections, coreClients: f.coreClients })
   await server.start()
   try {
-    const feedback = f.operations().find(value => value.queryFeedback?.stage === 'failed')!
+    const feedback = f.operations().find(value => value.queryFeedback?.stage === 'dispatched')!
     const result = await runSourceObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'inspect', '--operation-id', feedback.operationId], objectCliEnvironment(f.root), '', 30000,
       new URL('../../core/test/fixtures/a2a-resumed-inbox/source-loader.mjs', import.meta.url))
     expect(result.code, result.stdout + result.stderr).toBe(0)
     const inspected = JSON.parse(result.stdout).result
-    expect(inspected.delivery).toMatchObject({ operationId: feedback.operationId, state: 'confirmed', queryFeedback: { stage: 'failed', messageId: 'original-query' } })
+    expect(inspected.delivery).toMatchObject({ operationId: feedback.operationId, state: 'confirmed', queryFeedback: { stage: 'dispatched', messageId: 'original-query' } })
     for (const privateField of ['queryTurn', 'queryCompletion', 'payload', capacity.message]) expect(JSON.stringify(inspected)).not.toContain(privateField)
   } finally { await server.stop() }
-  expect(f.stages()).not.toContain('completed'); expect(f.reactions.map(value => value.reaction_type.emoji_type)).toContain('CrossMark')
+  expect(f.stages()).toEqual(['received', 'dispatched']); expect(f.reactions.map(value => value.reaction_type.emoji_type)).toContain('Get')
   expect(f.reactions.map(value => value.reaction_type.emoji_type)).not.toContain('DONE')
   const first = failures(f)[0]!, history = await f.client.sessionHistoryPage(f.ref.agentSessionId)
   const native = history.items.find(item => item.turnOutcome?.status === 'failed')!
@@ -413,14 +434,15 @@ it('provider outcome keeps unknown native details private, preserves the audienc
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20000)
 
-it('provider outcome distinguishes interruption and requires original adoption before failed query feedback', async () => {
+it('provider outcome preserves interruption and independent failure facts without automatic terminal reactions', async () => {
   const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
   await f.complete('unadopted-turn', capacity)
   await expect.poll(() => failures(f).map(value => value.state), { timeout: 10000 }).toEqual(['confirmed'])
   expect(f.stages()).not.toContain('failed')
-  await f.native('valid'); await expect.poll(f.stages).toContain('started'); await f.complete(turn, undefined, true)
-  await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'interrupted')?.state).toBe('confirmed')
-  expect(f.reactions.map(value => value.reaction_type.emoji_type)).toContain('MinusOne')
+  await f.native('valid'); await publishedOutcome(f, 'interrupted')
+  expect((await f.client.sessionHistoryPage(f.ref.agentSessionId)).items.some(item => item.turnId === turn && item.turnOutcome?.status === 'interrupted')).toBe(true)
+  expect(f.stages()).toEqual(['received', 'dispatched'])
+  expect(f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['Get'])
   expect(f.stages()).not.toContain('completed'); expect(f.stages()).not.toContain('failed'); expect(failures(f)).toHaveLength(1)
 }, 30000)
 

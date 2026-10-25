@@ -11,7 +11,7 @@ import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } f
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
-const stages = [['received', 'Get'], ['queued', 'OneSecond'], ['dispatched', 'CheckMark'], ['started', 'OnIt'], ['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const
+const stages = [['received', 'OneSecond'], ['queued', 'OneSecond'], ['dispatched', 'Get'], ['started', 'OnIt'], ['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const
 function operation(stage: typeof stages[number][0] = 'received'): PublicationOperation {
   return { operationId: 'query-' + stage, projectionId: 'original-query-projection', sourceRevision: 'original-query-revision', bindingId: 'original-binding', bindingRevision: 1,
     reference: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'ingress', ingressId: 'original-ingress' } },
@@ -32,7 +32,7 @@ async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse |
   return { remote, retained: reactions.active, publisher: new FeishuAdapter({ http: remote.http }).publication }
 }
 
-it.each(stages)('default registered Feishu adapter adds the %s milestone to the exact user query through the real SDK', async (stage, emojiType) => {
+it.each(stages)('default registered Feishu adapter adds the %s current or retained feedback to the exact user query through the real SDK', async (stage, emojiType) => {
   const f = await fixture()
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(f.remote.http.request as typeof defaultHttpInstance.request)
   const publisher = createBuiltinConnectionAdapters().find(adapter => adapter.adapterId === 'feishu')!.publication!
@@ -52,7 +52,7 @@ it.each(stages)('default registered Feishu adapter adds the %s milestone to the 
 it('uses the publication envelope to qualify current and retained reaction requests before native dispatch or inspection', async () => {
   const f = await fixture(), original = operation(), signal = new AbortController().signal
   const prepared = f.publisher.prepare(original)
-  const retained = { ...prepared, renderVersion: 'feishu-conversation-v6' }
+  const retained = { ...prepared, renderVersion: 'feishu-conversation-v6', request: { ...prepared.request, body: JSON.stringify({ reaction_type: { emoji_type: 'CheckMark' } }) } }
   expect((await f.publisher.dispatch(retained, original.target, 'synthetic-credential', signal)).state).toBe('confirmed')
   expect((await f.publisher.inspect(retained, original.target, 'synthetic-credential', signal))?.state).toBe('confirmed')
   const calls = f.remote.messageCalls().length
@@ -73,12 +73,12 @@ it('withdraws only an exact retained reaction without deleting the original quer
     const original = operation(stage)
     expect((await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'synthetic-credential', signal)).state).toBe('confirmed')
   }
-  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OneSecond', 'CheckMark', 'OnIt', 'DONE', 'CrossMark', 'MinusOne'])
+  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['OneSecond', 'OneSecond', 'Get', 'OnIt', 'DONE', 'CrossMark', 'MinusOne'])
   const mapping = { messageId: 'original-user-query', reactionId: 'reaction-1' }
   const withdrawal = f.publisher.prepare({ ...operation(), effect: 'withdraw', mapping })
   expect(withdrawal.request).toEqual({ method: 'DELETE', path: '/open-apis/im/v1/messages/original-user-query/reactions/reaction-1' })
   expect(await f.publisher.dispatch(withdrawal, operation().target, 'synthetic-credential', signal, mapping)).toEqual({ state: 'confirmed', mapping })
-  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['OneSecond', 'CheckMark', 'OnIt', 'DONE', 'CrossMark', 'MinusOne'])
+  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['OneSecond', 'Get', 'OnIt', 'DONE', 'CrossMark', 'MinusOne'])
   expect(() => f.publisher.prepare({ ...operation(), effect: 'withdraw' })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'another-user-query', reactionId: 'reaction-1' } })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'original-user-query', threadId: 'another-thread' } })).toThrow()
@@ -111,12 +111,12 @@ it('reconciles a lost reaction ACK using only the original message, stage and ex
 
 it('does not confirm another application reaction even when the emoji and message match', async () => {
   const f = await fixture(call => call.path.endsWith('/reactions')
-    ? { status: 200, body: { code: 0, data: call.method === 'POST' ? reaction('Get', 'foreign-app-reaction', 'another-app') : { items: [reaction('Get', 'foreign-app-reaction', 'another-app')], has_more: false } } } : undefined)
+    ? { status: 200, body: { code: 0, data: call.method === 'POST' ? reaction('OneSecond', 'foreign-app-reaction', 'another-app') : { items: [reaction('OneSecond', 'foreign-app-reaction', 'another-app')], has_more: false } } } : undefined)
   const original = operation(), prepared = f.publisher.prepare(original), signal = new AbortController().signal
   const receipt = await f.publisher.dispatch(prepared, original.target, 'synthetic-credential', signal)
   if (process.env.QUERY_FEEDBACK_LEAF_FACTS) appendFileSync(process.env.QUERY_FEEDBACK_LEAF_FACTS, JSON.stringify({
     case: 'foreign-app', operationId: original.operationId, originalApplication: original.target.application, originalMessageId: 'original-user-query',
-    nativeReaction: reaction('Get', 'foreign-app-reaction', 'another-app'), receipt, calls: f.remote.messageCalls()
+    nativeReaction: reaction('OneSecond', 'foreign-app-reaction', 'another-app'), receipt, calls: f.remote.messageCalls()
   }) + '\n')
   expect(receipt).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
   expect(await f.publisher.inspect(prepared, original.target, 'synthetic-credential', signal)).toBeNull()
