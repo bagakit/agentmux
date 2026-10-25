@@ -84,6 +84,7 @@ Load only the journey needed now:
   For a new Agent with separate project tools, use --execution-workspace AGENT_WORKSPACE
   and --tool-workspace RESOURCE_WORKSPACE. This requires a transport-authenticated user/device
   without a managed Agent caller; native resume, fork and new Zone creation cannot change this binding.
+- After freeing storage, a transport-approved user/device can release only the original active creation's current backoff with `amux agent creation continue --host HOST --operation-id ORIGINAL_CID [--session EXACT_SID]`. Managed Agent callers are refused. Use the original CID, not a new operation; an optional known SID is an extra fence. `woken` confirms scheduling only, not recovered storage, Start or delivered input. `not-waiting` stores no future wake credit; `unknown` does not reconstruct a missing/aborted owner or authorize another create. Inspect stays an observation; neither inspect nor repeating agent open wakes this wait. Keep the original creation result and unknown effects unchanged.
 - Original creator/child relations: amux agent spawn --help. Keep the original creation operation after an unknown receipt; never create a replacement to recover its result.
 - Saved native conversations or resume: amux agent native --help.
 - Original output, input mailbox, history or conversation: use that agent action's --help.
