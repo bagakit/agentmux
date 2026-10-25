@@ -763,11 +763,15 @@ function WorkbenchRegionSlot({ regionId }: { regionId: string }) {
 }
 function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
   useWorkbenchWindowRevision()
+  const targets = useContext(WorkbenchBrowserTargetsContext)
+  const windowTarget = targets.find(target => target.windowTarget?.kind === 'region' &&
+    target.windowTarget.tabId === props.tab.id && target.windowTarget.regionId === props.node.regionId)?.windowTarget
   const independentDocument = useWorkbenchDocument() !== document
   const parent = useWorkbenchBrowserPresentation()
   const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
   const homeId = `${parent.tabHostId}:region:${props.node.regionId}`
-  const detached = parent.reference && workbenchWindowPlacement({ kind: 'region', displayWorkspaceId: parent.reference.displayWorkspaceId, groupId: parent.reference.groupId, tabId: props.tab.id, regionId: props.node.regionId })
+  const detached = workbenchWindowPlacement(windowTarget ?? (parent.reference
+    ? { kind: 'region', displayWorkspaceId: parent.reference.displayWorkspaceId, groupId: parent.reference.groupId, tabId: props.tab.id, regionId: props.node.regionId } : null))
   const visible = Boolean(detached) || independentDocument || (target ? target.visible !== false : props.surfaceVisible)
   return <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       visible={visible}
@@ -775,7 +779,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       surface={target?.surface ?? parent.surface}
       survey={target ? target.surface === 'survey' : parent.survey} controlsOpen={target?.controlsOpen ?? parent.controlsOpen}
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
-      projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}
+      projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference} windowTarget={windowTarget}
       homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
       <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={detached || independentDocument ? visible : target ? visible : props.nativeSurfacesVisible}
         headerPortalTargetId={target?.surface === 'focus' ? null : target?.headerPortalTargetId ?? props.headerPortalTargetId} />
@@ -1695,6 +1699,7 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
           </StableWorkbenchView>)}
         <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
+          windowTarget={targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget}
           active={tabProjection?.active ?? true}
           visible={tabVisible}
           surface={tabProjection?.surface}
@@ -2230,7 +2235,9 @@ export function WorkspaceWorkbench({
         const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
         const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
           primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
-        const detached = primaryReference && workbenchWindowPlacement({ kind: 'tab', displayWorkspaceId: primaryReference.displayWorkspaceId, groupId: primaryReference.groupId, tabId: tab.id })
+        const windowTarget = targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget
+        const detached = workbenchWindowPlacement(windowTarget ?? (primaryReference
+          ? { kind: 'tab', displayWorkspaceId: primaryReference.displayWorkspaceId, groupId: primaryReference.groupId, tabId: tab.id } : null))
         const tabVisible = Boolean(detached) || (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <WorkbenchContentHost key={tab.id} workspaceId={workspaceId} tab={tab} targets={targets}
           homeId={homeId} targetId={targetId} tabProjection={tabProjection} regionTarget={regionTarget}

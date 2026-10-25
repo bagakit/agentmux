@@ -129,7 +129,7 @@ function DesktopApp() {
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
-  useWorkbenchWindows(!loading)
+  const workbenchWindows = useWorkbenchWindows(!loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
   const error = useAppStore((state) => state.error)
   const config = useAppStore((state) => state.config)
@@ -440,9 +440,24 @@ function DesktopApp() {
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
       })
     }
+    // A pending native window needs its original host even when its exact
+    // display occurrence is outside the current main surface or resource home.
+    for (const window of workbenchWindows) {
+      const target = window.target
+      if (!target) continue
+      const tab = tabs[target.tabId]
+      const regionId = target.kind === 'region' ? target.regionId : tab?.layout.activeRegionId
+      if (!tab || !regionId || !Object.hasOwn(tab.regions, regionId)) continue
+      const reference = { displayWorkspaceId: target.displayWorkspaceId, groupId: target.groupId, tabId: target.tabId, regionId }
+      if (!workbenchDisplayReferenceMatches(layouts[target.displayWorkspaceId], reference)) continue
+      const existing = targets[tab.id]?.find(existing => !existing.windowTarget && existing.reference?.displayWorkspaceId === reference.displayWorkspaceId &&
+        existing.reference.groupId === reference.groupId && (existing.projection?.entity.kind !== 'region' || existing.reference.regionId === regionId))
+      if (existing) targets[tab.id] = targets[tab.id]!.map(value => value === existing ? { ...value, windowTarget: target } : value)
+      else append(tab.id, { hostId: `workbench-window-host:${window.windowId}`, active: false, visible: false, surface: 'space', reference, windowTarget: target })
+    }
     return targets
   }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
-    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
+    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference, workbenchWindows])
   const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
   useEffect(() => { if (mainSurface === 'recall') setRecallVisited(true) }, [mainSurface])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')

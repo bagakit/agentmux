@@ -4,6 +4,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { sameWorkbenchProjectionSelection, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { desktopElementVisible } from './desktop-presentation'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
+import type { AppWindowTarget } from '@agentmux/core/control'
 
 /** Spatial visibility alone does not authorize launcher activation or a focus move. */
 export type BrowserControlConfirmation = (regionId: string, unconfirmed: boolean) => void
@@ -14,7 +15,7 @@ export function useWorkbenchPresentationActive(): boolean { return useContext(Wo
 export function useWorkbenchRetainedRegionId(): string | null { return useContext(WorkbenchPresentationContext).retainedRegionId }
 export function useWorkbenchBrowserPresentation() { return useContext(WorkbenchPresentationContext) }
 export type WorkbenchViewTargets = Readonly<Record<string, readonly WorkbenchViewTarget[]>>
-export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'recall' | 'survey' | 'focus' | 'space' | 'mote'; browserStartPage?: BrowserStartPageConfig; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
+export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'recall' | 'survey' | 'focus' | 'space' | 'mote'; browserStartPage?: BrowserStartPageConfig; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection; windowTarget?: AppWindowTarget }
 
 /** Resolve the original Browser occurrence inside an independently presented workface. */
 export function workbenchBrowserWindowTarget(targets: readonly WorkbenchViewTarget[], owner: WorkbenchPresentation, regionId: string): WorkbenchViewTarget | undefined {

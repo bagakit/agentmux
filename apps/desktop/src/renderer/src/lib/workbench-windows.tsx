@@ -15,7 +15,14 @@ type OpenWindow = { window: Window; document: Document; identity: WorkbenchWindo
 const opened = new Map<string, OpenWindow>()
 const listeners = new Set<() => void>()
 let snapshot: { windows: AppWindowDescriptor[]; issue: string | null; operation: AppWindowOperation | null } = { windows: [], issue: null, operation: null }
-const notify = () => { snapshot = { ...snapshot }; for (const listener of listeners) listener() }
+type WindowTarget = Pick<AppWindowDescriptor, 'windowId' | 'target'>
+let windowTargets: readonly WindowTarget[] = []
+const notify = () => {
+  const targets = snapshot.windows.filter(window => window.target).map(({ windowId, target }) => ({ windowId, target }))
+  // Native geometry/focus observations do not remount unrelated workfaces.
+  if (JSON.stringify(targets) !== JSON.stringify(windowTargets)) windowTargets = targets
+  snapshot = { ...snapshot }; for (const listener of listeners) listener()
+}
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) }
 const publishIssue = (error: unknown) => { snapshot = { ...snapshot, issue: String(error) }; notify() }
 
@@ -116,7 +123,6 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal): Prom
     if (!tab || request.target.kind === 'region' && !Object.hasOwn(tab.regions, request.target.regionId)) { record.returned = true; notify(); return }
   }
   validateTarget(request.target)
-  if (!originalWorkbenchHost(request.target)) useAppStore.getState().activateTab(request.target.displayWorkspaceId, request.target.groupId, request.target.tabId, 'navigation')
   const host = await awaitOriginalWorkbenchHost(request.target, signal)
   if (request.action === 'prepare') return
   const identity = { windowId: request.windowId, documentGeneration: request.documentGeneration }
@@ -151,7 +157,8 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal): Prom
 }
 
 /** One original Renderer owns every shell; no child starts an App or Store. */
-export function useWorkbenchWindows(ready: boolean): void {
+export function useWorkbenchWindows(ready: boolean): readonly WindowTarget[] {
+  const windows = useSyncExternalStore(subscribe, () => windowTargets)
   useEffect(() => {
     if (!ready) return
     const abort = new AbortController()
@@ -169,6 +176,7 @@ export function useWorkbenchWindows(ready: boolean): void {
     void api.ui.workbenchWindows.ready().then(identity => { if (identity && !abort.signal.aborted) rootDocument = registerWorkbenchDocument(document, identity) }).catch(publishIssue)
     return () => { abort.abort(); stopRequests(); stopChanges(); rootEvents(); rootDocument?.(); for (const record of opened.values()) record.dispose(); opened.clear(); notify() }
   }, [ready])
+  return windows
 }
 function WorkbenchWindowToolbar({ record }: { record: OpenWindow }) {
   const warning = useNativeOverlayChrome(record.document, record.identity)
