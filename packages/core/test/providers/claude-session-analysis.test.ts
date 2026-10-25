@@ -1,8 +1,7 @@
 import { fixtureClock, fixtureDay } from '../helpers/fixture-values.js'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { nativeHistoryFixture, jsonl } from '../fixtures/native-history-session.js'
 import { AgentMuxClient } from '../../src/client.js'
-import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../../src/session-history.js'
 
 const fixtures: Awaited<ReturnType<typeof nativeHistoryFixture>>[] = []
 afterEach(async () => {
@@ -85,7 +84,7 @@ describe('Claude session analysis and native trace completeness', () => {
     const userItem = page.items[0]!
     expect(userItem.id).toBe('user-msg-1')
     expect(userItem.contentParts).toEqual([
-      { kind: 'text', text: 'Please run the build and inspect output.' }
+      { kind: 'text', text: 'Please run the build and inspect output.', contentEligibility: 'unconfirmed' }
     ])
     expect(userItem.startedAt).toBe(Date.parse(fixtureDay(1) + "T" + fixtureClock(12, 0, 0, "000") + "Z"))
 
@@ -96,13 +95,13 @@ describe('Claude session analysis and native trace completeness', () => {
     expect(asstItem.turnId).toBe('user-msg-1')
     expect(asstItem.startedAt).toBe(Date.parse(fixtureDay(1) + "T" + fixtureClock(12, 0, 5, "000") + "Z"))
     expect(asstItem.contentParts).toEqual([
-      { kind: 'reasoning', text: 'Checking build scripts in package.json first.' },
-      { kind: 'text', text: 'Executing build now.' },
+      { kind: 'reasoning', text: 'Checking build scripts in package.json first.', contentEligibility: 'public' },
+      { kind: 'text', text: 'Executing build now.', contentEligibility: 'public' },
       {
         kind: 'tool-call',
         name: 'Bash',
         input: '{"command":"pnpm --filter @agentmux/core build"}',
-        callId: 'call-bash-1'
+        callId: 'call-bash-1', contentEligibility: 'public'
       }
     ])
 
@@ -116,7 +115,7 @@ describe('Claude session analysis and native trace completeness', () => {
       {
         kind: 'tool-result',
         output: 'Build succeeded in 1.4s',
-        callId: 'call-bash-1'
+        callId: 'call-bash-1', contentEligibility: 'public'
       }
     ])
     // failed is absent when is_error is false
@@ -181,7 +180,7 @@ describe('Claude session analysis and native trace completeness', () => {
     // Pure reasoning is activity
     expect(page.items[0]!.kind).toBe('activity')
     expect(page.items[0]!.contentParts).toEqual([
-      { kind: 'reasoning', text: 'Analyzing trace in solitude without speaking.' }
+      { kind: 'reasoning', text: 'Analyzing trace in solitude without speaking.', contentEligibility: 'public' }
     ])
 
     // Pure tool-call is activity
@@ -191,7 +190,7 @@ describe('Claude session analysis and native trace completeness', () => {
         kind: 'tool-call',
         name: 'WebFetch',
         input: '{"url":"https://example.com"}',
-        callId: 'call-fetch-1'
+        callId: 'call-fetch-1', contentEligibility: 'public'
       }
     ])
 
@@ -202,7 +201,7 @@ describe('Claude session analysis and native trace completeness', () => {
         kind: 'tool-result',
         output: 'HTTP 500 Internal Server Error',
         callId: 'call-fetch-1',
-        failed: true
+        failed: true, contentEligibility: 'public'
       }
     ])
   })
@@ -223,8 +222,8 @@ describe('Claude session analysis and native trace completeness', () => {
     expect(item).not.toHaveProperty('startedAt')
     expect(item).not.toHaveProperty('turnId')
     expect(item.contentParts).toEqual([
-      { kind: 'text', text: 'Reply without timestamp' },
-      { kind: 'tool-call', name: 'AnonymousTool', input: 'plain-string-input' }
+      { kind: 'text', text: 'Reply without timestamp', contentEligibility: 'public' },
+      { kind: 'tool-call', name: 'AnonymousTool', input: 'plain-string-input', contentEligibility: 'public' }
     ])
     expect(item.contentParts[1]).not.toHaveProperty('callId')
   })
