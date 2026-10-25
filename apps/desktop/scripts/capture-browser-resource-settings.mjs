@@ -44,8 +44,8 @@ if (args[0] === '--prepare') {
     } }],
     build: { outDir: join(directory, 'compiled'), emptyOutDir: true, minify: false, sourcemap: false, chunkSizeWarningLimit: 20000 } })
   for (const file of ['apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
-    'apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
-    'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
+    'apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
+    'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
     'apps/desktop/src/renderer/src/styles/browser-resources.css',
     'apps/desktop/src/renderer/src/styles/settings-materials.css']) {
     assert.equal(sources[file]?.file, hash(await readFile(join(root, file))), 'Actual candidate Renderer input: ' + file)
@@ -60,8 +60,8 @@ if (args[0] === '--prepare') {
   console.log(JSON.stringify({ prepared: true, directory, next: 'Run this exact directory to capture the complete actual Settings viewports' }))
 } else {
   const source = JSON.parse(await readFile(sourceFile, 'utf8'))
-  const owning = ['apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
-    'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts', 'apps/desktop/src/renderer/src/styles/browser-resources.css',
+  const owning = ['apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
+    'apps/desktop/src/renderer/src/lib/browser-resource-view.ts', 'apps/desktop/src/renderer/src/styles/browser-resources.css',
     'apps/desktop/src/renderer/src/styles/settings-materials.css', 'apps/desktop/src/renderer/src/components/settings/BrowserSettingsPane.tsx',
     'apps/desktop/src/renderer/src/components/SettingsPanel.tsx', 'apps/desktop/scripts/fixtures/browser-resource-presentation/main.cjs']
   for (const file of owning) assert.equal(hash(await readFile(join(root, file))), source.sources[file].file, 'Prepared owning product input remains exact: ' + file)

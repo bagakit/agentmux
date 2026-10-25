@@ -48,11 +48,11 @@ function execute(env) {
 const mutants = [
   { id: 'uploads', file: 'apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx',
     expected: 'scopes the real retained Settings observer to active visibility and preserves catalog pairing and automation draft' },
-  { id: 'shared', file: 'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
+  { id: 'shared', file: 'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
     expected: 'shares one all-Workspace directory and preserves partial positions while deduplicating exact process births' },
-  { id: 'receipt', file: 'apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
+  { id: 'receipt', file: 'apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
     expected: 'dispatches one finite release batch serially through preload and keeps each original mixed receipt without retry' },
-  { id: 'selection', file: 'apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
+  { id: 'selection', file: 'apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
     expected: 'keeps the selected original document when refresh, filtering and new pages change the visible directory' }
 ].filter(mutation => !mutationArgument || mutation.id === mutationArgument)
 assert.ok(mutants.length > 0, 'A selected mutation must identify an actual production boundary')
@@ -86,8 +86,8 @@ async function run(label, mutation) {
     if (input.mutated) { changed.add(input.path); assert.notEqual(input.served, input.source) }
     else assert.equal(input.served, input.source)
   }
-  for (const file of ['apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
-    'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
+  for (const file of ['apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
+    'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
     'apps/desktop/src/renderer/src/components/SettingsPanel.tsx',
     'apps/desktop/src/renderer/src/components/settings/BrowserSettingsPane.tsx',
     'apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx',
@@ -158,8 +158,8 @@ try {
     const nativePath = resolve(root, review.nativeReceipt), nativeBytes = await readFile(nativePath), native = JSON.parse(nativeBytes)
     assert.equal(native.passed, true); assert.equal(native.capture.passed, true); assert.equal(native.capture.cleanup.windowDestroyed, true)
     assert.equal(native.capture.frames.length, 2); assert.equal(review.files.length, 2)
-    for (const file of ['apps/desktop/src/renderer/src/components/settings/BrowserResources.tsx',
-      'apps/desktop/src/renderer/src/components/settings/browser-resource-view.ts',
+    for (const file of ['apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
+      'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
       'apps/desktop/src/renderer/src/styles/browser-resources.css', 'apps/desktop/src/renderer/src/styles/settings-materials.css']) {
       const current = hash(await readFile(join(root, file)))
       assert.equal(native.sources[file]?.file, current, 'The actual visual surface remains exact: ' + file)
