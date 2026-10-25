@@ -84,6 +84,10 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 同一 Hosted consumer 中，重叠的显式 `connectRuntime()` 共享尚未完成的原准备，包括前后 owner discovery 和 Host 准备。成功或失败后立即释放共享 Promise，后续调用重新准备；disconnect／dispose 清除该 consumer 的共享引用，旧调用收尾不能清掉新的准备。此处不缓存 readiness，不合并输入，不让独立 metadata reader 等待 Native 准备；每次输入仍保留自己的顺序、目标、byte cursor 与回执。
 
+本机 Host 的启动探测属于物理连接建立。[Desktop connector](../../apps/desktop/src/main/desktop-host.ts) 将原服务准备注入 [RPC client](../../packages/core/src/public-rpc-client.ts) 的 `prepareUnixConnection`；同一 Unix 通道的原 `ready` 覆盖准备与连接，后续请求、订阅和显式 owner discovery 复用该通道，不重复探测 socket。通道关闭后，新通道重新准备；没有健康状态缓存或定时探测。这个本地 SDK 注入点不进入 wire，也不替代上表的 Native 准入和每次操作的身份检查。
+
+单个 reader 取消只结束其等待；共享通道的准备由通道生命周期持有，RPC client 释放后迟到的准备不能再打开 socket。需要原设备授权的 forwarding 仍使用独立认证连接，每条物理连接单独准备，不混入普通共享通道。准备或连接失败不自动重发请求，已派发的未知结果保持原身份；平台服务启动仍由 Desktop 的原服务 owner 管理，reader 释放不停止健康 Host。
+
 一次 GUI 原终端附着的实际链路是：
 
 1. `TerminalView` 经 [preload](../../apps/desktop/src/preload/index.ts) 的 `api.sessions.attach` 或 `refreshAttachment`，进入 [Main IPC](../../apps/desktop/src/main/ipc.ts) 与 `RuntimeController.attachSession`。
