@@ -1,3 +1,4 @@
+import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseMessageFieldPage, validateMessageFieldRead } from './agent-message-field.js'
 import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
@@ -343,6 +344,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
       const input = parseAgentExecutionBinding(params)
       if (method === 'agent.execution.binding' && value === null) return value as unknown as Record<string, unknown>

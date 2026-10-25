@@ -1,3 +1,4 @@
+import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
 import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
@@ -138,7 +139,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -324,6 +325,7 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'providerId', 'status', 'semantic', 'readiness', 'since', 'activitySince', 'cursor', 'limit'],
   'agent.inspect': ['target'],
+  'agent.creation.continue': ['hostId', 'createOperationId', 'agentSessionId'],
   'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
   'agent.execution.create': AGENT_EXECUTION_CREATE_FIELDS,
   'agent.execution.binding': ['bindingId'],
@@ -1021,6 +1023,23 @@ export class AgentMuxRpcService {
       }) as AgentMuxRpcResult<M>
     }
     await this.assertRuntimeFence(context)
+    if (method === 'agent.creation.continue') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+        'Continuing a creation wait requires a transport-approved user or device, without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+      rpcString(context.principal.id, 'Transport principal')
+      const request = parseCreationContinueParams(params), { hostId, ...input } = request
+      // This action borrows an existing exact owner; it never opens a replacement local Runtime.
+      const scopes = (await this.ports.coreClients?.() ?? []).filter(scope => scope.hostId === hostId)
+      if (scopes.length !== 1 || this.endpointUnverified(scopes[0]!.client)) throw new AgentMuxError(
+        'The original creation Host is unavailable or ambiguous. No creation was reconstructed.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted(); await this.inputCallContext(context).assertCurrent?.()
+      context.signal?.throwIfAborted()
+      const scope = scopes[0]!
+      const receipt = scope.client.forwardRpc
+        ? parseCreationContinueResult(await scope.client.forwardRpc('agent.creation.continue', { ...input, hostId: 'local' }, await this.inputForwardContext(context)), { ...input, hostId: 'local' })
+        : parseCreationContinueReceipt(await scope.client.continueAgentCreation(input), input)
+      return { ...receipt, hostId } as AgentMuxRpcResult<M>
+    }
     if (isApplicationAccessMethod(method)) {
       const input = parseApplicationAccessParams(method,params)
       // This domain executes private configured application connectors. An Agent cannot self-approve.

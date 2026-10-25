@@ -32,6 +32,7 @@ export async function retryAgentCreationResources<T>(input: {
   operationId: string | (() => string | undefined); signal: AbortSignal
   attempt(context: AgentCreationResourceContext): Promise<T>
   waiting(error: unknown, retryAfterMs: number): void
+  setWake?(wake: (() => boolean) | undefined): void
 }): Promise<T> {
   let retryAfterMs = 1_000
   let waitRevision = 0
@@ -39,8 +40,26 @@ export async function retryAgentCreationResources<T>(input: {
   const wait = async (error: unknown) => {
     lastFailure = error
     waitRevision++
-    input.waiting(error, retryAfterMs)
-    try { await delay(retryAfterMs, undefined, { signal: input.signal }) } catch { throw error }
+    if (input.signal.aborted) throw error
+    const sleep = new AbortController()
+    let woken = false
+    const cancel = () => sleep.abort(input.signal.reason)
+    input.signal.addEventListener('abort', cancel, { once: true })
+    input.setWake?.(() => {
+      if (sleep.signal.aborted) return false
+      woken = true
+      input.setWake?.(undefined)
+      sleep.abort()
+      return true
+    })
+    try {
+      input.waiting(error, retryAfterMs)
+      await delay(retryAfterMs, undefined, { signal: sleep.signal })
+    } catch { if (!woken || input.signal.aborted) throw error }
+    finally {
+      input.setWake?.(undefined)
+      input.signal.removeEventListener('abort', cancel)
+    }
     if (input.signal.aborted) throw error
     retryAfterMs = Math.min(retryAfterMs * 2, 30_000)
   }

@@ -1,3 +1,4 @@
+import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { mintObjectId } from './object-id.js'
 import { parseTerminalRecoveryInput } from './terminal-recovery.js'
@@ -241,6 +242,10 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if (invocation.method === 'continueAgentCreation') {
+      if (invocation.args.length !== 1) throw new AgentMuxError('Creation continuation accepts one original target.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = parseCreationContinueInput(invocation.args[0])
+    }
     if (invocation.method === 'readAgentMessageQueuePath' && invocation.args.length !== 0)
       throw new AgentMuxError('Message namespace reading accepts no arguments.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'recoverTerminal') {
@@ -324,7 +329,7 @@ export class AgentMuxHostedRuntimeService {
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
-    const modifying = continuityControl || invocation.method === 'broadcastMessages' || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
+    const modifying = invocation.method === 'continueAgentCreation' || continuityControl || invocation.method === 'broadcastMessages' || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
     // Match the public human question-reply owner. Only transport-approved
     // user/device intent supplies human authorship; a wire claim cannot name an Agent.
@@ -387,6 +392,10 @@ export class AgentMuxHostedRuntimeService {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
       }
+      if (invocation.method === 'continueAgentCreation') {
+        await context.assertCurrent?.()
+        context.signal?.throwIfAborted(); this.assertFence(p.fence)
+      }
       const pending = operation.apply(this.client, rawAgentInput ? [invocation.args[0], rawContext]
         : rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]
         : (invocation.method === 'readAgentInputMailbox' || invocation.method === 'readAgentInputChanges' || invocation.method === 'readAgentInputResource') ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
@@ -404,6 +413,7 @@ export class AgentMuxHostedRuntimeService {
       value = invocation.method === 'sessionHistorySources' ? await observe(Promise.resolve(pending), context.signal) : await pending
     }
     } catch (error) { await recordActivity('unknown'); throw error }
+    if (invocation.method === 'continueAgentCreation') value = parseCreationContinueReceipt(value, invocation.args[0])
     if (invocation.method === 'sessionHistoryResource') {
       context.signal?.throwIfAborted(); this.assertFence(p.fence)
     }

@@ -41,6 +41,7 @@ export { type AgentMuxCreationRuntime, type AgentMuxTerminalCreationRetirement, 
 export * from './session-history-content.js'
 export * from './agent-creation-admission.js'
 export * from './agent-creation-authority.js'
+export * from './agent-creation-continue.js'
 export * from './agent-spawn.js'
 export type * from './agent-spawn-query.js'
 export type * from './agent-discovery.js'

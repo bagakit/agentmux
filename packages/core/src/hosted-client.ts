@@ -1,3 +1,4 @@
+import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
 import { parseMessageFieldPage } from './agent-message-field.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseReadingDiagnosticSourceRead, parseReadingDiagnosticSourceFind, type ReadingDiagnosticExactTarget, type ReadingDiagnosticFindParams } from './reading-diagnostic-query.js'
@@ -242,6 +243,7 @@ export async function connectHostedAgentMux(options: {
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
     if (method === 'readAgentMessageQueuePath') return parseHostedMessageQueuePath(decoded)
+    if (method === 'continueAgentCreation') return parseCreationContinueReceipt(decoded, parseCreationContinueInput(wireArgs[0]))
     if (method === 'recoverTerminal') return parseTerminalRecoveryResult(decoded, parseTerminalRecoveryInput(wireArgs[0]))
     if (method === 'findAgentStartupDiagnostics') return parseStartupDiagnosticRead(decoded, wireArgs[0] as AgentStartupDiagnosticRecentTarget)
     if (method === 'readAgentStartupDiagnostic') {

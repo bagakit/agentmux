@@ -227,6 +227,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'name.confirm': { operationId: string }
   whoami: Record<string, never>
   'agent.ls': import('./agent-discovery.js').AgentDiscoveryFilters
+  'agent.creation.continue': import('./agent-creation-continue.js').AgentMuxCreationContinueParams
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
   'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperationKey & { hostId: string }
   'agent.execution.create': import('./agent-execution-coordinator.js').AgentExecutionOpenInput
@@ -327,6 +328,7 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
     view: import('./agent-self-context.js').SelfViewOutcome; unavailable: AgentMuxRpcUnavailable[] }
   'agent.ls': import('./agent-discovery.js').AgentDiscoveryPage
+  'agent.creation.continue': import('./agent-creation-continue.js').AgentMuxCreationContinueResult
   'agent.inspect': AgentMuxRpcAgentInspection
   'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperation | null
   'agent.execution.create': { session: import('./types.js').AgentMuxAgentSession; execution: import('./agent-execution-coordinator.js').AgentExecutionInspection }
@@ -451,7 +453,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'notebook.scan': 'long', 'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
-  whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.execution.inspect': 'short', 'agent.execution.create': 'long', 'agent.execution.binding': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.create': 'long', 'agent.execution.binding': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.automation.pause': 'short', 'agent.automation.inspect': 'short',
   'agent.input.changes': 'short', 'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.resource': 'long', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.broadcast': 'long', 'agent.broadcast.inspect': 'short', 'agent.discuss': 'long', 'agent.handoff': 'short',

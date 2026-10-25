@@ -18,6 +18,7 @@ import { parseTerminalRecoveryInput, type AgentMuxTerminalRecoveryInput, type Ag
 import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
 import { retryAgentCreationResources, type AgentCreationResourceContext } from './agent-creation-resource-retry.js'
+import { parseCreationContinueInput, type AgentMuxCreationContinueInput, type AgentMuxCreationContinueReceipt } from './agent-creation-continue.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/resume-contract.js'
 import { runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
@@ -296,6 +297,7 @@ type AgentCreationExecution = AgentCreationResourceContext & {
 }
 type ActiveAgentCreation = {
   kind: 'direct' | 'host'
+  wake?: () => boolean
   input: AgentMuxAgentCreateInput | AgentMuxHostAgentCreateInput
   agentSessionId?: string
   controller: AbortController
@@ -4919,6 +4921,19 @@ export class AgentMuxClient {
       await this.createAgentWithDeliveryAttempt(frozen as AgentMuxAgentCreateInput, undefined, execution))
   }
 
+  /** Release only this original live creation's currently installed resource backoff. */
+  async continueAgentCreation(input: AgentMuxCreationContinueInput): Promise<AgentMuxCreationContinueReceipt> {
+    const request = parseCreationContinueInput(input)
+    const entry = this.activeCreations.get(request.createOperationId)
+    if (!entry || entry.controller.signal.aborted) return { createOperationId: request.createOperationId, status: 'unknown' }
+    if (request.agentSessionId !== undefined && entry.agentSessionId === undefined)
+      return { createOperationId: request.createOperationId, status: 'unknown' }
+    if (request.agentSessionId !== undefined && request.agentSessionId !== entry.agentSessionId) throw new AgentMuxError(
+      'The original creation belongs to another Session. Its current request and wait are retained.', 'AGENT_CREATION_OPERATION_CONFLICT')
+    return { createOperationId: request.createOperationId, ...(entry.agentSessionId ? { agentSessionId: entry.agentSessionId } : {}),
+      status: entry.wake?.() ? 'woken' : 'not-waiting' }
+  }
+
   private async runAgentCreation(kind: ActiveAgentCreation['kind'], input: ActiveAgentCreation['input'],
     execute: (input: ActiveAgentCreation['input'], execution: AgentCreationExecution) => ReturnType<AgentMuxClient['createAgentWithDelivery']>
   ): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
@@ -4950,6 +4965,7 @@ export class AgentMuxClient {
       return await retryAgentCreationResources({
         operationId: () => entry.agentSessionId ? agentLifecycleOperationIdentity('create', entry.agentSessionId, cid) : undefined,
         signal: controller.signal,
+        setWake: wake => { if (wake) entry.wake = wake; else delete entry.wake },
         attempt: async ({ preparation, waitRevision }) => {
           if (!entry.agentSessionId) bind(await preparation(() => this.resolveAgentCreationSessionId(cid)))
           execution ??= { preparation, waitRevision, signal: controller.signal }
