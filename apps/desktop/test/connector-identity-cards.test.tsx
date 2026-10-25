@@ -1,15 +1,18 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { moteBotUi } from './fixtures/mote-bot-ui'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 beforeEach(async () => {
-  f = await moteBotUi()
+  // The Mote directory belongs to the original local owner; its RPC remains real.
+  f = await moteBotUi({ hostId: 'local' })
   vi.spyOn(api.scratch, 'listTopics').mockImplementation(async () => f.topics.list(f.workspace))
   await act(async () => { await useAppStore.getState().refreshScratchTopics(f.workspace.id, true) })
 })
@@ -26,12 +29,23 @@ async function click(selector: string) {
     node.click()
   })
 }
-async function library() { await f.render(0, true); await ready('[data-mote-card-action="create"]') }
+async function library() { await f.render(0, true); await click('[data-mote-directory]'); await ready(`[data-mote-identity="${f.scopes[0]!.topic.id}"]`) }
 async function create() {
-  await library(); await act(async () => card().querySelector<HTMLButtonElement>('[data-mote-card-action="create"]')!.click())
+  await library()
+  await vi.waitFor(async () => { await f.settle(); expect(card().dataset.identityState).toBe('unbound') })
+  await act(async () => card().querySelector<HTMLButtonElement>('.connector-mote-card__identity')!.click())
   await f.click('Sign in & continue')
   await vi.waitFor(() => expect(f.beginCount).toBe(1), { timeout: 3500 })
   await ready('[data-mote-enrollment-action="confirm-account"]')
+  expect(f.creationCount).toBe(0)
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const summary = document.querySelector<HTMLElement>('.connector-account-summary')!
+  expect(summary).not.toBeNull()
+  expect(summary.querySelector('img')).toBeNull()
+  await copyConnectorIdentity(summary, 'Copy person name', 'Original account')
+  await copyConnectorIdentity(summary, 'Copy tenant name', 'Original enterprise')
+  await copyConnectorIdentity(summary, 'Copy Account ID', 'mote-user-1')
+  await copyConnectorIdentity(summary, 'Copy Tenant ID', 'mote-tenant')
   expect(f.creationCount).toBe(0)
   const forward = f.connectionCalls.getMockImplementation()!
   const held: Array<() => void> = []
@@ -79,11 +93,16 @@ it('opens the identity library and the original Mote detail without accessing th
 })
 
 it('one contextual action creates with the exact saved Mote name and avatar, then unbinds only its default through the original writer', async () => {
+  const savedProfile = await f.input('original-saved-profile-observation')
   await create()
   const input = f.parentCalls.mock.calls.find(([method]) => method === 'space.mote.connection.create')![1] as any
-  expect(input.source.target).toEqual(f.target()); expect(input.avatar).toBe('include-saved')
+  expect(input.source).toEqual(savedProfile.source)
+  expect(input.source.target).toEqual(f.target())
+  expect(input.desired).toEqual(savedProfile.desired)
+  expect(input.desired.name).toBe('Saved public name')
   const operation = (await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
-  expect(operation.snapshot.name).toBe('Saved public name'); expect(operation.snapshot.avatarSha256).toMatch(/^[a-f0-9]{64}$/)
+  expect(operation.snapshot.name).toBe('Saved public name')
+  expect(operation.snapshot.avatarSha256).toBe(createHash('sha256').update(Buffer.from(savedProfile.desired.avatar.pngDataUrl.slice('data:image/png;base64,'.length), 'base64')).digest('hex'))
   await f.click('Manage bot application'); await f.click('Back to Mote bot'); await ready('[data-mote-identity-unbind]')
   await f.settle(); expect(f.beginCount).toBe(1)
   const before = (await f.client.call('connection.ls', {})).connections
@@ -92,8 +111,9 @@ it('one contextual action creates with the exact saved Mote name and avatar, the
   await vi.waitFor(async () => expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values?.connection).toBeNull())
   expect(f.saves.mock.calls.at(-1)![0].values).toEqual({ connection: null })
   expect((await f.client.call('connection.ls', {})).connections).toEqual(before)
-  await f.click('Back to bots'); await ready('[data-mote-card-action="create"]')
-  expect(card().dataset.identityState).toBe('unbound'); expect(f.creationCount).toBe(1)
+  await f.click('Back to Motes')
+  await vi.waitFor(async () => { await f.settle(); expect(card().dataset.identityState).toBe('unbound') })
+  expect(card().textContent).toContain('No bot linked'); expect(f.creationCount).toBe(1)
 })
 
 it('a replacement keeps the old identity until the same new application is saved, without deleting the old application', async () => {

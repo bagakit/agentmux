@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer, AgentMuxRpcService } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import { ConnectionSetupHost } from '../../../packages/connectors/src/connection-setup.js'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { AgentMuxError } from '@agentmux/core'
@@ -16,15 +16,18 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { setBotTaskSelection, useAppStore } from '../src/renderer/src/store'
 import { managementTaskScope, restoredManagementTask } from '../src/renderer/src/lib/bot-task-selection'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { moteEnrollmentWeb } from './fixtures/mote-enrollment-web'
 import { imagePng } from './fixtures/mote-identity-image'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 
 const dom = composerDOM(), goal = { kind: 'agent-conversation', interaction: 'messages' } as const
 const TOKEN = 'fixture-settings-private-qr', FLOW = 'fixture-settings-private-flow'
 const USER = 'fixture-settings-account-id', TENANT = 'fixture-settings-enterprise-id', SECRET = 'fixture-settings-saved-secret'
 type Call = { method: ConnectionMethod; input: unknown; result?: unknown; delivered?: boolean; error?: { code?: string; message: string } }
 let directory: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
+let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>>, registration: ReturnType<typeof registerConnectorIpc>
+const hostingTarget = { hostId: 'local', runtimeId: 'original-settings-auth-runtime' }
 let forward: typeof api.connections.call, calls: Call[], beforeCall: ((call: Call) => Promise<void>) | undefined, afterCall: ((call: Call) => Promise<void>) | undefined
 let native: Array<{ url: string; at: number }>, trusted: ReturnType<typeof vi.fn>, secureAvailable: boolean
 let reopen: () => void
@@ -32,6 +35,12 @@ const releases: Array<() => void> = []
 
 beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  // New effect intents await the original Workbench writer; use its real startup/hydration.
+  localStorage.removeItem('agentmux-workbench-v1')
+  vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  await useAppStore.persist.rehydrate()
+  const stopStartup = await useAppStore.getState().initialize(); stopStartup()
   useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-auth-'))
   secureAvailable = true
@@ -44,15 +53,28 @@ beforeEach(async () => {
   server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Connection authentication may not borrow an Agent Runtime') } })
   await server.start()
+  rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
   trusted = vi.fn(); calls = []; native = []; beforeCall = undefined; afterCall = undefined
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: server.path,
-    secrets: { store: input => services.secrets.store(input), inspect: operationId => services.secrets.inspect(operationId) } })
-  forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+  const runtime: import('../src/main/connection-host-ipc').ConnectionHostIpc = {
+    connectionHostingTarget: async () => structuredClone(hostingTarget),
+    callConnectionHost: async (target, method, input) => {
+      expect(target).toEqual(hostingTarget)
+      return await rpc.call(method, input)
+    },
+    watchConnectionMetadata: async (target, handlers) => {
+      expect(target).toEqual(hostingTarget)
+      return await rpc.subscribe('connection.metadata.watch', {}, handlers)
+    }
+  }
+  registration = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted,
+    runtime, metadata: { publish() {}, observation() {} } })
+  vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
+  forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M], target?: typeof hostingTarget): Promise<ConnectionResultMap[M]> => {
     const call: Call = { method, input: structuredClone(input) }; calls.push(call)
     await beforeCall?.(call)
     try {
-      const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, input))
+      const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, input, target))
       call.result = structuredClone(result)
       await afterCall?.(call)
       call.delivered = true
@@ -68,6 +90,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   for (const release of releases.splice(0)) release()
+  registration?.dispose(); await rpc?.dispose()
   await server?.stop()
   services?.close(); await rm(directory, { recursive: true, force: true })
   vi.restoreAllMocks(); vi.unstubAllGlobals()
@@ -79,9 +102,12 @@ function nativeRoute(options: { scanned?: boolean; poll?: () => Response | Promi
   return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const target = new URL(String(url)); native.push({ url: target.href, at: Date.now() })
     expect(init?.redirect).toBe('manual')
-    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: {
-      'x-flow-key': FLOW, 'set-cookie': 'session=fixture-settings-private-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly'
-    } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') {
+      const response = Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: { 'x-flow-key': FLOW } })
+      // Main consumes a Node HTTP response. DOM Response constructors strip Set-Cookie.
+      response.headers.append('set-cookie', 'session=fixture-settings-private-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly')
+      return response
+    }
     if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') {
       expect(new Headers(init?.headers).get('x-flow-key')).toBe(FLOW)
       expect(JSON.parse(String(init?.body))).toEqual({ biz_type: null })
@@ -112,7 +138,9 @@ async function click(selector: string) {
 }
 function panel() { return dom.container.querySelector<HTMLElement>('[data-management-setup]') }
 function stage() { return panel()?.querySelector<HTMLElement>('[data-management-stage]')?.dataset.managementStage ?? panel()?.dataset.managementStage }
-async function waitStage(value: string) { await ready(() => expect(stage()).toBe(value)) }
+async function waitStage(value: string) { await ready(() => expect(stage(), JSON.stringify({ panel: panel()?.textContent,
+  operations: calls.filter(call => call.method === 'connection.setup.begin' || call.method === 'connection.setup.advance').map(call => ({ method: call.method, result: call.result, error: call.error })),
+  nativeEndpoints: native.map(call => new URL(call.url).pathname) })).toBe(value)) }
 function setupCalls(method: ConnectionMethod) { return calls.filter(call => call.method === method) }
 function view(call: Call) { return call.result as ConnectionSetupView }
 function beginInput(operationId: string, record: ConnectionRecord): ConnectionSetupBegin {
@@ -179,6 +207,7 @@ async function enrollmentWithInitialSetup(pauseBeforeSecureHandoff = false) {
 }
 
 it('the real Settings task follows native scan and phone confirmation, then explicitly confirms the exact account and keeps the saved bot separate', async () => {
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const saved = await seed()
   const off = await forward('connection.service.configure', { operationId: 'settings-traffic-off', expectedRevision: 0, service: { enabled: false } })
   calls = []; vi.stubGlobal('fetch', vi.fn(nativeRoute({ scanned: true })))
@@ -190,6 +219,14 @@ it('the real Settings task follows native scan and phone confirmation, then expl
   expect(original).toMatchObject({ connectionId: saved.connection.config.connectionId, expectedConnectionRevision: saved.connection.revision, goal })
   await waitStage('scanned'); await waitStage('account')
   expect(panel()?.textContent).toContain(USER); expect(panel()?.textContent).toContain(TENANT)
+  const accountSummary = panel()!.querySelector<HTMLElement>('.connector-account-summary')!
+  expect(accountSummary).not.toBeNull()
+  expect(accountSummary.querySelector('img')).toBeNull()
+  expect(accountSummary.textContent).toContain('Account name unavailable')
+  expect(accountSummary.textContent).toContain('Tenant name unavailable')
+  expect(accountSummary.textContent).not.toContain('open_id')
+  await copyConnectorIdentity(accountSummary, 'Copy Account ID', USER)
+  await copyConnectorIdentity(accountSummary, 'Copy Tenant ID', TENANT)
   expect(setupCalls('connection.setup.advance').filter(call => (call.input as ConnectionSetupAdvance).decision.value === 'confirm')).toEqual([])
   const account = view(setupCalls('connection.setup.advance').at(-1)!), action = account.continuation!.actions.find(value => value.kind === 'confirm-account')!
   expect(action).toBeDefined()

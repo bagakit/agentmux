@@ -8,6 +8,7 @@ vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 
 let lose = false
 beforeEach(() => { lose = false })
@@ -17,6 +18,7 @@ const f = connectorJourneyFixture({ publication: true, platform: async request =
     return { code: 0, data: { message_id: 'om_original_dialog', chat_id: 'oc_original_dialog', msg_type: 'interactive' } }
   }
   if (request.url?.endsWith('/members')) return { code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_ada', name: 'Ada · Research and Engineering Collaboration' }], has_more: false } }
+  if (request.url?.includes('/contact/v3/users/ou_saved')) return { code: 0, data: { user: { open_id: 'ou_saved', name: 'Saved participant outside this member page', avatar: { avatar_240: 'https://cdn.example/saved-participant.png' } } } }
   return { code: 0, data: { name: 'Original collaboration group', chat_status: 'normal', chat_mode: 'group' } }
 } })
 const wait = (check: () => void) => vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 8000 })
@@ -31,14 +33,48 @@ async function bind() {
 async function open() { await f.mount(); await f.journey('details'); await wait(() => expect(traffic()).not.toBeNull()) }
 const nativeRow = (id: string, type: 'user' | 'assistant') => JSON.stringify({ sessionId: 'original-native', uuid: id, type, message: { role: type, content: [{ type: 'text', text: 'Original private source ' + id }] } }) + '\n'
 
+it('shows the original cached profile for an authorized person outside the current member page without changing its grant', async () => {
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const binding = await bind(), actor = { application: binding.application, idType: 'open_id', userId: 'ou_saved' }
+  const grant = await f.forward('connection.grant', { operationId: 'saved-member-access', bindingId: binding.bindingId,
+    expectedBindingRevision: binding.revision, grantId: 'saved-member-access', expectedRevision: null,
+    actor, capabilities: ['input', 'answer'], state: 'active' }, f.hostingTarget)
+  expect(grant.state).toBe('applied')
+  await f.forward('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1,
+    subject: { kind: 'actor', actor } }, f.hostingTarget)
+  const before = writes()
+  await open()
+  await act(async () => dialog().querySelector<HTMLDetailsElement>('[data-connection-panel="members"] > summary')!.click())
+  const row = () => [...dialog().querySelectorAll<HTMLElement>('[data-member-row]')].find(node => node.dataset.memberRow === JSON.stringify(['open_id', 'ou_saved']))!
+  await wait(() => expect(row()?.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example/saved-participant.png'))
+  await copyConnectorIdentity(row(), 'Copy person name', 'Saved participant outside this member page')
+  await act(async () => row().querySelector<HTMLButtonElement>('[data-member-edit]')!.click())
+  expect(row().textContent).toContain('Not in the current member page')
+  await copyConnectorIdentity(row(), 'Copy open_id', 'ou_saved')
+  const choices = () => [...row().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].map(input => input.checked)
+  expect(choices()).toEqual([true, true, false])
+  await act(async () => row().querySelector('img')!.dispatchEvent(new Event('error')))
+  expect(row().querySelector('img')).toBeNull()
+  expect(row().textContent).toContain('Saved participant outside this member page')
+  expect(choices()).toEqual([true, true, false])
+  expect(writes()).toBe(before)
+  const retained = await f.forward('connection.binding.inspect', { operationId: 'saved-member-access' }, f.hostingTarget)
+  expect(retained.operation).toEqual(grant)
+  expect(retained.grants).toHaveLength(1)
+  expect(retained.grants[0]).toMatchObject({ actor, capabilities: ['input', 'answer'], state: 'active' })
+}, 30_000)
+
 it('shows source failure together with content gaps and original platform receipts through the real Host, RPC and dialog without writes', async () => {
   const binding = await bind(), publication = f.services.publication!
   const speech = () => publication.store.list(binding).filter(row => row.reference.source.kind !== 'binding-operation')
+  const publicationFacts = () => JSON.stringify({ observation: publication.observation(binding.bindingId, binding.revision),
+    states: speech().map(row => ({ state: row.state, source: row.reference.source.kind })),
+    nativeEndpoints: f.platformCalls.map(call => ({ method: call.method, url: call.url })) })
   await appendFile(f.original.transcript, nativeRow('first-answer', 'assistant'))
-  await wait(() => expect(speech().some(row => row.state === 'confirmed')).toBe(true))
+  await wait(() => expect(speech().some(row => row.state === 'confirmed'), publicationFacts()).toBe(true))
   lose = true
   await appendFile(f.original.transcript, nativeRow('old-unknown-answer', 'assistant'))
-  await wait(() => expect(speech().some(row => row.state === 'unknown')).toBe(true))
+  await wait(() => expect(speech().some(row => row.state === 'unknown'), publicationFacts()).toBe(true))
   await appendFile(f.original.transcript, nativeRow('unqualified-user', 'user'))
   await wait(() => expect(publication.observation(binding.bindingId, binding.revision).reason).toBe('content-unconfirmed'))
   // Only native source availability is controlled. Existing store coverage/effects and safe Core RPC are real.
@@ -65,6 +101,7 @@ it('shows source failure together with content gaps and original platform receip
 }, 30_000)
 
 it('starts with compact saved member rows, preserves a dirty editor across disclosures and reopen, and retains facts after a failed check', async () => {
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await bind(); const before = writes(); await open()
   await wait(() => expect(dialog().querySelector('[data-member-row]')).not.toBeNull())
   const panel = () => dialog().querySelector<HTMLDetailsElement>('[data-connection-panel="members"]')!
@@ -73,9 +110,16 @@ it('starts with compact saved member rows, preserves a dirty editor across discl
   expect(row().textContent).toContain('No Agent access')
   expect(row().querySelector('[data-member-editor]')).toBeNull()
   expect(panel().querySelectorAll('h3')).toHaveLength(0)
+  await copyConnectorIdentity(row(), 'Copy person name', 'Ada · Research and Engineering Collaboration')
+  const group = dialog().querySelector<HTMLElement>('[data-entity-kind="group"]')!
+  expect(group).not.toBeNull()
+  await copyConnectorIdentity(group, 'Copy group name', 'Original collaboration group')
+  expect(row().textContent).toContain('No Agent access')
+  expect(writes()).toBe(before)
   await act(async () => { const button = row().querySelector<HTMLButtonElement>('[data-member-edit]')!; button.focus(); button.click() })
   expect(row().querySelector('[data-member-edit]')?.getAttribute('aria-expanded')).toBe('true')
   expect(row().querySelector('[data-member-editor]')).not.toBeNull()
+  await copyConnectorIdentity(row(), 'Copy open_id', 'ou_ada')
   const source = row().querySelector('select')!
   await act(async () => { source.value = 'room'; source.dispatchEvent(new Event('change', { bubbles: true })) })
   const checkbox = [...row().querySelectorAll<HTMLLabelElement>('label')].find(node => node.textContent === 'Send requests')!.querySelector('input')!

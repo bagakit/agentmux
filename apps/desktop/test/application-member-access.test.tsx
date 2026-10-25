@@ -10,12 +10,16 @@ import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { ExternalConnectionsSettings } from '../src/renderer/src/components/settings/ExternalConnectionsSettings'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
+import { channelMetadataSubjectKey, type ChannelMetadataSubject } from '@agentmux/core/connections'
+import { ConnectorEntityIdentity, ConnectorIdentityField } from '../src/renderer/src/components/ConnectorEntityIdentity'
+import { useConnectorEntityProfiles } from '../src/renderer/src/lib/use-connector-room-name'
 
 const creatorId = 'ou_creator'
 const f = connectorJourneyFixture({ platform: async request => {
   if (request.url?.endsWith('/bot/v3/info')) return { code: 0, bot: { open_id: 'ou_bot', app_name: 'Original bot' } }
   if (request.url?.includes('/application/v6/applications/')) return { code: 0, data: { app: { app_id: f.config.application.appId, creator_id: creatorId } } }
-  if (request.url?.includes('/contact/v3/users/')) return { code: 0, data: { user: { open_id: creatorId, name: 'Ava' } } }
+  if (request.url?.includes('/contact/v3/users/')) return { code: 0, data: { user: { open_id: creatorId, name: 'Ava', avatar: { avatar_240: 'https://cdn.example/ava-original.png' } } } }
   if (request.url?.endsWith('/members')) return { code: 0, data: { items: [{ member_id_type: 'open_id', member_id: creatorId, name: 'Ava' }, { member_id_type: 'open_id', member_id: 'ou_ben', name: 'Ben' }], has_more: false } }
   return { code: 0, data: { name: 'Original members group', chat_status: 'normal', chat_mode: 'group' } }
 } })
@@ -39,6 +43,77 @@ async function app() {
 }
 const actor = () => ({ application: f.config.application, idType: 'open_id', userId: creatorId })
 const applicationWrites = () => f.calls.filter(call => call.method === 'connection.application.access.configure')
+
+it('copies the observed original person name and full actor ID through Settings while a failed avatar preserves the original access proposal', async () => {
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await f.forward('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1,
+    subject: { kind: 'actor', actor: actor() } }, f.hostingTarget)
+  await app()
+  await wait(() => expect(appRow().querySelector('[data-entity-kind="person"] img')?.getAttribute('src')).toBe('https://cdn.example/ava-original.png'))
+  const before = choices(appRow()).map(input => input.checked)
+  await copyConnectorIdentity(appRow(), 'Copy person name', 'Ava')
+  await copyConnectorIdentity(appRow(), 'Copy open_id', creatorId)
+  const image = appRow().querySelector<HTMLImageElement>('[data-entity-kind="person"] img')!
+  await act(async () => image.dispatchEvent(new Event('error')))
+  expect(appRow().querySelector('[data-entity-kind="person"] img')).toBeNull()
+  expect(appRow().querySelector('.connector-entity__name')?.textContent).toBe('Ava')
+  expect(appRow().textContent).toContain(creatorId)
+  expect(choices(appRow()).map(input => input.checked)).toEqual(before)
+  expect(applicationWrites()).toHaveLength(0)
+  expect(clipboard.mock.calls.map(call => call[0])).toEqual(['Ava', creatorId])
+  facts.entityCopy = { originalName: 'Ava', originalId: creatorId, avatarFailurePreservedIdentity: true, capabilities: before, writes: applicationWrites().length }
+})
+
+it.each(['subject', 'hosting-owner'] as const)('keeps late entity profile observations inside their original %s and never adds a native lookup', async change => {
+  const original: ChannelMetadataSubject = { kind: 'actor', actor: { application: f.config.application, idType: 'open_id', userId: creatorId } }
+  const other: ChannelMetadataSubject = { kind: 'actor', actor: { ...original.actor, userId: 'ou_ben' } }
+  await f.forward('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: original }, f.hostingTarget)
+  const nativeReads = f.platformCalls.length, localReads: unknown[] = [], released: Array<() => void> = []
+  let held = false, release!: () => void, completed = 0
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const forward = f.forward
+  vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, owner) => {
+    if (method === 'connection.metadata.get') localReads.push({ input, owner })
+    if (owner?.hostId === 'different-profile-host') throw Error('Controlled different Host metadata unavailable')
+    const result = await forward(method, input, owner)
+    if (method === 'connection.metadata.get' && !held) { held = true; await barrier; completed++ }
+    return result
+  })
+  vi.spyOn(api.connections, 'onMetadataChanged').mockImplementation((listener, observation, owner) => {
+    // Delivery timing is controlled; the original metadata result still comes through Core/RPC/IPC.
+    observation?.('ready')
+    released.push(() => listener({ connectionId: f.config.connectionId, application: f.config.application, subject: original }))
+    return () => {}
+  })
+  function People({ subjects, owner, active = true }: { subjects: readonly ChannelMetadataSubject[]; owner: typeof f.hostingTarget; active?: boolean }) {
+    const profiles = useConnectorEntityProfiles(f.config, subjects, owner, active)
+    return <>{subjects.map(subject => {
+      if (subject.kind !== 'actor') throw Error('This fixture renders actual person identities')
+      const key = channelMetadataSubjectKey(subject), profile = profiles.get(key)?.observation?.profile
+      return <ConnectorEntityIdentity key={key} identityKey={key} kind="person" name={profile?.name} missingName="Profile not observed" avatarUrl={profile?.avatarUrl}
+        secondary={<ConnectorIdentityField identityKey={key} label={subject.actor.idType} value={subject.actor.userId} />} />
+    })}</>
+  }
+  try {
+    await f.dom.render(<People subjects={[original]} owner={f.hostingTarget} />)
+    await wait(() => expect(held).toBe(true))
+    const subjects = change === 'subject' ? [other] : [original]
+    const owner = change === 'hosting-owner' ? { ...f.hostingTarget, hostId: 'different-profile-host' } : f.hostingTarget
+    await f.dom.render(<People subjects={subjects} owner={owner} />)
+    await act(async () => release())
+    await wait(() => expect(completed).toBe(1))
+    expect(document.querySelector('.connector-entity__name')?.textContent).toBe('Profile not observed')
+    expect(document.querySelector('[data-entity-kind="person"] img')).toBeNull()
+    expect(document.querySelector('[data-identity-field="open_id"]')?.textContent).toContain(change === 'subject' ? 'ou_ben' : creatorId)
+    expect(document.querySelector('[aria-label="Copy person name"]')).toBeNull()
+    const before = localReads.length
+    await f.dom.render(<People subjects={subjects} owner={owner} active={false} />)
+    await act(async () => { for (const staleCallback of released) staleCallback() })
+    expect(localReads).toHaveLength(before)
+    expect(f.platformCalls).toHaveLength(nativeReads)
+    expect(applicationWrites()).toHaveLength(0)
+  } finally { release() }
+})
 async function setApp(capabilities: Array<'input' | 'answer' | 'permission'>) {
   return f.forward('connection.application.access.configure', { operationId: 'original-application-rule', connectionId: f.config.connectionId, expectedConnectionRevision: 1, grantId: 'application-creator', expectedRevision: null, actor: actor(), capabilities, state: capabilities.length ? 'active' : 'revoked' }, f.hostingTarget)
 }
