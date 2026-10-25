@@ -73,6 +73,7 @@ function quickItem(spec: { id: string; state: AgentDisplayState; observedAt: num
     providerId: null,
     state: spec.state,
     observedAt: spec.observedAt,
+    surfaceKind: null,
     target: { kind: 'session', sessionId: spec.id }
   }
 }

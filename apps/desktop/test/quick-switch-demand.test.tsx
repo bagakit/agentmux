@@ -135,3 +135,67 @@ it('keeps query ranking, IME and keyboard selection on the exact original Store 
   expect(select.mock.results[0]?.value).toBe(true)
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(originalId)
 })
+
+it('keeps native Enter on a mode button instead of activating an unrelated result', async () => {
+  sessions(1)
+  vi.spyOn(api.files, 'list').mockResolvedValue({ status: 'listed', files: ['original.ts'], complete: true, omitted: 'git-ignored', partialReason: null })
+  const select = vi.spyOn(useAppStore.getState(), 'selectSession')
+  await dom.render(surface(true))
+  const button = [...document.querySelectorAll<HTMLButtonElement>('.quick-switch__modes button')].find(value => value.textContent === 'Project files')!
+  const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+  await act(async () => button.dispatchEvent(event))
+  expect(event.defaultPrevented, 'The original mode button keeps its native keyboard action').toBe(false)
+  expect(select).not.toHaveBeenCalled()
+  await act(async () => button.click())
+  expect(document.querySelector('[aria-label="Find project files"]')).not.toBeNull()
+})
+
+it('draws each tab row glyph from its typed surface even when the title reads like another kind', async () => {
+  sessions(1)
+  const typed = (title: string, surfaceKind: quickSwitch.QuickSwitchItem['surfaceKind']): quickSwitch.QuickSwitchItem => ({
+    id: `tab:${title}`, kind: 'tab', title, subtitle: 'workspace', providerId: null, state: null, observedAt: 0, surfaceKind,
+    target: { kind: 'tab', tabId: title, workspaceId: 'workspace', tabGroupId: 'group' } })
+  // A browser titled like the launcher, and a file titled like a URL, must keep their own kinds.
+  const index = vi.spyOn(quickSwitch, 'buildQuickSwitchIndex').mockReturnValue([
+    typed('New Tab', 'browser'), typed('https://example.invalid/', 'file'), typed('Git history', 'git'), typed('Start', 'launcher')])
+  await dom.render(surface(true))
+  const glyphs = Object.fromEntries([...rows()].map(row => [row.querySelector('.quick-switch__row-title')!.textContent,
+    row.querySelector('.quick-switch__glyph [data-semantic-icon]')?.getAttribute('data-semantic-icon')]))
+  expect(glyphs).toEqual({ 'New Tab': 'object.browser', 'https://example.invalid/': 'file.code', 'Git history': 'git.compare', Start: 'object.launcher' })
+  index.mockRestore()
+})
+
+it('exposes the keyboard-active row to assistive technology and explains an empty list', async () => {
+  sessions(3)
+  await dom.render(surface(true))
+  const field = document.querySelector<HTMLInputElement>('[aria-label="Search sessions and tabs"]')!
+  expect(field.getAttribute('role')).toBe('combobox')
+  expect(document.activeElement).toBe(field)
+  expect(field.getAttribute('aria-activedescendant')).toBe(rows()[0]!.id)
+  await key(field, 'ArrowDown')
+  expect(field.getAttribute('aria-activedescendant')).toBe(rows()[1]!.id)
+  expect(rows()[1]!.getAttribute('aria-selected')).toBe('true')
+  await input(field, 'no-such-session-or-tab')
+  expect(rows()).toHaveLength(0)
+  expect(field.getAttribute('aria-activedescendant')).toBeNull()
+  const empty = document.querySelector('.quick-switch__empty')!
+  expect(empty.getAttribute('role')).toBe('status')
+  expect(empty.closest('[role="listbox"]')).toBeNull()
+  expect(empty.textContent).toContain('no-such-session-or-tab')
+})
+
+it('keeps an unknown tab glyph navigable without treating its display text as a type', async () => {
+  sessions(1)
+  const activate = vi.fn()
+  useAppStore.setState({ activateTab: activate })
+  vi.spyOn(quickSwitch, 'buildQuickSwitchIndex').mockReturnValue([{
+    id: 'future-tab', kind: 'tab', title: 'New Tab', subtitle: 'https://example.invalid/', providerId: null, state: null, observedAt: 0,
+    surfaceKind: 'future-surface' as quickSwitch.QuickSwitchItem['surfaceKind'],
+    target: { kind: 'tab', tabId: 'original-tab', workspaceId: 'workspace', tabGroupId: 'original-group' }
+  }])
+  await expect(dom.render(surface(true))).resolves.toBeUndefined()
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0]!.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.terminal')
+  await key(document.querySelector<HTMLInputElement>('[role="combobox"]')!, 'Enter')
+  expect(activate).toHaveBeenCalledExactlyOnceWith('workspace', 'original-group', 'original-tab')
+})

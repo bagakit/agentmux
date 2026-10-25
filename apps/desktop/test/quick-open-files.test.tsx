@@ -52,6 +52,26 @@ it('discovers once, ranks input locally, respects IME and closes the original ov
   await flush()
   expect(useAppStore.getState().openFileAndReveal).toHaveBeenCalledExactlyOnceWith('nested/中文 notes.md', undefined, { line: 12, column: 3 }, workspace.id)
 })
+it('exposes the active project file as a combobox option and keeps empty copy outside its listbox', async () => {
+  await dom.render(<QuickOpenFiles onClose={() => {}} />)
+  const field = document.querySelector<HTMLInputElement>('[aria-label="Find project files"]')!
+  const options = () => [...dom.container.querySelectorAll<HTMLElement>('[role="option"]')]
+  expect(field.getAttribute('role')).toBe('combobox')
+  expect(field.getAttribute('aria-activedescendant')).toBe(options()[0]!.id)
+  await key(field, 'ArrowDown')
+  expect(field.getAttribute('aria-activedescendant')).toBe(options()[1]!.id)
+  await input('no-such-project-file')
+  expect(options()).toHaveLength(0)
+  expect(field.getAttribute('aria-activedescendant')).toBeNull()
+  const empty = dom.container.querySelector('.quick-switch__empty')!
+  expect(empty.getAttribute('role')).toBe('status')
+  expect(empty.closest('[role="listbox"]')).toBeNull()
+  expect(empty.textContent).toContain('no-such-project-file')
+  vi.mocked(api.files.list).mockResolvedValue({ ...listing, files: [] })
+  await dom.render(<div />)
+  await dom.render(<QuickOpenFiles onClose={() => {}} />)
+  expect(dom.container.querySelector('.quick-switch__empty')?.textContent).toBe('No project files are available in this listing.')
+})
 it('discarded discovery cannot replace a newer Workspace, and closing cancels its reader without opening anything', async () => {
   let late!: (value: typeof listing) => void
   vi.mocked(api.files.list).mockImplementationOnce(() => new Promise(resolve => { late = resolve }))

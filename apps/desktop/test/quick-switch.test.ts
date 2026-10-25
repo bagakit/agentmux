@@ -42,6 +42,7 @@ function item(overrides: Partial<QuickSwitchItem> & Pick<QuickSwitchItem, 'id'>)
     providerId: null,
     state: null,
     observedAt: 0,
+    surfaceKind: null,
     target: { kind: 'session', sessionId: overrides.id },
     ...overrides
   }
@@ -171,8 +172,23 @@ describe('buildQuickSwitchIndex', () => {
       kind: 'tab',
       title: 'index.ts',
       subtitle: 'repo-one',
+      surfaceKind: 'file',
       target: { kind: 'tab', tabId: fileTab.id, workspaceId: 'ws1', tabGroupId: 'group-1' }
     })
+  })
+
+  it('carries each non-session tab surface kind for its row glyph', () => {
+    const regionTab = (id: string, region: WorkbenchTab['regions'][string]): WorkbenchTab => ({
+      id, workspaceId: 'ws1', titleRegionId: region.regionId, layout: { root: { type: 'leaf', regionId: region.regionId }, activeRegionId: region.regionId },
+      regions: { [region.regionId]: region } })
+    const tabs = {
+      browser: regionTab('browser', { regionId: 'b', kind: 'browser', workspaceId: 'ws1', browserId: 'browser-1', url: 'https://example.invalid/', title: 'New Tab' } as WorkbenchTab['regions'][string]),
+      launcher: regionTab('launcher', { regionId: 'l', kind: 'launcher', workspaceId: 'ws1' } as WorkbenchTab['regions'][string]),
+      file: regionTab('file', { regionId: 'f', kind: 'file', workspaceId: 'ws1', path: _hygiene_fixturePath('repo/a.ts') })
+    }
+    const index = buildQuickSwitchIndex({ config, sessions: [], tabs, tabGroupOf: () => 'group-1' })
+    expect(Object.fromEntries(index.map(item => [item.target.kind === 'tab' ? item.target.tabId : item.id, item.surfaceKind])))
+      .toEqual({ browser: 'browser', launcher: 'launcher', file: 'file' })
   })
 
   it('drops a tab whose group cannot be resolved so activation always has a real target', () => {

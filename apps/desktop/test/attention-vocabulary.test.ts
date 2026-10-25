@@ -135,6 +135,7 @@ function quickSwitchItem(id: string, state: AgentDisplayState | null): QuickSwit
     providerId: null,
     state,
     observedAt: _tailFixtureEpoch(0, 0, 1),
+    surfaceKind: null,
     target: { kind: 'session', sessionId: id }
   }
 }
