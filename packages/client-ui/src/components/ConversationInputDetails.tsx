@@ -56,7 +56,7 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
           <dt>Sharing</dt><dd>Requires the original audience and sharing authorization</dd></>}
       </dl> : null}
       {speaker?.external ? <dl className="conversation-input-details__facts">
-        {channel ? <><dt>Current profile</dt><dd>{channel.profile?.name ?? 'Name not observed'} · {channelRead?.channelProfileReadIssue ? 'Saved · current read unconfirmed' : channel.freshness === 'current' ? 'Current' : channel.freshness === 'stale' ? 'Saved · refresh unconfirmed' : 'Not observed'}</dd></> : null}
+        {channel ? <><dt>Current profile</dt><dd>{channel.profile?.name ?? 'Name not observed'} · {!channel.profile?.name && !channel.profile?.avatarUrl ? 'Not observed' : channelRead?.channelProfileReadIssue ? 'Saved · current read unconfirmed' : channel.freshness === 'current' ? 'Current' : channel.freshness === 'stale' ? 'Saved · refresh unconfirmed' : 'Not observed'}</dd></> : null}
         {channelRead?.channelProfileReadIssue ? <><dt>Profile observation</dt><dd>{channelRead.channelProfileReadIssue}</dd></> : null}
         <dt>External application</dt><dd>{speaker.external.actor.application.domain} · {speaker.external.actor.application.appId}</dd>
         <dt>External actor</dt><dd>{speaker.external.actor.idType} · {speaker.external.actor.userId}</dd>
