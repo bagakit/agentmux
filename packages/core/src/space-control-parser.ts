@@ -1,3 +1,4 @@
+import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
@@ -208,15 +209,17 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
-      fields(input, ['kind', 'executorId', 'executionWorkspaceId', 'nativeResumeSource', 'prompt'], code)
+      fields(input, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt'], code)
+      if (Object.hasOwn(input, 'toolWorkspaceId') && (!Object.hasOwn(input, 'executionWorkspaceId') || Object.hasOwn(input, 'nativeResumeSource') || target.newZone)) fail('A tool Workspace requires an explicit execution Workspace for a new Agent, without native resume or new Zone resources.', code)
       if (target.newZone && Object.hasOwn(input, 'executionWorkspaceId')) fail('An execution Workspace cannot be combined with new Zone resources.', code)
       if (target.newZone && Object.hasOwn(input, 'nativeResumeSource')) fail('Native resume retains its original execution directory; select an existing execution Workspace.', code)
       content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code),
         ...(Object.hasOwn(input, 'executionWorkspaceId') ? { executionWorkspaceId: spaceControlId(input.executionWorkspaceId, 'Execution Workspace', code) } : {}),
+        ...(Object.hasOwn(input, 'toolWorkspaceId') ? { toolWorkspaceId: spaceControlId(input.toolWorkspaceId, 'Tool Workspace', code) } : {}),
         ...(Object.hasOwn(input, 'nativeResumeSource') ? { nativeResumeSource: parseAgentNativeResumeSource(input.nativeResumeSource) } : {}),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
     } else if (input.kind === 'fork-agent') {
@@ -442,7 +445,7 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
-    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement'], code)
+    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement', 'toolExecution'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
       providerId: nullableId(item.providerId, 'Provider', code), executorId: nullableId(item.executorId, 'Executor', code), hostId: spaceControlId(item.hostId, 'Host', code),
       cwd: string(item.cwd, 'Execution cwd', code), createOperationId: nullableId(item.createOperationId, 'Creation operation', code),
@@ -467,6 +470,7 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
         return { step: member(failure.step, ['session-commit', 'hook-bind', 'handshake'], 'Creation step', code),
           code: string(failure.code, 'Creation failure code', code), message: string(failure.message, 'Creation failure message', code) }
       })() }),
+      ...(item.toolExecution === undefined ? {} : { toolExecution: parseAgentToolExecutionBinding(item.toolExecution) }),
       ...(item.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(item.forkedFrom) }) }
   })()
   if ((source.outcome === 'retired') !== Boolean(agent?.retirement) || agent?.retirement && (!agent.runId || !agent.createOperationId)) {

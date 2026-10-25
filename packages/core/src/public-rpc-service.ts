@@ -1109,6 +1109,17 @@ export class AgentMuxRpcService {
               { kind: 'user', id: rpcString(context.principal!.id, 'Transport principal') }) }
       return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
     }
+    if (method === 'agent.open') {
+      const request = rpcControlRequest('agent.open', params)
+      if (request.operation === 'agent.open' && request.content.kind === 'new-agent' && request.content.toolWorkspaceId !== undefined) {
+        // Check before forwarding to a presentation owner: this mode carries the same resource authority as execution.create.
+        if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+            typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
+          throw new AgentMuxError('Opening an Agent with a tool Workspace requires a transport-approved user or device without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+        }
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      }
+    }
     if (method === 'agent.execution.create' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
           typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
