@@ -1,3 +1,5 @@
+import { encodeSelectedImageReference } from '@agentmux/client-ui/composer-semantic-reference'
+import type { AgentSessionControl } from '../../../shared/contracts'
 import { useEffect, useMemo, useRef, type RefObject } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { appendFileReferences, appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
@@ -9,7 +11,8 @@ import { api } from './api'
 import { selectScreenshotTarget, releaseScreenshotTarget } from './screenshot-attachment'
 
 /** Host resource IO only. The maintained editor owns insertion, selection, Undo and the draft. */
-export function useComposerAttachments({ scope, hostId, workspacePath, disabled, insertion, feedback, document, onRemoteFiles, shortcutActive = true }: {
+export function useComposerAttachments({ scope, sessionControl, hostId, workspacePath, disabled, insertion, feedback, document, onRemoteFiles, shortcutActive = true }: {
+  sessionControl?: AgentSessionControl | undefined
   scope: string; hostId: string | undefined; workspacePath: string | undefined; disabled: boolean
   insertion: RefObject<ComposerInsertionHandle | null>; feedback: ReturnType<typeof useComposerFeedback>
   document?: WorkbenchWindowDocument | undefined; onRemoteFiles?: (() => void) | undefined
@@ -32,12 +35,22 @@ export function useComposerAttachments({ scope, hostId, workspacePath, disabled,
       return isCurrent() && insertion.current === editor ? value : null
     }, { separate: true })
   }
+  async function selectedImage(text: string, bytes: Uint8Array, mimeType: string): Promise<string> {
+    if (!sessionControl) return text
+    try {
+      const selected = await api.ui.retainInputImage({ session: sessionControl, bytes, mimeType })
+      if (selected.observation === 'unavailable') feedback.report(new Error('This image is saved locally; external sharing is not confirmed. Your message can still be sent.'))
+      return encodeSelectedImageReference(text, selected.upload)
+    }
+    catch (error) { feedback.report(error); return text }
+  }
   async function imageReference(file: File): Promise<string> {
     requireLocal()
     const extension = Object.entries(PASTED_IMAGE_MIME_TYPES).find(([, mime]) => mime === file.type)?.[0]
     if (!extension) throw new Error(`Image format ${file.type || 'unknown'} is not supported by the image saver.`)
-    const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension })
-    return appendFileReferences('', [path])
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const path = await api.ui.savePastedImage({ bytes, extension })
+    return selectedImage(appendFileReferences('', [path]), bytes, file.type)
   }
   const pasteImage = (file: File, insert: ComposerInsert) => {
     void feedback.run(() => insertResolved(() => imageReference(file), insert))
@@ -90,7 +103,12 @@ export function useComposerAttachments({ scope, hostId, workspacePath, disabled,
         if (savedPath && (!isCurrent() || insertion.current !== originalEditor || documentKey !== undefined && shortcut.current.key !== documentKey)) {
           throw new Error('The original message editor changed; your drafts were not replaced.')
         }
-        return savedPath ? appendFileReferences('', [savedPath]) : null
+        if (!savedPath) return null
+        const text = appendFileReferences('', [savedPath])
+        if (!sessionControl) return text
+        const data = await api.ui.readPastedImage(savedPath)
+        const match = data?.dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/u)
+        return match ? await selectedImage(text, Uint8Array.from(atob(match[2]!), char => char.charCodeAt(0)), match[1]!) : text
       })
     } catch (cause) {
       if (savedPath) throw new Error(`Screenshot insertion into the original draft was not confirmed. The image is saved at ${savedPath}. ${presentError(cause)} Check the original draft and reference this image there if needed.`, { cause })

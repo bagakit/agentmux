@@ -1,3 +1,4 @@
+import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
 import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
@@ -1467,6 +1468,16 @@ export async function registerIpc(args: {
     if (!catalog) throw new Error('Agent Provider is unavailable')
     return await discoverAgentSkills({ catalog, workspacePath: workspace.path, home: app.getPath('home') })
   })
+  handleWithEvent('ui:retainInputImage', async (event, input: { session: AgentSessionControl; bytes: Uint8Array; mimeType: string }) => {
+    requireTrustedSender('ui:retainInputImage', event)
+    const bytes = Buffer.from(input.bytes)
+    const identity = parseFileUploadIdentity({ hostId: input.session.hostId, agentSessionId: input.session.agentSessionId, expectedRun: { runId: input.session.run.runId },
+      operationId: mintObjectId(), name: 'image', mimeType: input.mimeType, byteLength: bytes.length, revision: fileUploadRevision(bytes) })
+    try {
+      const result = parseFileUploadResult(await callUserRpc('file.upload', { ...identity, dataBase64: bytes.toString('base64') }), identity)
+      return { upload: identity, observation: result.status === 'uploaded' ? 'confirmed' : 'unavailable' }
+    } catch { return { upload: identity, observation: 'unavailable' } }
+  })
   handleWithEvent('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
     requireTrustedSender('ui:savePastedImage', event)
     // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies
@@ -1746,15 +1757,16 @@ export async function registerIpc(args: {
     goalContinuation?: { goalId: string; loopId: string },
     goalPmo?: GoalPmoIntent,
     goalDispatch?: GoalDispatchReference,
-    inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference
+    inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference,
+    inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
-    if (inputContextCapture !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
+    if (inputContextCapture !== undefined || inputImages !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if ('admissionIntent' in condition) {
       assertManualPromptSenderTrusted(event.sender, contents)
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
       pauseUserProgress(session, 'Paused for your message.')
-      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture)
+      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages)
     }
     if (goalPmo) {
       assertManualPromptSenderTrusted(event.sender, contents)
@@ -1785,7 +1797,7 @@ export async function registerIpc(args: {
         ...(loop?.taskSource?.kind === 'goal' ? { continuation: { intervalMs: loop.intervalMs, alignmentRevision: loop.taskSource.alignmentRevision } } : {}) })
     } else {
       pauseUserProgress(session, 'Paused for your message.')
-      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture)
+      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages)
     }
     if (goalPmo) {
       const original = await args.runtime.agentCreation(session.hostId, session.agentSessionId)

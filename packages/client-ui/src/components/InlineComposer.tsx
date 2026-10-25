@@ -8,7 +8,7 @@ import { closeHistory } from '@tiptap/pm/history'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { composerKeywordMatches } from '../lib/composer-keywords.js'
-import { encodeSemanticReference, parseComposerDraft, type ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
+import { encodeSemanticReference, parseComposerDraft, selectedImageReference, type ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
 import { createSemanticIconElement } from '../theme/icon-sprite.js'
 import { useClientUiPlatform } from '../platform.js'
 import { ConversationImageCollection } from './ConversationImageCollection.js'
@@ -86,7 +86,7 @@ export function draftDocument(value: string): JSONContent {
       ? splitPastedImageReferences(part.text).map((segment) => segment.kind === 'image'
         ? { type: 'pastedImage', attrs: { text: segment.text, path: segment.path } }
         : { type: 'text', text: segment.text })
-      : [{ type: 'toolReference', attrs: part.reference }])
+      : (() => { const image = selectedImageReference(part.reference), parsed = image && splitPastedImageReferences(image.text).find(segment => segment.kind === 'image'); return parsed?.kind === 'image' ? [{ type: 'pastedImage', attrs: { text: part.raw, path: parsed.path } }] : [{ type: 'toolReference', attrs: part.reference }] })())
   })) }
 }
 
@@ -169,7 +169,7 @@ export function composerExtensions(
         dom.contentEditable = 'false'
         dom.className = `composer-semantic-token composer-semantic-token--${reference.kind}`
         dom.dataset.toolReference = reference.kind
-        dom.append(createSemanticIconElement(reference.kind === 'agent' ? 'object.agent' : `conversation.reference-${reference.kind}`, dom.ownerDocument, { size: 12 }), dom.ownerDocument.createTextNode(reference.label))
+        dom.append(createSemanticIconElement(reference.kind === 'agent' ? 'object.agent' : reference.kind === 'image' ? 'conversation.reference-file' : `conversation.reference-${reference.kind}`, dom.ownerDocument, { size: 12 }), dom.ownerDocument.createTextNode(reference.label))
         dom.title = `${reference.kind === 'subcommand' ? 'Expand prompt' : 'Open reference'}: ${reference.reference}`
         dom.setAttribute('aria-label', dom.title)
         dom.addEventListener('click', () => {

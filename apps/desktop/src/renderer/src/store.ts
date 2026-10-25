@@ -1,3 +1,4 @@
+import { editComposerInputImages, restoreComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
 import { isBackgroundLocalAgentOpen } from '@agentmux/core/spatial-graph'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { restoredManualConnectionIntents, restoredManualConnectionSelections, manualConnectionScope, type ManualConnectionIntent } from "./lib/manual-connection-intent"
@@ -679,6 +680,7 @@ const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
 export type AgentSteerOptions = {
+  inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
   /** Admit to the existing queue without letting background drains dispatch before the explicit Send. */
   awaitingExplicitSend?: true
   browserRecipient?: AgentSessionControl
@@ -692,6 +694,7 @@ export type AgentSteerOptions = {
 }
 
 export type AgentSteerQueueEntry = {
+  inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
   operationId: string
   /** The first accepted local intent time; absent means it was never recorded. */
   enqueuedAt?: number
@@ -4756,7 +4759,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   }
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote && JSON.stringify(existing.browserInput) === JSON.stringify(browserInput) && JSON.stringify(existing.browserRecipient) === JSON.stringify(browserRecipient) && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && JSON.stringify(existing.goalDispatch) === JSON.stringify(options?.goalDispatch) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
+    if (existing.text === text && JSON.stringify(existing.inputImages) === JSON.stringify(options?.inputImages) && existing.agentMuxNote === agentMuxNote && JSON.stringify(existing.browserInput) === JSON.stringify(browserInput) && JSON.stringify(existing.browserRecipient) === JSON.stringify(browserRecipient) && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && JSON.stringify(existing.goalPmo) === JSON.stringify(options?.goalPmo) && JSON.stringify(existing.goalDispatch) === JSON.stringify(options?.goalDispatch) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content or an earlier execution choice. Your original message and draft are kept.'))
     return false
   }
@@ -4783,6 +4786,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
       ? { runId: session.control.run.runId } : {}),
     text,
+    ...(options?.inputImages?.length ? { inputImages: structuredClone(options.inputImages) } : {}),
     ...(browserInput ? { browserInput } : {}),
     ...(browserRecipient ? { browserRecipient: structuredClone(browserRecipient) } : {}),
     ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
@@ -10712,7 +10716,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const draft = state.agentComposerDrafts[sessionId] ?? ''
       if (!draft.trim() && entry.text.trim()) pause = session
       return {
-        agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: `${draft}${draft ? '\n\n' : ''}${entry.text}` },
+        agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: `${draft}${draft ? '\n\n' : ''}${restoreComposerInput(entry.text, entry.inputImages)}` },
         agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue!.map(item => item === entry ? { ...item, archived: true as const, movedToDraft: true as const } : item) }
       }
     })
@@ -10787,7 +10791,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (entry.text === nextText) return state
       return { agentSteerQueues: { ...state.agentSteerQueues,
-        [sessionId]: queue!.map(item => item.operationId === operationId ? { ...item, text: nextText } : item) } }
+        [sessionId]: queue!.map(item => {
+          if (item.operationId !== operationId) return item
+          const { inputImages: originalImages, ...original } = item
+          const inputImages = editComposerInputImages(item.text, nextText, originalImages)
+          return { ...original, text: nextText, ...(inputImages ? { inputImages } : {}) }
+        }) } }
     })
     // Saving changes only the original intent. It never grants execution or wakes its consumer.
   },
@@ -11107,7 +11116,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           } as SteerDeliveryAttempt
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
             !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
-            item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
+            item.text === entry.text && JSON.stringify(item.inputImages) === JSON.stringify(entry.inputImages) && item.agentMuxNote === entry.agentMuxNote &&
             item.sourceChannel === entry.sourceChannel && JSON.stringify(item.browserInput) === JSON.stringify(entry.browserInput) && JSON.stringify(item.browserRecipient) === JSON.stringify(entry.browserRecipient) && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) && JSON.stringify(item.goalPmo) === JSON.stringify(entry.goalPmo) && JSON.stringify(item.goalDispatch) === JSON.stringify(entry.goalDispatch) &&
             (!dispatchStarted || item.execution === attemptExecution) &&
             (item.promptCondition === null) === (attemptCondition === null) &&
@@ -11137,7 +11146,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 ? observed.status === 'stopped' || observed.status === 'waiting' && (observed.observation === 'rejoin-needed' || observed.control.waiting?.wake === 'explicit-rejoin')
                   ? await api.sessions.rejoinInputWaiting(control, observed.ref) : observed
                 : await api.sessions.submitPrompt(control, entry.text, entry.operationId, entry.directInputBinding,
-                    { execution: 'immediate' }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel, undefined, undefined, undefined, entry.browserInput?.capture.reference)
+                    { execution: 'immediate' }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel, undefined, undefined, undefined, entry.browserInput?.capture.reference, entry.inputImages)
               if (!receipt) throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original manual input has no typed receipt. Its text and identity are retained.')
               consumeInputReceipt(sessionId, receipt)
               if (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') drain.submitted.add(entry.operationId)
@@ -11293,7 +11302,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     ...(retryMessage.execution === 'immediate' ? { execution: 'immediate' as const } : {}), ...(preparationRetry ? { preparationRetry } : {}) }
                     : retryMessage.execution === 'immediate' ? { execution: 'immediate' } : undefined,
                   retryMessage.origin === 'manual', retryMessage.agentMuxNote, retryMessage.sourceChannel,
-                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined, retryMessage.goalPmo, retryMessage.goalDispatch, retryMessage.browserInput?.capture.reference)
+                  retryMessage.goalContinuation ? { goalId: retryMessage.goalContinuation.goalId, loopId: retryMessage.goalContinuation.loopId } : undefined, retryMessage.goalPmo, retryMessage.goalDispatch, retryMessage.browserInput?.capture.reference, retryMessage.inputImages)
                   if (receipt) throw new Error('The original exact queue input returned a different controlled admission contract.') }
               })
             } finally { if (preparationRetryCalls.get(retryKey) === retryCall) preparationRetryCalls.delete(retryKey) }
