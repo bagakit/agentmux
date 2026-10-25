@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { api } from '../../lib/api'
 import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
@@ -43,13 +44,10 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
     <div className="settings-pane-stack general-settings">
       <section className="settings-group" data-settings-field="copy-paths">
         <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
-        <div className="general-settings__path-choice"><label className="browser-automation-toggle">
-          <input type="checkbox" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />
-          <span>
-            <strong>Show and copy full project paths</strong>
-            <small>Include your complete home folder instead of <code>~</code>.</small>
-          </span>
-        </label>
+        <div className="general-settings__path-choice"><FormRow className="browser-automation-toggle" label="Show and copy full project paths"
+          description={<>Include your complete home folder instead of <code>~</code>.</>}>
+          {attributes => <input {...attributes} type="checkbox" name="copyPathsAsAbsolute" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />}
+        </FormRow>
         <figure className="general-settings__path-preview" aria-label="Project path draft preview" data-path-format={draft.value.copyPathsAsAbsolute ? 'absolute' : 'abbreviated'}>
           <figcaption>{draft.value.copyPathsAsAbsolute ? 'Full path' : 'Abbreviated path'}<small>Example</small></figcaption>
           <code><span>{draft.value.copyPathsAsAbsolute ? 'your home folder' : '~'}</span><b aria-hidden="true"> / </b>project</code>
