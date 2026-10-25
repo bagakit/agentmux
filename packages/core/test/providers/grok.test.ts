@@ -1,10 +1,18 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('grok')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
+const GROK_HOOK_DIALECT = lifecycleProvider.hook.lifecycle ?? {}
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import {  } from '../../src/agent-provider.js'
 import { GROK_HOOK_EVENTS } from '../../src/providers/grok.js'
-import { canonicalHookLifecycleEvent, GROK_HOOK_DIALECT } from '../../src/agent-hook-event.js'
-import { USAGE_FINALIZATION_EVENTS, hookResponseFor } from '../../src/agent-hook-command.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { hookResponseFor } from '../../src/agent-hook-command.js'
 import { AgentMuxError } from '../../src/errors.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
@@ -76,7 +84,7 @@ describe('Grok provider', () => {
       const configuredAsWire = GROK_HOOK_EVENTS.map((name) =>
         name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
       ).sort()
-      expect(configuredAsWire).toEqual(Object.keys(GROK_HOOK_DIALECT).sort())
+      expect(configuredAsWire).toEqual([...new Set(lifecycleProvider.hook.rules.flatMap(rule => rule.events))].sort())
 
       // 反过来不能断言「配置名一律认不出」——那是假的：`SessionStart`/`PreToolUse` 这些同时是
       // Claude 一族**真实的 wire 值**，它们本来就在合并表里（走 Claude 那块）。合并表按原始名索引、
@@ -107,16 +115,13 @@ describe('Grok provider', () => {
     })
   })
 
-  describe('三种收尾都算 done——少一种就会永远卡在 working', () => {
-    it('stop / stop_failure / stop_cancelled 全部收敛为 done', () => {
-      // stop_cancelled 最要紧：中断、拒绝授权、max-turns、无进展时它**取代** stop，
-      // 也就是说这几种收尾根本不会有 stop。漏掉它，用户按下中断后 Agent 永远停在 working。
+  describe('原生失败、中断与决策前 Stop 分别表达', () => {
+    it('失败只判 error，中断保持未知，决策前 stop 不结束轮', () => {
       for (const wire of ['stop', 'stop_failure', 'stop_cancelled']) {
         const event = hook(wire)
-        expect<AgentSemanticState>(event.semanticState).toBe('done')
-        expect(event.lifecycleEvent).toBe('turn-end')
-        // 收尾事件必须进 turn-end 集合，否则用量读取与「清掉陈旧用量」两侧都会漏掉它。
-        expect(USAGE_FINALIZATION_EVENTS.has(wire)).toBe(true)
+        expect<AgentSemanticState>(event.semanticState).toBe(wire === 'stop_failure' ? 'error' : 'unknown')
+        expect(event.lifecycleEvent).toBe(wire === 'stop' ? null : 'turn-end')
+        expect(USAGE_FINALIZATION_EVENTS.has(wire)).toBe(false)
       }
     })
 

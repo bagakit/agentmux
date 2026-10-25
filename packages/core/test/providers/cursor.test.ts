@@ -1,3 +1,11 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('cursor')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
+const CURSOR_HOOK_DIALECT = lifecycleProvider.hook.lifecycle ?? {}
 import { fixturePath } from '../helpers/fixture-values.js'
 import { join, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -7,7 +15,7 @@ import {
   createCursorManagedHookPlan,
   cursorTrustMarkerPath
 } from '../../src/providers/cursor.js'
-import { CURSOR_HOOK_DIALECT, canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { hookResponseFor } from '../../src/agent-hook-command.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
 import { AgentMuxError } from '../../src/errors.js'
@@ -17,7 +25,7 @@ import type { AgentSemanticState } from '../../src/types.js'
  * T-008 的 Provider 测试。
  *
  * 证据来自**读本机安装的 cursor-agent bundle**
- * （`~/.local/share/cursor-agent/versions/2026.08.11-e8db854/`，主要是 `index.js` 与
+ * （构建 `e8db854`，主要是 `index.js` 与
  * `6260.index.js`），核对本机既有的 `~/.cursor/hooks.json` 与一份真实的
  * `.workspace-trusted` marker。见 docs/reviews/agentmux-provider-cli-evidence.md 的 Cursor 小节。
  *
@@ -80,7 +88,7 @@ describe('Cursor provider', () => {
       expect(canonicalHookLifecycleEvent('postToolUse')).toBe('tool-use-end')
       // 失败也是一次调用的**事后**：少了这条，失败的调用会永远停在 streaming 徽标上。
       expect(canonicalHookLifecycleEvent('postToolUseFailure')).toBe('tool-use-end')
-      expect(canonicalHookLifecycleEvent('stop')).toBe('turn-end')
+      expect(canonicalHookLifecycleEvent('stop')).toBeUndefined()
       // 授权门不是工具事前：同一条命令会先过门再走 preToolUse，都算 tool-use-start 会落两条。
       expect(canonicalHookLifecycleEvent('beforeShellExecution')).toBeUndefined()
       expect(canonicalHookLifecycleEvent('beforeMCPExecution')).toBeUndefined()

@@ -121,13 +121,6 @@ export const NON_EXPORTED_INTERMEDIARY_WITNESSES: ReadonlyArray<{
   intermediary: string
 }> = [
   // 七个方言常量只被非导出的 HOOK_LIFECYCLE_DIALECTS 表收着。
-  { module: 'src/agent-hook-event.ts', export: 'PASCAL_CASE_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
-  { module: 'src/agent-hook-event.ts', export: 'HERMES_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
-  { module: 'src/agent-hook-event.ts', export: 'PI_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
-  { module: 'src/agent-hook-event.ts', export: 'GROK_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
-  { module: 'src/agent-hook-event.ts', export: 'GEMINI_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
-  { module: 'src/agent-hook-event.ts', export: 'CURSOR_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
-  { module: 'src/agent-hook-event.ts', export: 'COPILOT_HOOK_DIALECT', intermediary: 'HOOK_LIFECYCLE_DIALECTS' },
   // 截断上限只被非导出的 clamp() 读。
   { module: 'src/hook-tool-outcome.ts', export: 'MAX_TOOL_OUTPUT_CHARS', intermediary: 'clamp' },
   // 事件名清单只被非导出的 openCodePluginSource() 插进生成的插件源码里。

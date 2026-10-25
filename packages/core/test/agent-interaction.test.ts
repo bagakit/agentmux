@@ -133,7 +133,7 @@ describe('Agent terminal interaction protocol', () => {
         tool_name: 'AskUserQuestion',
         tool_input: { question: 'Choose scope?', options: ['Focused', 'Full'] }
       }
-    }, 100, claudeProtocol)
+    }, 100, claudeProtocol, undefined, 'permission-request')
 
     expect(request).toMatchObject({
       kind: 'question',
@@ -149,7 +149,7 @@ describe('Agent terminal interaction protocol', () => {
       providerId: 'claude',
       eventName: 'PermissionRequest',
       payload: { tool_name: 'Edit', tool_input: { path: 'src/index.ts' } }
-    }, 100, claudeProtocol)!
+    }, 100, claudeProtocol, undefined, 'permission-request')!
 
     // Every declared option — including allow-always — is projected with its DESCRIBE half; the
     // keystroke (`input`) is deliberately withheld from the request that crosses IPC.
@@ -193,7 +193,7 @@ describe('Agent terminal interaction protocol', () => {
       providerId: 'codex',
       eventName: 'PermissionRequest',
       payload: { tool_name: 'Bash', tool_input: { command: 'pnpm test' } }
-    }, 100, codexProtocol)!
+    }, 100, codexProtocol, undefined, 'permission-request')!
 
     const response = {
       kind: 'permission' as const,
@@ -240,7 +240,7 @@ describe('Agent terminal interaction protocol', () => {
       providerId: 'codex',
       eventName: 'PermissionRequest',
       payload: { tool_name: 'Bash' }
-    }, 100, codexProtocol)!
+    }, 100, codexProtocol, undefined, 'permission-request')!
     permission.kind === 'permission' && permission.options.push({ ...permission.options[0]! })
     expect(() => normalizeAgentInteractionResponse(permission, {
       kind: 'permission',

@@ -1,11 +1,17 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('copilot')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
 import { fixtureEpoch, fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
-import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { hookToolOutcome } from '../../src/hook-tool-outcome.js'
-import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
 import { releaseSubagentRoster } from '../../src/hook-normalizer.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
@@ -208,14 +214,14 @@ describe('Copilot provider', () => {
     })
   })
 
-  describe('收尾只有 agentStop 一种，且不是 sessionEnd', () => {
-    it('agentStop 判 done、是 turn-end、也是用量落定点', () => {
+  describe('原生收尾回调不代签成功', () => {
+    it('agentStop 保持 unknown，没有最终 turn-end 或用量声明', () => {
       const event = hookIn('run-stop')('agentStop', {
         stopReason: 'end_turn', transcriptPath: fixturePath("tmp/copilot/t.jsonl")
       })
-      expect<AgentSemanticState>(event.semanticState).toBe('done')
-      expect(canonicalHookLifecycleEvent('agentStop')).toBe('turn-end')
-      expect(USAGE_FINALIZATION_EVENTS.has('agentStop')).toBe(true)
+      expect<AgentSemanticState>(event.semanticState).toBe('unknown')
+      expect(canonicalHookLifecycleEvent('agentStop')).toBeUndefined()
+      expect(USAGE_FINALIZATION_EVENTS.has('agentStop')).toBe(false)
     })
 
     it('没有第二种收尾事件——别照抄 Claude 与 grok 的多条 done', () => {
@@ -235,29 +241,15 @@ describe('Copilot provider', () => {
     })
   })
 
-  describe('子代理成对，但只能按名字记账', () => {
-    it('按 agentName 记账——按 agentId 会让每个 start 都记不上', () => {
-      // 实测的不对称：`subagentStart` 只有 `transcriptPath` + `agentName`，**没有** `agentId`；
-      // `subagentStop` 两个都有。记账要求 start 与 stop 认同一个键，于是唯一两端都在的是 agentName。
-      // 后果是同名子代理并发时记成一个——上游负载的事实，不是这里能补的。
-      expect(COPILOT_HOOKS.subagentTracking).toEqual({
-        startEvents: ['subagentStart'],
-        stopEvents: ['subagentStop'],
-        mainStopEvents: ['agentStop'],
-        idKeys: ['agentName']
-      })
-    })
-
-    it('在途子代理压住主 agentStop，最后一个落地时才兑现 done', () => {
-      // 这条守「记账真的起作用」而不只是「字段填对了」：主 Agent 说完成、子代理还在跑时必须压成
-      // working，否则界面提前翻完成、还会误报完成通知。
-      const runId = 'run-subagent'
-      releaseSubagentRoster(runId)
+  describe('子代理身份缺口', () => {
+    it('只接受唯一 agentId，名称不合并主体，未确认 stop 不收敛主轮', () => {
+      expect(COPILOT_HOOKS.subagentTracking).toEqual({ startEvents: ['subagentStart'],
+        stopEvents: [], mainStopEvents: [], idKeys: ['agentId'] })
+      const runId = 'run-subagent'; releaseSubagentRoster(runId)
       const hook = hookIn(runId)
-      // 子代理开始只记子事实；不能冒称主 Agent 正在工作。
       expect(hook('subagentStart', { agentName: 'reviewer' }).semanticState).toBe('unknown')
-      expect(hook('agentStop', { stopReason: 'end_turn' }).semanticState).toBe('working')
-      expect(hook('subagentStop', { agentName: 'reviewer', agentId: 'ag-1' }).semanticState).toBe('done')
+      expect(hook('agentStop', { stopReason: 'end_turn' }).semanticState).toBe('unknown')
+      expect(hook('subagentStop', { agentName: 'reviewer', agentId: 'ag-1' }).semanticState).toBe('unknown')
       releaseSubagentRoster(runId)
     })
   })
