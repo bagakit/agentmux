@@ -674,9 +674,6 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         break
       }
-      case 'agent.input.ls': {
-        record(p, ['hostId', 'agentSessionId', 'queueId', 'cut', 'budgetBytes', 'items', 'nextCursor', 'coverage'])
-        if (p.hostId !== input.hostId) fail()
       case 'agent.input.changes': {
         record(p, ['hostId', 'agentSessionId', 'source', 'throughSequence', 'changes', 'nextCursor', 'checkpoint', 'coverage'])
         if (p.hostId !== input.hostId) fail()
@@ -685,6 +682,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         parseAgentInputChangesPage(page, read as import('./agent-input-changes.js').AgentInputChangesRead)
         break
       }
+      case 'agent.input.ls': {
+        record(p, ['hostId', 'agentSessionId', 'queueId', 'cut', 'budgetBytes', 'items', 'nextCursor', 'coverage'])
+        if (p.hostId !== input.hostId) fail()
         const { hostId: _route, ...page } = p
         const { hostId: _target, ...read } = input
         parseAgentInputMailboxPage(page, read as import('./agent-input-mailbox.js').AgentInputMailboxRead)
