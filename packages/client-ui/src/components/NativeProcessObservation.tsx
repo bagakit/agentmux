@@ -10,10 +10,10 @@ import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
 
-function recordedStatus(item: Pick<AgentSessionHistoryItem, 'collaboration'>): WorkflowObservationStatus | undefined {
+function recordedStatus(item: Pick<AgentSessionHistoryItem, 'collaboration' | 'turnOutcome'>): WorkflowObservationStatus | undefined {
   const collaboration = item.collaboration
-  if (collaboration?.kind !== 'operation') return undefined
-  return collaboration.status === 'completed' ? 'complete' : collaboration.status
+  if (collaboration?.kind === 'operation') return collaboration.status === 'completed' ? 'complete' : collaboration.status
+  return item.turnOutcome?.status === 'completed' ? 'complete' : item.turnOutcome?.status
 }
 
 function nativeReference(source: AgentSessionHistorySource): string {
@@ -66,7 +66,12 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
     : states.every(state => state === 'complete') ? 'complete' : undefined
-  const status = nativeOnly ? recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status) : undefined
+  const source = records[0]?.source
+  const sameTurn = metrics?.turnId && items.length === records.length && items.every(item => item.turnId === metrics.turnId)
+    && source?.kind === 'native' && typeof records[0]?.sourceHostId === 'string' && records.every(record => record.sourceHostId === records[0]?.sourceHostId && record.source.kind === 'native'
+      && record.source.providerId === source.providerId && record.source.nativeSessionId === source.nativeSessionId)
+  const turnOutcome = sameTurn ? items.find(item => item.turnOutcome)?.turnOutcome : undefined
+  const status = nativeOnly ? recordedStepStatus ?? (turnOutcome?.status === 'completed' ? 'complete' : turnOutcome?.status) : undefined
   const first = items[0]
   const recordedTime = groupRecordTime(records)
   return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
@@ -85,8 +90,8 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
           {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(key, open) } : {})}>{body}</NativeProcessStep>)
         : renderRecord(record, undefined, disclosure) : null}</div>
     })}
-  </WorkflowCard>{items.map(item => item.metricsDiagnostic
-    ? <p key={item.id} className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null)}</div>
+  </WorkflowCard>{items.flatMap(item => [item.metricsDiagnostic, item.turnOutcomeDiagnostic].flatMap((diagnostic, index) => diagnostic
+    ? [<p key={JSON.stringify([item.id, index])} className="conversation-metrics__notice" role="status">{diagnostic.message}</p>] : []))}</div>
 }
 
 export function NativeProcessStep({ item, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange }: {

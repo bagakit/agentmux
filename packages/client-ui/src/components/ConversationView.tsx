@@ -11,7 +11,8 @@ import { CapturedProcessRecord } from './CapturedProcessRecord.js'
 import { ConversationOriginalRecords, ConversationOriginalRecordContent } from './ConversationOriginalRecords.js'
 import { useConversationRecordLayout, type ConversationPresentationPort } from '../lib/use-conversation-record-layout.js'
 import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
-import type { ConversationRecord } from '../lib/conversation-records.js'
+import { conversationRecordTurnOutcome, type ConversationRecord } from '../lib/conversation-records.js'
+import { ConversationTurnFailure } from './ConversationTurnFailure.js'
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
@@ -189,7 +190,13 @@ export const ConversationView = memo(function ConversationView({
   function renderOriginal(record: ConversationRecord): ReactNode {
     return record.original.kind === 'native' ? renderNativeRecord(record.original.item, undefined, record) : renderCaptured(record)
   }
-  const renderRecord: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'deferred'
+  const renderRecord: ConversationRecordRenderer = (record, wrapBody, disclosure) => {
+    const outcome = conversationRecordTurnOutcome(record)
+    return outcome?.status === 'failed' ? <ConversationTurnFailure record={record} failure={outcome.failure}>
+      {() => renderRecordBody(record, undefined, disclosure)}
+    </ConversationTurnFailure> : renderRecordBody(record, wrapBody, disclosure)
+  }
+  const renderRecordBody: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'deferred'
     ? <DeferredConversationProcess key={JSON.stringify([record.executionHostId, record.sourceHostId, record.deferred!.records.map(source => [source.id, source.revision])])}
         record={record} {...(readProcessDetail ? { readDetail: readProcessDetail } : {})} active={reading.active !== false}
         located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source) || record.deferred!.records.some(source => conversationMessageSourceKey(sessionId, source.reference!.source) === locatedMessageKey)} {...(disclosure ? { disclosure } : {})}

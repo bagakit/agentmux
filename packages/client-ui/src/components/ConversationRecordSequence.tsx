@@ -96,6 +96,7 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
     return <Fragment key={conversationPresentationKey(record)}>{renderRecord(record, wrapBody, disclosure)}
       {showMetrics && item && metrics.has(item.id) ? <ConversationMetrics observation={metrics.get(item.id)!} /> : null}
       {showDiagnostic && item?.metricsDiagnostic ? <p className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null}
+      {showDiagnostic && item?.turnOutcomeDiagnostic ? <p className="conversation-metrics__notice" role="status">{item.turnOutcomeDiagnostic.message}</p> : null}
     </Fragment>
   }
   const anchors = new Map(insertions.map(entry => [entry.key, entry]))

@@ -31,6 +31,7 @@
 @import './conversation-process-collapse.css';
 @import './conversation-native-thread.css';
 @import './conversation-metrics.css';
+@import './conversation-turn-failure.css';
 @import './conversation-avatar.css';
 @import './agent-avatar-face.css';
 @import './conversation-reactions.css';

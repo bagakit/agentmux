@@ -3,9 +3,7 @@ import { formatDuration } from '../lib/conversation-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 
 export function conversationMetricsLabel({ metrics }: ConversationMetricsObservation): string {
-  const scope = metrics.scope === 'turn' ? '本轮' : '本次响应'
-  return metrics.status === 'failed' ? `${scope}失败`
-    : metrics.status === 'interrupted' ? `${scope}已中断` : metrics.status === 'completed' ? scope : `${scope}记录`
+  return metrics.scope === 'turn' ? '本轮用量' : '本次响应用量'
 }
 
 export function ConversationMetricsInline({ observation }: { observation: ConversationMetricsObservation }) {
@@ -29,8 +27,6 @@ export function ConversationMetricsDetails({ observation }: { observation: Conve
     <dl>
       {metrics.durationMs === undefined ? null : <div><dt>墙钟耗时</dt><dd>{metrics.durationMs.toLocaleString()} ms</dd></div>}
       {fields.map(([label, value]) => value === undefined ? null : <div key={label}><dt>{label}</dt><dd>{value.toLocaleString()} tokens</dd></div>)}
-      <div><dt>结束方式</dt><dd>{metrics.status === 'completed' ? metrics.scope === 'turn' ? '原生回合已结束' : '原生响应已结束'
-        : metrics.status === 'failed' ? '失败' : metrics.status === 'interrupted' ? '中断' : '未记录'}</dd></div>
       {turnId ? <div><dt>原回合</dt><dd><code>{turnId}</code></dd></div> : null}
       <div><dt>来源记录</dt><dd>{recordIds.map(id => <code key={id}>{id}</code>)}</dd></div>
     </dl>
