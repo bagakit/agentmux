@@ -45,7 +45,7 @@ export function SettingsSidebarNavigation({ groups, selected, activeGroup, navig
           {group.items.map(item => {
             const Icon = item.icon
             return <button key={item.id} type="button" className={selected === item.id ? 'selected' : ''} aria-current={selected === item.id ? 'page' : undefined} title={`${item.title}: ${item.description}`} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
-              <Icon size={15} /><span><strong>{item.title}</strong></span>
+              <Icon size={15} animation={item.group === 'work' && selected === item.id ? 'selection' : 'none'} /><span><strong>{item.title}</strong></span>
             </button>
           })}
         </div>

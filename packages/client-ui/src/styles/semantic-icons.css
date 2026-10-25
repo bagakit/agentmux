@@ -60,7 +60,7 @@
 [data-semantic-icon-part="feedback-forward"] { animation: var(--icon-feedback-forward, none) .72s ease-in-out; }
 [data-semantic-icon-part="feedback-down"] { animation: var(--icon-feedback-down, none) .72s ease-in-out; }
 [data-semantic-icon-part="feedback-trace"] { animation: var(--icon-feedback-trace, none) .8s ease-out; }
-[data-semantic-icon-part="agreement-flag"] { animation: var(--icon-feedback-flag, none) .8s ease-out; transform-box: view-box; transform-origin: 9px 9.5px; }
+[data-semantic-icon-part="agreement-flag"] { animation: var(--icon-selection-flag, var(--icon-feedback-flag, none)) var(--icon-selection-duration, .8s) ease-out; transform-box: view-box; transform-origin: 9px 9.5px; }
 [data-semantic-icon-part="note-content"] { animation: var(--icon-feedback-content, none) .8s ease-out; }
 [data-semantic-icon-part="survey-reflection"] { animation: var(--icon-feedback-probe, none) .8s ease-in-out; }
 /* Only registered sand parts receive these instance selectors; custom drawings stay whole. */
@@ -88,6 +88,30 @@
 }
 /* Every authored part uses the same stop policy, including future registered parts. */
 [data-semantic-icon-part] { animation-iteration-count: var(--icon-motion-iterations, infinite); animation-play-state: var(--icon-motion-play-state, inherit); }
+/* Selection belongs to this navigation instance, independently of work/success feedback.
+   Keep the frame, hit area and sprite stable; only authored local parts move once. */
+.semantic-icon-motion[data-icon-animation="selection"] {
+  --icon-motion-iterations: 1;
+  --icon-selection-duration: .56s;
+  --icon-selection-pane: semantic-icon-selection-pane;
+  --icon-selection-frame: semantic-icon-selection-frame;
+  --icon-selection-lens: semantic-icon-selection-lens;
+  --icon-selection-page: semantic-icon-selection-page;
+  --icon-selection-flag: semantic-icon-flag-once;
+  will-change: auto;
+}
+[data-semantic-icon-part^="selection-"] {
+  transform-box: view-box; transform-origin: 12px 12px;
+  animation-duration: .56s; animation-timing-function: cubic-bezier(.2, .7, .2, 1);
+}
+[data-semantic-icon-part="selection-pane"] { animation-name: var(--icon-selection-pane, none); }
+[data-semantic-icon-part="selection-frame"] { animation-name: var(--icon-selection-frame, none); }
+[data-semantic-icon-part="selection-lens"] { animation-name: var(--icon-selection-lens, none); }
+[data-semantic-icon-part="selection-page-left"], [data-semantic-icon-part="selection-page-right"] { animation-name: var(--icon-selection-page, none); }
+@keyframes semantic-icon-selection-pane { from { transform: translateX(3px); } 70% { transform: translateX(-.3px); } to { transform: none; } }
+@keyframes semantic-icon-selection-frame { from { transform: scale(.8); } 70% { transform: scale(1.025); } to { transform: none; } }
+@keyframes semantic-icon-selection-lens { from { transform: translate(-1.4px, -.8px); } 60% { transform: translate(.3px, -.2px); } to { transform: none; } }
+@keyframes semantic-icon-selection-page { from { transform: scaleX(.7); } 70% { transform: scaleX(1.025); } to { transform: none; } }
 @keyframes semantic-icon-hourglass-turn {
   0%, 78% { transform: rotate(0); }
   78% { animation-timing-function: cubic-bezier(.4, 0, .2, 1); }

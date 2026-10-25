@@ -7,7 +7,7 @@ export type AuthoredIconDesign = {
   motion: (
     | { kind: 'still'; animation: 'none' }
     | { kind: 'loop'; animation: 'work' | 'stream' | 'execute' | 'wait' | 'orbit' }
-    | { kind: 'once'; animation: 'feedback' }
+    | { kind: 'once'; animation: 'feedback' | 'selection' }
   ) & { description: string; trigger: string }
 }
 
@@ -27,31 +27,31 @@ export const MOTE_COMPANION_PARTS = {
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
   "space-workchamber": {
-    shapes: [["path", { "d": "M6 5.5h13a2 2 0 0 1 2 2v6" }], ["path", { "d": "M3 14v-4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4" }], ["path", { "d": "M2 18.5h20 M7 14h6" }]],
+    shapes: [["rect", { "x": "2.5", "y": "4", "width": "19", "height": "16", "rx": "2" }], ["path", { "d": "M9.5 4v16", "data-semantic-icon-part": "selection-pane" }]],
     design: {
-      rest: "低宽的双层壳体横向展开，开口与独立工作面留白清楚；平直舱顶避免竖向圆拱与立碑轮廓。",
-      motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Space 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
+      rest: "横向工作框内的并排分栏表达同一 Space 中展开的工作面；以清楚分隔替代层叠设备和高拱立碑。",
+      motion: { kind: "once", animation: "selection", description: "选中时分栏从中间轻轻展开，工作框固定，随后停稳。", trigger: "仅原导航实例当前选中；不表示运行、权限或完成。" }
     }
   },
   "focus-workframe": {
-    shapes: [["path", { "d": "M8 3.5H6.5a3 3 0 0 0-3 3V8 M16 3.5h1.5a3 3 0 0 1 3 3V8 M20.5 16v1.5a3 3 0 0 1-3 3H16 M8 20.5H6.5a3 3 0 0 1-3-3V16" }], ["rect", { "x": "8", "y": "9", "width": "8", "height": "6", "rx": "1" }]],
+    shapes: [["path", { "d": "M8 3H6a3 3 0 0 0-3 3v2 M16 3h2a3 3 0 0 1 3 3v2 M21 16v2a3 3 0 0 1-3 3h-2 M8 21H6a3 3 0 0 1-3-3v-2", "data-semantic-icon-part": "selection-frame" }], ["rect", { "x": "8", "y": "9", "width": "8", "height": "6", "rx": "1" }]],
     design: {
-      rest: "四角分离，中央保留横向内容面；以工作对象替代圆靶心。",
-      motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Focus 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
+      rest: "四角分离，中央保留横向内容面；以工作对象替代圆靶心，光学中心与整组导航一致。",
+      motion: { kind: "once", animation: "selection", description: "选中时四角略微收拢再对齐，中央工作面固定。", trigger: "仅原导航实例当前选中；不表示 Agent 正在运行或等待。" }
     }
   },
   "survey-prism": {
-    shapes: [["path", { "d": "m9.5 6 5-1.5a1.5 1.5 0 0 1 1.8.8L21 16" }], ["path", { "d": "m7 8 7.5 2.5L21 20 4 14Z" }], ["path", { "d": "m4 14-1.5 3.5A1.8 1.8 0 0 0 4.2 20H21" }]],
+    shapes: [["path", { "d": "M10 20H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4 M3 8h18" }], ["path", { "d": "M19 14.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z M18 18l3 3", "data-semantic-icon-part": "selection-lens" }]],
     design: {
-      rest: "前后错开的斜切光学面与连续承托形成探索棱镜，保留向外展开的方向和底部开口。",
-      motion: { kind: "still", animation: "none", description: "导航对象保持静止，选中与焦点归原宿主。", trigger: "按原 Survey 目的地显示，不表示成果写入、登记完成或执行状态。" }
+      rest: "浏览框与探查镜表达浏览和探索；小尺寸优先清楚用途，保留已可持久化的 glyph key。",
+      motion: { kind: "once", animation: "selection", description: "选中时探查镜轻扫后归位，浏览框固定。", trigger: "仅原导航实例当前选中；与 object.survey 的成果写入反馈分开。" }
     }
   },
   "recall-fold": {
-    shapes: [["path", { "d": "M12 8c-2-2-5-3-8-3L2.5 17c4 0 7 1 9.5 3 2.5-2 5.5-3 9.5-3L20 5c-3 0-6 1-8 3Z M12 8v12" }], ["path", { "d": "m2.5 17 .5 3c3.5 0 6.5.5 9 1 2.5-.5 5.5-1 9-1l.5-3" }]],
+    shapes: [["path", { "d": "M12 7C9.5 5 6.5 4 3.5 4L2.5 17c3.5 0 6.5 1 9.5 3", "data-semantic-icon-part": "selection-page-left" }], ["path", { "d": "M12 7c2.5-2 5.5-3 8.5-3l1 13c-3.5 0-6.5 1-9.5 3", "data-semantic-icon-part": "selection-page-right" }], ["path", { "d": "M12 7v13" }]],
     design: {
-      rest: "两张宽阔展开的页面以中央折脊连为一体，下沿连续壳体表达可留存和回看的知识。",
-      motion: { kind: "still", animation: "none", description: "书页与折脊保持完整静止，选中与焦点归原宿主。", trigger: "按原 Recall 目的地显示，不表示数据保存、同步或阅读状态。" }
+      rest: "两张展开页面以中央折脊连为一体，减少底部叠线并上移光学中心，清楚表达留存和回看。",
+      motion: { kind: "once", animation: "selection", description: "选中时两页围绕固定书脊轻轻展开，随后停稳。", trigger: "仅原导航实例当前选中；不表示保存、同步或阅读进度。" }
     }
   },
   "execution-split": {
@@ -149,7 +149,7 @@ export const AUTHORED_ICON_DEFINITIONS = {
     shapes: [["path",{"d":"M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 3V5a2 2 0 0 1 2-2Z"}],["path",{"d":"M9 15V6.5"}],["path",{"d":"M9 6.5h8l-2 3 2 3H9Z","fill":"currentColor","stroke":"none","data-semantic-icon-part":"agreement-flag"}]],
     design: {
       rest: "对话框中的实心旗帜表达讨论并约定共同方向，小尺寸保留清晰旗面与对话尾；不表示已经确认或完成",
-      motion: {"kind": "once", "animation": "feedback", "description": "仅旗面沿固定旗杆轻轻展开一次，对话框与旗杆保持静止", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
+      motion: {"kind": "once", "animation": "feedback", "description": "仅旗面沿固定旗杆轻轻展开一次，对话框与旗杆保持静止", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航选中另沿 selection 呈现；旧确认和结果验收不触发业务反馈。"}
     }
   },
   "survey-explore": {

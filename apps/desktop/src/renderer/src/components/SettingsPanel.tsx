@@ -200,7 +200,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
                   {group.items.map((item) => {
                     const Icon = item.icon
                     return <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item" data-settings-target={item.id}>
-                      <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><Icon size={15} aria-hidden="true" />{item.title}
+                      <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><Icon size={15} animation={!showResults && item.group === 'work' && active === item.id ? 'selection' : 'none'} aria-hidden="true" />{item.title}
                     </DropdownMenu.RadioItem>
                   })}
                 </Fragment>)}

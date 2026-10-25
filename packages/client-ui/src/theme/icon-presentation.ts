@@ -1,5 +1,5 @@
-/** Instance presentation only. Callers own whether the represented work is currently active. */
-export const ICON_ANIMATIONS = ['none', 'work', 'stream', 'execute', 'wait', 'orbit', 'feedback', 'spin'] as const
+/** Instance presentation only. Callers own work eligibility and current navigation selection. */
+export const ICON_ANIMATIONS = ['none', 'work', 'stream', 'execute', 'wait', 'orbit', 'feedback', 'selection', 'spin'] as const
 export type IconAnimation = typeof ICON_ANIMATIONS[number]
 export type SemanticIconPresentation = {
   size?: number | undefined

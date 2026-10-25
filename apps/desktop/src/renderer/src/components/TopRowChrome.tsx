@@ -279,7 +279,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
           } finally { surfaceSwitchObservation.actionEnded(observationId, result) }
         }}
       >
-        <Icon className="surface-navigation__icon" size={14} aria-hidden="true" />
+        <Icon className="surface-navigation__icon" size={14} animation={selected ? 'selection' : 'none'} aria-hidden="true" />
       </NavigationButton>
     )
   }
