@@ -1108,7 +1108,7 @@ export class AgentMuxClient {
           await this.kernel.stop(operation)
         }
       },
-      providers: { providers: this.providers, probeAgent: (...args) => this.probeAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args) },
+      providers: { providers: this.providers, probeAgent: (...args) => this.probePreparedAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args) },
       executors: { hostExecutorOwner: this.hostExecutorOwner, sessionExecutorConfiguration: this.sessionExecutorConfiguration,
         sessionExecutorOptions: (...args) => this.sessionExecutorOptions(...args) },
       hooks: {
@@ -3937,6 +3937,11 @@ export class AgentMuxClient {
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentCapabilitySnapshot> {
     await this.prepareExecutionEnvironment()
+    return this.probePreparedAgent(providerId, commandOverride, context)
+  }
+
+  /** The current create/recovery operation already prepared its Host environment. */
+  private async probePreparedAgent(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentCapabilitySnapshot> {
     const observations: AgentMuxExecutorProbeResult[] = []
     const observe = async (executable: string) => {
       const observation = await classifyExecutable(executable, context)
@@ -5012,7 +5017,7 @@ export class AgentMuxClient {
         : nativeResumeSource ? provider.buildResumeLaunch({ ...launchContext, nativeHandle: nativeResumeSource.nativeHandle })
         : provider.buildLaunch(launchContext)
       const executableContext = { workspacePath: input.workspacePath, env: terminalEnvironment(plan.env) }
-      const capability = await this.probeAgent(input.providerId, plan.command, executableContext)
+      const capability = await this.probePreparedAgent(input.providerId, plan.command, executableContext)
       if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) {
         throw executorUnavailableError(provider.label, capability)
       }

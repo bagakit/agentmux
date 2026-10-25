@@ -81,6 +81,8 @@ export class AgentSessionRunLifecycle {
         }
       }
       if (!sameRun(canonical.run, input.expectedRun)) throw new AgentMuxError('Agent Session changed before explicit restart. The current Run was kept.', 'STALE_AGENT_SESSION', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      // Only this invocation's preflight proves preparation; a durable reservation does not.
+      let preparedCapability: Parameters<AgentSessionRunLifecycle['resumeAgentRun']>[2]
       let reservation = await this.ports.sessions.store.loadResumeCorrelation(input.agentSessionId, operation)
       if (reservation) {
         if (identityOnly && !prior && reservation.restart) digest = reservation.restart.requestDigest
@@ -108,7 +110,9 @@ export class AgentSessionRunLifecycle {
         // Resolve the real replacement before interrupting useful work. Freeze these exact options in the original durable operation.
         const frozen = parseAgentRestartInput({ ...input, ...await this.ports.executors.sessionExecutorOptions(canonical, input) })
         const { plan } = this.buildResumePlan(canonical, frozen)
-        const capability = await this.ports.providers.probeAgent(canonical.providerId, plan.command, { workspacePath: canonical.workspacePath, env: terminalEnvironment(plan.env) })
+        const context = { workspacePath: canonical.workspacePath, env: terminalEnvironment(plan.env) }
+        const capability = await this.ports.providers.probeAgent(canonical.providerId, plan.command, context)
+        preparedCapability = { snapshot: capability, context }
         if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) throw executorUnavailableError(provider.label, capability)
         await this.ports.hooks.requireHookIngressOwner()
         const stopOperation = await this.ports.runtime.kernel.prepareStop(input.expectedRun.runId, operation + '-stop')
@@ -119,7 +123,7 @@ export class AgentSessionRunLifecycle {
       const recorded = await this.ports.sessions.store.recordRestartAdmission(reservation)
       await this.ports.sessions.registry.refresh(input.agentSessionId, input.expectedRun)
       this.ports.events.publishSession(recorded)
-      return await this.resumeAgentRun(reservation.restart!.request, input.expectedRun, undefined, undefined, digest, reservation)
+      return await this.resumeAgentRun(reservation.restart!.request, input.expectedRun, preparedCapability, undefined, digest, reservation)
     } finally { this.executingRestarts.delete(operation); this.restartSettlements.delete(operation); settle() }
   }
 
@@ -369,7 +373,7 @@ export class AgentSessionRunLifecycle {
       restartReservation ? 'restart' : reopening ? 'reopen' : 'resume', input.agentSessionId,
       safeId(input.operationId, 'Agent resume operation id')
     )
-    await this.ports.runtime.prepareExecutionEnvironment?.()
+    if (!knownCapability) await this.ports.runtime.prepareExecutionEnvironment?.()
     let reservation = restartReservation ?? (reopening
       ? await this.ports.sessions.registry.reserveReopen(input.agentSessionId, reopening.expectedRetiredAt, lifecycleOperationId, input.operationId)
       : await this.ports.sessions.registry.reserveExisting('resume', previous!.agentSessionId, previous!.run, lifecycleOperationId))

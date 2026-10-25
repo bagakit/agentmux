@@ -16,10 +16,22 @@ const mobileBuildDirectory = process.env.AGENTMUX_MOBILE_BUILD_DIRECTORY ?? join
 // The long-lived execution owner must load the user's shell environment itself;
 // a Desktop launched from Finder may still be hydrating when it starts this Host.
 // Runtime namespace and Agent identity belong to the original launch context, not shell setup.
-const environmentReady = prepareProcessEnvironmentFromLoginShell().then(environment => {
-  const warning = loginShellEnvironmentWarning(environment)
-  if (warning) process.stderr.write(`${warning}\n`)
-})
+let environmentReady: Promise<void> | undefined
+function prepareExecutionEnvironment(): Promise<void> {
+  return environmentReady ??= prepareProcessEnvironmentFromLoginShell().then(environment => {
+    // Keep complete preparation; incomplete observations belong only to this attempt.
+    // The next execution can retry without replacing this Host or any original Session.
+    if (environment.ok ? environment.mode !== 'interactive-login' : environment.reason !== 'unsupported-platform') {
+      environmentReady = undefined
+    }
+    const warning = loginShellEnvironmentWarning(environment)
+    if (warning) process.stderr.write(`${warning}\n`)
+  }, error => {
+    environmentReady = undefined
+    throw error
+  })
+}
+void prepareExecutionEnvironment()
 const configured = configuredHostClients(configurationPath)
 let host: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined
 let stopping: Promise<void> | undefined
@@ -36,7 +48,7 @@ const shutdown = (): Promise<void> => stopping ??= (async () => {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   void shutdown().catch(error => { console.error(error); process.exit(1) })
 })
-startup = startAgentMuxHost({ prepareExecutionEnvironment: () => environmentReady, store: agentMuxHostStore(storePath), mobileBuildDirectory, shutdown,
+startup = startAgentMuxHost({ prepareExecutionEnvironment, store: agentMuxHostStore(storePath), mobileBuildDirectory, shutdown,
   ...(configurationPath === undefined ? {} : { configurationPath }),
   ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: () => configured.clients(), subscribeClients: listener => configured.subscribeClients(listener),
     ...(moteConfigurationPath === undefined ? {} : { moteConfigurationPath }) } }) }).catch(async error => {
