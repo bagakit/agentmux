@@ -62,7 +62,7 @@ describe('phone direct conversation controls', () => {
     const goal = button(tools, '目标与结果')
     await click(goal)
     expect(view.element.querySelector('.mobile-goal-panel')?.hasAttribute('hidden')).toBe(false)
-    expect(f.client.forwardRpc).toHaveBeenCalledWith('goal.ls', { agentSessionId: 'session-original' })
+    await vi.waitFor(() => expect(f.client.forwardRpc).toHaveBeenCalledWith('goal.ls', { agentSessionId: 'session-original' }))
     await click(button(view.element.querySelector<HTMLElement>('.mobile-header')!, '返回对话'))
     await vi.waitFor(() => expect(document.activeElement).toBe(goal))
     expect(editor(view.element)).toBe(original); expect(original.textContent).toBe('目标与历史保留原编辑器')
