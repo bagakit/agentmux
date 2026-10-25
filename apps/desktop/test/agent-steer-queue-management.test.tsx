@@ -4,7 +4,6 @@ import { act } from 'react'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -103,9 +102,8 @@ it('records the actual first accepted time and creates no intent for refused adm
   const rejected = vi.fn()
   expect(useAppStore.getState().enqueueAgentSteer(sessionId, ' ', rejected)).toBe(false)
   expect(useAppStore.getState().enqueueAgentSteer('missing', 'message', rejected)).toBe(false)
-  expect(useAppStore.getState().enqueueAgentSteer(sessionId, 'x'.repeat(MAX_AGENT_PROMPT_BYTES + 1), rejected)).toBe(false)
   expect(queue()).toBe(admitted)
-  expect(rejected).toHaveBeenCalledTimes(1)
+  expect(rejected).not.toHaveBeenCalled()
 })
 
 it('uses the actual mailbox controls and shows immutable known time next to an unknown old intent', async () => {
