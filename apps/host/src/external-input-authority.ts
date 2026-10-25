@@ -65,10 +65,10 @@ export function createConnectionExternalInputAuthority(options: { ingress(): Pro
   }, async assertInteractionCurrent(author, intent): Promise<void> {
     const unavailable = () => new AgentMuxError('The original external permission authority is unconfirmed. Inspect its original operation; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
     try {
-      const ingress = await options.ingress()
+      const ingress = await sourceIngress(author.authoritySource)
       const result = await ingress.authority({ operationId: intent.operationId })
       const original = result.ingress, input = original?.kind === 'action' ? original.input : undefined
-      if (!input || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
+      if (!input || (!author.authoritySource && input.hostId !== options.executionHostId) || input.agentSessionId !== intent.agentSessionId ||
           input.expectedRun.runId !== intent.expectedRun.runId || input.operationId !== intent.operationId ||
           input.intentDigest !== agentInteractionIntentDigest(intent) ||
           JSON.stringify(parseAgentExternalInteractionAuthor(input.author)) !== JSON.stringify(parseAgentExternalInteractionAuthor(author)) ||
@@ -77,10 +77,10 @@ export function createConnectionExternalInputAuthority(options: { ingress(): Pro
   }, async assertQuestionCurrent(author, intent): Promise<void> {
     const unavailable = () => new AgentMuxError('The original external answer authority is unconfirmed. Inspect its original operation; local answers remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
     try {
-      const ingress = await options.ingress()
+      const ingress = await sourceIngress(author.authoritySource)
       const result = await ingress.authority({ operationId: intent.operationId })
       const original = result.ingress, input = original?.kind === 'action' ? original.input : undefined
-      if (!input || input.responseKind !== 'question' || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
+      if (!input || input.responseKind !== 'question' || (!author.authoritySource && input.hostId !== options.executionHostId) || input.agentSessionId !== intent.agentSessionId ||
           input.expectedRun.runId !== intent.expectedRun.runId || input.operationId !== intent.operationId || input.intentDigest !== agentQuestionReplyIntentDigest(intent) ||
           JSON.stringify(parseAgentExternalInteractionAuthor(input.author)) !== JSON.stringify(parseAgentExternalInteractionAuthor(author)) ||
           JSON.stringify(parseAgentExternalInteractionAuthor(intent.externalAction)) !== JSON.stringify(parseAgentExternalInteractionAuthor(author)) || result.authority !== 'current') throw unavailable()

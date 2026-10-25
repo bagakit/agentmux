@@ -18,7 +18,7 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
       if (owner.runtimeId !== executionRuntimeId || current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The original execution Runtime changed. No conversation or input was rerouted.', 'INGRESS_TARGET_UNCONFIRMED')
       return { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
     }
-    const invoke = async <T>(method: 'readAgentSession' | 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'readAgentInputChanges' | 'rejoinAgentInputWaiting' | 'runtimeSubject', args: unknown[], fence: NonNullable<Awaited<ReturnType<typeof target>>>): Promise<T> => {
+    const invoke = async <T>(method: 'readAgentSession' | 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'readAgentInputChanges' | 'rejoinAgentInputWaiting' | 'runtimeSubject' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission', args: unknown[], fence: NonNullable<Awaited<ReturnType<typeof target>>>): Promise<T> => {
       const response = await client.forwardRpc!('runtime.invoke', { consumerId, fence,
         invocation: encodeHostedValue({ method, args }) as import('@agentmux/core/hosted').AgentMuxHostedInvocation }, {}, fence)
       return decodeHostedValue(response.value) as T
@@ -32,10 +32,22 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
       },
       agentSession: id => client.agentSession(id),
       onEvent: listener => client.onEvent(listener),
-      respondAgentInteraction: input => client.respondAgentInteraction(input),
-      inspectAgentInteractionOperation: input => client.inspectAgentInteractionOperation(input),
-      replySessionQuestion: input => client.replySessionQuestion(input),
-      inspectAgentPromptSubmission: input => client.inspectAgentPromptSubmission(input),
+      respondAgentInteraction: async input => {
+        const fence = await target(input.externalAction?.authoritySource?.executionRuntimeId)
+        return fence ? await invoke('respondAgentInteraction', [input], fence) : await client.respondAgentInteraction(input)
+      },
+      inspectAgentInteractionOperation: async input => {
+        const fence = await target()
+        return fence ? await invoke('inspectAgentInteractionOperation', [input], fence) : await client.inspectAgentInteractionOperation(input)
+      },
+      replySessionQuestion: async input => {
+        const fence = await target(input.externalAction?.authoritySource?.executionRuntimeId)
+        return fence ? await invoke('replySessionQuestion', [input], fence) : await client.replySessionQuestion(input)
+      },
+      inspectAgentPromptSubmission: async input => {
+        const fence = await target()
+        return fence ? await invoke('inspectAgentPromptSubmission', [input], fence) : await client.inspectAgentPromptSubmission(input)
+      },
       providers: client.providers,
       runtimeSubject: async input => {
         const fence = await target()

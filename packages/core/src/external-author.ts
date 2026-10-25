@@ -60,15 +60,16 @@ export type AgentExternalInteractionAuthor = {
   grantRevision: number
   /** Absence is the original room reference; application grants have an explicit source. */
   grantSource?: 'application'
+  authoritySource?: AgentExternalAuthoritySource
 }
 
 export function parseAgentExternalInteractionAuthor(value: unknown): AgentExternalInteractionAuthor {
-  const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision', 'grantSource'], 'INVALID_EXTERNAL_AUTHOR')
+  const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision', 'grantSource', 'authoritySource'], 'INVALID_EXTERNAL_AUTHOR')
   const fail = (): never => { throw new AgentMuxError('External interaction attribution is malformed.', 'INVALID_EXTERNAL_AUTHOR') }
   const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail(); return v as string }
   const revision = (v: unknown): number => { if (!Number.isSafeInteger(v) || Number(v) < 1) fail(); return v as number }
   if (p.kind !== 'external-action' || p.grantSource !== undefined && p.grantSource !== 'application') fail()
-  return { kind: 'external-action', connectionId: text(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), sourceMessageId: text(p.sourceMessageId), actionRef: text(p.actionRef), bindingId: text(p.bindingId), bindingRevision: revision(p.bindingRevision), grantId: text(p.grantId), grantRevision: revision(p.grantRevision), ...(p.grantSource === undefined ? {} : { grantSource: 'application' as const }) }
+  return { kind: 'external-action', connectionId: text(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), sourceMessageId: text(p.sourceMessageId), actionRef: text(p.actionRef), bindingId: text(p.bindingId), bindingRevision: revision(p.bindingRevision), grantId: text(p.grantId), grantRevision: revision(p.grantRevision), ...(p.grantSource === undefined ? {} : { grantSource: 'application' as const }), ...(p.authoritySource === undefined ? {} : { authoritySource: parseAgentExternalAuthoritySource(p.authoritySource) }) }
 }
 
 /** Exact machine intent correlation. Mutable observations and JSON key order cannot change the original target. */
