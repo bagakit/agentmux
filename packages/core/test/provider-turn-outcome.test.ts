@@ -46,8 +46,10 @@ it('delivers the same failed native turn through evidence, history, RPC conversa
   const record = read.records[0]!
   expect(record.original).toMatchObject({ kind: 'deferred', item: { kind: 'native', item: { turnOutcome: item.turnOutcome } } })
   const unit = read.snapshot.units[0]!
+  const reference = unit.records[0]!.reference
+  if (!reference) throw new Error('Original outcome reference missing')
   const exact = reading(await f.rpc.call('agent.conversation.inspect', { ...f.ref, anchor: {
-    record: unit.records[0]!.reference, revision: unit.records[0]!.revision, frontier: read.snapshot.window.checkpoint } }))
+    record: reference, revision: unit.records[0]!.revision, frontier: read.snapshot.window.checkpoint } }))
   expect(exact.records[0]!.original).toMatchObject({ kind: 'native', item: { turnOutcome: item.turnOutcome } })
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
