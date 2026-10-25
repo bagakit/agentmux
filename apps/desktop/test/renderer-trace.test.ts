@@ -114,6 +114,18 @@ it.each(['attached', 'devtools'] as const)('refuses a pre-existing %s owner with
   expect(f.debuggerClient.attach).not.toHaveBeenCalled(); expect(f.debuggerClient.detach).not.toHaveBeenCalled()
   expect(f.state[kind]).toBe(true)
 })
+it('requests native triggering stacks while retained category facts remain independent of the current producer', async () => {
+  vi.useFakeTimers()
+  const f = fixture(), result = await finish(f)
+  expect(result.requestedCategories).toContain('disabled-by-default-devtools.timeline.stack')
+  expect(result.requestedCategories).not.toContain('disabled-by-default-devtools.timeline.invalidationTracking')
+  const retained = { ...result, requestedCategories: ['devtools.timeline', 'original-producer-category'] }
+  expect(parseRendererTraceResult(retained).requestedCategories).toEqual(retained.requestedCategories)
+  expect(parseRendererTraceResult(retained).trace).toEqual(result.trace)
+  for (const categories of [[], [''], [1], ['valid', null]])
+    expect(() => parseRendererTraceResult({ ...result, requestedCategories: categories })).toThrow()
+  expect(() => parseRendererTraceResult({ ...result, requestedCategories: ['x'.repeat(64 * 1024)] })).toThrow()
+})
 it('does not end a foreign native trace after its own start was rejected', async () => {
   const f = fixture(); f.state.nativeForeignTrace = true
   const result = await f.tracer.capture(input())
