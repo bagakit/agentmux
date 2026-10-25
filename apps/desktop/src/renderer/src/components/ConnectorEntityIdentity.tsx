@@ -34,7 +34,7 @@ export function ConnectorEntityIdentity({ identityKey, kind, name, label, missin
   const nameCopy = name ? <ContentCopyButton text={name} identity={`${identityKey}:name`} label={`Copy ${kind} name`} className="connector-entity__copy" /> : null
   return <div className={'connector-entity' + (compact ? ' connector-entity--compact' : '')} data-entity-kind={kind}>
     <span className="connector-entity__avatar" aria-hidden="true">
-      <ChannelProfileAvatar url={avatarUrl} size={size}><Icon size={compact ? 15 : 17} /></ChannelProfileAvatar>
+      <ChannelProfileAvatar key={JSON.stringify([identityKey, profileRead?.observation?.checkedAt])} url={avatarUrl} size={size}><Icon size={compact ? 15 : 17} /></ChannelProfileAvatar>
     </span>
     <div className="connector-entity__body">
       <div className="connector-entity__heading">
