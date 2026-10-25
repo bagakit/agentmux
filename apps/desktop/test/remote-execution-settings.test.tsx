@@ -53,7 +53,7 @@ async function toggleGuide(open: boolean) {
   return guide!
 }
 function guideText(content: string) {
-  return content.replace(/^## /gmu, '').replace(/^\d+\. /gmu, '')
+  return content.replace(/^## /gmu, '').replace(/^\d+\. /gmu, '').replace(/^\s*- /gmu, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1').replace(/\*\*|`/gu, '').replace(/\s+/gu, '')
 }
 
@@ -142,11 +142,11 @@ describe('Remote execution Settings', () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
     const before = useAppStore.getState()
     await pane(); await chooseProject('project-remote'); await button('Prepare Agent')
-    expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'project-remote', reveal: true })
+    expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'project-remote', reveal: true, initialExecution: { resourceWorkspaceId: 'project-remote', agentWorkspaceId: 'project-remote' } })
     const tabId = open.mock.results[0]!.value as string
     expect(tabId).toBeTruthy()
     const after = useAppStore.getState(), tab = after.tabs[tabId]!
-    expect(split).toHaveBeenCalledExactlyOnceWith({ tabId, regionId: tab.layout.activeRegionId }, 'project-remote')
+    expect(split).not.toHaveBeenCalled()
     expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: 'project-remote', agentWorkspaceId: 'project-remote' })
     expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts)
     expect(after.sessions).toBe(before.sessions)

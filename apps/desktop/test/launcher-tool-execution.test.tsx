@@ -37,21 +37,22 @@ async function mount(reverse = false, settings: ContextType<typeof SettingsNavig
   await dom.render(<SettingsNavigation.Provider value={settings}><NewTabSurface tabGroupId="group" tabId="launch" regionId="input" /></SettingsNavigation.Provider>)
   return { project, warm, before: useAppStore.getState() }
 }
+async function mode(label: string) {
+  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.launcher-execution__mode')].find(item => item.textContent?.includes(label))
+  expect(button).toBeDefined()
+  await act(async () => button!.click())
+}
 async function applySplit(workspaceId: string) {
-  // The project Launcher itself must expose this choice before any Host dialog opens.
-  const checkbox = dom.container.querySelector<HTMLInputElement>('.launcher-execution-mode input[type="checkbox"]')
-  expect(checkbox).not.toBeNull()
-  expect(checkbox!.closest('[role="dialog"], [hidden], [inert]')).toBeNull()
-  expect(document.querySelector('[aria-label="Machine for new session"]')).toBeNull()
-  expect(checkbox!.checked).toBe(false)
-  await act(async () => checkbox!.click())
-  expect(checkbox!.checked).toBe(true)
-  await dom.click('[aria-label="Agent runtime environment"]')
+  expect(dom.container.querySelector('.launcher-execution__modes')?.closest('[role="dialog"], [hidden], [inert]')).toBeNull()
+  await dom.click('.launcher-execution__custom')
+  await dom.click('.launcher-execution__endpoints > button:nth-child(2)')
   const hostId = useAppStore.getState().config!.workspaces.find(item => item.id === workspaceId)!.hostId
   const before = useAppStore.getState().tabs.launch!.regions.input
   await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Machine for new session"]')!; select.value = hostId; select.dispatchEvent(new Event('change', { bubbles: true })) })
   expect(useAppStore.getState().tabs.launch!.regions.input).toBe(before)
   await act(async () => document.querySelector<HTMLButtonElement>(`[data-workspace-id="${workspaceId}"]`)!.click())
+  expect(useAppStore.getState().tabs.launch!.regions.input).toBe(before)
+  await dom.click('.launcher-execution__setup .primary-button')
 }
 async function splitAt(workspaceId: string) { await expect(applySplit(workspaceId)).resolves.toBeUndefined() }
 it.each([false, true])('real Launcher sends exact B Core revision and A tool resource in direction reverse=%s, retaining A draft/files/warm shell', async reverse => {
@@ -101,7 +102,7 @@ it('never aliases a retained Core choice to App templates or a new Host revision
   expect(dom.container.querySelector('[aria-label="Agent prompt"]')?.getAttribute('contenteditable')).toBe('true')
   await dom.click('[data-executor-id="codex"]')
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ agentExecutor: { executorRevision: 'changed-revision' } })
-  await act(async () => dom.container.querySelector<HTMLInputElement>('.launcher-execution-mode input')!.click())
+  await mode('Local development')
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: 'workspace' })
   expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
 })
@@ -159,4 +160,92 @@ it('explains unsupported Mote dual execution while retaining normal launch, all 
   await act(async () => useAppStore.getState().setLauncherAgentWorkspace(target, null))
   expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!.disabled).toBe(false)
   expect(useAppStore.getState().agentComposerDrafts.input).toBe('Keep complete request')
+})
+
+
+it('exposes three intentions immediately; cancel and Host browsing keep the complete original tuple and drafts', async () => {
+  const f = await mount()
+  const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
+  expect(dom.container.querySelectorAll('.launcher-execution__mode')).toHaveLength(3)
+  await mode('Remote Agent')
+  expect(dom.container.querySelector('.launcher-execution__setup')?.textContent).toContain('Choose the remote Agent environment')
+  expect(dom.container.querySelectorAll('[aria-label="Machine for new session"] option')).toHaveLength(1)
+  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Machine for new session"]')!.value).toBe('B')
+  expect(useAppStore.getState().tabs).toBe(f.before.tabs)
+  await dom.click('[aria-label="Cancel execution setup"]')
+  expect(useAppStore.getState().tabs).toBe(f.before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts)
+  expect(useAppStore.getState().launcherNameDrafts).toBe(f.before.launcherNameDrafts)
+  expect(useAppStore.getState().launcherOptionDrafts).toBe(f.before.launcherOptionDrafts)
+  expect(document.activeElement?.textContent).toContain('Remote Agent')
+  expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+})
+it('one Remote Agent target choice commits the original local project and remote runtime without launching', async () => {
+  const f = await mount(), launch = vi.spyOn(api.sessions, 'launchAgent')
+  await mode('Remote Agent')
+  await dom.click('[data-workspace-id="agent-project"]')
+  expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: 'workspace', agentWorkspaceId: remoteProject.id })
+  expect(dom.container.querySelector('.launcher-execution__setup')).toBeNull()
+  expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts)
+  expect(launch).not.toHaveBeenCalled()
+  await mode('Local development')
+  expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
+  expect(useAppStore.getState().tabs.launch!.regions.input.workspaceId).toBe('workspace')
+})
+it('Remote development enters the selected project’s workface and keeps relative file drafts in the original project', async () => {
+  const f = await mount(), launch = vi.spyOn(api.sessions, 'launchAgent')
+  await act(async () => useAppStore.getState().setAgentComposerDraft('input', '[local.md](agentmux-file:%40local.md)'))
+  const source = useAppStore.getState()
+  await mode('Remote development')
+  expect(useAppStore.getState().activeWorkspaceId).toBe('workspace')
+  await dom.click('[data-workspace-id="agent-project"]')
+  const state = useAppStore.getState(), newTab = Object.values(state.tabs).find(tab => tab.id !== 'launch')!
+  expect(state.activeWorkspaceId).toBe(remoteProject.id)
+  expect(state.tabs.launch).toBe(source.tabs.launch)
+  expect(state.agentComposerDrafts.input).toBe('[local.md](agentmux-file:%40local.md)')
+  expect(newTab.workspaceId).toBe(remoteProject.id)
+  expect(newTab.regions[newTab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: remoteProject.id })
+  expect(newTab.regions[newTab.layout.activeRegionId]).not.toHaveProperty('agentWorkspaceId')
+  expect(state.agentComposerDrafts[newTab.layout.activeRegionId] ?? '').toBe('')
+  expect(state.launcherNameDrafts.input).toBe(f.before.launcherNameDrafts.input)
+  expect(state.launcherOptionDrafts.input).toBe(f.before.launcherOptionDrafts.input)
+  expect(launch).not.toHaveBeenCalled()
+})
+it('Custom staging leaves both addresses unchanged until one complete arrangement is applied', async () => {
+  const f = await mount(true)
+  await dom.click('.launcher-execution__custom')
+  await dom.click('.launcher-execution__endpoints > button:nth-child(2)')
+  await dom.click('[data-workspace-id="workspace"]')
+  expect(useAppStore.getState().tabs).toBe(f.before.tabs)
+  await dom.click('.launcher-execution__setup .primary-button')
+  expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: remoteProject.id, agentWorkspaceId: 'workspace' })
+})
+
+
+it('Custom endpoints distinguish identical project names and paths by their exact local and SSH environments', async () => {
+  await mount()
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!,
+    hosts: state.config!.hosts.map(host => host.id === 'B' ? { ...host, label: 'Studio', hostname: 'worker.example.invalid', user: 'developer', port: 2222 } : { ...host, label: 'Studio' }),
+    workspaces: state.config!.workspaces.map(workspace => ({ ...workspace, name: 'Same project', path: '/same/project' })) } })))
+  await applySplit(remoteProject.id)
+  await dom.click('.launcher-execution__custom')
+  const endpoints = [...dom.container.querySelectorAll('.launcher-execution__endpoints > button')]
+  expect(endpoints).toHaveLength(2)
+  expect(endpoints[0]!.textContent).toContain('This machine')
+  expect(endpoints[0]!.textContent).toContain('/same/project')
+  expect(endpoints[1]!.textContent).toContain('developer@worker.example.invalid:2222')
+  expect(endpoints[1]!.textContent).toContain('/same/project')
+  expect(endpoints[0]!.textContent).not.toBe(endpoints[1]!.textContent)
+})
+
+it('keeps execution setup open for IME-owned Escape and restores its mode focus only on an ordinary Escape', async () => {
+  await mount()
+  await mode('Remote Agent')
+  const input = dom.container.querySelector<HTMLInputElement>('.launcher-execution__setup input')!
+  expect(input).not.toBeNull()
+  await act(async () => { input.focus(); input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', isComposing: true, bubbles: true })) })
+  expect(dom.container.querySelector('.launcher-execution__setup')).not.toBeNull()
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })))
+  expect(dom.container.querySelector('.launcher-execution__setup')).toBeNull()
+  expect(document.activeElement?.textContent).toContain('Remote Agent')
 })
