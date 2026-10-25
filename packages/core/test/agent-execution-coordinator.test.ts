@@ -298,3 +298,24 @@ describe('optional execution service lifetime', () => {
     await restored.dispose()
   })
 })
+
+
+it('persists both helper qualification notices without taking away a connected service, including after reader restart', async () => {
+  const f = await fixture(), first = await f.open()
+  const notices = (['executor', 'frontend'] as const).map(role => ({ providerId: 'fixture-provider', role, capability: role === 'executor' ? 'agent-control' as const : 'hooks' as const,
+    state: role === 'executor' ? 'unconfigured' as const : 'unqualified' as const, code: role + '_QUALIFICATION', message: 'connected unavailable healthy are display text', action: 'Qualify original capability' }))
+  for (const [index, h] of [f.executor, f.frontend].entries()) {
+    h.api.prepareAgentExecutionHelper.mockImplementation(async input => ({ prepared: { ...input, launch: 'fixture' }, notices: [notices[index]!] }))
+  }
+  const created = await first.coordinator.create(f.input)
+  expect(created.execution).toMatchObject({ state: 'connected', notices })
+  expect(created.execution.diagnostic).toBeUndefined()
+  expect(f.read().notices).toEqual(notices)
+  await first.close()
+  const next = await f.open()
+  expect(next.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', notices })
+  expect(await next.coordinator.rejoin(f.input.bindingId)).toMatchObject({ state: 'connected', notices })
+  expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
+  expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+  expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+})

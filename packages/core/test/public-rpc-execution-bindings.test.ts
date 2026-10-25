@@ -142,3 +142,16 @@ describe('public execution binding owner', () => {
     expect(agentMuxCommandHelp('agent.execution')).toContain('amux agent execution create')
   })
 })
+
+
+it('preserves typed Provider notices through actual RPC service and strict result codec without altering connected state', async () => {
+  const f = fixture(), value: AgentExecutionInspection = { ...inspection, notices: [{ providerId: 'fixture-provider', role: 'executor', capability: 'agent-control', state: 'unconfigured', code: 'AGENT_TOOL_CONTEXT_UNAVAILABLE', message: 'Agent control unconfigured', action: 'Configure original route' }] }
+  const expected = structuredClone(value)
+  f.owner.inspect.mockResolvedValueOnce(value)
+  const returned = await f.service.call('agent.execution.binding', key, context)
+  expect(parseRpcNativeResult('agent.execution.binding', returned, key)).toEqual(expected)
+  for (const notice of [{ ...value.notices![0], state: 'connected' }, { ...value.notices![0], privateCredential: 'secret' }]) {
+    expect(() => parseAgentExecutionInspection({ ...value, notices: [notice] }, key)).toThrow()
+  }
+  expect(() => parseAgentExecutionInspection({ ...value, notices: [...value.notices!, ...value.notices!] }, key)).toThrow()
+})
