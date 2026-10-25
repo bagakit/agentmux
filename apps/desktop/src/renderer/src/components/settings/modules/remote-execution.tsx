@@ -8,7 +8,7 @@ export const remoteExecutionSettingsModule = {
   title: 'Remote execution',
   description: 'Run your Agent and its tools on the machines you choose.',
   keywords: 'remote execution agent runtime tools binding workspace project guide how start Space 双向 远程执行 运行端 工具 操作指南',
-  icon: semanticIconComponent('object.terminal'),
+  icon: semanticIconComponent('object.remote-execution'),
   savedSummary: () => 'Agent runtime · Project & tools',
   searchTargets: [
     { id: 'prepare', title: 'Prepare a remote Agent', kind: 'action' },

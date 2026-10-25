@@ -15,7 +15,8 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 /** Select a future execution resource without checking or changing any existing Run. */
-export function LauncherEnvironment({ workspace, host, check, displayPath, active, contextName, hosts, workspaces, onSelectWorkspace, selectionDisabled = false, onManageProjects, roleLabel, selectionLabel = 'Runtime environment', chooseTitle = 'Choose where to start', children }: {
+export function LauncherEnvironment({ workspace, host, check, displayPath, active, contextName, hosts, workspaces, onSelectWorkspace, selectionDisabled = false, onManageProjects, roleLabel, selectionLabel = 'Runtime environment', chooseTitle = 'Choose where to start', purpose = 'project', children }: {
+  purpose?: 'project' | 'runtime'
   roleLabel?: string | undefined
   selectionLabel?: string
   chooseTitle?: string
@@ -67,7 +68,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
           onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
           <header><div className="launcher-environment__identity"><ThemeObjectHostIcon size={18} /><div><Dialog.Title>{chooseTitle}</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
             <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
-          {open ? <LauncherExecutionPicker hosts={hosts} workspaces={workspaces} selected={workspace} disabled={selectionDisabled}
+          {open ? <LauncherExecutionPicker hosts={hosts} workspaces={workspaces} selected={workspace} disabled={selectionDisabled} purpose={purpose}
             onSelect={workspaceId => { onSelectWorkspace(workspaceId); setOpen(false); trigger.current?.focus() }}
             onManageProjects={() => { setOpen(false); onManageProjects() }} /> : null}
           {children}

@@ -37,6 +37,8 @@ import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
+import { LauncherExecutionModes } from './LauncherExecutionModes'
+import type { LauncherExecutionSelection } from '../store'
 import { ComposerFileReferences } from './ComposerFileReferences'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { LauncherAvailabilityNotice } from './LauncherAvailabilityNotice'
@@ -365,22 +367,41 @@ export function NewTabSurface({
     return target
   }
 
-  function chooseExecutionWorkspace(workspaceId: string): void {
-    if (busy) return
+  function chooseArrangement(selection: LauncherExecutionSelection, options: { navigateProject: boolean }): boolean {
+    if (busy || !workspace) return false
     try {
       const state = useAppStore.getState()
-      const target = materializeLauncher()
-      if (!target) return
-      state.setLauncherExecutionWorkspace(target, workspaceId, executorId)
-    } catch (cause) { setError(presentError(cause)) }
+      if (launcherRef) {
+        const displayWorkspaceId = projection?.displayWorkspaceId ?? Object.entries(state.layouts).find(([, layout]) =>
+          layout.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(launcherRef.tabId)))?.[0]
+        if (!displayWorkspaceId) throw new Error('The original Launcher location is still restoring. Your draft is kept.')
+        const result = state.selectLauncherExecution({ ...launcherRef, displayWorkspaceId, groupId: tabGroupId }, selection, { ...options, reveal: !projection || options.navigateProject })
+        if (projection && (!result.projectChanged || !options.navigateProject)) projection.onSelect(result)
+      } else if (selection.resourceWorkspaceId === workspace.id) {
+        const createdId = state.openLauncher({ workspaceId: workspace.id, ...creationTarget, tabGroupId,
+          reveal: Boolean(creationTarget && !projection), initialExecution: selection,
+          initialInputs: { prompt, names, optionsByProvider, sourceLauncherId: launcherId } })
+        const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
+        if (!created) return false
+        if (projection) projection.onSelect({ displayWorkspaceId: creationTarget?.displayWorkspaceId ?? workspace.id,
+          groupId: tabGroupId, tabId: created.id, regionId: created.layout.activeRegionId })
+      } else {
+        // A different project owns its own inputs. The empty Zone's source draft stays here.
+        const result = state.selectLauncherExecution({ resourceWorkspaceId: workspace.id,
+          displayWorkspaceId: creationTarget?.displayWorkspaceId ?? projection?.displayWorkspaceId ?? workspace.id,
+          groupId: tabGroupId }, selection, { ...options, reveal: !projection || options.navigateProject })
+        if (projection && !options.navigateProject) projection.onSelect(result)
+      }
+      return true
+    } catch (cause) { setError(presentError(cause)); return false }
   }
 
-  function chooseAgentWorkspace(workspaceId: string | null): void {
-    if (busy) return
-    try {
-      const target = materializeLauncher()
-      if (target) useAppStore.getState().setLauncherAgentWorkspace(target, workspaceId)
-    } catch (cause) { setError(presentError(cause)) }
+  function chooseExecutionWorkspace(workspaceId: string): void {
+    chooseArrangement({ resourceWorkspaceId: workspaceId, agentWorkspaceId: agentTarget?.agentWorkspaceId ?? null }, { navigateProject: true })
+  }
+
+  function chooseAgentWorkspace(workspaceId: string): void {
+    if (workspace) chooseArrangement({ resourceWorkspaceId: workspace.id, agentWorkspaceId: workspaceId }, { navigateProject: false })
   }
 
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
@@ -396,16 +417,14 @@ export function NewTabSurface({
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
         selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')}
         roleLabel={splitExecution ? 'Project & tools' : undefined} />
-      <div className="launcher-execution-choice">
-        <label className="launcher-execution-mode"><input type="checkbox" checked={splitExecution} disabled={busy !== null || !workspace || !splitExecution && isScratchWorkspaceId(workspace.id)}
-          onChange={event => chooseAgentWorkspace(event.target.checked ? workspace!.id : null)} />
-          <span>Run the Agent on a separate host</span></label>
-        {settings ? <button type="button" className="small-button" onClick={() => settings.open('remote-execution', undefined, 'guide')}>How it works</button> : null}
-      </div>
-      {workspace && isScratchWorkspaceId(workspace.id) ? <p className="launcher-environment__hint">Separate execution supports registered projects. Mote keeps its original runtime and context.</p> : null}
+      {!workspace || !isScratchWorkspaceId(workspace.id) ? <LauncherExecutionModes key={launcherId}
+        hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
+        explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null}
+        onSelect={chooseArrangement} onManageProjects={() => settings?.open('hosts')}
+        onGuide={settings ? () => settings.open('remote-execution', undefined, 'guide') : undefined} /> : null}
       {splitExecution ? <LauncherEnvironment workspace={agentWorkspace} host={agentHost} check={undefined}
         displayPath={agentWorkspace ? formatPathForDisplay(agentWorkspace.path, { home: agentHost?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute }) : ''}
-        roleLabel="Agent runtime" selectionLabel="Agent runtime environment" chooseTitle="Choose where the Agent runs" active={motionActive}
+        purpose="runtime" roleLabel="Agent runtime" selectionLabel="Agent runtime environment" chooseTitle="Choose where the Agent runs" active={motionActive}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseAgentWorkspace}
         selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} /> : null}
 
