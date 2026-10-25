@@ -462,3 +462,33 @@ it('keeps an unavailable default semantic request unapplied while explicit manua
   expect(h.prepare).toHaveBeenCalledTimes(1)
   expect(h.inner.kernel.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
+
+it('admits a later saved occurrence through the exact idle queue without consulting a screen', async () => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: before.updatedAt } })
+  await h.inner.registry.load('local')
+  const original = h.client.agentSession('recipient'), completionId = agentTurnCompletionIdentity(original)!
+  const first = { agentSessionId: 'recipient', operationId: 'consuming-completion', ...agentPromptCondition(original),
+    prompt: 'Original automatic input', expectedInputByte: 0, expectedCompletionId: completionId }
+  await h.client.submitAgentPrompt(first); await settledNative(h, key(first.operationId), 'admitted')
+  const provider = h.client.providers.get('codex')
+  provider.readPromptExecutionEvidence = async () => ({ sourceId: 'native-source', id: 'retained-end', state: 'ended', endReason: 'completed' })
+  provider.inspectPromptExecution = vi.fn(() => { throw Error('Screen presentation cannot authorize automatic input') })
+  const screen = Reflect.get(h.client, 'screenEvidence')
+  vi.spyOn(screen, 'wait').mockImplementation(() => { throw Error('No terminal frame is needed for native idle admission') })
+  await h.client.saveAgentFuturePromptIntent({ agentSessionId: 'recipient', intentId: 'later-occurrence', operationId: 'save-later',
+    prompt: 'A separately authorized later occurrence', active: true })
+  const current = h.client.agentSession('recipient'), next = { agentSessionId: 'recipient', ...agentPromptCondition(current),
+    operationId: 'later-input', prompt: 'A separately authorized later occurrence', expectedInputByte: 0,
+    expectedFutureIntent: { intentId: 'later-occurrence', occurrenceAt: fixtureEpoch(0, 3) } }
+  await h.client.submitAgentPrompt(next)
+  const record = await settledNative(h, key(next.operationId), 'admitted')
+  expect(record?.admission).toMatchObject({ transport: 'native', native: { plan: { operation: 'queue-idle', threadId: target.nativeSessionId } } })
+  expect(provider.inspectPromptExecution).not.toHaveBeenCalled()
+  expect(screen.wait).not.toHaveBeenCalled()
+  expect(h.send).toHaveBeenCalledTimes(2)
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
