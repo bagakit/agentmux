@@ -51,10 +51,9 @@ async function fixture(native: boolean) {
   if (endpoint) cleanups.push(async () => { for (const socket of endpoint.sockets) socket.destroy(); await new Promise<void>(resolve => endpoint.endpoint.close(() => resolve())) })
   const provider = new AgentProviderRegistry().get(native ? 'codex' : 'pi')
   const entry = join(root, 'managed-entry.mjs')
+  const nativeCommand = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
   if (native) {
-    const binary = process.env.AGENTMUX_TEST_CODEX_BINARY
-    if (!binary) throw new Error('Set the private pinned Codex binary for the real native protocol test')
-    expect((await runner.runProcess(binary, ['--version'], { timeoutMs: 5000 })).stdout.trim()).toBe('codex-cli 0.163.0')
+    expect((await runner.runProcess(nativeCommand, ['--version'], { timeoutMs: 5000 })).stdout.trim()).toBe('codex-cli 0.163.0')
     const helper = join(root, 'native-process-proof')
     expect(await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 }))
       .toMatchObject({ exitCode: 0, stderr: '' })
@@ -95,7 +94,7 @@ async function fixture(native: boolean) {
   cleanups.push(() => client.dispose())
   const output = join(root, 'input.jsonl')
   const session = await client.createAgent({ agentSessionId: 'original', createOperationId: 'original-create', providerId: provider.id, executorId: provider.id,
-    workspacePath: root, injectAgentMuxGuide: false, commandOverride: native ? process.env.AGENTMUX_TEST_CODEX_BINARY! : process.execPath,
+    workspacePath: root, injectAgentMuxGuide: false, commandOverride: native ? nativeCommand : process.execPath,
     ...(native ? { prompt: 'PRIVATE_QUEUE_INITIAL_ORIGINAL' } : {}),
     args: native ? [] : [fileURLToPath(new URL('./fixtures/prompt-carrier-terminal.mjs', import.meta.url))],
     env: { AGENTMUX_TEST_INPUT_WITNESS: output, ...(native ? { CODEX_HOME: join(root, 'native-home'), HOME: root } : {}) } })
