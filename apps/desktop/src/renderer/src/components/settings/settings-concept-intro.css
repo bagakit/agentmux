@@ -24,3 +24,19 @@
   .settings-concept-intro__art--goals { grid-row: 1; }
   .settings-concept-intro__art--goals img { height: 150px; }
 }
+
+.settings-concept-intro--workview {
+  grid-template-columns: minmax(0, 1fr) 184px; gap: var(--sp-4); padding: 16px 20px;
+  border-radius: 12px; background: var(--surface-1);
+}
+.settings-concept-intro--workview .settings-concept-intro__title { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
+.settings-concept-intro--workview .settings-concept-intro__description { line-height: 1.65; }
+.settings-concept-intro--workview .settings-concept-intro__art img { height: 124px; }
+@container (max-width: 580px) {
+  .settings-concept-intro--workview { grid-template-columns: minmax(0, 1fr) 112px; gap: var(--sp-3); padding: 14px; }
+  .settings-concept-intro--workview .settings-concept-intro__art img { height: 104px; }
+}
+@container (max-width: 380px) {
+  .settings-concept-intro--workview { grid-template-columns: minmax(0, 1fr) 76px; padding: 12px; }
+  .settings-concept-intro--workview .settings-concept-intro__art img { height: 76px; }
+}

@@ -10,6 +10,7 @@ import { useSettingsPreviewReturn } from './use-settings-preview-return'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { DEFAULT_FOCUS_MAP_PREFERENCES, focusMapPreferencesIssue } from '../../../../shared/focus-map-preferences'
 import { FocusMapSettings } from './FocusMapSettings'
+import { FocusIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-focus.css'
 import '../../styles/settings-workview-layout.css'
 
@@ -46,6 +47,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
     return <button type="button" className="small-button settings-preview-open" data-settings-preview-open={group} data-settings-preview-title={title} onClick={event => { setScene(nextScene); preview.open(event.currentTarget) }}><PreviewIcon size={14} />View preview</button>
   }
   return <div ref={preview.rootRef} className="settings-pane-stack focus-settings" data-active={active} onFocusCapture={preview.remember} onInputCapture={preview.remember} onChangeCapture={preview.remember} onClickCapture={preview.remember}>
+    <FocusIntroduction />
     <div className="focus-settings__intro"><p>Preview your choices before saving.</p><button type="button" className="small-button" onClick={reset}>Restore defaults</button></div>
     <div className="focus-settings__workspace">
       <div className="focus-settings__controls">

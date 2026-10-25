@@ -2,6 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROJECT_RAIL_DENSITY_DEFAULT, PROJECT_RAIL_DENSITY_IDS, type ProjectRailDensity } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
+import { SpaceIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-workflows.css'
 import '../../styles/settings-workview-layout.css'
 
@@ -32,6 +33,7 @@ export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, 
     { id: 'projects', label: 'Projects in Hosts', description: 'Manage registered folders and worktrees on each Host.', icon: ThemeObjectFolderOpenIcon, open: onProjects },
   ]
   return <div className="settings-pane-stack settings-space">
+    <SpaceIntroduction />
     <section className="settings-group" data-settings-field="project-rail">
       <header><span>Project rail</span><small>Saved: {projectRailDensityLabel(saved)}</small></header>
       <fieldset className="settings-workflows__density"><legend>Project rail density</legend>
