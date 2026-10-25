@@ -184,15 +184,16 @@
 .browser-start-page__customize { position: absolute; z-index: 1; top: 16px; right: 20px; display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text-2); background: var(--surface-1); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
 .browser-start-page__customize:hover { color: var(--text); border-color: var(--focus-line); }
 .browser-start-page__customize:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
-/* Pointer-driven atmosphere is rasterized within this local, noninteractive paint boundary. */
-.browser-start-atmosphere { position: absolute; z-index: -1; inset: 0 0 auto; height: min(720px, 100%); overflow: hidden; contain: strict; pointer-events: none; }
-.browser-start-atmosphere__plane { position: absolute; inset: -40px; contain: layout paint; transform: translate3d(0px, 0px, 0px); transition: transform 180ms ease-out; }
-.browser-start-atmosphere__light { position: absolute; inset: 0; background: radial-gradient(ellipse at 22% 15%, color-mix(in srgb, var(--green) 18%, transparent), transparent 55%), radial-gradient(ellipse at 80% 8%, color-mix(in srgb, var(--blue) 16%, transparent), transparent 55%); }
-.browser-start-atmosphere__lines { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--green); opacity: .13; }
-.browser-start-atmosphere__lines path { stroke: currentColor; stroke-width: .7; }
-.browser-start-atmosphere__lines circle { fill: currentColor; }
-.browser-start-page[data-background="true"] .browser-start-atmosphere { opacity: .45; }
-@media (prefers-reduced-motion: reduce) { .browser-start-atmosphere__plane { transition: none; } }
+/* Brand light folds are prepainted in two bounded layers; only their transform/opacity moves. */
+.browser-start-atmosphere { position: absolute; z-index: -1; inset: 0 0 auto; height: min(clamp(270px, 44cqw, 520px), 100%); overflow: hidden; contain: strict; pointer-events: none; }
+.browser-start-atmosphere__haze { position: absolute; inset: 0; background: radial-gradient(ellipse at 18% 12%, color-mix(in srgb, var(--green-2) 13%, transparent), transparent 45%), radial-gradient(ellipse at 83% 20%, color-mix(in srgb, var(--green) 8%, transparent), transparent 42%); }
+.browser-start-atmosphere__plane, .browser-start-atmosphere__sheen { position: absolute; inset: -24px; contain: layout paint; transform: translate3d(0px, 0px, 0px); transition: transform 280ms cubic-bezier(.22, 1, .36, 1); }
+.browser-start-atmosphere__plane > svg, .browser-start-atmosphere__sheen > svg { display: block; width: 100%; height: 100%; }
+.browser-start-atmosphere__sheen { opacity: .62; transition: transform 280ms cubic-bezier(.22, 1, .36, 1), opacity 280ms ease-out; }
+[data-appearance="light"] .browser-start-atmosphere__plane { opacity: .66; }
+[data-appearance="light"] .browser-start-atmosphere__haze { opacity: .55; }
+.browser-start-page[data-background="true"] .browser-start-atmosphere { opacity: .28; }
+@media (prefers-reduced-motion: reduce) { .browser-start-atmosphere__plane, .browser-start-atmosphere__sheen { transition: none; } }
 .browser-start-page__input { display: flex; align-items: center; gap: var(--sp-4); width: min(640px, 100%); min-width: 0; min-height: 54px; padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text-3); background: var(--surface-1); box-shadow: var(--elev-2); }
 .browser-start-page__input:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .browser-start-page__input > svg { flex: none; }
