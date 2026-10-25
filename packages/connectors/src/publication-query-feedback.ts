@@ -5,28 +5,30 @@ import type { ConnectionIngressMessage } from '@agentmux/core/connections'
 import { conversationInputAdoptionEdges, conversationInputIdentity, type ConversationInputWitness, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationBoundary, PublicationOperation, PublicationStore, QueryFeedbackPayload } from './publication-store.js'
 
-const queryStages: readonly QueryFeedbackPayload['stage'][] = ['received', 'queued', 'dispatched', 'started', 'completed']
+const queryStages: readonly (readonly QueryFeedbackPayload['stage'][])[] = [
+  ['received'], ['queued'], ['dispatched'], ['started'], ['completed', 'failed', 'interrupted']
+]
 
 export function queryFeedbackOperationId(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, ingressId: string, stage: QueryFeedbackPayload['stage']): string {
   return 'publication-query-feedback-' + createHash('sha256').update(JSON.stringify([boundary.bindingId, boundary.revision, ingressId, stage])).digest('base64url')
 }
 
-/** Reuse the five original facts and their mappings; this is presentation, never input state. */
+/** Terminal outcomes share one phase, without inventing an order between their original facts. */
 export function reconcileQueryFeedback(store: PublicationStore, original: PublicationOperation): void {
   if (!original.queryFeedback) return
   const boundary = { bindingId: original.bindingId, revision: original.bindingRevision }
-  const stages = queryStages.map(stage => store.inspect(queryFeedbackOperationId(boundary, original.queryFeedback!.ingressId, stage)))
-  const latest = stages.reduce((last, operation, index) => operation ? index : last, -1)
-  const confirmed = stages.reduce((last, operation, index) => operation?.state === 'confirmed' && operation.mapping?.reactionId ? index : last, -1)
-  for (const [index, operation] of stages.entries()) {
+  const stages = queryStages.flatMap((group, rank) => group.map(stage => ({ rank, operation: store.inspect(queryFeedbackOperationId(boundary, original.queryFeedback!.ingressId, stage)) })))
+  const latest = stages.reduce((last, { operation, rank }) => operation ? Math.max(last, rank) : last, -1)
+  const confirmed = stages.reduce((last, { operation, rank }) => operation?.state === 'confirmed' && operation.mapping?.reactionId ? Math.max(last, rank) : last, -1)
+  for (const { rank, operation } of stages) {
     if (!operation) continue
     // A newer fact supersedes an unsent display only; original in-flight effects keep their identity.
-    if (index < latest && operation.state === 'pending' && operation.attempt === undefined && !operation.prepared) {
+    if (rank < latest && operation.state === 'pending' && operation.attempt === undefined && !operation.prepared) {
       const next: PublicationOperation = { ...operation, state: 'superseded' }
       store.database.prepare('UPDATE connector_publication_operation SET operation_json=?,state=? WHERE operation_id=?')
         .run(JSON.stringify(next), next.state, next.operationId)
     }
-    if (index >= confirmed || operation.state !== 'confirmed' || !operation.mapping?.reactionId) continue
+    if (rank >= confirmed || operation.state !== 'confirmed' || !operation.mapping?.reactionId) continue
     const digest = createHash('sha256').update(JSON.stringify([operation.operationId, 'withdraw'])).digest('base64url')
     const operationId = 'publication-query-feedback-' + digest
     if (store.inspect(operationId)) continue
