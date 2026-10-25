@@ -64,6 +64,10 @@ simultaneous evidence. Deduplicate source samples and do not add inclusive paren
 Use explicit profile/trace capture help for the exact current Renderer target. V8 samples do
 not cover all Main, native, worker or GPU work; a broad unknown share needs another relevant
 source, not a guessed owner. Renderer memory/backing counters overlap and are not an RSS bill.
+Explicit timeline capture requests native triggering stacks for existing events. Only stacks
+actually present establish call locations; missing stacks remain unknown. Retained category
+filters belong to the original capture, not the reader's current policy. Node-level invalidation
+tracking is not enabled by default. Names and URLs stay in the explicit raw material.
 
 system metrics profile analyze --input FILE analyses one already-exported local cpuprofile
 without resolving or connecting to an endpoint, opening an App, sampling or uploading.
