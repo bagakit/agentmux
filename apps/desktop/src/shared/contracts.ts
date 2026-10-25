@@ -1794,6 +1794,7 @@ export type AgentMuxDesktopApi = {
     /** Original local File path from Electron webUtils; empty for a pathless browser File. */
     pathForFile(file: File): string
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
+    retainInputImage(input: { session: AgentSessionControl; bytes: Uint8Array; mimeType: string }): Promise<{ upload: import('@agentmux/core/files').FileUploadIdentity; observation: 'confirmed' | 'unavailable' }>
     savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
     /**
      * Read one pasted/captured image back as an `<img>`-ready data URI.
@@ -1899,7 +1900,7 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
     inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>

@@ -156,6 +156,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:publishNativeOverlays': 'native floating chrome',
   'ui:listAgentSkills': 'Agent skills',
   'ui:listWorkspaceSkills': 'Workspace agent skills',
+  'ui:retainInputImage': 'selected input image',
   'ui:savePastedImage': 'pasted image',
   'ui:exportTheme': 'theme file export',
   'ui:chooseFiles': 'file selection',

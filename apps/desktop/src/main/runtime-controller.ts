@@ -1794,7 +1794,8 @@ export class RuntimeController {
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool',
-    inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference
+    inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference,
+    inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
   ): Promise<void | AgentInputSubmissionReceipt> {
     const capturedCondition = validateAgentPromptInputBinding(condition)
     if ('admissionIntent' in capturedCondition) {
@@ -1805,6 +1806,7 @@ export class RuntimeController {
         agentSessionId: control.agentSessionId, ...capturedCondition, execution: 'immediate', operationId, prompt,
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
         ...(inputContextCapture ? { inputContextCapture } : {}),
+        ...(inputImages?.length ? { inputImages } : {}),
         ...(authorHuman === true ? { authorHuman: true } : {})
       }))
     }
@@ -1833,6 +1835,7 @@ export class RuntimeController {
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
           sourceChannel,
           ...(inputContextCapture ? { inputContextCapture } : {}),
+        ...(inputImages?.length ? { inputImages } : {}),
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
           ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),

@@ -470,6 +470,7 @@ const api: AgentMuxPreloadApi = {
     chooseFiles: (input, document) => ipcRenderer.invoke('ui:chooseFiles', input, document),
     chooseDirectory: (input, document) => ipcRenderer.invoke('ui:chooseDirectory', input, document),
     pathForFile: (file: File) => webUtils.getPathForFile(file),
+    retainInputImage: input => ipcRenderer.invoke('ui:retainInputImage', input),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
     readPastedImage: (path: string) => ipcRenderer.invoke('ui:readPastedImage', path),
@@ -614,8 +615,8 @@ const api: AgentMuxPreloadApi = {
       return ipcRenderer.invoke('sessions:paste', session, text, terminalData, ...(parent ? [parent] : []))
     },
     recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch, inputContextCapture) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch, inputContextCapture),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch, inputContextCapture, inputImages) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation, goalPmo, goalDispatch, inputContextCapture, inputImages),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     inputMailbox: (session, options) => ipcRenderer.invoke('sessions:inputMailbox', session, options),
     inspectInput: (session, key) => ipcRenderer.invoke('sessions:inspectInput', session, key),

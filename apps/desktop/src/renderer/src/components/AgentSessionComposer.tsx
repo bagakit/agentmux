@@ -14,7 +14,7 @@ import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { useComposerAttachments } from '../lib/use-composer-attachments'
 import { ComposerFileReferences } from './ComposerFileReferences'
-import { expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
+import { expandComposerInput, expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import {
@@ -173,9 +173,9 @@ export function AgentSessionComposer({
 
   function submit(): void {
     if (!submitMode.canSubmit || !text.trim()) return
-    const value = expandSemanticReferences(text)
+    const { text: value, inputImages } = expandComposerInput(text)
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
-    if (!send(sessionId, value, feedback.report, 'manual')) return
+    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages })) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.record(sessionId, value)
@@ -183,13 +183,13 @@ export function AgentSessionComposer({
   }
 
   function queue(): void {
-    const value = expandSemanticReferences(text)
+    const { text: value, inputImages } = expandComposerInput(text)
     if (!value.trim()) return
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
-    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual')) return
+    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages })) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
@@ -214,7 +214,7 @@ export function AgentSessionComposer({
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   const attachmentScope = JSON.stringify([sessionId, session?.hostId, session?.workspacePath])
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
-  const attachments = useComposerAttachments({ scope: attachmentScope, hostId: session?.hostId,
+  const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: session?.kind === 'agent' ? session.control : undefined, hostId: session?.hostId,
     workspacePath: session?.workspacePath, disabled: !submitMode.canType, insertion: insertionRef, feedback,
     document: dialogDocument, shortcutActive: visible && !readOnly, ...(workspace ? { onRemoteFiles: () => setFileReferencesOpen(true) } : {}) })
 
