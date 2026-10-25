@@ -131,7 +131,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, windowTarget, kind = 'tab', children }: {
   homeId: string
   /** Only the unique primary View carries an input-retention identity. */
   primaryTabId?: string | undefined
@@ -149,6 +149,8 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   onSelectRegion?: ((regionId: string) => void) | undefined
   projection?: import('../lib/workbench-projection').WorkbenchProjection | undefined
   reference?: import('../lib/workbench-projection').WorkbenchProjectionSelection | undefined
+  /** The window owner requests this exact occurrence without changing the presentation selection. */
+  windowTarget?: AppWindowTarget | undefined
   /** The existing projection owner describes a borrowed View at its original slot. */
   homeNotice?: ReactNode
   children: ReactNode
@@ -166,10 +168,10 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const [hostDocument, setHostDocument] = useState(host.ownerDocument)
   const placementWaiters = useRef<Array<{ placement: WorkbenchWindowPlacement | null; resolve(): void; reject(error: Error): void }>>([])
   const frozenTarget = useRef<AppWindowTarget | null>(null)
-  const originalTarget = useMemo<AppWindowTarget | null>(() => frozenTarget.current ?? (reference && (kind === 'region' ? nativeRegionId : primaryTabId)
+  const originalTarget = useMemo<AppWindowTarget | null>(() => frozenTarget.current ?? windowTarget ?? (reference && (kind === 'region' ? nativeRegionId : primaryTabId)
     ? kind === 'region' ? { kind: 'region', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: nativeRegionId! }
       : { kind: 'tab', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
-    : null), [kind, nativeRegionId, primaryTabId, reference?.displayWorkspaceId, reference?.groupId, reference?.tabId])
+    : null), [kind, nativeRegionId, primaryTabId, reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, windowTarget])
   useLayoutEffect(() => {
     if (!originalTarget) return
     return registerWorkbenchHost({ target: originalTarget, host, place: placement => new Promise<void>((resolve, reject) => {

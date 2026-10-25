@@ -235,10 +235,10 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     await this.ready
     await this.navigationCleanup
     this.rendererAvailable = true
+    this.changed()
     for (const record of this.windows.values()) if (record.durable && !record.native && !record.retiredNative) {
       void this.launch(record, false).catch(error => { record.phase = 'unknown'; this.warn(String(error)) })
     }
-    this.changed()
     return { windowId: this.mainId, documentGeneration: this.mainGeneration }
   }
 
@@ -500,7 +500,11 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     await this.nativeOwner.beforeClosing(window)
   }
 
-  private retain(record: ManagedWindow): void { this.windows.set(record.windowId, record); this.byTarget.set(targetKey(record.target), record) }
+  private retain(record: ManagedWindow): void {
+    this.windows.set(record.windowId, record); this.byTarget.set(targetKey(record.target), record)
+    // The original Renderer prepares this exact host without navigating to it.
+    this.changed()
+  }
   private remove(record: ManagedWindow): void {
     this.retireFocus({ windowId: record.windowId, documentGeneration: record.generation })
     this.windows.delete(record.windowId); this.byTarget.delete(targetKey(record.target))
