@@ -249,3 +249,62 @@ it('keeps execution setup open for IME-owned Escape and restores its mode focus 
   expect(dom.container.querySelector('.launcher-execution__setup')).toBeNull()
   expect(document.activeElement?.textContent).toContain('Remote Agent')
 })
+
+it('keeps a failed first Host inventory unknown and retries the same runtime without borrowing App configurations', async () => {
+  await mount()
+  const before = useAppStore.getState()
+  vi.mocked(api.executors.discover).mockRejectedValue(new Error('Original Host observation unavailable'))
+  await mode('Remote Agent')
+  await dom.click('.launcher-execution__setup [data-workspace-id="agent-project"]')
+  await act(async () => { await useAppStore.getState().detectExecutors(remote.id, { source: 'host' }) })
+  expect(useAppStore.getState().hostExecutorInventories[remote.id]?.state).toBe('error')
+  expect(dom.container.textContent?.match(/Agent configurations are unconfirmed/gu)).toHaveLength(1)
+  expect(dom.container.textContent).not.toMatch(/No Agent (?:Executor )?is configured/u)
+  expect(dom.container.querySelector('[data-executor-id]')).toBeNull()
+  expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!.disabled).toBe(true)
+  expect(dom.container.querySelector('[aria-label="Agent prompt"]')?.getAttribute('contenteditable')).toBe('true')
+  await dom.click('[aria-label="Collapse Agents"]')
+  expect(dom.container.textContent?.match(/Agent configurations are unconfirmed/gu)).toHaveLength(1)
+  vi.mocked(api.executors.discover).mockResolvedValue({ routeHostId: remote.id, runtimeId: 'runtime-' + remote.id,
+    executors: [{ executorId: 'codex', label: 'Recovered original Host', providerId: 'codex', command: '/core-codex',
+      source: 'registered', configRevision: 'recovered-revision', availability: 'available' }] })
+  const retry = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === 'Check again')
+  expect(retry).toHaveLength(1)
+  await act(async () => retry[0]!.click())
+  expect(api.executors.discover).toHaveBeenLastCalledWith(remote.id)
+  await dom.click('[aria-label="Expand Agents"]')
+  expect(dom.container.textContent).not.toContain('Agent configurations are unconfirmed')
+  expect(dom.container.querySelector('[data-executor-id="codex"]')?.textContent).toContain('Recovered original Host')
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+})
+
+it('shows an unread Host inventory as unconfirmed until an authoritative empty result arrives', async () => {
+  await mount()
+  let complete!: (value: Awaited<ReturnType<typeof api.executors.discover>>) => void
+  vi.mocked(api.executors.discover).mockImplementation(() => new Promise(resolve => { complete = resolve }))
+  await mode('Remote Agent')
+  await dom.click('.launcher-execution__setup [data-workspace-id="agent-project"]')
+  expect(dom.container.textContent).toContain('Agent configurations are unconfirmed')
+  expect(dom.container.textContent).not.toMatch(/No Agent (?:Executor )?is configured/u)
+  await act(async () => complete({ routeHostId: remote.id, runtimeId: 'runtime-' + remote.id, executors: [] }))
+  expect(dom.container.textContent).not.toContain('Agent configurations are unconfirmed')
+  expect(dom.container.textContent?.match(/No Agent is configured/gu)).toHaveLength(1)
+  expect(dom.container.textContent).not.toContain('No Agent Executor is configured')
+})
+
+it.each([false, true])('configures an authoritatively empty ordinary SSH runtime at its own Host, specialized=%s', async specialized => {
+  const openHost = vi.fn(), openHostExecutors = vi.fn(), open = vi.fn()
+  const settings = { open, openHost, ...(specialized ? { openHostExecutors } : {}), openToolkit: vi.fn(), openChannel: vi.fn(), channelEntries: [],
+    channelPresentation: vi.fn(), openMoteLark: vi.fn(), chooseAgent: vi.fn() }
+  await mount(true, settings)
+  vi.mocked(api.executors.discover).mockResolvedValue({ routeHostId: remote.id, runtimeId: 'runtime-' + remote.id, executors: [] })
+  await act(async () => { await useAppStore.getState().detectExecutors(remote.id) })
+  expect(dom.container.textContent).not.toContain('Agent configurations are unconfirmed')
+  expect(dom.container.textContent?.match(/No Agent is configured/gu)).toHaveLength(1)
+  expect(dom.container.textContent).not.toContain('No Agent Executor is configured')
+  const configure = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Configure an Agent')!
+  await act(async () => configure.click())
+  expect(specialized ? openHostExecutors : openHost).toHaveBeenCalledExactlyOnceWith(remote.id)
+  expect(open).not.toHaveBeenCalled()
+})
