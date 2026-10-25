@@ -44,8 +44,10 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
     futureIntent?: { intentId: string; occurrenceAt: number }
   }
   lastCompletionId?: string
+  /** Last claimed tick; durability may be unconfirmed. Read-only checks create no claim. */
   lastTickId?: string
   lastOutcome?: 'sent' | 'skipped' | 'unknown'
+  /** Last recorded check; later identical busy observations need not rewrite it. */
   lastTickAt?: number
   lastDecision?: string
 }
@@ -80,6 +82,16 @@ export class ContinuousProgressScheduler {
     const selected = target ? records.filter(loop =>
       (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).every(key => target[key] === undefined || loop[key] === target[key])) : records
     return selected.map(loop => structuredClone(loop))
+  }
+
+  get(loopId: string): ContinuousProgressLoop | undefined {
+    const loop = this.loops.get(loopId)
+    return loop ? structuredClone(loop) : undefined
+  }
+
+  replace(loopId: string, loop: ContinuousProgressLoop): void {
+    if (!this.loops.has(loopId) || loop.loopId !== loopId) throw new Error(`Unknown loop: ${loopId}`)
+    this.loops.set(loopId, structuredClone(loop))
   }
 
   create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; initialDelivery?: ContinuousProgressLoop['initialDelivery'] }): ContinuousProgressLoop {
@@ -118,9 +130,10 @@ export class ContinuousProgressScheduler {
   }
   stop(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'stopped' }) }
 
-  due(now = this.now()): ContinuousProgressLoop[] {
-    return [...this.loops.values()]
-      .filter((loop) => loop.status === 'active' && loop.nextCheckAt <= now)
+  due(now = this.now(), onlyLoopId?: string): ContinuousProgressLoop[] {
+    const selected = onlyLoopId === undefined ? this.loops.values() : [this.loops.get(onlyLoopId)]
+    return [...selected]
+      .filter((loop): loop is ContinuousProgressLoop => !!loop && loop.status === 'active' && loop.nextCheckAt <= now)
       .map((loop) => structuredClone(loop))
   }
 

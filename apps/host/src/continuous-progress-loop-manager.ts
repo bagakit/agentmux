@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
-import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
+import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord } from './continuous-progress-task-source.js'
@@ -299,7 +299,7 @@ export class ContinuousProgressLoopManager {
         }
         if (retryCreation && this.require(existing.loopId).status !== 'stopped' && !this.require(existing.loopId).lastMutation) {
           const { lastOutcome: _, lastDecision: __, ...confirmed } = this.require(existing.loopId)
-          this.scheduler.restore(this.list().map(loop => loop.loopId === existing.loopId ? { ...confirmed, status: 'active' } : loop))
+          this.scheduler.replace(existing.loopId, { ...confirmed, status: 'active' })
         }
         await this.persist(existing.loopId)
         return { ...scope, schedule: this.require(existing.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
@@ -441,7 +441,7 @@ export class ContinuousProgressLoopManager {
       throw new AgentMuxError('The original arrangement changed during resume. Its current state and manual input are retained.', 'CONTROL_REQUEST_CONFLICT')
     }
     const { lastDecision: _, ...loop } = this.scheduler.resume(loopId)
-    this.scheduler.restore(this.list().map(value => value.loopId === loopId ? loop : value))
+    this.scheduler.replace(loopId, loop)
     await this.persist(loopId)
     return loop
     })
@@ -458,7 +458,7 @@ export class ContinuousProgressLoopManager {
     if (this.require(loopId).status !== 'active') throw new Error('Resume this loop before checking it.')
     if (!isAgentSchedule(this.require(loopId))) this.scheduler.requestCheck(loopId)
     await this.checkPromise
-    await this.check()
+    await this.check(undefined, loopId)
     return this.require(loopId)
   }
   pauseTarget(target: Pick<ContinuousProgressTarget, 'hostId' | 'agentSessionId'>, reason: string): Promise<void> {
@@ -470,7 +470,7 @@ export class ContinuousProgressLoopManager {
     return Promise.all(changed.map(loop => this.persist(loop.loopId))).then(() => {})
   }
   private require(loopId: string): ContinuousProgressLoop {
-    const loop = this.list().find(loop => loop.loopId === loopId)
+    const loop = this.scheduler.get(loopId)
     if (!loop) throw new Error('Continuous progress loop is unavailable.')
     return loop
   }
@@ -484,15 +484,18 @@ export class ContinuousProgressLoopManager {
     }
     for (const listener of this.listeners) listener(this.require(loopId))
   }
-  async check(now?: number): Promise<void> {
+  async check(now?: number, onlyLoopId?: string): Promise<void> {
     if (this.checkPromise) return await this.checkPromise
-    this.checkPromise = this.checkOnce(now).finally(() => { this.checkPromise = null })
+    this.checkPromise = this.checkOnce(now, onlyLoopId).finally(() => { this.checkPromise = null })
     return await this.checkPromise
   }
-  private async checkOnce(now?: number): Promise<void> {
+  private async checkOnce(now?: number, onlyLoopId?: string): Promise<void> {
     if (!this.running) return
     const checkAt = now ?? this.now()
-    for (const loop of this.scheduler.due(checkAt)) {
+    const due = this.scheduler.due(checkAt, onlyLoopId)
+    for (const selected of due) {
+      const loop = this.scheduler.get(selected.loopId)
+      if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) continue
       if (loop.calendar && !loop.pendingCompletion) {
         const latest = latestCalendarOccurrence(loop.calendar, loop.nextCheckAt, checkAt)
         if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
@@ -501,21 +504,40 @@ export class ContinuousProgressLoopManager {
         const latest = latestIntervalOccurrence(loop.nextCheckAt, checkAt, loop.everyMs)
         if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
       }
-    }
-    const claims = this.scheduler.recover(now)
-    if (claims.length === 0) return
-    // Claim and persist before invoking provider code. A crash or unknown callback result cannot replay a tick.
-    try { await this.store.save(this.scheduler.list()) }
-    catch (error) {
-      for (const claim of claims) {
+      // A read-only probe can avoid a durable claim only for confirmed busy input.
+      // Everything else still follows the original claim and final admission fence.
+      let preflightFailure: unknown, preflightFailed = false
+      if (isAgentSchedule(loop) && !loop.pendingCompletion && loop.futureIntentId) {
+        const candidate = this.require(loop.loopId), controller = new AbortController()
+        this.activeDelivery = { loopId: loop.loopId, controller }
+        let observation: ContinuousProgressObservation | undefined
+        try { observation = await this.observe(candidate, mintObjectId(), now ?? Date.now(), controller.signal) }
+        catch (error) { preflightFailure = error; preflightFailed = true }
+        finally { if (this.activeDelivery?.controller === controller) this.activeDelivery = undefined }
+        const current = this.scheduler.get(loop.loopId)
+        if (!this.running || controller.signal.aborted || !current || !isDeepStrictEqual(current, candidate)) continue
+        if (!preflightFailed) {
+          const decision = decideFutureProgress(observation!, { intentId: candidate.futureIntentId!, occurrenceAt: candidate.nextCheckAt })
+          if (decision.kind === 'skip' && ['working', 'stale-working', 'user-input-changed', 'interaction-pending'].includes(decision.reason)) {
+            if (candidate.lastDecision !== decision.reason || candidate.lastOutcome !== 'skipped' || candidate.nextCheckAt !== loop.nextCheckAt) {
+              this.patch(loop.loopId, { lastDecision: decision.reason, lastOutcome: 'skipped', lastTickAt: checkAt })
+              await this.persist(loop.loopId)
+            }
+            continue
+          }
+        }
+      }
+      const claim = this.scheduler.claimTick(loop.loopId, checkAt)
+      if (!claim) continue
+      // Claim and persist before invoking provider code. A crash or unknown callback result cannot replay a tick.
+      try { await this.store.save(this.scheduler.list()) }
+      catch (error) {
         this.patch(claim.loop.loopId, { status: 'paused', lastDecision: `Automatic claim persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
         for (const listener of this.listeners) listener(this.require(claim.loop.loopId))
+        throw error
       }
-      throw error
-    }
-    for (const claim of claims) {
-      const isCurrent = () => this.running && this.scheduler.list().some((loop) =>
-        loop.loopId === claim.loop.loopId && loop.status === 'active' && loop.lastTickId === claim.tickId)
+      const isCurrent = () => { const current = this.scheduler.get(claim.loop.loopId)
+        return this.running && current?.status === 'active' && current.lastTickId === claim.tickId }
       const controller = new AbortController()
       this.activeDelivery = { loopId: claim.loop.loopId, controller }
       let outcome: LoopTickOutcome = 'skipped'
@@ -538,6 +560,7 @@ export class ContinuousProgressLoopManager {
             this.patch(claim.loop.loopId, { lastDecision: source.reason, ...(source.action === 'stop' ? { status: 'stopped' as const, lastOutcome: 'skipped' as const } : source.action === 'pause' ? { status: 'paused' as const, lastOutcome: 'skipped' as const } : {}) })
             if (source.action !== 'continue') { await this.persist(claim.loop.loopId); continue }
           }
+          if (preflightFailed) throw preflightFailure
           const observation = await this.observe(claim.loop, claim.tickId, now ?? Date.now(), controller.signal)
           if (!isCurrent()) continue
           if (claim.loop.taskSource?.kind === 'goal' && observation.session.run.runId !== claim.loop.initialDelivery?.condition.expectedRun.runId) { await this.pauseForSource(claim.loop, { action: 'pause', reason: 'The original executing Run changed. Inspect this Goal before explicitly starting new work; manual input remains available.' }); continue }
@@ -587,7 +610,7 @@ export class ContinuousProgressLoopManager {
         this.patch(claim.loop.loopId, { lastDecision: error instanceof Error ? error.message : String(error) })
       }
       finally { this.activeDelivery = undefined }
-      const current = this.scheduler.list().find((loop) => loop.loopId === claim.loop.loopId)
+      const current = this.scheduler.get(claim.loop.loopId)
       if (current) {
         if (outcome === 'unknown') this.patch(current.loopId, {
           ...(current.status === 'active' ? { status: 'paused' } : {}), lastOutcome: 'unknown'
@@ -613,8 +636,7 @@ export class ContinuousProgressLoopManager {
                 : 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
             }
           }
-          this.scheduler.restore(this.scheduler.list().map((loop) => loop.loopId === current.loopId
-            ? { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) } : loop))
+          this.scheduler.replace(current.loopId, { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) })
         }
       }
       await this.persist(claim.loop.loopId)
@@ -626,7 +648,7 @@ export class ContinuousProgressLoopManager {
     if (this.activeDelivery?.loopId === loopId) this.activeDelivery.controller.abort()
   }
   private patch(loopId: string, patch: Partial<ContinuousProgressLoop>): void {
-    this.scheduler.restore(this.scheduler.list().map((loop) => loop.loopId === loopId
-      ? { ...loop, ...patch, ...(isAgentSchedule(loop) && loop.status === 'stopped' ? { status: 'stopped' as const } : {}) } : loop))
+    const loop = this.scheduler.get(loopId)
+    if (loop) this.scheduler.replace(loopId, { ...loop, ...patch, ...(isAgentSchedule(loop) && loop.status === 'stopped' ? { status: 'stopped' as const } : {}) })
   }
 }
