@@ -9,7 +9,7 @@ import { button, click, deferred, fixture, mount, mounted } from './conversation
 
 const relay = vi.hoisted(() => ({ connect: vi.fn() }))
 vi.mock('@agentmux/core/relay-hosted', async original => ({ ...await original<object>(), connectRelayHostedClient: relay.connect }))
-vi.mock('../src/connection/relay-identity', () => ({ deviceRelayIdentity: async () => ({ publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) }) }))
+vi.mock('../src/connection/relay-identity', () => ({ deviceRelayIdentity: async () => ({ publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) }), existingDeviceRelayIdentity: async () => ({ publicKey: new Uint8Array(32), secretKey: new Uint8Array(32) }) }))
 
 const offer = { v: 2 as const, serverId: 'original-host', daemonPublicKeyB64: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', relay: { endpoint: '127.0.0.1:1', useTls: false } }
 const digest = (digit: string) => 'sha256:' + digit.repeat(64)
@@ -55,16 +55,51 @@ async function openProduct(f: ReturnType<typeof product>) {
 }
 beforeEach(async () => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-  localStorage.clear(); history.replaceState(null, '', '/mobile/reviewed-page-build/' + 'a'.repeat(64) + '/index.html')
+  localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/mobile/reviewed-page-build/' + 'a'.repeat(64) + '/index.html')
   await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
   await getDeviceWorkface().updateNavigation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
 })
 afterEach(async () => {
   for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
-  document.body.replaceChildren(); vi.useRealTimers(); vi.restoreAllMocks(); relay.connect.mockReset()
+  document.body.replaceChildren(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); relay.connect.mockReset()
 })
 
 describe('mobile update through the actual connection root and App', () => {
+  for (const version of ['current', 'unknown'] as const) it(`reopens ${version} version through the original safety owner without a diagnostic gate`, async () => {
+    const f = product()
+    if (version === 'current') f.setActive({ buildId: 'reviewed-page-build', digest: digest('a'), bytes: 100, fileCount: 2, revision: 1 })
+    else f.setInspect(() => { throw new Error('Version observation unavailable') })
+    const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
+    const fetchEntry = vi.fn(async () => ({ ok: true, url: location.origin + '/mobile/reviewed-page-build/' + 'a'.repeat(64) + '/index.html' }) as Response)
+    vi.stubGlobal('fetch', fetchEntry)
+    const view = await openProduct(f)
+    await click(button(view.element, '手机设置与连接'))
+    expect(document.body.textContent).toContain(version === 'current' ? '已是当前版本' : '版本尚未确认')
+    const reopen = button(document.body, '重新打开网页')
+    expect(reopen.disabled).toBe(false)
+    await click(reopen)
+    await vi.waitFor(() => expect(navigate.mock.calls, document.querySelector('.mobile-web-update-settings')?.textContent).toHaveLength(1))
+    expect(fetchEntry).toHaveBeenCalledOnce()
+    expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it('closes settings without allowing its unfinished reopening intent to navigate later', async () => {
+    const f = product(), waiting = deferred<Response>()
+    const fetchEntry = vi.fn(() => waiting.promise), navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchEntry)
+    const view = await openProduct(f)
+    await click(button(view.element, '手机设置与连接'))
+    await click(button(document.body, '载入最新版'))
+    await vi.waitFor(() => expect(fetchEntry).toHaveBeenCalledOnce())
+    await click(button(document.body, '关闭面板'))
+    await act(async () => waiting.resolve({ ok: true, url: location.origin + '/mobile/reviewed-page-build/' + 'a'.repeat(64) + '/index.html' } as Response))
+    expect(navigate).not.toHaveBeenCalled()
+    expect(document.querySelector('.mobile-web-update-settings')).toBeNull()
+    expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
   it('proactively offers a confirmed new release, can dismiss it and reopen the fixed settings entry', async () => {
     const f = product(), view = await openProduct(f)
     expect(updateNotice(view.element)?.textContent).toContain('网页有新版本')
