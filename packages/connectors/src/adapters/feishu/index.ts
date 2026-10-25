@@ -220,8 +220,11 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
       }, 'card.action.trigger': async () => {
         const witness = this.callback.getStore()
         if (!witness || !this.witnesses.has(witness) || witness.receiver !== receiver) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
-        await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
+        const received = await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
         receiver.observed = true
+        if (received.ingress.kind === 'action' && received.ingress.code === 'INGRESS_QUESTION_ANSWER_INVALID') return {
+          toast: { type: 'warning', content: 'Answer not sent. Choose one option or enter text for every question, then submit.' }
+        }
         return {}
       } })
       const invoke = dispatcher.invoke.bind(dispatcher)
