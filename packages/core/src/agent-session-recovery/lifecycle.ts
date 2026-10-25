@@ -453,7 +453,7 @@ export class AgentSessionRunLifecycle {
       const originalExecutable = plan.command
       if (current.toolExecution && !this.ports.executors.prepareToolExecutionLaunch) throw new AgentMuxError('The original tool execution owner is unavailable; no local replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
       const managedLaunch = current.toolExecution
-        ? { plan: await this.ports.executors.prepareToolExecutionLaunch!(provider, plan, current.toolExecution, current.workspacePath, current.agentSessionId) }
+        ? { plan: await this.ports.executors.prepareToolExecutionLaunch!(provider, plan, current.toolExecution, current.workspacePath, current.agentSessionId, { lifecycleOperationId, capability: invocationCapability }) }
         : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: 'resume', ...(prompt === undefined ? {} : { prompt }) })
       if (managedLaunch) plan = managedLaunch.plan
       if (managedLaunch?.promptDelivery === 'post-launch' && prompt) {

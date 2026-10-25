@@ -5,6 +5,7 @@ import type { Readable, Writable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
 import type { AgentToolContextState } from '../agent-tool-context.js'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
+import { AgentExecutionRpcResource } from '../agent-execution-rpc-relay.js'
 import { createAgentExecutionExecutor } from '../agent-execution-executor.js'
 import { AgentExecutionJournal } from '../agent-execution-journal.js'
 import { runCodexExecutionFrontend } from './codex-execution-frontend.js'
@@ -45,7 +46,7 @@ export async function runCodexExecutionHelper(
     diagnosticPending = true
     io.output.write(JSON.stringify({ type: 'diagnostic', code: 'NATIVE_EXECUTION_HELPER_OBSERVATION_UNCONFIRMED' }) + '\n', () => { diagnosticPending = false })
   }
-  if (context.role === 'frontend') return await runCodexExecutionFrontend({ input: io.input, output: io.output, onError: diagnostic })
+  if (context.role === 'frontend') return await runCodexExecutionFrontend({ input: io.input, output: io.output, onError: diagnostic, ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}) })
 
   const journal = await AgentExecutionJournal.open(context.journalDirectory, context.journalIdentity)
   const stderr = createWriteStream(join(context.journalDirectory, 'native-executor.stderr.log'), { flags: 'a', mode: 0o600 })
@@ -65,6 +66,7 @@ export async function runCodexExecutionHelper(
     input: io.input,
     output: io.output,
     stderr,
+    ...(context.agentSessionId ? { control: new AgentExecutionRpcResource(context.agentSessionId, diagnostic) } : {}),
     authorize: async target => {
       // This immutable launch grant came from the resource Core. Native frames
       // cannot choose another binding or turn their cwd into authorization.

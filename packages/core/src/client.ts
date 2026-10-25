@@ -4131,7 +4131,7 @@ export class AgentMuxClient {
   }
 
   private async prepareToolExecutionLaunch(provider: import('./agent-provider.js').AgentProvider, plan: import('./types.js').AgentLaunchPlan,
-    binding: import('./agent-tool-execution.js').AgentToolExecutionBinding, launchWorkspacePath: string, agentSessionId: string): Promise<import('./types.js').AgentLaunchPlan> {
+    binding: import('./agent-tool-execution.js').AgentToolExecutionBinding, launchWorkspacePath: string, agentSessionId: string, invocation?: { lifecycleOperationId: string; capability: string }): Promise<import('./types.js').AgentLaunchPlan> {
     binding = parseAgentToolExecutionBinding(binding)
     if (!provider.prepareToolExecutionLaunch) throw new AgentMuxError('This Provider has no qualified native tool execution launch.', 'EXECUTION_PROVIDER_UNSUPPORTED')
     const original = await this.executionHelperStore().read(binding.bindingId, 'frontend')
@@ -4146,7 +4146,10 @@ export class AgentMuxClient {
     if (this.runtimeIdentity().instanceId !== endpoint.ownerInstanceId) throw new AgentMuxError('The original execution helper Runtime is unavailable.', 'EXECUTION_RUNTIME_CHANGED')
     const run = await this.inspectPreparedTerminal(original.preparation.prepared, { runId: endpoint.runId })
     if (!run || run.state !== 'running') throw new AgentMuxError('The original execution helper is unavailable; the original Session remains retained.', 'EXECUTION_HELPER_UNAVAILABLE')
-    return await provider.prepareToolExecutionLaunch(plan, { binding, url: endpoint.url, launchWorkspacePath })
+    return await provider.prepareToolExecutionLaunch(plan, { binding, url: endpoint.url, launchWorkspacePath,
+      ...(invocation ? { invocation: { agentSessionId, lifecycleOperationId: invocation.lifecycleOperationId, capability: invocation.capability,
+        endpointPath: this.controlSocketPath, runtimeId: (await this.agentCreationAuthority()).runtimeId,
+        ctxmuxInstanceId: this.runtimeIdentity().instanceId } } : {}) })
   }
 
   private async readExecutionFrontendEndpoint(runId: string): Promise<string> {
@@ -5134,7 +5137,7 @@ export class AgentMuxClient {
       }
       const originalExecutable = plan.command
       const managedLaunch = input.toolExecution
-        ? { plan: await this.prepareToolExecutionLaunch(provider, plan, input.toolExecution, input.workspacePath, agentSessionId) }
+        ? { plan: await this.prepareToolExecutionLaunch(provider, plan, input.toolExecution, input.workspacePath, agentSessionId, { lifecycleOperationId, capability: invocationCapability }) }
         : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', prompt: launchPrompt })
       if (managedLaunch) plan = managedLaunch.plan
       const initialInput: AgentMuxContinuityLaunchInput | undefined = composed.text.trim() ? {
