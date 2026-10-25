@@ -1,17 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
-import { once } from 'node:events'
 import { inspect } from 'node:util'
-import type { ChildProcess } from 'node:child_process'
-import { CtxmuxClient, type Attachment } from '@ctxmux/sdk'
+import { CtxmuxClient, InputChannel, type Attachment, type RuntimeActivation, type RuntimeActivationPending } from '@ctxmux/sdk'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import { createInputPerformanceRecorder, type InputPerformanceHandle } from '../src/performance-diagnostics.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 import { RuntimeController } from '../../../apps/desktop/src/main/runtime-controller.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
-import type { AgentMuxHostedClient } from '../src/hosted-client-contract.js'
 import type { SessionControl } from '../../../apps/desktop/src/shared/contracts.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => process.env.AGENTMUX_STATE_DIRECTORY } }))
@@ -30,11 +26,16 @@ afterEach(async () => {
 
 it('private Native reader loss preserves neighbour Main input and adopted-owner replacement recovers the original output identity', async () => {
   const scope = await headlessFixture(); cleanup.push({ step: 'private Headless fixture', close: () => scope.cleanup() })
-  let activatedChild: ChildProcess | undefined
-  cleanup.push({ step: 'exact activated child', close: async () => {
-    if (!activatedChild || activatedChild.exitCode !== null || activatedChild.signalCode !== null) return
-    const ended = once(activatedChild, 'exit')
-    activatedChild.kill('SIGTERM'); await ended
+  let activated: RuntimeActivation | RuntimeActivationPending | undefined
+  cleanup.push({ step: 'exact private activation handle', close: async () => {
+    // The SDK handle reaps only its own spawned child, including a readiness
+    // attempt which never became a selected Runtime. Never infer a ChildProcess.
+    await activated?.shutdown()
+    if (activated?.childPid) {
+      expect(activated.observation.childExit).toBeDefined()
+      console.info('PRIVATE_NATIVE_ACTIVATION_CLEANUP=' + JSON.stringify({ childPid: activated.childPid,
+        childExit: activated.observation.childExit }))
+    }
   } })
   for (const [key, value] of Object.entries(scope.env)) if (/^(AGENTMUX_|CTXMUX_|HOME$)/u.test(key)) vi.stubEnv(key, value)
   // This is an independently adopted production Core, in this process. Its SDK class
@@ -48,17 +49,29 @@ it('private Native reader loss preserves neighbour Main input and adopted-owner 
     throw new Error('This Main byte consumer already has its exact private Hosted client')
   })
   cleanup.push({ step: 'Main controller', close: () => controller.dispose() })
-  const main = controller as unknown as { writeTerminalInput(client: AgentMuxHostedClient,
-    control: Extract<SessionControl, { kind: 'terminal' }>, data: string, diagnostic: InputPerformanceHandle, parent: null): Promise<void> }
-  const input = createInputPerformanceRecorder()
+  // Supply only the existing configured Host. Connection, tracking and byte
+  // dispatch remain the actual public Main consumer, without a private shortcut.
+  const main = controller as unknown as { hosts: Map<string, unknown> }
+  main.hosts.set('local', { client: hosted.sdk, config: { id: 'local' }, executionHost: { dispose: async () => {} },
+    unsubscribe: () => {}, historyObservationDisposers: new Set() })
   const write = async (runId: string, data: string) => {
-    const diagnostic = input.begin({ sessionId: null, runId, kind: 'terminal', bytes: Buffer.byteLength(data) })
-    await main.writeTerminalInput(hosted.sdk, { kind: 'terminal', hostId: 'local', runId, run: { runId } }, data, diagnostic, null)
+    const control: Extract<SessionControl, { kind: 'terminal' }> = { kind: 'terminal', hostId: 'local', runId, run: { runId } }
+    await controller.write(control, data, 'user')
   }
   const captures = new Map<string, Attachment>()
   const attach = CtxmuxClient.prototype.attach
   vi.spyOn(CtxmuxClient.prototype, 'attach').mockImplementation(async function (this: CtxmuxClient, ...args) {
     const value = await attach.apply(this, args); captures.set(args[0], value); return value
+  })
+  type NativeInput = { runId: string; daemonInstanceId: string; bytes: number[];
+    accepted?: Awaited<ReturnType<InputChannel['input']>> }
+  const physical: NativeInput[] = [], nativeInput = InputChannel.prototype.input
+  vi.spyOn(InputChannel.prototype, 'input').mockImplementation(function (this: InputChannel, data) {
+    const observed: NativeInput = { runId: this.snapshot.id, daemonInstanceId: this.runtime.daemonInstanceId,
+      bytes: [...(typeof data === 'string' ? Buffer.from(data) : data)] }
+    physical.push(observed)
+    // Preserve the real synchronous admission and this command's original ACK.
+    return nativeInput.call(this, data).then(accepted => { observed.accepted = accepted; return accepted })
   })
   const events: AgentMuxClientEvent[] = []; hosted.sdk.onEvent(event => events.push(event))
   const code = "process.stdin.setRawMode(true);process.stdout.write('private-ready:');process.stdin.on('data',b=>process.stdout.write(b));setInterval(()=>{},1000)"
@@ -77,7 +90,6 @@ it('private Native reader loss preserves neighbour Main input and adopted-owner 
   await until(() => core.listRuns(), values => values.filter(run => owned.includes(run.runId) && run.latestOutputBytes > 0).length === 2, 'two original private Native PTYs')
   const firstCut = await hosted.sdk.attachTerminal(first.runId, 0, 'raw')
   await hosted.sdk.attachTerminal(neighbour.runId, 0, 'raw')
-  const physical = vi.spyOn((core as unknown as { kernel: import('../src/ctxmux-run-adapter.js').CtxmuxRunAdapter }).kernel, 'input')
   const firstReader = captures.get(first.runId)!
   expect(firstReader).toBeDefined()
   firstReader.close() // Public SDK closes this actual Core→Native socket, not a Hosted callback.
@@ -135,7 +147,8 @@ it('private Native reader loss preserves neighbour Main input and adopted-owner 
   await hosted.sdk.attachTerminal(explicit.runId, 0, 'raw')
   await write(explicit.runId, 'new-fence-from-exact-cut')
   await until(() => events.filter((event): event is Extract<AgentMuxClientEvent, { type: 'terminal-output' }> => event.type === 'terminal-output' && event.run.runId === explicit.runId).map(event => event.data).join(''), value => value.includes('new-fence-from-exact-cut'), 'Main input consumes the replacement Native initial-cut receipt')
-  expect(physical.mock.calls).toHaveLength(3)
+  expect(physical).toHaveLength(3)
+  expect(physical.map(value => value.daemonInstanceId)).toEqual([native.instanceId, native.instanceId, core.runtimeIdentity().instanceId])
 
   // Stop the fixture-owned adopted daemon without starting any replacement. An
   // explicit original Core connect must activate the original durable Runtime itself.
@@ -144,14 +157,15 @@ it('private Native reader loss preserves neighbour Main input and adopted-owner 
   await until(() => events, values => values.some(event => event.type === 'attachment-state' && event.state === 'unavailable' && event.run.runId === explicit.runId), 'original adopted daemon loss before explicit reconnect')
   try { await core.connect() }
   finally {
-    const activated = (core as unknown as { kernel: { observedActivation: {
-      child: ChildProcess; stateDirectory: string; daemonInstanceId: string
+    const observed = (core as unknown as { kernel: { observedActivation: {
+      entry: { stateDirectory: string }; handle: RuntimeActivation | RuntimeActivationPending; release(): void
     } | null } }).kernel.observedActivation
-    // Even a failed post-spawn handshake leaves this exact child alive. Register it
-    // for private cleanup before assertions, without assuming another owner's PID.
-    if (activated?.stateDirectory === join(scope.env.AGENTMUX_STATE_DIRECTORY!, 'ctxmux')) activatedChild = activated.child
+    // Register the original public cleanup handle before assertions, even when
+    // post-spawn observation failed. Both paths must name this private fixture.
+    if (observed?.entry.stateDirectory === join(scope.env.AGENTMUX_STATE_DIRECTORY!, 'ctxmux') &&
+        observed.handle.socketPath === nativeSocket) activated = observed.handle
   }
-  expect(activatedChild?.pid).toBeGreaterThan(1)
+  expect(activated?.childPid).toBeGreaterThan(1)
   expect(core.runtimeIdentity().instanceId).not.toBe(adoptedReplacement)
   await hosted.sdk.refreshRunAttachment({ runId: explicit.runId }, 0, 'raw')
   expect(hosted.sdk.runtimeIdentity().instanceId).toBe(core.runtimeIdentity().instanceId)
@@ -162,12 +176,21 @@ it('private Native reader loss preserves neighbour Main input and adopted-owner 
   await hosted.sdk.attachTerminal(afterExplicit.runId, 0, 'raw')
   await write(afterExplicit.runId, 'explicit-connect-restored-input')
   await until(() => events.filter((event): event is Extract<AgentMuxClientEvent, { type: 'terminal-output' }> => event.type === 'terminal-output' && event.run.runId === afterExplicit.runId).map(event => event.data).join(''), value => value.includes('explicit-connect-restored-input'), 'Main input after original explicit connect activated Native')
-  expect(physical.mock.calls).toHaveLength(4)
-  expect(new Set(physical.mock.calls.map(call => call[1].operationId)).size).toBe(4)
+  expect(physical).toHaveLength(4)
+  expect(physical.map(value => value.runId)).toEqual([neighbour.runId, first.runId, explicit.runId, afterExplicit.runId])
+  expect(physical.map(value => Buffer.from(value.bytes).toString())).toEqual([
+    'neighbour-after-reader-loss', 'first-retained-suffix', 'new-fence-from-exact-cut', 'explicit-connect-restored-input'
+  ])
+  expect(physical.at(-1)?.daemonInstanceId).toBe(core.runtimeIdentity().instanceId)
+  for (const value of physical) {
+    expect(value.accepted?.commandId).toBeGreaterThan(0)
+    expect(value.accepted?.receipt).toEqual({ type: 'input', range: { start_byte: 0, end_byte: value.bytes.length } })
+  }
   console.info('PRIVATE_NATIVE_ATTACHMENT_PROOF=' + JSON.stringify({ originalNative: native.instanceId,
     replacementNative: core.runtimeIdentity().instanceId, semanticOwner, originalRun: first.runId,
     neighbourRun: neighbour.runId, neighbourPid: neighbour.pid, readerClose: 'public SDK Attachment.close',
     exactCursor: firstCut.run.latestOutputBytes, suffixBytes: Buffer.byteLength('first-retained-suffix'),
-    sourceCore: 'production independently adopted Core', consumer: 'original Main writeTerminalInput -> Hosted initial owner -> Core -> official Native',
-    exactInputOperations: physical.mock.calls.length, explicitConnectActivated: true, automaticInputReplays: 0 }))
+    sourceCore: 'production independently adopted Core', consumer: 'Main.write -> Hosted writeTerminalBytes -> Core -> SDK InputChannel -> official Native',
+    exactInputCommands: physical.map(({ runId, daemonInstanceId, accepted }) => ({ runId, daemonInstanceId, ...accepted })),
+    explicitConnectActivated: true, activatedChildPid: activated?.childPid, automaticInputReplays: 0 }))
 }, 90_000)
