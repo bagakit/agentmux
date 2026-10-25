@@ -167,7 +167,7 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
         throw new AgentMuxError('Native admission cannot contain PTY input facts.', 'INVALID_AGENT_SESSION_STORE')
       }
       const native = record(admission.native, 'native input admission'), plan = nativePromptPlan(native.plan)
-      const intent = promptInputIntent(admission.intent)
+      const intent = normalizePromptInputIntent(admission.intent)
       if (admission.submissionId === undefined || admission.operationId !== admission.submissionId || intent.message === undefined ||
           !['claimed', 'admitted', 'not-applied', 'unknown'].includes(String(native.outcome)) || JSON.stringify(intent.plan) !== JSON.stringify(plan) ||
           (native.outcome === 'admitted' ? admission.acknowledged !== true || (plan.operation === 'queue-idle'
@@ -181,7 +181,7 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
         ...(native.errorCode === undefined ? {} : { errorCode: (() => { if (!Number.isSafeInteger(native.errorCode)) throw new AgentMuxError('Invalid native error code.', 'INVALID_AGENT_SESSION_STORE'); return Number(native.errorCode) })() }) } }
     }
     if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined ||
-        admission.intent !== undefined && promptInputIntent(admission.intent).plan.kind === 'native-rpc') throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
+        admission.intent !== undefined && normalizePromptInputIntent(admission.intent).plan.kind === 'native-rpc') throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
     const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
     const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
     if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
@@ -204,7 +204,7 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
       const future = record(admission.futureIntent, 'future prompt occurrence')
       return { intentId: string(future.intentId, 'future intent id'), occurrenceAt: timestamp(future.occurrenceAt, 'future occurrence') }
     })() }),
-    ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
+    ...(admission.intent === undefined ? {} : { intent: normalizePromptInputIntent(admission.intent) }),
     ...(admission.frameRefresh === undefined ? {} : { frameRefresh: (() => {
       const refresh = record(admission.frameRefresh, 'prompt native frame refresh')
       return { ...terminalInputPhase(refresh, 'prompt native frame refresh'),
@@ -229,7 +229,8 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
     operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), ...transport }
 }
 
-function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>['intent']> {
+/** Decode the exact frozen input before journal admission or durable storage. */
+export function normalizePromptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>['intent']> {
   const source = record(value, 'promptCompletionAdmission.intent')
   const originalRun = runRef(source.run)
   const admissionIntent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
