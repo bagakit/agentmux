@@ -74,6 +74,7 @@ let loseSubmitAck: boolean
 let privateQueueDirectory: string, capability: string
 let immediateCapability: boolean
 let selectedImages: FileUploadOwner
+let originalProfileConfig: AppConfig
 
 function deferred() {
   let resolve!: () => void
@@ -147,6 +148,7 @@ beforeEach(async () => {
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: {
     codex: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/codex"), args: [], env: {}, injectAgentMuxGuide: false }
   }, workspaces: [{ id: 'private', name: 'Fixture', hostId: 'local', path: durable.workspacePath, kind: 'folder' }] }
+  originalProfileConfig = config
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
     session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
   disposeIpc = await registerIpc({ workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
@@ -631,4 +633,20 @@ it.each([{ oversized: false, edit: false }, { oversized: true, edit: false }, { 
   const resource = await client.readAgentInputResource({ key, index: 0, revision: fileUploadRevision(bytes), maxBytes: png.length })
   expect(resource).toMatchObject(oversized ? { status: 'unavailable' } : { status: 'available', dataBase64: bytes.toString('base64'), width: 1, height: 1 })
   expect(writes.join('')).toContain(expectedPrompt.trim())
+})
+
+
+it('freezes the original public author profile through the real App composer and trusted Main producer', async () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
+  originalProfileConfig.profile = { ...originalProfileConfig.profile, displayName: 'Original App person', avatar: 'data:image/png;base64,' + png }
+  await draft('Public profile from the original App'); await enter('metaKey'); await settled()
+  const record = (await client.sessionTimeline(ID)).items.find(item => item.content === 'Public profile from the original App')!
+  expect(record.authorHuman).toBe(true); expect(record.authorProfile?.name).toBe('Original App person')
+  expect(JSON.stringify(record.authorProfile)).not.toContain(png)
+  expect(record.inputRef).toBeDefined()
+  const request = { key: record.inputRef!, purpose: 'author-avatar' as const, index: 0, revision: record.authorProfile!.avatar!.revision, maxBytes: 1024 }
+  expect(await client.readAgentInputResource(request)).toMatchObject({ status: 'available', purpose: 'author-avatar', dataBase64: png })
+  originalProfileConfig.profile.displayName = 'Changed current person'
+  expect((await client.sessionTimeline(ID)).items.find(item => item.content === record.content)?.authorProfile?.name).toBe('Original App person')
+  expect(writes.join('')).toContain('Public profile from the original App')
 })
