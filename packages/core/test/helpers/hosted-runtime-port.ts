@@ -14,7 +14,7 @@ export function hostedTestOwner(client: Pick<AgentMuxClient, 'runtimeIdentity'>)
 export const hostedTestFence = { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' }
 
 /** In-memory transport only; SDK, dispatch, owner fences and transfer codec are production code. */
-export async function hostedTestClient(client: AgentMuxClient) {
+export async function hostedTestClient(client: AgentMuxClient, production = { AgentMuxHostedRuntimeService, connectHostedAgentMux }) {
   const owner = (): AgentMuxRuntimeOwnerIdentity => {
     try { return hostedTestOwner(client) }
     catch (error) {
@@ -22,7 +22,7 @@ export async function hostedTestClient(client: AgentMuxClient) {
       return { ...hostedTestFence, protocolVersion: 2, processId: 123, availability: 'connected', ctxmux: null }
     }
   }
-  const service = new AgentMuxHostedRuntimeService(client, null, owner)
+  const service = new production.AgentMuxHostedRuntimeService(client, null, owner)
   let projected!: () => void
   const initialProjection = new Promise<void>(resolve => { projected = resolve })
   const port: AgentMuxHostedRpcPort = {
@@ -41,7 +41,7 @@ export async function hostedTestClient(client: AgentMuxClient) {
       return { dispose: () => subscription.dispose() }
     }
   }
-  const sdk = await connectHostedAgentMux({ rpc: port })
+  const sdk = await production.connectHostedAgentMux({ rpc: port })
   await initialProjection // Separate the SDK's initial read from the operation being tested.
   return { sdk, service, port, dispose: async () => { await sdk.dispose(); await service.dispose() } }
 }
