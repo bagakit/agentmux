@@ -198,7 +198,7 @@ it('cancels original Goal initial admission when its real source owner becomes b
   await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
   await goals.confirmAlignment('original-goal', 1)
   const manager = new ContinuousProgressLoopManager(store, async () => 'sent', () => 0, observedDone, undefined, {
-    read: id => goals.get(id), inspectInitial: async () => 'unconfirmed', subscribe: listener => goals.subscribe(snapshot => listener(snapshot.demands))
+    read: id => goals.get(id), inspectInitial: async () => 'unconfirmed', subscribe: listener => goals.subscribe((snapshot, _ids, changes) => listener(changes, snapshot.revision, snapshot.demands))
   })
   try {
     const prepared = await manager.prepareGoal({ hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), goalId: 'original-goal', alignmentRevision: 1, intervalMs: 10, operationId: 'original-start', prompt: 'Original work' })

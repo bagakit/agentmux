@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -15,6 +15,8 @@ const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => {
   vi.restoreAllMocks()
   for (const close of cleanup.splice(0).reverse()) await close()
+  if (process.env.AGENTMUX_GOAL_OWNER_RECOVERY_FACTS) await appendFile(process.env.AGENTMUX_GOAL_OWNER_RECOVERY_FACTS,
+    JSON.stringify({ case: expect.getState().currentTestName, cleanup: 'confirmed', scope: 'Actual public Host progress owner and file Store; Native observation is a controlled port, no Native input submitted.' }) + '\n')
 })
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes }); return { promise, resolve } }
 async function directory() {
@@ -46,7 +48,7 @@ it('public create retries the original paused record until its real file write i
   const originalSave = ContinuousProgressLoopStore.prototype.save
   const unavailable = new Error('Original loop write unavailable before persistence')
   let failing = true
-  const saves = vi.spyOn(ContinuousProgressLoopStore.prototype, 'save').mockImplementation(function (loops) {
+  const saves = vi.spyOn(ContinuousProgressLoopStore.prototype, 'save').mockImplementation(function (this: ContinuousProgressLoopStore, loops) {
     return failing ? Promise.reject(unavailable) : originalSave.call(this, loops)
   })
   const input = { target: f.target, operationId: 'original-create', intervalMs: 60_000, prompt: 'Retain this exact work' }
@@ -65,11 +67,10 @@ it('public create retries the original paused record until its real file write i
   expect(saves).toHaveBeenCalledTimes(3)
   // Reopen before owner disposal: its final flush cannot manufacture the ACK under test.
   expect(await ContinuousProgressLoopStore.forUserData(f.root).load()).toEqual([result.loop])
-  const loader = resolve('apps/host/test/mobile-web-node-loader.mjs')
+  const loader = resolve('apps/host/test/goal-owner-recovery-node-loader.mjs')
   const store = pathToFileURL(resolve('apps/host/src/continuous-progress-loop-store.ts')).href
-  const demandSource = pathToFileURL(resolve('packages/demand/src') + '/').href
   const { stdout } = await promisify(execFile)(process.execPath, ['--experimental-transform-types', '--import', loader, '--input-type=module', '--eval',
-    `import { registerHooks } from 'node:module'; registerHooks({ resolve(id, context, next) { return next(id === '@agentmux/demand' ? new URL('index.ts', ${JSON.stringify(demandSource)}).href : id.startsWith('@agentmux/demand/') ? new URL(id.slice('@agentmux/demand/'.length) + '.ts', ${JSON.stringify(demandSource)}).href : id, context) } }); const { ContinuousProgressLoopStore } = await import(${JSON.stringify(store)}); console.log(JSON.stringify(await ContinuousProgressLoopStore.forUserData(process.argv[1]).load()))`, f.root], { env: process.env, timeout: 20_000 })
+    `const { ContinuousProgressLoopStore } = await import(${JSON.stringify(store)}); console.log(JSON.stringify(await ContinuousProgressLoopStore.forUserData(process.argv[1]).load()))`, f.root], { env: process.env, timeout: 20_000 })
   expect(JSON.parse(stdout)).toEqual([result.loop])
   expect(f.statusAgent).toHaveBeenCalledTimes(1)
   expect(f.submitAgentPrompt).not.toHaveBeenCalled()
