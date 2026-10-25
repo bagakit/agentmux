@@ -57,6 +57,52 @@ function LocalService({ id }: { id: string }) {
   </ServiceNoticeDisclosure>
 }
 
+it('keeps the original connection visible outside the inbox until its exact observation resolves', async () => {
+  const pending = { hostId: 'local', step: 'Core to ctxmux connection', scope: 'observation' as const,
+    availability: 'unverified' as const, code: 'CTXMUX_STARTUP_PENDING',
+    message: 'The original daemon is awaiting readiness.', recovery: 'The same connection will complete when readiness arrives.',
+    observationOrigin: { kind: 'runtime-connection' as const, boundary: 'core-ctxmux' as const } }
+  const other = { ...pending, hostId: 'remote', message: 'Remote readiness is awaiting confirmation.' }
+  useAppStore.setState({ runtimeEndpointWarnings: [pending, other], sessions: [agent('retained')] })
+  const original = useAppStore.getState().sessions
+  await dom.render(<GlobalSystemNotices />)
+  const indicator = () => dom.container.querySelector<HTMLButtonElement>('.global-system-notices__connection')
+  expect(indicator()?.textContent).toContain('Unconfirmed · ')
+  expect(indicator()?.textContent).toContain('Core to ctxmux connection')
+  expect(indicator()?.textContent).toContain('+1')
+  expect(indicator()?.title).toContain(pending.message)
+  expect(rows()).toHaveLength(0)
+  await click('.global-system-notices__connection')
+  await toggleNotificationCenter(dom.container, 'open')
+  expect(dom.container.querySelector('[data-category="connections"]')?.getAttribute('aria-pressed')).toBe('true')
+  await markShown()
+  expect(rows().every(row => row.dataset.unread === 'false')).toBe(true)
+  await toggleNotificationCenter(dom.container, 'closed')
+  expect(indicator()).not.toBeNull()
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', event: { type: 'control-endpoint-state' }, hostId: 'remote',
+    endpointObservation: { step: pending.step, warning: null } } as never))
+  expect(indicator()?.textContent).not.toContain('+1')
+  expect(indicator()?.title).toContain(pending.message)
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', event: { type: 'control-endpoint-state' }, hostId: 'local',
+    endpointObservation: { step: 'Core control connection', warning: null } } as never))
+  expect(indicator()).not.toBeNull()
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', event: { type: 'control-endpoint-state' }, hostId: 'local',
+    endpointObservation: { step: pending.step, warning: null } } as never))
+  expect(indicator()).toBeNull()
+  expect(useAppStore.getState().sessions).toBe(original)
+})
+
+it('keeps a connection observation with unknown provenance visible without inventing its origin', async () => {
+  useAppStore.setState({ runtimeEndpointWarnings: [{ hostId: 'local', scope: 'observation', availability: 'unverified',
+    step: 'Connection observation source', code: 'CONTROL_PROTOCOL_ERROR', observationOrigin: null,
+    message: 'The connection observation source is missing.', recovery: 'Observe the original connection again.' }] })
+  await dom.render(<GlobalSystemNotices />)
+  const indicator = dom.container.querySelector('.global-system-notices__connection')
+  expect(indicator?.textContent).toContain('Unconfirmed · ')
+  expect(indicator?.textContent).toContain('Connection observation source')
+  expect(useAppStore.getState().runtimeEndpointWarnings?.[0]?.observationOrigin).toBeNull()
+})
+
 it('positions the original popover from its invoking bell independently of unrelated input surfaces', async () => {
   const position = vi.mocked(floating.computePosition), original = position.getMockImplementation()!
   position.mockResolvedValue({ x: 100, y: 200,

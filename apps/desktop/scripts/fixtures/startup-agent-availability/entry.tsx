@@ -18,6 +18,7 @@ api.spatial.retainLabels = bridge.retainLabels
 api.spatial.onChange = bridge.onSpatial
 api.ui.requestStorageFlush = bridge.flush
 api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCandidates: [] })
+if (bridge.connectionProgress) api.sessions.onEvent = bridge.onRuntime
 
 const pending: Array<{ executorId: string; hostId: string; input: ExecutorDetectionInput; resolve(value: unknown): void; reject(error: Error): void }> = []
 const calls: Array<{ executorId: string; hostId: string; input: ExecutorDetectionInput }> = []
