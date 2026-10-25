@@ -5,17 +5,19 @@ import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
+  'raw-ack-serialization': ['client.ts', '            dispatch.releaseAdmission()', '            await completion; dispatch.releaseAdmission()'],
+  'raw-completion-retention': ['client.ts', '      lane.pending.delete(completion)', '      /* Incorrectly retain completed input. */'],
   'hosted-write-context': ['hosted-runtime-service.ts', 'rawAgentInput ? [invocation.args[0], rawContext]', "rawAgentInput ? [invocation.args[0], invocation.method === 'writeAgent' ? undefined : rawContext]"],
   'hosted-paste-context': ['hosted-runtime-service.ts', 'rawAgentInput ? [invocation.args[0], rawContext]', "rawAgentInput ? [invocation.args[0], invocation.method === 'pasteAgent' ? undefined : rawContext]"],
   'hosted-terminal-context': ['hosted-runtime-service.ts', 'rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]', 'rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2]]'],
   'hosted-context-forgery': ['hosted-runtime-service.ts', '(controlledInput || rawAgentInput) && invocation.args.length !== 1 || rawTerminalInput && (invocation.args.length < 2 || invocation.args.length > 3)', 'controlledInput && invocation.args.length !== 1'],
-  'raw-final-authority': ['client.ts', 'await this.assertRawInputCurrent(call)\n        if (!sameRun', '/* Original final authority omitted. */\n        if (!sameRun'],
+  'raw-final-authority': ['client.ts', "await diagnostic.measure('input-authority', () => this.assertRawInputCurrent(call))\n        if (!sameRun", '/* Original final authority omitted. */\n        if (!sameRun'],
   'raw-preemption-authority': ['client.ts', 'this.assertRawInputCurrent(call).then(preempt)', 'Promise.resolve().then(preempt)'],
   'raw-author-order': ['client.ts', 'if (preparation) void preparation.catch(() => {})', 'if (preparation) await preparation'],
   'raw-author-observation': ['client.ts', 'await observePromptInput(call.signal, async () => { await call.author!() })', 'await call.author()'],
   'raw-run-observation': ['client.ts', 'observePromptInput(rawInput.signal, () => this.requireCurrentAgentRun(session))', 'this.requireCurrentAgentRun(session)'],
   'typed-run-observation': ['client.ts', 'observePromptInput(preparationSignal, () => this.requireCurrentAgentRun(session))', 'this.requireCurrentAgentRun(session)'],
-  'raw-disconnect-tail': ['client.ts', '// Keep the original tail until its actual operation settles.', 'this.agentInputTails.clear()\n    // Keep the original tail until its actual operation settles.'],
+  'raw-disconnect-tail': ['client.ts', '// Keep the original tail until its actual operation settles.', 'this.agentInputLanes.clear()\n    // Keep the original tail until its actual operation settles.'],
   'raw-disconnect-lifetime': ['client.ts', 'this.connectionEpoch += 1\n    this.cancelInputPreparationObservations()', '/* Original connection lifetime retained incorrectly. */'],
   'raw-final-target': ['client.ts', "if (!sameRun(this.requireAgentSession(session.agentSessionId).run, session.run)) throw new AgentMuxError(\n          'Agent Session changed before native Input dispatch.', 'STALE_AGENT_SESSION')", '/* Original final target check omitted. */'],
   'raw-not-applied-record': ['client.ts', "if (!dispatched || error instanceof AgentMuxError && error.detail === 'not_applied')", "if (error instanceof AgentMuxError && error.detail === 'not_applied')"],
@@ -54,7 +56,8 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/raw-input-auth
       return { code: "import { appendFileSync as __rawOwnerLoaded } from 'node:fs'; __rawOwnerLoaded(" + JSON.stringify(report) + ', ' + JSON.stringify(JSON.stringify(row) + '\n') + ');\n' + code, map: null }
     }
   }], test: { include: ['packages/core/test/raw-input-authority.test.ts', 'packages/core/test/input-authority-cancellation.test.ts',
-    'packages/core/test/client-raw-input-cross-client.test.ts', 'packages/core/test/client-raw-input-render-preemption.test.ts'],
+    'packages/core/test/client-raw-input-cross-client.test.ts', 'packages/core/test/client-raw-input-render-preemption.test.ts',
+    'packages/core/test/ctxmux-input-channel-lifetime.test.ts'],
     setupFiles: [resolve(root, 'vitest.setup.ts'), resolve(root, 'packages/core/test/helpers/raw-input-private-state.ts')], environment: 'node', passWithNoTests: false,
     fileParallelism: false, maxWorkers: 1, testTimeout: 10_000, hookTimeout: 15_000,
     ...(process.env.AGENTMUX_RAW_INPUT_PATTERN ? { testNamePattern: process.env.AGENTMUX_RAW_INPUT_PATTERN } : {}) }

@@ -4,10 +4,9 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
-import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
+import type { CtxmuxAdapterInputChannel, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxRunInputData, AgentMuxStoredAgentSession } from '../src/types.js'
 
-type Input = { operationId: string; expectedByte: number; data: AgentMuxRunInputData }
 type Inner = {
   connected: boolean
   registry: AgentMuxAgentSessionRegistry
@@ -15,7 +14,7 @@ type Inner = {
     isConnected(): boolean
     identity(): { daemonInstanceId: string }
     status(id: string): Promise<CtxmuxAdapterRun>
-    input(id: string, operation: Input): Promise<{ run: CtxmuxAdapterRun; appliedByteRange: { startByte: number; endByte: number } }>
+    openInput(id: string): Promise<CtxmuxAdapterInputChannel>
   }
 }
 const clients: AgentMuxClient[] = []
@@ -23,24 +22,31 @@ afterEach(async () => {
   vi.restoreAllMocks()
   await Promise.all(clients.splice(0).map(client => client.dispose()))
 })
+const checkpoint = () => new Promise<void>(resolve => setImmediate(resolve))
 
-// Two public Clients share one supported Store and one kernel cursor. The kernel
-// seam enforces the real native exact-range rejection; it does not repair inputs.
+// Public Clients and real registry; this explicit native port assigns ranges at
+// admission, never from Core's last ACK. Actual socket/native admission has its
+// own integration case; a later Run snapshot is deliberately not an input ACK.
 async function fixture() {
   const store = new AgentMuxMemoryAgentSessionStore()
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'cross-client-agent', providerId: 'claude', executorId: 'claude',
-    hostId: 'local', workspacePath: fixturePath("private-fixture"), run: { runId: 'cross-client-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath('private-fixture'), run: { runId: 'cross-client-run' }, retiredRuns: [],
     hookBindingId: 'cross-client-binding', hookToken: 'cross-client-token', createdAt: 1, updatedAt: 2
   }
   await store.compareAndSwap(null, stored)
   let cursor = 0
-  const writes: Input[] = []
-  const rejected: Input[] = []
+  const writes: AgentMuxRunInputData[] = []
   const run = (): CtxmuxAdapterRun => ({ nativeService: null, runId: stored.run.runId, lifecycleOperationId: null,
     program: 'generic', args: [], workspacePath: stored.workspacePath, pid: 123,
     state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0,
     firstAvailableByte: 0, acceptedInputBytes: cursor })
+  const nativeInput = vi.fn((data: AgentMuxRunInputData) => {
+    writes.push(data)
+    const startByte = cursor
+    cursor += Buffer.byteLength(data)
+    return Promise.resolve({ appliedByteRange: { startByte, endByte: cursor } })
+  })
   async function create() {
     const client = new AgentMuxClient({ store }); clients.push(client)
     const inner = client as unknown as Inner
@@ -48,89 +54,94 @@ async function fixture() {
     inner.kernel.isConnected = () => true
     inner.kernel.identity = () => ({ daemonInstanceId: 'cross-client-daemon' })
     const status = vi.fn(async () => run()); inner.kernel.status = status
-    inner.kernel.input = async (id, operation) => {
-      expect(id).toBe(stored.run.runId)
-      if (operation.expectedByte !== cursor) {
-        rejected.push(operation)
-        throw new AgentMuxError('Input cursor mismatch.', 'CTXMUX_input_cursor_mismatch', 'not_applied')
-      }
-      expect(operation.data.length).toBeGreaterThan(0)
-      writes.push(operation)
-      const startByte = cursor
-      cursor += typeof operation.data === 'string' ? Buffer.byteLength(operation.data) : operation.data.byteLength
-      return { run: run(), appliedByteRange: { startByte, endByte: cursor } }
-    }
+    const channel: CtxmuxAdapterInputChannel = { run: run(), waitWritable: async () => {}, input: data => nativeInput(data) }
+    const open = vi.fn(async () => channel); inner.kernel.openInput = open
     const write = (data: AgentMuxRunInputData) => client.writeAgent({
       agentSessionId: stored.agentSessionId, expectedRun: stored.run, data, source: 'user'
     })
-    return { client, inner, status, write }
+    return { client, inner, status, open, channel, write }
   }
-  const a = await create(), b = await create()
-  await a.write('a') // A retains ACK cursor=1.
-  await b.write('b') // The independent public Client advances the same Run to 2.
-  return { a, b, run, writes, rejected, stored }
+  return { a: await create(), b: await create(), run, writes, nativeInput, stored }
 }
 
-describe('new raw input after another public Client writes', () => {
+describe('ordinary input native ordering', () => {
   it.each(['\x1b[<64;10;10M', new Uint8Array([0x1b, 0x5b, 0x4d, 0x60, 0x99, 0x99])] as const)(
-    'starts each nonempty original report at the fresh Run cursor', async data => {
-      const h = await fixture(); const count = h.a.status.mock.calls.length
-      const outcome = await h.a.write(data).then(ack => ({ ack, error: null }), error => ({ ack: null, error }))
-      expect(outcome.error).toBeNull()
-      expect(outcome.ack).not.toBeNull()
-      const ack = outcome.ack!
-      const length = typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
-      expect(h.writes.map(input => input.expectedByte)).toEqual([0, 1, 2])
-      expect(h.writes.map(input => input.data)).toEqual(['a', 'b', data])
-      expect(h.rejected).toEqual([])
+    'consumes its native range after another Client writes without querying status', async data => {
+      const h = await fixture()
+      await h.a.write('a'); await h.b.write('b')
+      const ack = await h.a.write(data)
+      const length = Buffer.byteLength(data)
+      expect(h.writes).toEqual(['a', 'b', data])
       expect(ack).toEqual({ runId: h.stored.run.runId,
         appliedByteRange: { startByte: 2, endByte: 2 + length }, acceptedThroughByte: 2 + length })
-      expect(h.a.status).toHaveBeenCalledTimes(count + 1)
+      expect(h.a.status).not.toHaveBeenCalled()
+      expect(h.b.status).not.toHaveBeenCalled()
+      expect(h.a.channel.run.acceptedInputBytes).toBe(0)
     })
 
-  it.each(['', new Uint8Array(0)] as const)('reports a known empty noop at the fresh cursor without native input', async data => {
-    const h = await fixture(); const count = h.a.status.mock.calls.length
-    const ack = await h.a.write(data)
-    expect(h.writes.map(input => input.data)).toEqual(['a', 'b'])
-    expect(h.rejected).toEqual([])
-    expect(ack).toEqual({ runId: h.stored.run.runId,
-      appliedByteRange: { startByte: 2, endByte: 2 }, acceptedThroughByte: 2 })
-    expect(h.run().acceptedInputBytes).toBe(2)
-    expect(h.a.status).toHaveBeenCalledTimes(count + 1)
+  it('dispatches the next original input before the earlier receipt, retaining exact independent ACKs', async () => {
+    const h = await fixture(), release = Promise.withResolvers<void>()
+    const native = h.nativeInput.getMockImplementation()!
+    h.nativeInput.mockImplementationOnce(data => {
+      const receipt = native(data)
+      return release.promise.then(() => receipt)
+    })
+    let firstSettled = false
+    const first = h.a.write('a').then(ack => { firstSettled = true; return ack })
+    const second = h.a.write('b')
+    for (let n = 0; n < 8; n++) await checkpoint()
+    const before = { writes: [...h.writes], firstSettled }
+    // Cleanup also runs for the inverse; the retained pre-release assertion is the oracle.
+    release.resolve()
+    const receipts = await Promise.all([first, second])
+    expect(before).toEqual({ writes: ['a', 'b'], firstSettled: false })
+    expect(receipts.map(ack => ack.appliedByteRange)).toEqual([{ startByte: 0, endByte: 1 }, { startByte: 1, endByte: 2 }])
+    expect(h.a.status).not.toHaveBeenCalled()
   })
 
-  it('preserves a real status-to-write race as not_applied and does not replay that report', async () => {
+  it('qualifies cold native cwd before any input and keeps a valid independent Client usable', async () => {
     const h = await fixture()
-    h.a.inner.kernel.status = async () => {
-      const snapshot = h.run()
-      h.a.inner.kernel.status = async () => h.run()
-      await h.b.write('c')
-      return snapshot
-    }
-    await expect(h.a.write('z')).rejects.toMatchObject({
-      code: 'CTXMUX_input_cursor_mismatch', detail: 'not_applied'
-    })
-    expect(h.writes.map(input => input.data)).toEqual(['a', 'b', 'c'])
-    expect(h.rejected.map(input => ({ expectedByte: input.expectedByte, data: input.data })))
-      .toEqual([{ expectedByte: 2, data: 'z' }])
-    expect(h.run().acceptedInputBytes).toBe(3)
-    const next = await h.a.write('y')
-    expect(next.appliedByteRange).toEqual({ startByte: 3, endByte: 4 })
-    expect(h.writes.map(input => input.data)).toEqual(['a', 'b', 'c', 'y'])
+    h.a.open.mockResolvedValue({ ...h.a.channel, run: { ...h.a.channel.run, workspacePath: fixturePath('wrong-native-cwd') } })
+    await expect(h.a.write('wrong')).rejects.toMatchObject({ code: 'AGENT_SESSION_RUN_MISMATCH' })
+    expect(h.writes).toEqual([])
+    expect((await h.b.write('right')).appliedByteRange).toEqual({ startByte: 0, endByte: 5 })
   })
 
-  it.each(['', new Uint8Array(0)] as const)('leaves unknown empty cursor facts unknown without input or a new failure', async data => {
+  it('does not replay an unknown original input when a later independent call succeeds', async () => {
+    const h = await fixture(), native = h.nativeInput.getMockImplementation()!
+    h.nativeInput.mockImplementationOnce(async data => {
+      await native(data)
+      throw new AgentMuxError('Original result was lost.', 'CTXMUX_connection_closed', 'unknown')
+    })
+    await expect(h.a.write('a')).rejects.toMatchObject({ detail: 'unknown' })
+    const next = await h.a.write('b')
+    expect(h.writes).toEqual(['a', 'b'])
+    expect(next.appliedByteRange).toEqual({ startByte: 1, endByte: 2 })
+  })
+
+  it.each(['', new Uint8Array(0)] as const)('keeps an empty operation behind prior completion and reads its actual cursor without native input', async data => {
+    const h = await fixture(), release = Promise.withResolvers<void>()
+    const native = h.nativeInput.getMockImplementation()!
+    h.nativeInput.mockImplementationOnce(value => {
+      const receipt = native(value)
+      return release.promise.then(() => receipt)
+    })
+    const first = h.a.write('a'), empty = h.a.write(data)
+    for (let n = 0; n < 8; n++) await checkpoint()
+    const readsBeforeAck = h.a.status.mock.calls.length
+    release.resolve(); await first
+    expect(await empty).toEqual({ runId: h.stored.run.runId, appliedByteRange: { startByte: 1, endByte: 1 }, acceptedThroughByte: 1 })
+    expect(readsBeforeAck).toBe(0)
+    expect(h.a.status).toHaveBeenCalledTimes(1)
+    expect(h.writes).toEqual(['a'])
+  })
+
+  it.each(['', new Uint8Array(0)] as const)('leaves an unknown empty cursor unknown without writing or closing the Run', async data => {
     const h = await fixture()
     h.a.inner.kernel.status = async () => ({ ...h.run(), acceptedInputBytes: null })
-    const cursorMap = (h.a.client as unknown as { agentInputCursors: Map<string, number> }).agentInputCursors
-    const previous = [...cursorMap]
-    const events: unknown[] = []
-    h.a.client.onEvent(event => events.push(event))
-    const ack = await h.a.write(data)
-    expect(ack).toEqual({ runId: h.stored.run.runId, appliedByteRange: null, acceptedThroughByte: null })
-    expect(h.writes.map(input => input.data)).toEqual(['a', 'b'])
-    expect(h.rejected).toEqual([])
-    expect([...cursorMap]).toEqual(previous)
+    const events: unknown[] = []; h.a.client.onEvent(event => events.push(event))
+    expect(await h.a.write(data)).toEqual({ runId: h.stored.run.runId, appliedByteRange: null, acceptedThroughByte: null })
+    expect(h.writes).toEqual([])
     expect(events).toEqual([])
     expect(h.run().state).toEqual({ type: 'running' })
   })
