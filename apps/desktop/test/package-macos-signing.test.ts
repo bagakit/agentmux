@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { readFile, access } from 'node:fs/promises'
 import { expect, it, vi } from 'vitest'
-import { preflightMacosSigning, signMacosApplication, verifyMacosSigning } from '../scripts/macos-signing.mjs'
+import { preflightMacosSigning, signAndVerifyMacosApplication, signMacosApplication, verifyMacosSigning } from '../scripts/macos-signing.mjs'
 
 const identity = 'A'.repeat(40), teamId = 'TESTTEAM01', app = _hygiene_fixturePath("candidate/AgentMux.app")
 const plan = { kind: 'certificate', identity, teamId }
@@ -12,6 +12,15 @@ const requirement = `designated => identifier "dev.agentmux.desktop" and anchor 
 function runner(meta = metadata, dr = requirement) {
   return vi.fn(async (_command: string, args: string[]) => ({ stdout: '', stderr: args.includes('--requirements') ? dr : args.includes('--display') ? meta : '' }))
 }
+
+it('reuses the signer deep verification while checking the exact certificate requirement', async () => {
+  const signer = vi.fn(async options => { expect(options.strictVerify).toBe(true) })
+  const run = runner()
+  await expect(signAndVerifyMacosApplication(app, plan, { signer, run })).resolves.toMatchObject({ kind: 'certificate', teamId })
+  expect(run.mock.calls[0][1]).toContain('--strict')
+  expect(run.mock.calls[0][1]).toContain('--test-requirement')
+  expect(run.mock.calls[0][1]).not.toContain('--deep')
+})
 
 it('rejects an absent stable identity before any native command', async () => {
   const run = vi.fn()

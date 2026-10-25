@@ -45,7 +45,7 @@ async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false
     brandApplication: noop, copyRuntimeApplication: noop, verifyIdentity: noop, verifyThirdPartyNotices: noop,
     verifyNativeDesktopCopy: noop, verifyNativeDesktopSigning: noop,
     auditBundleSymlinks: noop, auditRuntimeReferences: noop, verifyWorkspaceMoveHelper: noop,
-    signMacosApplication: noop, verifyMacosSigning: async () => ({ kind: 'certificate' }), sha256: async () => 'original-digest',
+    signAndVerifyMacosApplication: async () => ({ kind: 'certificate' }), sha256: async () => 'original-digest',
     verifyPackagedRuntime: noop, createDmg: noop, verifyLaunchServices: verification, verifyDmg: verification,
     rm: async (...args: Parameters<typeof rm>) => {
       if (options.stagingRemovalFails && args[0] === staging) throw stagingRemovalError
