@@ -186,3 +186,23 @@ it('retains executor journal identity privately and refuses a journal-less or fr
   await expect(f.store.prepare(other, async () => ({ ...withoutIdentity, bindingId: 'other' }))).rejects.toMatchObject({ code: 'AGENT_EXECUTION_HELPER_STORAGE_UNCONFIRMED' })
   await expect(f.store.prepare(f.input, async () => ({ ...prepared(f.input), journalIdentity: 'unexpected' }))).rejects.toMatchObject({ code: 'AGENT_EXECUTION_HELPER_STORAGE_UNCONFIRMED' })
 })
+
+
+it('durably retains Provider notices across reopen without requalification or private launch leakage', async () => {
+  const f = await fixture(), original = prepared(f.input)
+  original.notices = [{ providerId: f.input.providerId, role: f.input.role, capability: 'hooks', state: 'unqualified', code: 'HOOKS_UNQUALIFIED', message: 'Qualification unavailable', action: 'Qualify original hooks' }]
+  await f.store.prepare(f.input, async () => original)
+  const build = vi.fn(async () => { throw new Error('must not requalify') })
+  const reopened = await new AgentExecutionHelperStore(f.root).prepare(f.input, build)
+  expect(reopened.notices).toEqual(original.notices)
+  expect(build).not.toHaveBeenCalled()
+  reopened.notices![0]!.message = 'caller mutation'
+  expect((await f.store.read(f.input.bindingId, f.input.role))?.preparation.notices).toEqual(original.notices)
+})
+
+it.each([{ providerId: 'another-provider' }, { role: 'executor' }, { state: 'healthy' }, { privateCapability: 'secret' }])('refuses misattributed or non-metadata notices %j without replacing retained work', async changed => {
+  const f = await fixture(), original = prepared(f.input)
+  original.notices = [{ providerId: f.input.providerId, role: f.input.role, capability: 'hooks', state: 'unqualified', code: 'HOOKS_UNQUALIFIED', message: 'Qualification unavailable', action: 'Qualify original hooks', ...changed }] as any
+  await expect(f.store.prepare(f.input, async () => original)).rejects.toMatchObject({ code: 'AGENT_EXECUTION_HELPER_STORAGE_UNCONFIRMED' })
+  expect(await f.store.read(f.input.bindingId, f.input.role)).toBeNull()
+})

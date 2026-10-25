@@ -111,3 +111,35 @@ it('refuses a missing or replaced original executor journal without advertising 
   await expect(runCodexExecutionHelper(config, streams)).rejects.toMatchObject({ code: 'AGENT_EXECUTION_JOURNAL_INVALID' })
   expect(streams.frames).toEqual([])
 })
+
+
+it('reports each Provider qualification independently of helper launch and keeps notices outside runner arguments', async () => {
+  vi.mocked(runProcess).mockResolvedValue({ exitCode: 0, stdout: 'codex-cli 0.165.0\n', stderr: '' })
+  const frontend = await prepareCodexExecutionHelper(await context('frontend'))
+  const executor = await prepareCodexExecutionHelper(await context('executor'))
+  expect(frontend.notices?.map(({ role, capability, state }) => ({ role, capability, state }))).toEqual([
+    { role: 'frontend', capability: 'hooks', state: 'unqualified' }, { role: 'frontend', capability: 'skills', state: 'unverified' }])
+  expect(executor.notices?.map(({ role, capability, state }) => ({ role, capability, state }))).toEqual([
+    { role: 'executor', capability: 'mcp', state: 'unsupported' }, { role: 'executor', capability: 'agent-control', state: 'unconfigured' }])
+  for (const plan of [frontend, executor]) {
+    expect(plan.notices?.every(notice => notice.providerId === 'codex' && notice.code && notice.message && notice.action)).toBe(true)
+    expect(JSON.parse(plan.args.at(-1)!)).not.toHaveProperty('notices')
+  }
+})
+
+it.each(['original-agent-on-B', undefined])('passes exact original claim %s and unconfigured control state into the actual native child, clearing stale resource credentials', async agentSessionId => {
+  const streams = io(), config = { ...await context('executor'), ...(agentSessionId === undefined ? {} : { agentSessionId }) }
+  vi.stubEnv('AGENTMUX_AGENT_SESSION_ID', 'wrong-resource-helper-agent')
+  vi.stubEnv('AGENTMUX_AGENT_CAPABILITY', 'stale-resource-capability')
+  vi.stubEnv('AGENTMUX_TOOL_CONTEXT', 'inherited-state')
+  config.executable = join(config.workspacePath, 'native-fixture')
+  await writeFile(config.executable, `#!${process.execPath}
+const {createInterface}=require('node:readline');
+createInterface({input:process.stdin}).on('line', line=>{ const p=JSON.parse(line); process.stdout.write(JSON.stringify({id:p.id,result:{sessionId:'native-original',sid:process.env.AGENTMUX_AGENT_SESSION_ID??null,capability:process.env.AGENTMUX_AGENT_CAPABILITY??null,context:process.env.AGENTMUX_TOOL_CONTEXT,native:require('node:child_process').execFileSync('/bin/sh',['-c','printf native-still-available'],{encoding:'utf8'})}})+'\\n'); });
+`)
+  await chmod(config.executable, 0o700)
+  const runner = await runCodexExecutionHelper(config, streams); cleanup.push(() => runner.close())
+  streams.input.write(JSON.stringify({ type: 'request', generation: 'original-generation', payload: { id: 1, method: 'initialize', params: { clientName: 'codex-environment', resumeSessionId: null } } }) + '\n')
+  await vi.waitFor(() => expect(streams.frames.some(frame => frame.type === 'response')).toBe(true))
+  expect(streams.frames.find(frame => frame.type === 'response')?.payload.result).toEqual({ sessionId: 'native-original', sid: agentSessionId ?? null, capability: null, context: 'unconfigured', native: 'native-still-available' })
+})
