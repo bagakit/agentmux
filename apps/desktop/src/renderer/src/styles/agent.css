@@ -59,7 +59,8 @@
 /* One current request belongs to the common reading host, not to a copied history row. */
 .agent-body[data-pending-interaction] { display: grid; grid-template-rows: minmax(0, 1fr) fit-content(min(320px, 55%)); }
 .agent-body[data-pending-interaction] > .agent-terminal-stage { min-height: 0; height: auto; }
-.agent-body > .agent-interaction { min-height: 0; overflow: auto; margin-bottom: var(--sp-3); }
+/* The request card sits inside its source wrapper, which is the actual grid item that must shrink and scroll. */
+.agent-body > .agent-interaction-source { min-height: 0; overflow: auto; margin-bottom: var(--sp-3); }
 /* Window-wide agent attention rollup. Permanent chrome, so the working dot never pulses here — a
    count states the fact and a pulsing dot would compete with the terminal. Colour appears only when
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
