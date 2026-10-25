@@ -8,7 +8,11 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { root, desktopRequire as require, aliases } from './fixtures/settings-resource-library/environment.mjs'
 
 const fixture = path.join(root,'apps/desktop/scripts/fixtures/settings-home')
-const evidence = path.join(root,'.tmp/settings-home','run-'+randomUUID())
+const conceptIntros = process.argv.includes('--concept-intros')
+const conceptIntroMutant = process.argv.includes('--concept-intro-mutation')
+assert.ok(!conceptIntroMutant || conceptIntros, 'The concept mutation requires its bounded scenario')
+const evidenceRoot = path.join(root,conceptIntros?'.tmp/settings-companion-intros':'.tmp/settings-home')
+const evidence = path.join(evidenceRoot,'run-'+randomUUID())
 const owned = await fs.mkdtemp(path.join(os.tmpdir(),'amux-settings-home-'))
 const env = {...process.env,TMPDIR:owned,TEMP:owned,TMP:owned}; delete env.ELECTRON_RUN_AS_NODE
 const inputs = new Map(), runs = []
@@ -20,18 +24,20 @@ const previewReturnMutant = process.argv.includes('--preview-return-mutation')
 const larkNavigationMutant = process.argv.includes('--lark-navigation-mutation')
 const focusContentMutant = process.argv.includes('--focus-content-mutation')
 const toolkitModelMutant = process.argv.includes('--toolkit-model-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant,toolkitModelMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant || toolkitModelMutant
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant,toolkitModelMutant,conceptIntroMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = conceptIntroMutant || navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant || toolkitModelMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
-const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
+const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : conceptIntros ? ['capsule','goals'] : null
+if (conceptIntros) assert.deepEqual([...requestedPages].sort(),['capsule','goals'],'Concept scope is exactly Capsule and Goals')
 if (requestedPages) {
   assert.ok(requestedPages.every(Boolean), 'Page selection is nonempty')
   assert.equal(new Set(requestedPages).size, requestedPages.length, 'Page selection contains no duplicate')
 }
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
 let previewReturnMutationLoads = 0, larkNavigationMutationLoads = 0
-let toolkitModelMutationLoads = 0
+let toolkitModelMutationLoads = 0, conceptIntroMutationLoads = 0
+let conceptIntroMutationReceipt = null
 let focusContentMutationLoads = 0
 const focusContentMutationOwners = new Set()
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -49,7 +55,7 @@ try {
   for (const file of ['index.html','entry.mjs','lark-preview.ts','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
   for (const file of ['apps/desktop/scripts/verify-settings-home.mjs','apps/desktop/test/settings-home.test.tsx','apps/desktop/test/settings-overview.test.tsx']) await bind(path.join(root,file))
   await bind(path.join(root,'apps/desktop/resources/icon-512.png'))
-  for (const mode of process.argv.includes('--visual-only') || nativeMutant ? [] : ['baseline','expanded','disclosure','entry','drafts','exact','destination','restored']) {
+  for (const mode of process.argv.includes('--visual-only') || conceptIntros || nativeMutant ? [] : ['baseline','expanded','disclosure','entry','drafts','exact','destination','restored']) {
     const directory = path.join(evidence,mode), temporary = path.join(owned,mode), output = []
     await fs.mkdir(directory)
     await fs.mkdir(temporary)
@@ -77,9 +83,26 @@ try {
   const compiled = path.join(owned,'compiled')
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},
-    plugins:[{name:'bind-settings-home-product',enforce:'pre',async transform(code,id){
+    plugins:[{name:'bind-settings-home-product',enforce:'pre',async resolveId(specifier){
+      if (!conceptIntros || !specifier.startsWith('@agentmux/host/')) return
+      const manifestFile=path.join(root,'apps/host/package.json'); await bind(manifestFile)
+      const manifest=JSON.parse(await fs.readFile(manifestFile,'utf8'))
+      const entry=manifest.exports['./'+specifier.slice('@agentmux/host/'.length)]
+      assert.ok(entry,'The current Host public export exists: '+specifier)
+      const target=typeof entry==='string'?entry:entry.import
+      return path.join(root,'apps/host',target.replace('./dist/','./src/').replace(/\.js$/u,'.ts'))
+    },async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(conceptIntroMutant&&file.endsWith('/components/settings/CapsuleSettingsPane.tsx')) {
+        const anchor='<CapsuleIntroduction />'
+        assert.equal(code.split(anchor).length,2,'One original Capsule introduction consumer')
+        const mutated=code.replace(anchor,'{null}')
+        conceptIntroMutationLoads++
+        conceptIntroMutationReceipt={file:path.relative(root,file),original:sha(code),consumed:sha(mutated),change:'Remove the original Capsule introduction consumer'}
+        await fs.writeFile(path.join(evidence,'concept-intro-mutation.json'),JSON.stringify(conceptIntroMutationReceipt,null,2))
+        return {code:mutated,map:null}
+      }
       if(file.endsWith('/components/settings/ToolkitScriptEditor.tsx')) {
         const original = code
         const stable = "${display ? '/display' : actionId === null ? '/main' : `/actions/${encodeURIComponent(actionId)}`}"
@@ -163,13 +186,18 @@ try {
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
   if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,toolkitModelMutant?'toolkit-model':focusContentMutant?'focus-content':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,conceptIntros?'concept-intros':toolkitModelMutant?'toolkit-model':focusContentMutant?'focus-content':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
     cwd:root,env,timeoutMs:1200000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (toolkitModelMutant) {
+  if (conceptIntroMutant) {
+    assert.equal(conceptIntroMutationLoads,1,'The actual introduction consumer mutation is loaded once')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/The production Capsule introduction is present in its original pane/u,'The real missing introduction assertion kills its consumer mutation')
+  } else if (toolkitModelMutant) {
     assert.equal(toolkitModelMutationLoads,1,'One actual Toolkit document owner was reverted')
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
@@ -239,13 +267,13 @@ try {
   assert.ok(relevant.length>0)
   for (const [file,digest] of relevant) assert.equal(sha(await fs.readFile(file)),digest,'Changed candidate source: '+path.relative(root,file))
   const receipt={passed:true,captureOnly:!nativeMutant,aestheticReview:'not-performed',assertionRed:nativeMutant,testEvidence:runs.length?'passed-with-owning-mutations':nativeMutant?'native-control-assertion-red':'not-run',
-    runs,capture,render,callers,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
+    runs,capture,render,callers,conceptIntroMutation:conceptIntroMutationReceipt,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
   await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
   await fs.writeFile(path.join(evidence,'review.md'),['# Settings Home visual review','',render.boundary,'',
     nativeMutant ? 'The owning mutation failed the expected native behavior assertion. This does not establish aesthetic approval.' : 'Capture succeeded; independent aesthetic review is still required. Read every complete frame before ranking the pages.','',
     '| Page | Theme | Position | Screenshot |','| --- | --- | --- | --- |',
     ...render.frames.map(frame=>`| ${frame.page} | ${frame.theme} | ${frame.position} | [${frame.file}](visual/${frame.file}) |`),''].join('\n'))
-  if (!nativeMutant) await fs.writeFile(path.join(root,'.tmp/settings-home/latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
+  if (!nativeMutant || conceptIntros) await fs.writeFile(path.join(evidenceRoot,nativeMutant?'latest-mutant.json':'latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
   console.log(JSON.stringify({passed:true,assertionRed:nativeMutant,evidence,pages:render.scope?.resolved.length??render.catalog.length+1,frames:render.frames.length,aestheticReview:'not-performed'}))
 } finally {
   assert.deepEqual(await listProbeProcesses(-1,owned),[],'Owned private Renderer processes have exited')

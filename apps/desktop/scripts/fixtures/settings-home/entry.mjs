@@ -24,6 +24,29 @@ await api.config.save({ ...before, composerShortcuts: [
 ], workspaces: before.workspaces.map(workspace => ({...workspace,
   path: workspace.path.startsWith('/') ? workspace.path : new URL('controlled/'+workspace.id, new URL('/', location.href)).pathname
 })) }, before)
+// Only this isolated presentation scenario supplies a running service observation.
+// These are controlled port facts, not a live Capsule service qualification.
+const conceptIntros = new URLSearchParams(location.search).get('conceptIntros') === 'true'
+const conceptProbe = { calls: [], boundary: 'Controlled Capsule runtime/config ports; no service start, stop, page creation or backend persistence.' }
+if (conceptIntros) {
+  let capsuleConfig = { revision: 1, contentRoot: '/private/concept-intros/capsules', defaultStorageMode: 'managed', defaultMode: 'isolated', defaultTheme: 'none' }
+  api.capsuleRuntime.call = async (method, params) => {
+    conceptProbe.calls.push({ method, params: structuredClone(params) })
+    if (method !== 'capsule.runtime.inspect') throw new Error('Capsule lifecycle is outside the introduction review')
+    return { revision: 1, desired: 'running', phase: 'running', stateDirectory: '/private/concept-intros/state', socketPath: '/private/concept-intros/capsule.sock', run: { hostId: 'local', runId: 'concept-intro-controlled-run' }, runtime: null, operation: null, issue: null }
+  }
+  api.capsules.call = async (method, params) => {
+    conceptProbe.calls.push({ method, params: structuredClone(params) })
+    if (method === 'capsule.config.inspect') return { config: structuredClone(capsuleConfig) }
+    if (method === 'capsule.ls') return { capsules: [], issues: [] }
+    if (method === 'capsule.config.update') {
+      if (params.expectedRevision !== capsuleConfig.revision) throw new Error('The original Capsule config revision must match')
+      capsuleConfig = { ...capsuleConfig, ...params.changes, revision: capsuleConfig.revision + 1 }
+      return { operationId: params.operationId, status: 'committed', config: structuredClone(capsuleConfig) }
+    }
+    throw new Error('Unexpected Capsule operation in the bounded introduction review: ' + method)
+  }
+}
 await import('../settings-structure/entry.mjs')
 
 const toolkitOperations = []
@@ -46,6 +69,7 @@ window.settingsHomeProbe = {
   mobileConnectionProbe,
   toolkitOperations,
   larkPreview,
+  conceptProbe,
   ready: true
 }
 window.addEventListener('error', event => window.settingsHomeProbe.errors.push(event.message))
