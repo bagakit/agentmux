@@ -12,7 +12,10 @@ export function reviewFeishuPermissions(catalogState: string, appliedState: stri
   const required = [
     ...messages.map(name => ({ name, group: 'messages' as const })),
     ...groups.map(name => ({ name, group: 'groups' as const })),
-    { name: 'application:application:self_manage', group: 'identity' as const }
+    { name: 'application:application:self_manage', group: 'identity' as const },
+    // contact.user.get needs both endpoint access and the name/avatar field permission.
+    { name: 'contact:contact.base:readonly', group: 'identity' as const },
+    { name: 'contact:user.base:readonly', group: 'identity' as const }
   ]
   const parse = (value: string): Record<string, unknown> | null => { try { return record(JSON.parse(value)) } catch { return null } }
   const catalog = parse(catalogState)?.scopes, applied = parse(appliedState)?.scopes
