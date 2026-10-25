@@ -1,80 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxBrowserTarget } from '@agentmux/core'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
-import { usePerformanceObservation } from '../../lib/use-performance-observation'
+import type { MetricsObservation } from '@agentmux/core/control'
+import type { useBrowserDirectory } from '../../lib/use-browser-directory'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { browserProcessReadings, eligibleForRelease, memory, pageAddress, pageName, processKey, retentionReason, stateLabel, type BrowserDirectoryRow } from './browser-resource-view'
+import { browserProcessReadings, eligibleForRelease, memory, pageAddress, pageName, processKey, retentionReason, stateLabel, type BrowserDirectoryRow } from '../../lib/browser-resource-view'
 import '../../styles/browser-resources.css'
 
 type DirectoryRow = BrowserDirectoryRow
 
-/** One visible Settings reader; retained rows are observations, never another Browser owner. */
-export function useBrowserDirectory(active: boolean) {
-  const [rows, setRows] = useState<DirectoryRow[]>([])
-  const [pending, setPending] = useState(false)
-  const [notice, setNotice] = useState('')
-  const observation = useRef<{ active: boolean; reading: boolean; reread: boolean; revision: number } | null>(null)
-  const refresh = useCallback(async () => {
-    const owner = observation.current
-    if (!owner?.active) return
-    if (owner.reading) { owner.reread = true; setPending(true); return }
-    owner.reading = true
-    setPending(true)
-    try {
-      do {
-        owner.reread = false
-        const issued = ++owner.revision
-        try {
-          const result = await api.browser.listTargets()
-          if (!owner.active || observation.current !== owner) return
-          if (issued !== owner.revision) continue
-          setRows(previous => {
-            const old = new Map(previous.map(row => [row.target.id, row]))
-            const next = result.coverage === 'partial'
-              ? new Map(previous.map(row => [row.target.id, { ...row, current: false }])) : new Map<string, DirectoryRow>()
-            for (const target of result.targets) {
-              const before = old.get(target.id)
-              const locations = before?.target.resource?.locations
-              // A partial native row with no positions cannot prove the saved bindings disappeared.
-              const previousLocations = result.coverage === 'partial' && !target.resource?.locations.length
-                ? locations?.length ? locations : before?.previousLocations : undefined
-              next.set(target.id, { target, current: true, ...(previousLocations?.length ? { previousLocations } : {}) })
-            }
-            return [...next.values()]
-          })
-          setNotice(result.coverage === 'partial'
-            ? [result.warning, 'This query is partial. Pages not observed here keep their last known entry.'].filter(Boolean).join(' ')
-            : result.warning ?? '')
-        } catch (error) {
-          if (!owner.active || observation.current !== owner) return
-          if (issued !== owner.revision) continue
-          setRows(previous => previous.map(row => ({ ...row, current: false })))
-          setNotice(`Refresh failed. Existing pages are kept. ${presentError(error)}`)
-        }
-      } while (owner.active && observation.current === owner && owner.reread)
-    } finally {
-      owner.reading = false
-      if (owner.active && observation.current === owner) setPending(false)
-    }
-  }, [])
-  useEffect(() => {
-    if (!active) { setRows(previous => previous.map(row => ({ ...row, current: false }))); setPending(false); return }
-    const owner = { active: true, reading: false, reread: false, revision: 0 }
-    observation.current = owner
-    const release = api.browser.onTargetsChanged(() => { void refresh() })
-    void refresh()
-    return () => { owner.active = false; owner.reread = false; observation.current = null; release() }
-  }, [active, refresh])
-  const invalidate = useCallback((id: string) => {
-    if (observation.current) observation.current.revision++
-    setRows(previous => previous.map(row => row.target.id === id ? { ...row, current: false } : row))
-  }, [])
-  const observedIds = useMemo(() => new Set(rows.filter(row => row.current).map(row => row.target.id)), [rows])
-  return { rows, observedIds, pending, notice, refresh, invalidate }
-}
 
 type ActionResult = { target: AgentMuxBrowserTarget; kind: 'release' | 'restore'; navigationId?: string; status: string; detail: string }
 const BrowserIcon = semanticIconComponent('object.browser')
@@ -82,8 +19,10 @@ const RefreshIcon = semanticIconComponent('action.refresh')
 const resultLabel = (result: ActionResult) => result.status === 'released' ? 'Released' : result.status === 'retained' ? 'Kept'
   : result.status === 'ready' ? 'Restored' : 'Unconfirmed'
 
-export function BrowserResources({ active, directory }: {
+export function BrowserResources({ active, directory, app, observationError }: {
   active: boolean
+  app: MetricsObservation['app'] | undefined
+  observationError?: string | null
   directory: ReturnType<typeof useBrowserDirectory>
 }) {
   const [query, setQuery] = useState(''), [filter, setFilter] = useState('all')
@@ -94,8 +33,6 @@ export function BrowserResources({ active, directory }: {
   const working = useRef(false), mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const workspaces = useAppStore(state => state.config?.workspaces)
-  const observation = usePerformanceObservation(api.toolkit, active)
-  const app = observation.snapshot?.observation?.app
   const embedded = directory.rows.filter(row => row.target.source === 'embedded')
   const readings = browserProcessReadings(embedded, app?.data?.processes ?? [])
   const rank = new Map(order?.ids.map((id, index) => [id, index]))
@@ -177,11 +114,11 @@ export function BrowserResources({ active, directory }: {
       <button className="small-button" disabled={!active || busy.size > 0} onClick={() => void perform(selectedRows, 'release')}>Release selected ({selected.size})</button>
       <button className="browser-resources__text-button" disabled={busy.size > 0} onClick={() => setSelected(new Map())}>Clear selection</button>
     </div> : null}
-    {directory.notice || observation.error ? <div className="browser-resources__notices">
+    {directory.notice || observationError ? <div className="browser-resources__notices">
       <div role="status"><strong>{directory.notice ? 'Page directory needs attention' : 'Memory reading unavailable'}</strong><p>Refresh to check again. Previous entries are kept.</p></div>
       <details><summary>Observation details</summary>
         {directory.notice ? <p className="browser-resources__notice">{directory.notice}</p> : null}
-        {observation.error ? <p className="browser-resources__notice">Process observation unavailable: {observation.error}</p> : null}
+        {observationError ? <p className="browser-resources__notice">Process observation unavailable: {observationError}</p> : null}
       </details>
     </div> : null}
     {!embedded.length ? <p className="settings-group-note">{directory.pending ? 'Checking open pages…' : 'No Browser pages observed. Refresh to check for pages in AgentMux.'}</p> : !shown.length ? <p className="settings-group-note">No pages match this filter.</p> : <>

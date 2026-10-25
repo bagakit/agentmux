@@ -4,7 +4,10 @@ import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/cont
 import { useSettingDraftRecord } from './use-setting-draft'
 import { RetainedBrowserUploads } from './RetainedBrowserUploads'
 import { ExternalBrowserConnections } from './ExternalBrowserConnections'
-import { BrowserResources, useBrowserDirectory } from './BrowserResources'
+import { BrowserResources } from '../browser/BrowserResources'
+import { useBrowserDirectory } from '../../lib/use-browser-directory'
+import { usePerformanceObservation } from '../../lib/use-performance-observation'
+import { api } from '../../lib/api'
 import './browser-settings.css'
 
 export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean }
@@ -30,6 +33,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   const draft = useSettingDraftRecord(saved)
   const saveState = useSettingsSave()
   const directory = useBrowserDirectory(active)
+  const observation = usePerformanceObservation(api.toolkit, active)
 
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
@@ -62,7 +66,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
       </section>
       </div>
       <AppLinkSchemes browser={browser} onForget={onForget} />
-      <BrowserResources active={active} directory={directory} />
+      <BrowserResources active={active} directory={directory} app={observation.snapshot?.observation?.app} observationError={observation.error} />
       <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
         observedIds={directory.observedIds} />
       <RetainedBrowserUploads active={active} />
