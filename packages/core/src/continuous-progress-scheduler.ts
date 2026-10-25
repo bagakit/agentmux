@@ -67,6 +67,8 @@ export class ContinuousProgressScheduler {
   private readonly now: () => number
   private readonly id: () => string
   private loops = new Map<string, ContinuousProgressLoop>()
+  private readonly targetLoops = new Map<string, Map<string, number>>()
+  private nextOrdinal = 0
 
   constructor(options: ContinuousProgressSchedulerOptions = {}) {
     this.now = options.now ?? Date.now
@@ -75,10 +77,19 @@ export class ContinuousProgressScheduler {
 
   restore(records: readonly ContinuousProgressLoop[]): void {
     this.loops = new Map(records.map((record) => [record.loopId, structuredClone(record)]))
+    this.targetLoops.clear()
+    this.nextOrdinal = 0
+    for (const loop of this.loops.values()) this.indexLoop(loop, this.nextOrdinal++)
   }
 
   list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] {
-    const records = [...this.loops.values()]
+    // The ordinal preserves the original Map order when replace moves an older
+    // loop to a target which already owns newer records. Only IDs are indexed.
+    const indexed = target?.hostId !== undefined && target.agentSessionId !== undefined
+      ? this.targetLoops.get(this.targetKey({ hostId: target.hostId, agentSessionId: target.agentSessionId })) : undefined
+    const records = target?.hostId !== undefined && target.agentSessionId !== undefined
+      ? [...(indexed ?? [])].sort((a, b) => a[1] - b[1]).map(([id]) => this.loops.get(id)!)
+      : [...this.loops.values()]
     const selected = target ? records.filter(loop =>
       (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).every(key => target[key] === undefined || loop[key] === target[key])) : records
     return selected.map(loop => structuredClone(loop))
@@ -91,18 +102,41 @@ export class ContinuousProgressScheduler {
 
   replace(loopId: string, loop: ContinuousProgressLoop): void {
     if (!this.loops.has(loopId) || loop.loopId !== loopId) throw new Error(`Unknown loop: ${loopId}`)
-    this.loops.set(loopId, structuredClone(loop))
+    this.setLoop(structuredClone(loop))
+  }
+
+  private targetKey(target: Pick<ContinuousProgressTarget, 'hostId' | 'agentSessionId'>): string {
+    return JSON.stringify([target.hostId, target.agentSessionId])
+  }
+
+  private indexLoop(loop: ContinuousProgressLoop, ordinal: number): void {
+    const key = this.targetKey(loop), entries = this.targetLoops.get(key) ?? new Map<string, number>()
+    entries.set(loop.loopId, ordinal)
+    this.targetLoops.set(key, entries)
+  }
+
+  private setLoop(loop: ContinuousProgressLoop): void {
+    const previous = this.loops.get(loop.loopId)
+    const oldKey = previous && this.targetKey(previous)
+    const oldEntries = oldKey === undefined ? undefined : this.targetLoops.get(oldKey)
+    const ordinal = oldEntries?.get(loop.loopId) ?? this.nextOrdinal++
+    if (oldKey !== undefined && oldKey !== this.targetKey(loop)) {
+      oldEntries!.delete(loop.loopId)
+      if (!oldEntries!.size) this.targetLoops.delete(oldKey)
+    }
+    this.loops.set(loop.loopId, loop)
+    this.indexLoop(loop, ordinal)
   }
 
   create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; initialDelivery?: ContinuousProgressLoop['initialDelivery'] }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
     if (!Number.isFinite(input.intervalMs) || input.intervalMs <= 0) throw new Error('Loop interval must be positive.')
-    if ([...this.loops.values()].some((loop) => !isAgentSchedule(loop) && loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
+    if (this.list({ hostId: input.hostId, agentSessionId: input.agentSessionId }).some(loop => !isAgentSchedule(loop) && loop.status !== 'stopped')) {
       throw new Error(`A loop already exists for Agent ${input.agentSessionId}.`)
     }
     const now = this.now()
     const loop: ContinuousProgressLoop = { loopId: this.id(), hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: input.initialDelivery ? 'paused' : 'active', ...(input.taskSource ? { taskSource: { ...input.taskSource } } : {}), ...(input.operationId ? { creationOperationId: input.operationId, revision: 1 } : {}), ...(input.initialDelivery ? { initialDelivery: structuredClone(input.initialDelivery) } : {}) }
-    this.loops.set(loop.loopId, loop)
+    this.setLoop(loop)
     return { ...loop }
   }
 
@@ -114,7 +148,7 @@ export class ContinuousProgressScheduler {
     const loopId = this.id()
     const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
       ...timing, revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
-    this.loops.set(loopId, loop)
+    this.setLoop(loop)
     return structuredClone(loop)
   }
 
@@ -151,7 +185,7 @@ export class ContinuousProgressScheduler {
     const tickId = this.id()
     const nextCheckAt = isAgentSchedule(loop) ? loop.nextCheckAt : now + loop.intervalMs
     const updated = { ...loop, lastTickId: tickId, lastTickAt: now, nextCheckAt }
-    this.loops.set(loopId, updated)
+    this.setLoop(updated)
     return { loop: { ...updated }, tickId }
   }
 
@@ -162,7 +196,7 @@ export class ContinuousProgressScheduler {
   }
   private update(loopId: string, patch: Partial<ContinuousProgressLoop>): ContinuousProgressLoop {
     const updated = { ...this.require(loopId), ...patch }
-    this.loops.set(loopId, updated)
+    this.setLoop(updated)
     return { ...updated }
   }
 }
