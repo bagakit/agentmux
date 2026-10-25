@@ -25,7 +25,7 @@ const boundary = (type: string, turn: string, ordinal: number, extra = {}, time 
 async function fixture(records: unknown[] = [boundary('task_complete', TURN, 1, { error })]) {
   const f = await rpcOwnerFixture([SID, 'neighbor']); cleanups.push(f.close)
   const file = join(f.root, 'rollout-owned.jsonl')
-  await writeFile(file, line({ type: 'session_meta', payload: { id: NATIVE, source: 'cli' } }) + records.map(line).join(''))
+  await writeFile(file, line({ type: 'session_meta', payload: { id: NATIVE, source: 'cli', cwd: f.root } }) + records.map(line).join(''))
   const before = (await loadAgentSessions(f.store)).find(item => item.agentSessionId === SID)!
   const nativeHandle = { kind: 'provider' as const, providerId: 'codex', sessionId: NATIVE, transcriptPath: file }
   const session = { ...before, nativeHandle }
@@ -34,14 +34,23 @@ async function fixture(records: unknown[] = [boundary('task_complete', TURN, 1, 
   f.inner.kernel.start = vi.fn(() => { throw new Error('Forbidden model/Run start') })
   f.inner.kernel.connect = vi.fn(() => { throw new Error('Forbidden Runtime connect') })
   cleanups.push(async () => { for (const name of ['start', 'connect', 'stop', 'attach']) expect(f.inner.kernel[name]).not.toHaveBeenCalled() })
+  // Inspect is intentionally nonblocking. Await the actual observer operation before
+  // asserting its eventual semantic facts; do not turn snapshot timing into a failure.
+  const observations = vi.spyOn(f.client as unknown as { ensureNativeStatusObservation(...args: unknown[]): Promise<unknown> }, 'ensureNativeStatusObservation')
+  const status = async () => {
+    await f.client.statusAgent(SID)
+    await Promise.all(observations.mock.results.flatMap(result => result.type === 'return' ? [result.value] : []))
+    return f.client.statusAgent(SID)
+  }
   const context = { args: [], workspacePath: f.root, nativeHandle, signal: new AbortController().signal }
   const stored = async () => (await loadAgentSessions(f.store)).find(item => item.agentSessionId === SID)!
   const semantic = () => f.client.agentSession(SID).semanticStatus
-  return { ...f, file, session, nativeHandle, events, context, stored, semantic }
+  return { ...f, file, session, nativeHandle, events, context, stored, semantic, status }
 }
 
 it('recognizes the real native failure through Core, RPC and the compiled public CLI with the Run alive', async () => {
   const f = await fixture(), neighbor = f.client.agentSession('neighbor')
+  await f.status()
   if (process.env.AMX_FAILURE_CLI) vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AMX_FAILURE_CLI)
   const service = new AgentMuxRpcService({ coreClients: f.coreClients })
   cleanups.push(() => service.dispose())
@@ -82,7 +91,7 @@ it('recognizes the real native failure through Core, RPC and the compiled public
 
 it('clears failure on a new turn in one appended batch and keeps the failure in durable history after success', async () => {
   const f = await fixture([boundary('task_started', TURN, 1)])
-  await f.client.statusAgent(SID)
+  await f.status()
   const time = Date.now() - 500
   await appendFile(f.file, line(boundary('task_complete', TURN, 2, { error }, time)) +
     line(boundary('task_started', 'retry-turn', 3, {}, time + 1)))
@@ -96,12 +105,12 @@ it('clears failure on a new turn in one appended batch and keeps the failure in 
   expect(timeline.items.filter(item => item.status === 'failed')).toEqual([expect.objectContaining({
     source: 'native-transcript', content: expect.stringContaining('AGENT_MODEL_OVERLOADED') })])
   const now = f.semantic()!.observedAt
-  await f.client.statusAgent(SID); await f.client.statusAgent(SID)
+  await f.status(); await f.status()
   expect(f.semantic()!.observedAt).toBe(now)
 })
 
 it('retains the exact error across a separate process Store restart without replaying a prior resume turn', async () => {
-  const f = await fixture(); await f.client.statusAgent(SID)
+  const f = await fixture(); await f.status()
   const entry = resolve(process.env.AMX_FAILURE_COMPILED ?? 'packages/core/dist', 'agent-session-store.js')
   const program = `import { AgentMuxFileAgentSessionStore } from ${JSON.stringify(new URL('file://' + entry).href)};
     const s=new AgentMuxFileAgentSessionStore(process.argv[1]);console.log(JSON.stringify(await s.load()));`
@@ -125,7 +134,7 @@ it('retains the exact error across a separate process Store restart without repl
 it('keeps interrupted turns neutral, and rejects old turn ends and child failures in initial and live reads', async () => {
   const f = await fixture([boundary('task_complete', 'old-turn', 1), boundary('task_started', 'current-turn', 2),
     boundary('task_complete', 'old-turn', 3, { error }), boundary('task_complete', 'child-turn', 4, { error, thread_id: 'child-thread' })])
-  await f.client.statusAgent(SID)
+  await f.status()
   expect(f.semantic()).toMatchObject({ state: 'working', nativeTurnId: 'current-turn' })
   await appendFile(f.file, line(boundary('task_complete', 'old-turn', 5, { error })) +
     line(boundary('task_complete', 'child-turn', 6, { error, thread_id: 'child-thread' })) +
@@ -138,7 +147,7 @@ it('keeps interrupted turns neutral, and rejects old turn ends and child failure
 it('does not relabel malformed current native records as a prior successful result', async () => {
   const f = await fixture([boundary('task_complete', 'old-turn', 1), { type: 'event_msg', ordinal: 2, payload: { type: 'task_complete', error } }])
   expect(await readCodexPromptExecutionEvidence(f.context)).toBeNull()
-  const status = await f.client.statusAgent(SID)
+  const status = await f.status()
   expect(status.run.state).toBe('running'); expect(status.session.semanticStatus?.state).not.toBe('done')
   expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_NATIVE_STATUS_UNCONFIRMED' }))
 })
@@ -160,7 +169,7 @@ it('handles a split Unicode record, observes only its exact source, and releases
 })
 
 it('keeps healthy input and the retained error during observation failure, then reconnects on Inspect', async () => {
-  const f = await fixture(); await f.client.statusAgent(SID)
+  const f = await fixture(); await f.status()
   const retained = f.semantic(), originalRun = f.client.agentSession(SID).run
   await rename(f.file, f.file + '.removed')
   await vi.waitFor(() => expect(f.events.some(event => event.type === 'agent-error')).toBe(true))
@@ -168,14 +177,15 @@ it('keeps healthy input and the retained error during observation failure, then 
   f.inner.kernel.identity = () => ({ daemonInstanceId: 'private' })
   f.inner.kernel.input = vi.fn(async () => ({ run: f.run(originalRun.runId), appliedByteRange: { startByte: 0, endByte: 1 } }))
   await expect(f.client.writeAgent({ agentSessionId: SID, expectedRun: originalRun, source: 'user', data: 'x' })).resolves.toMatchObject({ appliedByteRange: { endByte: 1 } })
-  await rename(f.file + '.removed', f.file); await f.client.statusAgent(SID)
+  await rename(f.file + '.removed', f.file)
+  await f.client.refreshAgentSession(SID, originalRun); await f.status()
   await appendFile(f.file, line(boundary('task_started', 'new-turn', 2)))
   await vi.waitFor(() => expect(f.semantic()).toMatchObject({ state: 'working', nativeTurnId: 'new-turn' }))
   expect(f.client.agentSession(SID).run).toEqual(originalRun)
 })
 
 it.each([TURN, undefined, 'prior-turn'])('does not let a delayed Stop Hook with turn %s erase the confirmed native error', async turnId => {
-  const f = await fixture(); await f.client.statusAgent(SID)
+  const f = await fixture(); await f.status()
   Reflect.get(f.client, 'hookNativeWitnesses').set(f.session.run.runId, { candidate: JSON.stringify(NATIVE), handle: f.nativeHandle })
   const envelope: NativeHookEnvelope = { receiptId: 'late-stop', agentSessionId: SID, runId: f.session.run.runId,
     providerId: 'codex', eventName: 'Stop', payload: { hook_event_name: 'Stop', session_id: NATIVE,
@@ -186,7 +196,7 @@ it.each([TURN, undefined, 'prior-turn'])('does not let a delayed Stop Hook with 
 })
 
 it.each([undefined, 'prior-turn', 'current-turn'])('uses native outcomes after mid-turn tool activity and Stop with turn %s', async turnId => {
-  const f = await fixture([boundary('task_started', 'current-turn', 1)]); await f.client.statusAgent(SID)
+  const f = await fixture([boundary('task_started', 'current-turn', 1)]); await f.status()
   Reflect.get(f.client, 'hookNativeWitnesses').set(f.session.run.runId, { candidate: JSON.stringify(NATIVE), handle: f.nativeHandle })
   const feed = async (eventName: string, turn: string | undefined) => {
     const envelope: NativeHookEnvelope = { receiptId: eventName + '-' + String(turn), agentSessionId: SID, runId: f.session.run.runId,
@@ -237,8 +247,8 @@ it('drains an in-flight durable write without resurrecting a disconnected native
 
 it('never renews the old working clock from repeated snapshots', async () => {
   const old = Date.now() - 20 * 60_000, f = await fixture([boundary('task_started', TURN, 1, {}, old)])
-  await f.client.statusAgent(SID); expect(f.semantic()?.observedAt).toBe(old)
-  expect((await f.client.statusAgent(SID)).observation.semantic).toBe('unknown')
+  await f.status(); expect(f.semantic()?.observedAt).toBe(old)
+  expect((await f.status()).observation.semantic).toBe('unknown')
   expect(f.semantic()?.observedAt).toBe(old)
 })
 
@@ -249,7 +259,7 @@ it.each(['Run', 'native source'])('rejects callbacks after a changed %s, and dis
   vi.spyOn(providers, 'get').mockReturnValue({ ...original, observeSessionStatus: async (context: AgentProviderSessionStatusObservationContext) => {
     observation = context; return { dispose }
   } })
-  await f.client.statusAgent(SID)
+  await f.status()
   const previous = await f.stored()
   const replacement = target === 'Run' ? { ...previous, run: { runId: 'replacement-run' }, retiredRuns: [previous.run], updatedAt: Date.now() }
     : { ...previous, nativeHandle: { ...f.nativeHandle, sessionId: 'replacement-native' }, updatedAt: Date.now() }
@@ -261,4 +271,31 @@ it.each(['Run', 'native source'])('rejects callbacks after a changed %s, and dis
   await Reflect.get(f.client, 'nativeStatusWatches').get(SID).pending
   expect(f.semantic()).toBeUndefined(); expect(f.events.some(event => event.type === 'agent-status')).toBe(false)
   await f.client.disconnect(); expect(dispose).toHaveBeenCalled(); expect(observation.signal.aborted).toBe(true)
+})
+
+it('retains a suppressed historical failure and coalesces its capture with the exact native original', async () => {
+  const nativeTime = Date.now() - 1000
+  const f = await fixture([boundary('task_complete', TURN, 1, { error }, nativeTime)])
+  const previous = await f.stored(), now = Date.now()
+  const current = { ...previous, updatedAt: now,
+    semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: now, nativeTurnId: 'newer-turn' },
+    hookReceipt: { id: 'newer-hook', providerId: 'codex', agentSessionId: SID, run: previous.run,
+      eventName: 'UserPromptSubmit', nativeTurnId: 'newer-turn', observedAt: now } }
+  await f.store.compareAndSwap(previous, current); await f.client.refreshAgentSession(SID, current.run)
+  Reflect.get(f.client, 'hookTurnPhases').set(current.run.runId, 'in-turn')
+  await f.status()
+  expect(f.semantic()).toMatchObject({ state: 'working', nativeTurnId: 'newer-turn' })
+  const captured = (await f.store.loadTimeline(SID)).items.filter(item => item.turnOutcome?.status === 'failed')
+  expect(captured).toHaveLength(1)
+  expect(captured[0]).toMatchObject({ turnOutcome: { status: 'failed', failure: { nativeTurnId: TURN } },
+    conversation: { sameEvent: { hostId: 'local', agentSessionId: SID, source: { kind: 'native', providerId: 'codex', nativeSessionId: NATIVE } } } })
+  const { consumeConversationWindowPage } = await import('../src/conversation.js')
+  const window = consumeConversationWindowPage(await f.client.readAgentConversation({ hostId: 'local', agentSessionId: SID }))
+  expect(window.kind).toBe('complete')
+  if (window.kind !== 'complete') throw Error('Expected a complete original failure window')
+  const failures = window.snapshot.units.filter(unit => unit.records.some(record => record.original.kind !== 'deferred' && record.original.item.turnOutcome?.status === 'failed'))
+  expect(failures).toHaveLength(1)
+  expect(failures[0]!.records.map(record => record.original.kind).sort()).toEqual(['captured', 'native'])
+  expect(f.events.some(event => event.type === 'agent-status' && event.state === 'error')).toBe(false)
+  expect((await f.stored()).run).toEqual(current.run)
 })
