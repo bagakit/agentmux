@@ -15,6 +15,8 @@ export interface PublicationAdapter extends PublicationPreparer {
   readonly permissionActions?: true
   readonly questionActions?: true
   readonly queryFeedback?: true
+  /** This consumer renders reply snapshots and can update its original confirmed speech. */
+  readonly replyMetadata?: true
   readonly cards?: import('./publication-card.js').PublicationCardAdapter
   readonly images?: {
     readonly maxBytes: number

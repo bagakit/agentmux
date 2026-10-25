@@ -6,6 +6,8 @@ import { createHash } from 'node:crypto'
 import { publicationImage, type PublicationImage, type PublicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
 import { publicationInputAlias } from './publication-input-alias.js'
+import { replyRecord, replyMetadata, type ReplyPublicationMetadata, type ReplyFact, type ReplyProjection } from './publication-reply-metadata.js'
+export type { ReplyPublicationMetadata } from './publication-reply-metadata.js'
 import type { PublicationA2A, PublicationOriginalMessage } from './publication-a2a.js'
 import type { PublicationSpeaker } from './publication-speaker.js'
 import type { PublicationCardAdapter, PublicationCardPreparation, PublicationPortrait, CardCreateReceipt, PortraitReceipt } from './publication-card.js'
@@ -54,6 +56,7 @@ export type PublicationPayload = FailurePublicationPayload | QueryFeedbackPayloa
   phase?: 'progress' | 'final'
   questions?: NonNullable<AgentSessionHistoryItem['questionRequest']>['questions']
   relay?: NonNullable<ConnectionDelivery['relay']>
+  replyMetadata?: ReplyPublicationMetadata
 }
 export type PublicationTarget = Pick<PublicationBoundary, 'connectionId' | 'application' | 'externalConversationId'>
 export type PublicationState = ConnectionDeliveryState
@@ -101,6 +104,7 @@ export function publicDelivery(operation: PublicationOperation): ConnectionDeliv
 }
 export type PublicationPageOptions = {
   queryFeedback?: true
+  replyMetadata?: true
   queryAuthorized?: (query: import('@agentmux/core/connections').ConnectionIngressMessage) => boolean
   fragmentBytes?: number
   fragmentText?: (payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker?: PublicationSpeaker, originalMessage?: PublicationOperation['originalMessage']) => readonly PublicationTextFragment[] | undefined
@@ -156,7 +160,8 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
     ...(payload.inputSubmission ? { inputSubmission: payload.inputSubmission } : {}),
     ...(payload.relay ? { relay: payload.relay } : {}),
     ...(payload.phase === undefined ? {} : { phase: payload.phase }),
-    ...(index !== selected.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
+    ...(index !== selected.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }),
+    ...(index !== selected.length - 1 || payload.replyMetadata === undefined ? {} : { replyMetadata: payload.replyMetadata }) }))
 }
 
 type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile; segments?: Array<{ text: string; image?: PublicationImage }> }
@@ -176,6 +181,11 @@ function representation(parts: readonly RepresentationPart[], phase?: 'progress'
     else if (part.text) texts.push(part.text)
   }
   flush(); return { kind: 'sequence', parts: result }
+}
+function withReplyMetadata(payload: RepresentationPayload, metadata: ReplyPublicationMetadata | undefined): RepresentationPayload {
+  const speech = payload.kind === 'speech' ? payload : payload.kind === 'sequence' ? [...payload.parts].reverse().find(part => part.kind === 'speech') : undefined
+  if (metadata && speech?.kind === 'speech') speech.replyMetadata = metadata
+  return payload
 }
 type QuestionRepresentation = QuestionPublicationPayload | { kind: 'sequence'; parts: Array<ContentPayload | QuestionPublicationPayload> }
 const questionText = (value: RepresentationPayload): string => value.kind === 'failure' ? '' : value.kind === 'speech' ? value.text : value.parts.flatMap(part => part.kind === 'speech' ? [part.text] : []).join('\n\n')
@@ -281,7 +291,11 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_input_alias ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.inputAlias.key'))
       WHERE json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object';
       CREATE INDEX IF NOT EXISTS connector_publication_input_alias_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.inputAlias.record'))
-      WHERE json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object';`)
+      WHERE json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object';
+      CREATE INDEX IF NOT EXISTS connector_publication_reply_turn ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.kind'),json_extract(decision_json,'$.turnKey'))
+        WHERE json_extract(decision_json,'$.kind') IN ('reply-fact','reply-projection');
+      CREATE INDEX IF NOT EXISTS connector_publication_reply_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.kind'),json_extract(decision_json,'$.recordKey'))
+        WHERE json_extract(decision_json,'$.kind') IN ('reply-fact','reply-projection');`)
 
     try { database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_context_message
       ON connector_publication_operation(
@@ -422,7 +436,7 @@ export class PublicationStore {
     const gap: ConnectionDeliveryGap = { gapId: 'gap-' + digest([...scopeKey(boundary), 'captured-start']), reason: 'start-cut-unconfirmed', code: 'PUBLICATION_CAPTURED_START_UNCONFIRMED' }
     this.saveDecision(boundary, gap.gapId, digest(gap), { kind: 'gap', gap, state: 'unresolved' })
   }
-  private saveDecision(boundary: PublicationBoundary, id: string, revision: string, value: unknown): void {
+  private saveDecision(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, id: string, revision: string, value: unknown): void {
     this.decisionWrite.run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
   }
   /** Reuse only this accepted original part's exact derived image; no second resource cache. */
@@ -585,6 +599,7 @@ export class PublicationStore {
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
       this.retainMissingCapturedStart(boundary)
       if (options.queryFeedback) projectQueryFeedback(this, boundary, units, options.queryAuthorized)
+      const replyProjections = options.replyMetadata ? this.acceptReplyFacts(boundary, units) : []
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
         const key = conversationSourceKey(coverage.source)
@@ -701,7 +716,7 @@ export class PublicationStore {
         // Keep its original captured representation instead of dropping that receipt.
         const inputWireOnly = !plan.pieces.length && unit.records.length > 0 && unit.records.every(record => isCompleteConversationRecord(record) && record.original.kind === 'native' && record.original.item.kind === 'user-message' && conversationNativeInputWitness(record)?.key !== undefined)
         if (!inputWireOnly) this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
-          plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id))
+          plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id), undefined, options.replyMetadata)
         // A turn result supplements ordinary content. Its own fragment cannot replace
         // or withdraw a public answer that shares the accepted original event.
         if (plan.failure || this.latestProjection(projectionId + '-failure')) this.queueRepresentation(boundary, projectionId + '-failure', unit,
@@ -716,6 +731,7 @@ export class PublicationStore {
         }
       }
       this.accountInputAliases(boundary, units)
+      for (const projectionId of replyProjections) this.refreshReplyMetadata(boundary, projectionId, options.fragmentText)
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
     })
   }
@@ -761,11 +777,96 @@ export class PublicationStore {
       }
     }
   }
-  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage): void {
+  /** Small delivery witnesses live beside their original representation, not in a second history. */
+  private replyProjection(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId: string): ReplyProjection | undefined {
+    const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current'")
+      .get(...scopeKey(boundary), 'reply-projection-' + digest(projectionId))
+    return row ? JSON.parse(String(row.decision_json)) as ReplyProjection : undefined
+  }
+  private replySnapshot(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projection: ReplyProjection): ReplyPublicationMetadata {
+    const rows = new Map<number, ReplyFact>()
+    for (const [field, key] of [['recordKey', projection.recordKey], ['turnKey', projection.turnKey]] as const) {
+      if (!key) continue
+      for (const row of this.database.prepare(`SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=?
+        AND json_extract(decision_json,'$.kind') IN ('reply-fact','reply-projection') AND json_extract(decision_json,'$.kind')='reply-fact'
+        AND json_extract(decision_json,'$.${field}')=?`).all(...scopeKey(boundary), key)) rows.set(Number(row.rowid), JSON.parse(String(row.decision_json)))
+    }
+    const snapshot = replyMetadata(projection, [...rows.values()])
+    // Retain only the contributing field witnesses, not a copy of this turn's history.
+    this.saveDecision(boundary, 'reply-snapshot-' + digest([projection.projectionId, snapshot.metadata]), digest([projection, snapshot.witnesses]), { kind: 'reply-snapshot', projection, ...snapshot })
+    return snapshot.metadata
+  }
+  private acceptReplyFacts(boundary: PublicationBoundary, units: readonly ConversationUnit[]): Set<string> {
+    const projections = new Set<string>()
+    for (const record of units.flatMap(unit => unit.records)) {
+      if (!isCompleteConversationRecord(record)) continue
+      const witness = replyRecord(record, boundary.executionHostId, boundary.agentSessionId)
+      if (!witness || record.original.kind !== 'native') continue
+      const id = 'reply-fact-' + digest(witness.recordKey)
+      const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current'").get(...scopeKey(boundary), id)
+      const prior = row ? JSON.parse(String(row.decision_json)) as ReplyFact : undefined, item = record.original.item
+      if (!prior && !item.metrics && !item.turnOutcome) continue
+      const fact: ReplyFact = { kind: 'reply-fact', ...witness, ...(item.metrics ? { metrics: item.metrics } : {}), ...(item.turnOutcome && witness.turnKey ? { outcome: item.turnOutcome.status } : {}) }
+      if (same(prior, fact)) continue
+      this.saveDecision(boundary, id, 'current', fact)
+      for (const value of [prior, fact]) if (value) for (const [field, key] of [['recordKey', value.recordKey], ['turnKey', value.turnKey]] as const) {
+        if (!key) continue
+        for (const linked of this.database.prepare(`SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=?
+          AND json_extract(decision_json,'$.kind') IN ('reply-fact','reply-projection') AND json_extract(decision_json,'$.kind')='reply-projection'
+          AND json_extract(decision_json,'$.${field}')=?`).all(...scopeKey(boundary), key)) projections.add((JSON.parse(String(linked.decision_json)) as ReplyProjection).projectionId)
+      }
+    }
+    return projections
+  }
+  private projectReplyMetadata(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, exists: boolean): ReplyPublicationMetadata | undefined {
+    const prior = this.replyProjection(boundary, projectionId)
+    // Upgrades cannot enroll a previously frozen request, even when its source reappears.
+    if (!prior && exists) return
+    const piece = [...plan.pieces].reverse().find(piece => piece.text && !piece.image && !piece.file)
+    const record = piece && unit.records.find(record => same(record.reference, piece.part.record) && record.revision === piece.part.recordRevision)
+    if (!record || !isCompleteConversationRecord(record) || record.original.kind !== 'native' || record.original.item.kind !== 'assistant-message')
+      return prior && plan.phase === 'final' ? this.replySnapshot(boundary, prior) : undefined
+    const witness = replyRecord(record, boundary.executionHostId, boundary.agentSessionId)
+    if (!witness) return
+    const projection: ReplyProjection = { kind: 'reply-projection', projectionId, ...witness }
+    this.saveDecision(boundary, 'reply-projection-' + digest(projectionId), 'current', projection)
+    return record.original.item.messagePhase === 'final' ? this.replySnapshot(boundary, projection) : undefined
+  }
+  /** A late snapshot changes only an already confirmed editable original card. */
+  private refreshReplyMetadata(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId: string, fragmentText?: PublicationPageOptions['fragmentText']): void {
+    const projection = this.replyProjection(boundary, projectionId)
+    if (!projection) return
+    const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal')
+      .all(projectionId).map(row => this.read(row)!)
+    const original = [...latest].reverse().find(operation => operation.effect === 'upsert' && operation.payload.kind === 'speech')
+    if (!original || original.state !== 'confirmed' || !original.mapping || original.payload.kind !== 'speech' || original.payload.phase !== 'final' || !original.payload.replyMetadata) return
+    const metadata = this.replySnapshot(boundary, projection), payload = { ...original.payload, replyMetadata: metadata }
+    if (same(original.payload, payload)) return
+    const split = fragmentText?.(payload, original.speaker, original.originalMessage)
+    if (split && (split.length !== 1 || split[0]!.text !== payload.text)) return
+    const represented = representation(latest.filter(operation => operation.effect === 'upsert').map(operation => operation.payload.kind === 'image' ? { text: '', part: operation.payload.part, image: operation.payload.image }
+      : operation.payload.kind === 'file' ? { text: '', part: operation.payload.part, file: operation.payload.file }
+      : { text: operation.payload.kind === 'speech' ? operation.payload.text : '' }), payload.phase, payload.relay, '', payload.inputSubmission)
+    const revision = digest(withReplyMetadata(represented, metadata)), operationId = 'publication-' + digest([original.operationId, 'reply-metadata', revision])
+    if (this.inspect(operationId)) return
+    const { attempt: _attempt, prepared: _prepared, mapping: _mapping, cardPreparation: _card, cardSequence: _sequence, portrait: _portrait,
+      uploads: _uploads, avatarUploads: _avatarUploads, avatarSource: _avatarSource, reason: _reason, receipt: _receipt, ...retained } = original
+    const operation: PublicationOperation = { ...retained, operationId, sourceRevision: revision, payload, predecessorOperationId: original.operationId, state: 'pending' }
+    const avatar = original.avatarUploads?.at(-1)
+    if (original.avatarSource) operation.avatarSource = original.avatarSource
+    else if (avatar?.state === 'confirmed') operation.avatarSource = { operationId: original.operationId, attempt: original.avatarUploads!.length, imageKey: avatar.imageKey }
+    this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+      .run(operationId, projectionId, revision, operation.fragment.ordinal, ...scopeKey(boundary), encode(operation), operation.state)
+  }
+  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage, metadataEnabled?: true): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
     if (!plan.failure && !plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
     const payload = plan.failure ?? representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
+    if (!question && !originalMessage && !plan.failure && (metadataEnabled || this.replyProjection(boundary, projectionId))) {
+      const metadata = this.projectReplyMetadata(boundary, projectionId, unit, plan, latest.length > 0)
+      withReplyMetadata(payload, metadata)
+    }
     const represented = question && plan.text && (plan.complete || plan.gaps.every(gap => gap.reason === 'resource-unavailable'))
       ? questionRepresentation(payload, { ...question, ...(plan.phase ? { phase: plan.phase } : {}) }) : payload
     if (plan.failure) {
@@ -774,6 +875,11 @@ export class PublicationStore {
         this.saveDecision(boundary, 'failure-record-' + digest(record.reference), 'current', { kind: 'failure-record', projectionId })
     }
     const revision = digest(represented), parts = representationFragments(represented, fragmentBytes, fragmentText ? payload => fragmentText(payload, speaker, originalMessage) : undefined)
+    const withoutMetadata = (payload: PublicationPayload) => payload.kind === 'speech' ? (({ replyMetadata: _metadata, ...body }) => body)(payload) : payload
+    // A re-read containing the same body cannot turn late facts into a successor
+    // of an unknown/unsent request. Its original receipt will trigger safe enrichment.
+    if (latest.length === parts.length && latest.some(operation => operation.state !== 'confirmed') &&
+      latest.every((operation, index) => operation.effect === 'upsert' && same(withoutMetadata(operation.payload), withoutMetadata(parts[index]!)))) return
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     // A form status update has its own original receipt; unchanged media must not be sent again.
     if (question && payload.kind === 'sequence' && parts.length === latest.length && latest.every((operation, index) => operation.effect === 'upsert' && !['cancelled', 'superseded'].includes(operation.state) && same(operation.payload, parts[index]))) return
@@ -1062,6 +1168,15 @@ export class PublicationStore {
           const speeches = operations.flatMap(value => value.payload.kind === 'speech' ? [value.payload] : [])
           const inputSubmission = speeches[0]?.inputSubmission
           if (speeches.some(value => !same(value.inputSubmission, inputSubmission))) return
+          const metadata = speeches.at(-1)?.replyMetadata
+          if (speeches.slice(0, -1).some(value => value.replyMetadata !== undefined)) return
+          if (metadata) {
+            const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? LIMIT 1")
+              .get(...scopeKey(boundary), 'reply-snapshot-' + digest([operation.projectionId, metadata]))
+            if (!row) return
+            const snapshot = JSON.parse(String(row.decision_json)) as { metadata: ReplyPublicationMetadata }
+            if (!same(snapshot.metadata, metadata)) return
+          }
           const questions = operations.filter(value => value.payload.kind === 'question')
           if (questions.length > 1 || questions.length && operations.at(-1) !== questions[0]) return
           // Qualification above still owns every accepted part. Compare its current observation
@@ -1071,9 +1186,11 @@ export class PublicationStore {
           const body = representation(operations.filter(value => value.payload.kind !== 'question').map(value => value.payload.kind === 'image' ? { text: '', part: currentPart(value.payload), image: value.payload.image }
             : value.payload.kind === 'file' ? { text: '', part: value.payload.part, file: value.payload.file }
             : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '', inputSubmission)
+          withReplyMetadata(body, metadata)
           return { body, whole: questions.length ? questionRepresentation(body, questions[0]!.payload as QuestionPublicationPayload) : body }
         }
         const retained = assemble(latest, true), prior = assemble(frozen)
+        if (retained) withReplyMetadata(payload, latest.flatMap(value => value.payload.kind === 'speech' && value.payload.replyMetadata ? [value.payload.replyMetadata] : []).at(-1))
         const current = latest.some(value => value.operationId === operation.operationId && same(value.payload, operation.payload))
         if (current && operation.payload.kind === 'question' && operation.payload.text === questionText(payload) &&
             digest(operation.payload) === operation.sourceRevision && frozen.length === 1 && same(frozen[0]!.payload, operation.payload)) return 'qualified'
@@ -1362,6 +1479,8 @@ export class PublicationStore {
         ? { ...retained, state: 'confirmed', mapping: result.mapping, receipt: result }
         : { ...retained, state: result.state, reason: result.reason, receipt: result }
       this.write(settled)
+      if (result.state === 'confirmed' && settled.effect === 'upsert' && settled.payload.kind === 'speech')
+        this.refreshReplyMetadata({ bindingId: settled.bindingId, revision: settled.bindingRevision }, settled.projectionId)
       if (result.state === 'confirmed' && settled.effect === 'upsert' && settled.queryFeedback) reconcileQueryFeedback(this, settled)
       if (result.state === 'not-applied') {
         const successors = this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE projection_id=? AND fragment_ordinal=? AND state='pending' AND json_extract(operation_json,'$.predecessorOperationId')=? ORDER BY ordinal")
