@@ -21,7 +21,8 @@ app.whenReady().then(async () => {
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
   const read = code => win.webContents.executeJavaScript(code)
-  const until = async code => { for (let i = 0; i < 150; i++) { if (await read(code)) return; await pause(30) }; throw Error('Renderer condition unavailable: ' + code) }
+  // Deferred workfaces mount after their module arrives; a missing node is "not yet", not a failure.
+  const until = async code => { for (let i = 0; i < 150; i++) { if (await read(`(()=>{try{return Boolean(${code})}catch{return false}})()`)) return; await pause(30) }; throw Error('Renderer condition unavailable: ' + code) }
   const visible = selector => read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return !!n?.getClientRects().length && n.getBoundingClientRect().height>0})()`)
   const resize = async (width, height) => { win.setContentSize(width, height); await until(`innerWidth===${width}&&innerHeight===${height}&&Math.round(document.querySelector('.mobile-app').getBoundingClientRect().height)===${height}`) }
   const tap = async (selector, label = selector) => {
@@ -693,8 +694,7 @@ app.whenReady().then(async () => {
     const evidenceTargets = await read(`[...document.querySelectorAll('.mobile-goal-evidence button')].filter(n=>n.getClientRects().length).map(n=>({label:n.textContent,rect:n.getBoundingClientRect().toJSON()}))`)
     assert.ok(evidenceTargets.length > 0, 'Original result evidence actions were inspected')
     for (const target of evidenceTargets) assert.ok(target.rect.width >= 44 && target.rect.height >= 44, `${target.label} retains a 44px touch target`)
-    if (!await hasButton('返回原对话') && await hasButton('当前对话操作')) await button('当前对话操作')
-    await button('返回原对话')
+    await button('返回对话')
     assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
     assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), '先比较两种方案，保留原来的依据。')
   } else gap('Visible Mote context did not expose the original goal/result action.')
