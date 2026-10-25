@@ -2,6 +2,40 @@ import { AgentMuxError } from './errors.js'
 import type { ConnectionPort, ConnectionMethod, ConnectionParamsMap } from './connections-contract.js'
 import type { ConnectionDelivery, ConnectionDeliveryParamsMap, ConnectionDeliveryResultMap } from './connection-delivery-contract.js'
 import type { RoomBinding } from './room-binding-contract.js'
+import type { ConnectionIngressInspectInput, ConnectionIngressRecord } from './ingress-contract.js'
+
+/** Original intake scope is separate from bot administration and input authority. */
+export async function readAgentConnectionIngress(owner: ConnectionPort, input: ConnectionIngressInspectInput,
+  session: { hostId: string; agentSessionId: string }, assertCurrent: () => Promise<void>) {
+  const deny = (): never => { throw new AgentMuxError('Ingress inspection requires this authenticated Host and Session on its original target or current bound audience.', 'CONTROL_PERMISSION_DENIED') }
+  if (!owner.ingress || !owner.bindings) throw new AgentMuxError('Original ingress or binding inspection is unavailable. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
+  const audience = (binding: RoomBinding, record: ConnectionIngressRecord) => binding.application.domain === record.application.domain &&
+    binding.application.appId === record.application.appId && binding.externalConversationId === record.externalConversationId
+  const self = (target: { hostId: string; agentSessionId: string }) => target.hostId === session.hostId && target.agentSessionId === session.agentSessionId
+  const authorize = async (record: ConnectionIngressRecord | null) => {
+    if (!record) return
+    const frozen = [record.input ? { hostId: record.input.hostId, agentSessionId: record.input.agentSessionId,
+      bindingId: record.input.author.bindingId, bindingRevision: record.input.author.bindingRevision, connectionId: record.input.author.connectionId } : null,
+      record.kind !== 'action' ? record.group?.target : null].filter(target => target != null)
+    if (frozen.length) {
+      for (const target of frozen) {
+        if (!self(target)) deny()
+        const binding = (await owner.bindings!.inspect({ bindingId: target.bindingId, revision: target.bindingRevision })).binding
+        if (!binding || binding.bindingId !== target.bindingId || binding.revision !== target.bindingRevision || binding.connectionId !== target.connectionId ||
+          !self({ hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }) || !audience(binding, record)) deny()
+      }
+      return
+    }
+    // Unassigned actions retain only an audience association; this never creates an input target.
+    if (record.kind !== 'action' || !record.externalConversationId) deny()
+    const current = await owner.bindings!.list({ executionHostId: session.hostId, agentSessionId: session.agentSessionId })
+    if (!current.bindings.some(binding => binding.state !== 'detached' &&
+      self({ hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }) && audience(binding, record))) deny()
+  }
+  const result = await owner.ingress.inspect(input, { authorize: async record => { await authorize(record); await assertCurrent() } })
+  await authorize(result.ingress)
+  return result
+}
 
 type DeliveryReadMethod = 'connection.delivery.ls' | 'connection.delivery.inspect'
 /** Read the original receipt under its immutable audience, independently of bot administration. */

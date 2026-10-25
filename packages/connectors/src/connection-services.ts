@@ -257,7 +257,7 @@ export async function createConnectionServices(options: { directory: string | un
       } satisfies import('@agentmux/core/connections').ConnectionDeliveryPort } : {}),
       ...(options.ingress && options.bindings ? { ingress: {
         listAudience: async input => (await ensure()).ingress!.listAudience(input),
-        inspect: async input => (await ensure()).ingress!.inspect(input),
+        inspect: async (input, context) => (await ensure()).ingress!.inspect(input, context),
         list: async input => (await ensure()).ingress!.list(input),
         authority: async input => (await ensure()).ingress!.authority(input),
         recordAuthority: async input => (await ensure()).ingress!.recordAuthority(input)
