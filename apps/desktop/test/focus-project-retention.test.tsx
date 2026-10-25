@@ -11,6 +11,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createFocusTimeFormatters } from '../src/renderer/src/lib/focus-timeline-ruler'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { chooseFocusFilter, focusFilterOptions } from './fixtures/focus-filter-menu'
+import { deriveRetainedFocusProjects } from '../src/renderer/src/lib/focus-project-lanes'
+import { historySourcesReader } from './helpers/startup-observation-api-fixture'
 
 // Only PTY painting is isolated. Global, original Timeline/reader, Store,
 // Original project components, SessionPane and shared Markdown remain real.
@@ -111,6 +113,57 @@ afterEach(async () => {
   root = undefined; container?.remove(); container = undefined
   document.getElementById('agentmux-window-overlay-host')?.remove(); window.getSelection()?.removeAllRanges()
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+})
+
+it('shows original saved tasks before the startup directory resolves, then yields to current Session cards without input or recovery', async () => {
+  vi.mocked(api.sessions.historySources).mockImplementation(() => new Promise(() => {}) as never)
+  const newest = history('same-sid', 'startup', 'Startup project', NOW - 1000, { name: '原来的任务：优化启动体验', branch: 'feature/startup', topicId: 'original-topic' })
+  const other = history('same-sid', 'startup', 'Other Host project', NOW - 2000, { hostId: 'other', name: 'Other Host original task' })
+  const entries = [history('same-sid', 'startup', 'Startup project', NOW - DAY, { name: 'Older task name' }), other, newest,
+    history('second-task', 'startup', 'Startup project', NOW - 3000, { name: '第二项已保存工作' })]
+  await mount([], [], entries)
+  const original = useAppStore.getState()
+  const localTasks = container!.querySelector('[aria-label="Saved tasks in Startup project"]')!
+  expect(localTasks.textContent).toContain(newest.identity!.name)
+  expect(localTasks.textContent).toContain('feature/startup / original-topic')
+  expect(localTasks.textContent).not.toContain('Older task name')
+  expect([...localTasks.querySelectorAll<HTMLElement>('[data-saved-focus-session]')].map(node => node.dataset.savedFocusSession)).toEqual(['same-sid', 'second-task'])
+  expect(container!.querySelector('[aria-label="Saved tasks in Other Host project"]')?.textContent).toContain('Other Host original task')
+  expect(container!.querySelectorAll('.focus-context')).toHaveLength(0)
+  const counts = readCounts()
+  await click(container!.querySelector('[data-recent-project]')!)
+  expect(readCounts()).toEqual(counts)
+  expect(useAppStore.getState().agentFocus).toBe(original.agentFocus)
+  expect(useAppStore.getState().tabs).toBe(original.tabs)
+  expect(useAppStore.getState().layouts).toBe(original.layouts)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+  await act(async () => useAppStore.setState(state => ({ sessions: [agent('same-sid', _hygiene_fixturePath('startup'))],
+    config: { ...state.config!, workspaces: [workspace('startup', 'Startup project', _hygiene_fixturePath('startup'))] } })))
+  expect(container!.querySelector('[data-session-id="same-sid"]')).not.toBeNull()
+  expect(container!.querySelector('[aria-label="Saved tasks in Startup project"]')).toBeNull()
+  expect(container!.querySelector('[aria-label="Saved tasks in Other Host project"]')).not.toBeNull()
+  for (const method of ['launchAgent', 'resume', 'recover', 'stop', 'write', 'paste'] as const) expect(api.sessions[method]).not.toHaveBeenCalled()
+})
+
+it('retains the latest original visit per exact Host and Session, including unnamed and undated observations', async () => {
+  vi.mocked(api.sessions.historySources).mockImplementation(historySourcesReader())
+  const undated = history('undated', 'saved', 'Saved project', 0, { name: '' })
+  const newest = history('same', 'saved', 'Saved project', NOW - 1000, { name: 'Latest original name' })
+  const entries = [history('same', 'saved', 'Saved project', NOW - 2000, { name: 'Old original name' }), undated, newest,
+    history('same', 'saved', 'Remote project', NOW - 1500, { hostId: 'other', name: 'Remote original name' }),
+    history('terminal', 'saved', 'Saved project', NOW - 1000, { kind: 'terminal' })]
+  const copy = structuredClone(entries)
+  const projects = deriveRetainedFocusProjects(entries, [], { now: NOW })
+  const local = projects.find(project => project.hostId === 'local')!
+  expect(local.observations).toEqual([newest, undated])
+  expect(local.observations[0]).toBe(newest)
+  expect(projects.find(project => project.hostId === 'other')!.observations).toHaveLength(1)
+  expect(entries).toEqual(copy)
+  await mount([], [], entries)
+  const node = container!.querySelector('[aria-label="Saved tasks in Saved project"] [data-saved-focus-session="undated"]')!
+  expect(node.textContent).toContain('undated')
+  expect(node.textContent).toContain('Focus time unknown')
+  expect(node.querySelector('time')).toBeNull()
 })
 
 it('keeps interrupted and retained project entry points together with the original live task and workface',async()=>{
