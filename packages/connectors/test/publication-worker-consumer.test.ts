@@ -104,6 +104,85 @@ it('publication reuses original page validation through the port, worker and dur
     JSON.stringify({ counts, deliveries: f.dispatched.length, sdkAndCliReceiptEqual: true }, null, 2) + '\n')
 })
 
+it('gap lookup keeps exact recovery and bounded work as unrelated unresolved history grows', async () => {
+  const f = await fixture(), database = f.services.database!, prepare = database.prepare.bind(database)
+  const reads: Array<{ sql: string; parameters: Parameters<ReturnType<typeof prepare>['all']> }> = []
+  vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql)
+    if (new Error().stack?.includes('commitPage') && sql.startsWith('SELECT rowid,decision_json') && sql.includes("'$.state')='unresolved'")) {
+      const all = statement.all.bind(statement)
+      statement.all = (...parameters) => { reads.push({ sql, parameters }); return all(...parameters) }
+    }
+    return statement
+  })
+  await appendFile(f.transcript, row('gap-cost-original', 'Original gap lookup body'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'), { timeout: 8_000 })
+  const original = structuredClone(f.speech()[0]!)
+  if (original.reference.source.kind !== 'native') throw Error('Native original required')
+  const sourceKey = JSON.stringify(['native', original.reference.source.providerId, original.reference.source.nativeSessionId])
+  const sourceRead = reads.find(read => read.parameters[2] === sourceKey)!
+  const partRead = reads.find(read => read.sql.includes("'$.gap.part.record'")) ?? reads.at(-1)!
+  expect(reads.length).toBeGreaterThanOrEqual(2)
+  expect(sourceRead).toBeDefined(); expect(partRead).toBeDefined()
+  const part = JSON.parse(String(prepare("SELECT decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.part.record')=?").get(JSON.stringify(original.reference))!.decision_json)).part
+  const insert = prepare('INSERT INTO connector_publication_decision(binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?)')
+  const add = (id: string, value: unknown) => insert.run(f.binding.bindingId, f.binding.revision, 'unified', id, 'cost-fixture', 'content-accounted', JSON.stringify(value))
+  const sourceGap = { kind: 'gap', state: 'unresolved', sourceKey, gap: { gapId: 'relevant-source-gap', reason: 'source-gap', source: { kind: 'native', providerId: original.reference.source.providerId, nativeSessionId: original.reference.source.nativeSessionId } } }
+  const partGap = { kind: 'gap', state: 'unresolved', gap: { gapId: 'relevant-part-gap', reason: 'public-content-unconfirmed', part } }
+  add('relevant-source-gap', sourceGap); add('relevant-part-gap', partGap)
+  const file = String(prepare('PRAGMA database_list').get()!.file), queries = [sourceRead, partRead]
+  const costs: Array<{ unrelatedGaps: number; queries: Array<{ steps: number; rows: number }> }> = []
+  const measure = (unrelatedGaps: number) => {
+    const result = JSON.parse(execFileSync('python3', ['-c', `import json,sqlite3,sys
+x=json.load(sys.stdin)
+c=sqlite3.connect('file:'+x['file']+'?mode=ro',uri=True)
+results=[]
+for query in x['queries']:
+ steps=[0]
+ def tick():
+  steps[0]+=1
+  return 0
+ c.set_progress_handler(tick,1)
+ rows=c.execute(query['sql'],query['parameters']).fetchall()
+ c.set_progress_handler(None,0)
+ results.append({'steps':steps[0],'rows':len(rows)})
+print(json.dumps(results))
+c.close()`], { input: JSON.stringify({ file, queries }), encoding: 'utf8' }))
+    costs.push({ unrelatedGaps, queries: result })
+  }
+  measure(0)
+  let count = 0
+  for (const addition of [256, 1792]) {
+    database.exec('BEGIN')
+    for (let offset = 0; offset < addition; offset++) {
+      const id = 'unrelated-gap-' + count++, foreign = { ...part, record: { ...part.record, source: { ...part.record.source, recordId: id } } }
+      add(id, { ...partGap, gap: { ...partGap.gap, gapId: id, part: foreign } })
+      add(id + '-source', { ...sourceGap, sourceKey: 'unrelated-source-' + id, gap: { ...sourceGap.gap, gapId: id + '-source' } })
+    }
+    database.exec('COMMIT'); measure(count * 2)
+  }
+  expect(costs).toHaveLength(3)
+  for (const cost of costs) {
+    expect(cost.queries).toHaveLength(2)
+    expect(cost.queries.map(query => query.rows)).toEqual([1, 1])
+    for (const [index, query] of cost.queries.entries()) expect(query.steps).toBeLessThanOrEqual(costs[0]!.queries[index]!.steps + 8)
+  }
+  const plans = queries.map(query => ({ ...query, plan: prepare('EXPLAIN QUERY PLAN ' + query.sql).all(...query.parameters) }))
+  expect(plans.map(query => query.plan.some(row => String(row.detail).includes('<expr>=?')))).toEqual([true, true])
+  reads.length = 0
+  await appendFile(f.transcript, row('gap-cost-next', 'Next independent reply beside retained history'))
+  await vi.waitFor(() => expect(f.speech().filter(operation => operation.state === 'confirmed')).toHaveLength(2), { timeout: 8_000 })
+  expect(f.dispatched).toHaveLength(2)
+  const pending = prepare("SELECT record_id FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").all()
+  expect(pending).toHaveLength(4096)
+  expect(pending.some(row => String(row.record_id).startsWith('relevant-'))).toBe(false)
+  expect(reads.length).toBeGreaterThan(0)
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  const receipt = await f.sdk.call('connection.delivery.inspect', { operationId: f.speech()[1]!.operationId })
+  expect(receipt.delivery.state).toBe('confirmed')
+  if (process.env.PUBLICATION_GAP_LOOKUP_FACTS) await writeFile(process.env.PUBLICATION_GAP_LOOKUP_FACTS, JSON.stringify({ costs, plans, actualCommitQueries: reads.length, confirmedDeliveries: f.dispatched.length, originalOperationId: original.operationId, receipt }, null, 2) + '\n')
+})
+
 it('decision lookup keeps original publication identities and bounded work as unrelated decisions grow', async () => {
   const f = await fixture(), database = f.services.database!, prepare = database.prepare.bind(database)
   const reads: Array<{ kind: 'event' | 'failure'; sql: string; parameters: Parameters<ReturnType<typeof prepare>['get']> }> = []
