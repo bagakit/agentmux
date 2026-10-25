@@ -5,7 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { parseConnectionOffer } from '@agentmux/relay/offer'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
 
 const STORAGE = 'agentmux-mobile-workface-v1'
 const unavailable = { state: 'unavailable' as const, message: '设备未授权；原 Host 与 Run 状态未知。' }
@@ -58,7 +58,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
     expect(editor(view.element)).toBe(originalEditor)
     await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
-    await click(view.element.querySelector('.mobile-session-list button')!)
+    await click(await waitForElement(view.element, '.mobile-session-list button'))
     expect(editor(view.element)).toBe(originalEditor); expect(originalEditor.textContent).toBe('切换页面仍保留的草稿')
     await view.render(<MobileApp client={null} connection={unavailable} platform={platform} />)
     expect(originalEditor.textContent).toBe('切换页面仍保留的草稿')
@@ -108,7 +108,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain(offline.message)
     await view.render(<MobileApp client={f.client} connection={connected} platform={platform} />)
     expect(view.element.querySelector('.mobile-service-notice')).toBeNull()
-    await click(view.element.querySelector('.mobile-session-list button')!)
+    await click(await waitForElement(view.element, '.mobile-session-list button'))
     expect(editor(view.element)).toBe(originalEditor)
     expect(view.element.querySelector('.mobile-send-status[data-phase="unknown"]')).not.toBeNull()
     const retained = getDeviceWorkface().snapshot().record.conversation.attempts
@@ -132,7 +132,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
     expect(view.element.textContent).toContain('原记录尚未覆盖')
     await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
-    await click(view.element.querySelector('.mobile-session-list button')!)
+    await click(await waitForElement(view.element, '.mobile-session-list button'))
     await view.render(<MobileApp client={null} connection={unavailable} platform={platform} />)
     expect(localStorage.getItem(STORAGE)).toBe(original)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
@@ -144,7 +144,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('device storage unavailable') })
     await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
-    await click(view.element.querySelector('.mobile-session-list button')!)
+    await click(await waitForElement(view.element, '.mobile-session-list button'))
     expect(write).toHaveBeenCalledWith(STORAGE, expect.stringContaining('session-original'))
     expect(view.element.textContent).toContain('仅临时采用')
     expect(localStorage.getItem(STORAGE)).toBe(original)
