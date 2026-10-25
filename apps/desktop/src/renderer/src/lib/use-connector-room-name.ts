@@ -1,6 +1,6 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useState } from 'react'
-import { channelMetadataSubjectKey, type ChannelMetadataEntry, type ChannelMetadataResult, type ChannelMetadataSubject, type ConnectionApplication, type RoomBinding } from '@agentmux/core/connections'
+import { channelMetadataSubjectKey, type ChannelMetadataInput, type ChannelMetadataEntry, type ChannelMetadataResult, type ChannelMetadataSubject, type ConnectionApplication, type RoomBinding } from '@agentmux/core/connections'
 import { api } from './api'
 
 type MetadataConnection = { connectionId: string; application: ConnectionApplication }
@@ -8,8 +8,20 @@ type MetadataRead = { observation?: ChannelMetadataEntry['observation']; loading
 type MetadataReads = { scope: string; profiles: ReadonlyMap<string, MetadataRead>; updatesUnconfirmed: boolean }
 export type ConnectorEntityProfileRead = { observation?: ChannelMetadataEntry['observation']; loading: boolean; issue: string; updatesUnconfirmed?: boolean }
 
-/** One observation owner for the represented objects; native lookup remains the visible room-name policy. */
-function useConnectorMetadata(connection: MetadataConnection | null, subjects: readonly ChannelMetadataSubject[], hostingTarget: ConnectionHostingTarget | null | undefined, active: boolean, refresh = 0, refreshMissingRoomName = false) {
+// Only outstanding requests are shared. Completed observations remain in the Channel owner.
+const refreshes = new Map<string, Promise<ChannelMetadataResult>>()
+export function refreshConnectorProfile(input: ChannelMetadataInput, hostingTarget?: ConnectionHostingTarget | null) {
+  const key = JSON.stringify([hostingTarget ?? 'local', input.connectionId, input.expectedConnectionRevision, channelMetadataSubjectKey(input.subject)])
+  const existing = refreshes.get(key)
+  if (existing) return existing
+  const pending = api.connections.call('connection.metadata.refresh', input, hostingTarget)
+  refreshes.set(key, pending)
+  void pending.finally(() => { if (refreshes.get(key) === pending) refreshes.delete(key) }).catch(() => {})
+  return pending
+}
+
+/** Shared local observations and bounded native reads for the currently represented objects. */
+function useConnectorMetadata(connection: MetadataConnection | null, subjects: readonly ChannelMetadataSubject[], hostingTarget: ConnectionHostingTarget | null | undefined, active: boolean, refresh = 0, readMissing: false | 'name' | 'profile' = false) {
   const selected = new Map(subjects.map(subject => [channelMetadataSubjectKey(subject), subject]))
   const identity = JSON.stringify([...selected.keys()].sort())
   const scope = connection ? JSON.stringify([connection.connectionId, connection.application.domain, connection.application.appId,
@@ -23,13 +35,13 @@ function useConnectorMetadata(connection: MetadataConnection | null, subjects: r
     }))
     setRead(previous => ({ scope, profiles: retain(previous), updatesUnconfirmed: false }))
     if (!connection || !active || hostingTarget === null || !selected.size) return
-    const requests = new Map<string, number>()
+    const requests = new Map<string, number>(), pendingReads = new Map<string, number>()
     const sameApplication = (application: ConnectionApplication) => application.domain === connection.application.domain && application.appId === connection.application.appId
     const matches = (result: ChannelMetadataResult, key: string) => result.connectionId === connection.connectionId && sameApplication(result.application) && channelMetadataSubjectKey(result.entry.subject) === key
-    const load = (key: string, nativeOnMiss: boolean) => {
+    const load = async (key: string, nativeOnMiss: boolean) => {
       if (!live) return
       const subject = selected.get(key)!, request = (requests.get(key) ?? 0) + 1
-      requests.set(key, request)
+      requests.set(key, request); pendingReads.set(key, request)
       const current = () => live && requests.get(key) === request
       setRead(previous => {
         if (!current()) return previous
@@ -37,26 +49,30 @@ function useConnectorMetadata(connection: MetadataConnection | null, subjects: r
         profiles.set(key, { ...profiles.get(key), loading: true, unconfirmed: false })
         return { scope, profiles, updatesUnconfirmed: previous.scope === scope && previous.updatesUnconfirmed }
       })
-      const finish = (observation?: ChannelMetadataEntry['observation']) => {
+      const finish = (observation?: ChannelMetadataEntry['observation'], loading = false) => {
         if (!current()) return
         setRead(previous => {
           if (!current()) return previous
           const profiles = retain(previous)
-          profiles.set(key, { ...(observation ? { observation } : profiles.get(key)), loading: false, unconfirmed: !observation })
+          profiles.set(key, { ...(observation ? { observation } : profiles.get(key)), loading, unconfirmed: !observation })
           return { scope, profiles, updatesUnconfirmed: previous.scope === scope && previous.updatesUnconfirmed }
         })
       }
-      void (async () => {
+      try {
         let result = await api.connections.call('connection.metadata.get', { connectionId: connection.connectionId, subject }, hostingTarget)
         if (!current()) return
         if (!matches(result, key)) { finish(); return }
-        if (nativeOnMiss && subject.kind === 'conversation' && !result.entry.observation.profile?.name) {
-          result = await api.connections.call('connection.metadata.refresh', { connectionId: connection.connectionId, expectedConnectionRevision: result.connectionRevision, subject }, hostingTarget)
+        const observation = result.entry.observation
+        const missing = !observation.profile?.name || readMissing === 'profile' && !observation.profile?.avatarUrl
+        if (nativeOnMiss && missing) {
+          finish(observation, true)
+          result = await refreshConnectorProfile({ connectionId: connection.connectionId, expectedConnectionRevision: result.connectionRevision, subject }, hostingTarget)
         }
         if (!current()) return
         if (!matches(result, key)) { finish(); return }
         finish(result.entry.observation)
-      })().catch(() => finish())
+      } catch { finish() }
+      finally { if (pendingReads.get(key) === request) pendingReads.delete(key) }
     }
     let release: (() => void) | undefined, initialReadStarted = false
     const updateSubscription = (unconfirmed: boolean) => setRead(previous => live ? {
@@ -66,25 +82,33 @@ function useConnectorMetadata(connection: MetadataConnection | null, subjects: r
       release = api.connections.onMetadataChanged(change => {
         if (!live || change.connectionId !== connection.connectionId || !sameApplication(change.application)) return
         const key = channelMetadataSubjectKey(change.subject)
-        if (selected.has(key)) load(key, false)
+        if (selected.has(key)) void load(key, false)
       }, state => {
         if (!live) return
         updateSubscription(state !== 'ready')
         // A later ready notification closes the observation gap, including reconnects.
-        if (state === 'ready' && initialReadStarted) for (const key of selected.keys()) load(key, false)
+        if (state === 'ready' && initialReadStarted) for (const key of selected.keys()) if (!pendingReads.has(key)) void load(key, false)
       }, hostingTarget)
     } catch { updateSubscription(true) }
     initialReadStarted = true
-    for (const key of selected.keys()) load(key, refreshMissingRoomName)
+    const remaining = selected.keys()
+    // Leaving this represented set stops queued work; an already issued native read retains its owner.
+    for (let worker = 0; worker < Math.min(4, selected.size); worker++) void (async () => {
+      while (live) {
+        const next = remaining.next()
+        if (next.done) return
+        await load(next.value, readMissing !== false)
+      }
+    })()
     return () => { live = false; release?.() }
-  }, [scope, identity, active, refresh, refreshMissingRoomName])
+  }, [scope, identity, active, refresh, readMissing])
   const current = read.scope === scope ? read : undefined
   return { selected, current, loading: Boolean(connection && active && hostingTarget !== null) }
 }
 
-/** Parent-level local metadata reads for visible objects. No native lookup, polling or authority inference. */
+/** Visible objects share local metadata, missing-profile lookup and change observations. No polling or authority inference. */
 export function useConnectorEntityProfiles(connection: MetadataConnection | null, subjects: readonly ChannelMetadataSubject[], hostingTarget?: ConnectionHostingTarget | null, active = true): ReadonlyMap<string, ConnectorEntityProfileRead> {
-  const { selected, current, loading } = useConnectorMetadata(connection, subjects, hostingTarget, active)
+  const { selected, current, loading } = useConnectorMetadata(connection, subjects, hostingTarget, active, 0, 'profile')
   return new Map([...selected.keys()].map(key => {
     const profile = current?.profiles.get(key)
     const issue = hostingTarget === null ? 'Original bot hosting owner unconfirmed' : [
@@ -97,7 +121,7 @@ export function useConnectorEntityProfiles(connection: MetadataConnection | null
 /** Names are local Channel observations; only this visible original group's miss needs a native lookup. */
 export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, visible = true, hostingTarget?: ConnectionHostingTarget | null) {
   const subject: ChannelMetadataSubject | undefined = binding ? { kind: 'conversation', externalConversationId: binding.externalConversationId } : undefined
-  const { current, loading } = useConnectorMetadata(binding, subject ? [subject] : [], hostingTarget, visible, refresh, true)
+  const { current, loading } = useConnectorMetadata(binding, subject ? [subject] : [], hostingTarget, visible, refresh, 'name')
   const profile = subject ? current?.profiles.get(channelMetadataSubjectKey(subject)) : undefined
   const name = profile?.observation?.profile?.name
   const issue = hostingTarget === null ? 'Original bot hosting owner unconfirmed' : [

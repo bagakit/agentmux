@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdates } from './ConnectorEntityIdentity'
-import { useConnectorEntityProfiles } from '../lib/use-connector-room-name'
+import { refreshConnectorProfile, useConnectorEntityProfiles } from '../lib/use-connector-room-name'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 const RefreshIcon = semanticIconComponent('action.refresh')
@@ -109,7 +109,7 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
             const next = remaining.next()
             if (next.done) return
             try {
-              await api.connections.call('connection.metadata.refresh', { ...scopeOf(connection), subject: next.value }, hostingTarget)
+              await refreshConnectorProfile({ ...scopeOf(connection), subject: next.value }, hostingTarget)
             } catch { profileFailed = true }
           }
         })))
@@ -121,8 +121,8 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
   const facts = read?.identity === identity ? read : { room: null, people: null, issue: '' }
   const subjects: ChannelMetadataSubject[] = connection && externalConversationId ? [
     { kind: 'conversation', externalConversationId },
-    ...visibleActors.filter(actor => actor.application.domain === connection.config.application.domain && actor.application.appId === connection.config.application.appId).map(actor => ({ kind: 'actor' as const, actor })),
-    ...(facts.people?.members ?? []).map(member => ({ kind: 'actor' as const, actor: { application: connection.config.application, idType: member.idType, userId: member.userId } }))
+    ...(peopleVisible ? visibleActors : []).filter(actor => actor.application.domain === connection.config.application.domain && actor.application.appId === connection.config.application.appId).map(actor => ({ kind: 'actor' as const, actor })),
+    ...(peopleVisible ? facts.people?.members ?? [] : []).map(member => ({ kind: 'actor' as const, actor: { application: connection.config.application, idType: member.idType, userId: member.userId } }))
   ] : []
   const profiles = useConnectorEntityProfiles(connection?.config ?? null, subjects, hostingTarget)
   return { ...facts, identity, profiles, pending, refresh }
