@@ -53,6 +53,11 @@ async function idle() {
   await act(async () => { await vi.waitFor(() => expect(container.querySelector('.goal-patrol__actions > button')?.getAttribute('aria-busy')).toBe('false'), { timeout: 10_000 }) })
   await settle()
 }
+/** The original patrol action stays the same control as its label reflects its receipt. */
+function patrolAction() {
+  const found = container.querySelector<HTMLButtonElement>('.goal-patrol__actions > button[aria-busy]')
+  expect(found, 'the original patrol request / receipt action').not.toBeNull(); return found!
+}
 async function prepared(placement: 'mote' | 'project' = 'project') {
   seedMoteWorkface()
   const f = await fixture({ patrol: true }); await f.finite(); await f.setNativeState('owner', 'done'); await f.publish()
@@ -79,7 +84,7 @@ describe('single PMO inspection reaches its exact original conversation before b
     const gate = new Promise<void>(resolve => { release = resolve })
     vi.mocked(api.demands.delegation).mockImplementation(async (method, params) => { if (method === 'goal.patrol') await gate; return await originalPort(method, params) })
     try {
-      await act(async () => { button('PMO 巡查').click(); await Promise.resolve() })
+      await act(async () => { patrolAction().click(); await Promise.resolve() })
       conversation({ open: 'true', agent: 'owner', tab: tab.id, session: 'owner', region: 'original-manager-region', views: tab.id, projection: 'tab', issue: '' })
       expect(f.attempts).toHaveLength(0)
       expect(output().dataset.message).toContain('正在请求原 PMO 巡查')
@@ -101,7 +106,7 @@ describe('single PMO inspection reaches its exact original conversation before b
     expect(after.sessions.find(session => session.id === 'owner')!.workspacePath).toBe(f.metadata.get('owner')!.workspacePath)
     await act(async () => requestPmoTeamsTopicFloatingClose())
     const requests = vi.mocked(api.demands.delegation).mock.calls.filter(([method]) => method === 'goal.patrol').length
-    await act(async () => button('巡查请求已保存').click()); await idle()
+    await act(async () => patrolAction().click()); await idle()
     conversation({ open: 'true', agent: 'owner', tab: tab.id })
     expect(vi.mocked(api.demands.delegation).mock.calls.filter(([method]) => method === 'goal.patrol')).toHaveLength(requests)
     expect(f.attempts).toHaveLength(1)
@@ -121,15 +126,15 @@ describe('single PMO inspection reaches its exact original conversation before b
   it('unknown original target opens its own service window instead of a previously selected Mote, and never replays unknown input', async () => {
     const { f, tab } = await prepared('mote'); f.patrolState.loseReceiptAfterSubmit = true; f.patrolState.receiptUnavailable = true
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: customTab.topicId!, targetTabId: customTab.id }))
-    await act(async () => button('PMO 巡查').click())
+    await act(async () => patrolAction().click())
     await act(async () => { await vi.waitFor(() => expect(current().patrolObservations?.[0]?.state).toBe('unknown'), { timeout: 10_000 }) }); await idle()
     expect(f.attempts).toHaveLength(1)
     await act(async () => {
       useAppStore.setState(state => ({ tabs: Object.fromEntries(Object.entries(state.tabs).filter(([id]) => id !== 'original-manager-tab')) }))
       publishWorkbenchTabRemoved(tab, { displayWorkspaceId: scratchWorkspace.id, groupId: 'original-display-group', tabOrder: [tab.id, customTab.id] }, error => { throw error })
     })
-    await act(async () => { await vi.waitFor(() => expect(button('巡查请求已保存')).toBeDefined(), { timeout: 10_000 }) })
-    await act(async () => button('巡查请求已保存').click()); await idle()
+    await act(async () => { await vi.waitFor(() => expect(patrolAction()).toBeDefined(), { timeout: 10_000 }) })
+    await act(async () => patrolAction().click()); await idle()
     conversation({ open: 'true', agent: 'owner', tab: 'original-manager-tab', session: '', views: '' })
     expect(readPmoTeamsTopicFloatingState()!.reference).toMatchObject({ tabId: 'original-manager-tab', regionId: 'original-manager-region' })
     expect(output().dataset.issue).toContain('原 Agent')
@@ -156,7 +161,7 @@ describe('single PMO inspection reaches its exact original conversation before b
       return { kind: 'resumed', session: projection.sessions.find(session => session.id === 'owner')! }
     })
     try {
-      await act(async () => button('PMO 巡查').click())
+      await act(async () => patrolAction().click())
       await act(async () => { await vi.waitFor(() => expect(recovery).toHaveBeenCalledOnce(), { timeout: 10_000 }) })
       expect(output().dataset.message).toContain('通过 Core 恢复同一 Session')
       conversation({ agent: 'owner', tab: tab.id })
@@ -181,7 +186,7 @@ describe('single PMO inspection reaches its exact original conversation before b
     expect(split.layout.activeRegionId).toBe('neighbor-active-region')
     await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [tab.id]: split } })))
     const before = useAppStore.getState()
-    await act(async () => button('PMO 巡查').click())
+    await act(async () => patrolAction().click())
     await act(async () => { await vi.waitFor(() => expect(current().patrols).toHaveLength(1), { timeout: 10_000 }); await f.flushPatrol() }); await idle()
     conversation({ open: 'true', agent: 'owner', tab: tab.id, session: 'owner', region: 'original-manager-region', 'retained-region': 'original-manager-region', views: tab.id })
     expect(useAppStore.getState().tabs[tab.id]).toBe(split)

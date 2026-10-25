@@ -20,6 +20,11 @@ function button(label: string) {
   const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)
   expect(found, label).toBeDefined(); return found!
 }
+/** The original patrol action stays the same control as its label reflects its receipt. */
+function patrolAction() {
+  const found = container.querySelector<HTMLButtonElement>('.goal-patrol__actions > button[aria-busy]')
+  expect(found, 'the original patrol request / receipt action').not.toBeNull(); return found!
+}
 async function prepared(options: { alignment?: boolean | 'empty' } = {}) {
   const f = await fixture({ patrol: true, ...options }); await f.finite(); await f.publish()
   await mount(createElement(GoalDelegationWork, { demand: current() }))
@@ -79,19 +84,20 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     await mount(createElement(GoalDelegationWork, { demand: current(), compact: true }))
     const drafts = { original: 'Keep this unsent user input' }
     useAppStore.setState({ agentComposerDrafts: drafts })
-    await updated(() => button('PMO 巡查').click(), () => expect(current().patrolObservations?.[0]?.state).toBe('missing'))
+    await updated(() => patrolAction().click(), () => expect(current().patrolObservations?.[0]?.state).toBe('missing'))
     const saved = (await f.demands.get('goal'))!, original = saved.patrols![0]!
     expect(original.attempts).toEqual([]); expect(f.attempts).toEqual([])
     expect(container.querySelector('.goal-patrol')!.textContent).toContain('请求已保存 · 尚未投递')
     expect(container.querySelector('.goal-patrol')!.textContent).toContain(current().patrolObservations![0]!.reason)
-    expect(button('打开原 PMO')).toBeDefined()
+    expect([...container.querySelectorAll('button')].some(item => item.textContent?.includes('对话'))).toBe(true)
     const projection = await f.capture('missing-manager')
     await act(async () => { useAppStore.setState({ sessions: projection.sessions }); button('选择 Supervisor').click() })
     expect(document.querySelector('[role="dialog"]')).not.toBeNull()
     expect(document.querySelector('[role="dialog"]')!.textContent).toContain('先在负责人中添加')
     expect(document.querySelector('[data-session-id="owner"]')).not.toBeNull()
-    const update = vi.spyOn(api.demands, 'update').mockImplementation(async (id, patch, _operation, expectedUpdatedAt) =>
-      await f.demands.update(id, patch, { expectedUpdatedAt }))
+    const originalExecute = vi.mocked(api.goals.execute).getMockImplementation()!
+    const update = vi.fn((request: Parameters<typeof api.goals.execute>[0]) => originalExecute(request))
+    vi.mocked(api.goals.execute).mockImplementation(request => request.operation === 'demand.update' ? update(request) : originalExecute(request))
     await act(async () => button('Cancel').click())
     expect(update).not.toHaveBeenCalled(); expect((await f.demands.get('goal'))!.supervisorSessionId).toBe('owner')
     await act(async () => button('选择 Supervisor').click())
@@ -102,10 +108,10 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(document.querySelector<HTMLInputElement>('[data-session-id="worker-a"] input')!.checked).toBe(true)
     expect((await f.demands.get('goal'))!.supervisorSessionId).toBe('owner'); expect(f.attempts).toEqual([])
     await updated(() => button('Save relationships').click(), () => expect(current().supervisorSessionId).toBe('worker-a'))
-    expect(update).toHaveBeenCalledWith('goal', { supervisorSessionId: 'worker-a' }, undefined, saved.updatedAt)
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ operation: 'demand.update', demandId: 'goal', patch: { supervisorSessionId: 'worker-a' }, expectedUpdatedAt: saved.updatedAt }))
     await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().patrolObservations![0]!.state).toBe('stale'))
     expect((await f.demands.get('goal'))!.patrols).toEqual([original])
-    expect(button('PMO 巡查').disabled).toBe(false); expect(f.attempts).toEqual([]); expect(f.nativeWrites).toEqual([])
+    expect(patrolAction().disabled).toBe(false); expect(f.attempts).toEqual([]); expect(f.nativeWrites).toEqual([])
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(f.stop).not.toHaveBeenCalled()
     await evidence('compact-missing-manager-real-click-explicit-selection-no-replay', await f.proof(), 'patrol')
   }, 30_000)
@@ -117,22 +123,21 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     const pending = new Promise<GoalDelegationResult>(resolve => { release = resolve })
     f.read.mockImplementation(async () => await pending)
     try {
-      await act(async () => { button('PMO 巡查').click(); await Promise.resolve() })
+      await act(async () => { patrolAction().click(); await Promise.resolve() })
       expect(container.querySelector('.goal-patrol')!.textContent).toContain('执行责任依据尚未确认，尚未提交巡查')
-      expect(button('PMO 巡查').disabled).toBe(false)
+      expect(patrolAction().disabled).toBe(false)
       expect((await f.demands.get('goal'))!.patrols).toBeUndefined(); expect(f.attempts).toEqual([])
     } finally { await act(async () => { release(response); await refreshGoalDelegations('goal') }) }
     expect(f.stop).not.toHaveBeenCalled()
   }, 30_000)
 
   it('one actual click coalesces duplicate intent, commits the original Core input and keeps delivery distinct from PMO writeback', async () => {
-    vi.spyOn(api.demands, 'acceptGrounding')
     const f = await prepared(), drafts = { original: 'Do not replace this unsent user draft' }
     useAppStore.setState({ agentComposerDrafts: drafts, selectedDemandId: 'goal' })
     const initial = await f.capture('initial')
     expect(initial.inspect).toMatchObject({ ok: true, operation: 'goal.inspect', result: { goal: { id: 'goal' } } })
     expect((initial.delegations as { result: GoalDelegationResult }).result.patrols).toBeUndefined()
-    const trigger = button('PMO 巡查')
+    const trigger = patrolAction()
     await updated(() => { trigger.click(); trigger.click() }, () => expect(current().patrolObservations?.[0]?.state).toBe('delivered'))
     const saved = (await f.demands.get('goal'))!, patrol = saved.patrols![0]!, attempt = patrol.attempts[0]!
     expect(saved.patrols).toHaveLength(1); expect(f.attempts).toHaveLength(1)
@@ -154,7 +159,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(saved.progressUpdates).toBeUndefined(); expect(saved.patrols![0]!.report).toBeUndefined(); expect(saved.status).toBe('in_progress')
     expect(current().responsibility!.executions[0]).toMatchObject({ phase: 'stalled', alert: 'stalled' })
     expect(container.querySelector('.goal-patrol')!.textContent).toContain('已投递 · 等待实际巡查')
-    expect(button('巡查请求已保存').disabled).toBe(false)
+    expect(patrolAction().disabled).toBe(false)
     await f.capture('delivered')
     await request(f, 'other-click'); expect(f.attempts).toHaveLength(1)
     const returned = await report(f, patrol)
@@ -167,7 +172,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(current().grounding).toMatchObject({ acceptedAt: null }); expect(current().alignment!.confirmedAt).toBeNull()
     expect(container.querySelector('.goal-patrol')!.textContent).toContain('巡查已回填')
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(useAppStore.getState().selectedDemandId).toBe('goal')
-    expect(f.stop).not.toHaveBeenCalled(); expect(api.demands.acceptGrounding).not.toHaveBeenCalled()
+    expect(f.stop).not.toHaveBeenCalled(); expect(vi.mocked(api.goals.execute).mock.calls.some(([request]) => request.operation === 'demand.accept')).toBe(false)
     await f.capture('reported')
     const source = await evidence('one-click-real-core-input-actual-cli-report-writeback', await f.proof(), 'patrol')
     if (source) await f.exportJourney(source, { initialSnapshotId: 'initial', deliveredSnapshotId: 'delivered', reportedSnapshotId: 'reported' })
@@ -187,7 +192,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().responsibility!.executions[0]).toMatchObject({
       phase: 'result-review', alert: 'manager-review', nextOwner: { kind: 'manager', agentSessionId: 'owner' } }))
     expect(current().grounding!.acceptedAt).toBeNull(); expect(current().alignment!.confirmedAt).toBeNull()
-    expect(button('PMO 巡查').disabled).toBe(false); expect(f.stop).not.toHaveBeenCalled()
+    expect(patrolAction().disabled).toBe(false); expect(f.stop).not.toHaveBeenCalled()
     await evidence('review-retains-management-' + suffix, await f.proof(), 'patrol')
   }, 30_000)
 
@@ -202,13 +207,13 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().responsibility!.executions[0]).toMatchObject({
       phase: 'result-review', alert: 'manager-review', nextOwner: { kind: 'manager', agentSessionId: 'owner' } }))
     expect(current().grounding!.acceptedAt).toBeNull(); expect(current().alignment!.confirmedAt).toBeNull()
-    expect(button('PMO 巡查').disabled).toBe(false); expect(f.stop).not.toHaveBeenCalled()
+    expect(patrolAction().disabled).toBe(false); expect(f.stop).not.toHaveBeenCalled()
     await evidence('empty-criteria-checks-retain-management-responsibility', await f.proof(), 'patrol')
   }, 30_000)
 
   it('an explicitly completed patrol can start a new generation at the same unaligned business scope while in-flight duplicate clicks still coalesce', async () => {
     const f = await prepared({ alignment: false }), scope = current().responsibility!.scope
-    await updated(() => button('PMO 巡查').click(), () => expect(current().patrolObservations?.[0]?.state).toBe('delivered'))
+    await updated(() => patrolAction().click(), () => expect(current().patrolObservations?.[0]?.state).toBe('delivered'))
     const first = (await f.demands.get('goal'))!.patrols![0]!
     expect(first.alignment).toBeUndefined()
     await report(f, first, { operationId: 'unaligned-inspection', summary: 'Actually inspected missing original alignment; PMO must resolve it',
@@ -216,7 +221,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(current().responsibility!.scope).toBe(scope)
     expect(current().responsibility!.executions[0]!.alert).toBe('stalled')
     await act(async () => { await f.setNativeState('owner', 'done'); await refreshGoalDelegations('goal') })
-    const trigger = button('PMO 巡查')
+    const trigger = patrolAction()
     await updated(() => { trigger.click(); trigger.click() }, () => expect(current().patrols).toHaveLength(2))
     await updated(async () => { await f.flushPatrol(); await refreshGoalDelegations('goal') }, () => expect(current().patrolObservations?.at(-1)?.state).toBe('delivered'))
     const saved = (await f.demands.get('goal'))!, second = saved.patrols![1]!
@@ -310,7 +315,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(late.goalState!.alignment!.confirmedAt).toBeGreaterThan(0)
     await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().patrolObservations![0]!.state).toBe('stale'))
     expect(current().responsibility!.executions[0]!.alert).toBe('stalled')
-    expect(button('PMO 巡查').disabled).toBe(false); expect(f.attempts).toHaveLength(1)
+    expect(patrolAction().disabled).toBe(false); expect(f.attempts).toHaveLength(1)
     await evidence('stale-inspection-exact-authority-business-scope', await f.proof(), 'patrol')
   }, 30_000)
 

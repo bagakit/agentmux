@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const crypto = require('node:crypto')
-const [html, preload, sourcePath, privateRoot, evidence, phase] = process.argv.slice(2)
+const [html, preload, sourcePath, privateRoot, evidence, phase, viewScope = 'full'] = process.argv.slice(2)
 assert.ok(phase === 'capture' || phase === 'restore', 'Choose one private process phase.')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -108,6 +108,47 @@ async function detailFrames(prefix) {
     await capture(`${prefix}-${width}-${mode}`, width, mode)
   }
 }
+/** Bounded task proof: original Goal records and actions; no unrelated Mote/Region or lifecycle journey. */
+async function summaryFrames(source) {
+  assert.equal(await evaluate('goalResponsibilityVisual.restoredFromStorage'), false)
+  assert.ok(source.snapshots.some(snapshot => snapshot.id === 'working'), 'The normal scene needs its original public snapshot.')
+  await evaluate('goalResponsibilityVisual.snapshot("working")')
+  for (const [width, mode] of [[1280, 'light'], [620, 'dark']]) {
+    await dimensions(width, mode)
+    await evaluate('goalResponsibilityVisual.surface("list")')
+    await waitFor('Boolean(document.querySelector(".goals-row [data-goal-responsibility]"))')
+    await capture(`summary-working-${width}-${mode}`, width, mode)
+  }
+  await evaluate(`goalResponsibilityVisual.snapshot(${JSON.stringify(source.journey.initialSnapshotId)})`)
+  await dimensions(1280, 'light')
+  const before = await facts()
+  await click('document.querySelector(".goals-row .goal-patrol__actions > button[aria-busy]")', 'request-exact-original-patrol-from-compact-goal')
+  await waitFor(`goalResponsibilityVisual.facts().snapshotId === ${JSON.stringify(source.journey.deliveredSnapshotId)}`)
+  const delivered = await facts()
+  assert.deepEqual(preserved(delivered), preserved(before))
+  assert.equal(delivered.calls.filter(call => call.method === 'goal.patrol').length, 1)
+  await waitFor('Boolean(document.querySelector(".pmo-teams-topic-floating"))')
+  await click(button('Close Mote', 'document.querySelector(".pmo-teams-topic-floating")'), 'return-to-original-goal-after-patrol-navigation')
+  await dimensions(620, 'light')
+  await capture('summary-patrol-closed-620-light', 620, 'light')
+  const disclosure = 'document.querySelector(".goals-row .goal-patrol__source > summary")'
+  await click(disclosure, 'read-original-patrol-input-evidence')
+  await capture('summary-patrol-open-620-light', 620, 'light')
+  await click(disclosure, 'close-original-patrol-input-evidence')
+  assert.equal((await facts()).calls.filter(call => call.method === 'goal.patrol').length, 1)
+  await evaluate('goalResponsibilityVisual.publishReport()')
+  await waitFor(`goalResponsibilityVisual.facts().snapshotId === ${JSON.stringify(source.journey.reportedSnapshotId)}`)
+  const reported = await facts(), report = reported.goal.patrols.find(item => item.operationId === source.journey.patrol.params.operationId).report
+  assert.equal(report.applied, true)
+  for (const mode of ['light', 'dark']) for (const width of [1280, 620]) {
+    await dimensions(width, mode)
+    await capture(`summary-report-${width}-${mode}`, width, mode)
+    assert.equal(await evaluate('document.querySelector(".goals-row .goal-patrol__report-summary")?.closest("details") === null'), true)
+  }
+  result.final = await facts()
+  result.summaryOnly = true
+  result.durability = { kind: 'bounded-summary-capture', nativeLifecycleProven: false }
+}
 app.whenReady().then(async () => {
   try {
     await fs.mkdir(evidence, { recursive: true })
@@ -130,7 +171,8 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     result.rendererFocusEmulation = { enabled: true, window: observePrivateWindow('renderer-focus-emulation') }
     await waitFor('Boolean(window.goalResponsibilityVisual) && Boolean(document.querySelector(".app-shell"))')
-    if (phase === 'restore') {
+    if (viewScope === 'summary') await summaryFrames(source)
+    else if (phase === 'restore') {
       const previous = JSON.parse(await fs.readFile(path.join(evidence, 'capture-render.json'), 'utf8'))
       assert.equal(await evaluate('goalResponsibilityVisual.restoredFromStorage'), true, 'A new process must read the first saved profile.')
       const restored = await facts()
@@ -163,6 +205,7 @@ app.whenReady().then(async () => {
         await waitFor('Boolean(document.querySelector(".region-current-demand"))')
         await capture(`region-${width}-${mode}`, width, mode)
         await evaluate('goalResponsibilityVisual.surface("mote")')
+        await click(button('Profile', 'document.querySelector("[data-mote-space]")'), 'open-original-mote-profile')
         await waitFor('Boolean(document.querySelector("[data-mote-goal]"))')
         const mote = 'document.querySelector("[data-mote-goal] .mote-current-work__copy")'
         if (await evaluate(`${mote}.getAttribute('aria-expanded') !== 'true'`)) await click(mote, 'expand-original-mote-work')
@@ -178,13 +221,27 @@ app.whenReady().then(async () => {
       await waitFor(`Object.values(goalResponsibilityVisual.facts().drafts).includes(${JSON.stringify(draft)})`)
       const beforeClick = await facts()
       await openDetail()
-      await click(button('PMO 巡查', 'document.querySelector("[data-goal-detail-id]")'), 'request-original-pmo-patrol-once')
+      await click('document.querySelector("[data-goal-detail-id] .goal-patrol__actions > button[aria-busy]")', 'request-original-pmo-patrol-once')
       await waitFor(`goalResponsibilityVisual.facts().snapshotId === ${JSON.stringify(source.journey.deliveredSnapshotId)}`)
       const delivered = await facts()
       assert.equal(delivered.calls.filter(call => call.kind === 'recorded-request' && call.method === 'goal.patrol').length, 1)
       assert.deepEqual(preserved(delivered), preserved(beforeClick), 'Patrol navigation/input must retain the original private workface and draft.')
       assert.ok(delivered.goal.responsibility.executions.some(row => row.alert !== null), 'A delivered request cannot clear attention.')
+      const closeConversation = button('Close Mote', 'document.querySelector(".pmo-teams-topic-floating")')
+      await waitFor(visible(closeConversation))
+      await click(closeConversation, 'return-from-original-conversation-to-patrol-feedback')
       await detailFrames('delivered')
+      await evaluate('goalResponsibilityVisual.surface("list")')
+      await dimensions(620, 'light')
+      const disclosure = 'document.querySelector(".goals-row .goal-patrol__source > summary")'
+      await waitFor(visible(disclosure))
+      const requestsBeforeDisclosure = (await facts()).calls.filter(call => call.method === 'goal.patrol').length
+      await click(disclosure, 'disclose-original-patrol-evidence-without-send')
+      await capture('compact-patrol-open-620-light', 620, 'light')
+      await click(disclosure, 'close-original-patrol-evidence-without-send')
+      await capture('compact-patrol-closed-620-light', 620, 'light')
+      assert.equal((await facts()).calls.filter(call => call.method === 'goal.patrol').length, requestsBeforeDisclosure)
+      await openDetail()
       await evaluate('goalResponsibilityVisual.flush()')
       await win.webContents.session.flushStorageData()
       await new Promise(resolve => { win.webContents.once('did-finish-load', resolve); win.webContents.reload() })
@@ -201,6 +258,22 @@ app.whenReady().then(async () => {
       assert.ok(reported.goal.patrols.find(item => item.operationId === source.journey.patrol.params.operationId)?.report?.applied)
       assert.deepEqual(preserved(reported), preserved(reloaded), 'A recorded inspection publication cannot replace any original workface or input.')
       await detailFrames('reported')
+      for (const mode of ['light', 'dark']) for (const width of [1280, 620]) {
+        await dimensions(width, mode)
+        await evaluate('goalResponsibilityVisual.surface("list")')
+        await waitFor('Boolean(document.querySelector("[data-demand-id] [data-goal-responsibility]"))')
+        await capture(`reported-list-${width}-${mode}`, width, mode)
+      }
+      if (source.snapshots.some(snapshot => snapshot.id === 'working')) {
+        await evaluate('goalResponsibilityVisual.snapshot("working")')
+        for (const mode of ['light', 'dark']) for (const width of [1280, 620]) {
+          await dimensions(width, mode)
+          await evaluate('goalResponsibilityVisual.surface("list")')
+          await waitFor('Boolean(document.querySelector("[data-demand-id] [data-goal-responsibility]"))')
+          await capture(`working-list-${width}-${mode}`, width, mode)
+        }
+        await evaluate(`goalResponsibilityVisual.snapshot(${JSON.stringify(source.journey.reportedSnapshotId)})`)
+      }
       result.final = await facts()
       result.durability = { kind: 'private-renderer-profile', reloadReadOriginal: true, nativeLifecycleProven: false }
     }
@@ -210,7 +283,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(result.rendererFailures, [])
     assert.deepEqual(result.consoleErrors, [])
     assert.equal(result.final.calls.some(call => call.kind === 'unrecorded'), false, 'No other operation may be silently mocked as applied.')
-    assert.ok(result.frames.length >= (phase === 'capture' ? 25 : 2), 'A nonempty complete scenario/frame set is required.')
+    assert.ok(result.frames.length >= (viewScope === 'summary' ? 8 : phase === 'capture' ? 25 : 2), 'A nonempty complete scenario/frame set is required.')
     await evaluate('goalResponsibilityVisual.flush()')
     await win.webContents.session.flushStorageData()
     observePrivateWindow('before-exit')
