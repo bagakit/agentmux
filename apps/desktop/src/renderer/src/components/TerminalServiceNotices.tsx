@@ -9,7 +9,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 /** Only this Terminal's existing facts. No classifier, subscription, recovery action or error owner. */
 export function TerminalServiceNotices({ scope, visible = true, available = true,
   reveal, replayGeometry, viewportSync, continuation,
-  attachment, sessionObservation, hookIngress, causes = {}, historyNotice, historyContent,
+  attachment, writeObservation, sessionObservation, hookIngress, causes = {}, historyNotice, historyContent,
   refreshingObservation = false, onRefreshObservation, storageControl, continuationReason, connectionObservations = [] }: {
   scope: string
   visible?: boolean
@@ -19,9 +19,10 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
   viewportSync: RenderableServiceNotice | null
   continuation: RenderableServiceNotice | null
   attachment?: RenderableServiceNotice | null
+  writeObservation?: RenderableServiceNotice | null
   sessionObservation?: RenderableServiceNotice | null
   hookIngress?: RenderableServiceNotice | null
-  causes?: Partial<Record<'attachment' | 'sessionObservation' | 'hookIngress' | 'reveal' | 'replayGeometry' | 'viewportSync' | 'continuation', string>>
+  causes?: Partial<Record<'attachment' | 'writeObservation' | 'sessionObservation' | 'hookIngress' | 'reveal' | 'replayGeometry' | 'viewportSync' | 'continuation', string>>
   historyNotice?: ServiceNoticeItem | null
   historyContent?: ReactNode
   refreshingObservation?: boolean
@@ -30,7 +31,7 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
   connectionObservations?: readonly ServiceNoticeItem[]
   onRefreshObservation?(): void
 }) {
-  const notices: ServiceNoticeItem[] = (Object.entries({ attachment, sessionObservation, hookIngress, reveal, replayGeometry, viewportSync, continuation }) as
+  const notices: ServiceNoticeItem[] = (Object.entries({ attachment, writeObservation, sessionObservation, hookIngress, reveal, replayGeometry, viewportSync, continuation }) as
     [keyof typeof causes, RenderableServiceNotice | null | undefined][]).flatMap(([id, notice]) => notice
       ? [{ id, notice, ...(causes[id] ? { cause: causes[id] } : {}) }] : [])
   if (historyNotice) notices.push(historyNotice)
@@ -43,6 +44,7 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
     actions={onRefreshObservation && notices.length ? <button type="button" className="small-button" disabled={refreshingObservation}
       onClick={onRefreshObservation}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</button> : null}>
     <ServiceWindowNotice notice={attachment ?? null} />
+    <ServiceWindowNotice notice={writeObservation ?? null} />
     <ServiceWindowNotice notice={sessionObservation ?? null} />
     <ServiceWindowNotice notice={hookIngress ?? null} />
     <ServiceWindowNotice notice={reveal} />

@@ -1,5 +1,6 @@
 import { observeResolvedTheme } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { rendererPerformance } from '../lib/renderer-performance'
 import { clientIncidentDispatcher, createClientIncidentRecorder } from '../lib/client-incident-recorder'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
@@ -326,6 +327,8 @@ export function TerminalView({
   }, [switchTarget, visible, hydrating, liveOutputReady, readOnly, canControlRun])
   const [attachFailed, setAttachFailed] = useState(false)
   const [attachmentFailure, setAttachmentFailure] = useState<{ step: string; message: string } | null>(null)
+  const writeObservationScope = JSON.stringify([session.control.hostId, session.id, session.control.run.runId])
+  const [writeObservationFailure, setWriteObservationFailure] = useState<{ scope: string; step: string; message: string } | null>(null)
   const processStateRef = useRef(session.processState)
   processStateRef.current = session.processState
   const [refreshingObservation, setRefreshingObservation] = useState(false)
@@ -613,6 +616,7 @@ export function TerminalView({
     setLiveOutputReady(false)
     setAttachFailed(false)
     setAttachmentFailure(null)
+    setWriteObservationFailure(null)
     setRefreshingObservation(false)
     setHasOutput(false)
     setReplayGap(false)
@@ -728,6 +732,12 @@ export function TerminalView({
         setLinkPreview({ ...preview, placement })
       }, 350)
     }
+    function recordWriteObservationFailure(step: string, error: unknown): void {
+      if (disposed) return
+      const message = presentError(error).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+      setWriteObservationFailure(current => current?.scope === writeObservationScope && current.step === step && current.message === message
+        ? current : { scope: writeObservationScope, step, message })
+    }
     async function writeTerminal(data: string | Uint8Array, cause: RendererTerminalWriteContext['cause']): Promise<void> {
       const observationStarted = rendererPerformance.start()
       const observationVisible = visibleRef.current
@@ -744,13 +754,22 @@ export function TerminalView({
         await terminalWrite(terminal, data)
         writeCompletions++
         cost.completed++
-        const elapsed = Math.max(0, rendererPerformance.start() - observationStarted)
-        cost.callbackWall.count++
-        cost.callbackWall.totalMs += elapsed
-        cost.callbackWall.maxMs = Math.max(cost.callbackWall.maxMs, elapsed)
+        try {
+          const elapsed = Math.max(0, rendererPerformance.start() - observationStarted)
+          cost.callbackWall.count++
+          cost.callbackWall.totalMs += elapsed
+          cost.callbackWall.maxMs = Math.max(cost.callbackWall.maxMs, elapsed)
+        } catch (error) {
+          recordWriteObservationFailure('Measuring terminal write completion', error)
+        }
       } finally {
-        rendererPerformance.terminalWrite(observationVisible, data, observationStarted, observationContext)
+        // Observation cannot replace a parser result, including its original rejection.
         linkPreviewWrites--
+        try {
+          rendererPerformance.terminalWrite(observationVisible, data, observationStarted, observationContext)
+        } catch (error) {
+          recordWriteObservationFailure('Recording terminal write diagnostics', error)
+        }
         if (terminalGenerationRef.current === terminalGeneration) clearLinkPreview()
       }
     }
@@ -2209,6 +2228,11 @@ export function TerminalView({
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}. This read does not determine current Run availability or input delivery. Your Session, history and draft are kept.`,
     restore: 'Refresh observation to re-read this Session and reopen its output connection. Unknown Input is never replayed.'
   } } : null
+  const writeObservationNotice = writeObservationFailure?.scope === writeObservationScope ? { kind: 'indeterminate' as const, notice: {
+    step: writeObservationFailure.step,
+    mode: `${writeObservationFailure.message} This observation does not determine Run availability or input delivery. Completed parser callbacks retain their original byte progress. Your Session, history and draft are kept.`,
+    restore: 'Continue using this terminal and inspect current write metrics in Performance. Refreshing output does not reconstruct this failed observation.'
+  } } : null
   const noticeScope = JSON.stringify(['terminal', session.hostId, session.id, session.control.run])
   const historyNotice = hydrating ? null : historyReadFailure ? {
     id: 'history-read', cause: runtimeHistoryGap ? 'read-failed-after-runtime-gap' : 'retained-history-read-failed',
@@ -2351,6 +2375,8 @@ export function TerminalView({
             viewportSync={viewportSyncNotice} continuation={continuationNotice}
             causes={{
               attachment: JSON.stringify([attachmentFailure?.step, attachmentFailure ? errorIdentity(attachmentFailure.message) : null]),
+              writeObservation: JSON.stringify([writeObservationFailure?.scope, writeObservationFailure?.step,
+                writeObservationFailure ? errorIdentity(writeObservationFailure.message) : null]),
               sessionObservation: JSON.stringify([session.kind === 'agent' ? session.terminalCapability?.reason : null,
                 session.kind === 'agent' ? session.terminalOutputChannel?.reason : null,
                 session.status.state === 'disconnected' ? session.status.detail : null, nativeSessionServiceCause(session, nativeService)]),
@@ -2358,7 +2384,7 @@ export function TerminalView({
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
             }}
-            attachment={attachmentNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice}
+            attachment={attachmentNotice} writeObservation={writeObservationNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice}
             refreshingObservation={refreshingObservation}
             connectionObservations={connectionObservations}
             storageControl={session.control} continuationReason={continuationAbsence?.reason}
