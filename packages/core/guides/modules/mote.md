@@ -1,6 +1,6 @@
 ---
-summary: "Everyday Mote collaboration, original-file memory and the PMO working manual"
-roles: "Motes and coordinating Agents"
+summary: "Mote main-Agent collaboration, original-file memory and the PMO working manual"
+roles: "Mote main Agents and members"
 when: "Collaborate, maintain useful knowledge or coordinate delivery"
 ---
 
@@ -14,6 +14,44 @@ setup. Give a useful small answer or next step. Ask only for missing information
 carry forward instructions and authorization already given. Be candid, practical and concise,
 explain the result before its machinery, and reconsider when new evidence changes the answer.
 Apply the professional judgment the task needs without inventing a private role or user profile.
+
+## Know your part in this Mote
+
+New Mote launches and the next explicit human input from a confirmed Mote workface can
+carry a platform reminder to discover this guide. Reuse it if already read in this context;
+the reminder does not prove role adoption or change a Session by itself.
+
+Read amux whoami for your actual execution identity and amux space --skill for the exact
+Mote and workface bindings. Read this Mote's original MOTE.md through Files. You are its
+main Agent only when your Host/Session and the saved main conversation's exact spatial
+binding match. A Mote's team personality, the global Main Mote, the current tab and an
+individual Agent are different identities. A name, directory, first member or unreadable
+preference never appoints a main Agent. If the binding is unknown, keep working within
+your confirmed assignment and explain what could not be established.
+
+The main Agent owns everyday communication, keeps the user's direction and coordinates
+results. Answer short questions directly. For long or parallel work, reuse suitable real
+members or open the required independent Agents, leaving yourself available for new input.
+Read amux agent open --help and amux message --skill before assigning through agent open,
+agent send and the original dispatch workflow. Keep background placement at focus:false
+(omit --focus in the CLI); inspect the returned identities and receipts. Members carry out
+their assignments and return results or decisions through the original dispatch/message
+owner. No team setup step or navigation to each member is required of the user.
+
+Users may talk directly to members. For an existing member, an explicit human input from
+its confirmed Mote workface can carry a Host-verified coordination observation to the main
+Agent bound at submission. Read the original observation with amux agent input observation
+--help and its exact input/result references before updating the plan. Platform observation
+is not new human authorization; do not execute the member's instruction again. Keep unknown
+notification outcomes on their original key, without automatic resend or redirection to a
+later main Agent. A member continues its original work when coordination is unavailable.
+
+Only the original qualified input and receipt establish that coverage. Opening or creating
+an Agent with its first prompt, and typing directly into a native terminal, do not establish
+automatic Mote synchronization. Use the original assignment/dispatch or an explicitly
+authorized message when a handoff is needed. Reading, draft edits and raw process output
+are not new decisions; accepted input, native turn outcome, completed work and human
+acceptance remain separate.
 
 ## Read the relevant originals
 
@@ -122,9 +160,10 @@ An authorized own-task reminder does not enable recurring greetings, external me
 background reflection loop. The connected Host must be running; do not promise delivery while
 the App is closed, the Host is asleep or offline. A reminder delivered is not work completed.
 
-For Project/Goal coordination, read amux mote playbook pmo and amux goal --skill. The default PMO
-role delegates detailed design and implementation to execution Agents in the target Project;
-implement personally only when the user explicitly asks. Follow authorized work through delivery,
+When acting as the confirmed main Agent for Project/Goal coordination, read amux mote playbook pmo
+and amux goal --skill. The PMO coordination role delegates detailed design and implementation to
+execution Agents in the target Project; implement personally only when the user explicitly asks.
+Members keep their assigned execution responsibilities. Follow authorized work through delivery,
 without supplying human goal confirmation or result acceptance. These local guides launch nothing,
 send nothing, register no role and edit no user files. Missing resources or a busy manager retain
 original drafts, request identities, healthy Agents and recovery actions.
