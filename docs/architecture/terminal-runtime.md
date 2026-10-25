@@ -84,6 +84,10 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 同一 Hosted consumer 中，重叠的显式 `connectRuntime()` 共享尚未完成的原准备，包括前后 owner discovery 和 Host 准备。成功或失败后立即释放共享 Promise，后续调用重新准备；disconnect／dispose 清除该 consumer 的共享引用，旧调用收尾不能清掉新的准备。此处不缓存 readiness，不合并输入，不让独立 metadata reader 等待 Native 准备；每次输入仍保留自己的顺序、目标、byte cursor 与回执。
 
+Hosted Agent 的原始输入由 `writeAgent`／`pasteAgent` 自身先发现原 semantic Host，再交给同一次 Host invocation 准备 Native。Main 不在这条路径额外调用显式 `connectRuntime()`；每个串行输入只有一次 Host discovery 和一次业务 invocation，重叠 discovery 复用原在途请求。Host 保留准备前后的 owner fence，Core 保留准确 Session／Run、授权、FIFO、字节游标与回执；发现失败后的新输入重新观察，不重发未知输入。普通 Terminal 仍需 Main 的 Native fence／游标准备，直接 Core client 也保留原连接前提。
+
+这条路径的发现等待计入原 Main `host-call` 与总输入耗时，原 parent 关联不变。Main 不用旧 Native 投影标记 Hosted Agent 的执行 owner，实际 owner 由 Host 诊断提供；观察缺项保持未知。原输入错误保留在 Renderer 的通知与历史中。SDK 的原 Host 发现失败使其观察变为未确认时，Main 将该原错误保留在已有连接服务窗；下一次成功输入只清除此步骤的提醒。已确认 Host 上的业务拒绝不推断为连接失败，也不为分类错误增加探测。
+
 本机 Host 的启动探测属于物理连接建立。[Desktop connector](../../apps/desktop/src/main/desktop-host.ts) 将原服务准备注入 [RPC client](../../packages/core/src/public-rpc-client.ts) 的 `prepareUnixConnection`；同一 Unix 通道的原 `ready` 覆盖准备与连接，后续请求、订阅和显式 owner discovery 复用该通道，不重复探测 socket。通道关闭后，新通道重新准备；没有健康状态缓存或定时探测。这个本地 SDK 注入点不进入 wire，也不替代上表的 Native 准入和每次操作的身份检查。
 
 单个 reader 取消只结束其等待；共享通道的准备由通道生命周期持有，RPC client 释放后迟到的准备不能再打开 socket。需要原设备授权的 forwarding 仍使用独立认证连接，每条物理连接单独准备，不混入普通共享通道。准备或连接失败不自动重发请求，已派发的未知结果保持原身份；平台服务启动仍由 Desktop 的原服务 owner 管理，reader 释放不停止健康 Host。
