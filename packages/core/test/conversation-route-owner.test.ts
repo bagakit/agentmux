@@ -5,6 +5,7 @@ import { forwardConversationPage, readRoutedConversation } from '../src/conversa
 import { parseRoutedConversationPage, parseConversationReadPageForWindow, consumeConversationWindowPage,
   type AgentConversationReadPage, type ConversationTimelineReadInput } from '../src/conversation-changes'
 import * as stream from '../src/conversation-stream'
+import { AgentMuxRpcService } from '../src/public-rpc-service'
 
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { try { for (const close of closes.splice(0).reverse()) await close() } finally { vi.restoreAllMocks() } })
@@ -53,6 +54,34 @@ it('the original Reader keeps public local and source aliases without a redundan
     const digest = vi.spyOn(stream, 'conversationRevision')
     expect(parseConversationReadPageForWindow(page, input)).toBe(page)
     expect(digest).not.toHaveBeenCalled(); digest.mockRestore()
+  }
+})
+
+it('the public RPC service retains validated inspect and changes items without rehashing', async () => {
+  const f = await fixture(), reference = { ...f.input, hostId: 'selected-route' }
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: reference.hostId, client: f.client }] })
+  closes.push(() => service.dispose())
+  const checkpoint = (await f.client.conversationCheckpoint({ ...f.input, nativePosition: 'beginning' })).checkpoint
+  const digest = vi.spyOn(stream, 'conversationRevision')
+  let original: AgentConversationReadPage | undefined
+  const inspect = f.client.readAgentConversation.bind(f.client), changes = f.client.readConversationChanges.bind(f.client)
+  vi.spyOn(f.client, 'readAgentConversation').mockImplementation(async (...args) => {
+    original = await inspect(...args); digest.mockClear(); return original
+  })
+  vi.spyOn(f.client, 'readConversationChanges').mockImplementation(async (...args) => {
+    const page = await changes(...args); original = page; digest.mockClear(); return page
+  })
+  const calls = [
+    () => service.call('agent.conversation.inspect', reference),
+    () => service.call('agent.conversation.changes', { ...reference, checkpoint: { ...checkpoint, hostId: reference.hostId } })
+  ]
+  for (const call of calls) {
+    const page = await call()
+    expect(page.items.length).toBeGreaterThan(0)
+    expect(page).toMatchObject({ hostId: reference.hostId, sourceHostId: 'local', window: { complete: true } })
+    expect(digest, 'The public service must reuse the original validated content').not.toHaveBeenCalled()
+    expect(page.items).toBe(original!.items)
+    expect(consumeConversationWindowPage(page).kind).toBe('complete')
   }
 })
 
