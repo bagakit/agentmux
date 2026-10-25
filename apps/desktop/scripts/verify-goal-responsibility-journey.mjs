@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -18,21 +18,26 @@ const exec = promisify(execFile)
 const args = process.argv.slice(2), options = {}
 for (let index = 0; index < args.length; index++) {
   const flag = args[index]
-  if (flag === '--prepare-only') options.prepareOnly = true
+  if (flag === '--summary') options.summary = true
+  else if (flag === '--prepare-only') options.prepareOnly = true
   else if (flag === '--capture-only') options.captureOnly = true
-  else if (['--source', '--electron', '--evidence', '--capture-receipt'].includes(flag)) {
+  else if (['--source', '--electron', '--evidence', '--capture-receipt', '--prepared-build'].includes(flag)) {
     assert.ok(args[index + 1] && !args[index + 1].startsWith('--'), flag + ' requires one exact path.')
     options[flag.slice(2)] = args[++index]
   } else if (flag === '--help') {
-    console.log('Usage: node apps/desktop/scripts/verify-goal-responsibility-journey.mjs [--source FILE] [--electron EXISTING_BINARY] [--evidence DIR] [--prepare-only | --capture-only | --capture-receipt FILE]\n'
+    console.log('Usage: node apps/desktop/scripts/verify-goal-responsibility-journey.mjs [--summary] [--source FILE] [--prepared-build RECEIPT] [--electron EXISTING_BINARY] [--evidence DIR] [--prepare-only | --capture-only | --capture-receipt FILE]\n'
       + 'Environment equivalents: AGENTMUX_GOAL_RESPONSIBILITY_JOURNEY, AGENTMUX_GOAL_RESPONSIBILITY_ELECTRON (or AGENTMUX_PROOF_ELECTRON_PATH), AGENTMUX_GOAL_RESPONSIBILITY_EVIDENCE.\n'
       + 'Default source: .tmp/goal-responsibility/t005/source/journey.json. --capture-only preserves strict source/build/candidate checks and produces recorded-transport images only.\n'
       + '--capture-receipt (or AGENTMUX_GOAL_RESPONSIBILITY_CAPTURE_RECEIPT) reads an exact original capture and combines current Native/workface/cost evidence without rebuilding or recapturing. Its output directory must be separate.\n'
+      + '--summary captures eight original Goals summary scenes only, without the unrelated full workspace/restart journey. Requires --capture-only.\n'
+      + '--prepared-build reuses an exact already-prepared Renderer artifact in capture-only mode; only this runner and the Electron navigation harness may change.\n'
       + 'The default gate consumes original Native, workface and cost receipts; it never reruns Native input or downloads Electron. Independent aesthetic review remains required.')
     process.exit(0)
   } else throw new Error('Unknown responsibility capture option: ' + flag)
 }
 const sourcePath = options.source ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_JOURNEY ?? join(repository, '.tmp/goal-responsibility/t005/source/journey.json')
+assert.ok(!options.summary || options.captureOnly && !options['capture-receipt'], 'Summary capture is one bounded capture-only process.')
+assert.ok(!options['prepared-build'] || options.captureOnly, 'Prepared build reuse is limited to a new capture-only invocation.')
 const captureReceipt = options['capture-receipt'] ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_CAPTURE_RECEIPT
 assert.ok([options.prepareOnly, options.captureOnly, Boolean(captureReceipt)].filter(Boolean).length <= 1, 'Preparation, capture-only and original capture combination are mutually exclusive.')
 const electron = options.electron ?? process.env.AGENTMUX_GOAL_RESPONSIBILITY_ELECTRON ?? process.env.AGENTMUX_PROOF_ELECTRON_PATH
@@ -48,11 +53,11 @@ if (originalCapture) {
 await mkdir(evidence, { recursive: true })
 const privateRoot = captureReceipt ? null : await mkdtemp(join(tmpdir(), 'amx-goal-responsibility-'))
 const result = { schema: 'agentmux.goal-responsibility-visual-capture.v1', scope: 'production-renderer-recorded-transport',
-  captureOnly: true, aestheticReview: 'not-performed', prepared: false, passed: false, userRunTouched: false,
+  captureOnly: true, summaryOnly: Boolean(options.summary), aestheticReview: 'not-performed', prepared: false, passed: false, userRunTouched: false,
   humanWindowFocusTaken: false, privateRoot, evidence, processes: [], frames: [], limits: [
     'Actual production App, Goal, Mote and Region consumers and CSS in hidden Chromium; transport replies are captured original public results.',
     'The pointer action proves the accurate original patrol request consumer. It does not submit a second live PMO input.',
-    'Reload and process relaunch exercise a private Renderer profile and production layout projection. Core/Native lifecycle remains separately owned.',
+    options.summary ? 'This bounded Goals summary capture does not exercise application reload, process relaunch or Core/Native lifecycle.' : 'Reload and process relaunch exercise a private Renderer profile and production layout projection. Core/Native lifecycle remains separately owned.',
     'Aesthetic acceptance requires an independent reviewer to open these exact full images.'
   ] }
 const sourceFiles = new Map()
@@ -146,7 +151,27 @@ try {
   }
   for (const file of [import.meta.filename, join(fixture, 'source.mjs'), join(fixture, 'evidence.mjs'), join(fixture, 'entry.tsx'), join(fixture, 'index.html'), join(fixture, 'preload.cjs'), join(fixture, 'main.cjs'), join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/verify-goal-responsibility-mutations.mjs')]) await remember(file)
   const outDir = join(captureEvidence, 'compiled')
-  if (!originalCapture) await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
+  let reusedBuild
+  if (options['prepared-build']) {
+    const priorPath = resolve(options['prepared-build']), bytes = await readFile(priorPath), prior = JSON.parse(bytes)
+    assert.equal(prior.schema, 'agentmux.goal-responsibility-visual-capture.v1')
+    assert.equal(prior.scope, 'production-renderer-recorded-transport'); assert.equal(prior.captureOnly, true); assert.equal(prior.prepared, true)
+    assert.equal(prior.input.sha256, source.sourceSha256); assert.equal(prior.actualCliSha256, result.actualCliSha256)
+    assert.ok(prior.sources && Object.keys(prior.sources).length > 0)
+    const navigationHarness = new Set([relative(repository, import.meta.filename), relative(repository, join(fixture, 'main.cjs'))])
+    for (const [file, digest] of Object.entries(prior.sources)) {
+      if (navigationHarness.has(file)) continue
+      await remember(join(repository, file))
+      assert.equal(sourceFiles.get(file), digest, 'The prepared Renderer source changed: ' + file)
+    }
+    const originalCompiled = join(dirname(priorPath), 'compiled')
+    assert.deepEqual(await compiledFiles(originalCompiled), prior.compiled, 'Prepared compiled Renderer bytes changed.')
+    await cp(originalCompiled, outDir, { recursive: true, mode: constants.COPYFILE_FICLONE })
+    reusedBuild = { receipt: priorPath, sha256: hash(bytes), unchangedRendererSourceFiles: Object.keys(prior.sources).filter(file => !navigationHarness.has(file)).length,
+      currentNavigationHarness: [...navigationHarness] }
+    result.reusedBuild = reusedBuild
+  }
+  if (!originalCapture && !reusedBuild) await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
     plugins: [{ name: 'responsibility-source-receipt', enforce: 'pre',
       async transform(_code, id) { if (!id.startsWith('\0')) await remember(id.split('?')[0]) } }],
@@ -173,12 +198,12 @@ try {
     delete env.AGENTMUX_CAPABILITY
     delete env.AGENTMUX_AGENT_SESSION_ID
     delete env.AGENTMUX_AGENT_CAPABILITY
-    for (const phase of ['capture', 'restore']) {
+    for (const phase of options.summary ? ['capture'] : ['capture', 'restore']) {
       const log = []
       let outcome = originalCapture?.receipt.processes.find(value => value.phase === phase)
       if (!originalCapture) try {
         outcome = await runProbeProcess(electron, [join(fixture, 'main.cjs'), join(outDir, 'index.html'), join(fixture, 'preload.cjs'),
-          normalizedPath, privateRoot, evidence, phase], { cwd: repository, env, timeoutMs: 120_000, onLine: line => log.push(line) })
+          normalizedPath, privateRoot, evidence, phase, options.summary ? 'summary' : 'full'], { cwd: repository, env, timeoutMs: 120_000, onLine: line => log.push(line) })
       } catch (error) {
         result.processes.push({ phase, ...(error.probe ?? { exitConfirmed: false }) })
         throw error
@@ -214,8 +239,8 @@ try {
       }
       result.frames.push(...render.frames)
     }
-    assert.notEqual(result.processes[0].originalPid, result.processes[1].originalPid, 'Relaunch requires another real Electron process.')
-    assert.equal(result.frames.length >= 27, true, 'Both original capture and a real process relaunch must have nonempty frames.')
+    if (!options.summary) assert.notEqual(result.processes[0].originalPid, result.processes[1].originalPid, 'Relaunch requires another real Electron process.')
+    assert.equal(result.frames.length >= (options.summary ? 8 : 27), true, 'Both original capture and a real process relaunch must have nonempty frames.')
     if (originalCapture) {
       assert.deepEqual(result.frames, originalCapture.receipt.frames); assert.deepEqual(result.processes, originalCapture.receipt.processes)
       result.privateProfileRemoved = originalCapture.receipt.privateProfileRemoved; result.remainingProcesses = originalCapture.receipt.remainingProcesses
@@ -235,7 +260,7 @@ try {
       '# Goal responsibility screenshots — independent review pending', '',
       `Candidate commit: ${result.candidate.commit}. Exact source and compiled bytes: [receipt.json](receipt.json).`, '',
       'Production App and CSS; original public journey facts; recorded transport only. Native lifecycle and actual PMO input proof remain with the original journey owner.',
-      'The hidden window did not take human focus. The private Renderer profile retained its own layout, drafts and patrol feedback through reload and a second process.', '',
+      options.summary ? 'The bounded summary capture covers normal execution, applied business report, detail disclosure and the original patrol action. No application-restart acceptance is claimed.' : 'The hidden window did not take human focus. The private Renderer profile retained its own layout, drafts and patrol feedback through reload and a second process.', '',
       ...result.frames.map(frame => `- ${frame.name}: [complete image](${frame.file})`), '',
       'Open every listed image and review hierarchy, density, responsibility/next action, error and delivery/report distinctions, clipping, and width/brightness behavior. Capture does not grant aesthetic approval.', ''
     ].join('\n'))
