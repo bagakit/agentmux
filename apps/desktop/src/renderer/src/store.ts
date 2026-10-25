@@ -430,7 +430,7 @@ import {
   type AgentFocusContext
 } from './lib/agent-focus'
 import {
-  createDebouncedPersistentStorage,
+  createBatchedPersistentStorage,
   createWriteFencedStorage,
   registerUnloadFlush
 } from './lib/persisted-ui-writer'
@@ -4266,7 +4266,7 @@ function workbenchStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 // 闸本身住在 lib 里（`createWriteFencedStorage`）：留在这个模块里时它是一个 `let` 加一行 `if`，
 // 于是「闸关着时写入真的被拦了吗」在测试里不可观测，只能靠扫源码文本判断那个名字还在——实测把
 // 那行 `if` 删掉，五个持久化测试文件 62 条全绿。这里剩下的只有转发，没有可以被掏空的判断。
-const persistentWorkbenchStorage = createDebouncedPersistentStorage<PersistedAppState>({
+const persistentWorkbenchStorage = createBatchedPersistentStorage<PersistedAppState>({
   getItem: (name) => workbenchStorage().getItem(name),
   setItem: (name, value) => {
     workbenchStorage().setItem(name, value)
