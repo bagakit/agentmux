@@ -40,6 +40,13 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Focus 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
     }
   },
+  "execution-split": {
+    shapes: [["rect",{"x":"2","y":"3","width":"9","height":"8","rx":"1.5"}],["rect",{"x":"13","y":"13","width":"9","height":"8","rx":"1.5"}],["path",{"d":"M11 7h5a2 2 0 0 1 2 2v4 M13 17H8a2 2 0 0 1-2-2v-4"}],["path",{"d":"M5 5.5 7 7 5 8.5 M16 17h3"}]],
+    design: {
+      rest: "两个分离的工作面分别以执行提示和资源横线识别，无箭头桥接表达 Agent 运行端与项目工具端的结构关系；不固定哪端是本机、云端或某家 Provider",
+      motion: { kind: "still", animation: "none", description: "双端执行的对象身份保持静止，关系线不表示已连接、执行中、授权或成功。", trigger: "按 Remote execution 用途或双端绑定对象显示；原运行、连接和权限事实由各自 owner 另行表达。" }
+    }
+  },
   "capsule-page": {
     shapes: [["rect", {"x":"3","y":"3","width":"18","height":"18","rx":"5"}], ["path", {"d":"M8 7h8v10H8Z M8 11h8"}]],
     design: {

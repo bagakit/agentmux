@@ -20,6 +20,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'object.user-input': { label: 'User Input', glyph: 'user-input-field' },
   'object.agent-messaging': { label: 'Agent messaging', glyph: 'git-compare-arrows' },
   'object.amux-protocols': { label: 'amux Protocols', glyph: 'protocol-frame' },
+  'object.remote-execution': { label: 'Remote execution', glyph: 'execution-split' },
   'conversation.history-window': { label: 'Conversation history window', glyph: 'clock-3' },
   'action.configure-reconnect': { label: 'Configure original conversation reconnect timing', glyph: 'clock-3' },
   'action.upgrade-host': { label: 'Upgrade Host', glyph: 'arrow-up' },
