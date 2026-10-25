@@ -60,6 +60,8 @@ Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-messa
 
 Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献，Desktop、Mobile 和 Focus 消费该 Reader 的完整窗口。
 
+准确历史来源由原 [`AgentSessionStore.readHistorySource`](../../packages/core/src/agent-session-store.ts) 按 Session ID 读取。SQLite 的活跃记录只校验、投影原 Host、Provider 及当前／观察／已确认前序来源，不为读取描述重新校验或克隆无关恢复账本；原行 JSON 解析仍保留。完整元数据读写继续执行完整校验，退休与 reopen 关联沿原分支，历史描述不授予输入或生命周期权限。
+
 Hook 声明由原 [`AgentManagedHookInstaller`](../../packages/core/src/managed-hook-installer.ts) 在受管创建／恢复时安装。安装器在原 receipt／backup owner 内保留按 Provider、准确目标及 merge 范围限定的实际新增声明；后续更新经 [`prepareMergedHookContent`](../../packages/core/src/hook-config-merge.ts) 只替换能够精确确认的旧自有声明，保留用户、手改及未知历史条目。目标和声明归属同时参与预览校验，同一准确目标的写入由文件锁互斥，并在锁内复核；写入前保留 pending 的前后哈希，重建实例据准确字节判定所属代次。竞争或归属未知保留原回调与具名问题，不阻断健康 Agent。该机制防止安装更新继续累加采集入口，不补造旧回复快照的消息关联，也不改变已有 Conversation 或原记录读取接口。
 
 客户端的 [`useConversationView`](../../packages/client-ui/src/lib/use-conversation-view.ts) 在原读取状态中保留当前操作和失败操作的种类。后台变化更新或保留帧回放成功，不结算另一次失败的相邻页读取；原操作重试成功或新的明确读取成功后才收起其失败。已接受帧的来源不可用继续归原来源服务反馈，不能借自动补读意图把它改称分页操作失败。这些呈现事实不改变 Core 窗口、游标、来源覆盖或公开读取回执。
