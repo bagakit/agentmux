@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+// @vitest-environment-options {"settings":{"navigator":{"userAgent":"Mozilla/5.0 AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"}}}
 import { act, Profiler, useEffect } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
@@ -437,6 +438,50 @@ describe('confirmed Topic and Mote reply file resources', () => {
     expect(useAppStore.getState().documentRevealTargets[documentKey(scratch.id, logicalPath)]).toEqual({ line: 12, column: 3 })
     expect(useAppStore.getState().sessions).toEqual([originalSession])
     expect(useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]).toBe(originalRegion)
+    expect(useAppStore.getState().agentComposerDrafts.pmo).toBe('KEEP DRAFT')
+    expect(container.querySelector('[data-composer]')).not.toBeNull()
+  })
+})
+
+describe('ordinary split execution project file links', () => {
+  it.each([['local', 'remote'], ['remote', 'local'], ['local', 'local']] as const)('opens resource %s files from the original %s Agent without borrowing runtime cwd', async (resourceHost, runtimeHost) => {
+    project = { ...project, hostId: resourceHost }
+    config = { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Remote host', hostname: 'project-files-proof' }], workspaces: [project, scratch] }
+    seed('Read src/a.ts:7:2.', false)
+    const originalSession = { ...agent(), hostId: runtimeHost, control: { ...agent().control, hostId: runtimeHost },
+      toolExecution: { bindingId: 'original-file-binding', resourceHostId: resourceHost, resourceRuntimeId: 'resource-runtime', workspacePath: project.path } }
+    useAppStore.setState({ sessions: [originalSession] })
+    if (runtimeHost !== 'local') {
+      await reading.close()
+      reading = await conversationPagePortFixture({ hostId: runtimeHost, agentSessionId: 'pmo' }, { providerId: 'codex', nativeSessionId: 'proof' }, async () => ({
+        agentSessionId: 'pmo', source: { providerId: 'codex', nativeSessionId: 'proof' }, items: [{ id: 'split-body', kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: seededContent }] }], nextCursor: null }))
+    }
+    if (resourceHost !== 'local') vi.mocked(api.files.read).mockImplementation(async (workspaceId, path) => {
+      expect(workspaceId).toBe(project.id)
+      return { status: 'read', document: { path, content: 'CONTROLLED REMOTE PROJECT', revision: 'remote-revision' } }
+    })
+    const originalRegion = useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]
+    const realOpen = useAppStore.getState().openFile, open = vi.fn(realOpen)
+    useAppStore.setState({ openFile: open })
+    await mount(); expect(buttons()).toHaveLength(1); await click(buttons()[0]!)
+    expect(open.mock.calls[0]?.[3]).toBe(project.id)
+    expect(vi.mocked(api.files.read).mock.calls).toEqual([[project.id, 'src/a.ts']])
+    expect(useAppStore.getState().documents[documentKey(project.id, 'src/a.ts')]?.content).toBe(resourceHost === 'local' ? 'REAL PROJECT CONTENT' : 'CONTROLLED REMOTE PROJECT')
+    expect(useAppStore.getState().documentRevealTargets[documentKey(project.id, 'src/a.ts')]).toEqual({ line: 7, column: 2 })
+    expect(useAppStore.getState().sessions).toEqual([originalSession])
+    expect(useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]).toBe(originalRegion)
+    expect(useAppStore.getState().agentComposerDrafts.pmo).toBe('KEEP DRAFT')
+  })
+  it('keeps prose and the healthy original Pane when its bound project registration is missing', async () => {
+    seed('Read src/a.ts.', false)
+    const originalSession = { ...agent(), toolExecution: { bindingId: 'missing-project-binding', resourceHostId: 'local', resourceRuntimeId: 'resource-runtime', workspacePath: join(tinyRoot, 'unregistered') } }
+    useAppStore.setState({ sessions: [originalSession] })
+    await mount()
+    expect(buttons()).toEqual([])
+    expect(container.textContent).toContain('src/a.ts')
+    expect(container.textContent).toContain('original project file Workspace is unconfirmed')
+    expect(vi.mocked(api.files.read)).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([originalSession])
     expect(useAppStore.getState().agentComposerDrafts.pmo).toBe('KEEP DRAFT')
     expect(container.querySelector('[data-composer]')).not.toBeNull()
   })

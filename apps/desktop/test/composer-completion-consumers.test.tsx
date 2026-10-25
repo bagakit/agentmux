@@ -112,7 +112,7 @@ it('configured command prefix keeps Provider syntax; turning a quick input off p
   await wait(() => expect(options()).toHaveLength(0))
   expect(dom.draft()).toBe('#Review')
   await act(async () => editor().view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })))
-  expect(send).toHaveBeenCalledWith('agent-1', '#Review', expect.any(Function), 'manual')
+  expect(send).toHaveBeenCalledWith('agent-1', '#Review', expect.any(Function), 'manual', undefined, { inputImages: [] })
 })
 
 it('a failed directory read keeps exact Agent choices and ordinary draft editing; directory selection reads only its original child path', async () => {
