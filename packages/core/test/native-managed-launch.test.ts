@@ -12,7 +12,8 @@ import { nativeResumeSource } from './helpers/native-resume-source.js'
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
 import { CODEX_NATIVE_TOKEN_ENV, runCodexManaged, type CodexManagedRunPlan } from '../src/providers/codex-managed-run.js'
 import { nativeProcessTcpListeners } from '../src/agent-native-process.js'
-import { CODEX_LAUNCH_OPTIONS, resolveLaunchOptionArgv } from '../src/agent-launch-option.js'
+import { resolveLaunchOptionArgv } from '../src/agent-launch-option.js'
+import { CODEX_LAUNCH_OPTIONS } from '../src/providers/launch-options.js'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllEnvs() })

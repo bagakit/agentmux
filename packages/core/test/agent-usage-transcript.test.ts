@@ -10,10 +10,8 @@ import {
   readTurnUsageFromTranscript,
   HOOK_PAYLOAD_USAGE_KEY
 } from '../src/agent-usage-transcript.js'
-import type { AgentUsageCapability } from '../src/types.js'
-
-const CLAUDE: AgentUsageCapability = { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
-const CODEX: AgentUsageCapability = { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
+import { decodeClaudeUsage as CLAUDE } from '../src/providers/claude-usage.js'
+import { decodeCodexUsage as CODEX } from '../src/providers/codex-usage.js'
 
 // 真实记录形状——逐字取自本机真跑一个 turn 后 claude / codex 各自 transcript 里的那一行（已核对过
 // 与 Provider 自报的用量一致：claude `-p` 的 result.usage、codex 的 last_token_usage）。用真实 schema
