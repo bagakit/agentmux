@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), http = require('node:http')
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, screen } = require('electron')
 const { pages, html: pageHtml } = require('./pages.cjs')
 const [html, privateRoot, evidence, scene = 'history'] = process.argv.slice(2)
 if (scene === 'personalization') {
@@ -69,7 +69,12 @@ app.whenReady().then(async () => {
     await fs.writeFile(path.join(path.dirname(html), 'fixture-data.js'), 'window.startPageFixtureInput=' + JSON.stringify({ previews, capturedAt, scene }) + ';')
     window = new BrowserWindow({ width: 1440, height: 950, useContentSize: true, show: false, webPreferences: { ...(scene === 'personalization' ? { preload: path.join(__dirname, 'preload.cjs') } : {}), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     window.webContents.on('console-message', details => { if (details.level === 'error') process.stderr.write('renderer-error: ' + details.message + '\n') })
-    const read = code => window.webContents.executeJavaScript(code), facts = () => read('window.startPageProof.facts()')
+    // CDP can observe the private page while Electron's hidden-page scheduler is throttled.
+    const read = async code => {
+      const value = await window.webContents.debugger.sendCommand('Runtime.evaluate', { expression: code, awaitPromise: true, returnByValue: true, timeout: 5000 })
+      if (value.exceptionDetails) throw new Error(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text)
+      return value.result.value
+    }, facts = () => read('window.startPageProof.facts()')
     const until = async (label, predicate) => {
       const end = Date.now() + 15000
       do { if (await predicate()) return; await pause(40) } while (Date.now() < end)
@@ -100,7 +105,7 @@ app.whenReady().then(async () => {
     const shot = async (file, movePointer = true) => {
       const [width, height] = window.getContentSize()
       if (movePointer) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: width - 8, y: height / 2 })
-      await pause(220); await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+      await pause(scene === 'personalization' ? 360 : 220); await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
       const fact = await facts(); preserved(fact)
       const image = await window.webContents.capturePage(); assert.equal(image.isEmpty(), false)
       await fs.writeFile(path.join(evidence, file), image.toPNG())
@@ -108,6 +113,11 @@ app.whenReady().then(async () => {
     }
     await window.loadFile(html); window.showInactive(); window.webContents.debugger.attach('1.3')
     if (scene === 'personalization') {
+      receipt.nativeDevice = { rendererPid: window.webContents.getOSProcessId(), platform: process.platform, arch: process.arch,
+        electron: process.versions.electron, chromium: process.versions.chrome, offscreen: window.webContents.isOffscreen(),
+        displayScaleFactor: screen.getDisplayMatching(window.getBounds()).scaleFactor, gpuFeatureStatus: app.getGPUFeatureStatus(),
+        gpuMemory: 'unknown: LayerTree area is only a backing estimate; no device allocation measurement', gpuExecutionTime: 'unknown: no device timestamp/power counters collected' }
+      try { receipt.nativeDevice.gpuInfoBasic = await app.getGPUInfo('basic') } catch (error) { receipt.nativeDevice.gpuInfoUnknown = error.message }
       await require('./personalization-scene.cjs')({ window, read, facts, until, pointer, key, type, preserved, shot, pause, receipt, evidence })
       receipt.passed = true
       return

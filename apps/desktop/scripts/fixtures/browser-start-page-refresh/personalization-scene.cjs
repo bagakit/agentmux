@@ -1,88 +1,37 @@
-const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
-const { gzipSync } = require('node:zlib')
+const assert = require('node:assert/strict'), path = require('node:path')
 
 module.exports = async function personalization({ window, read, facts, until, pointer, key, type, preserved, shot, pause, receipt, evidence }) {
-  const send = (method, params = {}) => window.webContents.debugger.sendCommand(method, params)
-  await until('personalized start page mounted', () => read('window.startPageProof?.ready && document.querySelectorAll(".browser-start-history__card").length===12 && Boolean(document.querySelector(".browser-start-atmosphere__plane"))'))
+  await until('branded start page mounted', () => read('window.startPageProof?.ready && document.querySelectorAll(".browser-start-history__card").length===12 && Boolean(document.querySelector(".browser-start-atmosphere__sheen"))'))
   await until('real source images decoded', () => read('(()=>{const images=[...document.querySelectorAll(".browser-start-history__card img")];return images.length===4&&images.every(image=>image.complete&&image.naturalWidth>0)})()'))
   receipt.initial = await facts(); preserved(receipt.initial)
   receipt.boundary += ' Personalization additionally traverses actual SettingsNavigation/BrowserStartPageSettings/FileReader/ConfigOwner.edit/ConfigStore.save/confirmSaved through a private IPC bridge. Native pointer and CDP timeline observations certify this isolated Renderer only.'
+  const profile = await require('./native-atmosphere-cost.cjs')({ window, read, facts, pause, receipt, evidence })
+  const { send, layerStyle, surfaceBox, move, sample, trajectory } = profile
   await shot('p01-default-dark.png')
-  await send('Performance.enable')
-  const planeStyle = () => read('(()=>{const p=document.querySelector(".browser-start-atmosphere__plane");return p?{inline:p.style.transform,computed:getComputedStyle(p).transform}:null})()')
-  const surfaceBox = () => read('document.querySelector(".browser-start-page").getBoundingClientRect().toJSON()')
-  const move = async (x, y) => send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
-  let box = await surfaceBox()
-  await move(box.x + box.width * .12, box.y + 20); await pause(260)
-  receipt.pointerLeft = await planeStyle(); await shot('p02-pointer-left.png', false)
-  await move(box.x + box.width * .88, box.y + 20); await pause(260)
-  receipt.pointerRight = await planeStyle(); await shot('p03-pointer-right.png', false)
-  assert.notEqual(receipt.pointerLeft.inline, receipt.pointerRight.inline, 'Actual native pointer moves the rendered layer')
-  assert.notEqual(receipt.pointerLeft.computed, receipt.pointerRight.computed, 'Computed native transforms differ after settling')
+  await read('window.startPageProof.theme("light")'); await pause(360); await shot('p01a-default-light.png')
+  window.setContentSize(740, 860); await pause(360); await shot('p01b-default-narrow-light.png')
+  await read('window.startPageProof.theme("dark")'); await pause(360); await shot('p01c-default-narrow-dark.png')
+  window.setContentSize(1920, 1080); await pause(360); await shot('p01d-default-large-dark.png')
+  window.setContentSize(1440, 950); await pause(360)
+  const box = await surfaceBox()
+  await move(box.x + box.width * .12, box.y + 20); await pause(360)
+  receipt.pointerLeft = await layerStyle(); await shot('p02-pointer-left.png', false)
+  await move(box.x + box.width * .88, box.y + 20); await pause(360)
+  receipt.pointerRight = await layerStyle(); await shot('p03-pointer-right.png', false)
+  for (const name of ['plane', 'sheen']) {
+    assert.notEqual(receipt.pointerLeft[name].inline, receipt.pointerRight[name].inline, 'Actual native pointer moves ' + name)
+    assert.notEqual(receipt.pointerLeft[name].computed, receipt.pointerRight[name].computed, 'Computed native transforms differ after settling: ' + name)
+  }
+  assert.notEqual(receipt.pointerRight.plane.inline, receipt.pointerRight.sheen.inline, 'Distinct foreground and background depth')
 
-  function unionMs(events) {
-    let duration = 0, end = -Infinity
-    for (const event of events.sort((a, b) => a.ts - b.ts)) { duration += Math.max(0, event.ts + event.dur - Math.max(event.ts, end)); end = Math.max(end, event.ts + event.dur) }
-    return duration / 1000
-  }
-  async function metrics() { return Object.fromEntries((await send('Performance.getMetrics')).metrics.map(metric => [metric.name, metric.value])) }
-  async function sample(label, work) {
-    await pause(260)
-    await read('(()=>{window.startPageStyleWrites=[];window.startPageStyleObserver?.disconnect();const p=document.querySelector(".browser-start-atmosphere__plane");if(p){window.startPageStyleObserver=new MutationObserver(records=>{for(const r of records)window.startPageStyleWrites.push({at:performance.now(),value:r.target.style.transform})});window.startPageStyleObserver.observe(p,{attributes:true,attributeFilter:["style"]})}})()')
-    const start = await metrics(), beforePlane = await planeStyle(), beforeFacts = await facts()
-    let complete, stream, tracing = false
-    const done = new Promise(resolve => { complete = resolve })
-    const listener = (_event, method, value) => { if (method === 'Tracing.tracingComplete') complete(value) }
-    window.webContents.debugger.on('message', listener)
-    try {
-      await send('Tracing.start', { categories: '-*,devtools.timeline,disabled-by-default-devtools.timeline,toplevel,disabled-by-default-devtools.timeline.invalidationTracking', transferMode: 'ReturnAsStream' }); tracing = true
-      const startTime = Date.now(); await work(); const elapsedMs = Date.now() - startTime
-      await send('Tracing.end'); tracing = false
-      const finished = await Promise.race([done, pause(10000).then(() => { throw new Error('The original native cost trace did not finish') })])
-      assert.equal(finished.dataLossOccurred, false); assert.ok(finished.stream); stream = finished.stream
-      const chunks = []
-      for (;;) { const chunk = await send('IO.read', { handle: stream, size: 1024 * 1024 }); chunks.push(Buffer.from(chunk.data, chunk.base64Encoded ? 'base64' : 'utf8')); if (chunk.eof) break }
-      await send('IO.close', { handle: stream }); stream = undefined
-      const bytes = Buffer.concat(chunks), events = JSON.parse(bytes.toString()).traceEvents
-      await fs.writeFile(path.join(evidence, label + '.trace.json.gz'), gzipSync(bytes))
-      const rendererPid = window.webContents.getOSProcessId(), mainTid = events.find(event => event.pid === rendererPid && event.name === 'thread_name' && event.args?.name === 'CrRendererMain')?.tid
-      assert.ok(mainTid, 'Actual renderer main thread present in the native trace')
-      const main = events.filter(event => event.pid === rendererPid && event.tid === mainTid && event.ph === 'X'), statistics = {}
-      assert.ok(main.length > 0, 'A nonempty native pipeline was observed')
-      for (const event of main) { const row = statistics[event.name] ??= { count: 0, totalMs: 0 }; row.count++; row.totalMs += event.dur / 1000 }
-      const end = await metrics(), delta = {}
-      for (const name of ['LayoutCount', 'RecalcStyleCount', 'LayoutDuration', 'RecalcStyleDuration', 'TaskDuration', 'ScriptDuration']) delta[name] = end[name] - start[name]
-      const writes = await read('(()=>{window.startPageStyleObserver?.disconnect();return window.startPageStyleWrites})()')
-      const result = { label, elapsedMs, rendererPid, mainTid, beforePlane, afterPlane: await planeStyle(), beforeRetained: beforeFacts.retained, afterRetained: (await facts()).retained,
-        visibleAtmospheres: await read('[...document.querySelectorAll("[data-start-atmosphere]")].filter(e=>e.getClientRects().length&&!e.closest("[hidden]")).length'),
-        metrics: delta, documents: end.Documents, nodes: end.Nodes, writes, trace: label + '.trace.json.gz', traceEvents: events.length, statistics,
-        taskUnionMs: unionMs(main.filter(event => event.name === 'ThreadControllerImpl::RunTask')),
-        layoutEvents: main.filter(event => event.name === 'Layout').map(event => ({ durationMs: event.dur / 1000, args: event.args })),
-        invalidationExamples: events.filter(event => event.pid === rendererPid && /InvalidationTracking/.test(event.name)).slice(0, 12).map(event => ({ name: event.name, args: event.args })) }
-      receipt.costs.push(result)
-      return result
-    } finally {
-      if (tracing) await send('Tracing.end')
-      if (stream) await send('IO.close', { handle: stream })
-      window.webContents.debugger.off('message', listener)
-    }
-  }
-  const trajectory = async () => {
-    const rect = await surfaceBox()
-    // The original page's empty top strip avoids adding card hover work to atmosphere cost.
-    for (let index = 0; index < 48; index++) {
-      const unit = index % 24 / 23, x = rect.x + rect.width * (.12 + .76 * (index < 24 ? unit : 1 - unit))
-      await move(x, rect.y + 20); await pause(16)
-    }
-    await pause(220)
-  }
   receipt.costs = []
   for (const count of [100, 1000]) {
     await read(`window.startPageProof.retainTabs(${count})`)
     await until('retained scale ' + count, async () => (await facts()).retained === count)
     const result = await sample('cost-pointer-' + count, trajectory)
     assert.equal(result.visibleAtmospheres, 1)
-    assert.ok(result.writes.length > 5, 'Real pointer work reaches the actual layer')
+    for (const name of ['plane', 'sheen']) assert.ok(result.writes.filter(write => write.layer === 'browser-start-atmosphere__' + name).length > 5, 'Real pointer work reaches ' + name)
+    assert.ok(new Set(result.writes.filter(write => write.layer.endsWith('__sheen')).map(write => write.opacity)).size > 2, 'Native pointer changes sheen intensity')
     assert.equal(result.layoutEvents.length, 0, 'Pointer decoration does not schedule native Layout')
   }
   const [small, large] = receipt.costs
@@ -90,16 +39,66 @@ module.exports = async function personalization({ window, read, facts, until, po
   assert.ok(large.metrics.TaskDuration <= Math.max(.15, small.metrics.TaskDuration * 3), 'Unrelated retained Tabs do not amplify the same pointer workload')
   const idle = await sample('cost-idle-1000', () => pause(1300))
   assert.equal(idle.writes.length, 0, 'A still page schedules no decoration writes')
-  assert.deepEqual(idle.beforePlane, idle.afterPlane)
-  assert.equal(idle.layoutEvents.length, 0)
+  assert.deepEqual(idle.beforeLayers, idle.afterLayers); assert.equal(idle.layoutEvents.length, 0)
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-  await pause(250)
+  await pause(360)
   const reduced = await sample('cost-reduced-motion-1000', trajectory)
   assert.equal(reduced.writes.length, 0, 'Reduced motion removes pointer-driven decoration work')
-  assert.deepEqual(reduced.beforePlane, reduced.afterPlane)
+  assert.deepEqual(reduced.beforeLayers, reduced.afterLayers)
   await shot('p04-reduced-motion.png')
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
-  await read('window.startPageProof.retainTabs(0)'); await pause(250)
+  // Hidden pages may not acknowledge CDP mouse dispatch. Make one bounded native
+  // visibility observation with nonblocking Electron input, then always restore.
+  const boundedRead = code => Promise.race([read(code), pause(1500).then(() => { throw new Error('Hidden Renderer observation did not reply within 1500 ms') })])
+  try {
+    window.webContents.setBackgroundThrottling(true); window.hide(); await pause(360)
+    const hidden = await boundedRead('document.hidden')
+    if (!hidden) receipt.hiddenObservation = { status: 'unavailable', reason: 'Native window hide did not change document.hidden' }
+    else {
+      await boundedRead('(()=>{window.startPageHiddenWrites=[];window.startPageHiddenObserver=new MutationObserver(records=>window.startPageHiddenWrites.push(...records.map(r=>({layer:r.target.className,transform:r.target.style.transform,opacity:r.target.style.opacity}))));for(const p of document.querySelectorAll(".browser-start-atmosphere__plane,.browser-start-atmosphere__sheen"))window.startPageHiddenObserver.observe(p,{attributes:true,attributeFilter:["style"]})})()')
+      for (let i = 0; i < 24; i++) { window.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(box.x + box.width * (.12 + .76 * i / 23)), y: Math.round(box.y + 20) }); await pause(16) }
+      await pause(360)
+      receipt.hiddenObservation = { status: 'observed', windowVisible: window.isVisible(), ...await boundedRead('(()=>{window.startPageHiddenObserver.disconnect();return{documentHidden:document.hidden,writes:window.startPageHiddenWrites}})()'),
+        input: '24 native Electron sendInputEvent requests; hidden platform input delivery is not claimed. Actual hidden guard also has source-qualified tests.' }
+    }
+  } catch (error) { receipt.hiddenObservation = { status: 'unavailable', reason: error.message } }
+  finally { window.showInactive(); window.webContents.setBackgroundThrottling(false) }
+  await until('native document visible again', () => read('!document.hidden'))
+  await read('window.startPageHiddenObserver?.disconnect()')
+  if (receipt.hiddenObservation.status === 'observed') {
+    assert.equal(receipt.hiddenObservation.documentHidden, true); assert.equal(receipt.hiddenObservation.windowVisible, false)
+    assert.equal(receipt.hiddenObservation.writes.length, 0, 'Observed native hidden page writes no decoration styles')
+  }
+
+  async function setInteractive(enabled) {
+    await pointer('.browser-start-page__customize')
+    await until('original interactive setting', () => read('Boolean(document.querySelector("[data-settings-field=start-interactive-background] input"))'))
+    assert.notEqual(await read('document.querySelector("[data-settings-field=start-interactive-background] input").checked'), enabled)
+    await pointer('input[aria-label="Interactive start page background"]')
+    await pointer('[data-settings-save-bar] button')
+    await until('baseline setting durable', () => read('document.querySelector("[data-settings-save-bar]")?.textContent.includes("Changes saved")'))
+    await pointer('button[aria-label="Close settings"]')
+    await until('original homepage returned', () => read('Boolean(document.querySelector(".browser-start-page"))'))
+    assert.equal((await read('window.startPageNativeConfig.read()')).browser.startPage.interactiveBackground, enabled)
+  }
+  await setInteractive(false)
+  for (const count of [100, 1000]) {
+    await read(`window.startPageProof.retainTabs(${count})`)
+    await until('off retained scale ' + count, async () => (await facts()).retained === count)
+    const off = await sample('cost-default-off-' + count, trajectory)
+    assert.equal(off.visibleAtmospheres, 0); assert.equal(off.writes.length, 0)
+    const on = count === 100 ? small : large
+    assert.deepEqual(off.scene, on.scene, 'On/off uses the same viewport, page, appearance and history')
+    receipt.baselineComparisons ??= []
+    receipt.baselineComparisons.push({ retainedTabs: count, on: on.label, off: off.label,
+      taskDeltaMs: (on.metrics.TaskDuration - off.metrics.TaskDuration) * 1000,
+      styleCountDelta: on.metrics.RecalcStyleCount - off.metrics.RecalcStyleCount,
+      layerCountDelta: on.layerTreeAfter.contentLayerCount - off.layerTreeAfter.contentLayerCount,
+      contentAreaDeltaNativePixels: on.layerTreeAfter.totalContentAreaNativePixels - off.layerTreeAfter.totalContentAreaNativePixels,
+      boundary: 'Same actual native pointer trajectory and scene; whole Renderer totals include collection overhead and machine noise. Device GPU time/memory remain unknown.' })
+  }
+  await setInteractive(true)
+  await read('window.startPageProof.retainTabs(0)'); await pause(360)
 
   const central = 'input[aria-label="Search or enter a web address"]', draft = 'Keep this research draft while customizing'
   await type(central, draft); await key('Escape')
@@ -129,7 +128,7 @@ module.exports = async function personalization({ window, read, facts, until, po
   assert.equal(saved.central.value, draft); assert.equal(saved.toolbar.value, draft); assert.equal(saved.plane, null)
   assert.equal(await read('document.querySelector(".browser-start-page__background")?.complete'), true)
   await shot('p06-custom-background-off.png')
-  const off = await sample('cost-background-off', trajectory)
+  const off = await sample('cost-custom-background-off', trajectory)
   assert.equal(off.visibleAtmospheres, 0); assert.equal(off.writes.length, 0)
 
   await pointer('.browser-start-page__customize')
@@ -147,4 +146,5 @@ module.exports = async function personalization({ window, read, facts, until, po
   assert.equal(receipt.final.central.value, draft); assert.equal(receipt.final.count, 6)
   assert.deepEqual(receipt.final.calls.navigate, [])
   assert.equal((await read('window.startPageNativeConfig.read()')).browser.startPage.interactiveBackground, true)
+  await profile.cleanup()
 }
