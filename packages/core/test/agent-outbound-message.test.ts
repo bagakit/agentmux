@@ -13,7 +13,7 @@ import {
   issueAgentCapability
 } from '../src/agent-capability.js'
 import { planDiscussion } from '../src/agent-discussion.js'
-import { MAX_AGENT_PROMPT_BYTES, agentPromptExceedsBudget } from '../src/agent-prompt-budget.js'
+import { AGENT_LAUNCH_CONTEXT_BUDGET_BYTES, agentLaunchContextExceedsBudget } from '../src/agent-prompt-budget.js'
 
 it('budgets whole optional sources against escaped final wire including all omission notes', () => {
   const optional = [
@@ -28,11 +28,11 @@ it('budgets whole optional sources against escaped final wire including all omis
   expect(result.systemContext).toContain(optional[2].text)
   expect(result.systemContext).toContain('Required identity and authority.')
   expect(result.text.endsWith(NASTY_USER)).toBe(true)
-  expect(agentPromptExceedsBudget(result.text)).toBe(false)
+  expect(agentLaunchContextExceedsBudget(result.text)).toBe(false)
   expect(optional[1].text).toContain('<&>') // The source itself remains unchanged.
-  const mandatory = composeAgentLaunchPrompt('x'.repeat(MAX_AGENT_PROMPT_BYTES), true, 'Required authority.', optional)
-  expect(agentPromptExceedsBudget(mandatory.text)).toBe(true)
-  expect(mandatory.text.endsWith('x'.repeat(MAX_AGENT_PROMPT_BYTES))).toBe(true)
+  const mandatory = composeAgentLaunchPrompt('x'.repeat(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES), true, 'Required authority.', optional)
+  expect(agentLaunchContextExceedsBudget(mandatory.text)).toBe(true)
+  expect(mandatory.text.endsWith('x'.repeat(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES))).toBe(true)
   expect(mandatory.systemContext).toContain('Required authority.')
 })
 

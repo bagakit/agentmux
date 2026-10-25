@@ -11,7 +11,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { DEFAULT_MOTE_AGENT_INSTRUCTIONS, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_MEMORY } from '../src/shared/topic-agent-instructions'
 import { goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
-import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
+import { AGENT_LAUNCH_CONTEXT_BUDGET_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 vi.mock('electron', () => ({ nativeImage: {}, app: { getPath: () => _hygiene_fixturePath("not-used-by-this-test") } }))
@@ -47,7 +47,7 @@ it.each(['blank', 'single-memory', 'combined', 'escaped', 'personality-wiki'] as
   const { DEFAULT_CONFIG } = await import('../src/main/config-store')
   const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:budget-' + mode)
   const directory = mote.physicalDirectoryPath!
-  const edits: Record<string, string> = mode === 'single-memory' ? { 'MEMORY.md': 'm'.repeat(MAX_AGENT_PROMPT_BYTES) }
+  const edits: Record<string, string> = mode === 'single-memory' ? { 'MEMORY.md': 'm'.repeat(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES) }
     : mode === 'combined' ? { 'AGENTS.md': '甲'.repeat(11000), 'MEMORY.md': '乙'.repeat(11000) }
     : mode === 'escaped' ? { 'MEMORY.md': '<&>'.repeat(6000) }
     : mode === 'personality-wiki' ? { 'SOUL.md': '# SOUL\n' + '甲<&>'.repeat(15000), '.agentmux/topic-wiki.md': '乙<&>'.repeat(15000) } : {}
@@ -73,7 +73,7 @@ it.each(['blank', 'single-memory', 'combined', 'escaped', 'personality-wiki'] as
     expect(system).toContain('mote --skill')
     expect(timeline.items.filter(item => item.kind === 'user_message').map(item => item.content)).toEqual([user])
     const wire = (f.start.mock.calls[0]![0] as unknown as { args: string[] }).args.find(arg => arg.startsWith('<amux>'))!
-    expect(Buffer.byteLength(wire)).toBeLessThanOrEqual(MAX_AGENT_PROMPT_BYTES)
+    expect(Buffer.byteLength(wire)).toBeLessThanOrEqual(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES)
     expect(wire.endsWith(user)).toBe(true)
     if (mode === 'blank') {
       expect(system).toContain(DEFAULT_MOTE_AGENT_INSTRUCTIONS)
