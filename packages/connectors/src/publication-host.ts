@@ -37,6 +37,8 @@ type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | unde
 type Lane = { portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
+// Optional display observation only: expiry leaves the original author/body usable.
+const OPTIONAL_DISPLAY_WAIT_MS = 750
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
 export class PublicationHost implements ConnectionDeliveryPort {
@@ -44,6 +46,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
   private readonly lanes = new Map<string, Lane>()
   private readonly notices = new Map<string, Lane>()
   private readonly resourcePreparations = new Map<string, Promise<unknown>>()
+  private readonly speakerPreparations = new Map<string, Promise<PublicationSpeakerDetails>>()
+  private readonly speakerLifetime = new AbortController()
   private closed = false
   private readonly timer: ReturnType<typeof setInterval>
   constructor(private readonly options: PublicationHostOptions) {
@@ -334,7 +338,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const details = new Map<string, Promise<PublicationSpeakerDetails>>()
     for (const rows of originals.values()) for (const row of rows) for (const message of row.messages) {
       const target = message.speaker!.reference!, key = JSON.stringify(target)
-      if (this.options.speaker && !details.has(key)) details.set(key, this.until(this.options.speaker(target, signal), signal).catch(() => { signal.throwIfAborted(); return {} }))
+      if (this.options.speaker && !details.has(key)) details.set(key, this.speakerDetails(target, signal))
       if (details.has(key)) {
         const observed = await details.get(key)!, speaker = message.speaker!
         if (observed.name !== undefined) speaker.name = observed.name
@@ -344,6 +348,22 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
     }
     return originals
+  }
+  /** Share the real optional read; one lane ending its observation cannot cancel another. */
+  private async speakerDetails(reference: ConversationRef, signal: AbortSignal): Promise<PublicationSpeakerDetails> {
+    signal.throwIfAborted()
+    const key = JSON.stringify([reference.hostId, reference.agentSessionId])
+    let reading = this.speakerPreparations.get(key)
+    if (!reading) {
+      reading = Promise.resolve().then(() => {
+        this.speakerLifetime.signal.throwIfAborted()
+        return this.options.speaker!(reference, this.speakerLifetime.signal)
+      })
+        .finally(() => { this.speakerPreparations.delete(key) })
+      this.speakerPreparations.set(key, reading)
+    }
+    try { return await this.until(reading, AbortSignal.any([signal, AbortSignal.timeout(OPTIONAL_DISPLAY_WAIT_MS)])) }
+    catch { signal.throwIfAborted(); return {} }
   }
   private async speakers(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal): Promise<Map<string, PublicationSpeaker>> {
     const result = new Map<string, PublicationSpeaker>(), details = new Map<string, Promise<PublicationSpeakerDetails>>()
@@ -361,14 +381,14 @@ export class PublicationHost implements ConnectionDeliveryPort {
               .finally(() => { this.resourcePreparations.delete(key) })
             this.resourcePreparations.set(key, reading)
           }
-          const resource = parseAgentInputResourceResult(await this.until(reading, AbortSignal.any([signal, AbortSignal.timeout(750)])), request)
+          const resource = parseAgentInputResourceResult(await this.until(reading, AbortSignal.any([signal, AbortSignal.timeout(OPTIONAL_DISPLAY_WAIT_MS)])), request)
           if (resource.status === 'available') speaker.avatar = { ...speaker.avatar, observation: 'available', image: publicationImage({ ...resource, status: 'read' }) }
         } catch { signal.throwIfAborted() /* Optional original portrait never changes the accepted author. */ }
       }
 
       if (speaker.kind === 'agent' && speaker.reference && this.options.speaker) {
         const target = speaker.reference, key = JSON.stringify(target)
-        if (!details.has(key)) details.set(key, this.until(this.options.speaker(target, signal), signal).catch(() => { signal.throwIfAborted(); return {} }))
+        if (!details.has(key)) details.set(key, this.speakerDetails(target, signal))
         const observed = await details.get(key)!
         if (observed.name !== undefined) speaker.name = observed.name
         if (observed.nameRevision !== undefined) speaker.nameRevision = observed.nameRevision
@@ -807,6 +827,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   close(): void {
     if (this.closed) return
     this.closed = true; clearInterval(this.timer)
+    this.speakerLifetime.abort(); this.speakerPreparations.clear()
     for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
     this.lanes.clear()
     for (const lane of this.notices.values()) lane.abort.abort()
