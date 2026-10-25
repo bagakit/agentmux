@@ -31,10 +31,10 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 每个实际接入的错误形态需沿同一来源核对以下范围，完整文档覆盖与实际 CLI 支持分别说明：
 
 - 原生结构化错误中的 code、type、HTTP 状态、message、retry 信息、model 和 thread／turn 身份各自是否存在；不从同页一般说明补造当前字段。未识别 code 原样保留；缺 native code 明确未知，AgentMux 分类标识注明为本地分类。
-- Codex 自己渲染的错误若不带原码，只能识别其实际失败事实和有依据的分类。`Selected model is at capacity. Please try a different model.` 这一呈现不能单独证明 HTTP `503` 或 `server_is_overloaded`；识别还须证明是当前原生错误呈现，不能搜索普通聊天、引用、工具文本或旧屏幕后冒充当前请求失败。
+- `Selected model is at capacity. Please try a different model.` 这条文案本身不能证明当前失败、HTTP `503` 或 `server_is_overloaded`。适配须读取准确原生错误记录的结构、来源与终局事实；终端呈现、普通聊天、引用或工具文本里的相同文字不建立失败资格。实际原记录若提供 `codex_error_info: server_overloaded`，保留这个原码并按本地分类解释，不改写成官方 API 的另一原码。
 - 原生错误可能发生在独立子 Agent。错误事实保实际主体，主 Agent 当前是否仍在工作或本轮是否失败由真实协议决定；不根据相邻 review 文本猜具体模型或子线程。
 - 原生重试通知、最终请求失败、轮结束和进程退出分别核对。后续同请求成功、新轮或来源更换只按准确身份收敛，迟到旧错误不覆盖新结果，历史仍可读。
-- Core 公共状态及 SDK／JSON-RPC／CLI、Desktop 服务窗与 Focus 必须消费同一事实；不能只在 Provider helper 或终端看得到便声称闭环。普通输入、原 Session、Run、布局、历史和草稿继续保留。
+- 沿同一原记录分别核对状态、历史页、增量变化、SDK／JSON-RPC／CLI、共同对话错误卡和连接器发布。目标合同为原 item 上的 `turnOutcome`，metrics 仅保计量；不能只在 Provider helper、当前服务窗或终端看得到便声称闭环。外发使用 Provider 明确提供的 `publicMessage` 与标准恢复建议；缺摘要时使用固定通用失败文案，原 message／payload 不因可本地读取而获得公开资格。普通输入、原 Session、Run、布局、历史和草稿继续保留。
 
 ## 当前适配的原生信号
 
@@ -54,7 +54,7 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 
 Provider 的 [`observeCodexSessionStatus`](../../packages/core/src/providers/codex-session-status.ts) 复用轮证据解码与准确原文件观察，初读有界，后续读取新增字节；[`createCodexProvider`](../../packages/core/src/providers/codex.ts) 贡献 `observeSessionStatus`。Core 的 [`ensureNativeStatusObservation`／`statusAgent`](../../packages/core/src/client.ts) 接准确 Run／native source、持久状态与公共事件，SDK／JSON-RPC／CLI 复用原 `agent.inspect`、`agent.ls`、`whoami`。实际消费与后续恢复按对应实现的验证来源和边界核实。
 
-上述是当前源码路径，不表示官方 API、WebSocket 或 Python SDK 的所有错误在 CLI 都会出现，模型、完整 API error.type、Retry-After 等字段也不因此变成已暴露事实。真实支持按轮记录实际字段及对应实现的证明报告；没有原生终局记录或读取失败时保观察未知／明确诊断，不改健康 Run。
+上述适配表限定为当前状态观察路径，不证明原生历史与外部 publication 已使用同一结果。目标字段、同源归并和共享摘要见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，现有独立消费入口见[对话机制](../architecture/conversation.md#原生结果的现有接线与目标边界)。这些路径不表示官方 API、WebSocket 或 Python SDK 的所有错误在 CLI 都会出现，模型、完整 API error.type、Retry-After 等字段也不因此变成已暴露事实。真实支持按轮记录实际字段及对应实现的证明报告；没有原生终局记录或读取失败时保观察未知／明确诊断，不改健康 Run。
 
 ## 当前源码入口与交付边界
 
