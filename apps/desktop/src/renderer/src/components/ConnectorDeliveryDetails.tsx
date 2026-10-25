@@ -2,11 +2,13 @@ import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RoomBinding } from '@agentmux/core/connections'
+import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { api } from '../lib/api'
 import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, readGroupDiagnosis, retainGroupDiagnosis, type GroupDiagnosis, type GroupWindow } from '../lib/group-diagnosis'
 
 import { connectorGroupSummary } from '../lib/connector-group-status'
 import { ConnectorTrafficSummary } from './ConnectorTrafficSummary'
+import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
@@ -20,6 +22,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
   current.current = { key, source }
   const [read, setRead] = useState<{ key: string; value: GroupDiagnosis; checkedAt: number } | null>(null), [pending, setPending] = useState(false), [expanded, setExpanded] = useState(false)
   const [detail, setDetail] = useState<{ key: string; value: ReturnType<typeof deliveryFacts> | null; issue: boolean } | null>(null)
+  const [input, setInput] = useState<{ key: string; ingressId: string; receipt: AgentInputSubmissionReceipt | null; issue: boolean } | null>(null)
   const [copying, setCopying] = useState(false), [feedback, setFeedback] = useState('')
   const originalSections = useRef<Record<'incoming' | 'receipts' | 'content', HTMLElement | null>>({ incoming: null, receipts: null, content: null })
   const reveal = useRef<'incoming' | 'receipts' | 'content' | null>(null)
@@ -53,6 +56,19 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
     } catch { if (accepts() && request === epoch.current) setDetail({ key, value: null, issue: true }) }
     finally { if (accepts() && request === epoch.current) setPending(false) }
   }
+  async function inspectInput(row: NonNullable<GroupDiagnosis['incoming']['value']>['rows'][number]) {
+    const request = ++epoch.current; setPending(true)
+    try {
+      const result = await source('connection.ingress.inspect', { ingressId: row.ingressId })
+      if (!accepts() || request !== epoch.current) return
+      const ingress = result.ingress, saved = ingress?.kind !== 'action' ? ingress?.input : undefined, receipt = result.inputReceipt
+      const matches = ingress?.ingressId === row.ingressId && ingress.externalConversationId === target.externalConversationId && ingress.application.domain === target.domain && ingress.application.appId === target.appId &&
+        saved?.operationId === row.inputOperationId && saved.hostId === target.executionHostId && saved.agentSessionId === target.agentSessionId && saved.author.bindingId === target.bindingId && saved.author.bindingRevision === row.bindingRevision && saved.author.connectionId === target.connectionId &&
+        receipt?.originalControlOperationId === saved.operationId && receipt.key.kind === 'message' && receipt.key.agentSessionId === saved.agentSessionId && receipt.key.expectedRun.runId === saved.expectedRun.runId && receipt.key.messageId === saved.messageId
+      setInput(previous => ({ key, ingressId: row.ingressId, receipt: matches ? receipt! : previous?.key === key && previous.ingressId === row.ingressId ? previous.receipt : null, issue: !matches }))
+    } catch { if (accepts() && request === epoch.current) setInput(previous => ({ key, ingressId: row.ingressId, receipt: previous?.key === key && previous.ingressId === row.ingressId ? previous.receipt : null, issue: true })) }
+    finally { if (accepts() && request === epoch.current) setPending(false) }
+  }
   async function copyDiagnosis() {
     const request = ++exportRead.current
     // Freeze exact target and current bounded cursors at the click, separately from the changing display.
@@ -67,7 +83,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
     finally { if (accepts() && request === exportRead.current) setCopying(false) }
   }
   useEffect(() => {
-    live.current = true; reveal.current = null; setFeedback(''); setCopying(false); setDetail(null); void inspect()
+    live.current = true; reveal.current = null; setFeedback(''); setCopying(false); setDetail(null); setInput(null); void inspect()
     return () => { live.current = false; epoch.current++; exportRead.current++ }
   }, [key, source])
   const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value
@@ -95,7 +111,14 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
       <p className="agent-connector-note">Latest 5 records from this application and group, including other receiving connections. Platform acknowledgement is not recorded by this read API.</p>
       {incoming ? <><p className="agent-connector-note">Group window: {incoming.rows.length} records, newest first · has next: {String(incoming.next !== null)}</p>
         {!incoming.rows.length ? <p className="agent-connector-note">No intake in this exact group window. This is not a complete-history or platform-receipt claim.</p> : null}
-        {incoming.rows.map(row => <div className="agent-connector-receipt" key={row.ingressId}><span>Conversation record: {row.recording?.state ?? 'not confirmed'}{row.recording?.code ? ' · ' + row.recording.code : ''} · Host intake: {row.state}{row.code ? ' · ' + row.code : ''} · Core input: {row.coreStatus ?? (row.inputOperationId ? 'unconfirmed' : 'not started')}{row.scope === 'other-binding' ? ' · another binding revision' : ''}</span><code>{row.ingressId}</code>{row.inputOperationId ? <code>{row.inputOperationId}</code> : null}{row.waiting ? <small>Core waiting: {row.waiting.phase} · {row.waiting.reason} · {row.waiting.wake}</small> : null}{row.coreObservation === 'unavailable' ? <small>Original Core receipt read unavailable; no input was replayed.</small> : null}</div>)}
+        {incoming.rows.map(row => <div className="agent-connector-receipt" key={row.ingressId}><span>Conversation record: {row.recording?.state ?? 'not confirmed'}{row.recording?.code ? ' · ' + row.recording.code : ''} · Host intake: {row.state}{row.code ? ' · ' + row.code : ''} · Core input: {row.coreStatus ?? (row.inputOperationId ? 'unconfirmed' : 'not started')}{row.scope === 'other-binding' ? ' · another binding revision' : ''}</span><code>{row.ingressId}</code>{row.inputOperationId ? <code>{row.inputOperationId}</code> : null}{row.waiting ? <small>{row.waiting.wake === 'explicit-rejoin' ? 'Input recovery needed. Review the saved input before explicitly rejoining its wait.' : 'The saved input will be checked when its original runtime or session is restored.'}</small> : null}{row.coreObservation === 'unavailable' ? <small>Original Core receipt read unavailable; no input was replayed.</small> : null}
+          {row.kind === 'message' && row.scope === 'current-binding' && row.inputOperationId ? <button className="small-button" disabled={pending} onClick={() => void inspectInput(row)}>Open original input</button> : null}
+          {input?.key === key && input.ingressId === row.ingressId ? <>
+            {input.issue ? <small role="status">Original input receipt could not be confirmed. Saved input and any earlier receipt are kept.</small> : null}
+            {input.receipt ? <OriginalInputWaitingControl hostId={target.executionHostId} receipt={input.receipt} onRefresh={() => inspect(visible?.window)} /> : null}
+            <button className="small-button" onClick={() => setInput(null)}>Close original input</button>
+          </> : null}
+        </div>)}
         {incoming.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ beforeIngressId: incoming.next! })}>Earlier intake</button> : null}</> : null}
       {sectionIssue('Incoming', visible?.incoming)}
       </section>

@@ -16,7 +16,7 @@ const stopMessages: Record<AgentInputWaitStopReceipt['outcome'], string> = {
   'stale-generation': '等待批次已变化；未停止新的等待。重新打开详情查看当前等待。'
 }
 
-/** The original Core journal owns cancellation. A repeated explicit click uses the same original action identity. */
+/** The original Core journal owns waiting and its recovery. A repeated explicit click uses the same original action identity. */
 export function OriginalInputWaitingControl(props: Props) {
   return <OriginalWaiting key={JSON.stringify([props.hostId, ...inputKey(props.receipt.ref.key)])} {...props} />
 }
@@ -26,21 +26,24 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
   const [ref] = useState(() => receipt.ref)
   const [cancelOperationId] = useState(() => `desktop-input-stop-v1:${bytesToHex(sha256(utf8ToBytes(JSON.stringify([hostId, ...inputKey(ref.key), ref.waitGeneration]))))}`)
   const alive = useRef(true), running = useRef(false)
-  const [busy, setBusy] = useState<'stop' | 'check' | null>(null)
+  const [busy, setBusy] = useState<'stop' | 'check' | 'rejoin' | null>(null)
   const [ack, setAck] = useState<AgentInputWaitStopReceipt | null>(null)
+  const [rejoined, setRejoined] = useState(false)
+  const [rejoinUnconfirmed, setRejoinUnconfirmed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [checked, setChecked] = useState<{ source: AgentInputSubmissionReceipt; value: AgentInputSubmissionReceipt | null } | null>(null)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const observed = checked?.source === receipt ? checked.value ?? receipt : receipt
   const changed = referenceKey(observed.ref) !== referenceKey(ref)
   const enabled = !changed && observed?.status === 'waiting' && observed.control.state === 'enabled'
+  const needsRejoin = enabled && observed.control.waiting?.wake === 'explicit-rejoin'
   const control = { kind: 'agent' as const, hostId, agentSessionId: ref.key.agentSessionId, run: ref.key.expectedRun }
 
   async function refresh() {
     try { await onRefresh?.() }
     catch { if (alive.current) setError('刷新未确认；已收到的操作回执保留。') }
   }
-  async function run(action: 'stop' | 'check') {
+  async function run(action: 'stop' | 'check' | 'rejoin') {
     if (running.current) return
     running.current = true; setBusy(action); setError(null)
     try {
@@ -51,6 +54,11 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
           throw new Error('停止回执与原请求不匹配。')
         }
         setAck(result)
+      } else if (action === 'rejoin') {
+        const result = await api.sessions.rejoinInputWaiting(control, ref)
+        if (!alive.current) return
+        if (JSON.stringify(inputKey(result.key)) !== JSON.stringify(inputKey(ref.key))) throw new Error('接回回执与原输入不匹配。')
+        setChecked({ source: receipt, value: result }); setRejoined(true); setRejoinUnconfirmed(false)
       } else {
         const result = await api.sessions.inspectInput(control, ref.key)
         if (!alive.current) return
@@ -58,10 +66,14 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
           throw new Error('检查结果与原输入不匹配。')
         }
         setChecked({ source: receipt, value: result })
+        if (result) setRejoinUnconfirmed(false)
       }
       if (alive.current) await refresh()
     } catch (failure) {
-      if (alive.current) setError(`${action === 'stop' ? '停止结果未确认；保留原请求，可检查后再次明确停止。' : '本次检查未确认；保留原记录。'} ${failure instanceof Error ? failure.message : String(failure)}`)
+      if (alive.current) {
+        if (action === 'rejoin') setRejoinUnconfirmed(true)
+        setError(`${action === 'stop' ? '停止结果未确认；保留原请求，可检查后再次明确停止。' : action === 'rejoin' ? '接回结果未确认；原输入保留，请先检查原输入。' : '本次检查未确认；保留原记录。'} ${failure instanceof Error ? failure.message : String(failure)}`)
+      }
     } finally {
       if (alive.current) { running.current = false; setBusy(null) }
     }
@@ -70,10 +82,14 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
   if (!enabled && !changed && !ack && !checked && !error && !busy) return null
   return <section className="original-input-waiting" aria-label="原输入等待操作" data-original-input-waiting>
     <div className="original-input-waiting__actions">
+      {needsRejoin && !ack ? <button className="small-button" type="button" data-input-wait-action="rejoin" disabled={busy !== null || rejoinUnconfirmed} onClick={() => void run('rejoin')}>接回这次等待</button> : null}
       {enabled && !ack ? <button className="small-button" type="button" data-input-wait-action="stop" disabled={busy !== null} onClick={() => void run('stop')}>停止这次等待</button> : null}
       <button className="small-button" type="button" data-input-wait-action="check" disabled={busy !== null} onClick={() => void run('check')}>{busy === 'check' ? '正在检查…' : '检查原输入'}</button>
     </div>
     {busy === 'stop' ? <p role="status">正在停止这次等待…</p> : null}
+    {busy === 'rejoin' ? <p role="status">正在接回原输入等待…</p> : null}
+    {needsRejoin ? <p>原输入已保存，需要明确接回后才能继续检查输入环境。</p> : null}
+    {rejoined ? <p role="status" data-input-rejoin-outcome>原输入的接回请求已有回执；这不代表 Agent 已接收。</p> : null}
     {ack ? <p role="status" data-input-stop-outcome={ack.outcome}>{ack.outcome === 'already-settled' && receipt.status === 'waiting'
       ? '上方等待状态是此前观测。原输入已结束等待；请检查原输入结果。' : stopMessages[ack.outcome]}</p> : null}
     {changed && ack?.outcome !== 'stale-generation' ? <p role="status" data-input-wait-generation>等待批次已变化；当前操作仍绑定原批次。重新打开详情可查看新的等待。</p> : null}
