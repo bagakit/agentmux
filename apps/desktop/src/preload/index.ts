@@ -524,6 +524,11 @@ const api: AgentMuxPreloadApi = {
     goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
     list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
     create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource),
+    update: async input => {
+      const result: import('../shared/continuous-progress').ProgressUpdateResult = await ipcRenderer.invoke('continuousProgress:update', input)
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code })
+      return result.loop
+    },
     action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => ipcRenderer.invoke('continuousProgress:action', target, loopId, action, expectedLoop, operationId),
     pauseForInput: (control: AgentSessionControl) => ipcRenderer.invoke('continuousProgress:pauseForInput', control),
   },

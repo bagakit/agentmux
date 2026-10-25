@@ -237,6 +237,7 @@
 .continuous-progress-control__notice { color: var(--text-2); overflow-wrap: anywhere; white-space: pre-wrap; }
 .continuous-progress-control form, .continuous-progress-control__group, .continuous-progress-control__source-fields { display: grid; gap: var(--sp-4); min-width: 0; }
 .continuous-progress-control__group { padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.continuous-progress-control__group[hidden] { display: none; }
 .continuous-progress-control h4, .continuous-progress-panel h4 { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
 .continuous-progress-control label { display: grid; gap: var(--sp-2); min-width: 0; }
 .continuous-progress-control input:not([type='checkbox']), .continuous-progress-control textarea { width: 100%; min-width: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }

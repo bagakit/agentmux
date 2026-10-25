@@ -1708,6 +1708,13 @@ export async function registerIpc(args: {
     requireTrustedSender('continuousProgress:action', event)
     return (await callUserRpc('agent.progress.action', { target, loopId, action, expectedLoop, operationId })).loop
   })
+  handleWithEvent('continuousProgress:update', async (event, input: import('../shared/continuous-progress').ProgressUpdateRequest): Promise<import('../shared/continuous-progress').ProgressUpdateResult> => {
+    requireTrustedSender('continuousProgress:update', event)
+    try { return { ok: true, loop: (await callUserRpc('agent.progress.update', input)).loop } }
+    catch (error) {
+      return { ok: false, error: { ...(error instanceof AgentMuxError ? { code: error.code } : {}), message: error instanceof Error ? error.message : String(error) } }
+    }
+  })
   const pauseAutomaticInput = async (control: AgentSessionControl) => {
     const context = { principal: { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') } }
     const owner = (await args.runtime.callOriginalCore(control.hostId, 'runtime.owner.identity', {}, context)).owner

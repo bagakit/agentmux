@@ -13,6 +13,9 @@ export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionM
 }
 export type MoteIdeaDraft = { direction: string; includeDiscussion: boolean; feedback: Record<string, { vote: '' | 'useful' | 'less-useful'; comment: string }>; arrangement?: MoteIdeaSchedulePreparation }
 export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft; schedule?: ScheduleDraft;
+  progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
+  progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
+  unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
   prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
 
@@ -26,6 +29,9 @@ type LauncherState = {
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
   setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
   setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
+  setProgressUpdate(launcherId: string, request: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined): boolean
+  setProgressDraft(launcherId: string, patch: Partial<NonNullable<LauncherDraft['progressDraft']>> | undefined): boolean
+  retainProgressUpdate(launcherId: string): boolean
   setAgentName(launcherId: string, field: LauncherNameField, value: string): boolean
   setAgentOption(launcherId: string, providerId: string, optionId: string, choiceId: string | null): boolean
   copyUtilityDraft(fromLauncherId: string, toLauncherId: string): boolean
@@ -43,6 +49,23 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
   reportStorageIssue = message => { try { set({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
   return {
   persistenceIssue: null, sections: {}, drafts: {}, executors: {}, moteTopicId: null,
+  setProgressUpdate(launcherId, request) {
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), progressUpdate: request } } })); return true }
+    catch { reportStorageIssue('The original configuration request could not be saved. Your current input is kept.'); return false }
+  },
+  setProgressDraft(launcherId, patch) {
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT),
+      progressDraft: patch ? { interval: '', prompt: '', ...state.drafts[launcherId]?.progressDraft, ...patch } : undefined } } })); return true }
+    catch { reportStorageIssue('Your configuration draft could not be saved on this device. Current input remains available.'); return false }
+  },
+  retainProgressUpdate(launcherId) {
+    try { set(state => {
+      const draft = state.drafts[launcherId], request = draft?.progressUpdate
+      return !request ? state : { drafts: { ...state.drafts, [launcherId]: { ...draft, progressUpdate: undefined,
+        unconfirmedProgressUpdates: [...(draft.unconfirmedProgressUpdates ?? []), request] } } }
+    }); return true }
+    catch { reportStorageIssue('The original unconfirmed save remains available; its local persistence is unconfirmed.'); return false }
+  },
   setScheduleDraft(launcherId, patch) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT),
       schedule: { ...state.drafts[launcherId]?.schedule, ...patch } } } })); return true }
