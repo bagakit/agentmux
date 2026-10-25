@@ -166,7 +166,7 @@ it.runIf(process.platform === 'darwin')('real terminal preserves a large origina
   } finally { await h.close() }
 })
 
-it.runIf(process.platform === 'darwin')('actual record and encoded terminal limits reject only their operation while short input remains usable', async () => {
+it.runIf(process.platform === 'darwin')('actual record limit preserves its operation while bounded terminal frames carry the complete input', async () => {
   const h = await fixture(false)
   try {
     await h.client.submitAgentPrompt(h.input('record-too-large', '中'.repeat(400_000)))
@@ -181,11 +181,34 @@ it.runIf(process.platform === 'darwin')('actual record and encoded terminal limi
     await h.client.submitAgentPrompt(h.input('short-after-record', 'PRIVATE_QUEUE_SHORT_RECORD'))
     expect(await h.receipt('short-after-record', 'terminal-confirmed')).toMatchObject({ status: 'terminal-confirmed' })
     await h.client.submitAgentPrompt(h.input('carrier-too-large', '中'.repeat(100_000)))
-    const carrier = await h.receipt('carrier-too-large', 'not-applied')
-    expect(carrier).toMatchObject({ status: 'not-applied' })
+    const carrier = await h.receipt('carrier-too-large', 'terminal-confirmed')
+    expect(carrier).toMatchObject({ status: 'terminal-confirmed' })
     await h.client.submitAgentPrompt(h.input('short-after-carrier', 'PRIVATE_QUEUE_SHORT_CARRIER'))
     expect(await h.receipt('short-after-carrier', 'terminal-confirmed')).toMatchObject({ status: 'terminal-confirmed' })
-    await vi.waitFor(async () => expect(await h.terminalInputs()).toEqual(['PRIVATE_QUEUE_SHORT_RECORD', 'PRIVATE_QUEUE_SHORT_CARRIER']), { timeout: 5000, interval: 50 })
+    await vi.waitFor(async () => expect(await h.terminalInputs()).toEqual(['PRIVATE_QUEUE_SHORT_RECORD', '中'.repeat(100_000), 'PRIVATE_QUEUE_SHORT_CARRIER']), { timeout: 5000, interval: 50 })
     expect((await h.client.statusAgent('original')).run).toMatchObject({ runId: h.initial.run.runId, pid: h.initial.run.pid, state: 'running' })
+  } finally { await h.close() }
+})
+
+it.runIf(process.platform === 'darwin').each(['ASCII', 'Unicode'])('real terminal carries complete %s chunks once and retains receipts across Core reopen', async shape => {
+  const h = await fixture(false)
+  try {
+    const body = shape === 'ASCII' ? 'x'.repeat(900_000) : '中文🙂'.repeat(90_000), id = 'bounded-' + shape
+    const before = await h.client.statusAgent('original')
+    await h.client.submitAgentPrompt(h.input(id, body))
+    const receipt = await h.receipt(id, 'terminal-confirmed')
+    expect(receipt.admission!.admission!.chunks!.length).toBeGreaterThan(1)
+    expect(receipt.admission!.admission!.chunks!.every(chunk => chunk.acknowledged)).toBe(true)
+    await vi.waitFor(async () => expect((await h.terminalInputs()).map(value => ({ bytes: Buffer.byteLength(value), sha256: createHash('sha256').update(value).digest('hex') })))
+      .toEqual([{ bytes: Buffer.byteLength(body), sha256: createHash('sha256').update(body).digest('hex') }]), { timeout: 5000, interval: 50 })
+    const after = await h.client.statusAgent('original')
+    expect(after.run).toMatchObject({ runId: before.run.runId, pid: before.run.pid, state: 'running',
+      acceptedInputBytes: before.run.acceptedInputBytes! + Buffer.byteLength(body) + 1 })
+    await h.reopen()
+    const retained = await h.client.inspectAgentInput({ key: h.key(id) })
+    expect(retained!.admission).toEqual(receipt.admission)
+    expect(await h.client.rejoinAgentInputWaiting({ ref: retained!.ref })).toMatchObject({ status: 'terminal-confirmed', ref: retained!.ref })
+    expect((await h.terminalInputs()).map(value => createHash('sha256').update(value).digest('hex'))).toEqual([createHash('sha256').update(body).digest('hex')])
+    expect((await h.client.statusAgent('original')).run).toMatchObject({ runId: after.run.runId, pid: after.run.pid, acceptedInputBytes: after.run.acceptedInputBytes })
   } finally { await h.close() }
 })

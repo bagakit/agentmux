@@ -17,13 +17,14 @@ const mutations = [
   ['repartition-old-claim', 'const limit = current.chunk?.bytes ?? data.byteLength', 'const limit = current.chunk?.bytes ?? inputChunkBytes(position.runId, current.operation)'],
   ['skip-durable-claim', 'await this.options.persist(structuredClone(next))', 'await Promise.resolve()'],
 ]
-const candidatePaths = ['packages/core/src/agent-execution-bridge.ts', 'packages/core/test/agent-execution-bridge.test.ts']
+const candidatePaths = ['packages/core/src/agent-execution-bridge.ts', 'packages/core/src/recoverable-input-frame.ts', 'packages/core/test/agent-execution-bridge.test.ts']
 const fingerprint = async () => Object.fromEntries(await Promise.all(candidatePaths.map(async path => [path, createHash('sha256').update(await readFile(join(repository, path))).digest('hex')])))
 const candidate = await fingerprint()
 const receipts = []
 for (const [name, from, to] of mutations) {
   const report = join(root, name + '.json'), config = join(root, name + '.config.mjs'), log = join(root, name + '.log')
-  await writeFile(config, `let applied=0;export default {root:${JSON.stringify(repository)},plugins:[{name:'exact-input-mutation',enforce:'pre',transform(source,id){if(!id.endsWith('/agent-execution-bridge.ts'))return;const from=${JSON.stringify(from)};if(source.split(from).length!==2)throw new Error('Mutation source must match exactly once');applied++;return source.replace(from,${JSON.stringify(to)})},buildEnd(){if(applied!==1)throw new Error('Mutation did not reach the exact product module')}}],test:{include:['packages/core/test/agent-execution-bridge.test.ts'],passWithNoTests:false,pool:'forks',maxWorkers:1,reporters:['json'],outputFile:${JSON.stringify(report)}}}`, { mode: 0o600 })
+  const module = name === 'wire-numeric-budget' ? '/recoverable-input-frame.ts' : '/agent-execution-bridge.ts'
+  await writeFile(config, `let applied=0;export default {root:${JSON.stringify(repository)},plugins:[{name:'exact-input-mutation',enforce:'pre',transform(source,id){if(!id.endsWith(${JSON.stringify(module)}))return;const from=${JSON.stringify(from)};if(source.split(from).length!==2)throw new Error('Mutation source must match exactly once');applied++;return source.replace(from,${JSON.stringify(to)})},buildEnd(){if(applied!==1)throw new Error('Mutation did not reach the exact product module')}}],test:{include:['packages/core/test/agent-execution-bridge.test.ts'],passWithNoTests:false,pool:'forks',maxWorkers:1,reporters:['json'],outputFile:${JSON.stringify(report)}}}`, { mode: 0o600 })
   const child = spawn(resolve(repository, 'packages/core/node_modules/.bin/vitest'), ['run', '--config', config], { cwd: repository, stdio: ['ignore', 'pipe', 'pipe'] })
   const chunks = []
   child.stdout.on('data', bytes => chunks.push(bytes)); child.stderr.on('data', bytes => chunks.push(bytes))

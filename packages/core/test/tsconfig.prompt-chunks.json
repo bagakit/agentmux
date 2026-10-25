@@ -1,0 +1,8 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler",
+    "noEmit": true, "allowImportingTsExtensions": true, "lib": ["ES2024", "DOM", "DOM.Iterable"]
+  },
+  "include": ["prompt-submission-diagnostics.test.ts", "prompt-carrier-native.test.ts", "agent-execution-bridge.test.ts", "vitest.prompt-chunks.config.mts"]
+}
