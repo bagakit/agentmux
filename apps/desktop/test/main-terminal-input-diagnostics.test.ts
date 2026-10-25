@@ -2,6 +2,38 @@ import { expect, it, vi } from 'vitest'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve() }
+it('Agent OSC replies use the same raw input owner and quiescence as keyboard input', async () => {
+  const owner = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), async () => { throw Error('Unexpected connection') })
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  const writeAgent = vi.fn(async () => { await pending })
+  const connectRuntime = vi.fn(async () => {})
+  const client = { writeAgent, connectRuntime, runtimeOwnerIdentity: () => ({ availability: 'connected' }) }
+  const inner = owner as any
+  inner.hosts.set('local', { client, executionHost: { kind: 'local' } })
+  const run = { runId: 'protocol-run' }
+  const output = { type: 'terminal-output', run, data: '\u001b]10;?\u0007' }
+  try {
+    // A query before its Session arrives is delivered through the same owner when bound.
+    inner.publish('local', output)
+    expect(writeAgent).not.toHaveBeenCalled()
+    inner.publish('local', { type: 'agent-session', session: { agentSessionId: 'protocol-agent', run } })
+    expect(inner.hostOperations.get('local')?.size).toBe(1)
+    await flush()
+    expect(writeAgent).toHaveBeenCalledWith({ agentSessionId: 'protocol-agent', expectedRun: run,
+      source: 'terminal-protocol', data: '\u001b]10;rgb:ffff/ffff/ffff\u001b\\' })
+    expect(connectRuntime).not.toHaveBeenCalled()
+    let quiet = false
+    const idle = inner.waitForHostQuiescence('local').then(() => { quiet = true })
+    await flush(); expect(quiet).toBe(false)
+    release(); await idle; await flush()
+    expect(inner.hostOperations.size).toBe(0)
+    inner.publish('local', output)
+    await flush()
+    expect(writeAgent).toHaveBeenCalledTimes(2)
+    expect(connectRuntime).not.toHaveBeenCalled()
+  } finally { release(); owner.resourceSampler.dispose() }
+})
 it('Main raw input tracks original Host work without cursor or full-receipt serialization', async () => {
   const connect = vi.fn(async () => { throw new Error('No connection should be opened') })
   const owner = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), connect)
