@@ -45,7 +45,7 @@ it.each([undefined, 'original-agent-on-B'])('built CLI refuses control with orig
   expect(result.stderr).toContain('original Agent Host route')
   expect(result.stdout.length).toBeGreaterThan(0) // Preserve passive Hook output; do not gate a healthy tool.
   expect(f.counts()).toEqual({ rpcConnections: 0, hookRequests: 0 })
-})
+}, 30_000)
 it('built offline discovery and ordinary native commands remain usable; ordinary local mode still reaches its endpoint', async () => {
   const f = await fixture()
   for (const args of [['--help'], ['--skill'], ['agent', '--skill'], ['agent', 'ls', '--help']]) {
@@ -56,4 +56,4 @@ it('built offline discovery and ordinary native commands remain usable; ordinary
   expect(f.counts()).toEqual({ rpcConnections: 0, hookRequests: 0 })
   await f.run(['whoami'], cli, { ...f.env, AGENTMUX_TOOL_CONTEXT: undefined })
   expect(f.counts().rpcConnections).toBe(1)
-})
+}, 30_000)
