@@ -50,7 +50,7 @@ let f: Awaited<ReturnType<typeof channelMetadataFixture>>, calls: Array<{ method
 let metadataReady = false, metadataInFlight = 0, metadataChanges = 0
 beforeEach(async context => {
   vi.stubGlobal('URL', NodeURL)
-  const explicitOwner = context.task.name.startsWith('original Inputs fills') || context.task.name.startsWith('confirmed profile route')
+  const explicitOwner = context.task.name.startsWith('original Inputs fills') || context.task.name.startsWith('confirmed profile route') || context.task.name.startsWith('profile field observation')
   f = await channelMetadataFixture(cleanup, explicitOwner ? { hostingRuntimeId: 'original-profile-runtime', executionRuntimeId: 'original-execution-runtime' } : undefined); calls = []; metadataReady = false; metadataInFlight = 0; metadataChanges = 0
   terminals.mounted = 0; terminals.disposed = 0
   // This controlled hosting port retains the fixture's actual public RPC owner.
@@ -210,6 +210,46 @@ it.each([{ reference: false, partial: false }, { reference: true, partial: false
       actor: await f.get(), group: await f.get(groupSubject), selectedKey: key, wire, terminal: { mounted: terminals.mounted, disposed: terminals.disposed } }, null, 2))
   }
 }, 30_000)
+it.each([false, true])('profile field observation reaches original Inputs Info with saved=%s', async saved => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  const prior = await f.get(), native = f.transport.request.getMockImplementation()!
+  f.transport.request.mockImplementation(async input => input.url?.includes('/contact/v3/users/')
+    ? { code: 0, data: { user: { open_id: actorSubject.kind === 'actor' ? actorSubject.actor.userId : '' } } } : native(input))
+  if (!saved) await f.sdk.call('connection.metadata.clear', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject, expectedCacheRevision: prior.entry.cacheRevision })
+  const observed = await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
+  expect(observed.entry.observation).toMatchObject({ state: 'unavailable', freshness: saved ? 'stale' : 'unknown', profile: saved ? prior.entry.observation.profile : null })
+  const page = await f.sdk.call('agent.input.ls', { hostId: 'local', agentSessionId: 'original-agent', maxBytes: 128 * 1024 })
+  const items = page.items.flatMap(entry => entry.kind === 'item' && entry.item.kind === 'controlled' && entry.item.message?.sender.kind === 'external' ? [entry.item] : [])
+  expect(items).toHaveLength(1)
+  const item = items[0]!, key = inputMailboxItemKey('local', item)
+  const session = originalSession('terminal')
+  await dom.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} />)
+  const panel = await openInputs()
+  const row = () => [...panel.querySelectorAll<HTMLButtonElement>('.composer-mailbox__row')].find(node => node.dataset.recordKey === key)!
+  await vi.waitFor(() => expect(actorReads().length).toBeGreaterThan(0), { timeout: 5000 })
+  await vi.waitFor(() => expect(metadataInFlight).toBe(0), { timeout: 5000 })
+  await vi.waitFor(() => expect(row()?.querySelector('strong')?.textContent).toBe(saved ? 'Original native person' : 'original-external-user · open.feishu.cn'), { timeout: 5000 })
+  expect(row().querySelector('img')?.getAttribute('src') ?? null).toBe(saved ? 'https://cdn.example/person.png' : null)
+  await act(async () => row().click()); await dom.click('.conversation-input-details__toggle')
+  const facts = panel.querySelector('.conversation-input-details__body')!
+  expect(facts).not.toBeNull()
+  const profile = [...facts.querySelectorAll('dt')].find(node => node.textContent === 'Current profile')?.nextElementSibling
+  expect(profile?.textContent).toBe(saved ? 'Original native person · Saved · current read unconfirmed' : 'Name not observed · Not observed')
+  expect(facts.textContent).toContain('original-external-user')
+  const wire = item.intent.source.kind === 'message' ? item.intent.source.promptWire : undefined
+  expect(wire).toEqual(expect.any(String))
+  await dom.click('[aria-label="Copy message"]'); expect(copy).toHaveBeenLastCalledWith(wire)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect([terminals.mounted, terminals.disposed]).toEqual([1, 0])
+  const after = await f.sdk.call('agent.input.ls', { hostId: 'local', agentSessionId: 'original-agent', maxBytes: 128 * 1024 })
+  expect(after.items.flatMap(entry => entry.kind === 'item' && entry.item.kind === 'controlled' && entry.item.message?.messageId === item.message!.messageId ? [entry.item.intent.source] : [])).toEqual([item.intent.source])
+  const timeline = await f.client.sessionTimeline(session.id)
+  await mkdir('.local/channel-profile-field-permissions', { recursive: true })
+  await writeFile('.local/channel-profile-field-permissions/scene-' + (saved ? 'saved' : 'empty') + '.json', JSON.stringify({ control: session.control,
+    sourceHostId: timeline.sourceHostId, timeline, messages: projectSessionUserMessages({ agentSessionId: session.id, timeline }), mailbox: page,
+    actor: await f.get(), group: await f.get(groupSubject), selectedKey: key, wire }, null, 2))
+}, 30_000)
+
 it('native sender -> original profile cache -> public RPC -> registered IPC/preload -> mounted SessionPane original-record reader and exact renamed group', async () => {
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   let messages: AgentSessionUserMessage[] = []
