@@ -33,9 +33,10 @@ export async function conversationReaderCli(socketRoot: string) {
       const child = spawn(process.execPath, [entry, ...args], { env: objectCliEnvironment(socketRoot), stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       const timer = setTimeout(() => { child.kill('SIGKILL'); reject(Error('Private original CLI observation exceeded the test deadline')) }, 15000)
+      child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
       child.stdout.on('data', data => { stdout += data }); child.stderr.on('data', data => { stderr += data })
       child.on('error', error => { clearTimeout(timer); reject(error) })
-      child.on('exit', code => { clearTimeout(timer); resolve({ code, stdout, stderr }) })
+      child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }) })
       child.stdin.end(stdin)
     })
   }
