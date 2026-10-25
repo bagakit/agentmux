@@ -1087,8 +1087,8 @@ export function SessionPane({
                 description={frontendSurface ? frontendNotice.description : undefined}
                 detail={frontendSurface ? frontendNotice.surfaceDetail ?? frontendNotice.detail : restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
                 actions={!historyOpen ? agentRecoveryAction : null}
-                supplement={<>{identityNotice}{originalReadNotice}{session.kind === 'agent' && !frontendSurface ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
-                details={{ summary: frontendSurface ? frontendNotice.kind === 'initialization' ? 'Session and startup details' : 'Session and failure details' : 'Retained session', content: <>{frontendDiagnostic}<dl>
+                supplement={<>{frontendDiagnostic}{identityNotice}{originalReadNotice}{session.kind === 'agent' && !frontendSurface ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
+                details={{ summary: frontendSurface ? frontendNotice.kind === 'initialization' ? 'Session and startup details' : 'Session and failure details' : 'Retained session', content: <><dl>
                   <dt>Session</dt><dd>{session.label}</dd>
                   <dt>Session ID</dt><dd>{session.id}</dd>
                   <dt>Retained Run</dt><dd>{session.control.run.runId}</dd>
