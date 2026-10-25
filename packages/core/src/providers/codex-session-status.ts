@@ -5,6 +5,7 @@ import { AgentMuxError } from '../errors.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import type { AgentProviderSessionStatusContext, AgentProviderSessionStatusObservationContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence, AgentProviderSessionStatus } from '../types.js'
+import { codexTurnRecordId } from './codex-turn-outcome.js'
 import { codexNativeSourceId, codexTurnRecordEvidence, readCodexPromptExecutionEvidence } from './codex-prompt-execution-evidence.js'
 
 const READ_BYTES = 512 * 1024
@@ -12,6 +13,7 @@ const READ_BYTES = 512 * 1024
 function status(evidence: AgentPromptExecutionEvidence | null, context: AgentProviderSessionStatusContext): AgentProviderSessionStatus | null {
   if (!evidence?.nativeTurnId || evidence.state === 'idle' || context.nativePromptPredecessor?.evidenceId === evidence.id) return null
   return { recordId: evidence.id, nativeTurnId: evidence.nativeTurnId,
+    ...(evidence.nativeRecordId ? { nativeRecordId: evidence.nativeRecordId } : {}),
     ...(evidence.nativeOrdinal === undefined ? {} : { sequence: evidence.nativeOrdinal }),
     state: evidence.state === 'working' ? 'working' : evidence.endReason === 'failed' ? 'error' : evidence.endReason === 'completed' ? 'done' : 'unknown',
     ...(evidence.endReason ? { endReason: evidence.endReason } : {}),
@@ -27,9 +29,10 @@ export async function observeCodexSessionStatus(context: AgentProviderSessionSta
   }
   const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
   let observer: { dispose(): void } | undefined
-  let disposed = false, reading = false, queued = false, offset = 0, carry = ''
+  let disposed = false, reading = false, queued = false, offset = 0
+  let carry: Buffer = Buffer.alloc(0)
   let latest: AgentPromptExecutionEvidence | null = null
-  let decoder = new TextDecoder('utf8', { fatal: true })
+  const decoder = new TextDecoder('utf8', { fatal: true })
   const dispose = (): void => {
     if (disposed) return
     disposed = true; observer?.dispose(); context.signal.removeEventListener('abort', dispose)
@@ -73,7 +76,7 @@ export async function observeCodexSessionStatus(context: AgentProviderSessionSta
     if (offset && lastByte[0] !== 10) {
       const tail = Buffer.alloc(Math.min(offset, READ_BYTES)); await file.read(tail, 0, tail.length, offset - tail.length)
       const newline = tail.lastIndexOf(10)
-      carry = newline >= 0 ? decoder.decode(tail.subarray(newline + 1), { stream: true }) : ''
+      carry = newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0)
     }
     const check = (): void => {
       queued = true
@@ -91,21 +94,29 @@ export async function observeCodexSessionStatus(context: AgentProviderSessionSta
             const gap = start > offset
             const bytes = Buffer.alloc(size - start); await file.read(bytes, 0, bytes.length, start)
             if (gap) {
-              carry = ''; decoder = new TextDecoder('utf8', { fatal: true })
+              carry = Buffer.alloc(0)
               context.onUnavailable('AGENT_NATIVE_STATUS_GAP', 'Native status exceeded the observation window. The retained state and input remain available; inspect the current Session.')
             }
-            const data = gap ? bytes.subarray(bytes.indexOf(10) + 1) : bytes
-            const text = carry + decoder.decode(data, { stream: true }), lines = text.split('\n')
-            carry = lines.pop()!; offset = size
-            if (carry.length > READ_BYTES) {
-              carry = ''
-              context.onUnavailable('AGENT_NATIVE_STATUS_GAP', 'A native status record exceeded the observation window. The retained state and input remain available.')
-            }
-            for (const line of lines) {
-              if (!line) continue
-              const evidence = codexTurnRecordEvidence(JSON.parse(line), sourceId, handle.sessionId, latest)
+            const skipped = gap ? (bytes.indexOf(10) < 0 ? bytes.length : bytes.indexOf(10) + 1) : 0
+            const recordStart = gap ? start + skipped : offset - carry.length
+            const data = Buffer.concat([carry, bytes.subarray(skipped)])
+            let from = 0
+            for (let end = data.indexOf(10); end >= 0; end = data.indexOf(10, from)) {
+              const line = data.subarray(from, end), recordOffset = recordStart + from
+              from = end + 1
+              if (!line.length) continue
+              const value = JSON.parse(decoder.decode(line))
+              const evidence = codexTurnRecordEvidence(value, sourceId, handle.sessionId, latest)
               if (evidence === null) throw new AgentMuxError('The appended native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
-              if (evidence) { latest = evidence; emit(evidence) }
+              if (evidence) {
+                latest = { ...evidence, nativeRecordId: codexTurnRecordId(value, recordOffset) }
+                emit(latest)
+              }
+            }
+            carry = data.subarray(from); offset = size
+            if (carry.length > READ_BYTES) {
+              carry = Buffer.alloc(0)
+              context.onUnavailable('AGENT_NATIVE_STATUS_GAP', 'A native status record exceeded the observation window. The retained state and input remain available.')
             }
           }
         } catch (error) { unavailable(error) }

@@ -1,3 +1,4 @@
+import { parseAgentTurnOutcome } from './turn-outcome.js'
 import { authorProfileFields } from './author-profile.js'
 import { parseAgentInputImages } from './agent-input-resource.js'
 import { parseExternalConversationAuthor, parseExternalConversationInputObservation } from './external-conversation.js'
@@ -229,6 +230,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     createdAt,
     updatedAt,
     title: text(source.title, 'Timeline item title'),
+    ...(source.turnOutcome === undefined ? {} : { turnOutcome: parseAgentTurnOutcome(source.turnOutcome) }),
     ...authorProfileFields(source.authorProfile),
     ...(source.inputImages === undefined ? {} : { inputImages: parseAgentInputImages(source.inputImages) }),
     ...browserInputContextFields(source), ...agentInputContextCaptureProofFields(source),

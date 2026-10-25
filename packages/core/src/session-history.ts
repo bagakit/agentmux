@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { normalizeTurnOutcome } from './turn-outcome.js'
 import { conversationProvenanceFields } from './conversation-provenance.js'
 import type {
   AgentProviderSessionHistoryPage,
@@ -159,10 +160,6 @@ export function normalizeSessionHistoryMetrics(item: { metrics?: unknown; metric
         if (typeof value.durationMs === 'number' && Number.isFinite(value.durationMs) && value.durationMs >= 0) metrics.durationMs = value.durationMs
         else invalid.push('durationMs')
       }
-      if (value.status !== undefined) {
-        if (value.status === 'completed' || value.status === 'failed' || value.status === 'interrupted') metrics.status = value.status
-        else invalid.push('status')
-      }
       if (value.usage !== undefined) {
         const counts = optionalObject(value.usage), usage: AgentSessionHistoryTokenUsage = {}
         if (!counts) invalid.push('usage')
@@ -173,7 +170,7 @@ export function normalizeSessionHistoryMetrics(item: { metrics?: unknown; metric
         }
         if (Object.keys(usage).length) metrics.usage = usage
       }
-      if (metrics.durationMs !== undefined || metrics.status !== undefined || metrics.usage !== undefined) result.metrics = metrics
+      if (metrics.durationMs !== undefined || metrics.usage !== undefined) result.metrics = metrics
       else invalid.push('unreported values')
     }
   }
@@ -291,6 +288,7 @@ export function normalizeSessionHistoryPage(
       ...conversationProvenanceFields(item),
       ...collaborationMetadata,
       ...normalizeSessionHistoryMetrics(item),
+      ...normalizeTurnOutcome(item),
       ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
       ...(item.questionRequest === undefined ? {} : { questionRequest: questionRequest(item.questionRequest) }),
       ...(item.questionAnswers === undefined ? {} : { questionAnswers: questionAnswers(item.questionAnswers) }),

@@ -474,11 +474,15 @@ export type AgentPromptExecutionEvidence = {
   observedAt?: number
   failure?: AgentFailure
   nativeOrdinal?: number
+  /** Exact record identity exposed by the Provider's native history reader. */
+  nativeRecordId?: string
 }
 
 /** A Provider's exact native turn record; never inferred from terminal output. */
 export type AgentProviderSessionStatus = {
   recordId: string
+  /** Exact record identity in the already-qualified native history source. */
+  nativeRecordId?: string
   /** Reading a retained snapshot does not prove fresh activity. */
   initialSnapshot?: true
   sequence?: number
@@ -897,9 +901,12 @@ export type AgentSessionHistoryMetrics = {
   /** Native wall-clock elapsed milliseconds, not inference time or a locally started timer. */
   durationMs?: number
   usage?: AgentSessionHistoryTokenUsage
-  /** Only an explicit native outcome, independent of the Session/Run's current state. */
-  status?: 'completed' | 'failed' | 'interrupted'
 }
+
+/** A result of the original native turn, never current activity or task acceptance. */
+export type AgentTurnOutcome =
+  | { status: 'completed' | 'interrupted' }
+  | { status: 'failed'; failure: AgentFailure }
 
 export type AgentSessionHistoryItem = {
   id: string
@@ -914,6 +921,9 @@ export type AgentSessionHistoryItem = {
   questionAnswers?: AgentSessionHistoryQuestionAnswer[]
   /** A local native question/answer reading projection diagnostic; original speech and adjacent history stay readable. */
   questionDiagnostic?: { code: string; message: string }
+  /** Qualified by this original item, native source and turnId. */
+  turnOutcome?: AgentTurnOutcome
+  turnOutcomeDiagnostic?: { code: string; message: string }
   metrics?: AgentSessionHistoryMetrics
   /** Optional metrics unavailable; original content, identity and reading remain available. */
   metricsDiagnostic?: { code: string; message: string }
@@ -1947,6 +1957,8 @@ export type AgentMuxClientEvent = (
 ) & { observationOrigin?: AgentMuxObservationOrigin }
 
 export type AgentFailure = {
+  /** Provider-normalized safe summary; raw message has no external sharing qualification. */
+  publicMessage?: string
   code: string
   message: string
   nativeCode?: string
@@ -2026,6 +2038,8 @@ export type AgentWorkHistoryProjection = {
 }
 
 export type AgentTimelineItem = {
+  /** Result of the original native turn; independent of this capture's current Run. */
+  turnOutcome?: AgentTurnOutcome
   authorProfile?: import('./author-profile.js').AgentAuthorProfile
   inputImages?: import('./agent-input-resource.js').AgentInputImage[]
   inputContext?: import('./browser-input-context.js').BrowserInputContext
