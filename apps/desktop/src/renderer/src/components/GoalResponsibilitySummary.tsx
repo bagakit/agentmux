@@ -40,13 +40,13 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
     </div> : null}
     {!observed ? <span className="goal-responsibility__pending">{current.delegations?.length || current.dispatches?.some(item => item.execution === 'finite') ? '正在读取原执行责任…' : '尚无确认执行绑定'}</span> : null}
     {visible.map(row => <div className="goal-responsibility__execution" key={`${row.execution.kind}:${row.execution.operationId}`}>
-      <div className="goal-responsibility__line">{identity(row.execution.agentSessionId, row.execution.hostId)}
+      <div className="goal-responsibility__line"><span className="goal-responsibility__label">执行</span>{identity(row.execution.agentSessionId, row.execution.hostId)}
         <span className={`goal-responsibility__phase${row.alert ? ' goal-responsibility__phase--attention' : ''}`}>{GOAL_RESPONSIBILITY_LABELS[row.phase]}</span>
         {row.binding !== 'confirmed' ? <span className="goal-responsibility__binding">{row.binding === 'ambiguous' ? '多个执行依据' : '原输入待确认'}</span> : null}
       </div>
       <div className="goal-responsibility__next"><span>下一步</span>{row.nextOwner.agentSessionId ? identity(row.nextOwner.agentSessionId,
         row.nextOwner.agentSessionId === observed?.supervisor.agentSessionId ? observed.supervisor.hostId : row.execution.hostId) : <span>{row.nextOwner.kind === 'human' ? '等待人核验' : row.nextOwner.kind === 'external' ? '外部条件' : '待明确负责者'}</span>}
-        {!compact ? <span>{row.nextOwner.action}</span> : null}
+        <span className="goal-responsibility__next-action">{row.nextOwner.action}</span>
       </div>
       {!compact || row.alert ? <p className="goal-responsibility__reason" role={row.alert ? 'status' : undefined}>{row.reason}</p> : null}
       {!compact ? <details className="goal-responsibility__source"><summary>责任依据</summary>
