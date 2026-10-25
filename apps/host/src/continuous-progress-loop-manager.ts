@@ -95,7 +95,7 @@ export class ContinuousProgressLoopManager {
     await this.checkPromise?.catch(() => {})
     await this.store.save(this.scheduler.list())
   }
-  list(): ContinuousProgressLoop[] { return this.scheduler.list() }
+  list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] { return this.scheduler.list(target) }
   /** Initial Goal input and continuation share this original durable loop, never a second journal. */
   async prepareGoal(input: GoalProgressStart, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressLoop> {
     return this.serialize(`goal-start-operation:${input.operationId}`, () => this.serialize(`goal-start-goal:${input.goalId}`, () => this.serialize(`goal-target:${input.hostId}:${input.agentSessionId}`, () => this.activation(this.targetKey(input), async assertCurrent => {
@@ -247,7 +247,7 @@ export class ContinuousProgressLoopManager {
   /** Exact target cancellation revokes preparations as well as already active delivery. */
   cancelTarget(target: Pick<ContinuousProgressTarget, 'hostId' | 'agentSessionId'>): void {
     for (const controller of this.activations.get(this.targetKey(target)) ?? []) controller.abort()
-    for (const loop of this.list()) if (loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId) this.cancelDelivery(loop.loopId)
+    for (const loop of this.list(target)) this.cancelDelivery(loop.loopId)
   }
   private async goalSource(loop: ContinuousProgressLoop): Promise<{ action: 'continue' | 'pause' | 'stop'; reason: string }> {
     if (loop.taskSource?.kind !== 'goal') return { action: 'continue', reason: '' }
@@ -369,7 +369,7 @@ export class ContinuousProgressLoopManager {
       ['hostId','agentSessionId','providerId','workspacePath'].every(key => loop[key as keyof ContinuousProgressTarget] === target[key as keyof ContinuousProgressTarget])
     const value = await this.serialize('progress:' + target.hostId + ':' + target.agentSessionId, async () => {
       await this.start(); await this.authorizeCaller(target, context)
-      if (method === 'agent.progress.list') return { loops: this.list().filter(matches) }
+      if (method === 'agent.progress.list') return { loops: this.list(target).filter(matches) }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (method === 'agent.progress.update') {
         const update = input as import('@agentmux/core').AgentProgressParams['agent.progress.update']
@@ -498,7 +498,7 @@ export class ContinuousProgressLoopManager {
     return this.require(loopId)
   }
   pauseTarget(target: Pick<ContinuousProgressTarget, 'hostId' | 'agentSessionId'>, reason: string): Promise<void> {
-    const changed = this.list().filter(loop => !isAgentSchedule(loop) && loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.status === 'active')
+    const changed = this.list(target).filter(loop => !isAgentSchedule(loop) && loop.status === 'active')
     for (const loop of changed) {
       this.scheduler.pause(loop.loopId); this.patch(loop.loopId, { lastDecision: reason }); this.cancelDelivery(loop.loopId)
     }
