@@ -16,6 +16,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/help
 import { AgentMuxError } from '../../core/dist/errors.js'
 import { connectAgentMuxRpc } from '../../core/dist/public-rpc-client.js'
 import { connectionDiagnosisRecordKey, connectionDiagnosisEventKey, connectionDiagnosisCheckpointKey, formatGroupDiagnosis } from '../../core/dist/connections.js'
+import * as conversationStream from '../../core/dist/conversation-stream.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 let recentDeliveryFacts: unknown
@@ -69,6 +70,39 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   }
   return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
+
+it('publication reuses original page validation through the port, worker and durable receipt', async () => {
+  const f = await fixture(), digest = conversationStream.conversationRevision
+  const counts = { port: 0, workerPage: 0, assembly: 0, storePage: 0, storeUnits: 0 }
+  const stackLimit = Error.stackTraceLimit
+  Error.stackTraceLimit = 40
+  cleanup.push(() => { Error.stackTraceLimit = stackLimit })
+  vi.spyOn(conversationStream, 'conversationRevision').mockImplementation(value => {
+    const stack = new Error().stack ?? ''
+    if (stack.includes('PublicationStore.commitPage')) {
+      if (stack.includes('basePage')) counts.storePage++
+      else counts.storeUnits++
+    } else if (stack.includes('consumeConversationWindowPage')) counts.assembly++
+    else if (stack.includes('core-conversation-port.ts')) counts.port++
+    else if (stack.includes('PublicationHost.catchUp') && stack.includes('basePage')) counts.workerPage++
+    return digest(value)
+  })
+  await appendFile(f.transcript, row('page-validation-original', 'Original publication body'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'))
+  const operation = f.speech()[0]!
+  expect(operation.payload.text).toContain('Original publication body')
+  expect(f.dispatched).toHaveLength(1)
+  expect(counts.port, 'The actual routed original page must enter strict content validation').toBeGreaterThan(0)
+  expect(counts.storeUnits, 'Independently supplied assembled units retain strict commit validation').toBeGreaterThan(0)
+  expect(counts.workerPage, 'The worker must reuse the exact original page content validation').toBe(0)
+  expect(counts.assembly, 'Assembly must retain validation of complete owned items').toBe(0)
+  expect(counts.storePage, 'Commit must recheck the request envelope without rehashing owned items').toBe(0)
+  const receipt = await f.sdk.call('connection.delivery.inspect', { operationId: operation.operationId })
+  expect(receipt.delivery).toMatchObject({ operationId: operation.operationId, state: 'confirmed' })
+  expect(await f.cli(['inspect', '--operation-id', operation.operationId])).toEqual(receipt)
+  if (process.env.PUBLICATION_PAGE_REUSE_FACTS) await writeFile(process.env.PUBLICATION_PAGE_REUSE_FACTS,
+    JSON.stringify({ counts, deliveries: f.dispatched.length, sdkAndCliReceiptEqual: true }, null, 2) + '\n')
+})
 
 it('decision lookup keeps original publication identities and bounded work as unrelated decisions grow', async () => {
   const f = await fixture(), database = f.services.database!, prepare = database.prepare.bind(database)

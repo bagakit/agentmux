@@ -1,12 +1,116 @@
 import { createHash } from 'node:crypto'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session'
-import { consumeConversationWindowPage, parseConversationReadPage, parseConversationReadPageForWindow,
+import { consumeConversationWindowPage, parseConversationReadPage, parseConversationReadPageForWindow, parseConversationChangesPageForWindow,
   type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationWindowAssembly } from '../src/conversation'
+import * as stream from '../src/conversation-stream'
 
 const closes: Array<() => Promise<unknown>> = []
-afterEach(async () => { for (const close of closes.splice(0).reverse()) await close() })
+afterEach(async () => { try { for (const close of closes.splice(0).reverse()) await close() } finally { vi.restoreAllMocks() } })
 const row = (body: string) => ({ type: 'user', uuid: 'original-record', sessionId: 'native-main', message: { role: 'user', content: body } })
+
+it('reuses complete-unit validation only for the original owned page while checking each request again', async () => {
+  const f = await nativeHistoryFixture('claude', jsonl([row('Original immutable contribution')]))
+  closes.push(f.close)
+  const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const raw = structuredClone(await f.client.readAgentConversation(input))
+  const checkpoint = (await f.client.conversationCheckpoint({ ...input, nativePosition: 'beginning' })).checkpoint
+  const changesInput = { ...input, checkpoint }, rawChanges = structuredClone(await f.client.readConversationChanges(changesInput))
+  const required = (page: AgentConversationReadPage) => page.items.reduce((count, entry) => count + (entry.kind === 'item' ? entry.item.records.length + 1 : 0), 0)
+  expect(required(raw)).toBeGreaterThan(0); expect(required(rawChanges)).toBeGreaterThan(0)
+  const digest = vi.spyOn(stream, 'conversationRevision')
+  const owned = parseConversationReadPageForWindow(raw, input)
+  expect(digest, 'One content digest per original record and event at the strict read boundary').toHaveBeenCalledTimes(required(raw))
+  digest.mockClear()
+  const changes = parseConversationChangesPageForWindow(rawChanges, changesInput)
+  expect(digest, 'The strict changes boundary validates each original record and event').toHaveBeenCalledTimes(required(rawChanges))
+  digest.mockClear()
+  const reads = Array.from({ length: 3 }, () => parseConversationReadPageForWindow(owned, { ...input, limit: 100 }))
+  const repeatedChanges = Array.from({ length: 3 }, () => parseConversationChangesPageForWindow(changes, changesInput))
+  for (const page of [...reads, ...repeatedChanges]) expect(consumeConversationWindowPage(page).kind).toBe('complete')
+  expect(digest, 'Repeated original immutable pages must not recompute record or event digests').not.toHaveBeenCalled()
+  expect(reads.every(page => page === owned)).toBe(true); expect(repeatedChanges.every(page => page === changes)).toBe(true)
+  const copied = parseConversationReadPageForWindow(structuredClone(owned), input)
+  expect(digest, 'A transport or ordinary raw copy must validate independently').toHaveBeenCalledTimes(required(raw))
+  expect(copied).not.toBe(owned)
+  digest.mockClear()
+  parseConversationReadPageForWindow(raw, input); parseConversationReadPageForWindow(raw, input)
+  expect(digest, 'Mutable raw objects never acquire an identity cache').toHaveBeenCalledTimes(required(raw) * 2)
+  expect(f.controls.every(control => control.mock.calls.length === 0)).toBe(true)
+})
+
+it('keeps original request, selected source, representation, checkpoint and serialized byte bounds on owned pages', async () => {
+  const f = await nativeHistoryFixture('claude', jsonl([row('Original request-bound body')]))
+  closes.push(f.close)
+  const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const raw = structuredClone(await f.client.readAgentConversation(input)), owned = parseConversationReadPageForWindow(raw, input)
+  const first = owned.items[0]!
+  if (first.kind !== 'item') throw Error('Expected an original complete unit')
+  const record = first.item.records[0]!
+  const requests: ConversationTimelineReadInput[] = [
+    { ...input, hostId: 'another-route' }, { ...input, agentSessionId: 'another-session' },
+    { ...input, limit: 0 }, { ...input, maxBytes: owned.budgetBytes - 1 }, { ...input, processDetails: 'deferred' },
+    { ...input, nativeSource: { providerId: 'another-provider', nativeSessionId: 'another-source' } },
+    { ...input, record: { ...record.reference!, source: { ...record.reference!.source, recordId: 'another-record' } } },
+    { ...input, anchor: { record: record.reference!, revision: record.revision, frontier: owned.window.checkpoint } }
+  ]
+  for (const request of requests) expect(() => parseConversationReadPageForWindow(owned, request), JSON.stringify(request))
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const checkpoint = (await f.client.conversationCheckpoint({ ...input, nativePosition: 'beginning' })).checkpoint
+  const changesInput = { ...input, checkpoint }, changes = parseConversationChangesPageForWindow(await f.client.readConversationChanges(changesInput), changesInput)
+  const foreignSource = structuredClone(checkpoint); foreignSource.sourceHostId = 'another-source-host'
+  const foreignScope = structuredClone(checkpoint); foreignScope.frontier.scope.sources = []
+  for (const checkpoint of [foreignSource, foreignScope]) expect(() => parseConversationChangesPageForWindow(changes, { ...input, checkpoint }))
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  expect(() => parseConversationReadPageForWindow(changes, input), 'A changes response does not become an inspect response through its owner')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  expect(() => parseConversationChangesPageForWindow(owned, changesInput), 'An inspect owner cannot invent a changes checkpoint')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const oversized = structuredClone(raw), maxBytes = Buffer.byteLength(JSON.stringify(raw)) - 64
+  oversized.budgetBytes = maxBytes
+  expect(Buffer.byteLength(JSON.stringify(oversized)), 'The fixture must really exceed its edited declared byte budget').toBeGreaterThan(maxBytes)
+  expect(() => parseConversationReadPageForWindow(oversized, { ...input, maxBytes }), 'Actual serialized envelope bytes remain bounded, not just its claimed budget')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  expect(parseConversationReadPageForWindow(owned, input)).toBe(owned)
+})
+
+it('does not sanitize raw fields or accept reflected and proxied page owners as original validation', async () => {
+  const f = await nativeHistoryFixture('claude', jsonl([row('Original reflection-bound body')]))
+  closes.push(f.close)
+  const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const raw = structuredClone(await f.client.readAgentConversation(input)), owned = parseConversationReadPageForWindow(raw, input)
+  for (const invalid of [null, undefined, true, 1, 'raw', []]) expect(() => parseConversationReadPageForWindow(invalid, input), 'Unknown raw input keeps its original protocol error')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const key = Reflect.ownKeys(owned).find(key => typeof key === 'symbol')!, owner = Object.getOwnPropertyDescriptor(owned, key)!.value
+  const marked = structuredClone(owned)
+  Object.defineProperty(marked, key, { value: owner })
+  expect(() => parseConversationReadPageForWindow(marked, input), 'Copying a private marker cannot wash non-JSON raw input')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const hidden = structuredClone(raw); Object.defineProperty(hidden, 'unexpected', { value: 'hidden' })
+  expect(() => parseConversationReadPageForWindow(hidden, input)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const accessor = structuredClone(raw), getter = vi.fn(() => raw.window)
+  Object.defineProperty(accessor, 'window', { enumerable: true, get: getter })
+  expect(() => parseConversationReadPageForWindow(accessor, input)).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  expect(getter, 'Raw JSON validation must reject accessors before reading them').not.toHaveBeenCalled()
+  expect(() => parseConversationReadPageForWindow(new Proxy(owned, {}), input), 'A Proxy is not the exact private owned page')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const target = structuredClone(owned), proxy = new Proxy(target, { getOwnPropertyDescriptor(value, name) {
+    return name === key ? { configurable: true, enumerable: false, writable: false, value: owner } : Reflect.getOwnPropertyDescriptor(value, name)
+  } })
+  const digest = vi.spyOn(stream, 'conversationRevision'), parsed = parseConversationReadPageForWindow(proxy, input)
+  const required = raw.items.reduce((count, entry) => count + (entry.kind === 'item' ? entry.item.records.length + 1 : 0), 0)
+  expect(required).toBeGreaterThan(0)
+  expect(digest, 'A proxy showing another page owner must still execute strict content validation').toHaveBeenCalledTimes(required)
+  expect(parsed).not.toBe(proxy); expect(Object.isFrozen(parsed)).toBe(true)
+  const first = target.items[0]!
+  if (first.kind !== 'item') throw Error('Expected an original complete unit')
+  first.item.event.revision = 'b'.repeat(64)
+  expect(() => parseConversationReadPageForWindow(proxy, input), 'A reflected owner cannot certify a modified proxy target')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  const frozenRaw = structuredClone(target); Object.freeze(frozenRaw)
+  expect(() => parseConversationReadPageForWindow(frozenRaw, input), 'Frozen raw data is not parser ownership')
+    .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+})
 
 it('owns only its original immutable response and never freezes the raw input or ordinary public parser result', async () => {
   const f = await nativeHistoryFixture('claude', jsonl([row('Original complete body')]))
