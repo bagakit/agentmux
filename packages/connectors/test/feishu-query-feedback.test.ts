@@ -6,6 +6,7 @@ import { createBuiltinConnectionAdapters } from '../src/platform-adapters.js'
 import { reviewFeishuPermissions } from '../src/adapters/feishu/setup-permissions.js'
 import type { PublicationOperation } from '../src/publication-store.js'
 import { feishuConfig } from './fixtures/feishu.js'
+import { feishuReactions } from './fixtures/feishu-reactions.js'
 import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } from './fixtures/feishu-publication.js'
 
 const cleanup: Array<() => Promise<void>> = []
@@ -22,21 +23,13 @@ function reaction(emojiType = 'Get', reactionId = 'original-reaction', appId = f
   return { reaction_id: reactionId, operator: { operator_type: 'app', operator_id: appId }, reaction_type: { emoji_type: emojiType }, action_time: '1' }
 }
 async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
-  const retained: ReturnType<typeof reaction>[] = []
+  const reactions = feishuReactions()
   const remote = await feishuPublicationHttp(call => {
     if (call.path.endsWith('/reactions') && call.method === 'GET') expect(call.query.page_size).toBe('50')
-    const selected = override?.(call)
-    if (selected) return selected
-    if (!call.path.endsWith('/reactions')) return undefined
-    if (call.method === 'POST') {
-      const value = reaction(JSON.parse(call.body).reaction_type.emoji_type, 'original-reaction-' + (retained.length + 1))
-      retained.push(value); return { status: 200, body: { code: 0, data: value } }
-    }
-    if (call.method === 'GET') return { status: 200, body: { code: 0, data: { items: retained.filter(value => value.reaction_type.emoji_type === call.query.reaction_type), has_more: false, page_token: '' } } }
-    throw Error('Query feedback never deletes a reaction or user message')
+    return override?.(call) ?? reactions.handle(call)
   })
   cleanup.push(() => remote.close())
-  return { remote, retained, publisher: new FeishuAdapter({ http: remote.http }).publication }
+  return { remote, retained: reactions.active, publisher: new FeishuAdapter({ http: remote.http }).publication }
 }
 
 it.each(stages)('default registered Feishu adapter adds the %s milestone to the exact user query through the real SDK', async (stage, emojiType) => {
@@ -47,7 +40,7 @@ it.each(stages)('default registered Feishu adapter adds the %s milestone to the 
   expect(publisher.queryFeedback).toBe(true)
   expect(prepared.renderVersion).toBe(publisher.renderVersion)
   expect(prepared.request).toEqual({ method: 'POST', path: '/open-apis/im/v1/messages/original-user-query/reactions', contentType: 'application/json', body: JSON.stringify({ reaction_type: { emoji_type: emojiType } }) })
-  const confirmed = { state: 'confirmed', mapping: { messageId: 'original-user-query', reactionId: 'original-reaction-1' } }
+  const confirmed = { state: 'confirmed', mapping: { messageId: 'original-user-query', reactionId: 'reaction-1' } }
   expect(await publisher.dispatch(prepared, original.target, 'synthetic-credential', signal)).toEqual(confirmed)
   expect(await publisher.inspect!(prepared, original.target, 'synthetic-credential', signal, confirmed.mapping)).toEqual(confirmed)
   expect(JSON.stringify(prepared)).toBe(frozen)
@@ -74,18 +67,23 @@ it('uses the publication envelope to qualify current and retained reaction reque
   expect(f.remote.messageCalls()).toHaveLength(calls)
 })
 
-it('retains all five milestones and never withdraws the original user query while legacy cards remain usable', async () => {
+it('withdraws only an exact retained reaction without deleting the original query while legacy cards remain usable', async () => {
   const f = await fixture(), signal = new AbortController().signal
   for (const [stage] of stages) {
     const original = operation(stage)
     expect((await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'synthetic-credential', signal)).state).toBe('confirmed')
   }
   expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OneSecond', 'CheckMark', 'OnIt', 'DONE'])
-  expect(() => f.publisher.prepare({ ...operation(), effect: 'withdraw', mapping: { messageId: 'original-user-query', reactionId: 'original-reaction-1' } })).toThrow()
-  expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'another-user-query', reactionId: 'original-reaction-1' } })).toThrow()
+  const mapping = { messageId: 'original-user-query', reactionId: 'reaction-1' }
+  const withdrawal = f.publisher.prepare({ ...operation(), effect: 'withdraw', mapping })
+  expect(withdrawal.request).toEqual({ method: 'DELETE', path: '/open-apis/im/v1/messages/original-user-query/reactions/reaction-1' })
+  expect(await f.publisher.dispatch(withdrawal, operation().target, 'synthetic-credential', signal, mapping)).toEqual({ state: 'confirmed', mapping })
+  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['OneSecond', 'CheckMark', 'OnIt', 'DONE'])
+  expect(() => f.publisher.prepare({ ...operation(), effect: 'withdraw' })).toThrow()
+  expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'another-user-query', reactionId: 'reaction-1' } })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'original-user-query', threadId: 'another-thread' } })).toThrow()
   expect(await f.publisher.dispatch(f.publisher.prepare(operation()), operation().target, 'synthetic-credential', signal, { messageId: 'original-user-query', threadId: 'another-thread' })).toEqual({ state: 'not-applied', reason: 'unsupported-format' })
-  expect(f.remote.messageCalls().some(call => call.method === 'DELETE')).toBe(false)
+  expect(f.remote.messageCalls().filter(call => call.method === 'DELETE').map(call => call.path)).toEqual([withdrawal.request.path])
   const speech = { ...operation(), operationId: 'independent-speech', payload: { kind: 'speech' as const, text: 'Independent original reply remains usable.' } }
   const prepared = f.publisher.prepare(speech), legacy = { ...prepared, renderVersion: 'feishu-conversation-v5' }
   const delivered = await f.publisher.dispatch(legacy, speech.target, 'synthetic-credential', signal)

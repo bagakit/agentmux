@@ -11,6 +11,7 @@ import { createPublicationConversationPort } from '../src/core-conversation-port
 import { FeishuAdapter } from '../src/adapters/feishu/index.js'
 import { signedRoomAdapter } from './fixtures/signed-room-adapter.js'
 import { feishuPublicationHttp } from './fixtures/feishu-publication.js'
+import { feishuReactions } from './fixtures/feishu-reactions.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import type { RoomBinding, ConnectionIngressMessage } from '@agentmux/core/connections'
 
@@ -51,11 +52,8 @@ async function fixture() {
     regions: [{ regionId: 'region', tabId: 'tab', kind: 'agent', agentSessionId: ref.agentSessionId, runId: null, execution: { hostId: 'local', cwd: f.root } }],
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {} } })
-  const reactions: any[] = [], http = await feishuPublicationHttp(call => {
-    if (!call.path.endsWith('/reactions')) return
-    if (call.method === 'POST') { const reaction = { reaction_id: 'reaction-' + reactions.length, operator: { operator_type: 'app', operator_id: feishuConfig.application.appId }, reaction_type: JSON.parse(call.body).reaction_type }; reactions.push({ ...reaction, path: call.path }); return { status: 200, body: { code: 0, data: reaction } } }
-    return { status: 200, body: { code: 0, data: { items: reactions.filter(value => value.path === call.path && value.reaction_type.emoji_type === call.query.reaction_type), has_more: false } } }
-  }); cleanup.push(http.close)
+  const remote = feishuReactions(), reactions = remote.active
+  const http = await feishuPublicationHttp(remote.handle); cleanup.push(http.close)
   const wire = signedRoomAdapter('feishu'), verify = wire.adapter.ingress!.verify
   const adapter = { ...wire.adapter, publication: new FeishuAdapter({ http: http.http }).publication, ingress: { ...wire.adapter.ingress!, verify: async (...args: Parameters<typeof verify>) => ({ ...await verify(...args), conversationKind: 'group' as const }) } }
   const services = await createConnectionServices({ directory: join(f.root, 'connections'), adapters: [adapter], bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, ingress: { core: host => host === 'local' ? f.client : undefined }, publication: createPublicationConversationPort(f.coreClients) }); cleanup.push(() => services.close())
@@ -70,7 +68,7 @@ async function fixture() {
   const grant = { operationId: 'original-grant', bindingId: binding.bindingId, expectedBindingRevision: 1, grantId: 'original-member', expectedRevision: null, actor: member, state: 'active' as const, capabilities: ['input' as const] }
   await services.bindings!.grant(grant, context)
   await expect.poll(() => wire.endpoint).toBeDefined()
-  const operations = () => services.publication!.store.list(binding, 100).filter(value => value.queryFeedback)
+  const operations = () => services.publication!.store.list(binding, 100).filter(value => value.queryFeedback && value.effect === 'upsert')
   const stages = () => operations().map(value => value.queryFeedback!.stage)
   const restore = () => { f.inner.connected = true; f.inner.kernel.isConnected = () => true; Reflect.get(f.client, 'publisher').publish({ type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: Date.now() } }) }
   return { ...f, transcript, ref, services, wire, sends, reactions, binding, member, stages, operations, restore,
@@ -92,9 +90,9 @@ it('default group feeds the real native RPC Provider and publishes five distinct
   await f.native('valid'); await expect.poll(f.stages, { timeout: 5000 }).toContain('started')
   await f.complete('other-turn'); await new Promise<void>(resolve => setImmediate(resolve)); expect(f.stages()).not.toContain('completed')
   await f.complete(); await expect.poll(f.stages, { timeout: 5000 }).toContain('completed')
-  await expect.poll(() => f.operations().every(value => value.state === 'confirmed')).toBe(true)
+  await expect.poll(() => f.operations().every(value => ['confirmed', 'superseded'].includes(value.state))).toBe(true)
   expect(f.stages()).toEqual(['received', 'queued', 'dispatched', 'started', 'completed'])
-  expect(f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OneSecond', 'CheckMark', 'OnIt', 'DONE'])
+  await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['DONE'])
   expect(f.reactions.every(value => value.path.endsWith('/original-query/reactions'))).toBe(true)
 }, 30000)
 
@@ -157,10 +155,11 @@ it('the original Hosted ingress port consumes recipient changes and exact receip
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
   vi.spyOn(f.client, 'connect').mockRejectedValue(new Error('Controlled Runtime observation unavailable'))
-  const hosted = await connectHostedAgentMux({ rpc, waitForReady: false, forwardRpc: (method, params, context) => rpc.call(method, params as never, { signal: context?.signal }) }); cleanup.push(() => hosted.dispose())
+  const hosted = await connectHostedAgentMux({ rpc, waitForReady: false, forwardRpc: (method, params, context) => rpc.call(method, params as never, context?.signal ? { signal: context.signal } : {}) }); cleanup.push(() => hosted.dispose())
   const route = createHostedIngressCorePort(() => [{ hostId: 'exact-host', client: hosted }])
   const port = route('exact-host', hostedTestOwner(f.client).runtimeId)!, cut = await port.readAgentInputChanges!({ agentSessionId: 'recipient' })
   const receipt = await f.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'hosted-original', prompt: 'Private unchanged input', admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', authorHuman: true })
+  if (!receipt) throw Error('Original prompt receipt is missing')
   const changed = await port.readAgentInputChanges!({ agentSessionId: 'recipient', after: cut.checkpoint!, limit: 25 })
   expect(changed.changes.map(value => value.key)).toEqual([receipt.key])
   expect(await port.inspectAgentInput({ key: receipt.key })).toMatchObject({ persistence: 'confirmed', status: 'waiting', ref: receipt.ref })
