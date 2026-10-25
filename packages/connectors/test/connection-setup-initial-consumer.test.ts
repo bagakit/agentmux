@@ -9,7 +9,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/help
 
 const APP = 'cli_initial_conversations', VERSION = 'initial-version', USER = 'original-creator'
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
-const SCOPES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:self_manage', 'im:message.reactions:write_only']
+const SCOPES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:self_manage', 'im:message.reactions:write_only', 'contact:contact.base:readonly', 'contact:user.base:readonly']
 const EVENT = 'im.message.receive_v1'
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => {
