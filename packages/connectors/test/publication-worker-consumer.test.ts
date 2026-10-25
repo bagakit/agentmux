@@ -1,12 +1,15 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import type { PublicationAdapter } from '../src/publication-adapter.js'
-import type { PublicationReceipt, PublicationMapping } from '../src/publication-store.js'
+import type { PublicationReceipt, PublicationMapping, PublicationOperation } from '../src/publication-store.js'
+import type { PublicationSpeakerReader } from '../src/publication-speaker.js'
 import { PublicationStore } from '../src/publication-store.js'
 import { config, roomBindingFixture, core } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -17,12 +20,14 @@ import { connectionDiagnosisRecordKey, connectionDiagnosisEventKey, connectionDi
 const cleanup: Array<() => void | Promise<void>> = []
 let recentDeliveryFacts: unknown
 const recoveryCostFacts: unknown[] = []
+const cardRecoveryFacts: unknown[] = []
 afterAll(async () => { if (process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS) await writeFile(process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS, JSON.stringify(recentDeliveryFacts ?? null, null, 2) + '\n') })
 afterAll(async () => { if (process.env.AGENTMUX_TEST_PUBLICATION_RECOVERY_FACTS) await writeFile(process.env.AGENTMUX_TEST_PUBLICATION_RECOVERY_FACTS, JSON.stringify(recoveryCostFacts, null, 2) + '\n') })
+afterAll(async () => { if (process.env.PUBLICATION_CARD_RECOVERY_FACTS) await writeFile(process.env.PUBLICATION_CARD_RECOVERY_FACTS, JSON.stringify(cardRecoveryFacts, null, 2) + '\n') })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const row = (id: string, text = 'Same original reply', content?: unknown[]) => JSON.stringify({ sessionId: 'original-native', uuid: id,
   type: 'assistant', message: { role: 'assistant', content: content ?? [{ type: 'text', text }] } }) + '\n'
-async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = false) {
+async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = false, speaker?: PublicationSpeakerReader) {
   const original = await roomBindingFixture(); cleanup.push(() => original.close())
   const dispatched: Array<{ request: Parameters<PublicationAdapter['dispatch']>[0]; target: Parameters<PublicationAdapter['dispatch']>[1]; mapping?: Readonly<PublicationMapping> }> = []
   const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'speech-v1', supportedRenderVersions: ['speech-v1'], fragmentBytes: 8_192,
@@ -38,7 +43,7 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   const conversation = createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }])
   const services = await createConnectionServices({ directory: join(original.root, 'desktop-publication'),
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }],
-    bindings: { spatial: original.spatial, checkpoint: original.checkpoint }, publication: conversation })
+    bindings: { spatial: original.spatial, checkpoint: original.checkpoint }, publication: conversation, ...(speaker ? { speaker } : {}) })
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'original-credential-entry', secret: 'original-private-credential' })
   await services.connections.configure({ operationId: 'original-configuration', expectedRevision: null, connection: { ...config, credentialRef: credential.credentialRef } })
@@ -60,6 +65,122 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   }
   return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
+
+it('card recovery keeps original scope and in-flight effects with bounded work as completed history grows', async () => {
+  const bytes = Buffer.from('original-avatar'), image = { mimeType: 'image/png' as const, dataBase64: bytes.toString('base64'), byteLength: bytes.length,
+    width: 1, height: 1, sha256: createHash('sha256').update(bytes).digest('hex') }
+  const f = await fixture(undefined, false, async () => ({ avatar: { observation: 'available', image } }))
+  let releaseUpload!: () => void, releaseCreate!: () => void
+  const upload = new Promise<void>(done => { releaseUpload = done }), create = new Promise<void>(done => { releaseCreate = done })
+  cleanup.push(releaseUpload, releaseCreate)
+  const createCard = vi.fn(async () => { await create; return { state: 'confirmed' as const, id: 'original-native-card' } })
+  Object.assign(f.adapter, {
+    images: { maxBytes: 1024, accepts: () => true, upload: async () => { await upload; return { state: 'confirmed', imageKey: 'original-avatar-key' } } },
+    cards: { prepareCreate: f.adapter.prepare, create: createCard, preparePortrait: f.adapter.prepare,
+      portrait: async () => ({ state: 'confirmed' }), inspectPortrait: async () => null }
+  } satisfies Partial<PublicationAdapter>)
+  const database = f.services.database!, store = f.services.publication!.store, prepare = database.prepare.bind(database)
+  // Existing production journals can create projection_latest after the card
+  // index during upgrades. Reproduce that observed order using the same DDL
+  // only in this private fixture; retained rows and query semantics do not change.
+  const projectionIndex = String(prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='connector_publication_projection_latest'").get()!.sql)
+  database.exec('DROP INDEX connector_publication_projection_latest'); database.exec(projectionIndex)
+  const reads: Array<{ sql: string; parameters: Parameters<ReturnType<typeof prepare>['all']>; ids: string[]; host: boolean }> = []
+  vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql), stack = new Error().stack ?? ''
+    if (stack.includes('unconfirmedCards') && sql.includes('operation_json')) {
+      const all = statement.all.bind(statement), host = stack.includes('cycle')
+      statement.all = (...parameters) => {
+        const rows = all(...parameters)
+        reads.push({ sql, parameters, ids: rows.map(row => JSON.parse(String(row.operation_json)).operationId), host })
+        return rows
+      }
+    }
+    return statement
+  })
+  await appendFile(f.transcript, row('original-card-reply', 'Original card body'))
+  await vi.waitFor(() => expect(createCard).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'))
+  const original = structuredClone(f.speech()[0]!)
+  expect(original.cardPreparation?.receipt.state).toBe('dispatching')
+  const hostRead = reads.findLast(read => read.host)
+  expect(hostRead, 'The actual PublicationHost cycle must consume the card recovery query').toBeDefined()
+  const insert = prepare('INSERT INTO connector_publication_operation(operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+  const add = (operationId: string, receipt: NonNullable<PublicationOperation['cardPreparation']>['receipt'] | null,
+    bindingId = f.binding.bindingId, bindingRevision = f.binding.revision) => {
+    const { cardPreparation, ...body } = original
+    const value: PublicationOperation = { ...body, operationId, projectionId: operationId, sourceRevision: operationId, bindingId, bindingRevision,
+      prepared: { ...original.prepared!, requestKey: operationId },
+      ...(receipt ? { cardPreparation: { ...cardPreparation!, prepared: { ...cardPreparation!.prepared, requestKey: operationId }, receipt } } : {}) }
+    insert.run(operationId, value.projectionId, value.sourceRevision, value.fragment.ordinal, bindingId, bindingRevision, JSON.stringify(value), value.state)
+    return value
+  }
+  // These retained rows are isolated journal history derived from the actual
+  // original card. Only the production Host/Store owns recovery and receipts.
+  database.exec('BEGIN')
+  add('abandoned-first', { state: 'dispatching' }); add('abandoned-second', { state: 'dispatching' })
+  const excluded = [add('foreign-card', { state: 'dispatching' }, 'foreign-binding'),
+    add('other-revision-card', { state: 'dispatching' }, f.binding.bindingId, f.binding.revision + 1),
+    add('unknown-card', { state: 'unknown', reason: 'effect-unconfirmed' }), add('confirmed-card', { state: 'confirmed', id: 'confirmed-native-card' }),
+    add('not-applied-card', { state: 'not-applied', reason: 'effect-unconfirmed' }), add('ordinary-body', null)]
+  database.exec('COMMIT')
+  const expected = [original.operationId, 'abandoned-first', 'abandoned-second'].sort()
+  expect(store.unconfirmedCards(f.binding).map(value => value.operationId).sort(), 'Card recovery must retain all and only the exact original binding revision').toEqual(expected)
+  const file = String(prepare('PRAGMA database_list').get()!.file)
+  const costs: Array<{ historyRows: number; steps: number; rows: number; sqliteVersion: string }> = []
+  const measure = (historyRows: number) => {
+    const result = JSON.parse(execFileSync('python3', ['-c', `import json,sqlite3,sys
+x=json.load(sys.stdin)
+c=sqlite3.connect('file:'+x['file']+'?mode=ro',uri=True)
+steps=0
+def tick():
+ global steps
+ steps+=1
+ return 0
+c.set_progress_handler(tick,1)
+rows=c.execute(x['sql'],x['parameters']).fetchall()
+c.set_progress_handler(None,0)
+print(json.dumps({'steps':steps,'rows':len(rows),'sqliteVersion':sqlite3.sqlite_version}))
+c.close()`], { input: JSON.stringify({ file, sql: hostRead!.sql, parameters: hostRead!.parameters }), encoding: 'utf8' }))
+    costs.push({ historyRows, ...result })
+  }
+  measure(0)
+  let historyRows = 0
+  for (const count of [256, 768]) {
+    database.exec('BEGIN')
+    for (let index = 0; index < count; index++) add('completed-body-' + historyRows++, null)
+    database.exec('COMMIT'); measure(historyRows)
+  }
+  const plans = prepare('EXPLAIN QUERY PLAN ' + hostRead!.sql).all(...hostRead!.parameters)
+  const unhintedPlan = prepare('EXPLAIN QUERY PLAN ' + hostRead!.sql.replace(' INDEXED BY connector_publication_card_preparation', '')).all(...hostRead!.parameters)
+  const facts = { sql: hostRead!.sql, parameters: hostRead!.parameters, costs, plans, unhintedPlan, selected: expected,
+    schemaCondition: { recreatedIndex: 'connector_publication_projection_latest', originalDefinition: projectionIndex, reason: 'Observed existing-journal index creation order' },
+    nodeSqliteVersion: prepare('SELECT sqlite_version() version').get()!.version,
+    boundary: 'Actual ConnectionServices/PublicationHost/PublicationStore and public receipts. Runtime and adapter effects are controlled. VM steps use a separate read-only Python SQLite connection/version on this same isolated journal.' }
+  cardRecoveryFacts.push(facts)
+  expect(costs.every(value => value.rows === expected.length)).toBe(true)
+  expect(costs.at(-1)!.steps, 'Completed history must not multiply actual card-recovery VM work').toBeLessThan(costs[0]!.steps * 1.2)
+  expect(plans.some(plan => String(plan.detail).includes('connector_publication_card_preparation'))).toBe(true)
+  const before = reads.length
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(reads.length).toBeGreaterThan(before))
+  await vi.waitFor(() => expect(store.inspect('abandoned-second')?.cardPreparation?.receipt.state).toBe('unknown'))
+  expect(store.inspect('abandoned-first')?.cardPreparation?.receipt).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
+  expect(store.inspect(original.operationId)?.cardPreparation?.receipt.state, 'A current native create must retain its original in-flight receipt').toBe('dispatching')
+  for (const value of excluded) expect(store.inspect(value.operationId)).toEqual(value)
+  expect(createCard).toHaveBeenCalledOnce(); expect(f.dispatched).toHaveLength(1)
+  const receipt = await f.sdk.call('connection.delivery.inspect', { operationId: 'abandoned-first' })
+  expect(receipt.delivery).toMatchObject({ operationId: 'abandoned-first', state: 'confirmed', presentation: { entity: { state: 'unknown', reason: 'effect-unconfirmed' } } })
+  expect(await f.cli(['inspect', '--operation-id', 'abandoned-first'])).toEqual(receipt)
+  releaseCreate(); releaseUpload()
+  await vi.waitFor(() => expect(store.inspect(original.operationId)?.cardPreparation?.receipt.state).toBe('confirmed'))
+  expect(store.unconfirmedCards(f.binding)).toEqual([])
+  measure(historyRows)
+  expect(costs.at(-1)!.rows).toBe(0)
+  expect(costs.at(-1)!.steps).toBeLessThan(costs[0]!.steps * 1.2)
+  expect(createCard).toHaveBeenCalledOnce(); expect(f.dispatched).toHaveLength(1)
+  Object.assign(facts, { publicReceipt: receipt, createCalls: createCard.mock.calls.length, bodyDispatches: f.dispatched.length })
+}, 15_000)
 
 it('publication recovery keeps original effects while its loaded Host query excludes completed and unrelated history ranges', async () => {
   const f = await fixture(async request => JSON.parse(request.request.body!).text === 'Original uncertain reply'
