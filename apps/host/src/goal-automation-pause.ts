@@ -51,10 +51,11 @@ export function createGoalAutomationPause(options: {
         try { await options.progress.start() } catch (error) { receipt.issues.push({ stage: 'original-progress-owner', message: error instanceof Error ? error.message : String(error) }) }
         await assertTarget()
         assertTargetSync()
-        options.cancel({ kind: 'agent', hostId: 'local', agentSessionId: input.agentSessionId, run: input.expectedRun })
-        options.progress.cancelTarget({ hostId: 'local', agentSessionId: input.agentSessionId })
+        const target = { hostId: 'local', agentSessionId: input.agentSessionId }
+        options.cancel({ kind: 'agent', ...target, run: input.expectedRun })
+        options.progress.cancelTarget(target)
         const originalContext = { ...context, assertCurrent: assertTarget }
-        const loops = options.progress.list().filter(loop => loop.hostId === 'local' && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')
+        const loops = options.progress.list(target).filter(loop => loop.status !== 'stopped')
         const intents: string[] = []
         let afterIntentId: string | undefined
         do {
