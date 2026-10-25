@@ -611,7 +611,7 @@ it('rejects a second owner while the original Stop is executing and prevents ano
   await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_OWNER_DISPOSED' })
   release(); await first; await disposal; await f.invariants(second)
 })
-it.each(['Stop', 'Start'] as const)('a distinct process recovers the original interrupted restart after lost %s reply without retiring its Session', async stage => {
+it.each(['Stop', 'Start', 'Start after initialization recovery'] as const)('a distinct process recovers the original interrupted restart after lost %s reply without retiring its Session', async stage => {
   const f = await fixture(); let originalSuccessor: any
   if (stage === 'Stop') f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); throw new Error('Original private Stop reply lost') })
   else f.start.mockImplementationOnce(async (input: any) => { originalSuccessor = await f.nativeStart(input); throw new core.AgentMuxError('Original private Start reply lost', 'CONTROL_UNAVAILABLE') })
@@ -631,6 +631,20 @@ it.each(['Stop', 'Start'] as const)('a distinct process recovers the original in
     resources: { 'original-tab': { draft: 'Original unsent draft', browserId: 'original-browser' } }
   } })
   await f.client.dispose()
+  if (stage === 'Start after initialization recovery') {
+    // Retained record from an interrupted owner: initialization was observed on the old Run,
+    // then Start succeeded without a commit ACK. The replacement process must reconcile it.
+    const reservation = await f.store.readLifecycleReservation(f.original.agentSessionId)
+    const operation = reservation!.preparedSession!.continuity!
+    operation.initializationRecovery = { actorId: 'original-initializing-actor', lifecycleOperationId: 'original-initializing-create',
+      run: { ...f.original.run }, previousFrontendId: 'original-initializing-frontend', outputAfterByte: 0,
+      observation: { frontendId: 'original-initializing-frontend', state: 'starting', backendState: 'running', source: 'managed-process', observedAt: 1,
+        initialization: { lifecycleOperationId: 'original-initializing-create', phase: 'unknown', native: { state: 'unknown' } } } }
+    reservation!.preparedSession!.continuityOperations![operation.operationId] = operation
+    const db = new DatabaseSync(f.storePath)
+    try { db.prepare('UPDATE reservations SET json=? WHERE id=?').run(JSON.stringify(reservation), f.original.agentSessionId) }
+    finally { db.close() }
+  }
   const entry = process.env.AGENTMUX_TEST_RESTART_CHILD_ENTRY ?? process.env.AGENTMUX_TEST_RESTART_ENTRY ?? new URL('../dist/index.js', import.meta.url).href
   const code = `import * as core from ${JSON.stringify(entry)};const program=${JSON.stringify(program)};const provider=${provider.toString()};const store=new core.AgentMuxFileAgentSessionStore(${JSON.stringify(f.storePath)});const spatial=new core.AgentMuxSpatialStateStore(${JSON.stringify(spatialPath)});const before=await spatial.read();const client=new core.AgentMuxClient({store,providers:[provider()]});Object.defineProperty(client.hookServer,'port',{value:0});await client.connect();client.kernel.list=async()=>{throw Error('Original operation must not read unrelated inventory')};try{const session=await client.restartAgent(${JSON.stringify(f.request)});console.log(JSON.stringify({pid:process.pid,session,inspection:await client.inspectAgentRestart(${JSON.stringify(f.request)}),workfaceBefore:before,workfaceAfter:await spatial.read()}))}finally{await client.dispose()}`
   const child = spawn(process.execPath, ['--input-type=module', '-e', code], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -649,6 +663,21 @@ it.each(['Stop', 'Start'] as const)('a distinct process recovers the original in
   if (originalSuccessor) expect((await second.inner.kernel.status(originalSuccessor.runId)).pid).toBe(originalSuccessor.pid)
   expect((await second.client.listRuns()).filter((run: any) => run.state === 'running')).toHaveLength(2)
   expect(await second.store.readRetiredAgentSession(f.original.agentSessionId)).toBeNull()
+  if (stage === 'Start after initialization recovery') {
+    expect(result.session.continuity.initializationRecovery).toBeUndefined()
+    expect(await second.store.readLifecycleReservation(f.original.agentSessionId)).toBeNull()
+    const hosted = new core.AgentMuxHostedRuntimeService(second.client, second.store.path, () => ({ runtimeId: 'recovered-runtime', ownerInstanceId: 'recovered-owner', protocolVersion: 2,
+      processId: process.pid, ctxmux: second.client.runtimeIdentity(), availability: 'connected' }))
+    cleanups.push(() => hosted.dispose())
+    const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: second.client }], hostedRuntime: () => hosted })
+    await server.start(); cleanups.push(() => server.stop())
+    const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
+    const consumer = await core.connectHostedAgentMux({ rpc }); cleanups.push(() => consumer.dispose())
+    await consumer.stopAgent(f.original.agentSessionId, result.session.run)
+    expect(await second.store.readRetiredAgentSession(f.original.agentSessionId)).toMatchObject({ history: { nativeHandle: f.original.nativeHandle } })
+    expect((await second.inner.kernel.status(f.unrelated.runId)).state.type).toBe('running')
+    expect((await new core.AgentMuxSpatialStateStore(spatialPath).read()).graph).toEqual(workface.graph)
+  }
 })
 it('does not Start a successor until the original Stop has an authoritative terminal Run state', async () => {
   const f = await fixture()

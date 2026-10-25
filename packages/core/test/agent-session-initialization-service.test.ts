@@ -2,8 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import type { AgentTerminalFrontend } from '../src/agent-terminal-frontend.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
-import { DEFAULT_AGENT_CONTINUITY_POLICY, type AgentMuxContinuityOperation } from '../src/agent-session-recovery.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityResult } from '../src/agent-session-recovery.js'
 import { prepareContinuityLaunchInput, bindContinuityLaunchInput } from '../src/agent-session-recovery/input.js'
+import { AgentMuxError } from '../src/errors.js'
+import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -85,6 +87,123 @@ async function retainSupervisedFrontend(f: Awaited<ReturnType<typeof fixture>>) 
   f.inner.kernel.observeLifecycle = vi.fn(async () => async () => {})
   return operation
 }
+
+/** Keep the real public continuity, durable Store, reconciliation and Stop owners;
+ * only external Provider/Runtime boundaries are deterministic here. */
+async function replacementAfterInitialization(origin: 'initialization' | 'frontend', loseStartReply = false) {
+  const f = await fixture({ resume: true, detached: origin === 'frontend' })
+  if (origin === 'frontend') {
+    const reconnect = f.reconnect.getMockImplementation()!
+    f.reconnect.mockImplementationOnce(reconnect).mockRejectedValueOnce(new Error('Original frontend reply unknown'))
+  } else f.reconnect.mockRejectedValueOnce(new Error('Original initialization reply unknown'))
+  const observed = await f.client.ensureAgentContinuity(f.original)
+  expect(observed.kind).toBe('pending')
+  const events: Array<{ type: string; code?: string; session?: Pick<AgentMuxStoredAgentSession, 'run' | 'continuity'> }> = []
+  const off = f.inner.publisher.onStatusEvent((event: typeof events[number]) => events.push(structuredClone(event)))
+  cleanup.push(async () => off())
+  const retained = structuredClone((await f.store.readMetadata('recipient'))!.continuityOperations![f.original.operationId]!)
+  expect(retained.initializationRecovery?.run).toEqual(f.original.expectedRun)
+  if (origin === 'frontend') expect(retained.frontendReconnect?.previousFrontendId).toBe('first-tui')
+
+  // An unrelated historical operation must survive the current Run transition.
+  const historical = { ...structuredClone(retained), operationId: 'prior-initialization-observation' }
+  await f.inner.registry.update('recipient', f.original.expectedRun, (value: AgentMuxStoredAgentSession) => ({ ...value,
+    continuityOperations: { ...value.continuityOperations, [historical.operationId]: historical } }))
+  const provider = f.client.providers.get('codex')
+  f.inner.sessionExecutorOptions = async (_session: unknown, input: unknown) => input
+  f.inner.probePreparedAgent = vi.fn(async () => ({ providerId: 'codex', executable: 'codex', installed: true,
+    capabilities: provider.catalog.capabilities }))
+  f.inner.requireHookIngressOwner = vi.fn(async () => {})
+  f.inner.ensureManagedHooks = vi.fn(async () => {})
+  f.inner.hookServer.createBinding = vi.fn(() => ({ bindingId: 'replacement-hook',
+    endpoint: { url: 'http://127.0.0.1:0', token: 'replacement-token' }, bindRun: async () => {}, close: async () => {} }))
+  const managed = vi.spyOn(provider as Required<typeof provider>, 'prepareManagedLaunch').mockImplementation(async (plan, operationId) => ({ plan,
+    nativeActor: { ...f.actor, actorId: 'replacement-actor', lifecycleOperationId: operationId, token: 'b'.repeat(64) } }))
+  if (provider.readPromptExecutionEvidence) vi.spyOn(provider as Required<typeof provider>, 'readPromptExecutionEvidence').mockResolvedValue(null)
+  let successor: CtxmuxAdapterRun | undefined, observable = !loseStartReply
+  const ended: CtxmuxAdapterRun = { ...f.run(f.original.expectedRun.runId), state: { type: 'interrupted', reason: 'daemon_restart' } }
+  f.inner.kernel.status = vi.fn(async (runId: string) => runId === ended.runId ? ended : successor!)
+  f.inner.kernel.start = vi.fn(async (input: { operationKey: string; program: string; args: string[] }) => {
+    successor = { ...f.run('replacement-run'), pid: 456, program: input.program, args: input.args,
+      lifecycleOperationId: input.operationKey }
+    if (loseStartReply) throw new AgentMuxError('Original replacement Start reply unknown', 'CONTROL_UNAVAILABLE')
+    return successor
+  })
+  f.inner.kernel.inspectCreation = vi.fn(async (operationId: string) =>
+    observable && successor?.lifecycleOperationId === operationId ? successor : null)
+  f.inner.kernel.prepareStop = vi.fn(async (runId: string, operationKey: string) => ({ daemonInstance: 'fixture-runtime', operationKey, runId }))
+  f.inner.kernel.stop = vi.fn(async (operation: { runId: string }) => {
+    expect(operation.runId).toBe(successor!.runId)
+    successor = { ...successor!, state: { type: 'exited', code: 0, signal: null } }
+  })
+  return { ...f, managed, historical, retained, events, successor: () => successor!, observeStart: () => { observable = true } }
+}
+
+async function expectReplacementCanClose(f: Awaited<ReturnType<typeof replacementAfterInitialization>>, result: Pick<AgentMuxAgentContinuityResult, 'continuity'>) {
+  const saved = (await f.store.readMetadata('recipient'))!
+  expect(saved.run).toEqual({ runId: f.successor().runId })
+  expect(saved.retiredRuns).toContainEqual(f.original.expectedRun)
+  expect(saved.nativeHandle).toMatchObject({ providerId: 'codex', sessionId: 'original-native' })
+  expect(saved.nativeActor).toMatchObject({ actorId: 'replacement-actor', lifecycleOperationId: f.successor().lifecycleOperationId })
+  expect(saved.continuityOperations![f.historical.operationId]).toEqual(f.historical)
+  expect(saved.continuity?.initializationRecovery).toBeUndefined()
+  expect(saved.continuity?.frontendReconnect).toBeUndefined()
+  expect(saved.continuityOperations![f.original.operationId]).toEqual(saved.continuity)
+  expect(result.continuity).toEqual(saved.continuity)
+  expect(f.events.filter(event => event.code === 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED')).toEqual([])
+  const published = f.events.filter(event => event.type === 'agent-session' && event.session?.run.runId === saved.run.runId)
+  expect(published.length).toBeGreaterThan(0)
+  for (const event of published) {
+    expect(event.session!.continuity?.initializationRecovery).toBeUndefined()
+    expect(event.session!.continuity?.frontendReconnect).toBeUndefined()
+  }
+  expect(await f.store.readLifecycleReservation('recipient')).toBeNull()
+  expect(f.inner.kernel.start).toHaveBeenCalledOnce()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  await expect(f.client.stopAgent('recipient', saved.run)).resolves.toBeUndefined()
+  expect(f.inner.kernel.stop).toHaveBeenCalledOnce()
+  expect(await f.store.readMetadata('recipient')).toBeNull()
+  expect(await f.store.readRetiredAgentSession('recipient')).toMatchObject({
+    agentSessionId: 'recipient', run: saved.run, history: { nativeHandle: saved.nativeHandle } })
+}
+
+it.each(['initialization', 'frontend'] as const)('replaces an ended Run after pending %s recovery and closes the exact successor', async origin => {
+  const f = await replacementAfterInitialization(origin)
+  const result = await f.client.ensureAgentContinuity(f.original)
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'resumed', run: { runId: 'replacement-run' } })
+  await expectReplacementCanClose(f, result)
+})
+
+it.each(['initialization', 'frontend'] as const)('reconciles the original prepared Start after pending %s recovery without replay and then closes it', async origin => {
+  const f = await replacementAfterInitialization(origin, true)
+  const attempted = await f.client.ensureAgentContinuity(f.original)
+  expect(attempted.kind).toBe('pending')
+  const reservation = await f.store.readLifecycleReservation('recipient')
+  expect(reservation).toMatchObject({ kind: 'resume', expectedRun: f.original.expectedRun,
+    preparedSession: { nativeActor: { actorId: 'replacement-actor' } } })
+  const unknown = await f.client.ensureAgentContinuity(f.original)
+  expect(unknown.kind).toBe('pending')
+  expect(await f.store.readLifecycleReservation('recipient')).toEqual(reservation)
+  await expect(f.client.stopAgent('recipient', f.original.expectedRun)).rejects.toMatchObject({ code: 'AGENT_SESSION_BUSY' })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.inner.kernel.start).toHaveBeenCalledOnce()
+  f.observeStart()
+  const restored = await f.client.ensureAgentContinuity(f.original)
+  expect(restored, JSON.stringify(restored)).toMatchObject({ kind: 'resumed', run: { runId: 'replacement-run' } })
+  await expectReplacementCanClose(f, restored)
+})
+
+it('connection recovery commits the retained successor before any manual continuity receipt is recorded', async () => {
+  const f = await replacementAfterInitialization('frontend', true)
+  expect((await f.client.ensureAgentContinuity(f.original)).kind).toBe('pending')
+  const reservation = await f.store.readLifecycleReservation('recipient')
+  expect(reservation).toMatchObject({ kind: 'resume', preparedSession: { continuity: {
+    initializationRecovery: expect.any(Object), frontendReconnect: expect.any(Object) } } })
+  f.observeStart()
+  await f.inner.recoverStaleLifecycles()
+  expect(f.inner.kernel.inspectCreation).toHaveBeenCalledWith(reservation!.operationId)
+  await expectReplacementCanClose(f, f.client.agentSession('recipient'))
+})
 
 it('skips initial-input history enumeration for a legacy actor while its original supervisor still observes', async () => {
   const f = await fixture({ resume: true, capability: false }), operation = await retainSupervisedFrontend(f)
