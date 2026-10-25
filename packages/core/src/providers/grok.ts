@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { GROK_LAUNCH_OPTIONS } from '../agent-launch-option.js'
+import { GROK_LAUNCH_OPTIONS } from './launch-options.js'
 import type { PostureControlDeclaration } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'

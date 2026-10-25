@@ -127,6 +127,10 @@
       "types": "./dist/session-user-messages.d.ts",
       "import": "./dist/session-user-messages.js"
     },
+    "./provider-launch-options": {
+      "types": "./dist/providers/launch-options.d.ts",
+      "import": "./dist/providers/launch-options.js"
+    },
     "./launch-option": {
       "types": "./dist/agent-launch-option.d.ts",
       "import": "./dist/agent-launch-option.js"

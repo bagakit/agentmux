@@ -5,6 +5,7 @@ export { mintObjectId, mintCapabilityToken, deriveObjectId, isObjectId } from '.
 export * from './agent-provider.js'
 export * from './agent-plugin.js'
 export * from './agent-launch-option.js'
+export * from './providers/launch-options.js'
 export * from './agent-interaction.js'
 export * from './agent-interaction-state.js'
 export * from './agent-message.js'

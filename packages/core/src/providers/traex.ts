@@ -1,4 +1,4 @@
-import { TRAEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
+import { TRAEX_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { discoverAppServerNativeSession } from './app-server-native-session.js'

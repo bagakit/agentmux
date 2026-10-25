@@ -11,7 +11,7 @@ import { executorDetectionKey, useAppStore } from '../../store'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
-import { withYoloArgs } from '@agentmux/core/launch-option'
+import { withUnrestrictedLaunchArgs } from '@agentmux/core/provider-launch-options'
 import { parseExecutorArgs } from '../../lib/executors'
 export { parseExecutorArgs } from '../../lib/executors'
 import { HostExecutorSettings } from './HostExecutorSettings'
@@ -337,7 +337,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   async function enableYolo(id?: string): Promise<void> {
     await saveDrafts(() => {
       const next = Object.fromEntries(Object.entries(drafts).map(([candidate, draft]) => {
-        const args = candidate === id || id === undefined ? withYoloArgs(draft.providerId, parseExecutorArgs(draft.args)) : null
+        const args = candidate === id || id === undefined ? withUnrestrictedLaunchArgs(draft.providerId, parseExecutorArgs(draft.args)) : null
         return [candidate, args ? { ...draft, args: args.map(quote).join('\n') } : draft]
       }))
       setDrafts(() => next)
@@ -425,7 +425,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                     {!config.executors[id] ? <p className="settings-group-note">Executor ID: <code>{id}</code>. Provider and ID are fixed after saving.</p> : null}
                         <label><span>Environment variables <small>JSON object · values stay literal</small></span><ComposerTextarea value={draft.env} onValueChange={(value) => update(id, { env: value })} placeholder={'{"API_BASE": "https://example.test"}'} rows={3} /></label>
                     <label className="agent-guide-toggle"><input type="checkbox" checked={draft.injectAgentMuxGuide} onChange={(event) => update(id, { injectAgentMuxGuide: event.target.checked })} /><span><strong>AgentMux guide</strong><small>Help this agent use your views, tabs, and configured executors.</small></span></label>
-                    {withYoloArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO</button></div> : null}
+                    {withUnrestrictedLaunchArgs(draft.providerId, []) ? <div className="settings-launch-action"><span>Skip permission prompts on future launches.</span><button type="button" className="small-button" disabled={saving} onClick={() => void enableYolo(id)}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO</button></div> : null}
                   </div>
                 </details>
                 <div className="settings-executor-remove"><button type="button" className="small-button" disabled={saving} onClick={() => removeExecutor(id)}><ThemeActionRemoveIcon size={13} /> Delete executor</button></div>
@@ -434,7 +434,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
           )
         })}
           {!executors.some(({ id }) => id === selectedId) ? <div className="settings-resource-editor__empty" tabIndex={-1} role="status"><ThemeObjectAgentIcon size={28} aria-hidden="true" /><strong>{selectedId ? 'Executor unavailable' : scopedExecutors.length ? 'Choose an executor' : 'No executors for this provider'}</strong><p>{selectedId ? 'This executor is no longer in the configuration. Select another, or add a new one.' : 'Create a launch configuration with its own command, arguments and appearance.'}</p>{!selectedId ? <button className="small-button" disabled={saving} onClick={() => addExecutor()}>Add executor</button> : null}</div> : null}
-          {executors.some(({ draft }) => withYoloArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ThemeNavigationDownIcon size={13} /></summary><div className="settings-launch-action"><span>Skip permission prompts for all Claude and Codex executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO for Claude &amp; Codex</button></div></details> : null}
+          {executors.some(({ draft }) => withUnrestrictedLaunchArgs(draft.providerId, []) !== null) ? <details className="settings-bulk-actions"><summary>Launch actions <ThemeNavigationDownIcon size={13} /></summary><div className="settings-launch-action"><span>Use unrestricted access for supported executors on future launches.</span><button className="small-button" disabled={saving} onClick={() => void enableYolo()}><ThemeStatusUnrestrictedIcon size={13} /> Enable YOLO for supported executors</button></div></details> : null}
         </div>
           </div>
           </div>
