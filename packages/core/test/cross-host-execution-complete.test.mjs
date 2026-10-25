@@ -46,6 +46,9 @@ function uiFixture() {
 }
 test('an original UI pass cannot qualify a different candidate, route, Run or workface', () => {
   validateUi(uiFixture(), candidate, hashes)
+  const completeDist = { ...hashes, 'packages/core/dist/index.d.ts': sha, 'packages/core/dist/index.js.map': sha }
+  const executableLease = uiFixture(); executableLease.coreConsumption.hashes = completeDist
+  validateUi(executableLease, candidate, completeDist)
   const changes = [
     value => { value.remoteLease.sourceCommit = 'c'.repeat(40) },
     value => { value.remoteLease.endpoint = { ...candidate.remote.endpoint, host: 'another-host' } },

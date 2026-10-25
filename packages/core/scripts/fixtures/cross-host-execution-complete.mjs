@@ -49,7 +49,11 @@ export function validateUi(receipt, candidate, expectedDist) {
   assert(lease.ownsNewScopeOnly === true && lease.installedPackageReadOnly === true && lease.base.startsWith(candidate.remote.installedRoot + '/ui-'), 'UI must own only its isolated remote scope')
   assert(nonempty(expectedDist), 'The original Core build must identify its complete dist')
   assert.deepEqual(dist(receipt.coreConsumption?.hashes), expectedDist, 'UI local Core differs from the qualified build')
-  assert.deepEqual(Object.fromEntries(Object.entries(lease.coreHashes ?? {}).filter(([file]) => file.startsWith('dist/')).map(([file, digest]) => ['packages/core/' + file, digest])), expectedDist, 'UI remote Core differs from the qualified build')
+  // The UI lease records executable JavaScript. Full dist/bin/vendor identity is
+  // independently checked by the installed-candidate preflight before this join.
+  const executableDist = Object.fromEntries(Object.entries(expectedDist).filter(([file]) => file.endsWith('.js')))
+  assert(nonempty(executableDist))
+  assert.deepEqual(Object.fromEntries(Object.entries(lease.coreHashes ?? {}).map(([file, digest]) => ['packages/core/' + file, digest])), executableDist, 'UI remote Core differs from the qualified executable set')
   assert.deepEqual(receipt.phases?.map(phase => phase.phase), ['tool-workspace', 'tool-workspace-restore'])
   const [first, second] = receipt.phases
   for (const phase of receipt.phases) assert(phase.native?.passed === true && phase.exit?.exitCode === 0 && phase.exit.exitSignal === null && phase.exit.exitConfirmed === true && phase.exit.timedOut === false, 'Both original Electron processes must close successfully')
