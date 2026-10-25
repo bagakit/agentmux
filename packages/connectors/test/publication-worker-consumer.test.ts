@@ -21,9 +21,11 @@ const cleanup: Array<() => void | Promise<void>> = []
 let recentDeliveryFacts: unknown
 const recoveryCostFacts: unknown[] = []
 const cardRecoveryFacts: unknown[] = []
+const decisionLookupFacts: unknown[] = []
 afterAll(async () => { if (process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS) await writeFile(process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS, JSON.stringify(recentDeliveryFacts ?? null, null, 2) + '\n') })
 afterAll(async () => { if (process.env.AGENTMUX_TEST_PUBLICATION_RECOVERY_FACTS) await writeFile(process.env.AGENTMUX_TEST_PUBLICATION_RECOVERY_FACTS, JSON.stringify(recoveryCostFacts, null, 2) + '\n') })
 afterAll(async () => { if (process.env.PUBLICATION_CARD_RECOVERY_FACTS) await writeFile(process.env.PUBLICATION_CARD_RECOVERY_FACTS, JSON.stringify(cardRecoveryFacts, null, 2) + '\n') })
+afterAll(async () => { if (process.env.PUBLICATION_DECISION_LOOKUP_FACTS) await writeFile(process.env.PUBLICATION_DECISION_LOOKUP_FACTS, JSON.stringify(decisionLookupFacts, null, 2) + '\n') })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const row = (id: string, text = 'Same original reply', content?: unknown[]) => JSON.stringify({ sessionId: 'original-native', uuid: id,
   type: 'assistant', message: { role: 'assistant', content: content ?? [{ type: 'text', text }] } }) + '\n'
@@ -65,6 +67,88 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   }
   return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
+
+it('decision lookup keeps original publication identities and bounded work as unrelated decisions grow', async () => {
+  const f = await fixture(), database = f.services.database!, prepare = database.prepare.bind(database)
+  const reads: Array<{ kind: 'event' | 'failure'; sql: string; parameters: Parameters<ReturnType<typeof prepare>['get']> }> = []
+  vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql), stack = new Error().stack ?? ''
+    const kind = sql.includes("='event-representation'") ? 'event' : sql.includes("='failure-record'") ? 'failure' : undefined
+    if (kind && stack.includes('commitPage') && sql.includes('record_id=?')) {
+      const get = statement.get.bind(statement)
+      statement.get = (...parameters) => { reads.push({ kind, sql, parameters }); return get(...parameters) }
+    }
+    return statement
+  })
+  await appendFile(f.transcript, row('decision-cost-original', 'Original decision body'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'))
+  const original = structuredClone(f.speech()[0]!), event = reads.find(read => read.kind === 'event'), failure = reads.find(read => read.kind === 'failure')
+  expect(event, 'The actual PublicationHost must consume its event decision lookup').toBeDefined()
+  expect(failure, 'The actual PublicationHost must consume its failure decision lookup').toBeDefined()
+  const current = JSON.parse(String(prepare(event!.sql).get(...event!.parameters)!.decision_json))
+  expect(current.projectionId).toBe(original.projectionId)
+  const insert = prepare('INSERT INTO connector_publication_decision(binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?)')
+  const add = (id: string, revision: string, value: unknown, source = 'unified', binding = f.binding.bindingId, bindingRevision = f.binding.revision) =>
+    insert.run(binding, bindingRevision, source, id, revision, 'content-accounted', JSON.stringify(value))
+  // Same original event, several retained versions. Latest means publication row order,
+  // never lexicographic revision order or an unrelated source with the same local key.
+  for (const revision of ['zz-older-fixture', 'aa-latest-fixture']) add(String(event!.parameters[2]), revision,
+    { ...current, event: { ...current.event, revision } })
+  add(String(event!.parameters[2]), 'foreign-source-version', { ...current, projectionId: 'foreign-source' }, 'other-source')
+  add(String(event!.parameters[2]), 'foreign-binding-version', { ...current, projectionId: 'foreign-binding' }, 'unified', 'other-binding')
+  add(String(event!.parameters[2]), 'foreign-revision-version', { ...current, projectionId: 'foreign-revision' }, 'unified', f.binding.bindingId, f.binding.revision + 1)
+  add(String(failure!.parameters[2]), 'current', { kind: 'failure-record', projectionId: 'foreign-source' }, 'other-source')
+  const selected = () => JSON.parse(String(prepare(event!.sql).get(...event!.parameters)!.decision_json))
+  expect(selected()).toMatchObject({ projectionId: original.projectionId, event: { revision: 'aa-latest-fixture' } })
+  expect(prepare(failure!.sql).get(...failure!.parameters)).toBeUndefined()
+  const file = String(prepare('PRAGMA database_list').get()!.file)
+  const costs: Array<{ unrelatedDecisions: number; reads: Array<{ kind: string; steps: number; rows: number }>; sqliteVersion: string }> = []
+  const measure = (unrelatedDecisions: number) => {
+    const result = JSON.parse(execFileSync('python3', ['-c', `import json,sqlite3,sys
+x=json.load(sys.stdin)
+c=sqlite3.connect('file:'+x['file']+'?mode=ro',uri=True)
+results=[]
+for query in x['reads']:
+ steps=[0]
+ def tick():
+  steps[0]+=1
+  return 0
+ c.set_progress_handler(tick,1)
+ rows=c.execute(query['sql'],query['parameters']).fetchall()
+ c.set_progress_handler(None,0)
+ results.append({'kind':query['kind'],'steps':steps[0],'rows':len(rows)})
+print(json.dumps({'reads':results,'sqliteVersion':sqlite3.sqlite_version}))
+c.close()`], { input: JSON.stringify({ file, reads: [event, failure] }), encoding: 'utf8' }))
+    costs.push({ unrelatedDecisions, ...result })
+  }
+  measure(0)
+  let unrelatedDecisions = 0
+  for (const count of [256, 1792]) {
+    database.exec('BEGIN')
+    for (let index = 0; index < count; index++) add('unrelated-decision-' + unrelatedDecisions++, 'current', { kind: 'scope', excluded: [] })
+    database.exec('COMMIT'); measure(unrelatedDecisions)
+  }
+  for (const kind of ['event', 'failure']) {
+    const values = costs.map(cost => cost.reads.find(read => read.kind === kind)!)
+    expect(values.every(value => value.rows === (kind === 'event' ? 1 : 0))).toBe(true)
+    expect(values.at(-1)!.steps, kind + ' lookup must not scan unrelated retained decisions').toBeLessThan(values[0]!.steps * 1.2)
+  }
+  const plans = [event!, failure!].map(read => ({ kind: read.kind, sql: read.sql, parameters: read.parameters,
+    plan: prepare('EXPLAIN QUERY PLAN ' + read.sql).all(...read.parameters) }))
+  for (const read of plans) expect(read.plan.some(plan => String(plan.detail).includes('source_key=? AND record_id=?'))).toBe(true)
+  expect(selected()).toMatchObject({ projectionId: original.projectionId, event: { revision: 'aa-latest-fixture' } })
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  const receipt = await f.sdk.call('connection.delivery.inspect', { operationId: original.operationId })
+  expect(receipt.delivery).toMatchObject({ operationId: original.operationId, state: 'confirmed' })
+  expect(await f.cli(['inspect', '--operation-id', original.operationId])).toEqual(receipt)
+  await appendFile(f.transcript, row('decision-cost-next', 'Next original decision body'))
+  await vi.waitFor(() => expect(f.speech().filter(operation => operation.state === 'confirmed')).toHaveLength(2))
+  expect(f.dispatched).toHaveLength(2)
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  decisionLookupFacts.push({ costs, plans, originalOperationId: original.operationId, publicReceipt: receipt,
+    latestEventRevision: selected().event.revision, nodeSqliteVersion: prepare('SELECT sqlite_version() version').get()!.version,
+    boundary: 'Actual ConnectionServices/PublicationHost/PublicationStore from loaded source, Core transcript reader, public RPC and compiled CLI; controlled external adapter. VM steps read this same isolated journal through Python SQLite.' })
+}, 15_000)
 
 it('card recovery keeps original scope and in-flight effects with bounded work as completed history grows', async () => {
   const bytes = Buffer.from('original-avatar'), image = { mimeType: 'image/png' as const, dataBase64: bytes.toString('base64'), byteLength: bytes.length,
