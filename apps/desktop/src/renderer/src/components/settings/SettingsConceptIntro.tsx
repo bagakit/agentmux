@@ -1,9 +1,37 @@
 import { useId } from 'react'
 import capsuleArt from '../../assets/settings/capsule-keepsake.png'
 import goalsArt from '../../assets/settings/goals-companions.png'
+import spaceArt from '../../assets/settings/space-workchamber.png'
+import focusArt from '../../assets/settings/focus-workframe.png'
 import './settings-concept-intro.css'
 
 /** Read-only illustrations. Configuration and execution remain with each pane. */
+export function SpaceIntroduction() {
+  const titleId = useId()
+  return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="space" aria-labelledby={titleId}>
+    <div className="settings-concept-intro__copy">
+      <h3 className="settings-concept-intro__title" id={titleId}>让工作各就其位。</h3>
+      <p className="settings-concept-intro__description">把 Agent、文件和页面放在同一工作面，按需要并排展开。</p>
+    </div>
+    <div className="settings-concept-intro__art" aria-hidden="true">
+      <img src={spaceArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
+    </div>
+  </section>
+}
+
+export function FocusIntroduction() {
+  const titleId = useId()
+  return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="focus" aria-labelledby={titleId}>
+    <div className="settings-concept-intro__copy">
+      <h3 className="settings-concept-intro__title" id={titleId}>把此刻看清楚。</h3>
+      <p className="settings-concept-intro__description">汇总正在推进和需要回应的工作，随时回到原来的上下文。</p>
+    </div>
+    <div className="settings-concept-intro__art" aria-hidden="true">
+      <img src={focusArt} alt="" width="1254" height="1254" loading="lazy" decoding="async" draggable={false} />
+    </div>
+  </section>
+}
+
 export function CapsuleIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro" data-concept="capsule" aria-labelledby={titleId}>

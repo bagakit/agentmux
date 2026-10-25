@@ -26,6 +26,20 @@ export const MOTE_COMPANION_PARTS = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "space-workchamber": {
+    shapes: [["path", { "d": "M8 3.5h6a6.5 6.5 0 0 1 6.5 6.5v7" }], ["path", { "d": "M3.5 17v-6a4 4 0 0 1 4-4h5a5 5 0 0 1 5 5v5" }], ["path", { "d": "M2 21h20 M8 18v-4h5" }]],
+    design: {
+      rest: "双层壳体与底座断开，留出进入工作面的负形；内部独立桌面不与壳体连成 G。",
+      motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Space 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
+    }
+  },
+  "focus-workframe": {
+    shapes: [["path", { "d": "M8 3.5H6.5a3 3 0 0 0-3 3V8 M16 3.5h1.5a3 3 0 0 1 3 3V8 M20.5 16v1.5a3 3 0 0 1-3 3H16 M8 20.5H6.5a3 3 0 0 1-3-3V16" }], ["rect", { "x": "8", "y": "9", "width": "8", "height": "6", "rx": "1" }]],
+    design: {
+      rest: "四角分离，中央保留横向内容面；以工作对象替代圆靶心。",
+      motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Focus 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
+    }
+  },
   "capsule-page": {
     shapes: [["rect", {"x":"3","y":"3","width":"18","height":"18","rx":"5"}], ["path", {"d":"M8 7h8v10H8Z M8 11h8"}]],
     design: {
