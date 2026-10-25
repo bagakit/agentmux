@@ -11,12 +11,14 @@ import { feishuQuestionCard } from './question-card.js'
 import { fragmentFeishuReply } from './reply-card.js'
 import { feishuRoleCard, type FeishuRoleSpeaker } from './role-card.js'
 import type { PublicationSpeaker } from '../../publication-speaker.js'
+import type { PublicationCardAdapter } from '../../publication-card.js'
 import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
-const currentCardRenderVersion = 'feishu-conversation-v10'
+const currentCardRenderVersion = 'feishu-conversation-v11'
 // Retained frozen cards use their original wire; this never prepares or replays an older effect.
-const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', 'feishu-conversation-v9', currentCardRenderVersion]
+const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', 'feishu-conversation-v9', 'feishu-conversation-v10', currentCardRenderVersion]
+const cardsPath = '/open-apis/cardkit/v1/cards'
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 const key = (operationId: string) => createHash('sha256').update(operationId).digest('base64url')
@@ -33,9 +35,13 @@ function speechCard(payload: Extract<PublicationPayload, { kind: 'speech' }>, sp
     { ...(payload.phase ? { phase: payload.phase } : {}), ...(fragment ? { fragment } : {}),
       ...(payload.presentationContext?.literal ? { literal: true } : {}), incoming: originalMessage !== undefined, ...(status ? { status } : {}) })
 }
-function roleSpeaker(operation: Readonly<PublicationOperation>): FeishuRoleSpeaker {
+function identityElementId(operation: Readonly<PublicationOperation>): string {
+  const speaker = operation.speaker, avatar = speaker?.avatar
+  return 'author_' + createHash('sha256').update(JSON.stringify([speaker?.kind, speaker?.reference, speaker?.mote, avatar?.input, avatar?.target, avatar?.revision])).digest('hex').slice(0, 13)
+}
+function roleSpeaker(operation: Readonly<PublicationOperation>, identity = false): FeishuRoleSpeaker {
   const snapshot = operation.speaker ?? { kind: 'unknown' as const }, uploaded = operation.avatarUploads?.at(-1)
-  return { kind: snapshot.kind, ...(snapshot.name ? { name: snapshot.name } : {}),
+  return { kind: snapshot.kind, ...(snapshot.name ? { name: snapshot.name } : {}), ...(identity ? { elementId: identityElementId(operation) } : {}),
     ...(operation.avatarSource?.imageKey ? { imageKey: feishuIdentity(operation.avatarSource.imageKey) }
       : uploaded?.state === 'confirmed' ? { imageKey: feishuIdentity(uploaded.imageKey) } : {}) }
 }
@@ -45,7 +51,9 @@ function ownSender(value: unknown, application: ConnectionApplication): boolean 
 }
 function requestCard(prepared: PreparedPublication): Record<string, unknown> | null {
   try {
-    const body = object(JSON.parse(prepared.request.body!)), card = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
+    const body = object(JSON.parse(prepared.request.body!)), envelope = object(body?.card)
+    const source = envelope?.type === 'card_json' ? envelope.data : body?.type === 'card_json' ? body.data : body?.content
+    const card = typeof source === 'string' ? object(JSON.parse(source)) : null
     if (!card || object(card.config)?.update_multi !== true) return null
     if (card.schema === '2.0') return (card.header === undefined || object(object(card.header)?.title)?.tag === 'plain_text') && Array.isArray(object(card.body)?.elements) ? card : null
     if (object(object(card.header)?.title)?.tag !== 'plain_text' || !Array.isArray(card.elements)) return null
@@ -67,6 +75,27 @@ function requestCard(prepared: PreparedPublication): Record<string, unknown> | n
     }
     return card
   } catch { return null }
+}
+function requestEntity(prepared: PreparedPublication): string | null {
+  try {
+    const body = object(JSON.parse(prepared.request.body!)), card = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
+    const id = object(card?.data)?.card_id
+    return card?.type === 'card' && typeof id === 'string' && id.length <= 20 ? feishuIdentity(id) : null
+  } catch { return null }
+}
+function identityElement(value: unknown, id: string): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null
+  if (object(value)?.element_id === id) return object(value)
+  for (const child of Object.values(value)) { const found = identityElement(child, id); if (found) return found }
+  return null
+}
+function nativeSequence(body: Record<string, unknown> | null, prepared: PreparedPublication): boolean {
+  return !!body && Number.isSafeInteger(body.sequence) && Number(body.sequence) >= 1 && Number(body.sequence) <= 2_147_483_647 && body.uuid === key(prepared.requestKey)
+}
+function nativeFailure(status: number | undefined, code: unknown): Exclude<PublicationReceipt, { state: 'confirmed' }> | null {
+  if (status !== undefined && status >= 500) return { state: 'unknown', reason: 'platform-unavailable' }
+  if ([10002, 200740, 200750, 200770, 200810, 200860, 300301, 300302, 200220, 300305, 300307, 300311, 300317, 300121].includes(Number(code))) return { state: 'not-applied', reason: 'platform-rejected' }
+  return failure(status, code) as Exclude<PublicationReceipt, { state: 'confirmed' }> | null
 }
 /** Feed preview only. Visible card text supplies the excerpt; no action values or private references. */
 function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationOperation, 'payload' | 'presentationTime' | 'speaker' | 'originalMessage'>): string {
@@ -175,6 +204,50 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly permissionActions = true as const
   readonly questionActions = true as const
   readonly queryFeedback = true as const
+  readonly cards: PublicationCardAdapter = {
+    prepareCreate: operation => {
+      const card = requestCard(this.prepare(operation, true))
+      if (card?.schema !== '2.0' || !identityElement(card, identityElementId(operation))) feishuFailure('FEISHU_NATIVE_CARD_UNSUPPORTED')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId,
+        request: { method: 'POST', path: cardsPath, contentType: 'application/json', body: JSON.stringify({ type: 'card_json', data: JSON.stringify(card) }) } }
+    },
+    create: async (prepared, target, credential, signal) => {
+      try {
+        parsePreparedPublication(prepared, this)
+        if (prepared.request.method !== 'POST' || prepared.request.path !== cardsPath || requestCard(prepared)?.schema !== '2.0') return { state: 'not-applied', reason: 'unsupported-format' }
+        const { result, status } = await this.request(prepared, target, credential, signal), failed = nativeFailure(status, result?.code)
+        if (failed) return failed
+        const id = feishuIdentity(object(result?.data)?.card_id)
+        return id.length <= 20 ? { state: 'confirmed', id } : { state: 'unknown', reason: 'effect-unconfirmed' }
+      } catch { return { state: 'unknown', reason: 'effect-unconfirmed' } }
+    },
+    preparePortrait: (operation, sequence) => {
+      const mapping = operation.mapping?.nativeCard
+      if (!mapping) feishuFailure('FEISHU_NATIVE_CARD_REQUIRED')
+      const card = requestCard(this.prepare({ ...operation, cardSequence: sequence })), id = identityElementId(operation), element = identityElement(card, id)
+      if (!element || object(element.icon)?.tag !== 'custom_icon') feishuFailure('FEISHU_PORTRAIT_UNAVAILABLE')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId + ':portrait', request: {
+        method: 'PUT', path: `${cardsPath}/${encodeURIComponent(mapping.id)}/elements/${id}`, contentType: 'application/json',
+        body: JSON.stringify({ uuid: key(operation.operationId + ':portrait'), sequence, element: JSON.stringify(element) }) } }
+    },
+    portrait: async (prepared, target, credential, signal, mapping) => {
+      try {
+        if (!this.validPortrait(prepared, mapping)) return { state: 'not-applied', reason: 'unsupported-format' }
+        const { result, status } = await this.request(prepared, target, credential, signal)
+        return nativeFailure(status, result?.code) ?? { state: 'confirmed' }
+      } catch { return { state: 'unknown', reason: 'effect-unconfirmed' } }
+    },
+    inspectPortrait: async (prepared, target, credential, signal, mapping) => {
+      if (!this.validPortrait(prepared, mapping)) return null
+      try {
+        const body = object(JSON.parse(prepared.request.body!)), expected = object(JSON.parse(String(body?.element))), id = String(expected?.element_id)
+        const value = await this.readMessage(target, credential, signal, mapping)
+        if (!value || value.msg_type !== 'interactive' || value.deleted === true) return null
+        const card = JSON.parse(String(object(value.body)?.content))
+        return isDeepStrictEqual(identityElement(card, id), expected) ? { state: 'confirmed' } : null
+      } catch { return null }
+    }
+  }
   readonly images = {
     maxBytes: 10 * 1024 * 1024,
     accepts: (image: PublicationImage) => image.byteLength > 0 && image.byteLength <= this.images.maxBytes && image.width > 0 && image.height > 0 &&
@@ -218,16 +291,22 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     const count = Math.max(2, payload.text.length)
     const fits = (part: PublicationTextFragment, fragment: { ordinal: number; count: number }) => {
       const displayed = { ...payload, text: part.text, ...(part.presentationContext ? { presentationContext: part.presentationContext } : {}) }
-      const role: FeishuRoleSpeaker = speaker ? { kind: speaker.kind, ...(speaker.name ? { name: speaker.name } : {}) } : { kind: 'unknown' }
+      const role: FeishuRoleSpeaker = { kind: speaker?.kind ?? 'unknown', ...(speaker?.name ? { name: speaker.name } : {}), elementId: 'author_' + 'x'.repeat(13) }
       const card = speechCard(displayed, role, originalMessage, fragment)
       card.config = { ...object(card.config), summary: { content: cardSummary(card, { payload: displayed, presentationTime: 0, ...(speaker ? { speaker } : {}), ...(originalMessage ? { originalMessage } : {}) }) } }
-      return Buffer.byteLength(JSON.stringify({ receive_id: target.externalConversationId, msg_type: 'interactive', uuid: 'x'.repeat(43), content: JSON.stringify(card) })) <= FEISHU_MESSAGE_BODY_BYTES
+      const data = JSON.stringify(card)
+      // The same fragment may later update its original entity. Measure both native envelopes,
+      // including its fixed identity component and largest sequence, independently of avatar readiness.
+      return Math.max(...[
+        { receive_id: target.externalConversationId, msg_type: 'interactive', uuid: 'x'.repeat(43), content: data },
+        { card: { type: 'card_json', data }, uuid: 'x'.repeat(43), sequence: 2_147_483_647 }
+      ].map(body => Buffer.byteLength(JSON.stringify(body)))) <= FEISHU_MESSAGE_BODY_BYTES
     }
     if (fits({ text: payload.text }, { ordinal: 0, count: 1 })) return [{ text: payload.text }]
     return fragmentFeishuReply(payload.text, part => fits(part, { ordinal: count - 1, count }))
   }
 
-  prepare(operation: Readonly<PublicationOperation>): PreparedPublication {
+  prepare(operation: Readonly<PublicationOperation>, identity = !!operation.mapping?.nativeCard): PreparedPublication {
     feishuIdentity(operation.target.externalConversationId)
     feishuIdentity(operation.target.application.appId)
     if (!['open.feishu.cn', 'open.larksuite.com'].includes(operation.target.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
@@ -261,7 +340,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(payload.agentSessionId)}` }] }
       ] }
     } else if (operation.payload.kind === 'question') {
-      card = feishuQuestionCard(operation.payload, feishuIdentity(operation.reference.agentSessionId), roleSpeaker(operation))
+      card = feishuQuestionCard(operation.payload, feishuIdentity(operation.reference.agentSessionId), roleSpeaker(operation, identity))
     } else if (operation.payload.kind === 'permission') {
       const payload = operation.payload
       const status = { pending: 'Choose one original permission option.', 'response-sent': 'Response returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original response is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
@@ -272,27 +351,32 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       ] }
     } else if (operation.payload.kind === 'speech') {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-      const speaker = roleSpeaker(operation)
+      const speaker = roleSpeaker(operation, identity)
       card = speechCard(operation.payload, speaker, operation.originalMessage, operation.fragment)
     } else if (operation.payload.kind === 'image') {
       const uploaded = operation.uploads?.at(-1)
       if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
-      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared image' } },
-        elements: [{ tag: 'img', img_key: feishuIdentity(uploaded.imageKey), alt: { tag: 'plain_text', content: operation.payload.image.alt || 'Original conversation image' } }] }
+      card = { schema: '2.0', config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared image' } },
+        body: { elements: [{ tag: 'img', img_key: feishuIdentity(uploaded.imageKey), alt: { tag: 'plain_text', content: operation.payload.image.alt || 'Original conversation image' } }] } }
     }
     if (card) {
       card.config = { ...object(card.config), summary: { content: cardSummary(card, operation) } }
-      const encode = () => JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(card) })
+      const native = mapping?.nativeCard
+      const created = !mapping && operation.cardPreparation?.useForMessage && operation.cardPreparation.receipt.state === 'confirmed' ? operation.cardPreparation.receipt.id : undefined
+      if (native && (card.schema !== '2.0' || !Number.isSafeInteger(operation.cardSequence) || operation.cardSequence! < 1 || operation.cardSequence! > 2_147_483_647)) feishuFailure('FEISHU_NATIVE_CARD_UNSUPPORTED')
+      const encode = () => JSON.stringify(native ? { card: { type: 'card_json', data: JSON.stringify(card) }, uuid: key(operation.operationId), sequence: operation.cardSequence }
+        : { ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(created ? { type: 'card', data: { card_id: created } } : card) })
       let body = encode()
       if (Buffer.byteLength(body) > FEISHU_MESSAGE_BODY_BYTES && operation.payload.kind === 'speech' && operation.speaker) {
         // The exact optional asset key cannot force another body fragment or delay its delivery.
-        card = speechCard(operation.payload, operation.speaker, operation.originalMessage, operation.fragment)
+        const { imageKey: _imageKey, ...speaker } = roleSpeaker(operation, identity)
+        card = speechCard(operation.payload, speaker, operation.originalMessage, operation.fragment)
         card.config = { ...object(card.config), summary: { content: cardSummary(card, operation) } }
         body = encode()
       }
       if (Buffer.byteLength(body) > FEISHU_MESSAGE_BODY_BYTES) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
-        method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
+        method: native ? 'PUT' : mapping ? 'PATCH' : 'POST', path: native ? `${cardsPath}/${encodeURIComponent(native.id)}` : mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
     }
     if (operation.payload.kind === 'file') {
@@ -313,40 +397,63 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > FEISHU_MESSAGE_BODY_BYTES) return false
       const reaction = readFeishuQueryReaction(prepared)
       if (reaction) return mapping === undefined || mapping.messageId === reaction.messageId && mapping.threadId === undefined
+      if (mapping?.nativeCard && prepared.request.method !== 'DELETE') return prepared.request.method === 'PUT' && prepared.request.path === `${cardsPath}/${encodeURIComponent(mapping.nativeCard.id)}` &&
+        prepared.request.query === undefined && prepared.request.contentType === 'application/json' && requestCard(prepared)?.schema === '2.0' && nativeSequence(object(JSON.parse(prepared.request.body!)), prepared)
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
         prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && nativeCardRenderVersions.includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && nativeCardRenderVersions.includes(prepared.renderVersion) && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && nativeCardRenderVersions.includes(prepared.renderVersion) && (requestCard(prepared) !== null || requestEntity(prepared) !== null))
     } catch { return false }
+  }
+  private validPortrait(prepared: PreparedPublication, mapping: Readonly<PublicationMapping>): boolean {
+    try {
+      parsePreparedPublication(prepared, this)
+      const body = object(JSON.parse(prepared.request.body!)), element = object(JSON.parse(String(body?.element))), id = String(element?.element_id)
+      return !!mapping.nativeCard && prepared.request.method === 'PUT' && prepared.request.path === `${cardsPath}/${encodeURIComponent(mapping.nativeCard.id)}/elements/${id}` &&
+        /^[A-Za-z][A-Za-z0-9_]{0,19}$/u.test(id) && element?.tag === 'div' && object(element.icon)?.tag === 'custom_icon' && nativeSequence(body, prepared)
+    } catch { return false }
+  }
+  private async request(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal) {
+    let status: number | undefined
+    const response = await this.clients.withClient(target, credential, client => client.request<unknown>({
+      url: prepared.request.path, method: prepared.request.method, params: prepared.request.query, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      ...(prepared.request.body === undefined ? {} : { data: {}, transformRequest: [() => prepared.request.body] }),
+      validateStatus: value => { status = value; return true }, signal
+    }), signal)
+    return { response, result: object(response), status }
+  }
+  private async readMessage(target: PublicationTarget, credential: string, signal: AbortSignal, mapping: Readonly<PublicationMapping>): Promise<Record<string, unknown> | null> {
+    let status: number | undefined
+    const response = await this.clients.withClient(target, credential, client => client.request<unknown>({ url: `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}`, method: 'GET', params: { user_id_type: 'open_id', card_msg_content_type: 'user_card_content' }, validateStatus: value => { status = value; return true }, signal }), signal)
+    const result = object(response), items = object(result?.data)?.items
+    if (result?.code !== 0 || status !== undefined && (status < 200 || status >= 300) || !Array.isArray(items)) return null
+    const matches = items.map(object).filter(item => item?.message_id === mapping.messageId)
+    const original = matches.length === 1 ? matches[0] : null
+    return original && original.chat_id === target.externalConversationId && ownSender(original.sender, target.application) && (original.thread_id === undefined || original.thread_id === mapping.threadId) ? original : null
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
     if (!this.valid(prepared, target, mapping)) return { state: 'not-applied', reason: 'unsupported-format' }
     try {
-      let status: number | undefined
-      const response = await this.clients.withClient(target, credential, client => client.request<unknown>({
-        url: prepared.request.path, method: prepared.request.method, params: prepared.request.query, headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        // The SDK merges data into an object. Axios must serialize the original frozen bytes instead.
-        ...(prepared.request.body === undefined ? {} : { data: {}, transformRequest: [() => prepared.request.body] }),
-        validateStatus: value => { status = value; return true }, signal
-      }), signal)
+      const { response, status } = await this.request(prepared, target, credential, signal)
       const reaction = readFeishuQueryReaction(prepared)
       if (reaction) return feishuReactionReceipt(response, status, reaction, target.application, mapping)
       const result = object(response), failed = failure(status, result?.code)
+      if (mapping?.nativeCard && prepared.request.method === 'PUT') return nativeFailure(status, result?.code) ?? { state: 'confirmed', mapping: { ...mapping } }
       if (failed) return failed
       const data = object(result?.data)
       if (!data || !consistent(data, target, mapping)) return unknown()
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
       if (prepared.request.method === 'PATCH') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
-      const card = requestCard(prepared), messageId = feishuIdentity(data.message_id)
-      if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card ? 'interactive' : requestFile(prepared) ? 'file' : 'post')) return unknown()
+      const card = requestCard(prepared), entity = requestEntity(prepared), messageId = feishuIdentity(data.message_id)
+      if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card || entity ? 'interactive' : requestFile(prepared) ? 'file' : 'post')) return unknown()
       const body = object(data.body)
       // A successful create returns the native reading representation, not the
       // authored card JSON. The original request's ID/target receipt confirms it.
-      if (!card && body?.content !== undefined && !(requestFile(prepared) ? sameFile(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
+      if (!card && !entity && body?.content !== undefined && !(requestFile(prepared) ? sameFile(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
       if (mapping) return { state: 'confirmed', mapping: { ...mapping } }
       const threadId = data.thread_id === undefined ? undefined : feishuIdentity(data.thread_id)
-      return { state: 'confirmed', mapping: { messageId, ...(threadId === undefined ? {} : { threadId }) } }
+      return { state: 'confirmed', mapping: { messageId, ...(threadId === undefined ? {} : { threadId }), ...(entity ? { nativeCard: { id: entity, operationId: prepared.requestKey } } : {}) } }
     } catch { return unknown() }
   }
   async inspect(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt | null> {
