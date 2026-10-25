@@ -1,3 +1,4 @@
+import { moteInputSource } from '../lib/mote-input-source'
 import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
@@ -171,8 +172,8 @@ export function AgentSessionComposer({
     if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt)) return false
     // State actions leave the independently authored Composer draft intact.
     const accepted = queueStatusPrompt
-      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual')
-      : send(sessionId, prompt.body, feedback.report, 'manual')
+      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin) })
+      : send(sessionId, prompt.body, feedback.report, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin) })
     if (!accepted) return false
     feedback.dismiss()
     if (queueStatusPrompt) void useAppStore.getState().flushAgentSteerQueue(sessionId)
@@ -183,7 +184,7 @@ export function AgentSessionComposer({
     if (!submitMode.canSubmit || !text.trim()) return
     const { text: value, inputImages } = expandComposerInput(text)
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
-    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages })) return
+    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin) })) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.record(sessionId, value)
@@ -197,7 +198,7 @@ export function AgentSessionComposer({
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
-    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages })) return
+    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin) })) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)

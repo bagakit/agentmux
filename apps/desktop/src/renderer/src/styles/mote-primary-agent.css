@@ -1,6 +1,11 @@
 .mote-primary-return { flex: 0 0 auto; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); line-height: 1.4; padding: 3px 7px; white-space: nowrap; cursor: pointer; }
 .mote-primary-return:hover, .mote-primary-return:focus-visible { color: var(--text); background: var(--surface-3); border-color: var(--line); }
 
+.mote-input-receipt { margin-block: 8px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); font-size: var(--fs-meta); }
+.mote-input-receipt summary { cursor: pointer; color: var(--text); }
+.mote-input-receipt p { color: var(--text-2); line-height: 1.5; margin: 8px 0; }
+.mote-input-receipt dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 10px 0; }
+.mote-input-receipt dd { margin: 0; }
 
 /* Mote-wide actions stay outside individual Group tab strips. */
 .mote-floating-actions { flex: 0 0 auto; min-height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 2px 6px; border-bottom: 1px solid var(--line-soft); }

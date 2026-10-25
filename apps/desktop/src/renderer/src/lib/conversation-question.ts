@@ -39,7 +39,7 @@ export function editConversationQuestionDraft(control: AgentSessionControl, targ
 }
 
 /** The workbench owns persistence; shared reply transitions own the original frozen operation. */
-export async function sendConversationQuestionReply(control: AgentSessionControl, input: ConversationQuestionInput): Promise<void> {
+export async function sendConversationQuestionReply(control: AgentSessionControl, input: ConversationQuestionInput, moteSource?: import('@agentmux/core').AgentInputMoteSource): Promise<void> {
   const key = questionReplyKey(control.agentSessionId, input)
   const get = () => useAppStore.getState().questionReplies?.[control.agentSessionId]?.[key]
   const assertOwner = () => {
@@ -56,7 +56,7 @@ export async function sendConversationQuestionReply(control: AgentSessionControl
     throw new Error('The preserved reply belongs to another Host or Run. It has not been replaced.')
   }
   await submitQuestionReply({ sessionId: control.agentSessionId, get,
-    create: () => ({ hostId: control.hostId, phase: 'sending', input: { ...structuredClone(input),
+    create: () => ({ hostId: control.hostId, phase: 'sending', input: { ...structuredClone(input), ...(moteSource ? { moteSource: structuredClone(moteSource) } : {}),
       expectedRun: { ...control.run }, afterSubmissionId: session.promptSubmissionPredecessor ?? null, operationId: mintObjectId() } }),
     retain: (next, expected) => retainConversationQuestionReply(control.agentSessionId, key, next, expected),
     submit: original => { assertOwner(); return api.sessions.replyQuestion(control, original) }

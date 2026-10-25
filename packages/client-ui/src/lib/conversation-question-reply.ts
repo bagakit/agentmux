@@ -7,6 +7,7 @@ export { questionReplyKey, questionReplyReceiptMatches, recordedQuestionAnswers,
 import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 
 export type QuestionReplyIntent = ConversationQuestionInput & {
+  moteSource?: import('@agentmux/core').AgentInputMoteSource
   operationId: string
   expectedRun: { runId: string }
   afterSubmissionId: string | null

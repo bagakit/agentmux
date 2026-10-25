@@ -1,3 +1,5 @@
+import { MoteInputReceipt } from './MoteInputReceipt'
+import { moteInputSource } from '../lib/mote-input-source'
 import { AgentToolExecutionNotice } from './AgentToolExecutionNotice'
 import { usePendingDeliveryLayout, type PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -1119,7 +1121,7 @@ export function SessionPane({
       questionReplyContext: JSON.stringify([session.control.hostId, session.id, session.control.run.runId]),
       onOpenQuestionTerminal: openTerminal,
       questionReplyDraft: target => questionDrafts?.[questionReplyKey(sessionId, target)],
-      onQuestionReply: input => sendConversationQuestionReply(session.control, input),
+      onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, mailboxOrigin)),
       onQuestionDraftChange: (target, answers) => editConversationQuestionDraft(session.control, target, answers),
       questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target) } : {})
   }
@@ -1178,7 +1180,7 @@ export function SessionPane({
       takeoverSurface={takeoverAt(presentationOrigin(target), target.visible !== false, workbenchSessionStageHostId(target, linkOrigin.regionId!))}
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
-      activity={{ ...activityProps, renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && !pendingAgentRestore}
+      activity={{ ...activityProps, onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, presentationOrigin(target))), renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && !pendingAgentRestore}
       recovery={pendingAgentRestore ? cloneElement(restoreSurface, { visible: target.visible !== false && !parked, supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
@@ -1280,6 +1282,8 @@ export function SessionPane({
             // same terms as the composer below it — otherwise a dead Run still shows live buttons and
             // answering it fails on a Run that can no longer accept input.
             disabled={!visible || session.processState !== 'running' || session.status.state === 'disconnected' || Boolean(session.pendingInteraction.evidence.run && session.pendingInteraction.evidence.run.runId !== session.control.run.runId)}
+            getMoteSource={() => moteInputSource(session.id, mailboxOrigin)}
+            renderReceipt={receipt => receipt.moteObservationId ? <MoteInputReceipt reference={session.control} observationId={receipt.moteObservationId} /> : null}
             onInspect={async operationId => await useAppStore.getState().inspectInteraction(session.id, operationId)}
             onRespond={async (response, intent) => await respondInteraction(session.id, response, intent)}
           />

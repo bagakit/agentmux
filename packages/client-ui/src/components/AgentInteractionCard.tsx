@@ -23,6 +23,8 @@ export function AgentInteractionCard({
   sourceNotice,
   onOpenTerminal,
   onInspect,
+  getMoteSource,
+  renderReceipt,
   onRespond
 }: {
   surfaceRef?: Ref<HTMLElement>
@@ -33,13 +35,15 @@ export function AgentInteractionCard({
   /** Presentation of a caller's retained original receipt; input ownership stays unchanged. */
   responseStatus?: ReactNode
   sourceNotice?: string | undefined
+  getMoteSource?(): import('@agentmux/core').AgentInputMoteSource | undefined
+  renderReceipt?(receipt: AgentMuxInteractionOperationReceipt): ReactNode
   onOpenTerminal?(): void
   onInspect?(operationId: string): Promise<AgentMuxInteractionOperationReceipt | null>
-  onRespond(response: AgentMuxInteractionResponse, intent: AgentMuxInteractionOperationIntent): Promise<void | AgentMuxInteractionOperationReceipt>
+  onRespond(response: AgentMuxInteractionResponse, intent: AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }): Promise<void | AgentMuxInteractionOperationReceipt>
 }) {
   const [phase, setPhase] = useState<'idle' | 'sending' | 'awaiting'>('idle')
   const submission = useRef(false)
-  const operation = useRef<AgentMuxInteractionOperationIntent | null>(null)
+  const operation = useRef<(AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }) | null>(null)
   const [receipt, setReceipt] = useState<AgentMuxInteractionOperationReceipt | null>(null)
   const requestKey = JSON.stringify(agentInteractionRequestTarget(request))
   useEffect(() => {
@@ -58,7 +62,10 @@ export function AgentInteractionCard({
       : response.outcome === 'answered' ? response.answers[0]?.optionId ?? null : null)
     setFailure(null)
     try {
-      operation.current ??= { operationId: mintObjectId(), expectedRequest: structuredClone(request) }
+      if (!operation.current) {
+        const moteSource = getMoteSource?.()
+        operation.current = { operationId: mintObjectId(), expectedRequest: structuredClone(request), ...(moteSource ? { moteSource: structuredClone(moteSource) } : {}) }
+      }
       const original = operation.current
       const result = await onRespond(response, original)
       if (operation.current !== original) return
@@ -83,6 +90,7 @@ export function AgentInteractionCard({
     : 'Needs your answer'
   const requestStatus = responseStatus ?? <div>
     <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
+    {receipt && renderReceipt ? renderReceipt(receipt) : null}
     {onInspect && operation.current && (receipt?.delivery === 'unknown' || receipt?.delivery === 'saved') ?
       <button type="button" onClick={() => { const original = operation.current!; void onInspect(original.operationId).then(value => {
         if (value && operation.current === original) setReceipt(value)
