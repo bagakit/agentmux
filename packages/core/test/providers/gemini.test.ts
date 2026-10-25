@@ -1,9 +1,17 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('gemini')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
+const GEMINI_HOOK_DIALECT = lifecycleProvider.hook.lifecycle ?? {}
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { GEMINI_HOOK_EVENTS, createGeminiManagedHookPlan } from '../../src/providers/gemini.js'
 import { createAntigravityManagedHookPlan } from '../../src/providers/antigravity.js'
-import { GEMINI_HOOK_DIALECT, canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
 import { AgentMuxError } from '../../src/errors.js'
 import type { AgentSemanticState } from '../../src/types.js'
@@ -59,7 +67,7 @@ describe('Gemini provider', () => {
 
   describe('事件名是 Gemini 自己的，负载键才与 Claude 同族', () => {
     it('装的清单与方言一一对应，且用的是 BeforeTool 而非 Claude 的 PreToolUse', () => {
-      expect([...GEMINI_HOOK_EVENTS].sort()).toEqual(Object.keys(GEMINI_HOOK_DIALECT).sort())
+      expect([...GEMINI_HOOK_EVENTS].sort()).toEqual([...new Set(lifecycleProvider.hook.rules.flatMap(rule => rule.events))].sort())
       // 最容易犯的错：把 Claude 的事件名照抄过来。Gemini 压根不发这些。
       for (const claudeOnly of ['PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit']) {
         expect(GEMINI_HOOK_EVENTS).not.toContain(claudeOnly)
@@ -101,10 +109,10 @@ describe('Gemini provider', () => {
   })
 
   describe('AfterAgent 是一轮收尾，不是会话收尾', () => {
-    it('AfterAgent 判 done 并归入 turn-end', () => {
+    it('AfterAgent 仅为收尾回调，不证明最终 turn-end', () => {
       const event = hook('AfterAgent', { prompt: 'hi', prompt_response: 'done', stop_hook_active: false })
-      expect<AgentSemanticState>(event.semanticState).toBe('done')
-      expect(event.lifecycleEvent).toBe('turn-end')
+      expect<AgentSemanticState>(event.semanticState).toBe('unknown')
+      expect(event.lifecycleEvent).toBeNull()
     })
 
     it('SessionEnd 既不装也不映射——会话终结是 PTY 事实，不是轮次事实', () => {

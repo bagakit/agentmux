@@ -1,3 +1,10 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('claude')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
 import { fixturePath } from '../helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -7,8 +14,7 @@ import { pathToFileURL } from 'node:url'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
 import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
-import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
-import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { agentHasActiveSubagents, releaseSubagentRoster } from '../../src/hook-normalizer.js'
 import { AgentMuxClient } from '../../src/client.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
@@ -61,7 +67,7 @@ describe('Claude native mod activity', () => {
       expect(end.semanticState).toBe(reason === 'error' ? 'error' : 'unknown')
       expect(end.lifecycleEvent).toBe(reason === 'error' ? 'turn-end' : null)
       expect(end.status.detail).toBe(reason === 'error'
-        ? 'Native turn ended in error; the Provider did not supply a structured error code.'
+        ? 'The native Claude turn ended in error; the original error code is unavailable.'
         : 'turn.complete')
       expect(end.interaction).toBeUndefined()
     }
@@ -139,7 +145,7 @@ describe('Claude native mod activity', () => {
       const normalize = (extra = {}) => provider.normalizeHook({ receiptId: 'source-unavailable',
         agentSessionId: 'core-source', runId: 'run-source', providerId: 'claude', payload: { ...payload, ...extra } }, {})
       const diagnostic = normalize()
-      expect(diagnostic.observationFailure).toEqual({ code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE',
+      expect(diagnostic.observationFailure).toEqual({ code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', source: { sourceId: payload.sourceId, sequence: payload.sequence },
         message: 'The native activity observer could not capture its original actor identity. Current activity is unconfirmed. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh observer.' })
       expect(diagnostic.semanticState).toBe('unknown')
       expect(diagnostic.lifecycleEvent).toBeNull()
@@ -404,9 +410,9 @@ describe('Claude provider', () => {
     })
 
     it('Stop 与 StopFailure 都是用量落定点，用量收口两侧共用同一份口径', () => {
-      // USAGE_FINALIZATION_EVENTS 从 canonical 表派生。两条收尾都在里面，否则报错收尾的用量读不到。
+      // Transcript sampling is declared separately: pre-decision Stop does not establish turn-end.
       for (const eventName of ['Stop', 'StopFailure']) {
-        expect(canonicalHookLifecycleEvent(eventName)).toBe('turn-end')
+        expect(canonicalHookLifecycleEvent(eventName)).toBe(eventName === 'StopFailure' ? 'turn-end' : undefined)
         expect(USAGE_FINALIZATION_EVENTS.has(eventName)).toBe(true)
       }
     })

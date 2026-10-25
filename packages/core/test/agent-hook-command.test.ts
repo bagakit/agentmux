@@ -77,6 +77,7 @@ describe('agent hook command usage relay', () => {
 
   beforeEach(() => {
     vi.stubEnv('AGENTMUX_ENV', '1')
+    vi.stubEnv('AGENTMUX_PROVIDER_ID', 'claude')
   })
 
   function feedStdin(json: string): void {
@@ -122,6 +123,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+      vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
       const { bodies } = captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-real', transcript_path: transcriptPath }))
 
@@ -149,6 +151,38 @@ describe('agent hook command usage relay', () => {
     await runAgentHookCommand()
 
     expect(bodies, 'unmanaged shared-config hook must be a passive no-op').toHaveLength(0)
+  })
+
+  it('relays only the original Provider usage schema through the real Hook command', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'provider-usage-relay-'))
+    try {
+      const transcriptPath = join(dir, 'transcript.jsonl')
+      vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
+      vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
+      vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
+      vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop']))
+      const { bodies } = captureHookPost()
+      for (const sample of [
+        { provider: 'claude', format: 'claude-jsonl', record: JSON.parse(CLAUDE_TRANSCRIPT), total: 7 },
+        { provider: 'codex', format: 'codex-rollout', record: { type: 'event_msg', payload: { type: 'token_count', info: {
+          last_token_usage: { input_tokens: 13, output_tokens: 5, total_tokens: 22 }
+        } } }, total: 22 }
+      ]) {
+        vi.stubEnv('AGENTMUX_HOOK_PROVIDER', sample.provider)
+        vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', sample.format)
+        await writeFile(transcriptPath, JSON.stringify(sample.record) + '\n')
+        feedStdin(JSON.stringify({ session_id: 'original-native', transcript_path: transcriptPath }))
+        await runAgentHookCommand()
+        expect((bodies.at(-1)!.payload as Record<string, unknown>).agentmuxUsage).toMatchObject({ scope: 'response', totalTokens: sample.total })
+        restoreStdin?.(); restoreStdin = null
+      }
+      vi.stubEnv('AGENTMUX_HOOK_PROVIDER', 'claude')
+      vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'codex-rollout')
+      feedStdin(JSON.stringify({ session_id: 'original-native', transcript_path: transcriptPath }))
+      await runAgentHookCommand()
+      expect(bodies).toHaveLength(3)
+      expect((bodies.at(-1)!.payload as Record<string, unknown>).agentmuxUsage).toBeUndefined()
+    } finally { await rm(dir, { recursive: true, force: true }) }
   })
 
   it('attaches NO usage when the provider did not declare a transcript format (never a fabricated one)', async () => {
@@ -190,6 +224,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+      vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
       const { bodies } = captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-noturn', transcript_path: transcriptPath }))
 
@@ -212,6 +247,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'PostToolUse')
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+      vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
       const { bodies } = captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-midturn', transcript_path: transcriptPath }))
 
@@ -245,6 +281,7 @@ describe('agent hook command usage relay', () => {
         // 关键：不给旗标、不给环境变量——事件名只能从 stdin 负载的这个拼法读出来。
         vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
         vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+      vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
         vi.stubEnv('AGENTMUX_HOOK_PAYLOAD_KEY', key)
         const { bodies } = captureHookPost()
         feedStdin(JSON.stringify({ [key]: 'Stop', session_id: 'sess-spelling', transcript_path: transcriptPath }))
@@ -265,11 +302,7 @@ describe('agent hook command usage relay', () => {
     }
   })
 
-  /**
-   * 收尾事件集合是从 canonical 映射表派生的，所以 snake_case 的收尾方言也能抽到用量。
-   * 此前硬编码 `['Stop','StopFailure']`：Hermes 的 `on_session_end` 与 Pi 的 `agent_settled` 永远读不到。
-   */
-  it('extracts usage on a snake_case turn-end dialect, not only on PascalCase Stop', async () => {
+  it('samples only the exact events declared by this Provider, independent of spelling', async () => {
     for (const eventName of ['on_session_end', 'agent_settled']) {
       const dir = await mkdtemp(join(tmpdir(), 'agentmux-hookcmd-'))
       try {
@@ -279,6 +312,7 @@ describe('agent hook command usage relay', () => {
         vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
         vi.stubEnv('AGENTMUX_HOOK_EVENT', eventName)
         vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
+      vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify([eventName]))
         const { bodies } = captureHookPost()
         feedStdin(JSON.stringify({ session_id: 'sess-snake', transcript_path: transcriptPath }))
 
@@ -286,7 +320,7 @@ describe('agent hook command usage relay', () => {
 
         expect(bodies).toHaveLength(1)
         const payload = bodies[0]!.payload as Record<string, unknown>
-        expect(payload.agentmuxUsage, `${eventName} is a turn end and must yield usage`)
+        expect(payload.agentmuxUsage, `${eventName} is a declared usage event and must yield a sample`)
           .toMatchObject({ inputTokens: 2, outputTokens: 5, totalTokens: 7 })
       } finally {
         await rm(dir, { recursive: true, force: true })
@@ -320,6 +354,7 @@ describe('agent hook command usage relay', () => {
     ]
     for (const scenario of cases) {
       vi.stubEnv('AGENTMUX_ENV', '1')
+    vi.stubEnv('AGENTMUX_PROVIDER_ID', 'claude')
       for (const [key, value] of Object.entries(scenario.env)) vi.stubEnv(key, value)
       const { bodies } = captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-gate' }))
@@ -335,6 +370,7 @@ describe('agent hook command usage relay', () => {
 
   it('F1：有认证 managed 上下文但事件名读不出来时仍投递 POST，body 省略 eventName 并保留 raw 负载', async () => {
     vi.stubEnv('AGENTMUX_ENV', '1')
+    vi.stubEnv('AGENTMUX_PROVIDER_ID', 'claude')
     vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
     vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
@@ -367,6 +403,7 @@ describe('POST 失败后真的重投一次', () => {
 
   beforeEach(() => {
     vi.stubEnv('AGENTMUX_ENV', '1')
+    vi.stubEnv('AGENTMUX_PROVIDER_ID', 'claude')
   })
 
   function feedStdin(json: string): void {
@@ -508,6 +545,7 @@ describe('门控决策先于读 stdin', () => {
 
   beforeEach(() => {
     vi.stubEnv('AGENTMUX_ENV', '1')
+    vi.stubEnv('AGENTMUX_PROVIDER_ID', 'claude')
   })
 
   /** 塞一段任意大小的 stdin；返回的函数还原原描述符。 */

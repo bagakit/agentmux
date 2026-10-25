@@ -1,11 +1,17 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('droid')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { DROID_HOOK_EVENTS, DROID_HOOKS, createDroidManagedHookPlan } from '../../src/providers/droid.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
-import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
-import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**
@@ -174,7 +180,7 @@ describe('Droid provider', () => {
       })
       expect<AgentSemanticState>(event.semanticState).toBe('unknown')
       expect(event.lifecycleEvent).toBeNull()
-      expect(USAGE_FINALIZATION_EVENTS.has('Stop')).toBe(true)
+      expect(USAGE_FINALIZATION_EVENTS.has('Stop')).toBe(false)
     })
 
     it('没有 StopFailure/StopCancelled——别照抄 Claude 与 grok 的多条收尾', () => {

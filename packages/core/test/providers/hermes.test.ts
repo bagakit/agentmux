@@ -1,9 +1,15 @@
+import { AgentProviderRegistry as LifecycleRegistry } from '../../src/agent-provider.js'
+const lifecycleProvider = new LifecycleRegistry().get('hermes')
+const canonicalHookLifecycleEvent = (name: string) => {
+  const rule = lifecycleProvider.hook.rules.find(rule => rule.events.includes(name) && !rule.matches && !rule.toolNames)
+  return declaredHookLifecycleEvent(name, rule?.lifecycleEvent, lifecycleProvider.hook.lifecycle)
+}
+const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { HERMES_HOOK_EVENTS, HERMES_HOOKS, createHermesManagedHookPlan } from '../../src/providers/hermes.js'
-import { canonicalHookLifecycleEvent } from '../../src/agent-hook-event.js'
-import { USAGE_FINALIZATION_EVENTS } from '../../src/agent-hook-command.js'
+import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**
@@ -202,7 +208,7 @@ describe('Hermes provider', () => {
       expect(postLlm.lifecycleEvent).toBeNull()
 
       expect(canonicalHookLifecycleEvent('on_session_end')).toBe('turn-end')
-      expect(USAGE_FINALIZATION_EVENTS.has('on_session_end')).toBe(true)
+      expect(USAGE_FINALIZATION_EVENTS.has('on_session_end')).toBe(false)
     })
 
     it('subagent_stop 判 working——主 Agent 还在干活，且不冒称按 id 记账', () => {
