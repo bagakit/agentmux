@@ -5,7 +5,10 @@ import { WebSocketServer } from 'ws'
 import * as core from '../../core/src/index.js'
 import * as processLeaves from '../../core/src/agent-native-process.js'
 import { runSourceObjectCli } from '../../core/test/helpers/source-object-cli.js'
-import { objectCliEnvironment } from '../../core/test/helpers/object-cli-rpc.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+import { AgentMuxControlServer } from '../../core/src/public-rpc-server.js'
+import { AgentMuxRpcService } from '../../core/src/public-rpc-service.js'
+import { connectAgentMuxRpc } from '../../core/src/public-rpc-client.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { createConnectionServices } from '../src/connection-services.js'
@@ -127,6 +130,93 @@ it('default group feeds the real native RPC Provider and publishes five distinct
   expect(f.stages()).toEqual(['received', 'queued', 'dispatched', 'started', 'completed'])
   await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['DONE'])
   expect(f.reactions.every(value => value.path.endsWith('/original-query/reactions'))).toBe(true)
+}, 30000)
+
+it('managed receipt readers consume original upsert and withdrawal through SDK and compiled CLI without bot administration', async () => {
+  const f = await fixture()
+  const original = (await f.store.readMetadata(f.ref.agentSessionId))!
+  await f.store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'foreign-reader', providerId: 'codex', executorId: 'codex',
+    hostId: 'local', workspacePath: f.root, run: { runId: 'foreign-run' }, retiredRuns: [], capabilityHash: original.capabilityHash!,
+    hookBindingId: 'foreign-hook', hookToken: 'foreign-token', createdAt: original.createdAt, updatedAt: original.updatedAt })
+  await f.inner.registry.load('local')
+  await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
+  await f.native('valid'); await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'started')?.state).toBe('confirmed')
+  const started = f.operations().find(value => value.queryFeedback?.stage === 'started')!
+  await appendFile(f.transcript, jsonl([{ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'receipt-answer', content: [{ type: 'output_text', text: 'Original public answer.' }] } }]))
+  f.services.publication!.refresh()
+  const answer = () => f.services.publication!.store.list(f.binding, 100).find(value => value.payload.kind === 'speech' && value.payload.text === 'Original public answer.')
+  await expect.poll(() => answer()?.state).toBe('confirmed')
+  await f.complete(turn, { message: 'Original failure' })
+  const withdrawal = () => f.services.publication!.store.list(f.binding, 100).find(value => value.predecessorOperationId === started.operationId)
+  await expect.poll(() => withdrawal()?.state).toBe('confirmed')
+  const oldBinding = f.binding
+  expect(await f.services.connections.ownsEnrollmentConnection?.(oldBinding.connectionId, f.ref.agentSessionId)).toBe(false)
+  const paused = await f.services.connections.bindings!.pause({ operationId: 'pause-after-feedback', bindingId: oldBinding.bindingId, expectedRevision: oldBinding.revision }, { actor: { kind: 'user', id: 'owner' } })
+  expect(paused.state).toBe('applied')
+  const owner = f.services.connections, socket = new AgentMuxControlServer({ socketPath: join(f.root, 'receipts.sock'), coreClients: f.coreClients, connections: owner })
+  await socket.start(); cleanup.push(() => socket.stop())
+  const endpoint = { transport: 'unix' as const, path: socket.path }
+  const sdk = await connectAgentMuxRpc({ endpoint, credentials: f.credentials }); cleanup.push(() => sdk.dispose())
+  const foreign = await connectAgentMuxRpc({ endpoint, credentials: { ...f.credentials, agentSessionId: 'foreign-reader' } }); cleanup.push(() => foreign.dispose())
+  const request = { connectionId: oldBinding.connectionId, bindingId: oldBinding.bindingId, bindingRevision: oldBinding.revision, limit: 100 }
+  const page = await sdk.call('connection.delivery.ls', request)
+  expect(page.deliveries).toEqual(expect.arrayContaining([
+    expect.objectContaining({ operationId: started.operationId, effect: 'upsert', receipt: { state: 'confirmed', mapping: started.mapping } }),
+    expect.objectContaining({ operationId: withdrawal()!.operationId, effect: 'withdraw', state: 'confirmed' })
+  ]))
+  const env = objectCliEnvironment(f.root, { AGENTMUX_AGENT_SESSION_ID: f.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.credentials.capability })
+  const output = await runCompiledObjectCli(['--endpoint', 'unix:' + socket.path, 'connection', 'delivery', 'inspect', '--operation-id', withdrawal()!.operationId], env)
+  expect(output.code, output.stdout + output.stderr).toBe(0)
+  const delivery = JSON.parse(output.stdout).result.delivery
+  expect(delivery).toMatchObject({ operationId: withdrawal()!.operationId, effect: 'withdraw', bindingRevision: oldBinding.revision, mapping: started.mapping })
+  expect(delivery).not.toHaveProperty('payload'); expect(delivery).not.toHaveProperty('prepared')
+  const beforeRead = f.remote.calls.length
+  await expect(foreign.call('connection.delivery.ls', request)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(foreign.call('connection.delivery.inspect', { operationId: started.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.delivery.ls', { ...request, connectionId: 'foreign-connection' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.delivery.ls', { ...request, bindingRevision: 987 })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.delivery.retry', { operationId: started.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.ingress.ls', { connectionId: oldBinding.connectionId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.inspect', { connectionId: oldBinding.connectionId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const inspect = owner.bindings!.inspect.bind(owner.bindings)
+  const read = vi.spyOn(owner.bindings!, 'inspect').mockImplementation(async input => {
+    const value = await inspect(input)
+    return { ...value, binding: value.binding ? { ...value.binding, executionHostId: 'other-host' } : null }
+  })
+  await expect(sdk.call('connection.delivery.ls', request)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  read.mockRestore()
+  const inspectDelivery = owner.delivery!.inspect.bind(owner.delivery)
+  const receiptRead = vi.spyOn(owner.delivery!, 'inspect').mockImplementation(async input => {
+    const value = await inspectDelivery(input)
+    return { delivery: value.delivery ? { ...value.delivery, target: { ...value.delivery.target, externalConversationId: 'other-room' } } : null }
+  })
+  await expect(sdk.call('connection.delivery.inspect', { operationId: started.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  receiptRead.mockRestore()
+  // A recorded source namespace is not a route or an Agent capability.
+  const sourceBinding = vi.spyOn(owner.bindings!, 'inspect').mockImplementation(async input => {
+    const value = await inspect(input)
+    return { ...value, binding: value.binding ? { ...value.binding, sourceFrontier: { ...value.binding.sourceFrontier!, sourceHostId: 'original-source-namespace' } } : null }
+  })
+  const sourceReceipt = vi.spyOn(owner.delivery!, 'inspect').mockImplementation(async input => {
+    const value = await inspectDelivery(input)
+    return { delivery: value.delivery ? { ...value.delivery, reference: { ...value.delivery.reference, hostId: 'original-source-namespace' } } : null }
+  })
+  expect((await sdk.call('connection.delivery.inspect', { operationId: answer()!.operationId })).delivery?.reference.hostId).toBe('original-source-namespace')
+  sourceBinding.mockImplementation(async input => {
+    const value = await inspect(input)
+    if (!value.binding) return value
+    const { sourceFrontier: _frontier, ...binding } = value.binding
+    return { ...value, binding }
+  })
+  expect((await sdk.call('connection.delivery.inspect', { operationId: answer()!.operationId })).delivery?.reference.hostId).toBe('original-source-namespace')
+  sourceBinding.mockRestore(); sourceReceipt.mockRestore()
+  let readFinished = false
+  const originalList = owner.delivery!.list.bind(owner.delivery)
+  vi.spyOn(owner.delivery!, 'list').mockImplementation(async input => { const value = await originalList(input); readFinished = true; return value })
+  const service = new AgentMuxRpcService({ coreClients: f.coreClients, connections: owner })
+  await expect(service.call('connection.delivery.ls', request, { caller: f.credentials, assertCurrent: () => { if (readFinished) throw new core.AgentMuxError('Original caller revoked during read', 'CONTROL_PERMISSION_DENIED') } })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(readFinished).toBe(true); expect(f.remote.calls).toHaveLength(beforeRead)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
 
 it.each([['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const)('replaces earlier markers with the same terminal phase for an original %s outcome', async (outcome, emoji) => {
