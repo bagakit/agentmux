@@ -128,7 +128,7 @@ export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryE
   timelines?: Readonly<Record<string, AgentTimelineSnapshot>>
 } = {}): FocusRetainedProject[] {
   const now = options.now ?? Date.now()
-  const current = new Set(lanes.map(lane => focusProjectKey(lane.hostId, lane.projectId)))
+  const current = new Set(lanes.flatMap(lane => lane.contextIds.map(id => JSON.stringify([lane.hostId, lane.projectId, id]))))
   const projects = new Map<string, FocusRetainedProject>()
   const sources = new Map(options.sources?.map(source => [JSON.stringify([source.hostId, source.agentSessionId]), source]))
   const members = new Map<string, Map<string, AgentSessionHistoryDescriptor | undefined>>()
@@ -137,7 +137,9 @@ export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryE
     const identity = entry.identity
     if (identity?.kind !== 'agent' || !identity.hostId || !identity.project?.id || !identity.project.name) continue
     const key = focusProjectKey(identity.hostId, identity.project.id)
-    if (current.has(key)) continue
+    // One observed Context replaces only its own saved card. Other Sessions in
+    // the same project can still be waiting for their first current observation.
+    if (current.has(JSON.stringify([identity.hostId, identity.project.id, entry.sessionId]))) continue
     const lastFocusedAt = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= now ? entry.focusedAt : null
     const visits = observations.get(key) ?? new Map<string, AgentFocusHistoryEntry>()
     const visit = visits.get(entry.sessionId)
