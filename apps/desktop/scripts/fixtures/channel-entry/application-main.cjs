@@ -18,7 +18,11 @@ app.whenReady().then(async () => {
     const groupRow = '[data-member-row=' + JSON.stringify(identity) + ']'
     const exists = selector => '!!document.querySelector(' + JSON.stringify(selector) + ')'
     const named = (label, selector = '.agent-connector-dialog button') => 'js:[...document.querySelectorAll(' + JSON.stringify(selector) + ')].find(node=>node.textContent.trim()===' + JSON.stringify(label) + ')'
-    const membersAction = 'js:[...document.querySelectorAll(' + JSON.stringify('[aria-label="Group connection sections"] button') + ')].find(node=>node.querySelector("span")?.textContent==="Members")'
+    async function showMembers() {
+      const panel = '[data-connection-panel="members"]'
+      if (!await read('document.querySelector(' + JSON.stringify(panel) + ')?.open')) await click(panel + ' > summary')
+      if (!await read(exists(groupRow + ' select'))) await click(groupRow + ' [data-member-edit]')
+    }
     const choices = selector => read('[...document.querySelectorAll(' + JSON.stringify(selector + ' input[type="checkbox"]') + ')].map(input=>({label:input.getAttribute("aria-label"),checked:input.checked,disabled:input.matches(":disabled")}))')
     const facts = () => read(`(() => {const selector='.settings-page:not([hidden]),.agent-connector-dialog,.connector-header-menu';return {
       viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},surfaces:[...document.querySelectorAll(selector)].map(node=>({className:node.className,rect:node.getBoundingClientRect().toJSON(),html:node.outerHTML})),
@@ -53,12 +57,13 @@ app.whenReady().then(async () => {
     await capture('application-member-narrow-saved', '[data-application-access-settings]')
     await click('[aria-label="Close settings"]'); await until('!' + exists('[aria-label="Close settings"]'))
     win.setContentSize(1380, 1100); await until('innerWidth===1380&&innerHeight===1100')
-    await openGroup(); await click(membersAction)
+    await openGroup(); await showMembers()
     await until(exists(groupRow + ' select'))
     if (await read('document.querySelector(' + JSON.stringify(groupRow + ' select') + ').value==="room"')) {
       result.retainedCreatorProposal = await facts()
       assert.ok(result.retainedCreatorProposal.source.groupDrafts, 'Opening the group before application settings retained its original creator proposal')
       await click(named('Discard changes', groupRow + ' button'))
+      await showMembers()
     }
     await until('document.querySelector(' + JSON.stringify(groupRow + ' select') + ')?.value==="application"')
     assert.deepEqual((await choices(groupRow)).map(item => item.checked), [true, true, true])
@@ -82,10 +87,10 @@ app.whenReady().then(async () => {
     await until(exists(groupRow + ' [data-member-save]'))
     const edited = await facts()
     assert.equal(edited.requests.filter(item => item.method === 'connection.grant' || item.method === 'connection.binding.member.inherit').length, 0, 'Selecting group-only access and editing remains an unsaved draft')
-    win.setContentSize(520, 980); await until('innerWidth===520&&innerHeight===980'); await click(membersAction)
+    win.setContentSize(520, 980); await until('innerWidth===520&&innerHeight===980'); await showMembers()
     await capture('group-member-narrow-local-draft', '[data-member-access]')
     await click('[aria-label="Close group setup"]'); await until('!' + exists('.agent-connector-dialog'))
-    await openGroup(); await click(membersAction)
+    await openGroup(); await showMembers()
     assert.equal(await read('document.querySelector(' + JSON.stringify(groupRow + ' select') + ').value'), 'room')
     assert.deepEqual((await choices(groupRow)).map(item => item.checked), [true, true, false], 'The exact group draft survives reopening without changing the application rule')
     await click('[aria-label="Close group setup"]'); await until('!' + exists('.agent-connector-dialog'))

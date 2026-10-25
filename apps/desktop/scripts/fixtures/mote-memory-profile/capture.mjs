@@ -6,10 +6,11 @@ import path from 'node:path'
 import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 const privateChat = process.argv.includes('--private-chat')
+const peopleOnly = privateChat && process.argv.includes('--people-only')
 const fixture = privateChat ? path.resolve(import.meta.dirname, '../mote-private-chat-history') : import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const directory = path.join(root, `${privateChat ? '.local/channel-protocol/T-037' : '.local/state/mote-memory-profile'}/capture-${globalThis.crypto.randomUUID()}`), compiled = path.join(directory, 'compiled')
+const directory = path.join(root, `${peopleOnly ? '.local/connector-entity-components/people-visual' : privateChat ? '.local/channel-protocol/T-037' : '.local/state/mote-memory-profile'}/capture-${globalThis.crypto.randomUUID()}`), compiled = path.join(directory, 'compiled')
 
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
 const receipt = { passed: false, captureOnly: true, captureSubset: privateChat ? 'private-chat-profile-original-input-reader' : 'memory-profile-original-editor', aestheticReview: 'not-performed', source: {}, images: {},
@@ -57,6 +58,10 @@ try {
       alias['@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))] = path.join(folder, source)
     }
   }
+  for (const [subpath, target] of Object.entries(JSON.parse(await fs.readFile(path.join(root, 'apps/host/package.json'), 'utf8')).exports)) {
+    if (subpath.includes('*')) continue
+    alias['@agentmux/host' + (subpath === '.' ? '' : subpath.slice(1))] = path.join(root, 'apps/host', target.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'))
+  }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
@@ -67,11 +72,12 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(peopleOnly ? ['--people-only'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
+  if (peopleOnly) assert.equal(receipt.renderer.images.length, 2)
   for (const file of receipt.renderer.images) receipt.images[path.relative(root, path.join(directory, file))] = sha(await fs.readFile(path.join(directory, file)))
   receipt.sourceDrift = []
   for (const [file, expected] of Object.entries(receipt.source)) if (sha(await fs.readFile(path.resolve(root, file))) !== expected) receipt.sourceDrift.push(file)

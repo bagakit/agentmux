@@ -18,14 +18,15 @@ const conversationSync = process.argv.includes('--conversation-sync')
 const popoverClarity = process.argv.includes('--popover-clarity')
 const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = questionValidation || process.argv.includes('--refusal-clarity')
-const connectorDetails = process.argv.includes('--connector-details-modern')
+const entityOverview = process.argv.includes('--entity-overview')
+const connectorDetails = entityOverview || process.argv.includes('--connector-details-modern')
 const inputRecovery = process.argv.includes('--input-recovery')
 const statusPriorityDetails = process.argv.includes('--status-priority-details')
 const statusPriority = statusPriorityDetails || process.argv.includes('--status-priority')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
 const applicationAccess = process.argv.includes('--application-access'), memberAccess = process.argv.includes('--member-access'), headerStatus = connectorDetails || inputRecovery || statusPriority || groupActivityActions || refusalClarity || popoverClarity || process.argv.includes('--header-status'), focused = headerStatus || memberAccess || applicationAccess || conversationSharing || conversationSync
 const main = conversationSync ? 'sync-main.cjs' : conversationSharing ? 'sharing-main.cjs' : applicationAccess ? 'application-main.cjs' : memberAccess ? 'member-main.cjs' : headerStatus ? 'status-main.cjs' : 'main.cjs'
-const evidenceRoot = connectorDetails ? '.local/channel-current-session-regression/connector-details-modern/visual' : inputRecovery ? '.local/channel-current-session-regression/input-recovery-visual' : questionValidation ? '.local/channel-current-session-regression/question-form-visual' : statusPriority ? '.local/channel-current-session-regression/status-visual' : groupActivityActions ? '.local/channel-protocol/T-048/visual' : refusalClarity ? '.local/channel-protocol/T-046/visual' : conversationSync ? '.local/channel-protocol/T-036/visual' : popoverClarity ? '.local/channel-protocol/T-026/visual' : conversationSharing ? '.local/channel-protocol/T-021/visual' : applicationAccess ? '.local/member-access/application-visual' : memberAccess ? '.local/member-access/visual' : headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
+const evidenceRoot = entityOverview ? '.local/connector-entity-components/group-visual' : connectorDetails ? '.local/channel-current-session-regression/connector-details-modern/visual' : inputRecovery ? '.local/channel-current-session-regression/input-recovery-visual' : questionValidation ? '.local/channel-current-session-regression/question-form-visual' : statusPriority ? '.local/channel-current-session-regression/status-visual' : groupActivityActions ? '.local/channel-protocol/T-048/visual' : refusalClarity ? '.local/channel-protocol/T-046/visual' : conversationSync ? '.local/channel-protocol/T-036/visual' : popoverClarity ? '.local/channel-protocol/T-026/visual' : conversationSharing ? '.local/channel-protocol/T-021/visual' : applicationAccess ? '.local/member-access/application-visual' : memberAccess ? '.local/member-access/visual' : headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
 const evidence = resolve(root, evidenceRoot, 'runs', randomUUID()), temporary = await mkdtemp(resolve(tmpdir(), 'amux-channel-entry-'))
 await mkdir(evidence, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
@@ -56,12 +57,12 @@ try {
   if (!focused) await cp(compiled, resolve(evidence, 'compiled'), { recursive: true })
   receipt.compiled = Object.fromEntries(await Promise.all((await readdir(compiled, { recursive: true })).filter(name => /\.(?:html|js|css)$/u.test(name)).map(async name => [name, sha(await readFile(resolve(compiled, name)))])))
   const visual = resolve(evidence, 'visual'); await mkdir(visual)
-  const lines = [], execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, main), resolve(compiled, 'index.html'), temporary, visual, ...(connectorDetails ? ['--connector-details-modern'] : []), ...(inputRecovery ? ['--input-recovery'] : []), ...(popoverClarity ? ['--popover-clarity'] : []), ...(refusalClarity ? ['--refusal-clarity'] : []), ...(questionValidation ? ['--question-validation'] : []), ...(groupActivityActions ? ['--group-activity-actions'] : []), ...(statusPriority ? ['--status-priority'] : []), ...(statusPriorityDetails ? ['--status-priority-details'] : [])], { cwd: root, temporaryRoot: temporary, env, timeoutMs: connectorDetails ? 100000 : 60000, onLine: line => lines.push(line) })
+  const lines = [], execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, main), resolve(compiled, 'index.html'), temporary, visual, ...(connectorDetails ? ['--connector-details-modern'] : []), ...(entityOverview ? ['--entity-overview'] : []), ...(inputRecovery ? ['--input-recovery'] : []), ...(popoverClarity ? ['--popover-clarity'] : []), ...(refusalClarity ? ['--refusal-clarity'] : []), ...(questionValidation ? ['--question-validation'] : []), ...(groupActivityActions ? ['--group-activity-actions'] : []), ...(statusPriority ? ['--status-priority'] : []), ...(statusPriorityDetails ? ['--status-priority-details'] : [])], { cwd: root, temporaryRoot: temporary, env, timeoutMs: connectorDetails ? 100000 : 60000, onLine: line => lines.push(line) })
   receipt.execution = execution
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.equal(render.frames.length, connectorDetails ? 8 : inputRecovery ? 4 : statusPriority ? statusPriorityDetails ? 4 : 6 : groupActivityActions ? 6 : refusalClarity ? 2 : conversationSync ? 4 : popoverClarity || conversationSharing ? 4 : applicationAccess ? 5 : memberAccess ? 4 : 8)
+  assert.equal(render.frames.length, entityOverview ? 2 : connectorDetails ? 8 : inputRecovery ? 4 : statusPriority ? statusPriorityDetails ? 4 : 6 : groupActivityActions ? 6 : refusalClarity ? 2 : conversationSync ? 4 : popoverClarity || conversationSharing ? 4 : applicationAccess ? 5 : memberAccess ? 4 : 8)
   receipt.render = render; receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async file => [file, sha(await readFile(resolve(visual, file)))])))
   receipt.changedAfterLoad = []
   for (const [file, expected] of Object.entries(receipt.inputs)) {
@@ -69,7 +70,7 @@ try {
     if (current === expected) continue
     // A controlled UI probe binds its compiled input, not concurrent unrelated Core work.
     // T071 still requires every changed product owner and its capture fixture to stay exact.
-    const owned = /(?:components\/(?:AgentConnectorDialog|ConnectorDeliveryDetails|ConnectorMemberAccess|ConnectorRoomJoinLink|ConnectorTrafficSummary)\.tsx|lib\/connector-group-status\.ts|styles\/(?:agent-connector|connector-traffic-summary)\.css|scripts\/(?:capture-channel-entry\.mjs|fixtures\/channel-entry\/))/u.test(file)
+    const owned = /(?:components\/(?:AgentConnectorDialog|ConnectorDeliveryDetails|ConnectorMemberAccess|ConnectorRoomJoinLink|ConnectorTrafficSummary|ConnectorEntityIdentity|ConnectorRoomSelection)\.tsx|lib\/(?:connector-group-status|use-connector-room-name)\.ts|styles\/(?:agent-connector|connector-traffic-summary|connector-entity-identity)\.css|scripts\/(?:capture-channel-entry\.mjs|fixtures\/channel-entry\/))/u.test(file)
     assert.ok(connectorDetails && !owned, 'A loaded source changed during capture: ' + file)
     receipt.changedAfterLoad.push({ file, loaded: expected, current })
   }
