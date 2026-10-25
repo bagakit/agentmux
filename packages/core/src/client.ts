@@ -10052,7 +10052,8 @@ export class AgentMuxClient {
     ): AgentMuxStoredAgentSession => {
       signal.throwIfAborted()
       if (!sameNativeHandle(current.nativeHandle, session.nativeHandle)) throw new AgentMuxError('Native binding changed before Hook publication.', 'AGENT_NATIVE_CONFIRMATION_STALE')
-      if (nativeActivity && !this.acceptsNativeCurrentActivity(current, nativeActivity)) return current
+      if (nativeActivity && !this.acceptsNativeCurrentActivity(
+        current.nativeHandle || !normalized.nativeHandle ? current : { ...current, nativeHandle: normalized.nativeHandle }, nativeActivity)) return current
       const nativeReadiness = current.terminalPromptReadiness?.source === 'native-stop'
         ? current.terminalPromptReadiness : undefined
       const existingReadiness = nativeReadiness && (
