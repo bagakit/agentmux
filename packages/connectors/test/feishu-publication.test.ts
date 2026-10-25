@@ -112,7 +112,7 @@ it.each(['progress', 'final'] as const)('sends the compact secondary %s author r
     avatarSource: { operationId: 'original-confirmed-upload', attempt: 1, imageKey: 'confirmed-original-portrait' },
     payload: { kind: 'speech', phase, text } })
   const prepared = f.publisher.prepare(original), frozen = JSON.stringify(prepared)
-  expect(prepared.renderVersion).toBe('feishu-conversation-v13')
+  expect(prepared.renderVersion).toBe('feishu-conversation-v14')
   const receipt = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
   expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Author row did not reach native create')
   expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
