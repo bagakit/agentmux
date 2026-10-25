@@ -10,6 +10,9 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { CalendarScheduleControl } from './CalendarScheduleControl'
 import { useAppStore } from '../store'
 import { resolveAutomationPreferences } from '../../../shared/automation-preferences'
+import type { ProgressUpdateRequest } from '../../../shared/continuous-progress'
+import { useLauncherState } from '../lib/launcher-state'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
@@ -28,6 +31,14 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     providerId: session.providerId, workspacePath: session.workspacePath }),
   [session.control.hostId, session.control.agentSessionId, session.providerId, session.workspacePath])
   const targetKey = JSON.stringify([target.hostId, target.agentSessionId, target.providerId, target.workspacePath])
+  const draftKey = 'progress-update:' + targetKey
+  const pendingUpdate = useLauncherState(state => state.drafts[draftKey]?.progressUpdate)
+  const previousUpdates = useLauncherState(state => state.drafts[draftKey]?.unconfirmedProgressUpdates)
+  const persistenceIssue = useLauncherState(state => state.persistenceIssue)
+  const [saveNotice, setSaveNotice] = useState<string>()
+  const [conflict, setConflict] = useState(false)
+  const editBasis = useRef<ContinuousProgressLoop | undefined>(undefined)
+  const editVersion = useRef(0)
   const [initialDefaults] = useState(() => resolveAutomationPreferences(useAppStore.getState().config?.automation))
   const form = useRef({ target, defaults: initialDefaults })
   if (form.current.target !== target) form.current = { target, defaults: resolveAutomationPreferences(useAppStore.getState().config?.automation) }
@@ -48,8 +59,10 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
   const reads = useRef(new Map<string, Promise<ContinuousProgressLoop[]>>())
   useEffect(() => {
     updates.current++
-    hadLoop.current = false; edited.current = false
-    setLoops([]); setError(undefined); setBusy(false); setPrompt(form.current.defaults.progressPrompt); setInterval(String(form.current.defaults.progressIntervalMs / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
+    const held = useLauncherState.getState().drafts[draftKey], retained = held?.progressUpdate, draft = held?.progressDraft
+    hadLoop.current = false; edited.current = !!(retained || draft); editBasis.current = draft?.expectedLoop ?? retained?.expectedLoop; editVersion.current++
+    setLoops([]); setError(undefined); setBusy(false); setSaveNotice(undefined); setConflict(false)
+    setPrompt(draft?.prompt ?? retained?.prompt ?? form.current.defaults.progressPrompt); setInterval(draft?.interval ?? String((retained?.intervalMs ?? form.current.defaults.progressIntervalMs) / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
   }, [target])
   useEffect(() => {
     if (!visible) return
@@ -80,7 +93,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     document.addEventListener('visibilitychange', visibility)
     return () => { alive = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', visibility) }
   }, [target, targetKey, visible])
-  async function run(action: () => Promise<ContinuousProgressLoop>) {
+  async function run(action: () => Promise<ContinuousProgressLoop>, onFailure?: (error: unknown) => void) {
     if (busy) return
     const captured = target, before = ++updates.current
     setBusy(true)
@@ -91,11 +104,20 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
         setLoops(previous => [...previous.filter(loop => loop.loopId !== result.loopId), result]); setObservedTarget(target)
       }
       if (current.current === captured) setError(undefined)
-    } catch (failure) { if (current.current === captured) { updates.current++; setError(failure instanceof Error ? failure.message : String(failure)) } }
+      return result
+    } catch (failure) { onFailure?.(failure); if (current.current === captured) { updates.current++; setError(presentError(failure)) } }
     finally { if (current.current === captured) setBusy(false) }
   }
   const loop = observedTarget === target ? loops.find(loop => loop.status !== 'stopped') : undefined
   const displayed = loop ?? (observedTarget === target ? loops.at(-1) : undefined)
+  useEffect(() => {
+    if (!loop) return
+    // A late observation may provide the target but must not replace an edited draft or IME preview.
+    if (!editBasis.current) editBasis.current = loop
+    if (edited.current || progressFormElement.current?.contains(document.activeElement)) return
+    editBasis.current = loop
+    setInterval(String(loop.intervalMs / 60_000)); setPrompt(loop.prompt)
+  }, [loop])
   useEffect(() => {
     if (loop) { hadLoop.current = true; return }
     if (observedTarget !== target || !hadLoop.current) return
@@ -105,12 +127,72 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     form.current.defaults = defaults
     setInterval(String(defaults.progressIntervalMs / 60_000)); setPrompt(defaults.progressPrompt)
     setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
+    editBasis.current = undefined
   }, [target, loop?.loopId, observedTarget])
   const status: ContinuousProgressStatus = error || displayed?.lastOutcome === 'unknown' || observedTarget !== target
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
   const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind, loop, mintObjectId()))
+  function editConfiguration(patch: { interval?: string; prompt?: string }) {
+    edited.current = true; editVersion.current++
+    if (patch.interval !== undefined) setInterval(patch.interval)
+    if (patch.prompt !== undefined) setPrompt(patch.prompt)
+    useLauncherState.getState().setProgressDraft(draftKey, { interval, prompt, ...patch, expectedLoop: editBasis.current })
+  }
+  async function saveConfiguration() {
+    if (busy) return
+    const captured = target, version = editVersion.current
+    const request: ProgressUpdateRequest | undefined = pendingUpdate ?? (loop ? {
+      target, loopId: loop.loopId, expectedLoop: editBasis.current ?? loop,
+      intervalMs: Number(interval) * 60_000, prompt, operationId: mintObjectId()
+    } : undefined)
+    if (!request) {
+      const created = await run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined))
+      if (created && current.current === captured) {
+        editBasis.current = created
+        if (editVersion.current === version) { edited.current = false; useLauncherState.getState().setProgressDraft(draftKey, undefined) }
+      }
+      return
+    }
+    if (!useLauncherState.getState().setProgressUpdate(draftKey, request)) {
+      // No remote call was made. A failed local write may still have updated Zustand memory.
+      if (!pendingUpdate) useLauncherState.getState().setProgressUpdate(draftKey, undefined)
+      setSaveNotice('The save request could not be retained on this device. Your draft is kept; retry when storage is available.')
+      return
+    }
+    setSaveNotice(undefined)
+    const saved = await run(() => api.continuousProgress.update(request), failure => {
+      const code = (failure as { code?: string })?.code
+      // Only an explicit first-attempt rejection proves this request was not applied.
+      if (!pendingUpdate && ['CONTROL_REQUEST_CONFLICT', 'INVALID_CONTROL_REQUEST', 'CONTROL_PERMISSION_DENIED'].includes(code ?? '')) {
+        useLauncherState.getState().setProgressUpdate(draftKey, undefined)
+        if (current.current === captured) setConflict(code === 'CONTROL_REQUEST_CONFLICT')
+      }
+      if (current.current === captured) setSaveNotice(presentError(failure))
+    })
+    if (!saved) return
+    useLauncherState.getState().setProgressUpdate(draftKey, undefined)
+    const heldDraft = useLauncherState.getState().drafts[draftKey]?.progressDraft
+    useLauncherState.getState().setProgressDraft(draftKey, heldDraft && (heldDraft.prompt !== request.prompt || Number(heldDraft.interval) * 60_000 !== request.intervalMs) ? { expectedLoop: saved } : undefined)
+    if (current.current !== captured) return
+    editBasis.current = saved; setConflict(false)
+    if (editVersion.current === version && request.prompt === prompt && request.intervalMs === Number(interval) * 60_000) edited.current = false
+    setSaveNotice('Changes saved. ' + (saved.status === 'paused' ? 'Continuous progress remains paused.' : 'The current check keeps its original settings.'))
+  }
+  async function reviewLatest() {
+    const captured = target
+    try {
+      const latest = await api.continuousProgress.list(target)
+      if (current.current !== captured) return
+      updates.current++; setLoops(latest.filter(value => !isAgentSchedule(value))); setObservedTarget(target)
+      editBasis.current = latest.find(value => value.loopId === loop?.loopId)
+      if (pendingUpdate) useLauncherState.getState().retainProgressUpdate(draftKey)
+      const draft = useLauncherState.getState().drafts[draftKey]?.progressDraft
+      useLauncherState.getState().setProgressDraft(draftKey, { interval: draft?.interval ?? interval, prompt: draft?.prompt ?? prompt, expectedLoop: editBasis.current })
+      setConflict(false); setSaveNotice('Latest saved settings are shown above. Your draft is kept; save again to apply it.' + (pendingUpdate ? ' The previous save remains unconfirmed below.' : ''))
+    } catch (failure) { if (current.current === captured) setSaveNotice(presentError(failure)) }
+  }
   const progress = displayed || status === 'unconfirmed' ? <>
     {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !error ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{error ? ` ${error}` : ''}</p> : null}
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
@@ -125,7 +207,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       disabled={busy} onPause={() => action('pause')} onResume={() => action('resume')} onStop={() => action('stop')} onCheck={() => action('check')} />
       : null}
     {displayed ? <details className="continuous-progress-control__details" data-progress-details="configuration" onToggle={event => event.stopPropagation()}>
-      <summary>Saved configuration <span>Read only</span></summary>
+      <summary>Saved configuration</summary>
       <div className="continuous-progress-control__detail-body">
         <dl><dt>Check every</dt><dd>{displayed.intervalMs / 60_000} minutes</dd></dl>
         <div><h4>Continuation prompt</h4><p className="continuous-progress-control__prompt">{displayed.prompt}</p></div>
@@ -139,13 +221,13 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       </div>
     </details>
   </> : null
-  const progressForm = <form ref={progressFormElement} aria-label="Continuous progress setup" onChange={() => { edited.current = true }} onSubmit={event => { event.preventDefault(); if (!loop) void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
+  const progressForm = <form ref={progressFormElement} aria-label="Continuous progress setup" onChange={() => { edited.current = true; editVersion.current++ }} onCompositionStart={() => { edited.current = true; editVersion.current++ }} onSubmit={event => { event.preventDefault(); if (!conflict) void saveConfiguration() }}>
       <section className="continuous-progress-control__group" aria-label="Continuation settings">
         <h4>Continuation settings</h4>
-        <label className="continuous-progress-control__interval">Check every (minutes)<TextInput type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
-        <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={setPrompt} /></label>
+        <label className="continuous-progress-control__interval">Check every (minutes)<TextInput type="number" min="1" value={interval} onChange={event => editConfiguration({ interval: event.target.value })} /></label>
+        <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={value => editConfiguration({ prompt: value })} /></label>
       </section>
-      <section className="continuous-progress-control__group" aria-label="Optional task source">
+      <section className="continuous-progress-control__group" aria-label="Optional task source" hidden={!!loop || !!pendingUpdate}>
         <h4>Optional task source</h4>
         <label><input type="checkbox" checked={bindSource} onChange={event => setBindSource(event.target.checked)} />Bind a read-only Feature Tracker source</label>
         {bindSource ? <div className="continuous-progress-control__source-fields">
@@ -154,12 +236,20 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
           <label>Public Tracker script<TextInput aria-label="Public Tracker script" value={readerPath} onChange={event => setReaderPath(event.target.value)} /></label>
         </div> : <p className="continuous-progress-control__help">Periodic continuation only. This loop is not bound to a business task source.</p>}
       </section>
-        {loop ? <p className="continuous-progress-control__help">Continuous progress is already configured above. Your draft is kept.</p> : null}
-        <button type="submit" className="small-button" disabled={!!loop || busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
+        {loop ? <p className="continuous-progress-control__help">Edits apply to future checks. The current check time, task source and {loop.status === 'paused' ? 'paused' : 'active'} state are kept.</p> : null}
+        {saveNotice || persistenceIssue ? <p className="continuous-progress-control__notice" role="status">{saveNotice || persistenceIssue}</p> : null}
+        {pendingUpdate && !busy ? <p className="continuous-progress-control__help">Previous save is unconfirmed. Retry saves its original values; your newer draft is kept.</p> : null}
+        {pendingUpdate ? <button type="button" className="small-button" disabled={busy} onClick={() => void reviewLatest()}>Review latest settings</button> : null}
+        {previousUpdates?.length ? <details className="continuous-progress-control__details" onToggle={event => event.stopPropagation()}><summary>Previous unconfirmed saves</summary>
+          {previousUpdates.map(request => <div key={request.operationId} className="continuous-progress-control__detail-body"><code>{request.operationId}</code><p>{request.intervalMs / 60_000} minutes</p><p className="continuous-progress-control__prompt">{request.prompt}</p></div>)}
+        </details> : null}
+        {conflict ? <button type="button" className="small-button" onClick={() => void reviewLatest()}>Review latest settings</button>
+          : <button type="submit" className="small-button" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
     <div className="automation-target"><span>Sending to</span><strong>{targetName || session.label}</strong><small>{target.agentSessionId}</small></div>
     <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} unified
+      progressConfigured={!!loop}
       progress={presented ? progress : null} progressForm={presented ? progressForm : null} />
     {presented ? <>
     <details className="continuous-progress-control__details" data-progress-details="target" onToggle={event => event.stopPropagation()}>

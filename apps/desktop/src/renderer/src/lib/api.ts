@@ -954,6 +954,7 @@ const mockApi: AgentMuxDesktopApi = {
     goalAction: async () => { throw new Error('Goal continuation actions require the original background Host.') },
     list: async () => [],
     create: async () => { throw new Error('Continuous progress requires the background Host.') },
+    update: async () => { throw new Error('Saving continuous progress requires the background Host. Your draft is kept.') },
     action: async () => { throw new Error('Continuous progress requires the background Host.') },
     pauseForInput: async () => {},
   },
