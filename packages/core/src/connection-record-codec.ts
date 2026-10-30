@@ -30,11 +30,13 @@ export function parseConnectionRecord(value: unknown): ConnectionRecord {
   const p = object(value, ['config', 'revision', 'observation', 'initialSetup', 'capabilities', 'receiver'])
   const initial = p.initialSetup === undefined ? undefined : object(p.initialSetup, ['state'])
   if (initial && !['incomplete', 'complete', 'unconfirmed'].includes(initial.state as string)) fail()
-  const support = p.capabilities === undefined ? undefined : object(p.capabilities, ['roomDiscovery', 'roomCreation', 'roomLink'])
+  const support = p.capabilities === undefined ? undefined : object(p.capabilities, ['roomDiscovery', 'roomCreation', 'roomLink', 'receiverRecovery'])
   if (support && [support.roomDiscovery, support.roomCreation, support.roomLink].some(value => typeof value !== 'boolean')) fail()
+  if (support?.receiverRecovery !== undefined && typeof support.receiverRecovery !== 'boolean') fail()
   return { config: parseConnectionConfig(p.config), revision: revision(p.revision), observation: parseConnectionObservation(p.observation),
     ...(p.receiver === undefined ? {} : { receiver: parseConnectionReceiverObservation(p.receiver) }),
-    ...(support ? { capabilities: { roomDiscovery: support.roomDiscovery as boolean, roomCreation: support.roomCreation as boolean, roomLink: support.roomLink as boolean } } : {}),
+    ...(support ? { capabilities: { roomDiscovery: support.roomDiscovery as boolean, roomCreation: support.roomCreation as boolean, roomLink: support.roomLink as boolean,
+      ...(support.receiverRecovery === undefined ? {} : { receiverRecovery: support.receiverRecovery as boolean }) } } : {}),
     ...(initial ? { initialSetup: { state: initial.state as NonNullable<ConnectionRecord['initialSetup']>['state'] } } : {}) }
 }
 export function parseConnectionReceiverObservation(value: unknown): ConnectionReceiverObservation {

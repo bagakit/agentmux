@@ -13,6 +13,8 @@ import type { ChannelActorProfileObservation, ChannelProfileReason, ConnectionAc
 import type { ChannelMetadataChange, ChannelMetadataPort } from '@agentmux/core/connections'
 import { createChannelMetadata } from './channel-metadata.js'
 import { credentialLookupFailure } from './credential-observation.js'
+import { parseConnectionReceiverParams, parseConnectionReceiverOperation, type ConnectionReceiverPort, type ConnectionReceiverRecoverInput,
+  type ConnectionReceiverRecoveryOperation, type ConnectionReceiverCallContext } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation, type ConnectionServiceSelector } from '@agentmux/core/connections'
 
@@ -45,6 +47,11 @@ export interface ConnectionAdapter {
   test(config: ConnectionConfig, credential: string): Promise<ConnectionObservation>
 }
 export type ConnectionHostOptions = { databasePath?: string; database?: DatabaseSync; secrets: SecretPort; adapters?: readonly ConnectionAdapter[] }
+/** Private lifetime control of an admitted original receiver operation; never accepted from RPC data. */
+export type ConnectionReceiverControl = {
+  prepare(input: ConnectionReceiverRecoverInput): Pick<ConnectionReceiverRecoveryOperation, 'receiverRef' | 'disposition'>
+  continue(operation: ConnectionReceiverRecoveryOperation): void
+}
 const unknown = (): ConnectionObservation => ({ authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'not-tested' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } })
 function disabled(): ConnectionObservation { return { authentication: { state: 'disabled' }, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
 function unavailable(reason: 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'adapter-unavailable' | 'check-failed'): ConnectionObservation {
@@ -52,6 +59,8 @@ function unavailable(reason: 'credential-missing' | 'credential-format-unsupport
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
+  readonly receiver: ConnectionReceiverPort
+  receiverControl?: ConnectionReceiverControl | undefined
   readonly applicationAccess: ApplicationAccessHost
   readonly service: ConnectionServicePort
   readonly metadata: ChannelMetadataPort
@@ -94,6 +103,8 @@ export class ConnectionHost implements ConnectionPort {
       const parsed = parseConnectionServiceParams('connection.service.inspect', input)
       return this.serviceSafe(() => { const saved = this.storedOperation(parsed.operationId); return { operation: saved?.kind === 'service' ? saved.operation : null } })
     } }
+    this.receiver = { recover: (input, context) => this.recoverReceiver(input, context),
+      inspect: (input, context) => this.inspectReceiverRecovery(input, context) }
     this.adapters = new Map((options.adapters ?? []).map(adapter => [adapter.adapterId, adapter]))
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
     for (const adapter of this.adapters.values()) try {
@@ -155,7 +166,8 @@ export class ConnectionHost implements ConnectionPort {
       catch { /* Association is unconfirmed; do not manufacture a managed requirement for a manual bot. */ }
     }
     const adapter = this.adapters.get(config.adapterId)
-    const capabilities = adapter ? { roomDiscovery: !!adapter.roomDiscovery, roomCreation: !!adapter.rooms, roomLink: !!adapter.roomDiscovery?.createLink } : undefined
+    const capabilities = adapter ? { roomDiscovery: !!adapter.roomDiscovery, roomCreation: !!adapter.rooms, roomLink: !!adapter.roomDiscovery?.createLink,
+      receiverRecovery: !!adapter.transport && !!adapter.ingress && !!this.receiverControl } : undefined
     return parseConnectionRecord({ config, revision, observation, ...(receiver ? { receiver } : {}), ...(initialSetup ? { initialSetup } : {}), ...(capabilities ? { capabilities } : {}) })
   }
   /** Synchronous exact configuration read for owners joining this same database transaction. */
@@ -191,10 +203,16 @@ export class ConnectionHost implements ConnectionPort {
     | { kind: 'application'; input: ConnectionConfigureInput; operation: ConnectionOperation }
     | { kind: 'service'; input: ConnectionServiceConfigure; operation: ConnectionServiceOperation }
     | { kind: 'deletion'; input: ConnectionDeleteInput; operation: ConnectionDeleteOperation }
+    | { kind: 'receiver'; input: ConnectionReceiverRecoverInput; operation: ConnectionReceiverRecoveryOperation; actor: ConnectionReceiverCallContext['actor'] }
     | null {
     const row = this.database.prepare('SELECT input_json, result_json FROM connection_configuration_operation WHERE operation_id = ?').get(operationId)
     if (!row) return null
     const raw = JSON.parse(row.input_json as string), result = JSON.parse(row.result_json as string)
+    if (Object.hasOwn(raw, 'receiverRecovery')) {
+      const input = parseConnectionReceiverParams('connection.receiver.recover', raw.receiverRecovery)
+      if (!raw.actor || !['user', 'device'].includes(raw.actor.kind) || typeof raw.actor.id !== 'string' || !raw.actor.id) throw new AgentMuxError('Original receiver actor could not be confirmed.', 'CONNECTION_STORAGE_UNCONFIRMED')
+      return { kind: 'receiver', input, operation: parseConnectionReceiverOperation(result), actor: { kind: raw.actor.kind, id: raw.actor.id } }
+    }
     if (Object.hasOwn(raw, 'deletion')) {
       const input = parseConnectionDeletionParams('connection.delete', raw.deletion)
       return { kind: 'deletion', input, operation: parseConnectionDeletionResult('connection.delete', result, input) }
@@ -205,6 +223,45 @@ export class ConnectionHost implements ConnectionPort {
     }
     const input = parseConnectionParams('connection.configure', raw)
     return { kind: 'application', input, operation: parseConnectionResult('connection.configure', result, input) }
+  }
+  private async receiverActor(context: ConnectionReceiverCallContext) {
+    if (!context?.actor || !['user', 'device'].includes(context.actor.kind) || typeof context.actor.id !== 'string' || !context.actor.id) throw new AgentMuxError(
+      'Receiver management requires the original user or device. Message receipt reading does not grant this authority.', 'CONTROL_PERMISSION_DENIED')
+    const actor = { ...context.actor }
+    await context.assertCurrent?.()
+    return actor
+  }
+  private async recoverReceiver(value: ConnectionReceiverRecoverInput, context: ConnectionReceiverCallContext) {
+    const input = parseConnectionReceiverParams('connection.receiver.recover', value), actor = await this.receiverActor(context)
+    const operation = this.safe(() => {
+      this.database.exec('BEGIN IMMEDIATE')
+      try {
+        const saved = this.storedOperation(input.operationId)
+        if (saved) {
+          if (saved.kind !== 'receiver' || JSON.stringify(saved.input) !== JSON.stringify(input) || JSON.stringify(saved.actor) !== JSON.stringify(actor)) throw new AgentMuxError(
+            'The original receiver recovery has different input or actor. Inspect its original operation.', 'CONNECTION_OPERATION_CONFLICT')
+          this.database.exec('COMMIT'); return saved.operation
+        }
+        const decision = this.receiverControl?.prepare(input) ?? { disposition: 'unconfirmed' as const, receiverRef: input.receiverRef }
+        const operation: ConnectionReceiverRecoveryOperation = { operationId: input.operationId, connectionId: input.connectionId,
+          configurationRevision: input.expectedRevision, ...decision }
+        this.database.prepare('INSERT INTO connection_configuration_operation (operation_id,input_json,result_json) VALUES (?,?,?)')
+          .run(input.operationId, JSON.stringify({ receiverRecovery: input, actor }), JSON.stringify(operation))
+        this.database.exec('COMMIT'); return operation
+      } catch (error) { try { this.database.exec('ROLLBACK') } catch { /* Original committed identity remains inspectable. */ } throw error }
+    })
+    // The journal is already durable. Exact ref CAS can continue an admitted action
+    // after a lost commit response, but can never repeat a completed ref transition.
+    this.receiverControl?.continue(operation)
+    return { operation, connection: this.safe(() => this.read(operation.connectionId)) }
+  }
+  private async inspectReceiverRecovery(value: { operationId: string }, context: ConnectionReceiverCallContext) {
+    const input = parseConnectionReceiverParams('connection.receiver.inspect', value)
+    await this.receiverActor(context)
+    return this.safe(() => {
+      const saved = this.storedOperation(input.operationId), operation = saved?.kind === 'receiver' ? saved.operation : null
+      return { operation, connection: operation ? this.read(operation.connectionId) : null }
+    })
   }
   private configureService(value: ConnectionServiceConfigure): ConnectionServiceOperation {
     const input = parseConnectionServiceParams('connection.service.configure', value)

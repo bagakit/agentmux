@@ -1,5 +1,5 @@
 import { AgentMuxError, mintObjectId } from '@agentmux/core'
-import { parseConnectionObservation, parseConnectionReceiverObservation, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord, type ConnectionReceiverObservation } from '@agentmux/core/connections'
+import { parseConnectionObservation, parseConnectionReceiverObservation, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord, type ConnectionReceiverObservation, type ConnectionReceiverRecoverInput, type ConnectionReceiverRecoveryOperation } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
 import type { DurableIngressHost } from './durable-ingress.js'
@@ -40,6 +40,7 @@ export class ConnectionReceivers {
   private readonly timer: ReturnType<typeof setInterval>
   constructor(private readonly connections: ConnectionHost, private readonly ingress: DurableIngressHost) {
     connections.receiverObservation = (id, revision) => this.observation(id, revision)
+    connections.receiverControl = { prepare: input => this.prepare(input), continue: operation => this.continue(operation) }
     this.timer = setInterval(() => this.refresh(), 5_000); this.timer.unref()
     this.refresh()
   }
@@ -110,6 +111,43 @@ export class ConnectionReceivers {
     const current = this.connections.readConfiguration(lane.record.config.connectionId)
     return current?.config.enabled === true && current.revision === lane.record.revision
   }
+  /** Read admission only: the Host journals this exact decision before any physical transition. */
+  private prepare(input: ConnectionReceiverRecoverInput): Pick<ConnectionReceiverRecoveryOperation, 'receiverRef' | 'disposition'> {
+    const decision = (disposition: ConnectionReceiverRecoveryOperation['disposition'], receiverRef = input.receiverRef) => ({ disposition, receiverRef })
+    try {
+      const record = this.connections.readConfiguration(input.connectionId)
+      if (!record || record.revision !== input.expectedRevision) return decision('not-current')
+      if (!record.config.enabled || !this.connections.automaticTrafficEnabled(record.config.adapterId)) return decision('disabled')
+      const lane = this.lanes.get(input.connectionId)
+      if (this.closed || !lane || lane.record.revision !== input.expectedRevision) return decision('unconfirmed')
+      if (input.receiverRef !== null && lane.ref !== input.receiverRef) return decision('not-current')
+      // Startup HTTP/credential observation can have no public ref. Null can join,
+      // but cannot acquire authority to close or replace an unobserved consumer.
+      if (input.receiverRef === null) return decision(lane.opening ? 'joined' : 'unconfirmed', lane.ref)
+      if (lane.opening) return decision('joined')
+      if (!lane.receiver) return decision('unconfirmed')
+      if (lane.receiver.closed.aborted) {
+        const end = lane.receiver.closed.reason as ConnectionReceiverEnd | undefined
+        if (end?.automatic && (end.retryAt ?? 0) > Date.now()) return decision('joined')
+        return decision('scheduled')
+      }
+      return decision(lane.receiver.lifecycle().state === 'ready' ? 'already-ready' : 'joined')
+    } catch { return decision('unconfirmed') } // Observation failure retains the current physical receiver.
+  }
+  private continue(operation: ConnectionReceiverRecoveryOperation): void {
+    if (operation.disposition !== 'scheduled' || operation.receiverRef === null) return
+    const lane = this.lanes.get(operation.connectionId)
+    if (!lane || lane.ref !== operation.receiverRef || lane.record.revision !== operation.configurationRevision || lane.opening || !lane.receiver?.closed.aborted) return
+    try {
+      if (!this.current(lane)) return
+      const transport = this.connections.registeredAdapter(lane.record.config.adapterId)?.transport
+      if (!transport) return
+      lane.receiver.close(); delete lane.receiver
+      // start changes ref synchronously before its first await: concurrent old-ref
+      // operations and lost replies can only join the admitted original transition.
+      void this.start(lane, transport)
+    } catch { /* Unconfirmed policy/observation never closes a healthy receiver. */ }
+  }
   private async start(lane: Lane, transport: ConnectionIngressTransport): Promise<void> {
     lane.ref = mintObjectId()
     lane.opening = true
@@ -174,6 +212,6 @@ export class ConnectionReceivers {
     if (this.closed) return
     this.closed = true; clearInterval(this.timer)
     for (const lane of this.lanes.values()) this.release(lane)
-    this.lanes.clear(); this.connections.receiverObservation = undefined
+    this.lanes.clear(); this.connections.receiverObservation = undefined; this.connections.receiverControl = undefined
   }
 }

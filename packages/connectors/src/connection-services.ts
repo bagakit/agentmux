@@ -266,6 +266,8 @@ export async function createConnectionServices(options: { directory: string | un
       inspectDeletion: async input => (await ensure()).connections.inspectDeletion(input),
       list: async () => (await ensure()).connections.list(),
       inspect: async input => (await ensure()).connections.inspect(input),
+      receiver: { recover: async (input, context) => (await ensure()).connections.receiver.recover(input, context),
+        inspect: async (input, context) => (await ensure()).connections.receiver.inspect(input, context) },
       configure: async input => { const owner = await ensure(); const result = await owner.connections.configure(input); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
       test: async input => (await ensure()).connections.test(input)
     },

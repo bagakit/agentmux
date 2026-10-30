@@ -10,6 +10,7 @@ import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResu
 import { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
 import { isConnectionApplicationAccessMethod, parseConnectionApplicationAccessParams } from './connection-application-access-codec.js'
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
+import { isConnectionReceiverMethod, parseConnectionReceiverParams } from './connection-receiver-codec.js'
 import { homedir } from 'node:os'
 import { discoverAgentSkills } from './agent-skills.js'
 import { isChannelMetadataMethod, parseChannelMetadataParams, parseChannelMetadataChange } from './channel-metadata-codec.js'
@@ -823,6 +824,18 @@ export class AgentMuxRpcService {
       }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
+      if (isConnectionReceiverMethod(method)) {
+        if (caller || !context.runtimeFence) throw new AgentMuxError('Receiver recovery administration requires the original person/device and exact Runtime owner.', 'CONTROL_PERMISSION_DENIED')
+        if (!owner.receiver) throw new AgentMuxError('The original receiver management owner is unavailable. Retain the operation and original connection.', 'CONTROL_UNAVAILABLE')
+        const administration = { actor: { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id },
+          assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context) } }
+        await administration.assertCurrent()
+        const result = method === 'connection.receiver.recover'
+          ? await owner.receiver.recover(parseConnectionReceiverParams(method, input), administration)
+          : await owner.receiver.inspect(parseConnectionReceiverParams(method, input), administration)
+        await administration.assertCurrent()
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       // Deliberate safe-read contract for authenticated managed callers. Keep their original context;
       // the projection cannot configure, grant, read private setup data or return conversation bodies.
       if (method === 'connection.diagnose') {

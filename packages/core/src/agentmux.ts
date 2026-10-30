@@ -28,6 +28,7 @@ import { agentMuxPmoPlaybook } from './agentmux-pmo-playbook.js'
 import { agentMuxModuleSkill } from './agentmux-cli-module-skills.js'
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
 import { prepareConnectionCredentialCli } from './connection-credential-cli.js'
+import { isConnectionReceiverMethod } from './connection-receiver-codec.js'
 import type { AgentMuxRpcCallOptions } from './public-rpc-client.js'
 
 function write(value: unknown, stream: NodeJS.WriteStream = process.stdout, boundedReader = false): void {
@@ -210,6 +211,13 @@ async function main(): Promise<number> {
     if (isConnectionCredentialMethod(method)) {
       const prepared = await prepareConnectionCredentialCli(client, method, invocation.params)
       invocation.params = prepared.params; callOptions = prepared.options
+    }
+    if (isConnectionReceiverMethod(method)) {
+      const { ownership } = await client.call('connection.owner.inspect', {})
+      if (ownership !== 'local') throw new AgentMuxError('Select the original connector hosting endpoint: connection owner inspect must confirm local ownership there, then runtime owner identity discovers its Runtime. An execution-only forwarding endpoint cannot substitute its own Runtime for receiver administration.', 'CONTROL_UNAVAILABLE')
+      const { owner } = await client.call('runtime.owner.identity', {})
+      if (owner.runtimeId !== invocation.hostingRuntimeId) throw new AgentMuxError('This endpoint is not the original receiver hosting Runtime. Retain its original endpoint, Runtime and operation; no action was rerouted.', 'RUNTIME_OWNER_MISMATCH')
+      callOptions = { runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }
     }
     if (method === 'space.commit') {
       try { invocation.params.graph = JSON.parse(await readStdin()) }

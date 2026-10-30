@@ -1,4 +1,6 @@
 export * from './connections-contract.js'
+export type * from './connection-receiver-contract.js'
+export * from './connection-receiver-codec.js'
 export type * from './ingress-contract.js'
 export * from './ingress-codec.js'
 export * from './connections-codec.js'

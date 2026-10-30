@@ -53,6 +53,7 @@ import { parseFileHistoryParams, parseFileRestoreParams, parseFileUndoParams, pa
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { isSplitDirection, SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
 import type { AgentMuxRpcParams } from './public-rpc.js'
+import { isConnectionReceiverMethod } from './connection-receiver-codec.js'
 
 type FlagKind = 'boolean' | 'value' | 'data'
 type FlagSpec = Readonly<Record<string, FlagKind>>
@@ -75,6 +76,7 @@ export interface AgentMuxCliInvocation {
   params: Record<string, unknown>
   endpoint?: string
   output?: string
+  hostingRuntimeId?: string
 }
 
 const invalid = (message: string): never => { throw new AgentMuxError(message, 'INVALID_CLI_ARGUMENT') }
@@ -911,6 +913,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('connection.inspect', '(--connection ID|--operation-id ID)', 'Read one original connection or configuration operation without replaying it.', { '--connection': 'data', ...OP }, f => parseConnectionParams('connection.inspect', { ...fields(f, { '--connection': 'connectionId', '--operation-id': 'operationId' }) })),
   command('connection.configure', '--input FILE|-', 'Save an exact external connection using an opaque Host credential reference.', { '--input': 'data' }, async f => parseConnectionParams('connection.configure', await readControlJsonInput(value(f, '--input', true)!, 'Connection configuration')), 'Input requires operationId, expectedRevision (null for creation), and connection. Credentials must already be stored at the executing Host. Inspect the same operation after an unknown response; never replay with a new ID.'),
   command('connection.test', '--connection ID', 'Check original authentication and transport; intake and delivery remain separate facts.', { '--connection': 'data' }, f => parseConnectionParams('connection.test', { connectionId: id(f, '--connection', true) })),
+  command('connection.receiver.recover', '--input FILE|- --runtime ID', 'Recover the same original native receiver through its Host operation journal.', { '--input': 'data', '--runtime': 'data' }, async f => parseConnectionParams('connection.receiver.recover', await readControlJsonInput(value(f, '--input', true)!, 'Original receiver recovery')),
+    'Requires the original user/device management authority and --runtime ID from runtime owner identity on the original hosting endpoint, where connection owner inspect confirms local ownership. An execution-only forwarding entry cannot substitute its own Runtime. Input is operationId, connectionId, expectedRevision and receiverRef from original connection inspect; null only joins an unconfirmed startup observation and never authorizes replacement. Healthy or already recovering receivers are joined without rotation. Retain the same endpoint, Runtime, input and operationId after an unknown reply; inspect that original operation. No Agent/input/platform message is restarted or replayed.'),
+  command('connection.receiver.inspect', '--operation-id ID --runtime ID', 'Read an original receiver recovery decision and its separately scoped current connection observation.', { ...OP, '--runtime': 'data' }, f => parseConnectionParams('connection.receiver.inspect', { operationId: id(f, '--operation-id', true) }),
+    'Original user/device management read with --runtime ID retained from the exact hosting endpoint, where connection owner inspect confirms local ownership and runtime owner identity discovers that Runtime. It never reconnects, repeats credential/platform checks or grants management to an Agent that can read its own message receipts.'),
   settings('settings.inspect', '[target]', 'Read supported host settings.'),
   settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts', 'themes'] as const).flatMap(resource => [
@@ -1100,5 +1106,6 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
     if (tail.length !== 3 || tail[1] !== '--output' || !tail[2]?.length || tail[2] === '-') invalid('Use inspect <id> --output FILE; output creates a new file and never overwrites an existing file.')
     output = tail[2]; tail = tail.slice(0, 1)
   }
-  return { command, params: await match!.command.parse(tail), ...(output === undefined ? {} : { output }), ...(endpoint === undefined ? {} : { endpoint }) }
+  const hostingRuntimeId = isConnectionReceiverMethod(command.method) ? id(flags(tail, command.flags!), '--runtime', true) : undefined
+  return { command, params: await match!.command.parse(tail), ...(hostingRuntimeId === undefined ? {} : { hostingRuntimeId }), ...(output === undefined ? {} : { output }), ...(endpoint === undefined ? {} : { endpoint }) }
 }
