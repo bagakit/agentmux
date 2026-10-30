@@ -40,11 +40,10 @@ const id = (value: unknown): string => {
 const time = (value: unknown): number => { if (!Number.isSafeInteger(value) || Number(value) < 0) fail(); return value as number }
 const sameApplication = (left: ConnectionApplication, right: ConnectionApplication) => left.domain === right.domain && left.appId === right.appId
 
-export function parseChannelTranscriptQuote(value: unknown): ChannelTranscriptQuote {
-  const p = object(value, ['version', 'application', 'externalConversationId', 'observedAt', 'range', 'coverage', 'gaps', 'records'])
-  const application = parseConnectionApplication(p.application), r = object(p.range, ['from', 'throughMessageId', 'origin'])
-  if (p.version !== 1 || !['first-observed', 'admitted-input'].includes(String(r.origin)) ||
-      !['complete', 'partial', 'unavailable'].includes(String(p.coverage)) || !Array.isArray(p.gaps) || !Array.isArray(p.records)) fail()
+/** The same original range is visible while its quote is still being read. */
+export function parseChannelQuoteRange(value: unknown): ChannelQuoteRange {
+  const r = object(value, ['from', 'throughMessageId', 'origin'])
+  if (!['first-observed', 'admitted-input'].includes(String(r.origin))) fail()
   let from: ChannelQuoteRange['from'] = null
   if (r.from !== null) {
     const f = object(r.from, ['messageId', 'inclusive'])
@@ -53,12 +52,24 @@ export function parseChannelTranscriptQuote(value: unknown): ChannelTranscriptQu
   }
   if (r.origin === 'admitted-input' && (!from || from.inclusive)) fail()
   const throughMessageId = id(r.throughMessageId)
-  const gaps = (p.gaps as unknown[]).map(value => {
+  return { from, throughMessageId, origin: r.origin as ChannelQuoteRange['origin'] }
+}
+
+export function parseChannelQuoteGaps(value: unknown): ChannelQuoteGap[] {
+  if (!Array.isArray(value)) fail()
+  return (value as unknown[]).map(value => {
     const g = object(value, ['reason', 'fromMessageId', 'throughMessageId']), reason = id(g.reason)
     if (!/^[a-z][a-z0-9-]{0,95}$/u.test(reason)) fail()
     return { reason, ...(g.fromMessageId === undefined ? {} : { fromMessageId: id(g.fromMessageId) }),
       ...(g.throughMessageId === undefined ? {} : { throughMessageId: id(g.throughMessageId) }) }
   })
+}
+
+export function parseChannelTranscriptQuote(value: unknown): ChannelTranscriptQuote {
+  const p = object(value, ['version', 'application', 'externalConversationId', 'observedAt', 'range', 'coverage', 'gaps', 'records'])
+  const application = parseConnectionApplication(p.application), range = parseChannelQuoteRange(p.range)
+  if (p.version !== 1 || !['complete', 'partial', 'unavailable'].includes(String(p.coverage)) || !Array.isArray(p.records)) fail()
+  const { from, throughMessageId } = range, gaps = parseChannelQuoteGaps(p.gaps)
   if (p.coverage === 'complete' ? !from || gaps.length !== 0 : gaps.length === 0) fail()
   const ids = new Set<string>()
   const records = (p.records as unknown[]).map(value => {
@@ -95,7 +106,7 @@ export function parseChannelTranscriptQuote(value: unknown): ChannelTranscriptQu
       ...(m.threadId === undefined ? {} : { threadId: id(m.threadId) }), ...(resources === undefined ? {} : { resources }) }
   })
   return { version: 1, application, externalConversationId: id(p.externalConversationId), observedAt: time(p.observedAt),
-    range: { from, throughMessageId, origin: r.origin as ChannelQuoteRange['origin'] }, coverage: p.coverage as ChannelTranscriptQuote['coverage'], gaps, records }
+    range, coverage: p.coverage as ChannelTranscriptQuote['coverage'], gaps, records }
 }
 
 /** One deterministic JSON line. Source content cannot introduce markup boundaries. */

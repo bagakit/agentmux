@@ -3,7 +3,7 @@ import type { FeishuAdapter } from './index.js'
 import { feishuIdentity } from './message.js'
 import { AgentMuxError } from '@agentmux/core'
 
-type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void }
+type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void; snapshot?(read: () => ChannelTranscriptQuote): void }
 type Message = { message_id?: unknown; chat_id?: unknown; msg_type?: unknown; create_time?: unknown; update_time?: unknown; deleted?: unknown; root_id?: unknown; parent_id?: unknown; thread_id?: unknown; mentions?: unknown; sender?: { id?: unknown; id_type?: unknown; sender_type?: unknown }; body?: { content?: unknown } }
 const timestamp = (value: unknown): number | undefined => typeof value === 'string' && /^\d+$/u.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : undefined
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value)
@@ -40,6 +40,7 @@ export function createFeishuHistory(adapter: Pick<FeishuAdapter, 'withClient'>) 
       quote.coverage = quote.gaps.length ? quote.records.length ? 'partial' : 'unavailable' : 'complete'
       return structuredClone(quote)
     }
+    input.snapshot?.(finish)
     if (!input.range.from) { gap('baseline-unconfirmed'); return finish() }
     try {
       feishuIdentity(input.externalConversationId); feishuIdentity(input.range.from.messageId); feishuIdentity(input.range.throughMessageId)

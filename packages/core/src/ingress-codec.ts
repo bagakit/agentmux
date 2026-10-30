@@ -7,7 +7,7 @@ import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, p
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import { validateAgentInputWaitRef } from './agent-input-wait.js'
 import { channelActorKey, parseChannelActorProfileObservation } from './channel-profile.js'
-import { parseChannelTranscriptQuote } from './channel-quote.js'
+import { parseChannelTranscriptQuote, parseChannelQuoteRange, parseChannelQuoteGaps } from './channel-quote.js'
 import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
 
 export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long', 'connection.ingress.record-authority': 'long', 'connection.ingress.rejoin': 'long' } as const
@@ -131,14 +131,14 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
   if (method === 'connection.ingress.rejoin') {
     const p = object(value, ['action', 'inspection']), action = object(p.action, ['ingressId', 'operationId', 'source', 'outcome', 'inputRef'])
     const request = parseIngressParams('connection.ingress.rejoin', { ingressId: action.ingressId, operationId: action.operationId, source: action.source })
-    if (!equal(request, input) || !['pending', 'handed-off', 'stale'].includes(String(action.outcome))) fail()
+    if (!equal(request, input) || !['pending', 'handed-off', 'stale', 'context-ended'].includes(String(action.outcome))) fail()
     const inputRef = action.inputRef === undefined ? undefined : validateAgentInputWaitRef(action.inputRef)
-    if (action.outcome === 'handed-off' && !inputRef || action.outcome === 'stale' && inputRef) fail()
+    if (action.outcome === 'handed-off' && !inputRef || (action.outcome === 'stale' || action.outcome === 'context-ended') && inputRef) fail()
     const inspection = parseIngressResult('connection.ingress.inspect', p.inspection, { ingressId: request.ingressId })
     if (inputRef && (inputRef.key.kind !== 'message' || inspection.ingress?.kind === 'action' || !inspection.ingress?.input ||
         inputRef.key.agentSessionId !== inspection.ingress.input.agentSessionId || inputRef.key.messageId !== inspection.ingress.input.messageId ||
         !equal(inputRef.key.expectedRun, inspection.ingress.input.expectedRun))) fail()
-    return { action: { ...request, outcome: action.outcome as 'pending' | 'handed-off' | 'stale', ...(inputRef ? { inputRef } : {}) }, inspection } as ConnectionIngressResultMap[M]
+    return { action: { ...request, outcome: action.outcome as import('./ingress-contract.js').ConnectionIngressRejoinAction['outcome'], ...(inputRef ? { inputRef } : {}) }, inspection } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.record-authority') return parseExternalConversationAuthority(value) as ConnectionIngressResultMap[M]
   if (method === 'connection.ingress.authority') {
@@ -151,7 +151,7 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
-    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context', 'rejoinSource']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
+    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context', 'preparation', 'rejoinSource']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     const receipt = p.inputReceipt === null ? null : parseAgentInputSubmissionReceipt(p.inputReceipt)
     if (ingress && ingress.ingressId !== (input as ConnectionIngressParamsMap['connection.ingress.inspect']).ingressId || !['not-started', 'observed', 'unavailable'].includes(String(p.observation))) fail()
     if (!ingress?.input && (receipt || p.observation !== 'not-started') || ingress?.input && p.observation === 'not-started' || p.observation === 'unavailable' && receipt) fail()
@@ -186,11 +186,23 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     const context = p.context === undefined ? undefined : parseIngressContextObservation(p.context)
     if (context && (!ingress?.input?.channelQuote || context.coverage !== ingress.input.channelQuote.coverage ||
         context.quotedMessages !== ingress.input.channelQuote.records.length || context.gapCount !== ingress.input.channelQuote.gaps.length)) fail()
+    let preparation: import('./ingress-contract.js').ConnectionIngressInspection['preparation']
+    if (p.preparation !== undefined) {
+      const value = object(p.preparation, ['observationId', 'revision', 'phase', 'range', 'source', 'gaps'])
+      if (!ingress || ingress.kind === 'action') return fail()
+      if (!Number.isSafeInteger(value.revision) || Number(value.revision) < 1 || !['position','credential','history','ended'].includes(String(value.phase))) fail()
+      const range = parseChannelQuoteRange(value.range), gaps = parseChannelQuoteGaps(value.gaps)
+      if (range.throughMessageId !== ingress.externalMessageId) fail()
+      let source: import('./types.js').AgentSessionHistorySource | undefined
+      if (value.source !== undefined) { const v = object(value.source, ['providerId', 'nativeSessionId']); source = { providerId: text(v.providerId), nativeSessionId: text(v.nativeSessionId) } }
+      preparation = { observationId: text(value.observationId), revision: Number(value.revision), phase: value.phase as NonNullable<typeof preparation>['phase'], range, gaps, ...(source ? { source } : {}) }
+    }
     const source = p.rejoinSource === undefined ? undefined : rejoinSource(p.rejoinSource)
-    if (source && (!ingress || ingress.kind === 'action' || source.kind === 'context-observation' || receipt ||
+    if (source && (!ingress || ingress.kind === 'action' || receipt ||
+      source.kind === 'context-observation' && (!preparation || source.observationId !== preparation.observationId || preparation.phase === 'ended' || ingress.state !== 'received') ||
       source.kind === 'firstsave' && (!ingress.input || source.messageOperationId !== ingress.input.operationId || source.messageId !== ingress.input.messageId || !equal(source.expectedRun, ingress.input.expectedRun)) ||
       source.kind === 'received' && ingress.state !== 'received')) fail()
-    return { ingress, inputReceipt: receipt, observation: p.observation, ...(context ? { context } : {}), ...(source ? { rejoinSource: source } : {}) } as ConnectionIngressResultMap[M]
+    return { ingress, inputReceipt: receipt, observation: p.observation, ...(context ? { context } : {}), ...(preparation ? { preparation } : {}), ...(source ? { rejoinSource: source } : {}) } as ConnectionIngressResultMap[M]
   }
   const p = object(value, ['ingresses', 'nextAfterIngressId']), expected = input as ConnectionIngressParamsMap['connection.ingress.ls']
   if (!Array.isArray(p.ingresses) || p.ingresses.length > (expected.limit ?? 25)) fail()

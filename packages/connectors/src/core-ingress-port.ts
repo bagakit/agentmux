@@ -1,4 +1,4 @@
-import { AgentMuxError, mintObjectId } from '@agentmux/core'
+import { AgentMuxError, mintObjectId, observeRead } from '@agentmux/core'
 import { encodeHostedValue, decodeHostedValue } from '@agentmux/core/public-rpc-http'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { DurableIngressCore } from './durable-ingress.js'
@@ -10,17 +10,19 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
     const exact = clients().filter(entry => entry.hostId === hostId)
     if (exact.length !== 1) return undefined
     const client = exact[0]!.client, consumerId = mintObjectId()
-    const target = async (executionRuntimeId = originalRuntimeId) => {
-      if (!executionRuntimeId) return
+    const target = async (executionRuntimeId = originalRuntimeId, signal?: AbortSignal) => {
+      signal?.throwIfAborted()
+      const expectedRuntimeId = executionRuntimeId ?? (signal ? client.runtimeOwnerIdentity?.()?.runtimeId : undefined)
+      if (!expectedRuntimeId) return
       if (!client.forwardRpc) throw new AgentMuxError('The original execution Runtime cannot be confirmed. Retain this intake and its source.', 'INGRESS_TARGET_UNCONFIRMED')
-      const { owner } = await client.forwardRpc('runtime.owner.identity', { expectedRuntimeId: executionRuntimeId })
+      const { owner } = await client.forwardRpc('runtime.owner.identity', { expectedRuntimeId }, signal ? { signal } : {})
       const current = clients().filter(entry => entry.hostId === hostId)
-      if (owner.runtimeId !== executionRuntimeId || current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The original execution Runtime changed. No conversation or input was rerouted.', 'INGRESS_TARGET_UNCONFIRMED')
+      if (owner.runtimeId !== expectedRuntimeId || current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The original execution Runtime changed. No conversation or input was rerouted.', 'INGRESS_TARGET_UNCONFIRMED')
       return { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
     }
-    const invoke = async <T>(method: 'readAgentSession' | 'ensureAgentContinuity' | 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'readAgentInputChanges' | 'rejoinAgentInputWaiting' | 'runtimeSubject' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission', args: unknown[], fence: NonNullable<Awaited<ReturnType<typeof target>>>): Promise<T> => {
+    const invoke = async <T>(method: 'readAgentSession' | 'ensureAgentContinuity' | 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'readAgentInputChanges' | 'rejoinAgentInputWaiting' | 'runtimeSubject' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission', args: unknown[], fence: NonNullable<Awaited<ReturnType<typeof target>>>, signal?: AbortSignal): Promise<T> => {
       const response = await client.forwardRpc!('runtime.invoke', { consumerId, fence,
-        invocation: encodeHostedValue({ method, args }) as import('@agentmux/core/hosted').AgentMuxHostedInvocation }, {}, fence)
+        invocation: encodeHostedValue({ method, args }) as import('@agentmux/core/hosted').AgentMuxHostedInvocation }, signal ? { signal } : {}, fence)
       return decodeHostedValue(response.value) as T
     }
     // A private callback is not serializable. The original semantic Host restores it from the saved claim;
@@ -75,9 +77,10 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
         const fence = await target()
         return fence ? await invoke('readAgentInputChanges', [input], fence) : await client.readAgentInputChanges(input)
       },
-      inspectAgentInput: async input => {
-        const fence = await target()
-        return fence ? await invoke('inspectAgentInput', [input], fence) : await client.inspectAgentInput(input)
+      inspectAgentInput: async (input, _caller, observation) => {
+        const signal = observation?.signal, fence = await target(undefined, signal)
+        if (signal && client.forwardRpc && !fence) throw new AgentMuxError('This weak receipt reader has no confirmed Runtime observation source. Existing input and read capabilities remain available.', 'INGRESS_TARGET_UNCONFIRMED')
+        return fence ? await invoke('inspectAgentInput', [input], fence, signal) : await observeRead(client.inspectAgentInput(input), signal)
       },
       submitAgentMessage: async input => {
         const fence = await target(input.envelope.sender.kind === 'external' ? input.envelope.sender.authoritySource?.executionRuntimeId : undefined)

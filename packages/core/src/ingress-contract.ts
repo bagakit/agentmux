@@ -10,7 +10,7 @@ export type ConnectionIngressRejoinSource =
   | { kind: 'context-observation'; observationId: string }
 export type ConnectionIngressRejoinInput = { ingressId: string; operationId: string; source: ConnectionIngressRejoinSource }
 export type ConnectionIngressRejoinAction = ConnectionIngressRejoinInput & {
-  outcome: 'pending' | 'handed-off' | 'stale'
+  outcome: 'pending' | 'handed-off' | 'stale' | 'context-ended'
   inputRef?: import('./agent-input-wait.js').AgentInputWaitRef
 }
 export type ConnectionIngressRejoinResult = { action: ConnectionIngressRejoinAction; inspection: ConnectionIngressInspection }
@@ -104,6 +104,10 @@ export type ConnectionIngressInspection = {
   /** Original Core read only. An absent receipt never licenses a replay. */
   inputReceipt: AgentInputSubmissionReceipt | null
   context?: ConnectionIngressContextObservation
+  /** Exact original weak observation. No new input or cancellation authority. */
+  preparation?: { observationId: string; revision: number; phase: 'position' | 'credential' | 'history' | 'ended';
+    range: import('./channel-quote.js').ChannelQuoteRange; source?: import('./types.js').AgentSessionHistorySource;
+    gaps: import('./channel-quote.js').ChannelTranscriptQuote['gaps'] }
   /** Safe projection of the original Core historical-question admission, not another input journal. */
   questionReceipt?: { agentSessionId: string; expectedRun: { runId: string }; operationId: string;
     source: import('./types.js').AgentSessionHistorySource; recordId: string; questionIds: string[]; outcome: 'saved' | 'unknown' | 'not-applied' | 'submitted' } | null

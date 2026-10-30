@@ -4,7 +4,7 @@ import type { DiscordClients } from './client.js'
 import { observeRead, AgentMuxError } from '@agentmux/core'
 import { discordConfig, discordId } from './protocol.js'
 
-type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void }
+type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void; snapshot?(read: () => ChannelTranscriptQuote): void }
 const timestamp = (value: unknown): number | undefined => typeof value === 'string' && Number.isSafeInteger(Date.parse(value)) ? Date.parse(value) : undefined
 
 /** A Discord thread has its own channel identity and Binding; it is not an implicit parent audience. */
@@ -17,8 +17,9 @@ export function createDiscordHistory(clients: DiscordClients) {
       quote.observedAt = Date.now()
       quote.records.sort((a, b) => BigInt(a.messageId) < BigInt(b.messageId) ? -1 : BigInt(a.messageId) > BigInt(b.messageId) ? 1 : 0)
       quote.coverage = quote.gaps.length ? quote.records.length ? 'partial' : 'unavailable' : 'complete'
-      return quote
+      return structuredClone(quote)
     }
+    input.snapshot?.(finish)
     if (!input.range.from) { gap('baseline-unconfirmed'); return finish() }
     try {
       discordConfig(config)

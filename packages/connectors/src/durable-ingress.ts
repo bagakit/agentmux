@@ -4,10 +4,10 @@ import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
 import { readRoomPublicationBinding, sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
-import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
+import { mintObjectId, AgentMuxError, observeRead, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
-import { parseChannelTranscriptQuote, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
+import { parseChannelTranscriptQuote, parseChannelQuoteRange, parseChannelQuoteGaps, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
 import { ingressContextRevision, IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
 import type { ConnectionIngressRuntimeObservation, ConnectionIngressRejoinInput, ConnectionIngressRejoinAction, ConnectionIngressRejoinSource, ConnectionIngressRejoinContext, RoomBindingCallContext } from '@agentmux/core/connections'
 
@@ -40,9 +40,11 @@ export interface IngressAuthenticator {
   /** Read the exact parent after persistence/ACK, outside original Core input admission. */
   qualifyReply?(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'>
   /** Native history is quoted data, never another authenticated input or grant. */
-  readHistory?(config: ConnectionConfig, input: { externalConversationId: string; range: ChannelQuoteRange; knownThreadIds?: string[]; assertCurrent?(): void }, credential: string, signal: AbortSignal): Promise<ChannelTranscriptQuote>
+  readHistory?(config: ConnectionConfig, input: { externalConversationId: string; range: ChannelQuoteRange; knownThreadIds?: string[]; assertCurrent?(): void; snapshot?(read: () => ChannelTranscriptQuote): void }, credential: string, signal: AbortSignal): Promise<ChannelTranscriptQuote>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'ensureAgentContinuity'> & Partial<Pick<AgentMuxClient, 'readAgentInputChanges' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'runtimeSubject'>> & {
+export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'ensureAgentContinuity'> & Partial<Pick<AgentMuxClient, 'readAgentInputChanges' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'runtimeSubject'>> & {
+  /** Borrowed readonly context only; never occupies Core's original caller argument. */
+  inspectAgentInput(selector: Parameters<AgentMuxClient['inspectAgentInput']>[0], caller?: Parameters<AgentMuxClient['inspectAgentInput']>[1], observation?: { signal?: AbortSignal }): ReturnType<AgentMuxClient['inspectAgentInput']>
   readAgentSession(id: string, expectedRuntimeId?: string): ReturnType<AgentMuxClient['readAgentSession']>
   providers?: { get(id: string): { catalog: import('@agentmux/core').AgentCatalogEntry } }
 }
@@ -63,6 +65,15 @@ export type DurableIngressOptions = {
   /** Existing confirmed configured-owner metadata only; never performs I/O before native ACK. */
   authoritySource?(hostId: string, executionRuntimeId?: string): AgentExternalAuthoritySource | undefined
 }
+type ContextPreparation = {
+  revision: number; observationId: string; phase: 'position' | 'credential' | 'history' | 'ended'
+  target: { hostId: string; agentSessionId: string; expectedRun: { runId: string }; author: import('@agentmux/core').AgentExternalMessageAuthor; source?: AgentSessionHistorySource }
+  range: ChannelQuoteRange; gaps: ChannelTranscriptQuote['gaps']; quote?: ChannelTranscriptQuote
+}
+type IngressRejoinRecord = { actor: RoomBindingCallContext['actor']; action: ConnectionIngressRejoinAction; preparationRevision?: number }
+type IngressWork = { promise?: Promise<ConnectionIngressInspection>; observer?: {
+  observationId: string; abort: AbortController; snapshot?: () => ChannelTranscriptQuote
+} }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const intakeRows = 'SELECT sequence,connection_id,ingress_id,record_json FROM connection_ingress_message UNION ALL SELECT intake_sequence AS sequence,connection_id,ingress_id,record_json FROM connection_ingress_event WHERE record_json IS NOT NULL'
 const unfinishedIntake = "(json_extract(record_json,'$.state')='received' OR (COALESCE(json_extract(record_json,'$.code'),'')!='INGRESS_CONTENT_UNSUPPORTED' AND json_extract(record_json,'$.group.target.agentSessionId') IS NOT NULL AND json_extract(record_json,'$.group.recorded') IS NULL AND COALESCE(json_extract(record_json,'$.group.recording.state'),'')!='refused'))"
@@ -91,7 +102,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
   questionForm(input: ConnectionQuestionFormInput): ConnectionQuestionForm | null { return this.permissions.questionForm(input) }
   private readonly database
   private readonly authenticators: Map<string, IngressAuthenticator>
-  private readonly pending = new Map<string, Promise<ConnectionIngressInspection>>()
+  private readonly pending = new Map<string, IngressWork>()
   private readonly recoveryDelay = new Map<string, { failures: number; nextAt: number }>()
   private contextPositions: IngressContextPositions | undefined
   private readonly historyAbort = new AbortController()
@@ -113,6 +124,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       // A derived work index on the original intake, never an input receipt or another queue.
       // Existing claims are observed once in bounded pages before they can leave this index.
       const messageColumns = this.database.prepare('PRAGMA table_info(connection_ingress_message)').all().map(column => column.name)
+      if (!messageColumns.includes('context_json')) this.database.exec('ALTER TABLE connection_ingress_message ADD COLUMN context_json TEXT')
       if (!messageColumns.includes('rejoin_json')) this.database.exec("ALTER TABLE connection_ingress_message ADD COLUMN rejoin_json TEXT NOT NULL DEFAULT '{}'")
       if (!messageColumns.includes('input_settled')) this.database.exec('ALTER TABLE connection_ingress_message ADD COLUMN input_settled INTEGER NOT NULL DEFAULT 0')
       this.database.exec("CREATE INDEX IF NOT EXISTS connection_ingress_pending_input ON connection_ingress_message(connection_id,sequence) WHERE input_settled=0 AND json_extract(record_json,'$.state')='claimed'")
@@ -368,46 +380,140 @@ export class DurableIngressHost implements ConnectionIngressPort {
     return handle?.kind === 'provider' && !session?.nativeSourceObservation
       ? { providerId: handle.providerId, nativeSessionId: handle.sessionId } : undefined
   }
-  private async prepareQuote(record: ConnectionIngressMessage, binding: RoomBinding, client: DurableIngressCore,
-    contextSource?: AgentSessionHistorySource, receiverSignal?: AbortSignal): Promise<ChannelTranscriptQuote> {
-    let range: ChannelQuoteRange = { from: null, throughMessageId: record.externalMessageId, origin: 'first-observed' }
-    try {
-      this.contextPositions ??= new IngressContextPositions(this.database)
-      if (this.contextPositions && contextSource) await this.contextPositions.reconcile({ bindingId: binding.bindingId,
-        bindingRevision: ingressContextRevision(record, binding.revision), hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, source: contextSource },
-        operationId => client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: operationId }))
-      if (this.contextPositions) range = this.contextPositions.range(record, binding, contextSource)
-      else return unavailableChannelQuote(record, range, 'context-position-unavailable')
-    } catch { return unavailableChannelQuote(record, range, 'context-position-unavailable') }
-    const connection = this.options.connections.readConfiguration(record.connectionId)
-    const reader = connection && this.authenticators.get(connection.config.adapterId)?.readHistory
-    if (!connection || !reader) return unavailableChannelQuote(record, range, 'native-history-unsupported')
-    let credential: string | null
-    try { credential = await this.options.connections.resolveCredential(record.connectionId) }
-    catch { return unavailableChannelQuote(record, range, 'native-history-credential-unavailable') }
-    if (!credential) return unavailableChannelQuote(record, range, 'native-history-credential-missing')
-    const signal = receiverSignal ? AbortSignal.any([this.historyAbort.signal, receiverSignal]) : this.historyAbort.signal
-    const originalAuthor = this.authorize(record).author
+  private readPreparation(ingressId: string): ContextPreparation | undefined {
+    const row = this.database.prepare('SELECT context_json FROM connection_ingress_message WHERE ingress_id=?').get(ingressId)
+    if (!row?.context_json) return undefined
+    const value = JSON.parse(String(row.context_json)) as ContextPreparation
+    if (!Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.observationId !== 'string' || !value.observationId ||
+      !['position','credential','history','ended'].includes(value.phase) || !value.target?.hostId || !value.target.agentSessionId || !value.target.expectedRun?.runId) fail('INGRESS_STORAGE_UNCONFIRMED')
+    value.target.author = parseAgentExternalMessageAuthor(value.target.author)
+    value.range = parseChannelQuoteRange(value.range)
+    value.gaps = parseChannelQuoteGaps(value.gaps)
+    if (value.quote) value.quote = parseChannelTranscriptQuote(value.quote)
+    return value
+  }
+  private writePreparation(ingressId: string, value: ContextPreparation): void {
+    this.database.prepare('UPDATE connection_ingress_message SET context_json=? WHERE ingress_id=?').run(JSON.stringify(value), ingressId)
+  }
+  private preparationObservation(record: ConnectionIngressMessage): ConnectionIngressInspection['preparation'] {
+    const value = this.readPreparation(record.ingressId)
+    return value ? { observationId: value.observationId, revision: value.revision, phase: value.phase, range: value.range,
+      ...(value.target.source ? { source: value.target.source } : {}), gaps: value.gaps } : undefined
+  }
+  private async prepareQuote(record: ConnectionIngressMessage, binding: RoomBinding, client: DurableIngressCore, expectedRun: { runId: string },
+    contextSource?: AgentSessionHistorySource, receiverSignal?: AbortSignal, work?: IngressWork): Promise<ChannelTranscriptQuote> {
+    const author = this.authorize(record).author
+    const target = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, expectedRun: { ...expectedRun }, author,
+      ...(contextSource ? { source: structuredClone(contextSource) } : {}) }
+    let retainedRange: ChannelQuoteRange = { from: null, throughMessageId: record.externalMessageId, origin: 'first-observed' }
+    let positionUnavailable = false
+    try { this.contextPositions ??= new IngressContextPositions(this.database); retainedRange = this.contextPositions.range(record, binding, contextSource) }
+    catch { positionUnavailable = true }
+    const original = this.transaction(() => {
+      const previous = this.readPreparation(record.ingressId)
+      // A consumed observation freezes its quote even if the reply or next claim was lost.
+      if (previous?.quote) {
+        if (!isDeepStrictEqual(previous.target, target)) fail('INGRESS_TARGET_UNCONFIRMED')
+        return previous
+      }
+      const value: ContextPreparation = { revision: (previous?.revision ?? 0) + 1, observationId: mintObjectId(), phase: 'position', target,
+        range: retainedRange, gaps: positionUnavailable ? [{ reason: 'context-position-unavailable' }] : [] }
+      this.writePreparation(record.ingressId, value)
+      return value
+    })
+    if (original.quote) return original.quote
+    const observer: NonNullable<IngressWork['observer']> = { observationId: original.observationId, abort: new AbortController() }
+    if (work) work.observer = observer
+    const signals = [this.historyAbort.signal, observer.abort.signal, ...(receiverSignal ? [receiverSignal] : [])]
+    const signal = AbortSignal.any(signals)
+    const current = () => {
+      const value = this.readPreparation(record.ingressId)
+      if (!value || value.observationId !== observer.observationId) fail('INGRESS_CONTEXT_OBSERVATION_REVISED')
+      return value
+    }
+    const phase = (value: ContextPreparation['phase']) => this.transaction(() => {
+      const preparation = current()
+      if (!preparation.quote) this.writePreparation(record.ingressId, { ...preparation, phase: value, range: original.range, gaps: original.gaps })
+    })
     const assertCurrent = () => {
-      signal.throwIfAborted()
-      if (this.options.connections.readConfiguration(record.connectionId)?.revision !== connection.revision || !isDeepStrictEqual(this.authorize(record).author, originalAuthor)) fail('INGRESS_AUTHORITY_REVISED')
+      signal.throwIfAborted(); current()
+      if (!isDeepStrictEqual(this.authorize(record).author, author)) fail('INGRESS_AUTHORITY_REVISED')
+    }
+    const gap = (reason: string) => { if (!original.gaps.some(item => item.reason === reason)) original.gaps.push({ reason }) }
+    const read = async <T>(call: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+      assertCurrent()
+      const accurate = AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+      const value = await observeRead(call(accurate), accurate)
+      assertCurrent()
+      return value
+    }
+    const finish = (quote: ChannelTranscriptQuote) => {
+      const frozen = current().quote
+      if (frozen) return frozen
+      const gaps = [...quote.gaps, ...original.gaps.filter(item => !quote.gaps.some(gap => gap.reason === item.reason))]
+      const result = { ...quote, gaps, coverage: gaps.length ? quote.records.length ? 'partial' as const : 'unavailable' as const : quote.coverage }
+      original.gaps = gaps
+      phase('ended')
+      return result
     }
     try {
+      this.contextPositions ??= new IngressContextPositions(this.database)
+      if (contextSource) await this.contextPositions.reconcile({ bindingId: binding.bindingId,
+        bindingRevision: ingressContextRevision(record, binding.revision), hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, source: contextSource },
+        async operationId => {
+          try { return await read(signal => client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: operationId }, undefined, { signal })) }
+          catch { signal.throwIfAborted(); current(); gap('context-position-unavailable'); return null }
+        })
+      if (!original.gaps.some(item => item.reason === 'context-position-unavailable')) original.range = this.contextPositions.range(record, binding, contextSource)
+    } catch {
+      const frozen = current().quote
+      if (frozen) return frozen
+      signal.throwIfAborted(); gap('context-position-unavailable')
+      // Keep this observation's last confirmed cut; a concurrent later input must not replace its retained baseline.
+    }
+    phase('credential')
+    const connection = this.options.connections.readConfiguration(record.connectionId)
+    const reader = connection && this.authenticators.get(connection.config.adapterId)?.readHistory
+    let quote: ChannelTranscriptQuote
+    try {
       assertCurrent()
+      if (!connection || !reader) return finish(unavailableChannelQuote(record, original.range, 'native-history-unsupported'))
+      let credential: string | null
+      try { credential = await read(() => this.options.connections.resolveCredential(record.connectionId)) }
+      catch { const frozen = current().quote; if (frozen) return frozen; signal.throwIfAborted(); return finish(unavailableChannelQuote(record, original.range, 'native-history-credential-unavailable')) }
+      if (!credential) return finish(unavailableChannelQuote(record, original.range, 'native-history-credential-missing'))
+      phase('history')
       const adapter = this.authenticators.get(connection.config.adapterId)!
-      const quote = parseChannelTranscriptQuote(await reader.call(adapter, connection.config,
-        { externalConversationId: record.externalConversationId, range, assertCurrent }, credential, signal))
-      if (!isDeepStrictEqual(quote.application, record.application) || quote.externalConversationId !== record.externalConversationId || !isDeepStrictEqual(quote.range, range)) return unavailableChannelQuote(record, range, 'native-history-target-unconfirmed')
-      return quote
-    } catch { return unavailableChannelQuote(record, range, this.historyAbort.signal.aborted ? 'native-history-cancelled' : 'native-history-unavailable') }
+      quote = parseChannelTranscriptQuote(await observeRead(reader.call(adapter, connection.config,
+        { externalConversationId: record.externalConversationId, range: original.range, assertCurrent: () => {
+          assertCurrent()
+          if (this.options.connections.readConfiguration(record.connectionId)?.revision !== connection.revision) fail('INGRESS_AUTHORITY_REVISED')
+        }, snapshot: snapshot => { assertCurrent(); observer.snapshot = snapshot } }, credential, signal), signal))
+      assertCurrent()
+      if (!isDeepStrictEqual(quote.application, record.application) || quote.externalConversationId !== record.externalConversationId || !isDeepStrictEqual(quote.range, original.range))
+        quote = unavailableChannelQuote(record, original.range, 'native-history-target-unconfirmed')
+    } catch {
+      const frozen = current().quote
+      if (frozen) return frozen
+      quote = observer.snapshot?.() ?? unavailableChannelQuote(record, original.range, 'native-history-unavailable')
+      const reason = signal.aborted ? 'native-history-cancelled' : 'native-history-unavailable'
+      if (!quote.gaps.some(gap => gap.reason === reason)) quote.gaps.push({ reason })
+    }
+    return finish(quote)
   }
   async dispatch(ingressId: string, receiverSignal?: AbortSignal): Promise<ConnectionIngressInspection> {
     return await this.dispatchOriginal(ingressId, receiverSignal)
   }
-  private async dispatchOriginal(ingressId: string, receiverSignal?: AbortSignal, custodyOnly = false): Promise<ConnectionIngressInspection> {
+  private async dispatchOriginal(ingressId: string, receiverSignal?: AbortSignal, custodyOnly = false, observationRevision?: number): Promise<ConnectionIngressInspection> {
     const active = this.pending.get(ingressId)
-    if (active) return await active
-    const work = this.deliver(ingressId, receiverSignal, custodyOnly).then(async result => {
+    if (observationRevision !== undefined) {
+      const preparation = this.readPreparation(ingressId)
+      if (preparation && (preparation.revision > observationRevision || preparation.revision === observationRevision &&
+        active?.observer?.observationId !== preparation.observationId && this.read(ingressId)?.state === 'received')) return await this.inspect({ ingressId })
+    }
+    if (active) return await active.promise!
+    const entry: IngressWork = {}
+    const work = this.deliver(ingressId, receiverSignal, custodyOnly, entry).then(async result => {
       try {
         const record = this.read(ingressId)
         if (record && record.kind !== 'action' && record.group?.recorded) await this.recordGroup(record)
@@ -422,11 +528,12 @@ export class DurableIngressHost implements ConnectionIngressPort {
         if (result.ingress && result.ingress.kind !== 'action' && result.ingress.group) return { ...result, ingress: { ...result.ingress, group: { ...result.ingress.group, recording } } }
       }
       return result
-    }).finally(() => this.pending.delete(ingressId))
-    this.pending.set(ingressId, work)
+    }).finally(() => { if (this.pending.get(ingressId) === entry) this.pending.delete(ingressId) })
+    entry.promise = work
+    this.pending.set(ingressId, entry)
     return await work
   }
-  private async deliver(ingressId: string, receiverSignal?: AbortSignal, custodyOnly = false): Promise<ConnectionIngressInspection> {
+  private async deliver(ingressId: string, receiverSignal?: AbortSignal, custodyOnly = false, work?: IngressWork): Promise<ConnectionIngressInspection> {
     let intake = this.read(ingressId)
     if (!intake) fail('UNKNOWN_CONNECTION_INGRESS')
     if (intake.kind === 'action') return intake.state === 'refused' ? await this.inspect({ ingressId }) : await this.dispatchAction(intake)
@@ -496,7 +603,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const exact = await this.prepareRecipient(record, client)
     const expectedRun = { ...exact.run }
     const contextSource = this.nativeContextSource(original.binding, exact)
-    let channelQuote = record.conversationKind === 'group' ? await this.prepareQuote(record, original.binding, client, contextSource, receiverSignal) : undefined
+    let channelQuote = record.conversationKind === 'group' ? await this.prepareQuote(record, original.binding, client, exact.run, contextSource, receiverSignal, work) : undefined
     let contextObservation: 'known-publications-unavailable' | undefined
     if (channelQuote && contextSource && this.options.contextPublications) {
       try {
@@ -510,6 +617,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const currentTarget = channelQuote ? await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId) : exact
     if (!currentTarget || !isDeepStrictEqual(currentTarget.run, expectedRun) || !isDeepStrictEqual(this.nativeContextSource(original.binding, currentTarget), contextSource)) fail('INGRESS_TARGET_UNCONFIRMED')
     const claimed = this.transaction(() => {
+      if (work?.observer && this.readPreparation(ingressId)?.observationId !== work.observer.observationId) fail('INGRESS_CONTEXT_OBSERVATION_REVISED')
       const current = this.read(ingressId)!
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
@@ -519,6 +627,11 @@ export class DurableIngressHost implements ConnectionIngressPort {
       this.authorize(current, frozen)
       const next = this.write({ ...current, state: 'claimed', input: frozen })
       this.contextPositions?.claimed(next)
+      const preparation = this.readPreparation(ingressId)
+      if (preparation?.quote) {
+        const { quote: _handedOffPrefix, ...completed } = preparation
+        this.writePreparation(ingressId, completed) // The original claimed input now holds the complete frozen quote.
+      }
       return { record: next, own: true as const }
     })
     if (!claimed.own) return await this.inspect({ ingressId })
@@ -670,7 +783,8 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const input = parseIngressParams('connection.ingress.inspect', value), ingress = this.read(input.ingressId)
     await context?.authorize(ingress)
     const source = ingress && ingress.kind !== 'action' ? this.rejoinSource(ingress) : undefined
-    if (!ingress?.input) return { ingress, inputReceipt: null, observation: 'not-started', ...(source ? { rejoinSource: source } : {}) }
+    const preparation = ingress && ingress.kind !== 'action' ? this.preparationObservation(ingress) : undefined
+    if (!ingress?.input) return parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt: null, observation: 'not-started', ...(preparation ? { preparation } : {}), ...(source ? { rejoinSource: source } : {}) }, input)
     if (ingress.kind === 'action') {
       try {
         const client = this.options.core(ingress.input.hostId, ingress.input.author.authoritySource?.executionRuntimeId)
@@ -681,17 +795,17 @@ export class DurableIngressHost implements ConnectionIngressPort {
 
     try {
       const client = this.options.core(ingress.input.hostId, ingress.input.author.authoritySource?.executionRuntimeId)
-      if (!client) return { ingress, inputReceipt: null, observation: 'unavailable', ...(source ? { rejoinSource: source } : {}) }
+      if (!client) return { ingress, inputReceipt: null, observation: 'unavailable', ...(preparation ? { preparation } : {}), ...(source ? { rejoinSource: source } : {}) }
       const inputReceipt = await client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: ingress.input.operationId })
       const context = this.inspectContext(ingress, inputReceipt)
-      const result = parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt, observation: 'observed', ...(context ? { context } : {}), ...(!inputReceipt && source ? { rejoinSource: source } : {}) }, input)
+      const result = parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt, observation: 'observed', ...(context ? { context } : {}), ...(preparation ? { preparation } : {}), ...(!inputReceipt && source ? { rejoinSource: source } : {}) }, input)
       if (inputReceipt && (inputReceipt.status === 'admitted' || inputReceipt.status === 'terminal-confirmed' || inputReceipt.status === 'launch-carried')) {
         try { this.database.prepare('UPDATE connection_ingress_message SET input_settled=1 WHERE ingress_id=? AND input_settled=0').run(ingress.ingressId) }
         catch { /* A failed work-index update leaves extra observation work, never erases a valid Core receipt. */ }
         this.recoveryDelay.delete(ingress.ingressId)
       }
       return result
-    } catch { return { ingress, inputReceipt: null, observation: 'unavailable', ...(source ? { rejoinSource: source } : {}) } }
+    } catch { return { ingress, inputReceipt: null, observation: 'unavailable', ...(preparation ? { preparation } : {}), ...(source ? { rejoinSource: source } : {}) } }
   }
   private async inspectAction(ingress: ConnectionIngressAction, client: DurableIngressCore): Promise<{ started: boolean; inspection: ConnectionIngressInspection }> {
     const input = ingress.input!
@@ -757,26 +871,38 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const input = parseIngressParams('connection.ingress.rejoin', value)
     await context.assertCurrent?.()
     const observed = this.read(input.ingressId)
-    if (context.actor.kind === 'agent' && (!context.authorize || input.source.kind === 'context-observation' ||
+    if (context.actor.kind === 'agent' && (!context.authorize ||
       !observed || observed.kind === 'action' || !observed.input && !observed.group?.target)) throw new AgentMuxError(
       'Custody continuation requires this Agent on the original frozen message target. Context cancellation has separate authority.', 'CONTROL_PERMISSION_DENIED')
     await context.authorize?.(observed)
+    if (input.source.kind === 'context-observation' && context.actor.kind === 'agent') {
+      const preparation = observed && observed.kind !== 'action' ? this.readPreparation(observed.ingressId) : undefined
+      const target = observed?.kind !== 'action' ? observed?.group?.target : undefined
+      if (!target || !preparation?.target.source || preparation.target.hostId !== target.hostId ||
+        preparation.target.agentSessionId !== target.agentSessionId || preparation.target.author.bindingId !== target.bindingId ||
+        preparation.target.author.bindingRevision !== target.bindingRevision) throw new AgentMuxError(
+          'Context continuation requires the original observer and this authenticated frozen recipient.', 'CONTROL_PERMISSION_DENIED')
+    }
     const selected = this.transaction(() => {
       // The Hosting Runtime and ingress row scope this action identity.
       const record = this.read(input.ingressId)
       if (!record || record.kind === 'action') fail('INGRESS_REJOIN_SOURCE_UNAVAILABLE')
       const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
-      const actions = JSON.parse(String(row.rejoin_json)) as Record<string, { actor: RoomBindingCallContext['actor']; action: ConnectionIngressRejoinAction }>
+      const actions = JSON.parse(String(row.rejoin_json)) as Record<string, IngressRejoinRecord>
       const prior = Object.hasOwn(actions, input.operationId) ? actions[input.operationId] : undefined
       if (prior) {
         if (!isDeepStrictEqual(prior.actor, context.actor) || !isDeepStrictEqual(prior.action.source, input.source)) fail('INGRESS_REJOIN_CONFLICT')
-        return { record, action: prior.action }
+        return { record, action: prior.action, preparationRevision: prior.preparationRevision }
       }
       const source = this.rejoinSource(record)
       const action: ConnectionIngressRejoinAction = { ...input, outcome: source && isDeepStrictEqual(input.source, source) ? 'pending' : 'stale' }
-      Object.defineProperty(actions, input.operationId, { value: { actor: context.actor, action }, enumerable: true, writable: true })
+      const preparation = input.source.kind === 'received' ? this.readPreparation(input.ingressId) : undefined
+      const active = this.pending.get(input.ingressId)?.observer
+      const preparationRevision = input.source.kind === 'received'
+        ? preparation && active?.observationId === preparation.observationId ? preparation.revision : (preparation?.revision ?? 0) + 1 : undefined
+      Object.defineProperty(actions, input.operationId, { value: { actor: context.actor, action, ...(preparationRevision === undefined ? {} : { preparationRevision }) }, enumerable: true, writable: true })
       this.database.prepare('UPDATE connection_ingress_message SET rejoin_json=? WHERE ingress_id=?').run(JSON.stringify(actions), input.ingressId)
-      return { record, action }
+      return { record, action, preparationRevision }
     })
     let action = selected.action
     if (action.outcome === 'pending') {
@@ -784,12 +910,16 @@ export class DurableIngressHost implements ConnectionIngressPort {
       await context.assertCurrent?.()
       // Current input grants authorize only new advancement; an already stored
       // handoff remains readable without turning those observations into grants.
-      const inspection = input.source.kind === 'firstsave' ? await this.ensureOriginalInput(selected.record)
-        : input.source.kind === 'received' ? await this.dispatchOriginal(input.ingressId, undefined, true) : await this.inspect({ ingressId: input.ingressId })
-      if (inspection.inputReceipt) {
+      if (input.source.kind === 'context-observation') {
+        action = this.endContextObservation(input, selected.record)
+      }
+      const inspection = input.source.kind === 'context-observation' ? await this.inspect({ ingressId: input.ingressId })
+        : input.source.kind === 'firstsave' ? await this.ensureOriginalInput(selected.record)
+        : input.source.kind === 'received' ? await this.dispatchOriginal(input.ingressId, undefined, true, selected.preparationRevision ?? input.source.preparationRevision + 1) : await this.inspect({ ingressId: input.ingressId })
+      if (inspection.inputReceipt && input.source.kind !== 'context-observation') {
         action = this.transaction(() => {
           const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
-          const actions = JSON.parse(String(row.rejoin_json)) as Record<string, { actor: RoomBindingCallContext['actor']; action: ConnectionIngressRejoinAction }>
+          const actions = JSON.parse(String(row.rejoin_json)) as Record<string, IngressRejoinRecord>
           const prior = actions[input.operationId]!
           if (prior.action.outcome === 'pending') {
             prior.action = { ...prior.action, outcome: 'handed-off', inputRef: { key: inspection.inputReceipt!.key, waitGeneration: 1 } }
@@ -799,11 +929,65 @@ export class DurableIngressHost implements ConnectionIngressPort {
         })
       }
     }
+    if (action.outcome === 'context-ended') {
+      await context.authorize?.(this.read(input.ingressId))
+      await context.assertCurrent?.()
+      // A pending original deliver borrows the frozen gap; replay never creates a new observation.
+      const record = this.read(input.ingressId)
+      const preparation = this.readPreparation(input.ingressId)
+      if (record?.state === 'received' && input.source.kind === 'context-observation' &&
+        preparation?.observationId === input.source.observationId && preparation.quote) {
+        try { await this.dispatchOriginal(input.ingressId, undefined, true) }
+        catch (error) {
+          // Preserve the completed local action when a distinct strong body/target step remains unavailable.
+          const code = error instanceof AgentMuxError ? error.code : 'INGRESS_PREPARATION_UNAVAILABLE'
+          this.transaction(() => { const current = this.read(input.ingressId); if (current?.kind !== 'action' && current?.state === 'received') this.write({ ...current, code }) })
+        }
+      }
+    }
     return parseIngressResult('connection.ingress.rejoin', { action, inspection: await this.inspect({ ingressId: input.ingressId },
       context.authorize ? { authorize: context.authorize } : undefined) }, input)
   }
+  private endContextObservation(input: ConnectionIngressRejoinInput, record: ConnectionIngressMessage): ConnectionIngressRejoinAction {
+    if (input.source.kind !== 'context-observation') fail('INGRESS_REJOIN_SOURCE_UNAVAILABLE')
+    const observationId = input.source.observationId
+    const preparation = this.readPreparation(input.ingressId), active = this.pending.get(input.ingressId)?.observer
+    let prefix: ChannelTranscriptQuote | undefined
+    if (preparation?.observationId === input.source.observationId && active?.observationId === input.source.observationId) {
+      try { prefix = active.snapshot?.() } catch { /* Only already confirmed native data can enter the frozen gap. */ }
+    }
+    const action = this.transaction(() => {
+      const currentRecord = this.read(input.ingressId), current = this.readPreparation(input.ingressId)
+      const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
+      const actions = JSON.parse(String(row.rejoin_json)) as Record<string, { action: ConnectionIngressRejoinAction }>
+      const prior = actions[input.operationId]!
+      if (prior.action.outcome !== 'pending') return prior.action
+      if (currentRecord?.kind !== 'action' && currentRecord?.state === 'received' && current && current.phase !== 'ended' &&
+        current.observationId === observationId && current.target.source) {
+        // Fresh original local author/grant checks authorize this effect, separately from read access.
+        if (!isDeepStrictEqual(this.authorize(currentRecord).author, current.target.author)) fail('INGRESS_AUTHORITY_REVISED')
+        const quote = prefix && isDeepStrictEqual(prefix.application, record.application) && prefix.externalConversationId === record.externalConversationId &&
+          isDeepStrictEqual(prefix.range, current.range) ? parseChannelTranscriptQuote(prefix)
+          : unavailableChannelQuote(record, current.range, 'context-prefix-unavailable')
+        quote.gaps = [...quote.gaps, ...current.gaps.filter(item => !quote.gaps.some(gap => gap.reason === item.reason)), { reason: 'context-observation-cancelled' }]
+        quote.coverage = quote.records.length ? 'partial' : 'unavailable'
+        this.writePreparation(input.ingressId, { ...current, phase: 'ended', quote, gaps: quote.gaps })
+        prior.action = { ...prior.action, outcome: 'context-ended' }
+      } else prior.action = { ...prior.action, outcome: 'stale' }
+      this.database.prepare('UPDATE connection_ingress_message SET rejoin_json=? WHERE ingress_id=?').run(JSON.stringify(actions), input.ingressId)
+      return prior.action
+    })
+    // Consume the named durable source before touching its live observation. Never abort a newer O2.
+    if (action.outcome === 'context-ended' && active?.observationId === observationId) active.abort.abort()
+    return action
+  }
   private rejoinSource(record: ConnectionIngressMessage): ConnectionIngressRejoinSource | undefined {
-    if (record.state === 'received') return { kind: 'received', preparationRevision: 0 }
+    if (record.state === 'received') {
+      const preparation = this.readPreparation(record.ingressId)
+      return preparation && preparation.phase !== 'ended' && preparation.target.source
+        ? { kind: 'context-observation', observationId: preparation.observationId }
+        : { kind: 'received', preparationRevision: preparation?.revision ?? 0 }
+    }
     const ref = record.input
     return record.state === 'claimed' && ref?.admissionIntent ? { kind: 'firstsave', messageOperationId: ref.operationId, messageId: ref.messageId, expectedRun: ref.expectedRun } : undefined
   }
