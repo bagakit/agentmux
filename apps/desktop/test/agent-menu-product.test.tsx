@@ -17,7 +17,7 @@ async function mount(entries: RegionMenuEntry[]) {
   await dom.render(<Menu.Root open><Menu.Trigger>Actions</Menu.Trigger><Menu.Content data-product-menu="">
     <WorkbenchMenuScope.Provider value={Menu}><AgentMenuContent name="Original Agent" executorLabel="Executor" sessionId="canonical-agent"
       executionHost={{ id: 'execution-host', label: 'Build machine', kind: 'ssh', configured: true, cwd: '/original' }}
-      links={entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={entries} Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} /> : null}
+      links={entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={entries} Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} labelPresentation="tooltip" /> : null}
       onTakeOver={() => {}} onHistory={() => {}} onRestart={entries.find(entry => entry.kind === 'restart')?.onSelect}
       extensions={{
         workspace: entries.some(entry => ['layout', 'promote'].includes(entry.kind)) ? entries.filter(entry => ['layout', 'promote'].includes(entry.kind)).map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index} Item={Menu.Item} Separator={Menu.Separator} Group={Menu.Group} Label={Menu.Label} />) : null,
@@ -51,6 +51,8 @@ it('keeps compact exact link actions and connector recovery issues directly in t
   expect([...root.querySelectorAll('[role="menuitem"]')].slice(0, 2).map(node => node.getAttribute('aria-label'))).toEqual(['Copy Agent Link', 'Copy Region Link'])
   const links = root.querySelector('[role="group"][aria-label="Copy link"]')!
   expect([...links.querySelectorAll('[role="menuitem"]')].map(node => node.getAttribute('aria-label'))).toEqual(['Copy Agent Link', 'Copy Region Link'])
+  expect(links.closest('.agent-region-menu__identity')).not.toBeNull()
+  expect(links.querySelector('.workbench-menu-row__label')).toBeNull()
   expect(links.querySelector('[aria-haspopup]')).toBeNull()
   const disclosure = item(root, 'Connections')
   await act(async () => { disclosure.focus(); disclosure.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
@@ -76,7 +78,7 @@ it('copy shortcuts keep horizontal keyboard navigation and execute only the chos
     item(root, 'Copy Agent Link').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
   })
   expect(document.activeElement).toBe(item(root, 'Copy Region Link'))
-  expect(root.querySelector('.workbench-menu-row__label-text')?.textContent).toBe('Copy Region Link')
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toBe('Copy Region Link')
   await act(async () => item(root, 'Copy Region Link').click())
   expect(region).toHaveBeenCalledOnce(); expect(agent).not.toHaveBeenCalled()
 })

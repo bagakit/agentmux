@@ -85,8 +85,14 @@ if(process.env.AGENTMUX_AGENT_MENU_SCENE_RECEIPT){
   const redCompiled=JSON.parse(await readFile(join(directory,'menu-shared-maintenance-red/compiled.json'),'utf8'))
   assert.ok(Object.keys(redCompiled.compiledFiles).length>0);assert.equal(redCompiled.sourceMutations.length,1)
   const mutation=redCompiled.sourceMutations[0];assert.equal(mutation.original,saved.menuOwnerSources[mutation.path]);assert.notEqual(mutation.original,mutation.mutated)
+  for(const[label,message]of [['identity-header-layout-removed','Agent identity and copy actions share one compact header'],['tool-label-column-shifted','Tool labels align with the ordinary menu icon column']]){
+    const entries=saved.mutations.filter(item=>item.label===label);assert.equal(entries.length,1)
+    assert.equal(entries[0].red.outcome.exitCode,1);assert.equal(entries[0].red.rendered.failure.name,'AssertionError');assert.ok(entries[0].red.rendered.failure.message.includes(message))
+    const compiled=JSON.parse(await readFile(join(entries[0].red.directory,'compiled.json'),'utf8'));assert.equal(compiled.progressCssMutations.length,1)
+    assert.equal(compiled.progressCssMutations[0].productionWritten,false)
+  }
   assert.equal(saved.cleanup.rootRemoved,true);assert.deepEqual(saved.cleanup.remaining,[])
-  console.log(JSON.stringify({passed:true,exactEvidenceReused:true,receipt:path,frames:saved.render.rendered.frames.length,mutants:1}));process.exit(0)
+  console.log(JSON.stringify({passed:true,exactEvidenceReused:true,receipt:path,frames:saved.render.rendered.frames.length,mutants:3}));process.exit(0)
 }
 const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-identity-menu-"))
 if(agentMenuOwning){result.menuOwnerSources=await menuOwnerHashes();result.positioningInputs=await positioningBinding()}
@@ -98,7 +104,7 @@ async function compiled(directory){
   for(const entry of entries){if(!entry.isFile())continue;const path=join(entry.parentPath,entry.name);files[path.slice(directory.length+1)]=hash(await readFile(path))}
   assert.ok(Object.keys(files).length>0,'The actual private renderer outputs are nonempty');return files
 }
-async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false,mailboxMutation='',menuMutation=false){
+async function renderer(label,probe='complete',unreadableProgressActions=false,focusMutation=false,mailboxMutation='',menuMutation=false,menuRhythmMutation=''){
   const directory=join(evidence,label), outDir=join(privateRoot,label);await mkdir(directory,{recursive:true})
   const xtermFile=require.resolve('@xterm/xterm'), wrapper=join(privateRoot,'record-xterm.mjs')
   await writeFile(wrapper,`import xterm from ${JSON.stringify(xtermFile)};
@@ -149,6 +155,15 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
       if(agentMenuOwning)for(const file of this.getWatchFiles())if(Object.hasOwn(result.positioningInputs.files,file))positioningImports[file]=hash(await readFile(file))
     }}],
     css:{postcss:{plugins:[{postcssPlugin:'private-progress-controls',async Once(sheet){
+      if(menuRhythmMutation){
+        const identity=menuRhythmMutation==='identity',selector=identity?'.agent-region-menu__identity':':is(.agent-region-menu, .focus-context-menu) .workbench-layout-menu'
+        const property=identity?'display':'padding',from=identity?'grid':'0 var(--sp-4)',to=identity?'block':'0 var(--sp-3)',declarations=[]
+        sheet.walkRules(selector,rule=>{if(rule.source?.input.file===cssPath)rule.walkDecls(property,declaration=>declarations.push(declaration))})
+        if(!declarations.length)return
+        assert.equal(declarations.length,1,'The actual menu rhythm declaration is unique');assert.equal(declarations[0].value,from)
+        declarations[0].value=to;progressCssMutations.push({path:cssPath.slice(repository.length+1),selector,property,from,to,productionWritten:false})
+        return
+      }
       if(mailboxMutation==='navigation'){
         const owners=[]
         sheet.walkRules('.composer-mailbox__folders',rule=>{if(rule.source?.input.file===cssPath)owners.push(rule)})
@@ -185,7 +200,7 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   const cssKey=cssPath.slice(repository.length+1),cssAfter=await readFile(cssPath)
   assert.equal(importedStyleInputs[cssKey],hash(cssBefore),'The compiled renderer watches the exact owner CSS')
   assert.equal(hash(cssAfter),hash(cssBefore),'The owner CSS stays unchanged through compilation')
-  assert.equal(progressCssMutations.length,unreadableProgressActions||mailboxMutation==='navigation'?1:0,'Requested actual CSS mutation is applied exactly once')
+  assert.equal(progressCssMutations.length,unreadableProgressActions||mailboxMutation==='navigation'||menuRhythmMutation?1:0,'Requested actual CSS mutation is applied exactly once')
   assert.equal(sourceMutations.length,focusMutation||mailboxMutation==='compact'||menuMutation?1:0)
   const harnessInputs={}
   if(mailboxLayoutOwning||agentMenuOwning)for(const name of agentMenuOwning?['main.cjs','menu-product.cjs','entry.tsx']:['main.cjs','mailbox-layout.cjs']){
@@ -278,6 +293,11 @@ try{
       const restored=result.render
       assert.equal(restored.outcome.exitCode,0,JSON.stringify(restored.rendered.failure));assert.equal(restored.rendered.passed,true)
       result.mutations.push({label:'shared-source-check-consumer-removed',red,restored,productionWritten:false})
+      for(const[label,kind,message]of [['identity-header-layout-removed','identity','Agent identity and copy actions share one compact header'],['tool-label-column-shifted','alignment','Tool labels align with the ordinary menu icon column']]){
+        const red=await renderer(label,'agent-menu-owning',false,false,'',false,kind)
+        assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError');assert.ok(red.rendered.failure.message.includes(message),JSON.stringify(red.rendered.failure))
+        result.mutations.push({label,red,restored:result.render,productionWritten:false})
+      }
     }
     if(mailboxLayoutOwning){
       const navigationRed=await renderer('mailbox-navigation-red','mailbox-layout-owning',false,false,'navigation')

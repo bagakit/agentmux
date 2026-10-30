@@ -11,6 +11,7 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
     return child
   }
   async function frame(name) {
+    await painted()
     const png=await capture(name)
     result.frames.push({file:name+'.png',png,width:await evaluate('innerWidth'),state:name})
   }
@@ -41,6 +42,25 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
     assert.ok(rect.left>=0&&rect.right<=rect.width&&rect.top>=0&&rect.bottom<=rect.height,'Menu stays inside the actual viewport: '+JSON.stringify(rect))
     assert.ok(rect.scrollWidth<=rect.clientWidth,'Menu content has no horizontal overflow')
   }
+  async function rhythm() {
+    const observed=await evaluate(`(()=>{
+      const root=${menu},identity=root.querySelector('.agent-region-menu__identity'),summary=identity?.querySelector('.agent-region-menu__summary'),links=identity?.querySelector('[aria-label="Copy link"]')
+      const rect=e=>e?.getBoundingClientRect().toJSON(),style=identity&&getComputedStyle(identity)
+      const ordinary=root.querySelector('.tab-context-menu__item:not(.workbench-menu-row__item) > svg')
+      return{identity:rect(identity),summary:rect(summary),links:rect(links),padding:style?parseFloat(style.paddingTop)+parseFloat(style.paddingBottom):0,
+        ordinary:rect(ordinary),labels:[...root.querySelectorAll('.workbench-menu-row__label')].filter(e=>!identity?.contains(e)).map(rect),
+        buttons:links?[...links.querySelectorAll('[role="menuitem"]')].map(rect):[],hiddenLabel:links?.querySelector('.workbench-menu-row__label')!==null}
+    })()`)
+    assert.ok(observed.identity&&observed.summary&&observed.links,'The actual Agent identity and sharing controls are nonempty')
+    assert.ok(observed.identity.height<=Math.max(observed.summary.height,observed.links.height)+observed.padding+1,'Agent identity and copy actions share one compact header')
+    assert.ok(observed.links.left>=observed.summary.right-1,'Copy actions remain beside the original identity')
+    assert.equal(observed.hiddenLabel,false,'Header sharing keeps no separate caption row')
+    assert.equal(observed.buttons.length,2,'The exact original Agent and Region sharing actions are both present')
+    for(const button of observed.buttons)assert.ok(button.width>=28&&button.height>=28,'Sharing retains its original complete hitbox')
+    assert.ok(observed.ordinary&&observed.labels.length>=2,'Ordinary items and original labelled tool rows are nonempty')
+    for(const label of observed.labels)assert.ok(Math.abs(label.left-observed.ordinary.left)<1,'Tool labels align with the ordinary menu icon column')
+    result.menuRhythms??=[];result.menuRhythms.push(observed)
+  }
   for(const appearance of ['dark','light']) {
     for(const width of [640,320]) {
       await evaluate(`identityMenu.appearance(${JSON.stringify(appearance)})`)
@@ -59,11 +79,21 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
       assert.deepEqual(await evaluate(`[...${copyRow}.querySelectorAll('[role="menuitem"]')].map(node=>node.getAttribute('aria-label'))`),['Copy Agent Link','Copy Region Link'],'Copy links share one compact root row')
       assert.equal(await evaluate(`${item(menu,'Copy Region Link')}.closest('[role="menu"]')===${menu}`),true,'Copy has no nested disclosure')
       assert.equal(await evaluate(`${menu}.textContent.includes('Host ID:')`),false,'Raw diagnostics do not dominate the root menu')
-      await bounded(menu);await frame(`${width}-${appearance}-menu`)
+      await bounded(menu);await rhythm();await frame(`${width}-${appearance}-menu`)
+      const pointerCopy=item(menu,'Copy Agent Link')
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...await point(pointerCopy),buttons:0})
+      await waitFor(visible(`document.querySelector('.workbench-layout-menu__tooltip')`))
+      assert.equal(await evaluate(`document.querySelector('.workbench-layout-menu__tooltip').textContent`),'Copy Agent Link','Header copy has a real complete pointer explanation')
+      if(appearance==='dark'&&width===640)await frame('copy-agent-hint')
       await close(false);await open('keyboard')
       const agentLink=item(menu,'Copy Agent Link'),regionLink=item(menu,'Copy Region Link')
-      await evaluate(`${agentLink}.focus()`);await key('ArrowRight','ArrowRight',39)
+      await evaluate(`${agentLink}.focus()`)
+      await waitFor(visible(`document.querySelector('.workbench-layout-menu__tooltip')`))
+      assert.equal(await evaluate(`document.querySelector('.workbench-layout-menu__tooltip').textContent`),'Copy Agent Link','Header copy has a real complete keyboard explanation')
+      await key('ArrowRight','ArrowRight',39)
       assert.equal(await evaluate(`document.activeElement===${regionLink}`),true,'Right moves to the next compact copy action')
+      await waitFor(`document.querySelector('.workbench-layout-menu__tooltip')?.textContent==='Copy Region Link'`)
+      if(appearance==='dark'&&width===320)await frame('copy-region-hint')
       await key('ArrowLeft','ArrowLeft',37)
       assert.equal(await evaluate(`document.activeElement===${agentLink}`),true,'Left returns to the original compact copy action')
       const maintenance=await submenu('Maintenance')
@@ -122,7 +152,7 @@ module.exports = async function agentMenuProof({win,evaluate,waitFor,visible,pai
       for(const label of ['Copy','Paste','Select all','Find','Copy visible output','Copy all output','Scroll to bottom','Clear terminal','Copy Agent Link','Split Right'])
         assert.equal(await evaluate(`Boolean(${item(menu,label)})`),true,'Terminal context preserves the original action: '+label)
       assert.equal(await evaluate(`Boolean(${menu}.querySelector('[role="note"]'))`),false,'Long terminal explanations stay out of the root menu')
-      await bounded(menu);await frame(`${width}-${appearance}-terminal-context`)
+      await bounded(menu);await rhythm();await frame(`${width}-${appearance}-terminal-context`)
       if(appearance==='dark'&&width===320){
         const terminalInfo=await submenu('Terminal info')
         const explanations=await evaluate(`[...${terminalInfo}.querySelectorAll('[role="note"]')].map(node=>node.textContent)`)
