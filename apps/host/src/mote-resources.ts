@@ -499,7 +499,8 @@ export class ScratchTopics {
       if (!created) {
         const saved = await inspectDirectoryIdentity(absolutePath, context)
         if (!saved || saved.needsUpgrade || saved.topicId !== topicId) throw new Error('The Mote destination is not confirmed as this full content ID. Existing bytes are kept; inspect its original directory before retrying.')
-      } else await retainDirectoryIdentity(absolutePath, context)
+      } else await retainDirectoryIdentity(absolutePath, context,
+        { ...(this.options.directoryIdentityHelper ? { helperPath: this.options.directoryIdentityHelper } : {}) })
     }
     await ensureDirectory(absolutePath)
     // Freeze the same identity read() will publish before a new ordinary Topic reaches Core.
