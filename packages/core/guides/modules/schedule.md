@@ -1,7 +1,7 @@
 ---
 summary: "Civil-time arrangements, one-shot countdowns and original lifecycle"
 roles: "Authorized scheduling operators"
-when: "Inspect, create, pause, resume or cancel a scheduled task"
+when: "Inspect, create, update, pause, resume or cancel a scheduled task"
 ---
 
 # schedule
@@ -35,6 +35,13 @@ or pausing and resuming keeps that deadline. Pause suspends delivery, not time; 
 countdown processes the original occurrence. One confirmed input delivery ends a countdown.
 The connected Host must be running; App exit, sleep or offline delivery is not promised. Busy
 Agents, user input and permission waits keep the original occurrence pending.
+
+Use schedule update --data <FILE|-> with {scheduleId,expectedRevision,operationId,everyMs}
+to change an original repeating interval. It preserves the current deadline and any claimed input,
+including an unknown operation; it does not resume a paused arrangement. A managedSource records
+the original configuration owner and binding generation. Change that original configuration rather
+than treating the schedule as a second preference store. Agent message authority cannot activate
+or edit standing maintenance.
 
 Inspect the current help for supported triggers and complete input. Pause/resume/cancel
 change the exact schedule; they do not stop unrelated healthy Agents or accept its results.

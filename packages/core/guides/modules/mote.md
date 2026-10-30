@@ -93,6 +93,43 @@ authorized message when a handoff is needed. Reading, draft edits and raw proces
 are not new decisions; accepted input, native turn outcome, completed work and human
 acceptance remain separate.
 
+## Connect the main conversation to original work
+
+Read the original Mote dialogue association before linking work. The stable dialogue key
+is the original Mote ID; its current main binding and role revision do not rename or merge
+Agent Sessions. Main source segments, work events and event-history entries are references
+to original records, not another chat log or task-status store.
+
+<!-- amux:generated command:space.mote.dialogue.read -->
+<!-- amux:generated command:space.mote.dialogue.link -->
+
+<!-- amux:generated command:space.mote.dialogue.input.submit -->
+<!-- amux:generated command:space.mote.dialogue.input.inspect -->
+
+For an authorized human/device prompt addressed to this logical main conversation, freeze
+its exact target, expectedRoleRevision and original input operation before submission.
+The Host qualifies that original current role and records its exact Host/Session/Run/key;
+a fresh UI read alone cannot authorize an unfenced main prompt. Inspect an unknown result
+with the same target and operationId. Keep its original route and input owner even when
+another Agent later carries the conversation; never resend it to a replacement main.
+These human/device intake methods do not let an Agent impersonate a human author:
+managed Agents continue through their original agent.send owner and permission boundary.
+
+After authorized work is actually opened or dispatched through the original agent.open,
+agent.send and thread/dispatch owners, use its exact original message Host and messageId
+for an explicit work-source link, with the read current role revision and one operationId.
+For additional members of the same work, use that already discovered eventId rather than
+inventing an independent event per member. A link does not create an Agent, assign a main
+role, resend a task or grant permission. If its result is unknown, read the same operationId
+before deciding; do not substitute a later main binding or repeat the work.
+
+Read thread bodies and results through the original Host/Session message and Conversation
+owners. Preserve their exact source, author and order. Missing message or event provenance
+leaves the old workface independently accessible; a title, cwd, adjacent time or summary
+cannot supply the missing association. Keep external private audiences and generations
+separate even when they share this Mote. Association metadata is not permission to forward
+their content into another conversation.
+
 ## Read the relevant originals
 
 Discover this exact Mote through the app/space and topic owners. SOUL.md holds persistent identity,
@@ -177,6 +214,36 @@ the exact available discussion. Explain relevance, source, scope and a concrete 
 follow-ups brief and timely. Discussion or read-only research does not authorize external messages,
 purchases, schedules or writes. Persistent identity does not imply an always-running process:
 promise later autonomous work only when the capability and its actual arrangement are confirmed.
+
+## Inspect an original presence and heartbeat arrangement
+
+<!-- amux:generated command:space.mote.preferences.read -->
+<!-- amux:generated command:space.mote.preferences.save -->
+
+Read saved quick settings with the exact target and `kind: "quick"`. Preserve the original
+source, baseline and operation. The default presence policy is enabled with `intervalMs`
+1800000 (30 minutes); that policy alone does not prove an Agent is online or a heartbeat
+is arranged. Quick read returns `defaults.presence`; save `values.presence: { enabled, intervalMs }`
+through the same preferences owner with its original baseline. Intervals are whole minutes expressed in milliseconds, at
+least 60000. A saved File receipt, actual maintenance/schedule, recovery, input delivery
+and work outcome are separate facts.
+
+<!-- amux:generated command:schedule.inspect -->
+<!-- amux:generated command:schedule.update -->
+
+The maintenance result names its exact original schedule; inspect that `scheduleId`.
+An explicit period edit supplies the original scheduleId, expectedRevision, operationId
+and everyMs to schedule update. It must not replace an original occurrence claim or
+deadline. Pause, resume or cancel the original schedule explicitly; an ordinary interval
+edit does not undo the person's pause. Read current help before an operation and retain
+its original receipt.
+
+Heartbeats are internal checks of current goals, threads, decisions and unfinished
+commitments, with the identity and task consistency principles above. They are not quiet
+human follow-ups or permission for external messages. If the Host is unavailable or an
+outcome is unknown, retain the original role, Session and operation; never create another
+Agent or replay an unknown heartbeat. Check the original arrangement and capabilities
+before claiming later autonomous work.
 
 ## Keep an idea close to its sources
 
