@@ -1,10 +1,11 @@
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import type { ConnectionDelivery } from '@agentmux/core/connections'
-import { deliveryFacts } from '@agentmux/core/connections'
+import { deliveryFacts, connectionDiagnosisActorKey } from '@agentmux/core/connections'
 import { api } from '../../../src/renderer/src/lib/api'
 import { channelFixture } from './facts'
 const { proof, connection, target } = channelFixture
-const scene = { active: false, mode: 'busy' as 'busy' | 'ready' | 'waiting' | 'admitted', bindingId: '', revision: 1, room: '', longName: false, receiver: 'ready' as 'ready' | 'ended' | 'recovering' | 'unknown', recoveryLost: false }
+const scene = { active: false, mode: 'busy' as 'busy' | 'ready' | 'waiting' | 'admitted', bindingId: '', revision: 1, room: '', longName: false, receiver: 'ready' as 'ready' | 'ended' | 'recovering' | 'unknown', recoveryLost: false, statusMode: 'normal' as 'normal' | 'unknown', showAvatar: false }
+const statusAvatar = new URL('../../../src/renderer/src/assets/mote-origin/role-team.png', import.meta.url).href
 Object.assign(proof, { diagnosis: scene })
 connection.capabilities = { ...connection.capabilities!, receiverRecovery: true }
 const recoveries = new Map<string, any>()
@@ -40,10 +41,14 @@ api.connections.call = (async (method: any, input: any, owner: any) => {
       input: { operationId: inputReceipt.originalControlOperationId, hostId: target.executionHostId, agentSessionId: target.agentSessionId, expectedRun: inputReceipt.key.expectedRun, messageId: 'preview-original-message', author: { bindingId: scene.bindingId, bindingRevision: scene.revision, connectionId: connection.config.connectionId } } }, inputReceipt, observation: 'observed' }
   }
   const result: any = await original(method, input, owner)
+  // A controlled, locally decoded actor profile image; other members keep their original fallback.
+  if (scene.showAvatar && method === 'connection.metadata.get' && input.subject?.kind === 'actor' && input.subject.actor.userId === '567890123456789012' && result.entry?.observation?.profile) result.entry.observation.profile.avatarUrl = statusAvatar
+  if (method === 'connection.binding.inspect' && scene.active && scene.statusMode === 'unknown') throw Error('Controlled current member access observation unavailable')
   if (method === 'connection.metadata.get' && input.subject?.kind === 'conversation' && scene.longName && result.entry?.observation?.profile) result.entry.observation.profile.name = 'Research and Engineering · Customer investigation and release planning'
   if (method === 'connection.diagnose') for (const group of result.groups.value?.items ?? []) {
     scene.bindingId = group.target.bindingId; scene.revision = group.target.publicationRevision; scene.room = group.target.externalConversationId
     if (!scene.active) continue
+    if (input.activity) group.activity = { limit: 50, incoming: scene.statusMode === 'unknown' ? { value: null, issue: 'read-unavailable' } : { value: { examined: 16, included: 12, more: true, latest: { ingressId: 'preview-status-latest-message', state: 'claimed', receivedAt: Date.now() - 120000 }, actors: ['567890123456789012', '678901234567890123', '789012345678901234'].map((userId, index) => ({ actorKey: connectionDiagnosisActorKey(group.target, { application: connection.config.application, idType: 'user_id', userId }), messages: [7, 4, 1][index] })) }, issue: null }, outgoing: { value: { examined: 5, included: 3, more: false, latest: { operationId: 'preview-status-latest-reply', state: scene.statusMode === 'unknown' ? 'unknown' : 'confirmed', receipt: scene.statusMode === 'unknown' ? 'unknown' : 'confirmed', receiptObservedAt: scene.statusMode === 'unknown' ? null : Date.now() - 3600000 * 25 } }, issue: null } }
     group.connection.value = { ...group.connection.value, receiver: scene.receiver === 'unknown' ? undefined : { ref: 'preview-original-receiver', state: scene.receiver }, transport: { state: scene.receiver === 'ready' ? 'ready' : scene.receiver === 'ended' ? 'unavailable' : 'unknown' }, authentication: { state: 'ready' }, intake: { state: 'unknown', reason: 'check-failed' } }
     const out = group.outgoing.value
     out.sourceObservation = scene.mode === 'busy' || scene.mode === 'waiting' ? { state: 'unavailable', reason: 'source-gap', code: scene.mode === 'busy' ? 'AGENT_SESSION_HISTORY_BUSY' : 'AGENT_SESSION_HISTORY_TIMEOUT', codeRecorded: true, checkpointKey: 'a'.repeat(64) } : { state: 'ready', code: null, codeRecorded: false, checkpointKey: 'a'.repeat(64) }

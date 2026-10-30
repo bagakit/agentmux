@@ -9,6 +9,7 @@ const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
 const receiverRecovery = process.argv.includes('--receiver-recovery')
+const statusIdentity = process.argv.includes('--status-identity')
 const connectionOverview = process.argv.includes('--connection-overview')
 const diagnosisExplanations = process.argv.includes('--diagnosis-explanations')
 const deliverySourceRetry = process.argv.includes('--delivery-source-retry')
@@ -105,7 +106,9 @@ app.whenReady().then(async () => {
         assert.ok(await read('document.querySelector(".agent-connector-dialog__body").scrollTop < 20'), 'Default entry keeps group identity at the top')
       }
       const dismiss = async () => { await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')'); assert.equal(await read('document.activeElement?.dataset.channelEntry'), 'feishu') }
-      if (connectionOverview) {
+      if (statusIdentity) {
+        await require('./status-identity-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, layout, open, close, result })
+      } else if (connectionOverview) {
         await require('./connection-overview-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, layout, open, close, result })
       } else if (diagnosisExplanations) {
         await require('./diagnosis-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, layout, open, close, result })
@@ -148,7 +151,7 @@ app.whenReady().then(async () => {
       await read('document.querySelector(".agent-connector-dialog__body").scrollTop=0')
       await capture('group-stale-recovery-wide-light')
       }
-      if (!process.argv.includes('--skip-reference')) {
+      if (!statusIdentity && !process.argv.includes('--skip-reference')) {
         await dismiss(); win.setContentSize(1380, 980); await until('innerWidth===1380'); await read('window.channelEntryProof.setTheme("light")'); await open('feishu'); await click(action('Channel settings'))
         await until(exists('[data-settings-group-toggle="mote"]'))
         if (await read('document.querySelector(\'[data-settings-group-toggle="mote"]\').getAttribute("aria-expanded")!=="true"')) await click('[data-settings-group-toggle="mote"]')
