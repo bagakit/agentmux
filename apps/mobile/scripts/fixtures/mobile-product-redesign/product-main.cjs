@@ -69,6 +69,10 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'creation-recovery') {
+    await require('./creation-recovery.cjs')({ read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'polish-followup') {
     await require('./polish-followup.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return

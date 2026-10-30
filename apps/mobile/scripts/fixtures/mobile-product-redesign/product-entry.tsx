@@ -359,6 +359,14 @@ function Scene() {
       catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!.conversation = null
     },
     setPromptReadFailure: (fail: boolean) => { promptReadFails = fail },
+    seedCreationRecovery: async () => {
+      const owner = getDeviceWorkface()
+      const intent = { runtimeId: 'runtime-original', deviceHostId: owner.snapshotIdentity().host?.hostId ?? null,
+        input: { operationId: 'original-unconfirmed-creation', content: { kind: 'new-agent' as const, executorId: 'fixture-original', prompt: '核对原资料，保留依据和未确认项。' },
+          destination: { spaceId: 'mote-resources', zoneId: 'zone-resources', newTab: true as const }, focus: false as const }, phase: 'unknown' as const }
+      await owner.retainAgentCreate(intent, owner.recordIdentity())
+      return intent
+    },
     seedSpatialRecovery: async () => {
       const owner = getDeviceWorkface(), runtimeId = client.runtimeOwnerIdentity!()!.runtimeId!, deviceHostId = owner.snapshot().record.host?.hostId ?? null
       for (const [operationId, destination] of [
