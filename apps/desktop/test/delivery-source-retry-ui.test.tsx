@@ -103,9 +103,12 @@ it('read failure retains the original selection and late recovery cannot overwri
  const f=await consumer();await f.mount();await f.select()
  const actual=f.bridge.getMockImplementation()!;let fail=true
  f.bridge.mockImplementation(async(method,input,target)=>{if(method==='connection.delivery.inspect'&&fail){fail=false;throw Error('Original selected read unavailable')}return actual(method,input,target)})
- const row=[...dom.container.querySelectorAll('.agent-connector-receipt')].find(n=>n.querySelector('code')?.textContent===f.operationId)!
- await act(async()=>row.querySelector<HTMLButtonElement>('button')!.click())
- await wait(()=>expect(dom.container.textContent).toContain('earlier result retained'))
+ const rows=[...dom.container.querySelectorAll('.agent-connector-receipt')].filter(n=>n.querySelector('code')?.textContent===f.operationId)
+ expect(rows).toHaveLength(1)
+ expect([...rows[0]!.querySelectorAll('button')].filter(n=>n.textContent==='Check receipt')).toHaveLength(0)
+ expect(rows[0]!.querySelectorAll('[data-delivery-action=inspect]')).toHaveLength(1)
+ await dom.click('[data-delivery-action=inspect]')
+ await wait(()=>expect(dom.container.textContent).toContain('Original result observation unconfirmed'))
  expect(dom.container.querySelector('[data-selected-delivery]')?.getAttribute('data-selected-delivery')).toBe(f.operationId)
  const original={operationId:f.operationId,source:(await f.record()).retrySource!}
  await expect(api.connections.call('connection.delivery.retry',original,{...f.hostingTarget,runtimeId:'same-alias-replacement'})).rejects.toMatchObject({code:'RUNTIME_OWNER_MISMATCH'})
