@@ -7,6 +7,7 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { api } from '../src/renderer/src/lib/api'
 import { sessionFrontendPresentation } from '../src/renderer/src/lib/session-recovery-banner'
+import { initialNativeComposerBinding } from '../src/renderer/src/lib/initial-native-composer-binding'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../src/renderer/src/lib/workbench-presentation'
@@ -124,6 +125,60 @@ it('does not cover a usable terminal with a stale or attached initialization fai
   expect(dom.container.querySelector('.full-page-loading')).toBeNull()
   expect(dom.container.querySelector('[data-live-terminal]')).not.toBeNull()
   expect(dom.draft(original.id)).toBe('Original unsent thought')
+  noSideEffects()
+})
+
+it('keeps pending original frontend join visible without covering the terminal or granting recovery', async () => {
+  const session = startup('ready')
+  session.terminalFrontend.initialization.native = { state: 'confirmed', sessionId: 'original-native' } as never
+  session.terminalFrontend.initialization.failure = { step: 'frontend', message: 'The original native join has not returned.' }
+  const refresh = vi.spyOn(useAppStore.getState(), 'refreshSession').mockResolvedValue(undefined)
+  const recover = vi.spyOn(useAppStore.getState(), 'recoverSession').mockResolvedValue(undefined)
+  const tab = await mount(session)
+  expect(sessionFrontendPresentation(session)).toMatchObject({ kind: 'connecting', fullPage: false,
+    diagnostic: session.terminalFrontend.initialization.failure.message })
+  expect(dom.container.querySelector('.full-page-loading')).toBeNull()
+  expect(dom.container.querySelector('.terminal-recovery')).toBeNull()
+  expect(dom.container.querySelector('[data-live-terminal]')).not.toBeNull()
+  expect(dom.container.textContent).toContain('Terminal connection pending')
+  expect(dom.draft(session.id)).toBe('Original unsent thought')
+  await act(async () => button('Refresh observation').click())
+  expect(refresh).toHaveBeenCalledOnce()
+  expect(recover).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
+  noSideEffects()
+  await act(async () => useAppStore.setState({ sessions: [{ ...session,
+    terminalFrontend: { ...session.terminalFrontend, state: 'attached' } }] }))
+  expect(dom.container.textContent).not.toContain('Terminal connection pending')
+  expect(dom.draft(session.id)).toBe('Original unsent thought')
+  const stale = { ...session, terminalFrontend: { ...session.terminalFrontend, run: { runId: 'old-run' } } }
+  expect(sessionFrontendPresentation(stale)).toBeNull()
+})
+
+it('captures an exact native target only for a new draft while its original terminal has not started', async () => {
+  vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+  const session = startup('ready')
+  session.terminalFrontend.initialization.native = { state: 'confirmed', sessionId: 'original-native' } as never
+  session.nativeHandle = { kind: 'provider', providerId: session.providerId, sessionId: 'original-native' }
+  session.capabilities = { ...session.capabilities, nativeConversationInput: { managedRuns: true } }
+  await mount(session)
+  await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, 'Actual first draft', undefined, 'first-empty-draft', 'manual', undefined,
+    { execution: 'immediate' })).toBe(true) })
+  const captured = useAppStore.getState().agentSteerQueues[session.id]![0]!
+  expect(captured.directInputBinding).toEqual({ expectedRun: session.control.run,
+    admissionIntent: { kind: 'native-conversation', source: { providerId: session.providerId, nativeSessionId: 'original-native' } } })
+  await act(async () => useAppStore.setState({ sessions: [{ ...session, terminalFrontend: { ...session.terminalFrontend, state: 'attached' } }] }))
+  expect(useAppStore.getState().agentSteerQueues[session.id]![0]!.directInputBinding).toEqual(captured.directInputBinding)
+  await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, 'Later terminal draft', undefined, 'later-draft', 'manual', undefined,
+    { execution: 'immediate' })).toBe(true) })
+  expect(useAppStore.getState().agentSteerQueues[session.id]![1]!.directInputBinding?.admissionIntent).toEqual({ kind: 'manual-actor' })
+  for (const changed of [
+    { ...session, terminalFrontend: { ...session.terminalFrontend, run: { runId: 'old-run' } } },
+    { ...session, nativeHandle: { ...session.nativeHandle, sessionId: 'different-native' } },
+    { ...session, capabilities: { ...session.capabilities, nativeConversationInput: undefined } }
+  ]) expect(initialNativeComposerBinding(changed)).toBeUndefined()
+  await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, 'Not a fresh manual producer', undefined, 'background-message')).toBe(true) })
+  expect(useAppStore.getState().agentSteerQueues[session.id]![2]!.directInputBinding).toBeUndefined()
   noSideEffects()
 })
 
