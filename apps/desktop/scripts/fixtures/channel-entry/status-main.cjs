@@ -9,6 +9,7 @@ const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
 const receiverRecovery = process.argv.includes('--receiver-recovery')
+const deliverySourceRetry = process.argv.includes('--delivery-source-retry')
 const groupClarity = process.argv.includes('--group-clarity')
 const sharingCraft = process.argv.includes('--sharing-craft')
 const groupDetails = process.argv.includes('--group-details')
@@ -102,7 +103,9 @@ app.whenReady().then(async () => {
         assert.ok(await read('document.querySelector(".agent-connector-dialog__body").scrollTop < 20'), 'Default entry keeps group identity at the top')
       }
       const dismiss = async () => { await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')'); assert.equal(await read('document.activeElement?.dataset.channelEntry'), 'feishu') }
-      if (receiverRecovery) {
+      if (deliverySourceRetry) {
+        await require('./delivery-retry-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, result })
+      } else if (receiverRecovery) {
         await require('./receiver-scene.cjs')({ win, read, until, click, press, settle, layout, open, close, capture, details, dismiss, result })
       } else if (sharingCraft) {
         await require('./sharing-craft-scene.cjs')({ win, read, until, click, settle, capture, details, dismiss, tab, result })
@@ -149,7 +152,7 @@ app.whenReady().then(async () => {
         result.references = [{ file: reference, purpose: 'Current Settings Mote Club at the same 1380 × 980 viewport and light theme; compare hierarchy, density and control treatment, not task content.' }]
       }
       result.requests = await read('window.channelEntryProof.requests')
-      assert.ok(!result.requests.some(row => /rejoin|retry|configure|respond|\.grant$|\.create$/.test(row.method)), 'Viewing, local drafts and recovery navigation make no external changes')
+      assert.ok(!result.requests.some(row => !(deliverySourceRetry && row.method === 'connection.delivery.retry') && /rejoin|retry|configure|respond|\.grant$|\.create$/.test(row.method)), 'Only the bounded typed visual retry leaf is writable; viewing and navigation make no other changes')
       assert.deepEqual(await read('window.channelEntryProof.errors'), [])
       result.passed = true; return
     }
