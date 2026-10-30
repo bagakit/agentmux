@@ -15,6 +15,7 @@ export type ContinuousProgressGoalSource = { kind: 'goal'; goalId: string; align
 export type ContinuousProgressTaskSource = { kind?: 'feature'; root: string; ownerId: string; readerPath: string } | ContinuousProgressGoalSource
 
 export type ContinuousProgressLoop = ContinuousProgressTarget & {
+  managedSource?: import('./automatic-input-source.js').AutomaticInputSource
   taskSource?: ContinuousProgressTaskSource
   loopId: string
   calendar?: AgentScheduleCalendar
@@ -67,6 +68,7 @@ export class ContinuousProgressScheduler {
   private readonly now: () => number
   private readonly id: () => string
   private loops = new Map<string, ContinuousProgressLoop>()
+  private readonly sourceLoops = new Map<string, Map<string, number>>()
   private readonly targetLoops = new Map<string, Map<string, number>>()
   private nextOrdinal = 0
 
@@ -78,6 +80,7 @@ export class ContinuousProgressScheduler {
   restore(records: readonly ContinuousProgressLoop[]): void {
     this.loops = new Map(records.map((record) => [record.loopId, structuredClone(record)]))
     this.targetLoops.clear()
+    this.sourceLoops.clear()
     this.nextOrdinal = 0
     for (const loop of this.loops.values()) this.indexLoop(loop, this.nextOrdinal++)
   }
@@ -93,6 +96,11 @@ export class ContinuousProgressScheduler {
     const selected = target ? records.filter(loop =>
       (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).every(key => target[key] === undefined || loop[key] === target[key])) : records
     return selected.map(loop => structuredClone(loop))
+  }
+
+  /** Original IDs only; a source observation never clones unrelated prompt bodies. */
+  listManaged(sourceId: string): ContinuousProgressLoop[] {
+    return [...(this.sourceLoops.get(sourceId) ?? [])].sort((a,b) => a[1]-b[1]).map(([id]) => structuredClone(this.loops.get(id)!))
   }
 
   get(loopId: string): ContinuousProgressLoop | undefined {
@@ -113,6 +121,10 @@ export class ContinuousProgressScheduler {
     const key = this.targetKey(loop), entries = this.targetLoops.get(key) ?? new Map<string, number>()
     entries.set(loop.loopId, ordinal)
     this.targetLoops.set(key, entries)
+    if (loop.managedSource) {
+      const sources = this.sourceLoops.get(loop.managedSource.sourceId) ?? new Map<string, number>()
+      sources.set(loop.loopId, ordinal); this.sourceLoops.set(loop.managedSource.sourceId, sources)
+    }
   }
 
   private setLoop(loop: ContinuousProgressLoop): void {
@@ -123,6 +135,10 @@ export class ContinuousProgressScheduler {
     if (oldKey !== undefined && oldKey !== this.targetKey(loop)) {
       oldEntries!.delete(loop.loopId)
       if (!oldEntries!.size) this.targetLoops.delete(oldKey)
+    }
+    if (previous?.managedSource && previous.managedSource.sourceId !== loop.managedSource?.sourceId) {
+      const entries = this.sourceLoops.get(previous.managedSource.sourceId)!
+      entries.delete(loop.loopId); if (!entries.size) this.sourceLoops.delete(previous.managedSource.sourceId)
     }
     this.loops.set(loop.loopId, loop)
     this.indexLoop(loop, ordinal)
@@ -142,12 +158,12 @@ export class ContinuousProgressScheduler {
 
   requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
-  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string }): ContinuousProgressLoop {
+  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string; managedSource?: import('./automatic-input-source.js').AutomaticInputSource }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || (!Number.isSafeInteger(input.nextDue) || input.nextDue < 0)) throw new Error('An exact schedule target, message and next occurrence are required.')
     const timing = parseAgentScheduleTiming({ calendar: input.calendar, afterMs: input.afterMs, everyMs: input.everyMs, checkIn: input.checkIn })
     const loopId = this.id()
     const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
-      ...timing, revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
+      ...timing, ...(input.managedSource ? { managedSource: { ...input.managedSource } } : {}), revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
     this.setLoop(loop)
     return structuredClone(loop)
   }

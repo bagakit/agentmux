@@ -23,7 +23,7 @@ const sameRun = (a: AgentMuxRunRef, b: AgentMuxRunRef) => a.runId === b.runId
 const terminal = (phase: AgentMuxContinuitySupervision['phase']) => ['settled', 'cancelled', 'paused'].includes(phase)
 const reobservableReasons = ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'operation-unconfirmed', 'original-operation-unconfirmed']
 const operationInput = (op: AgentMuxContinuityOperation): AgentMuxAgentContinuityInput => ({ agentSessionId: op.agentSessionId,
-  operationId: op.operationId, expectedRun: op.previousRun, trigger: op.trigger, policy: op.policy,
+  operationId: op.operationId, ...(op.standingIntent ? { standingIntent: op.standingIntent } : {}), expectedRun: op.previousRun, trigger: op.trigger, policy: op.policy,
   ...(op.timingOverride ? { timingOverride: op.timingOverride } : {}), ...(op.trigger === 'input' && op.launchInput ? { input: op.launchInput.input } : {}),
   ...(op.trigger === 'input' && op.messageInput ? { messageInputRef: structuredClone(op.messageInput.ref) } : {}) })
 
@@ -97,6 +97,7 @@ export class AgentSessionContinuitySupervisor {
       if (originals.length > 1) throw new AgentMuxError('More than one unresolved frontend intent names this Run. Inspect the original operations; existing input remains available.', 'AGENT_CONTINUITY_SUPERSEDED')
       root = originals[0]; rootId = root?.operationId
     }
+    if (root && !isDeepStrictEqual(root.standingIntent, input.standingIntent)) return
     const supervision = root?.supervision
     const active = supervision ? session.continuityOperations?.[supervision.activeAttemptOperationId] : undefined
     if (!root || root.operationId !== rootId || root.agentSessionId !== session.agentSessionId || !supervision ||
@@ -356,7 +357,7 @@ export class AgentSessionContinuitySupervisor {
         if (supervision.nextAttemptAt > Date.now()) { this.at(id, rootId, supervision.nextAttemptAt, () => this.wake(id)); return }
         const attemptCount = supervision.attemptCount + 1
         const operationId = 'frontend-' + createHash('sha256').update(JSON.stringify([id, rootId, attemptCount])).digest('base64url')
-        const attempt: AgentMuxContinuityOperation = { operationId, agentSessionId: id, intentOperationId: rootId, trigger: root.trigger, policy: root.policy,
+        const attempt: AgentMuxContinuityOperation = { operationId, agentSessionId: id, intentOperationId: rootId, trigger: root.trigger, ...(root.standingIntent ? { standingIntent: root.standingIntent } : {}), policy: root.policy,
           previousRun: { ...session.run }, nativeTarget: structuredClone(root.nativeTarget), admittedAt: Date.now(), observedAt: Date.now(), rechecks: 0,
           kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-running', observedAt: Date.now() },
           interruptedWorking: false, recoveryInputs: { reminder: '', continuation: '' } }
@@ -410,7 +411,7 @@ export class AgentSessionContinuitySupervisor {
     if (supervision.nextAttemptAt > Date.now()) { this.at(id, rootId, supervision.nextAttemptAt, () => this.wake(id)); return }
     const attemptCount = supervision.attemptCount + 1
     const operationId = 'recovery-' + createHash('sha256').update(JSON.stringify([id, rootId, attemptCount])).digest('base64url')
-    const attempt: AgentMuxContinuityOperation = { operationId, agentSessionId: id, intentOperationId: rootId, trigger: root.trigger, policy: root.policy,
+    const attempt: AgentMuxContinuityOperation = { operationId, agentSessionId: id, intentOperationId: rootId, trigger: root.trigger, ...(root.standingIntent ? { standingIntent: root.standingIntent } : {}), policy: root.policy,
       previousRun: { ...session.run }, nativeTarget: structuredClone(root.nativeTarget), admittedAt: Date.now(), observedAt: Date.now(), rechecks: 0,
       kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-ended', state: 'exited', observedAt: Date.now() },
       interruptedWorking: false, recoveryInputs: { reminder: '', continuation: '' } }

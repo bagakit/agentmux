@@ -1,4 +1,5 @@
 import { resumeResolutionRequest, resumeResolutionDigest } from '../agent-prepared-resume.js'
+import { sameAutomaticInputSource } from '../automatic-input-source.js'
 import type { AgentSessionRunLifecycle } from './lifecycle.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { parseTerminalFrontendObservation } from '../agent-terminal-frontend.js'
@@ -174,7 +175,7 @@ export async function performAgentContinuity(
     if ((input.trigger !== 'manual' || retained.kind === 'pending' || retained.kind === 'starting') &&
         (retained.initializationRecovery || current.nativeActor?.initializationControl)) return await performAgentContinuity(context, { agentSessionId: input.agentSessionId,
       expectedRun: { ...input.expectedRun }, operationId: retained.operationId, trigger: retained.trigger, policy: retained.policy,
-      ...(retained.timingOverride ? { timingOverride: retained.timingOverride } : {}) }, retained.intentOperationId)
+      ...(retained.timingOverride ? { timingOverride: retained.timingOverride } : {}), ...(retained.standingIntent ? { standingIntent: retained.standingIntent } : {}) }, retained.intentOperationId)
     supervisor.observe(current, true)
     let run: AgentMuxRun | null = null
     let evidence: import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
@@ -224,12 +225,18 @@ export async function performAgentContinuity(
   if (prior && !sameRun(prior.previousRun, input.expectedRun)) {
     throw new AgentMuxError('A continuity operation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
   }
+  if (prior && !isDeepStrictEqual(prior.standingIntent, input.standingIntent)) throw new AgentMuxError('The original recovery has a different standing source.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
+  const standing = input.standingIntent
+  const assertStanding = (intent: import('../types.js').AgentFuturePromptIntent | null | undefined, session: AgentMuxStoredAgentSession) => {
+    if (!standing) return
+    if (!intent?.active || intent.operationId !== standing.operationId || !sameAutomaticInputSource(intent.continuitySource, { sourceId: standing.sourceId, revision: standing.revision }) || session.continuity?.supervision?.cancellation) throw new AgentMuxError('The original standing maintenance was revoked, changed or cancelled. Its Session and manual input are retained.', 'AGENT_STANDING_INTENT_CHANGED')
+  }
   const priorFailure = rolledBackResumeFailure(current ?? undefined, input.operationId)
   if (priorFailure) throw priorFailure
   const now = Date.now(), policy = prior?.policy ?? normalizeAgentContinuityPolicy(input.policy)
   let receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
     operationId: input.operationId, agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
-    ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), policy,
+    ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), ...(standing ? { standingIntent: { ...standing } } : {}), policy,
     previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
     kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown', observedAt: now, message: 'Not yet observed.' }
   }
@@ -469,6 +476,9 @@ export async function performAgentContinuity(
         throw new AgentMuxError('The original recovery intent no longer authorizes this attempt.', 'AGENT_CONTINUITY_SUPERSEDED')
       }
       admission = { kind: 'resume', reason: 'supervised-retry', interruptedWorking: false }
+    } else if (standing) {
+      assertStanding(await ports.sessions.store.readFuturePromptIntent(current.agentSessionId, standing.intentId), current)
+      admission = { kind: 'resume', reason: 'standing-intent', interruptedWorking: false }
     } else admission = agentContinuityAdmission({ session: ports.events.projectSession(current), trigger: receipt.trigger, policy,
       admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}),
       ...(lastActivityAt === undefined ? {} : { lastActivityAt }) })
@@ -704,6 +714,7 @@ export async function performAgentContinuity(
     attemptLimit: receipt.supervision?.attemptLimit ?? Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
   // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
   current = await ports.sessions.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
+    if (standing) assertStanding(value.futurePromptIntents?.[standing.intentId], value)
     if (completedRuntimeIntent) {
       const pointer = value.continuity?.intentOperationId ?? value.continuity?.operationId
       const root = value.continuityOperations?.[completedRuntimeIntent.rootId]
@@ -727,7 +738,7 @@ export async function performAgentContinuity(
     const original = { ...structuredClone(receipt), ...(messageInput ? { messageInput } : {}) }
     return { ...retainExecutor(value), continuity: original,
       continuityOperations: { ...value.continuityOperations, [receipt.operationId]: original } }
-  })
+  }, standing?.intentId)
   try {
     const session = await lifecycle.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId,
       ...(input.args === undefined ? {} : { args: input.args }), ...(input.env === undefined ? {} : { env: input.env }),

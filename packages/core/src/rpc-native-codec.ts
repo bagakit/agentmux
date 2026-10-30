@@ -1,3 +1,5 @@
+import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
+import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote-dialogue.js'
 import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseMessageFieldPage, validateMessageFieldRead } from './agent-message-field.js'
 import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
@@ -17,7 +19,9 @@ import { isCapsuleRuntimeMethod, parseCapsuleRuntimeResult } from './capsule-run
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseMessageEventsPage } from './agent-message-events.js'
-import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead } from './agent-input-context-capture.js'
+import { createAgentInputContextCaptureRecord, parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead } from './agent-input-context-capture.js'
+import { parseAgentInputSubmit } from './agent-input-submit.js'
+import { composeAgentPrompt } from './agent-outbound-message.js'
 import { isMessageNotificationInput, validateMessageNotification } from './agent-message-notification.js'
 import { agentDiscoveryActivity } from './agent-discovery.js'
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
@@ -395,6 +399,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.history' ? parseFileHistoryResult(value, parseFileHistoryParams(params)) : method === 'file.restore' ? parseFileRestoreResult(value, parseFileRestoreParams(params)) : method === 'file.undo' ? parseFileUndoResult(value, parseFileUndoParams(params)) : method === 'file.create' ? parseFileCreateResult(value, parseFileCreateParams(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
     if (isAgentLearningMethod(method)) return parseAgentLearningResult(method, value, parseAgentLearningParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteChatMethod(method)) return parseMoteChatResult(method, value, parseMoteChatParams(method, params)) as unknown as Record<string, unknown>
+    if (isMoteDialogueMethod(method)) return parseMoteDialogueResult(method,value,parseMoteDialogueParams(method,params)) as unknown as Record<string,unknown>
     if (isMoteConnectionMethod(method)) return parseMoteConnectionResult(method,value,parseMoteConnectionParams(method,params)) as unknown as Record<string,unknown>
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
@@ -703,6 +708,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'agent.automation.pause': case 'agent.automation.inspect': { parseAgentAutomationInspection(p, parseAgentAutomationTarget(input)); break }
       case 'agent.input.submit': {
+        const submitted = parseAgentInputSubmit(input), packet = submitted.capturedContext
         record(p, ['key', 'record', 'input','moteObservationId'])
         if(p.moteObservationId!==undefined)string(p.moteObservationId)
         const key = validateAgentPromptInputKey(p.key)
@@ -712,13 +718,23 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (observed && (!isDeepStrictEqual(observed.key, key) || !isDeepStrictEqual(observed.admission, p.record))) fail()
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), message = original.admission?.intent?.message ?? original.launch?.message
+          const expectedContext = packet ? message?.inputContext : submitted.inputContext
+          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : submitted.moteGuidance === true ? MOTE_INPUT_GUIDANCE : undefined).systemContext
+          if (packet) {
+            if (!expectedContext) fail()
+            const {schema:_schema,inputContext:_context,...proof} = createAgentInputContextCaptureRecord({reference:packet.reference,
+              binding:{executionHostId:'local',agentSessionId:submitted.agentSessionId,originRun:submitted.expectedRun},prompt:submitted.prompt,
+              ...(packet.agentMuxNote === undefined ? {} : {agentMuxNote:packet.agentMuxNote}),inputContext:expectedContext!})
+            if (!isDeepStrictEqual(message?.inputContextCaptureProof,proof)) fail()
+          } else if (message?.inputContextCaptureProof !== undefined) fail()
           if (original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, key.expectedRun) ||
               (original.admission?.submissionId ?? original.launch?.input.submissionId) !== key.submissionId ||
               original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key) ||
-              !message || message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, input.inputContext) ||
+              !message || message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, expectedContext) ||
               !isDeepStrictEqual(message.inputImages?.map(({ observation: _observation, ...reference }) => reference), input.inputImages) ||
-              message.authorHuman !== undefined || message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
-              message.systemContext !== undefined || message.inputContextSource !== (input.inputContext === undefined ? undefined : 'caller-declared')) fail()
+              message.authorHuman !== (submitted.moteGuidance === true || packet ? true : undefined) || message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
+              submitted.sourceChannel !== undefined && message.sourceChannel !== submitted.sourceChannel ||
+              message.systemContext !== expectedNote || message.inputContextSource !== (packet ? 'host-capture' : submitted.inputContext === undefined ? undefined : 'caller-declared')) fail()
         }
         break
       }

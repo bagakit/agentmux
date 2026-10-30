@@ -83,6 +83,15 @@
       "types": "./dist/mote-connections.d.ts",
       "import": "./dist/mote-connections.js"
     },
+    "./automatic-input-source": { "types": "./dist/automatic-input-source.d.ts", "import": "./dist/automatic-input-source.js" },
+    "./mote-dialogue-store": {
+      "types": "./dist/mote-dialogue-store.d.ts",
+      "import": "./dist/mote-dialogue-store.js"
+    },
+    "./mote-dialogue": {
+      "types": "./dist/mote-dialogue.d.ts",
+      "import": "./dist/mote-dialogue.js"
+    },
     "./mote-preferences": {
       "types": "./dist/mote-preferences.d.ts",
       "import": "./dist/mote-preferences.js"

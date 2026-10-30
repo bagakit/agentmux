@@ -1,3 +1,7 @@
+import { createHostMoteMainReader, createHostMoteDialogue } from './mote-dialogue.js'
+import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
+import { HostMoteQuickPreferences } from './mote-quick-preferences.js'
+import { createHostMotePresence } from './mote-presence.js'
 import { createHostContent } from './content-owner.js'
 import { createHostMoteInputSource } from './mote-input-source.js'
 import { createHostSettingsResourceRead } from './settings-resource-read.js'
@@ -14,7 +18,7 @@ import { createHostSpatialPresentation } from './spatial-presentation.js'
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError,
-  startHeadlessAgentMux, connectAgentMuxRpc, defaultAgentMuxControlSocketPath, isMoteChatMethod,
+  startHeadlessAgentMux, connectAgentMuxRpc, spatialCatalog, defaultAgentMuxControlSocketPath, isMoteChatMethod,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
@@ -65,11 +69,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let relay: RelayTransportController | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
   let goals: ReturnType<typeof createHostGoals> | undefined
+  let motePresence: ReturnType<typeof createHostMotePresence> | undefined
   let mobileIncidents: ReturnType<typeof createHostMobileIncidents> | undefined
   const closeResources = async () => {
     const errors: unknown[] = []
     for (const close of [() => initializingMobile, () => authorityOpening?.catch(() => {}), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
-      () => mobileIncidents?.flush(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
+      () => mobileIncidents?.flush(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
     if (errors.length === 1) throw errors[0]
@@ -136,8 +141,27 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       if (!client || !('forwardRpc' in client) || !client.forwardRpc) throw new AgentMuxError('The exact original Goal message Host is unavailable or ambiguous. Original messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
       return await client.forwardRpc(method, params, context)
     } })
+  const moteMain = configurationPath && content?.files ? createHostMoteMainReader({ configurationPath, spatial: spatialState, files: content.files }) : undefined
+  const moteDialogue = moteMain && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteDialogue({
+    main: moteMain, spatial: spatialState, store: new MoteDialogueStore(join(dirname(options.store.path), 'mote-dialogue.sqlite')),
+    clientForHost: hostId => {
+      if (hostId === 'local') return originalRuntime().client
+      const matches = options.connections?.clients?.().filter(value => value.hostId === hostId) ?? []
+      if (matches.length !== 1) throw new AgentMuxError('The exact original message Host is unavailable or ambiguous. Its source is retained.', 'CONTROL_UNAVAILABLE')
+      return matches[0]!.client
+    }
+  }) : undefined
+  if (configurationPath && content?.files && moteMain && goals) motePresence = createHostMotePresence({ configurationPath, spatial: spatialState, files: content.files, main: moteMain, schedules: goals.schedules, ...(options.connections?.subscribeClients ? { subscribeClients: options.connections.subscribeClients } : {}),
+    clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] })
+  const moteQuickPreferences = content?.files && moteMain ? new HostMoteQuickPreferences({ files: content.files, main: moteMain,
+    ...(moteDialogue ? { recordMainSource: moteDialogue.recordMainSource } : {}),
+    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
+    executors: async () => (await originalRuntime().client.listHostExecutors()).executors.map(value => ({ id: value.executorId, name: value.label, providerId: value.providerId })),
+    ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined
   const service = {
     spatialState,
+    ...(moteDialogue ? { moteDialogue } : {}),
+    ...(moteQuickPreferences ? { moteQuickPreferences } : {}),
     ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime, agentMuxContext: async request => await goals?.contextForSpatialOpen(request) }) } : {}),
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
@@ -263,6 +287,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     await connectionOwner?.start(runtime)
+    await motePresence?.start()
     if (goals) void goals.start().catch(error => process.emitWarning(`Starting original Goal automation is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Goal records and manual Agent input remain available.`, { code: 'GOAL_AUTOMATION_UNCONFIRMED' }))
     await initializeMobile()
 

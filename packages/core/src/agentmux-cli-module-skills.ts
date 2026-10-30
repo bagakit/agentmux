@@ -12,13 +12,22 @@ interface ModuleDefinition {
   guide: string
 }
 
+const commandFacts = Object.fromEntries(AGENTMUX_CLI_COMMANDS.map(command => [
+  'command:' + command.method,
+  `amux ${command.method.replaceAll('.', ' ')}${command.usage ? ' ' + command.usage : ''}`
+]))
+
+const moduleGuideFacts: Readonly<Record<string, string>> = {
+  ...commandFacts,
+  'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY,
+  'protocol-catalog': AGENTMUX_PROTOCOL_CATALOG.map(entry => `- ${entry.title} (${entry.id}, ${entry.form})\n  ${entry.description}`).join('\n')
+}
+
 /** Markdown owns guidance; module names and availability follow the executable registry. */
 const definitions: Readonly<Record<string, ModuleDefinition>> = Object.fromEntries(Object.entries(MODULE_GUIDES).map(([root, definition]) => [root, {
   ...definition,
-  guide: guideText(definition.guide, {
-    'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY,
-    'protocol-catalog': AGENTMUX_PROTOCOL_CATALOG.map(entry => `- ${entry.title} (${entry.id}, ${entry.form})\n  ${entry.description}`).join('\n')
-  })
+  // guideText owns diagnostics when a required original fact is absent.
+  guide: guideText(definition.guide, key => moduleGuideFacts[key]!)
 }]))
 
 export interface AgentMuxCliModule {

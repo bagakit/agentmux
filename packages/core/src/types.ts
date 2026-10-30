@@ -1390,6 +1390,7 @@ export type AgentPromptMessageContent = {
 
 export type AgentFuturePromptOccurrence = { intentId: string; occurrenceAt: number }
 export type AgentFuturePromptIntent = {
+  continuitySource?: import('./automatic-input-source.js').AutomaticInputSource
   operationId: string
   prompt: string
   message: AgentPromptMessageContent

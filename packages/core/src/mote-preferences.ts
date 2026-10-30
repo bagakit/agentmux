@@ -1,3 +1,5 @@
+import { deriveObjectId } from './object-id.js'
+import { parseScheduleRecord } from './public-rpc-schedules.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { ConnectionApplication } from './connections-contract.js'
@@ -13,7 +15,22 @@ export function isPrimaryMoteSpace(space: Pick<AgentMuxSpaceFact, 'kind' | 'topi
 
 /** Values are serialized only by the original MOTE.md owner. No YAML lives here. */
 export type MoteDefaultConversation = { hostId: string; sessionId: string; displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
-export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; recovery?: 'startup' | 'on-open' }
+export type MotePresencePreferences = { enabled: boolean; intervalMs: number }
+export const DEFAULT_MOTE_PRESENCE: Readonly<MotePresencePreferences> = Object.freeze({ enabled: true, intervalMs: 1_800_000 })
+export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences }
+export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('./continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null }
+export interface MoteQuickPreferencesPort {
+  read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
+  save(input: MoteQuickPreferencesSaveParams, context?: import('./connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
+}
+/** Metadata is authored by the original CAS writer, never by a display or a new read. */
+export function effectiveMoteQuickSave(input: MoteQuickPreferencesSaveParams): MoteQuickDefaults {
+  const { conversationRevision: _requested, recovery: _historical, ...values } = input.values
+  const before = input.baseline.defaults
+  const same = JSON.stringify(before.conversation ?? null) === JSON.stringify(values.conversation ?? null) ||
+    !!before.conversation && !!values.conversation && Object.keys(before.conversation).every(key => before.conversation![key as keyof MoteDefaultConversation] === values.conversation![key as keyof MoteDefaultConversation])
+  return { ...values, ...(before.recovery === undefined ? {} : { recovery: before.recovery }), conversationRevision: same ? before.conversationRevision ?? `legacy:${input.baseline.document?.revision ?? 'missing'}` : deriveObjectId('mote-main-role', JSON.stringify([input.target.spaceId, input.operationId, input.baseline.document?.revision ?? null])) }
+}
 export type MotePreferencesTarget = { spaceId: string; zoneId: string; expectedResource: FileResource }
 export type MotePreferencesDestination =
   | { kind: 'occurrence'; displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
@@ -27,7 +44,7 @@ export type MoteQuickBaseline = { resource: FileReadResource; document: FileDocu
 export type MoteQuickPreferencesReadInput = { kind: 'quick'; target: MotePreferencesTarget }
 export type MoteQuickPreferencesReadResult = MoteQuickPreferencesReadInput & {
   status: 'ready' | 'unconfirmed'; source: FileReadResult | null; defaults: MoteQuickDefaults | null
-  choices: MoteQuickChoices; main: boolean | null; issue: string | null
+  choices: MoteQuickChoices; main: boolean | null; issue: string | null; maintenance?: MotePresenceReading
 }
 export type MoteQuickPreferencesSaveInput = MoteQuickPreferencesReadInput & {
   baseline: MoteQuickBaseline; values: MoteQuickDefaults; destination: MotePreferencesDestination
@@ -87,7 +104,8 @@ export function parseMoteDefaultConversation(value: unknown, code: Code = 'INVAL
   return Object.fromEntries(tupleFields.map(key => [key, id(c[key], code, key === 'tabId' || key === 'regionId')])) as MoteDefaultConversation
 }
 export function sameMoteQuickDefaults(a: MoteQuickDefaults, b: MoteQuickDefaults): boolean {
-  return a.executorId === b.executorId && a.recovery === b.recovery && (a.conversation === b.conversation || !!a.conversation && !!b.conversation &&
+  return a.executorId === b.executorId && a.recovery === b.recovery && a.conversationRevision === b.conversationRevision &&
+    a.presence?.enabled === b.presence?.enabled && a.presence?.intervalMs === b.presence?.intervalMs && (a.conversation === b.conversation || !!a.conversation && !!b.conversation &&
     tupleFields.every(key => a.conversation![key] === b.conversation![key]))
 }
 export function sameMotePreferencesTarget(a: MotePreferencesTarget, b: MotePreferencesTarget): boolean {
@@ -108,7 +126,13 @@ export function sameMoteConnectionValues(a: MoteConnectionValues, b: MoteConnect
     a.connection.application.domain === b.connection.application.domain && a.connection.application.appId === b.connection.application.appId
 }
 export function parseMoteQuickDefaults(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MoteQuickDefaults {
-  const p = fields(value, ['executorId', 'conversation', 'recovery'], [], code), result: MoteQuickDefaults = {}
+  const p = fields(value, ['executorId', 'conversation', 'conversationRevision', 'recovery', 'presence'], [], code), result: MoteQuickDefaults = {}
+  if (Object.hasOwn(p, 'conversationRevision')) result.conversationRevision = id(p.conversationRevision, code)
+  if (Object.hasOwn(p, 'presence')) {
+    const value = fields(p.presence, ['enabled','intervalMs'], ['enabled','intervalMs'], code)
+    if (typeof value.enabled !== 'boolean' || !Number.isSafeInteger(value.intervalMs) || (value.intervalMs as number) < 60_000 || (value.intervalMs as number) % 60_000 !== 0) fail('Mote heartbeat requires enabled and a whole-minute interval of at least one minute.', code)
+    result.presence = { enabled: value.enabled as boolean, intervalMs: value.intervalMs as number }
+  }
   if (Object.hasOwn(p, 'executorId')) result.executorId = id(p.executorId, code)
   if (Object.hasOwn(p, 'conversation')) {
     result.conversation = parseMoteDefaultConversation(p.conversation, code)
@@ -197,7 +221,7 @@ export function parseMotePreferencesReadResult(value: unknown, input?: MotePrefe
       p.status === 'unconfirmed' && !p.issue) fail('Mote connection read lacks its original File facts.', code)
     return { ...base, status: p.status as 'ready' | 'unconfirmed', source, values, issue: p.issue as string | null }
   }
-  const code = 'CONTROL_PROTOCOL_ERROR', p = fields(value, ['kind', 'target', 'status', 'source', 'defaults', 'choices', 'main', 'issue'], ['kind', 'target', 'status', 'source', 'defaults', 'choices', 'main', 'issue'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = fields(value, ['kind', 'target', 'status', 'source', 'defaults', 'choices', 'main', 'issue', 'maintenance'], ['kind', 'target', 'status', 'source', 'defaults', 'choices', 'main', 'issue'], code)
   const base = parseMotePreferencesReadInput({ kind: p.kind, target: p.target }, code)
   if (base.kind !== 'quick') fail('Mote quick read is invalid.', code)
   if (input && (base.kind !== input.kind || !sameMotePreferencesTarget(base.target, input.target))) fail('Mote preference read belongs to another original target.', code)
@@ -212,7 +236,13 @@ export function parseMotePreferencesReadResult(value: unknown, input?: MotePrefe
   if (p.status !== 'ready' && p.status !== 'unconfirmed' || !(p.main === null || typeof p.main === 'boolean') || !(p.issue === null || typeof p.issue === 'string')) fail('Mote preference read status is invalid.', code)
   if (p.status === 'ready' && (!source?.resource || !['read', 'deleted'].includes(source.result.status) || defaults === null || p.main === null || p.issue !== null)) fail('Ready Mote preferences require actual original File facts.', code)
   if (p.status === 'unconfirmed' && !p.issue) fail('Unconfirmed Mote preferences require their original reason.', code)
-  return { kind: 'quick', target: base.target, status: p.status as 'ready' | 'unconfirmed', source, defaults, choices, main: p.main as boolean | null, issue: p.issue as string | null }
+  let maintenance: MotePresenceReading | undefined
+  if (p.maintenance !== undefined) {
+    const value = fields(p.maintenance, ['status','schedule','issue'], ['status','schedule','issue'], code)
+    if (!['active','paused','disabled','unbound','unconfirmed'].includes(value.status as string) || value.issue !== null && typeof value.issue !== 'string') fail('Mote maintenance observation is invalid.', code)
+    maintenance = { status: value.status as MotePresenceReading['status'], schedule: value.schedule === null ? null : parseScheduleRecord(value.schedule), issue: value.issue as string | null }
+  }
+  return { kind: 'quick', target: base.target, status: p.status as 'ready' | 'unconfirmed', source, defaults, choices, main: p.main as boolean | null, issue: p.issue as string | null, ...(maintenance ? { maintenance } : {}) }
 }
 export function moteQuickBaseline(read: MotePreferencesReadResult): MoteQuickBaseline | null {
   return read.kind === 'quick' && read.status === 'ready' && read.source?.resource && read.defaults ? {
@@ -241,6 +271,6 @@ export function parseMotePreferencesSaveResult(value: unknown, params?: MotePref
   }
   const source = p.source === null ? null : parseMoteQuickBaseline(p.source, base.target, code)
   const confirmed = p.status === 'saved' || p.status === 'unchanged'
-  if (confirmed && (!source?.document || params?.kind === 'quick' && !sameMoteQuickDefaults(source.defaults, params.values)) || !confirmed && (!p.message || source !== null)) fail('Mote save status lacks its original writer facts.', code)
+  if (confirmed && (!source?.document || params?.kind === 'quick' && !sameMoteQuickDefaults(source.defaults, effectiveMoteQuickSave(params))) || !confirmed && (!p.message || source !== null)) fail('Mote save status lacks its original writer facts.', code)
   return { ...base, operationId, status: p.status as MotePreferencesSaveResult['status'], source, message: p.message as string | null }
 }

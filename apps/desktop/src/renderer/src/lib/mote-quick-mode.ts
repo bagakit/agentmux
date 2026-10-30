@@ -1,25 +1,21 @@
-import { executorsForHost } from './executors'
 import type { FileDocument } from '@agentmux/core'
 import type { FileReadResult } from '@agentmux/core/files'
-import { sameMoteQuickDefaults, type MoteQuickBaseline } from '@agentmux/core/mote-preferences'
-import { MOTE_QUICK_MODE_PATH, sameMoteDefaultConversation, parseMoteQuickMode, serializeMoteQuickMode, type MoteQuickDefaults } from '../../../shared/mote-quick-mode'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import type { MoteQuickDefaults } from '../../../shared/mote-quick-mode'
 import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
-import { readMoteMaterial, saveMoteFile } from './mote-cooperation'
-import { confirmedMoteReference, confirmedMoteDestination, emptyMoteDestination, type FileDestination } from './mote-materials-actions'
-import { fileNavigationSelection, useAppStore } from '../store'
+import { confirmedMoteReference, emptyMoteDestination, type FileDestination } from './mote-materials-actions'
+import { useAppStore } from '../store'
 import { documentKey } from './workbench-tabs'
-import { spatialCatalog } from './space-agent-control'
-import { moteConversationChoices } from './mote-quick-preferences'
+import { moteConnectionTarget } from './mote-connection-default'
+import { api } from './api'
 
-export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; issue?: string; source?: FileReadResult }
+export type SavedMoteQuickMode = { document: FileDocument | null; defaults: MoteQuickDefaults; issue?: string; source?: FileReadResult; pending?: MoteQuickPreferencesSaveParams; maintenance?: MotePresenceReading }
 export async function readMoteQuickDefaults(scope: MoteWorkfaceScope): Promise<SavedMoteQuickMode> {
-  const read = await readMoteMaterial(scope, scope.rootPath + '/' + MOTE_QUICK_MODE_PATH)
-  if (read.result.status === 'deleted') return { document: null, defaults: {}, source: read }
-  if (read.result.status !== 'read') return { document: null, defaults: {}, source: read, issue: 'message' in read.result ? read.result.message : 'MOTE.md read is unconfirmed.' }
-  const parsed = parseMoteQuickMode(read.result.document.content)
-  return parsed.status === 'valid' ? { document: read.result.document, defaults: parsed.defaults, source: read }
-    : { document: read.result.document, defaults: {}, issue: parsed.message, source: read }
+  const target = moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings)
+  if (!target) return { document: null, defaults: {}, issue: 'The original Mote resource is unconfirmed. Its settings and conversations remain available.' }
+  const input = { kind: 'quick' as const, target }, result = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
+  return { document: result.source?.result.status === 'read' ? result.source.result.document : null, defaults: result.defaults ?? {}, ...(result.source ? { source: result.source } : {}), ...(result.issue ? { issue: result.issue } : {}), ...(result.maintenance ? { maintenance: result.maintenance } : {}) }
 }
 export type MoteQuickWrite = { status: 'saved' | 'unchanged'; source: MoteQuickBaseline }
 export class MoteQuickSaveError extends Error {
@@ -27,44 +23,35 @@ export class MoteQuickSaveError extends Error {
     super(cause instanceof Error ? cause.message : String(cause), { cause })
   }
 }
+/** Client draft/navigation checks precede one original Host CAS writer. No YAML is written here. */
 export async function saveMoteQuickDefaults(scope: MoteWorkfaceScope, defaults: MoteQuickDefaults, saved: SavedMoteQuickMode,
-  open: (path: string) => Promise<unknown>, stillCurrent: () => boolean, reference?: WorkbenchProjectionSelection | null, destination?: FileDestination): Promise<MoteQuickWrite> {
-  let writeStarted = false, confirmed: MoteQuickWrite | null = null
+  _open: (path: string) => Promise<unknown>, stillCurrent: () => boolean, reference?: WorkbenchProjectionSelection | null, destination?: FileDestination): Promise<MoteQuickWrite> {
+  let dispatched = false, confirmed: MoteQuickWrite | null = null
   try {
-  const state = useAppStore.getState(), exact = destination ? confirmedMoteDestination(state, scope, destination, true) :
-    confirmedMoteReference(state, scope, { reference }) ?? emptyMoteDestination(state, scope, { reference })
-  if (!exact || saved.issue) throw new Error(saved.issue ?? 'The original Mote display is unconfirmed. Your choices and work are kept.')
-  const navigation = fileNavigationSelection(state), path = scope.rootPath + '/' + MOTE_QUICK_MODE_PATH
-  let changed = false
-  const unsubscribe = useAppStore.subscribe(current => { if (fileNavigationSelection(current) !== navigation) changed = true })
-  let latest: SavedMoteQuickMode
-  try {
-    latest = await readMoteQuickDefaults(scope)
-    if (changed || !stillCurrent() || latest.issue || latest.document?.revision !== saved.document?.revision || latest.document?.content !== saved.document?.content || !sameMoteQuickDefaults(latest.defaults, saved.defaults) ||
-      saved.source && JSON.stringify(latest.source?.resource) !== JSON.stringify(saved.source.resource))
-      throw new Error(latest.issue ?? 'The saved settings or your later selection changed. Your choices are kept; reread MOTE.md before saving.')
-  } finally { unsubscribe() }
-  const current = useAppStore.getState()
-  const workspace = current.config?.workspaces.find(item => item.id === scope.workspace.id)
-  if (workspace?.hostId !== scope.workspace.hostId || workspace.path !== scope.workspace.path || !stillCurrent()) throw new Error('The original Mote resource changed. Your choices are kept.')
-  if (defaults.executorId && defaults.executorId !== saved.defaults.executorId && !executorsForHost(current.config, scope.workspace.hostId, current.executorDetections, current.hostExecutorInventories[scope.workspace.hostId]).some(item => item.id === defaults.executorId)) throw new Error('The chosen Agent configuration no longer exists. Your choices are kept; choose an existing Agent.')
-  if (defaults.conversation && !sameMoteDefaultConversation(defaults.conversation, saved.defaults.conversation) && !moteConversationChoices(current, scope.topic, scope.workspace.id, spatialCatalog(current, [scope.topic])).some(item => sameMoteDefaultConversation(item, defaults.conversation))) throw new Error('The chosen original conversation changed. Your choices are kept; reread its exact location.')
-  const key = documentKey(scope.workspace.id, path)
-  if (current.dirtyDocuments[key] || current.documentIssues[key]) throw new Error('The original settings Editor has an unsaved or unconfirmed draft. It is kept; review it before saving.')
-  if (!latest.source?.resource) throw new Error('The original MOTE.md mapping is unconfirmed. Your choices are kept.')
-  const next = serializeMoteQuickMode(latest.document?.content ?? '', defaults)
-  if (latest.document && next === latest.document.content) return { status: 'unchanged', source: { resource: latest.source.resource, document: latest.document, defaults } }
-  let document = latest.document
-  if (!document) {
-    writeStarted = true
-    await current.createPath({ path, kind: 'file' }, scope.workspace.id)
-    const read = await readMoteMaterial(scope, path)
-    if (!stillCurrent() || read.result.status !== 'read' || read.result.document.content !== '') throw new Error('Creating MOTE.md is unconfirmed or another edit arrived. Your choices and the original file are kept; inspect it before retrying.')
-    document = read.result.document
-  }
-  const written = await saveMoteFile(scope, path, document, next, open, stillCurrent, exact, () => { writeStarted = true })
-  confirmed = { status: 'saved', source: { resource: latest.source.resource, document: written, defaults } }
-  await useAppStore.getState().refreshScratchTopics(scope.workspace.id, true, scope.topic.id)
-  return confirmed
-  } catch (cause) { throw new MoteQuickSaveError(cause, writeStarted, confirmed) }
+    const state = useAppStore.getState(), target = moteConnectionTarget(scope, state.spaceZoneBindings)
+    if (!target || saved.issue || !saved.source?.resource || !stillCurrent()) throw new Error(saved.issue ?? 'The original settings source changed. Keep your draft and reread it.')
+    const path = scope.rootPath + '/MOTE.md', key = documentKey(scope.workspace.id, path)
+    if (state.dirtyDocuments[key] || state.documentIssues[key]) throw new Error('The original settings Editor has an unsaved or unconfirmed draft. It is kept; review it before saving.')
+    const occurrence = destination ? null : confirmedMoteReference(state, scope, { reference })
+    const empty = destination ?? (occurrence ? null : emptyMoteDestination(state, scope, { reference }))
+    const chosen = occurrence ? { kind: 'occurrence' as const, ...occurrence } : empty ? { kind: 'empty' as const, ...empty } : null
+    if (!chosen) throw new Error('The original Mote display is unconfirmed. Your draft and existing work are kept.')
+    const baseline = { resource: saved.source.resource, document: saved.document, defaults: saved.defaults }
+    const pending = saved.pending
+    if (pending && JSON.stringify(pending.values) !== JSON.stringify(defaults)) throw new Error('The previous save has an unknown result. Retain that original request and inspect it before saving different settings.')
+    const input: MoteQuickPreferencesSaveParams = pending ?? { kind: 'quick', target, baseline, values: structuredClone(defaults), destination: chosen, operationId: crypto.randomUUID() }
+    saved.pending = input
+    dispatched = true
+    const result = parseMotePreferencesSaveResult(await api.motePreferences.save(input), input)
+    if ((result.status !== 'saved' && result.status !== 'unchanged') || !result.source) {
+      if (result.status === 'refused-before-write') delete saved.pending
+      throw new Error(result.message ?? 'The original save is unconfirmed. Keep this request; do not replay or overwrite it.')
+    }
+    confirmed = { status: result.status, source: result.source }
+    delete saved.pending
+    // Saved settings do not select/open a document or change a later workface.
+    await useAppStore.getState().refreshScratchTopics(scope.workspace.id, true, scope.topic.id)
+    if (result.message) throw new Error(result.message)
+    return confirmed
+  } catch (cause) { throw new MoteQuickSaveError(cause, dispatched, confirmed) }
 }

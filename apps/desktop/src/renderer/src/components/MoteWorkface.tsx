@@ -1,4 +1,3 @@
-import { useMoteConversationRecovery } from '../lib/mote-session-recovery'
 import { useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { useMemo, type ReactNode } from 'react'
 import { useAppStore } from '../store'
@@ -16,7 +15,6 @@ export function MoteWorkface({ workspaceId, topicId, floating = false, visible =
 }) {
   const scope = useMoteWorkfaceScope(workspaceId, topicId, visible)
   useMoteConversationMode(scope, { workspaceId, topicId, active: visible && recoverOnOpen, floating, reference, conversationEntry })
-  useMoteConversationRecovery(scope?.topic, scope?.workspace.id ?? workspaceId, recoverOnOpen)
   const defaults = useMoteDefaultConversation(scope?.topic, scope?.workspace.id ?? workspaceId, visible)
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')

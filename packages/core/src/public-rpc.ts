@@ -1,3 +1,4 @@
+import { MOTE_DIALOGUE_METHODS, type MoteDialogueParamsMap, type MoteDialogueResultMap } from './mote-dialogue.js'
 import { AGENT_PROGRESS_METHODS, type AgentProgressParams, type AgentProgressResults } from './agent-progress.js'
 import { MOTE_CHAT_RPC_METHODS } from './mote-chat-codec.js'
 import { AGENT_LEARNING_METHODS, type AgentLearningMethod, type AgentLearningParamsMap, type AgentLearningResultMap } from './agent-learning.js'
@@ -209,7 +210,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentProgressParams & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentProgressParams & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').HostV8ProfileInput
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationConfirm
   'goal.watch': Record<string, never>
@@ -310,7 +311,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentProgressResults & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentProgressResults & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileResult
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationReceipt
   'goal.watch': never
@@ -427,6 +428,7 @@ export type AgentMuxRpcSpacePresentation = {
 }
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
+  ...MOTE_DIALOGUE_METHODS,
   'system.metrics.host-profile.capture': 'long',
   ...AGENTMUX_RPC_DESKTOP_NATIVE_METHODS,
   ...AGENT_LEARNING_METHODS,

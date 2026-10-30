@@ -1,5 +1,5 @@
 import { parseMoteDefaultConversation, parseMoteConnectionValues, sameMoteConnectionValues,
-  type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+  parseMoteQuickDefaults, type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 export type { MoteDefaultConversation, MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 import { Document, isMap, isScalar, parseDocument } from 'yaml'
 
@@ -86,18 +86,38 @@ export function parseMoteQuickMode(content: string): { status: 'valid'; defaults
       catch { return { status: 'unconfirmed', message: ISSUE } }
     }
   }
+  if (isMap(node)) {
+    if (node.has('conversationRevision')) {
+      const value = node.get('conversationRevision', true)
+      if (!isScalar(value) || typeof value.value !== 'string') return { status: 'unconfirmed', message: ISSUE }
+      defaults.conversationRevision = value.value
+    }
+    if (node.has('presence')) {
+      const value = node.get('presence', true)
+      if (!isMap(value)) return { status: 'unconfirmed', message: ISSUE }
+      const enabled = value.get('enabled', true), interval = value.get('intervalMs', true)
+      try { defaults.presence = parseMoteQuickDefaults({ presence: { enabled: isScalar(enabled) ? enabled.value : null, intervalMs: isScalar(interval) ? interval.value : null } }).presence! }
+      catch { return { status: 'unconfirmed', message: ISSUE } }
+    }
+  }
+  try { parseMoteQuickDefaults(defaults) } catch { return { status: 'unconfirmed', message: ISSUE } }
   return { status: 'valid', defaults }
 }
 /** Only known fields change; the original Markdown, unknown YAML and comments remain. */
 export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefaults): string {
+  parseMoteQuickDefaults(defaults)
   if (defaults.recovery !== undefined && defaults.recovery !== 'startup' && defaults.recovery !== 'on-open' || defaults.executorId !== undefined && !validId(defaults.executorId)) throw new Error(ISSUE)
   if (defaults.conversation) { try { parseMoteDefaultConversation(defaults.conversation) } catch { throw new Error(ISSUE) } }
   const original = content ? frontmatter(content) : null
   const parsed = content ? parseMoteQuickMode(content) : null
   if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)
-  if (parsed?.status === 'valid' && parsed.defaults.recovery === defaults.recovery && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
+  if (parsed?.status === 'valid' && parsed.defaults.conversationRevision === defaults.conversationRevision && JSON.stringify(parsed.defaults.presence) === JSON.stringify(defaults.presence) && parsed.defaults.recovery === defaults.recovery && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
   const document = original?.document ?? new Document({ version: 1, defaults: {} })
   if (!document.has('defaults')) document.set('defaults', {})
+  for (const field of ['conversationRevision','presence'] as const) {
+    if (defaults[field] === undefined) document.deleteIn(['defaults', field])
+    else document.setIn(['defaults', field], defaults[field])
+  }
   if (defaults.recovery === undefined) document.deleteIn(['defaults', 'recovery'])
   else document.setIn(['defaults', 'recovery'], defaults.recovery)
   if (defaults.executorId === undefined) document.deleteIn(['defaults', 'executorId'])

@@ -1,5 +1,6 @@
 import { parseResumeResolution, type AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { assertPreparedResumeBinding, parseResumeResolutionRequest, resumeResolutionDigest, type ResumeResolutionRequest } from './agent-prepared-resume.js'
+import { parseAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
 import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 import { rpcRecord } from './rpc-data.js'
@@ -1693,7 +1694,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
         const userContent = message.userContent === undefined ? undefined : text(message.userContent, 'future prompt content', MAX_STORED_TEXT_BYTES)
         const systemContext = message.systemContext === undefined ? undefined : text(message.systemContext, 'future prompt context', MAX_STORED_TEXT_BYTES)
         if (userContent === undefined && systemContext === undefined) throw new AgentMuxError('Future prompt source is empty.', 'INVALID_AGENT_SESSION_STORE')
-        return [id, { operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORED_TEXT_BYTES), active: intent.active,
+        return [id, { ...(intent.continuitySource === undefined ? {} : { continuitySource: parseAutomaticInputSource(intent.continuitySource) }), operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORED_TEXT_BYTES), active: intent.active,
           message: { ...(userContent === undefined ? {} : { userContent }), ...(systemContext === undefined ? {} : { systemContext }),
             ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'future prompt author') }),
             ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }) },

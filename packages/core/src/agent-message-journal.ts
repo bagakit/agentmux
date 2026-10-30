@@ -84,6 +84,13 @@ export function initializeInputWaitingIndex(db: DatabaseSync): void {
 }
 
 /** The source freezes routing before a remote effect; the target alone owns the message. */
+export const mainInputRouteJournalSchema = `
+  CREATE TABLE IF NOT EXISTS mote_main_input_routes (
+    scope TEXT NOT NULL, operation_id TEXT NOT NULL, sequence INTEGER NOT NULL UNIQUE,
+    PRIMARY KEY(scope, operation_id)
+  );
+`
+
 export const messageRouteJournalSchema = `
   CREATE TABLE IF NOT EXISTS message_routes (
     message_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL UNIQUE, sequence INTEGER NOT NULL UNIQUE

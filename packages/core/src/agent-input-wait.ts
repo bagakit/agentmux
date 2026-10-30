@@ -136,33 +136,43 @@ export function agentInputSubmissionStatus(control: AgentInputWaitControl, admis
     claim.inputKey?.kind === deliveryKey.kind && claim.inputKey.agentSessionId === deliveryKey.agentSessionId &&
     claim.inputKey.expectedRun.runId === deliveryKey.expectedRun.runId &&
     agentPromptInputId(claim.inputKey) === agentPromptInputId(deliveryKey)
-  if (linked && claim) {
-    if (claim.transport === 'launch') return claim.launch.outcome === 'launch-carried' && claim.acknowledged ? 'launch-carried'
-      : claim.launch.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
-    if (claim.transport === 'native') return claim.native.outcome === 'admitted' && claim.acknowledged ? 'admitted'
-      : claim.native.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
-    const phases = admission?.terminalPromptSubmission, plan = claim.intent?.plan
-    const first = phases?.prepare?.interrupt ?? phases?.payload
-    const byteLength = (data: string) => new TextEncoder().encode(data).byteLength
-    const confirmedBytes = !phases
-      ? plan?.kind === 'single-phase' && claim.endByte - claim.startByte === byteLength(plan.data)
-      : plan?.kind === 'render-then-submit' && phases.run.runId === admission?.run.runId &&
-        phases.submissionId === claim.submissionId && first?.operationId === claim.operationId &&
-        first.inputByteRange.startByte === claim.startByte && phases.submit.inputByteRange.endByte === claim.endByte &&
-        phases.payload.inputByteRange.endByte === phases.submit.inputByteRange.startByte &&
-        phases.payload.inputByteRange.endByte - phases.payload.inputByteRange.startByte === byteLength(plan.payload) &&
-        phases.submit.inputByteRange.endByte - phases.submit.inputByteRange.startByte === byteLength(plan.submit) &&
-        (!phases.prepare?.interrupt || plan.prepare && phases.prepare.interrupt.acknowledged &&
-          phases.prepare.interrupt.inputByteRange.endByte === phases.payload.inputByteRange.startByte &&
-          phases.prepare.interrupt.inputByteRange.endByte - phases.prepare.interrupt.inputByteRange.startByte === byteLength(plan.prepare.interrupt)) &&
-        phases.payload.acknowledged && phases.submit.acknowledged
-    if (claim.acknowledged && !claim.notApplied && confirmedBytes) return 'terminal-confirmed'
-    if (admission && agentPromptNotApplied({ run: admission.run, promptCompletionAdmission: claim,
-      ...(phases ? { terminalPromptSubmission: phases } : {}) })) return 'not-applied'
-    return 'unknown'
-  }
+  if (linked && claim) return agentPromptSubmissionOutcome(admission)
   return admission || control.state === 'dispatch-authorized' ? 'unknown'
     : control.state === 'stopped-before-dispatch' ? 'stopped' : 'waiting'
+}
+/** One original Core receipt outcome; no waiting generation or delivery authority is synthesized. */
+export type AgentPromptSubmissionOutcome = 'admitted' | 'terminal-confirmed' | 'not-applied' | 'launch-carried' | 'unknown'
+export function agentPromptSubmissionOutcome(admission: AgentPromptSubmissionRecord | null): AgentPromptSubmissionOutcome {
+  const launch = admission?.launch
+  if (launch) return launch.delivery === 'launch' && launch.state === 'launch-carried' && launch.key?.agentSessionId === admission?.agentSessionId &&
+    launch.key.expectedRun.runId === admission.run.runId && launch.key.submissionId === launch.input.submissionId &&
+    launch.receipt?.kind === 'runtime-launch' && launch.receipt.operationId === launch.lifecycleOperationId && launch.receipt.run.runId === admission.run.runId
+    ? 'launch-carried' : 'unknown'
+  const claim = admission?.admission
+  if (!claim) return 'unknown'
+  if (claim.transport === 'launch') return claim.launch.outcome === 'launch-carried' && claim.acknowledged ? 'launch-carried'
+    : claim.launch.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
+  if (claim.transport === 'native') return claim.native.outcome === 'admitted' && claim.acknowledged ? 'admitted'
+    : claim.native.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
+  const phases = admission?.terminalPromptSubmission, plan = claim.intent?.plan
+  const first = phases?.prepare?.interrupt ?? phases?.payload
+  const byteLength = (data: string) => new TextEncoder().encode(data).byteLength
+  const confirmedBytes = !phases
+    ? plan?.kind === 'single-phase' && claim.endByte - claim.startByte === byteLength(plan.data)
+    : plan?.kind === 'render-then-submit' && phases.run.runId === admission?.run.runId &&
+      phases.submissionId === claim.submissionId && first?.operationId === claim.operationId &&
+      first.inputByteRange.startByte === claim.startByte && phases.submit.inputByteRange.endByte === claim.endByte &&
+      phases.payload.inputByteRange.endByte === phases.submit.inputByteRange.startByte &&
+      phases.payload.inputByteRange.endByte - phases.payload.inputByteRange.startByte === byteLength(plan.payload) &&
+      phases.submit.inputByteRange.endByte - phases.submit.inputByteRange.startByte === byteLength(plan.submit) &&
+      (!phases.prepare?.interrupt || plan.prepare && phases.prepare.interrupt.acknowledged &&
+        phases.prepare.interrupt.inputByteRange.endByte === phases.payload.inputByteRange.startByte &&
+        phases.prepare.interrupt.inputByteRange.endByte - phases.prepare.interrupt.inputByteRange.startByte === byteLength(plan.prepare.interrupt)) &&
+      phases.payload.acknowledged && phases.submit.acknowledged
+  if (claim.acknowledged && !claim.notApplied && confirmedBytes) return 'terminal-confirmed'
+  if (admission && agentPromptNotApplied({ run: admission.run, promptCompletionAdmission: claim,
+    ...(phases ? { terminalPromptSubmission: phases } : {}) })) return 'not-applied'
+  return 'unknown'
 }
 export type AgentInputWaitJournalRecord =
   | { kind: 'input-intent'; sequence: number; intent: AgentInputJournalIntent; at: number }

@@ -1,3 +1,4 @@
+import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
   type AgentMuxAgentSession, type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
   type AgentMuxRunRef, type AgentMuxRun, type AgentMuxRpcCallContext, type AgentPromptInputBinding,
@@ -39,7 +40,7 @@ export interface GoalRuntimePort {
   inspectGoalAttention(input: Attention): Promise<AgentPromptSubmissionRecord | null>
   inspectGoalStart(input: DemandDispatch): Promise<AgentPromptSubmissionRecord | null>
   authorizeFutureIntent(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
-  saveFutureIntent(loop: ContinuousProgressTarget & { futureIntentId?: string; creationOperationId?: string; prompt: string; checkIn?: AgentScheduleCheckInPolicy }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
+  saveFutureIntent(loop: ContinuousProgressTarget & { futureIntentId?: string; creationOperationId?: string; managedSource?: import('@agentmux/core/automatic-input-source').AutomaticInputSource; prompt: string; checkIn?: AgentScheduleCheckInPolicy }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   observeCheckIn(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
   inspectContinuousProgressInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
@@ -174,9 +175,9 @@ export function createGoalRuntime(options: {
       const original = await client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId)
       if (original && (original.operationId !== loop.creationOperationId || original.message.userContent !== loop.prompt)) throw new AgentMuxError('The original future-message content changed. Inspect that saved arrangement.', 'AGENT_FUTURE_INTENT_CHANGED')
       await context?.assertCurrent?.()
-      const agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '')
+      const agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY + (loop.managedSource ? '\n\n' + MOTE_INPUT_GUIDANCE + '\nInternal maintenance source: ' + JSON.stringify(loop.managedSource) : '') + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '')
       await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
-        expectedRun: observed.session.run,
+        expectedRun: observed.session.run, ...(loop.managedSource ? { continuitySource: loop.managedSource } : {}),
         prompt: loop.prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
         active, ...(context?.caller ? { caller: context.caller } : {}) })
     },

@@ -1,3 +1,4 @@
+import { parseStandingIntentReference } from '../automatic-input-source.js'
 import { performAgentContinuity } from './continuity-attempt.js'
 import { AgentSessionRunLifecycle } from './lifecycle.js'
 import { AgentSessionRecoveryReconciler } from './reconciliation.js'
@@ -122,7 +123,8 @@ export class AgentSessionRecoveryService {
         'An existing recovery message must retain its original Session, Run and input trigger, without another authored input.', 'INVALID_AGENT_INPUT_CONTROL')
       input = { ...input, messageInputRef: ref }
     }
-    input = { ...input, trigger: input.trigger === undefined ? 'manual' : parseAgentContinuityTrigger(input.trigger), expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
+    if (input.standingIntent && (input.input || input.trigger === undefined || input.trigger === 'manual' || input.trigger === 'input')) throw new AgentMuxError('Standing maintenance retains its own source; it is not a new human input.', 'INVALID_CONTROL_REQUEST')
+    input = { ...input, ...(input.standingIntent ? { standingIntent: parseStandingIntentReference(input.standingIntent) } : {}), trigger: input.trigger === undefined ? 'manual' : parseAgentContinuityTrigger(input.trigger), expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
       ...(input.input.inputContextCapture === undefined ? {} : { inputContextCapture: parseAgentInputContextCaptureReference(input.input.inputContextCapture) }),
       ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) } } : {}) }
     this.ports.connection.requireConnected()

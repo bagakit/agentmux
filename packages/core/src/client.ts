@@ -1,4 +1,5 @@
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
+import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
 import { parseAgentExecutionNotices } from './agent-execution-helper.js'
@@ -6812,9 +6813,11 @@ export class AgentMuxClient {
 
   /** Save an exact future message through the same durable Session owner as Input. */
   async saveAgentFuturePromptIntent(input: { agentSessionId: string; intentId: string; operationId: string; prompt: string; agentMuxNote?: string; active: boolean; expectedRun?: AgentMuxAgentSession['run'];
-    caller?: { agentSessionId: string; capability: string }; sourceDevice?: import('./types.js').AgentOperationDevice }): Promise<void> {
+    caller?: { agentSessionId: string; capability: string }; sourceDevice?: import('./types.js').AgentOperationDevice; continuitySource?: import('./automatic-input-source.js').AutomaticInputSource }): Promise<void> {
     this.requireConnected()
     if ('authorHuman' in input || 'authorAgentSessionId' in input) throw new AgentMuxError('Future-message authors come from the original authenticated owner.', 'MESSAGE_SENDER_MISMATCH')
+    const continuitySource = input.continuitySource === undefined ? undefined : parseAutomaticInputSource(input.continuitySource)
+    if (continuitySource && input.caller) throw new AgentMuxError('An Agent message does not authorize standing lifecycle maintenance.', 'CONTROL_PERMISSION_DENIED')
     const intentId = safeId(input.intentId, 'Future message intent id')
     const operationId = safeId(input.operationId, 'Future message operation id')
     if (typeof input.active !== 'boolean' || typeof input.prompt !== 'string' ||
@@ -6834,8 +6837,9 @@ export class AgentMuxClient {
       }
       await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
       const intents = { ...current.futurePromptIntents }, previous = intents[intentId]
-      if (previous && (previous.operationId !== operationId || previous.prompt !== composed.text)) throw new AgentMuxError('Future intent identity was reused with different content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      intents[intentId] = { ...previous, operationId, prompt: composed.text, active: input.active,
+      if (previous?.continuitySource && input.caller) throw new AgentMuxError('An Agent message cannot change the original standing maintenance intent.', 'CONTROL_PERMISSION_DENIED')
+      if (previous && (previous.operationId !== operationId || previous.prompt !== composed.text || continuitySource && !sameAutomaticInputSource(previous.continuitySource, continuitySource))) throw new AgentMuxError('Future intent identity was reused with different content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      intents[intentId] = { ...previous, ...(continuitySource ? { continuitySource } : {}), operationId, prompt: composed.text, active: input.active,
         message: previous?.message ?? { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
           ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(input.sourceDevice ? { sourceDevice: structuredClone(input.sourceDevice) } : {}) } }
       return { ...current, futurePromptIntents: intents, updatedAt: Date.now() }

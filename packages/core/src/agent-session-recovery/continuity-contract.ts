@@ -1,5 +1,6 @@
 import { parseResumeResolution, type AgentMuxResumeResolution } from './resume-resolution.js'
 export { parseResumeResolution, type AgentMuxResumeResolution } from './resume-resolution.js'
+import { parseStandingIntentReference, type AgentStandingIntentReference } from '../automatic-input-source.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import { agentInputContextCaptureProofFields, parseAgentInputContextCaptureReference } from '../agent-input-context-capture.js'
 import { AMUX_CONTINUE_MARKER } from '../amux-protocol-definition.js'
@@ -228,6 +229,7 @@ export type AgentMuxContinuitySupervision = {
 }
 
 export type AgentMuxContinuityOperation = {
+  standingIntent?: AgentStandingIntentReference
   operationId: string
   agentSessionId: string
   trigger: AgentMuxContinuityTrigger
@@ -337,6 +339,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
         fact.nativeTarget?.kind !== 'provider' || typeof fact.nativeTarget.providerId !== 'string' || !fact.nativeTarget.providerId || typeof fact.nativeTarget.sessionId !== 'string' || !fact.nativeTarget.sessionId ||
         !Number.isSafeInteger(fact.observedAt) || fact.observedAt < 0)))) throw new TypeError('Invalid original recovery supervision.')
   if (supervision?.controlOperations !== undefined) parseAgentContinuityControlReceipts(supervision.controlOperations, op.agentSessionId, op.operationId)
+  if (op.standingIntent) parseStandingIntentReference(op.standingIntent)
   if (op.launchInput) {
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
     if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')
@@ -416,6 +419,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
 }
 
 export type AgentMuxAgentContinuityInput = {
+  standingIntent?: AgentStandingIntentReference
   agentSessionId: string
   expectedRun: AgentMuxRunRef
   operationId: string

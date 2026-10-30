@@ -1,3 +1,4 @@
+import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
@@ -48,6 +49,11 @@ const updateDigest = (input: unknown): string => {
 
 /** Host owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
+  private maintenanceOwner: { maintain(): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<void> } | undefined
+  setMaintenanceOwner(owner: { maintain(): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<void> }): () => void {
+    if (this.maintenanceOwner) throw new Error('The original scheduler already has a maintenance source owner.')
+    this.maintenanceOwner = owner; return () => { if (this.maintenanceOwner === owner) this.maintenanceOwner = undefined }
+  }
   private readonly scheduler: ContinuousProgressScheduler
   private timer: ReturnType<typeof setInterval> | null = null
   private checkPromise: Promise<void> | null = null
@@ -116,6 +122,8 @@ export class ContinuousProgressLoopManager {
     await this.store.save(this.scheduler.list())
   }
   list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] { return this.scheduler.list(target) }
+  listManaged(sourceId: string): ContinuousProgressLoop[] { return this.scheduler.listManaged(sourceId) }
+  inspectLoop(loopId: string): ContinuousProgressLoop | undefined { return this.scheduler.get(loopId) }
   /** Initial Goal input and continuation share this original durable loop, never a second journal. */
   async prepareGoal(input: GoalProgressStart, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressLoop> {
     return this.serialize(`goal-start-operation:${input.operationId}`, () => this.serialize(`goal-start-goal:${input.goalId}`, () => this.serialize(`goal-target:${input.hostId}:${input.agentSessionId}`, () => this.activation(this.targetKey(input), async assertCurrent => {
@@ -292,7 +300,7 @@ export class ContinuousProgressLoopManager {
         (context?.caller || !context?.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Quiet follow-up requires explicit opt-in from the authenticated user or device. Existing arrangements and manual input remain available.', 'SCHEDULE_CHECK_IN_OPT_IN_REQUIRED')
     if (method === 'schedule.list' || method === 'schedule.inspect') return this.callOwned(method, params, context)
     const create = params as ScheduleParamsMap['schedule.create']
-    const key = method === 'schedule.create' ? create.checkIn ? 'checkin:' + JSON.stringify([create.target.hostId, create.target.agentSessionId, create.target.providerId, create.target.workspacePath]) : `create:${create.operationId}` : (params as ScheduleParamsMap['schedule.pause']).scheduleId
+    const key = method === 'schedule.create' ? create.managedSource ? 'managed:' + create.managedSource.sourceId : create.checkIn ? 'checkin:' + JSON.stringify([create.target.hostId, create.target.agentSessionId, create.target.providerId, create.target.workspacePath]) : `create:${create.operationId}` : (params as ScheduleParamsMap['schedule.pause']).scheduleId
     const previous = this.mutations.get(key) ?? Promise.resolve()
     const operation = previous.catch(() => {}).then(() => method === 'schedule.create'
       ? this.activation(this.targetKey(create.target), assertCurrent => this.callOwned(method, params, context, assertCurrent))
@@ -315,10 +323,11 @@ export class ContinuousProgressLoopManager {
     if (method === 'schedule.create') {
       const p = params as ScheduleParamsMap['schedule.create']
       if (p.checkIn && (context?.caller || !context?.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Quiet follow-up requires explicit opt-in from the authenticated user or device. Existing arrangements and manual input remain available.', 'SCHEDULE_CHECK_IN_OPT_IN_REQUIRED')
+      if (p.managedSource && context?.caller) throw new AgentMuxError('Standing maintenance requires the original person/device configuration owner.', 'CONTROL_PERMISSION_DENIED')
       await this.authorizeCaller(p.target, context)
       const existing = this.list().find(loop => loop.creationOperationId === p.operationId)
       if (existing) {
-        if (existing.prompt !== p.prompt || JSON.stringify(existing.calendar) !== JSON.stringify(p.calendar) || existing.afterMs !== p.afterMs || existing.everyMs !== p.everyMs || JSON.stringify(existing.checkIn) !== JSON.stringify(p.checkIn) || ['hostId','agentSessionId','providerId','workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== p.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Schedule operation was reused with conflicting target or content.', 'SCHEDULE_OPERATION_CONFLICT')
+        if (!sameAutomaticInputSource(existing.managedSource, p.managedSource) || existing.prompt !== p.prompt || JSON.stringify(existing.calendar) !== JSON.stringify(p.calendar) || existing.afterMs !== p.afterMs || existing.everyMs !== p.everyMs || JSON.stringify(existing.checkIn) !== JSON.stringify(p.checkIn) || ['hostId','agentSessionId','providerId','workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== p.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Schedule operation was reused with conflicting target or content.', 'SCHEDULE_OPERATION_CONFLICT')
         if (!this.futureInputs) throw new AgentMuxError('Future-message admission durability is unconfirmed.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
         const retryCreation = existing.status === 'paused' && existing.lastOutcome === 'unknown' && !existing.lastTickId && !existing.lastMutation
         try { await this.saveFutureIntent(existing, retryCreation || existing.status === 'active', context); assertCurrent?.() }
@@ -333,20 +342,36 @@ export class ContinuousProgressLoopManager {
         await this.persist(existing.loopId)
         return { ...scope, schedule: this.require(existing.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
       }
+      if (p.managedSource && this.listManaged(p.managedSource.sourceId).some(loop => loop.status !== 'stopped' && loop.managedSource?.sourceId === p.managedSource!.sourceId)) throw new AgentMuxError('The original managed source already has an arrangement. Inspect that original schedule.', 'SCHEDULE_MANAGED_EXISTS')
       if (!this.futureInputs) throw new AgentMuxError('The connected Host cannot save future-message admission. The Agent and manual input remain available.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
       if (p.checkIn && this.list().some(loop => loop.checkIn && loop.status !== 'stopped' && ['hostId','agentSessionId','providerId','workspacePath'].every(key => loop[key as keyof ContinuousProgressTarget] === p.target[key as keyof ContinuousProgressTarget]))) throw new AgentMuxError('This Agent already has a saved quiet follow-up. Inspect, pause or cancel that original arrangement.', 'SCHEDULE_CHECK_IN_EXISTS')
       const nextDue = p.calendar ? nextCalendarOccurrence(p.calendar, this.now()) : this.now() + (p.afterMs ?? p.everyMs!)
       if (nextDue !== null && (!Number.isSafeInteger(nextDue) || nextDue < 0 || p.everyMs !== undefined && !Number.isFinite(new Date(nextDue).getTime()))) throw new AgentMuxError('The requested delay exceeds the safe absolute schedule clock. Choose a representable delay; the Agent and manual input remain available.', 'INVALID_CONTROL_REQUEST')
       if (nextDue === null) throw new AgentMuxError('This one-time civil occurrence is past or falls in a skipped DST gap. Choose a valid future time.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
       assertCurrent?.()
-      const loop = this.scheduler.createSchedule({ ...p.target, prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
+      const loop = this.scheduler.createSchedule({ ...p.target, prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
       this.patch(loop.loopId, { status: 'paused' })
       try { await this.persist(loop.loopId); assertCurrent?.(); await this.saveFutureIntent(loop, true, context); assertCurrent?.(); this.patch(loop.loopId, { status: 'active' }); await this.persist(loop.loopId) }
-      catch (error) { this.patch(loop.loopId, { status: 'paused', lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available.' }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
+      catch (error) { this.patch(loop.loopId, { status: 'paused', lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available. ' + String(error) }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
+      return { ...scope, schedule: this.require(loop.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
+    }
+    if (method === 'schedule.update') {
+      const p = params as ScheduleParamsMap['schedule.update'], loop = this.require(p.scheduleId), digest = updateDigest(p)
+      if (loop.managedSource && context?.caller) throw new AgentMuxError('Only the original standing configuration owner can edit this managed arrangement.', 'CONTROL_PERMISSION_DENIED')
+      if (!isAgentSchedule(loop) || loop.everyMs === undefined || loop.status === 'stopped') throw new AgentMuxError('Only the original retained repeating arrangement can change interval.', 'SCHEDULE_CANCELLED')
+      await this.authorizeCaller(loop, context)
+      if (loop.lastMutation?.operationId === p.operationId) {
+        if (loop.lastMutation.action !== 'update' || loop.lastMutation.requestDigest !== digest) throw new AgentMuxError('The interval operation changed content.', 'SCHEDULE_OPERATION_CONFLICT')
+      } else {
+        if (loop.revision !== p.expectedRevision) throw new AgentMuxError('The original schedule revision changed.', 'SCHEDULE_REVISION_CONFLICT')
+        this.patch(loop.loopId, { everyMs: p.everyMs, revision: p.expectedRevision + 1, lastMutation: { operationId: p.operationId, action: 'update', expectedRevision: p.expectedRevision, requestDigest: digest } })
+      }
+      await this.persist(loop.loopId)
       return { ...scope, schedule: this.require(loop.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
     }
     const p = params as ScheduleParamsMap['schedule.pause'], action = method.slice('schedule.'.length) as 'pause' | 'resume' | 'cancel'
     let loop = this.require(p.scheduleId)
+    if (loop.managedSource && context?.caller) throw new AgentMuxError('Only the original standing configuration owner can control this managed arrangement.', 'CONTROL_PERMISSION_DENIED')
     if (!isAgentSchedule(loop)) throw new AgentMuxError('This public operation requires a saved schedule.', 'UNKNOWN_SCHEDULE')
     await this.authorizeCaller(loop, context)
     loop = this.require(p.scheduleId)
@@ -581,11 +606,16 @@ export class ContinuousProgressLoopManager {
   }
   private async checkOnce(now?: number, onlyLoopId?: string): Promise<void> {
     if (!this.running) return
+    await this.maintenanceOwner?.maintain()
     const checkAt = now ?? this.now()
     const due = this.scheduler.due(checkAt, onlyLoopId)
     for (const selected of due) {
       const loop = this.scheduler.get(selected.loopId)
       if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) continue
+      if (loop.managedSource) {
+        try { if (!this.maintenanceOwner) throw new Error('The original configuration owner is unavailable.'); await this.maintenanceOwner.qualify(loop) }
+        catch (error) { await this.pause(loop.loopId, 'Original maintenance source is unconfirmed: ' + String(error)); continue }
+      }
       if (loop.calendar && !loop.pendingCompletion) {
         const latest = latestCalendarOccurrence(loop.calendar, loop.nextCheckAt, checkAt)
         if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
@@ -640,6 +670,7 @@ export class ContinuousProgressLoopManager {
           if (!isCurrent()) continue
           if (source.action !== 'continue') { await this.pauseForSource(claim.loop, source); continue }
         }
+        if (claim.loop.managedSource) await this.maintenanceOwner!.qualify(claim.loop)
         if (pending && claim.loop.lastOutcome === 'unknown') {
           outcome = await this.onTick(claim.loop, pending.operationId, isCurrent, controller.signal)
         } else {

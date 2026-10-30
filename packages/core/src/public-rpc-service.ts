@@ -1,3 +1,5 @@
+import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
+import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, type MoteDialoguePort, type MoteDialogueMethod } from './mote-dialogue.js'
 import { moteInputObservationId } from './mote-input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
 import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
@@ -30,6 +32,7 @@ import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead, type AgentInputContextCaptureReader } from './agent-input-context-capture.js'
+import { resolveAgentInputContextCapture } from './agent-input-context-capture-resolve.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
 import { assertAgentConnectionAccess, readAgentConnectionDelivery, readAgentConnectionIngress } from './connection-agent-access.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
@@ -51,7 +54,7 @@ import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from '
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import type { MoteConnectionPort, MoteConnectionMethod } from './mote-connection-contract.js'
-import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteConnectionPreferencesPort, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesSaveParams } from './mote-preferences.js'
+import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickPreferencesPort, type MoteConnectionPreferencesPort, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesSaveParams } from './mote-preferences.js'
 import { isConnectionProfileMethod, parseConnectionProfileParams } from './connection-profile-codec.js'
 import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
@@ -111,7 +114,7 @@ import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './ag
 import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
 import { assertAgentMessageRouteIntent, type AgentMessageRoute } from './agent-message-route.js'
-import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
+import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { AGENT_INPUT_SUBMIT_FIELDS, parseAgentInputSubmit } from './agent-input-submit.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
@@ -168,10 +171,12 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
+  moteDialogue?: MoteDialoguePort
   moteChat?: MoteChatPort
   /** Host-owned learning workflow; Core neither stores nor interprets its knowledge. */
   agentLearning?: AgentLearningPort
   moteConnections?: MoteConnectionPort
+  moteQuickPreferences?: MoteQuickPreferencesPort
   motePreferences?: MoteConnectionPreferencesPort
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
@@ -399,7 +404,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | NativeDesktopMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -732,6 +737,32 @@ export class AgentMuxRpcService {
       const result = this.ports.agentLearning ? await this.ports.agentLearning.call(method, input, ownerContext)
         : await this.ports.forwardControl!<AgentLearningMethod>(method, input, ownerContext)
       return parseAgentLearningResult(method, result, input) as AgentMuxRpcResult<M>
+    }
+    if (isMoteDialogueMethod(method)) {
+      const caller = await this.authenticated(context)
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind)))
+        throw new AgentMuxError('Mote dialogue sources require their original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseMoteDialogueParams(method, params)
+      if (!this.ports.moteDialogue) {
+        if (!this.ports.forwardControl) throw new AgentMuxError('The original Mote dialogue owner is unavailable. Keep its source references and existing work.', 'CONTROL_UNAVAILABLE')
+        const result = await this.ports.forwardControl<MoteDialogueMethod>(method, input, context)
+        return parseMoteDialogueResult(method, result, input) as AgentMuxRpcResult<M>
+      }
+      if (method === 'space.mote.dialogue.input.submit' || method === 'space.mote.dialogue.input.inspect') {
+        if (caller) throw new AgentMuxError('Managed Agents must use agent.send; logical main prompt intake cannot impersonate a person.', 'MANAGED_AGENT_PROMPT_FORBIDDEN')
+        const value = method === 'space.mote.dialogue.input.submit'
+          ? await this.moteMainInput(method, parseMoteDialogueParams(method,params),context)
+          : await this.moteMainInput(method, parseMoteDialogueParams(method,params),context)
+        return parseMoteDialogueResult(method,value,input) as AgentMuxRpcResult<M>
+      }
+      const original = { ...(caller ? { caller: { hostId: caller.hostId, agentSessionId: caller.agentSessionId } } : {}),
+        ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context)
+        } }
+      const result = method === 'space.mote.dialogue.read'
+        ? await this.ports.moteDialogue.read(parseMoteDialogueParams(method, params), original)
+        : await this.ports.moteDialogue.link(parseMoteDialogueParams(method, params), original)
+      return parseMoteDialogueResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (isMoteChatMethod(method)) {
       const caller = await this.authenticated(context)
@@ -1647,7 +1678,8 @@ export class AgentMuxRpcService {
       return await caller.client.forwardRpc(method, params, context)
     }
     let result: unknown
-    if (this.ports.motePreferences && p.kind === 'connection' &&
+    const preferences = p.kind === 'quick' ? this.ports.moteQuickPreferences : this.ports.motePreferences
+    if (preferences && (p.kind === 'quick' || p.kind === 'connection') &&
         (method === 'space.mote.preferences.read' || method === 'space.mote.preferences.save')) {
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId }
         : context.principal && (context.principal.kind === 'user' || context.principal.kind === 'device')
@@ -1659,13 +1691,13 @@ export class AgentMuxRpcService {
       } }
       await administration.assertCurrent()
       if (method === 'space.mote.preferences.read') {
-        const input = parseMotePreferencesReadInput(params) as MoteConnectionPreferencesReadInput
-        const result = await this.ports.motePreferences.read(input)
+        const input = parseMotePreferencesReadInput(params)
+        const result = input.kind === 'quick' ? await this.ports.moteQuickPreferences!.read(input) : await this.ports.motePreferences!.read(input)
         await administration.assertCurrent()
         return parseMotePreferencesReadResult(result, input) as AgentMuxRpcResult<M>
       }
-      const input = parseMotePreferencesSaveParams(params) as MoteConnectionPreferencesSaveParams
-      const result = await this.ports.motePreferences.save(input, administration)
+      const input = parseMotePreferencesSaveParams(params)
+      const result = input.kind === 'quick' ? await this.ports.moteQuickPreferences!.save(input, administration) : await this.ports.motePreferences!.save(input, administration)
       await administration.assertCurrent()
       return parseMotePreferencesSaveResult(result, input) as AgentMuxRpcResult<M>
     }
@@ -2452,17 +2484,7 @@ export class AgentMuxRpcService {
         if (!context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Prompt intake requires its transport-approved local user or device. No input was submitted.', 'CONTROL_PERMISSION_DENIED')
         const input = parseAgentInputSubmit(p), scope = await this.owner(input.agentSessionId)
         if (scope.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Prompt intake requires the exact original Session ID.', 'INVALID_AGENT_PROMPT')
-        if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.submit', input, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
-        if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore(scope.hostId, 'agent.input.submit', input, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
-        const device = this.ports.operationSource?.(context)
-        const receipt = await scope.client.submitAgentPrompt({ ...input, sourceChannel: context.transport === 'unix' ? 'cli' : 'api',
-          ...(device ? { sourceDevice: normalizeOperationDevice(device) } : {}) }, this.inputCallContext(context))
-        const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
-        const observed = await scope.client.inspectAgentInput({ key }) ?? (receipt && 'key' in receipt ? receipt : undefined)
-        // One receipt owns its observed admission. Independent reads can straddle
-        // dispatch and would produce an internally contradictory public packet.
-        const record = observed ? observed.admission : await scope.client.inspectAgentPromptSubmission(key)
-        result = { key, record, ...(observed ? { input: observed } : {}), ...(receipt?.moteObservationId ? {moteObservationId:receipt.moteObservationId} : {}) }
+        result = await this.submitInputAt(scope,input,context)
         break
       }
       case 'agent.input.changes': {
@@ -2724,6 +2746,109 @@ export class AgentMuxRpcService {
       (filters.since === undefined || goal.updatedAt >= rpcCount(filters.since, 0)))
     return filters.all === true ? goals : goals.slice(0, rpcCount(filters.limit, 100, 1000))
   }
+  private async submitInputAt(scope: AgentMuxRpcCoreClient, input: import('./agent-input-submit.js').AgentInputSubmit, context: AgentMuxRpcCallContext): Promise<import('./agent-input-submit.js').AgentInputSubmitResult> {
+    if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.submit',input,await this.inputForwardContext(context))
+    if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore(scope.hostId,'agent.input.submit',input,await this.inputForwardContext(context))
+    const device = this.ports.operationSource?.(context)
+    const {moteGuidance,capturedContext,...prompt} = input
+    const receipt = await scope.client.submitAgentPrompt({ ...prompt,
+      ...(capturedContext ? {inputContextCapture:capturedContext.reference, ...(capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:capturedContext.agentMuxNote}),authorHuman:true} : {}),
+      ...(moteGuidance ? {agentMuxNote:MOTE_INPUT_GUIDANCE,authorHuman:true} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
+      ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}) },{...this.inputCallContext(context), ...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
+    const key = {kind:'prompt' as const,agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}
+    const observed = await scope.client.inspectAgentInput({key}) ?? (receipt && 'key' in receipt ? receipt : undefined)
+    const record = observed ? observed.admission : await scope.client.inspectAgentPromptSubmission(key)
+    return {key,record,...(observed ? {input:observed} : {}),...(receipt?.moteObservationId ? {moteObservationId:receipt.moteObservationId} : {})}
+  }
+
+  /** Logical intake adds only an immutable route to the original journal. Original Core remains the sole input owner. */
+  private async moteMainInput(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote-dialogue.js').MoteDialogueInputSubmit | import('./mote-dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteDialogueInputInspection> {
+    const mainOwner = this.ports.moteDialogue?.mainInput
+    if (!mainOwner) throw new AgentMuxError('The original Mote main input owner is unavailable. Keep the draft and original operation; no input was sent.', 'CONTROL_UNAVAILABLE')
+    await this.inputCallContext(context).assertCurrent?.(); context.signal?.throwIfAborted()
+    // This original Host read is the admission linearization point, not a client snapshot.
+    const main = await mainOwner.readCurrentMoteMain(input.target,context.signal)
+    if (!main.identity) throw new AgentMuxError('The original Mote identity is unconfirmed. Keep its original draft and input key.', 'MOTE_MAIN_CHANGED')
+    const parsed = 'input' in input ? parseAgentInputSubmit(input.input) : null
+    const recovery = 'input' in input ? input.recovery : undefined
+    const journal = await this.messageRouteJournal(), submit = parsed ? {...parsed,...(parsed.capturedContext ? {} : {moteGuidance:true as const})} : null
+    const operationId = submit?.operationId ?? (input as import('./mote-dialogue.js').MoteDialogueInputRead).operationId
+    let route = await journal.readMoteMainInputRoute(main.identity,operationId)
+    let firstIntake = false
+    if (submit) {
+      const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+        ? Object.fromEntries(Object.entries(value).filter(([,v]) => v !== undefined).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0).map(([k,v]) => [k,canonical(v)])) : value
+      const {preparationRetry:_preparationRetry,...stableIntent} = submit
+      const digest = createHash('sha256').update(JSON.stringify(canonical({input:stableIntent,...(recovery ? {recovery:{operationId:recovery.operationId}} : {})}))).digest('hex')
+      const key = {kind:'prompt' as const,agentSessionId:submit.agentSessionId,expectedRun:submit.expectedRun,submissionId:submit.operationId}
+      const expectedRoleRevision = (input as import('./mote-dialogue.js').MoteDialogueInputSubmit).expectedRoleRevision
+      if (route) {
+        if (route.intentDigest !== digest || route.roleRevision !== expectedRoleRevision || !isDeepStrictEqual(route.key,key)) throw new AgentMuxError('This logical main input already names another original role, target or content. Keep its original input key.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      } else {
+        if (main.status !== 'ready' || !main.current || !main.roleRevision || main.roleRevision !== expectedRoleRevision || main.current.sessionId !== submit.agentSessionId)
+          throw new AgentMuxError('The main Agent changed before accepting this logical input. The original draft was retained; no later Agent received it.', 'MOTE_MAIN_CHANGED')
+        const owners = (await this.clients()).filter(scope => scope.hostId === main.current!.hostId)
+        if (owners.length !== 1 || this.endpointUnverified(owners[0]!.client)) throw new AgentMuxError('The exact current main Host is unavailable or ambiguous. Keep the original draft.', 'CONTROL_UNAVAILABLE')
+        const prior = await this.inspectMainInputAt(owners[0]!, key, context)
+        const priorRecovery = recovery && (await owners[0]!.client.readAgentSession(key.agentSessionId))?.continuityOperations?.[recovery.operationId]
+        if (prior.input || prior.record || priorRecovery) {
+          const concurrent = await journal.readMoteMainInputRoute(main.identity,operationId)
+          if (!concurrent) throw new AgentMuxError('This input already belongs to its original producer. Inspect that original key; no main role or new platform guidance was added.', 'MOTE_MAIN_INPUT_PREEXISTING')
+          if (concurrent.intentDigest !== digest || concurrent.roleRevision !== expectedRoleRevision || !isDeepStrictEqual(concurrent.key,key)) throw new AgentMuxError('This logical main input already names another original role, target or content. Keep its original input key.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+          route = concurrent
+        } else {
+          // Validate an existing Host capture before freezing a new role route. This read grants no input authority.
+          if (submit.capturedContext) await resolveAgentInputContextCapture({reference:submit.capturedContext.reference,
+            agentSessionId:submit.agentSessionId,expectedRun:submit.expectedRun,operationId:submit.operationId,prompt:submit.prompt,
+            ...(submit.capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:submit.capturedContext.agentMuxNote})},
+            async () => undefined,this.ports.inputContextCaptures,context.signal)
+          await mainOwner.assertCurrent(main,context.signal)
+          const claimed = await journal.claimMoteMainInputRoute({identity:main.identity,operationId,roleRevision:main.roleRevision,reference:main.current,key,
+            runtimeId:owners[0]!.client.runtimeOwnerIdentity?.()?.runtimeId ?? null,intentDigest:digest,admittedAt:Date.now(),
+            ...(recovery ? {recoveryOperationId:recovery.operationId} : {})})
+          route = claimed.route; firstIntake = claimed.created
+        }
+      }
+    }
+    if (!route) return {route:null,record:null,input:null}
+    const owners = (await this.clients()).filter(scope => scope.hostId === route!.reference.hostId)
+    const scope = owners.length === 1 ? owners[0] : undefined
+    if (!scope || this.endpointUnverified(scope.client) || route.runtimeId !== null && scope.client.runtimeOwnerIdentity?.()?.runtimeId !== route.runtimeId)
+      throw new AgentMuxError('The original logical input Host is unavailable or changed. Its role and input key remain frozen; no replacement Agent received input.', 'CONTROL_UNAVAILABLE')
+    if (route.recoveryOperationId) {
+      if (submit && (firstIntake || recovery?.reconcile === true)) {
+        const device = this.ports.operationSource?.(context)
+        await scope.client.ensureAgentContinuity({agentSessionId:route.key.agentSessionId,expectedRun:route.key.expectedRun,operationId:route.recoveryOperationId,trigger:'input',
+          input:{submissionId:route.operationId,prompt:submit.prompt,authorHuman:true,sourceChannel:submit.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
+            ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}),
+            ...(submit.capturedContext ? {inputContextCapture:submit.capturedContext.reference,
+              ...(submit.capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:submit.capturedContext.agentMuxNote})} : {agentMuxNote:MOTE_INPUT_GUIDANCE}),
+            ...(submit.inputContext ? {inputContext:submit.inputContext} : {})}},
+          {...this.inputCallContext(context),...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
+      }
+      const retained = (await scope.client.readAgentSession(route.key.agentSessionId))?.continuityOperations?.[route.recoveryOperationId] ?? null
+      const key = retained?.launchInput?.key
+      const original = key ? await this.inspectMainInputAt(scope,key,context) : {record:null,input:null}
+      return {route,record:original.record,input:original.input ?? null,recovery:retained}
+    }
+    const observed = await this.inspectMainInputAt(scope,route.key,context)
+    // Accepted, waiting and unknown original inputs are reads, never another submit or a later role.
+    const notApplied = observed.input?.status === 'not-applied' || observed.record && agentPromptNotApplied({run:observed.record.run,
+      ...(observed.record.admission ? {promptCompletionAdmission:observed.record.admission} : {}),
+      ...(observed.record.terminalPromptSubmission ? {terminalPromptSubmission:observed.record.terminalPromptSubmission} : {})})
+    const explicitPreparationRetry = submit?.preparationRetry && notApplied
+    if (!submit || !firstIntake && !explicitPreparationRetry || (observed.input || observed.record) && !explicitPreparationRetry) return {route,record:observed.record,input:observed.input ?? null}
+    const result = await this.submitInputAt(scope,submit,context)
+    return {route,record:result.record,input:result.input ?? null}
+  }
+
+  private async inspectMainInputAt(scope: AgentMuxRpcCoreClient, key: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>, context: AgentMuxRpcCallContext) {
+    if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.inspect',{key},context)
+    if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local','agent.input.inspect',{key},context)
+    const input = await scope.client.inspectAgentInput({key})
+    return {input,record:input ? input.admission : await scope.client.inspectAgentPromptSubmission(key)}
+  }
+
   /** The existing ingress Core journal retains only routing facts, never another envelope/body. */
   private async messageRouteJournal() {
     const local = (await this.clients()).filter(scope => scope.hostId === 'local')

@@ -1,5 +1,7 @@
 import { assertAgentInputClaimLease, type AgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseAgentInputHandoff, type AgentInputCarrier } from './agent-input-handoff.js'
+import { parseMoteDialogueInputRoute, moteDialogueInputScope, type MoteDialogueInputRoute } from './mote-dialogue-contract.js'
+import type { MoteDialogueIdentity } from './mote-dialogue.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { validateBroadcastIntent, parseBroadcastReceipt, type AgentMuxMessageBroadcastIntent, type AgentMuxMessageBroadcastReceipt, type AgentMuxBroadcastIssue, type AgentMuxBroadcastTargetResult } from './agent-message-broadcast.js'
 import { parseMessageEventsPage, parseMessageEventsQuery, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
@@ -29,7 +31,7 @@ import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 import { prepareMessageInputRepresentation, messageInputWireMatches } from './agent-message-input.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, mainInputRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
 import { agentInputJournalKey, agentInputDeliveryKey, validateAgentInputRetry, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
@@ -138,6 +140,7 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'broadcast'; readonly sequence: number; readonly intent: AgentMuxMessageBroadcastIntent }
   | { readonly kind: 'broadcast-target'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly at: number }
   | { readonly kind: 'broadcast-result'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly outcome: 'saved' | 'not-applied' | 'unconfirmed'; readonly issue?: AgentMuxBroadcastIssue; readonly at: number }
+  | { readonly kind: 'mote-main-input-route'; readonly sequence: number; readonly route: MoteDialogueInputRoute }
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference'; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification; readonly at?: number }
@@ -306,6 +309,7 @@ export class DurableAgentMuxMessageQueue {
         initializeInputWaitingIndex(this.db)
         this.db.exec(messageBroadcastJournalSchema)
         this.db.exec(messageRouteJournalSchema)
+        this.db.exec(mainInputRouteJournalSchema)
         this.db.exec(messageNotificationJournalSchema)
         this.initializeMoteInputIndex()
         initializeMessageNotificationReferenceIndex(this.db)
@@ -1089,6 +1093,13 @@ export class DurableAgentMuxMessageQueue {
     if (!Number.isSafeInteger(record.sequence) || record.sequence < this.nextSequence) {
       throw new AgentMuxError('Message journal sequence is invalid or out of order.', 'MESSAGE_QUEUE_UNAVAILABLE')
     }
+    if (record.kind === 'mote-main-input-route') {
+      const route = parseMoteDialogueInputRoute(record.route)
+      this.db.exec(mainInputRouteJournalSchema)
+      this.db.prepare('INSERT INTO mote_main_input_routes VALUES (?, ?, ?)').run(moteDialogueInputScope(route.identity), route.operationId, record.sequence)
+      this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
+      return
+    }
     if (record.kind === 'mote-input-observation') {
       const value = parseMoteInputObservation(record.observation)
       this.db.exec(moteInputJournalSchema)
@@ -1351,6 +1362,31 @@ export class DurableAgentMuxMessageQueue {
         original && selected && original.messageId !== selected.messageId) throw new AgentMuxError(
       'Message operation and message ID name different original routes.', 'MESSAGE_ID_CONFLICT')
     return original ?? selected
+  }
+
+  private mainInputRoute(identity: MoteDialogueIdentity, operationId: string): MoteDialogueInputRoute | null {
+    const row = this.db.prepare('SELECT r.json FROM mote_main_input_routes i JOIN records r ON r.sequence=i.sequence WHERE i.scope=? AND i.operation_id=?').get(moteDialogueInputScope(identity), nonEmpty(operationId,'Main input operation'))
+    if (!row) return null
+    const route = parseMoteDialogueInputRoute((JSON.parse(String(row.json)) as Extract<JournalRecord,{kind:'mote-main-input-route'}>).route)
+    if (moteDialogueInputScope(route.identity) !== moteDialogueInputScope(identity) || route.operationId !== operationId) throw new AgentMuxError('The original logical input route is unconfirmed. Its input is retained.', 'CONTROL_PROTOCOL_ERROR')
+    return route
+  }
+
+  /** The same ingress journal freezes the role before any original input RPC; it stores no prompt or dispatch state. */
+  async readMoteMainInputRoute(identity: MoteDialogueIdentity, operationId: string): Promise<MoteDialogueInputRoute | null> {
+    return this.withLock(async () => this.mainInputRoute(identity,operationId), true)
+  }
+  async claimMoteMainInputRoute(value: MoteDialogueInputRoute): Promise<{ route: MoteDialogueInputRoute; created: boolean }> {
+    const candidate = parseMoteDialogueInputRoute(value)
+    return this.withLock(async () => {
+      const prior = this.mainInputRoute(candidate.identity,candidate.operationId)
+      if (prior) {
+        if (!isDeepStrictEqual({...prior,admittedAt:0},{...candidate,admittedAt:0})) throw new AgentMuxError('This logical main input already has another original role, target or content. Retain its original input key.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+        return { route: prior, created: false }
+      }
+      await this.appendRecord({kind:'mote-main-input-route',sequence:this.nextSequence,route:structuredClone(candidate)})
+      return { route: candidate, created: true }
+    },true)
   }
 
   async readMessageRoute(operationId?: string, messageId?: string): Promise<AgentMessageRoute | null> {
