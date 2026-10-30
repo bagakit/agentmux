@@ -104,7 +104,7 @@ export function moteSessionStartupMode(state: State, session: Agent): MoteRecove
   }
   return fixed ?? (unknown ? 'pending' : 'ordinary')
 }
-async function recoverOriginal(session: Agent, current: () => boolean, trigger: 'startup' | 'workspace-startup' | 'workspace-open', timingOverride?: 'startup' | 'on-open'): Promise<boolean> {
+async function recoverOriginal(session: Agent, current: () => boolean, trigger: 'startup' | 'workspace-open', timingOverride?: 'startup' | 'on-open'): Promise<boolean> {
   if (!current() || session.processState === 'running' || !hostAvailable(useAppStore.getState(), session.control.hostId)) return false
   const key = identity(session), guard: Guard = { cancelled: false, current }
   const listeners = entries.get(key) ?? new Set(); listeners.add(guard); entries.set(key, listeners)
@@ -153,7 +153,7 @@ export async function recoverMoteConversationAtStartup(session: Agent): Promise<
   }
   if (!eligible()) return
   scope.attempted.add(key)
-  if (!await recoverOriginal(session, eligible, mode === 'ordinary' ? 'startup' : 'workspace-startup', mode === 'ordinary' ? undefined : 'startup')) scope.attempted.delete(key)
+  if (!await recoverOriginal(session, eligible, 'startup', mode === 'ordinary' ? undefined : 'startup')) scope.attempted.delete(key)
 }
 /** Called after the original workface and initial fresh directory cut are published. */
 export async function recoverScratchConversationsAtStartup(): Promise<void> {
