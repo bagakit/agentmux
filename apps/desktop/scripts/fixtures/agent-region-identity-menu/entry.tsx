@@ -9,12 +9,39 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import type { AgentSessionHistoryPage, AgentTimelineItem, ContinuousProgressLoop, DurableAgentMuxMessage, AgentMuxMessageMetadata } from '@agentmux/core'
 import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
+import type { RuntimeEvent } from '../../../src/shared/contracts'
 
 const workspaceId = useAppStore.getState().activeWorkspaceId!
 const tabId = 'region-actions-tab', leftId = 'region-actions-target', rightId = 'region-actions-survivor'
 const names = ['Layout coordinator · investigate recovery without losing this original Agent', 'Notes researcher', 'Build reviewer']
 const original = (window as any).regionActions
 const first = useAppStore.getState().sessions[0]!
+// Same private transport as the terminal-context owning fixture: the real
+// TerminalView consumes ordered Core output and updates its original boundary.
+const menuOutputListeners = new Set<(event: RuntimeEvent) => void>(), menuOutputCursors = new Map<string, number>()
+const menuOriginalEvents = api.sessions.onEvent, menuOriginalAttach = api.sessions.attach
+api.sessions.onEvent = listener => {
+  menuOutputListeners.add(listener)
+  const release = menuOriginalEvents(listener)
+  return () => { menuOutputListeners.delete(listener); release() }
+}
+api.sessions.attach = async (...args) => {
+  const result = await menuOriginalAttach(...args), size = result.currentSize ?? { cols: 80, rows: 24 }
+  menuOutputCursors.set(result.session.control.run.runId, 0)
+  return { ...result, session: { ...result.session, latestOutputBytes: 0 }, replay: [], gap: null,
+    terminal: { type: 'basic-vt', checkpoint: { runId: result.session.control.run.runId,
+      throughByte: 0, resizeRevision: result.resizeRevision, size, restoreSize: size,
+      restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\u001b[H'), resizes: [] } }
+}
+// Observe original pointer-reporting input separately from menu disclosure.
+const menuInputs: { operation: string; args: unknown[] }[] = []
+for (const operation of ['write', 'paste'] as const) {
+  const original = api.sessions[operation] as (...args: unknown[]) => Promise<void>
+  api.sessions[operation] = ((...args: Parameters<typeof original>) => {
+    menuInputs.push({ operation, args })
+    return original(...args)
+  }) as typeof original
+}
 // Exact native read ports only; the real SessionMailbox owns windows, selection and reading.
 let layoutJournal: DurableAgentMuxMessage[] | null = null
 let layoutInputs: AgentInputMailboxItem[] = []
@@ -316,7 +343,28 @@ const probe = {
     const state = useAppStore.getState()
     return { ...original.facts(), active: state.tabs[tabId]?.layout.activeRegionId, tabs: state.tabs,
       drafts: state.agentComposerDrafts, queues: state.agentSteerQueues, names: state.agentNames,
-      regionAddress: formatRegionAddress(leftId), clipboard: [...clipboard], resizes: [...resizes], selections: [...selections] }
+      regionAddress: formatRegionAddress(leftId), clipboard: [...clipboard], resizes: [...resizes], selections: [...selections], menuInputs: [...menuInputs] }
+  },
+  async terminalContext() {
+    const element = document.querySelector(`[data-workbench-region-id="${leftId}"] .xterm`)
+    const record = (window as any).identityTerminals.find((record: { disposed: boolean; terminal: { element: Element } }) =>
+      !record.disposed && record.terminal.element === element)
+    if (!record) throw new Error('The original terminal instance is unavailable')
+    const session = useAppStore.getState().sessions.find(session => session.id === first.id)!
+    const startByte = menuOutputCursors.get(session.control.run.runId)
+    if (startByte === undefined || menuOutputListeners.size === 0) throw new Error('The original output attachment is unavailable')
+    const data = '\u001b[?1049h\u001b[HOriginal full-screen output\r\n\u001b[?1003h', dataBytes = new TextEncoder().encode(data)
+    menuOutputCursors.set(session.control.run.runId, startByte + dataBytes.length)
+    const event = { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
+      data, dataBytes, evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } } as RuntimeEvent
+    for (const listener of menuOutputListeners) listener(event)
+    const deadline = Date.now() + 5000
+    await new Promise<void>((done, reject) => { const check = () => {
+      if (record.terminal.buffer.active.type === 'alternate' && record.terminal.modes.mouseTrackingMode === 'any') { done(); return }
+      if (Date.now() >= deadline) { reject(new Error('The original ordered output did not reach its TerminalView')); return }
+      requestAnimationFrame(check)
+    }; check() })
+    return { buffer: record.terminal.buffer.active.type, mouseTrackingMode: record.terminal.modes.mouseTrackingMode }
   },
   terminal() {
     const element = document.querySelector(`[data-workbench-region-id="${leftId}"] .xterm`) ?? document.querySelector('.xterm')

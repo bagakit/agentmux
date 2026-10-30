@@ -12,6 +12,7 @@ import { agentContextForSession, createFocusProjectionSelector } from '../src/re
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => <span /> }))
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
+import { FocusContextMenu } from '../src/renderer/src/components/FocusContextMenu'
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 
 const initial = useAppStore.getState(), first = composerSession('stop-first'), target = composerSession('stop-target')
@@ -207,7 +208,7 @@ it('copies the canonical Agent link from the original alias card', async () => {
   const alias = { ...target, control: { ...target.control, agentSessionId: 'canonical-original-agent' } }
   await exactTarget(alias)
   await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Copy Agent Link')
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.getAttribute('aria-label') === 'Copy Agent Link')
   expect(item).toBeDefined()
   await act(async () => item!.click()); await settle()
   expect(copy).toHaveBeenCalledExactlyOnceWith('amux://agent/canonical-original-agent')
@@ -242,12 +243,73 @@ it('keeps Copy available for an unobserved canonical identity and reports withou
   await exactTarget(target, [first], false)
   const before = useAppStore.getState()
   await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Copy Agent Link')
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.getAttribute('aria-label') === 'Copy Agent Link')
   expect(item).toBeDefined(); await act(async () => item!.click()); await settle()
   expect(copy).not.toHaveBeenCalled()
   expect(useAppStore.getState().error).toContain('canonical Agent identity is not confirmed')
   expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Refresh this Agent’s identity')
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
+})
+
+it('shares Session details and maintenance with Region menus without guessing a position or reading history on open', async () => {
+  const alias = { ...target, control: { ...target.control, agentSessionId: 'canonical-card-agent' } }
+  await exactTarget(alias)
+  const history = vi.spyOn(api.sessions, 'historyPage'), before = useAppStore.getState()
+  await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
+  const menu = document.querySelector<HTMLElement>('.focus-context-menu')!
+  const labels = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(item => item.getAttribute('aria-label') ?? item.textContent)
+  expect(labels).toEqual(['Copy Agent Link', 'Rename Agent', 'Session details', 'Restart Session…', 'Stop Agent', 'Maintenance'])
+  const details = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Session details')!
+  await act(async () => { details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })) }); await settle()
+  const content = document.getElementById(details.getAttribute('aria-controls')!)!
+  expect(content.textContent).toContain('Session: canonical-card-agent')
+  expect(content.textContent).toContain(`Host ID: ${alias.control.hostId}`)
+  expect(history).not.toHaveBeenCalled(); expect(select).not.toHaveBeenCalled(); retained(before)
+})
+
+it('closed card menus add no Store listeners while an open menu reads current Session facts', async () => {
+  await act(async () => root.render(null))
+  const subscribe = vi.spyOn(useAppStore, 'subscribe')
+  const context = agentContextForSession(target, undefined, 'Original Agent', composerConfig.workspaces[0], null)
+  const render = (open: boolean) => root.render(<FocusContextMenu open={open} context={context} onOpenChange={() => {}}
+    onRename={() => {}} onRestoreFocus={() => {}}><button>Agent</button></FocusContextMenu>)
+  await act(async () => render(false))
+  expect(subscribe).not.toHaveBeenCalled()
+  await act(async () => render(true)); await settle()
+  expect(subscribe).toHaveBeenCalledOnce()
+  await act(async () => render(false)); await settle()
+  subscribe.mockClear()
+  await act(async () => useAppStore.setState({ errorDismissed: !useAppStore.getState().errorDismissed }))
+  expect(subscribe).not.toHaveBeenCalled()
+})
+
+it('confirms the canonical alias source and reports the original failed operation after menu unmount', async () => {
+  const alias = { ...target, hostId: 'original-remote', control: { ...target.control, hostId: 'original-remote', agentSessionId: 'canonical-source-agent', run: { runId: 'original-source-run' } },
+    nativeHandle: { kind: 'provider' as const, providerId: target.providerId, sessionId: 'old-source' },
+    observedNativeHandle: { kind: 'provider' as const, providerId: target.providerId, sessionId: 'new-source' },
+    nativeSourceObservation: { state: 'changed' as const, run: { runId: 'original-source-run' }, observedAt: Date.now(), reason: 'An authoritative source change' } }
+  await exactTarget(alias)
+  vi.spyOn(useAppStore.getState(), 'refreshSession').mockResolvedValue(undefined)
+  let reject!: (reason: Error) => void
+  const confirmation = vi.spyOn(api.sessions, 'confirmNativeSession').mockReturnValue(new Promise<never>((_, fail) => { reject = fail }))
+  await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
+  const action = (label: string) => {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)
+    expect(item, label).toBeDefined(); return item!
+  }
+  await act(async () => { const details = action('Session details'); details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })) }); await settle()
+  await act(async () => action('Review source change…').click()); await settle()
+  await act(async () => action('Confirm this native source').click()); await settle()
+  expect(confirmation).toHaveBeenCalledOnce()
+  const [control, input] = confirmation.mock.calls[0]!
+  expect(control).toEqual(alias.control)
+  expect(input.agentSessionId).toBe(alias.control.agentSessionId)
+  expect(input.expectedRun).toEqual(alias.control.run)
+  await act(async () => root.render(null)); later.focus()
+  await act(async () => reject(new Error('Original confirmation receipt unavailable'))); await settle()
+  expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(alias.control)
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain(input.operationId)
+  expect(confirmation).toHaveBeenCalledOnce(); expect(document.activeElement).toBe(later)
 })
 
 it('admits the original card with an unobserved Run and retains the Core failure service window', async () => {

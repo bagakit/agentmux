@@ -1,6 +1,8 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { createElement as h, useState } from 'react'
-import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
+import { createRoot } from 'react-dom/client'
+import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
@@ -13,6 +15,7 @@ import '../../../src/renderer/src/styles/index.css'
 // Maintained typed preview transport, original card/Store/menu/copy/error owners.
 // No Runtime, actual PID, Native history producer or user application is represented.
 const config = await api.config.get(), snapshot = await api.sessions.snapshot()
+mountThemeRuntime(window, config.appearance ?? {})
 const base = snapshot.sessions.find(session => session.kind === 'agent')
 if (!base?.control.run.runId || !config.workspaces[0]) throw new Error('Nonempty typed preview Agent facts required')
 const { pendingInteraction: _pending, ...agent } = base
@@ -26,7 +29,7 @@ const sessions = ids.map((id, index) => ({ ...agent, id, label: index < 2 ? '同
   processState: index === 5 ? 'exited' : index === 6 ? 'interrupted' : 'running', status: { state: ['working','working','waiting_permission','error','done','done','disconnected'][index], source: 'native-hook', observedAt: now, ...(index === 3 ? { detail: 'History reader unavailable; original Run retained' } : index === 6 ? { detail: 'Disconnected · execution is unconfirmed' } : {}) },
   control: { ...base.control, agentSessionId: id, run: { ...base.control.run, runId: 'typed-recap-' + id } },
   ...(index === 2 ? { pendingInteraction: { id: 'permission-real-owner', kind: 'permission', title: 'Allow editing src/scroll-anchor.ts?', operation: 'edit' } } : {}) }))
-const timelines = Object.fromEntries(ids.map(id => [id, { agentSessionId: id, revision: 3, items: id === 'recap-b' || id === 'offline' ? [] : id === 'next-prompt' ? [message('old-response', 'assistant_message', response), message('next-request', 'user_message', prompt, now)] : id === 'result' ? [message('finished-response', 'assistant_message', response)] : [message('request', 'user_message', prompt), message('response', 'assistant_message', response), tool] }]))
+const timelines = Object.fromEntries(ids.map(id => [id, { agentSessionId: id, revision: 3, items: (id === 'recap-b' || id === 'offline' ? [] : id === 'next-prompt' ? [message('old-response', 'assistant_message', response), message('next-request', 'user_message', prompt, now)] : id === 'result' ? [message('finished-response', 'assistant_message', response)] : [message('request', 'user_message', prompt), message('response', 'assistant_message', response), tool]).map(item => ({ ...item, agentSessionId: id })) }]))
 api.workspaces.listBranches = async () => ({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
 api.scratch.listTopics = async () => []
 const reads = { historyPage: 0, timeline: 0, historySources: 0, topics: 0, appearance: 0 }, controls = { stop: 0, resume: 0, launchAgent: 0, write: 0, interrupt: 0 }
@@ -42,7 +45,7 @@ const compact = contexts.find(context => context.id === 'offline')
 if (!compact) throw new Error('Nonempty retained compact Context required')
 function Probe() {
   const [chosen, setChosen] = useState(null)
-  return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 } },
+  return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, boxSizing: 'border-box', paddingBottom: '24px' } },
     h('div', { style: { flex: 1, minHeight: 0 } }, h(GlobalFocusSurface)),
     h('aside', { 'aria-label': 'Same Session at another card occurrence', style: { display: 'flex', gap: '12px', padding: '8px', alignItems: 'center', flexWrap: 'wrap', background: 'var(--bg-2)' } },
       h('div', { style: { width: '160px' }, 'data-min-column': true }, h(FocusContextRow, { context: contexts.find(context => context.id === 'recap-a'), selected: false, onSelect: setChosen })),
@@ -50,12 +53,12 @@ function Probe() {
       h('input', { 'aria-label': 'Later explicit input', defaultValue: original.agentComposerDrafts['recap-b'], style: { flex: 1, minWidth: '160px' } })),
     h('footer', { className: 'window-status-bar', style: { position: 'fixed', left: 0, right: 0, bottom: 0 } }, h(GlobalSystemNotices)))
 }
-createRoot(document.getElementById('root')).render(h(Probe))
+createRoot(document.getElementById('root')).render(h(DesktopClientUiProvider, {}, h(Probe)))
 let nodes = [], draft
 window.recapProof = {
   ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b'),
   remember() { nodes = [...document.querySelectorAll('.focus-context')]; draft = document.querySelector('[aria-label="Later explicit input"]'); draft.setSelectionRange(2,8) },
   denyClipboard(value) { denyClipboard = value },
   churn() { for (let index = 0; index < 200; index++) useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, status: { ...session.status, observedAt: now + index + 1 } })) })) },
-  facts() { const state = useAppStore.getState(); return { reads: { ...reads }, controls: { ...controls }, clipboard: [...clipboard], sameNodes: nodes.length > 0 && nodes.every(node => node.isConnected), originalFocus: state.agentFocus === original.agentFocus, originalDrafts: state.agentComposerDrafts === original.agentComposerDrafts, originalControls: state.sessions.every((session,index) => session.control === sessions[index].control), draft: draft?.value, range: [draft?.selectionStart, draft?.selectionEnd], error: state.error } }
+  facts() { const state = useAppStore.getState(); return { reads: { ...reads }, controls: { ...controls }, clipboard: [...clipboard], sameNodes: nodes.length > 0 && nodes.every(node => node.isConnected), originalFocus: state.agentFocus === original.agentFocus, originalDrafts: state.agentComposerDrafts === original.agentComposerDrafts, originalControls: state.sessions.every((session,index) => session.control === sessions[index].control), draft: draft?.value, range: [draft?.selectionStart, draft?.selectionEnd], error: state.error, events: state.notificationEvents.map(event => ({ id: event.id, message: event.message })) } }
 }

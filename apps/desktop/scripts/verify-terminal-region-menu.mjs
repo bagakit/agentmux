@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url), fixture = join(desktop, 'scripts
 const temporaryRoot = await mkdtemp(fixturePath('tmp/amx-terminal-menu-'))
 const evidence = join(repository, '.tmp/terminal-region-menu', 'attempt-' + globalThis.crypto.randomUUID())
 const hash = data => createHash('sha256').update(data).digest('hex')
-const owners = ['RegionContextMenu', 'AgentRegionHeader', 'AgentRegionMenuContent', 'AgentRegionMenuActions', 'TerminalContextMenu', 'TerminalMenuTools', 'TerminalView']
+const owners = ['RegionContextMenu', 'AgentRegionHeader', 'AgentMenuContent', 'TerminalContextMenu', 'TerminalMenuTools', 'TerminalView']
   .map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`).concat('apps/desktop/src/renderer/src/styles/terminal.css')
 const sources = async () => Object.fromEntries(await Promise.all(owners.map(async name => [name, hash(await readFile(join(repository, name)))])))
 const result = { schema: 'agentmux.terminal-region-menu-delivery.v1', passed: false, userRunTouched: false,

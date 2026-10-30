@@ -4,14 +4,13 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { listProbeProcesses, stopProbeProcesses, runProbeProcess } from './probe-process.mjs'
 import { reapDetachedRuns } from './probe-owned-run.mjs'
 
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..')
 const require=createRequire(import.meta.url), exec=promisify(execFile), {build}=await import('vite'), ts=require('typescript')
-const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-identity-menu-"))
 const evidence=join(repository,'.tmp/agent-region-identity-menu',("attempt-" + (globalThis.crypto.randomUUID()) + "")), fixture=join(desktop,'scripts/fixtures/agent-region-identity-menu')
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const visualOnly=process.argv.includes('--visual-only')
@@ -34,6 +33,63 @@ assert.ok(!messageFeedbackOwning||visualOnly,'Message feedback owning uses only 
 assert.ok(!mailboxMotionOwning||visualOnly,'Mailbox motion owning uses only the private visual fixture')
 const result={schema:'agentmux.region-identity-menu-delivery.v1',passed:false,sourceBefore:{},sourceAfter:{},mutations:[],callers:[],cleanup:{},userRunTouched:false,
   ...(visualOnly?{captureOnly:true,aestheticReview:'not-performed'}:{})}
+const menuOwnerFiles=[...['AgentMenuContent','AgentRegionHeader','FocusContextMenu','RegionContextMenu','TerminalContextMenu','TerminalMenuTools','AgentNativeSourceControls','SessionStop','SessionRestart','WorkbenchMenuSubmenu','WorkbenchCopyLinkRow','WorkbenchActionRows'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
+  ...['agent-region-header','focus','terminal','chrome'].map(name=>`apps/desktop/src/renderer/src/styles/${name}.css`)]
+async function menuOwnerHashes(){return Object.fromEntries(await Promise.all(menuOwnerFiles.map(async path=>[path,hash(await readFile(join(repository,path)))])))}
+async function positioningBinding(){
+  const files={},entries={}
+  async function bind(name,resolver){
+    const entry=resolver.resolve(name),directory=dirname(dirname(entry)),manifestPath=join(directory,'package.json')
+    const manifest=JSON.parse(await readFile(manifestPath,'utf8'));assert.equal(manifest.name,name)
+    entries[name]=entry
+    for(const path of new Set([manifestPath,entry,...[manifest.main,manifest.module].filter(Boolean).map(target=>join(directory,target))]))files[path]=hash(await readFile(path))
+    return createRequire(entry)
+  }
+  const context=createRequire(require.resolve('@radix-ui/react-context-menu'))
+  const menu=createRequire(context.resolve('@radix-ui/react-menu'))
+  const popper=await bind('@radix-ui/react-popper',menu)
+  const reactDom=await bind('@floating-ui/react-dom',popper)
+  const dom=await bind('@floating-ui/dom',reactDom)
+  const core=await bind('@floating-ui/core',dom)
+  await bind('@floating-ui/utils',core)
+  const yaml=createRequire(join(repository,'packages/core/package.json'))('yaml'),key='@radix-ui/react-popper@1.3.3'
+  const workspace=yaml.parse(await readFile(join(repository,'pnpm-workspace.yaml'),'utf8')),lock=yaml.parse(await readFile(join(repository,'pnpm-lock.yaml'),'utf8'))
+  const path=workspace.patchedDependencies[key];assert.ok(path&&lock.patchedDependencies[key],'The original Popper patch is declared in both manifests')
+  return{files,entries,patch:{key,path,sha256:hash(await readFile(join(repository,path))),lock:lock.patchedDependencies[key]}}
+}
+if(process.env.AGENTMUX_AGENT_MENU_SCENE_RECEIPT){
+  assert.ok(visualOnly&&agentMenuOwning,'An explicit Agent-menu scene receipt requires its original owning mode')
+  const path=resolve(process.env.AGENTMUX_AGENT_MENU_SCENE_RECEIPT),saved=JSON.parse(await readFile(path,'utf8'))
+  assert.equal(saved.schema,result.schema);assert.equal(saved.passed,true);assert.equal(saved.userRunTouched,false)
+  assert.equal(saved.render.outcome.exitCode,0);assert.equal(saved.render.rendered.passed,true)
+  assert.deepEqual(saved.menuOwnerSources,await menuOwnerHashes())
+  assert.ok(saved.positioningInputs,'Actual captured Popper/Floating inputs are required')
+  assert.deepEqual(saved.positioningInputs,await positioningBinding())
+  await productionCallers()
+  const callerFacts=items=>items.map(({symbol,definition,caller,kind,hits})=>({symbol,definition,caller,kind,hits}))
+  assert.ok(saved.callers.length>0);assert.deepEqual(callerFacts(result.callers),callerFacts(saved.callers))
+  const directory=join(path,'..'),fixed=JSON.parse(await readFile(join(directory,'fixed/compiled.json'),'utf8'))
+  assert.ok(Object.keys(fixed.loadedSourceInputs).length>0&&Object.keys(fixed.compiledFiles).length>0)
+  for(const[name,sha]of Object.entries(fixed.harnessInputs)){
+    assert.equal(hash(await readFile(join(fixture,name))),sha);assert.equal(hash(await readFile(join(directory,'fixed','driver-'+name))),sha)
+  }
+  for(const[name,sha]of Object.entries(saved.menuOwnerSources)){
+    const loaded=name.endsWith('.css')?fixed.importedStyleInputs[name]:fixed.loadedSourceInputs[name]
+    if(loaded!==undefined)assert.equal(loaded,sha,'Original menu owner was actually compiled: '+name)
+  }
+  assert.ok(saved.render.rendered.frames.length>0)
+  for(const frame of saved.render.rendered.frames){const bytes=await readFile(join(directory,'fixed',frame.file));assert.ok(bytes.length>0);assert.equal(hash(bytes),frame.png)}
+  const mutants=saved.mutations.filter(item=>item.label==='shared-source-check-consumer-removed');assert.equal(mutants.length,1)
+  const red=mutants[0].red;assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError')
+  assert.match(red.rendered.failure.message,/Maintenance preserves source checking and observation refresh/)
+  const redCompiled=JSON.parse(await readFile(join(directory,'menu-shared-maintenance-red/compiled.json'),'utf8'))
+  assert.ok(Object.keys(redCompiled.compiledFiles).length>0);assert.equal(redCompiled.sourceMutations.length,1)
+  const mutation=redCompiled.sourceMutations[0];assert.equal(mutation.original,saved.menuOwnerSources[mutation.path]);assert.notEqual(mutation.original,mutation.mutated)
+  assert.equal(saved.cleanup.rootRemoved,true);assert.deepEqual(saved.cleanup.remaining,[])
+  console.log(JSON.stringify({passed:true,exactEvidenceReused:true,receipt:path,frames:saved.render.rendered.frames.length,mutants:1}));process.exit(0)
+}
+const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-identity-menu-"))
+if(agentMenuOwning){result.menuOwnerSources=await menuOwnerHashes();result.positioningInputs=await positioningBinding()}
 const sourceFiles=visualOnly?[]:(await exec('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:repository,maxBuffer:32*1024*1024})).stdout.split('\0').filter(Boolean)
 if(!visualOnly)assert.ok(sourceFiles.length>0)
 async function sources(){return Object.fromEntries(await Promise.all(sourceFiles.map(async name=>[name,hash(await readFile(join(repository,name)))])))}
@@ -50,13 +106,18 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
   const cssPath=agentMenuOwning?join(desktop,'src/renderer/src/styles/agent-region-header.css'):composerToolbarOwning||mailboxLayoutOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
-  const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[],sourceMutations=[]
+  const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[],sourceMutations=[],isolatedSourceInputs=[],positioningImports={}
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(repository,'packages/client-ui/src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
-      if(menuMutation&&id===join(desktop,'src/renderer/src/components/AgentRegionMenuContent.tsx')){
+      if(agentMenuOwning&&['EditorPane','FileSurfaceView','GitBranchDiffPane'].some(name=>id===join(desktop,`src/renderer/src/components/${name}.tsx`))){
+        const name=id.slice(id.lastIndexOf('/')+1,-4),code=`export function ${name}(){throw new Error('No File or Git editor belongs to the Agent menu scene.')}`
+        isolatedSourceInputs.push({path:id.slice(repository.length+1),originalSHA256:hash(source),loadedSHA256:hash(code),boundary:'No File/Git Region in this scene; attempting to render its editor fails explicitly'})
+        return code
+      }
+      if(menuMutation&&id===join(desktop,'src/renderer/src/components/AgentMenuContent.tsx')){
         const anchor='{nativeSourceCheck}'
-        assert.equal(source.split(anchor).length,2,'Actual root source-check consumer is unique')
+        assert.equal(source.split(anchor).length,2,'Actual shared maintenance source-check consumer is unique')
         const altered=source.replace(anchor,'{null}')
         sourceMutations.push({path:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
         return altered
@@ -85,6 +146,7 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
       }
     },async generateBundle(){
       for(const file of this.getWatchFiles())if((file.startsWith(join(desktop,'src')+'/')||file.startsWith(join(repository,'packages/client-ui/src')+'/'))&&file.endsWith('.css'))importedStyleInputs[file.slice(repository.length+1)]=hash(await readFile(file))
+      if(agentMenuOwning)for(const file of this.getWatchFiles())if(Object.hasOwn(result.positioningInputs.files,file))positioningImports[file]=hash(await readFile(file))
     }}],
     css:{postcss:{plugins:[{postcssPlugin:'private-progress-controls',async Once(sheet){
       if(mailboxMutation==='navigation'){
@@ -126,11 +188,12 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   assert.equal(progressCssMutations.length,unreadableProgressActions||mailboxMutation==='navigation'?1:0,'Requested actual CSS mutation is applied exactly once')
   assert.equal(sourceMutations.length,focusMutation||mailboxMutation==='compact'||menuMutation?1:0)
   const harnessInputs={}
-  if(mailboxLayoutOwning||agentMenuOwning)for(const name of agentMenuOwning?['main.cjs','menu-product.cjs']:['main.cjs','mailbox-layout.cjs']){
+  if(mailboxLayoutOwning||agentMenuOwning)for(const name of agentMenuOwning?['main.cjs','menu-product.cjs','entry.tsx']:['main.cjs','mailbox-layout.cjs']){
     const source=await readFile(join(fixture,name));harnessInputs[name]=hash(source)
     await writeFile(join(directory,`driver-${name}`),source)
   }
-  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,sourceMutations,harnessInputs,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
+  if(agentMenuOwning){assert.ok(Object.keys(positioningImports).some(path=>path.includes('/@radix-ui/react-popper/')),'The actual Popper runtime entry was compiled');for(const[path,sha]of Object.entries(positioningImports))assert.equal(sha,result.positioningInputs.files[path])}
+  await writeFile(join(directory,'compiled.json'),JSON.stringify({compiledFiles,terminalWrapperSha256,loadedSourceInputs,importedStyleInputs,progressCssMutations,sourceMutations,isolatedSourceInputs,positioningImports,harnessInputs,ownerCss:{path:cssKey,before:hash(cssBefore),after:hash(cssAfter)}},null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
   const log=[]
   const outcome=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),join(outDir,'index.html'),privateRoot,directory,probe],{
@@ -160,13 +223,13 @@ async function productionCallers(){
   const contracts=[
     {symbol:'AgentRegionHeader',definition:'components/AgentRegionHeader.tsx',caller:'components/SessionPane.tsx',kind:'jsx'},
     {symbol:'useRegionMenuEntries',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionHeader.tsx',kind:'call'},
-    {symbol:'AgentRegionMenuContent',definition:'components/AgentRegionMenuContent.tsx',caller:'components/AgentRegionHeader.tsx',kind:'jsx'},
-    {symbol:'AgentRegionMenuActions',definition:'components/AgentRegionMenuActions.tsx',caller:'components/AgentRegionMenuContent.tsx',kind:'jsx'},
+    {symbol:'AgentMenuContent',definition:'components/AgentMenuContent.tsx',caller:'components/AgentRegionHeader.tsx',kind:'jsx'},
+    {symbol:'AgentMenuContent',definition:'components/AgentMenuContent.tsx',caller:'components/FocusContextMenu.tsx',kind:'jsx'},
     {symbol:'useSessionStop',definition:'components/SessionStop.tsx',caller:'components/AgentRegionHeader.tsx',kind:'call'},
-    {symbol:'RegionMenuEntryView',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionMenuActions.tsx',kind:'jsx'},
+    {symbol:'RegionMenuEntryView',definition:'components/RegionContextMenu.tsx',caller:'components/AgentRegionHeader.tsx',kind:'jsx'},
     {symbol:'agentDisplayName',definition:'lib/workbench-tabs.ts',caller:'components/SessionPane.tsx',kind:'call'},
     {symbol:'closeRegion',definition:'store.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
-    {symbol:'agentDisplayName',definition:'lib/workbench-tabs.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
+    {symbol:'useWorkbenchRegionLabels',definition:'lib/workbench-session-subscriptions.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
     {symbol:'regionSwapMenuEntries',definition:'lib/workbench-tab-actions.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'},
     {symbol:'swapRegions',definition:'store.ts',caller:'components/WorkspaceWorkbench.tsx',kind:'call'}
   ]
@@ -206,14 +269,15 @@ try{
   result.render=await renderer('fixed',visualOnly?(agentMenuOwning?'agent-menu-owning':mailboxLayoutOwning?'mailbox-layout-owning':composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
     if(agentMenuOwning){
-      const red=await renderer('menu-root-maintenance-red','agent-menu-owning',false,false,'',true)
+      await productionCallers()
+      const red=await renderer('menu-shared-maintenance-red','agent-menu-owning',false,false,'',true)
       assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError')
-      assert.match(red.rendered.failure.message,/Maintenance actions are directly reachable at root/)
+      assert.match(red.rendered.failure.message,/Maintenance preserves source checking and observation refresh/)
       // The mutant exists only in its private compilation. Reuse the unchanged
       // fixed candidate's successful run instead of rebuilding and rerunning it.
       const restored=result.render
       assert.equal(restored.outcome.exitCode,0,JSON.stringify(restored.rendered.failure));assert.equal(restored.rendered.passed,true)
-      result.mutations.push({label:'root-source-check-consumer-removed',red,restored,productionWritten:false})
+      result.mutations.push({label:'shared-source-check-consumer-removed',red,restored,productionWritten:false})
     }
     if(mailboxLayoutOwning){
       const navigationRed=await renderer('mailbox-navigation-red','mailbox-layout-owning',false,false,'navigation')
@@ -243,7 +307,7 @@ try{
       '采集成功不等于审美通过。实际场景使用 WorkspaceWorkbench → SessionPane → AgentSessionComposer 和产品 CSS；数据来自 preview API，不证明真实 CLI、Native 或安装。未操作用户 App/Run。',
       `HEAD 诊断：\`${result.sourceCommit}\`。采集当前工作树的私有编译；HEAD 不代表未提交内容。实际产物身份见 [compiled.json](fixed/compiled.json)，采集结果见 [render.json](fixed/render.json)。`,
       '',
-      ...result.render.rendered.frames.map(frame=>`- ${frame.width}px Region / ${frame.state}：[截图](fixed/${frame.file}) · SHA-256 \`${frame.png}\``),
+      ...result.render.rendered.frames.map(frame=>`- ${frame.width}px viewport / ${frame.state}：[截图](fixed/${frame.file}) · SHA-256 \`${frame.png}\``),
       '',
       '独立 Agent：先读 docs/design/agentmux-desktop-interaction.md 与 docs/design/agentmux-surface-density.md 的有关约束，逐张打开以上完整截图，结合真实操作顺序判断主次、紧凑、对齐、留白、可读性和控件清晰性。说明具体位置、观感与修正建议；未看到或未确认的范围写明未知。不要用像素阈值、差异分数或 CSS 在场替代看图。',
       '在短评审记录中写下实际看过的截图、结论和边界。需修改时修正后重新采集同一场景，并由独立 Agent 再看图；不能把这份采图清单当作已完成评审。',
@@ -263,11 +327,15 @@ try{
     await productionCallers();result.restart=await restart();result.swapRestart=await restart(true)
   }else result.diagnosticOnly=true
   if(!visualOnly){result.sourceAfter=await sources();assert.deepEqual(result.sourceAfter,result.sourceBefore)}
+  if(agentMenuOwning){assert.deepEqual(await menuOwnerHashes(),result.menuOwnerSources,'The exact menu candidate remains unchanged');assert.deepEqual(await positioningBinding(),result.positioningInputs,'The actual positioning dependency and patch remain unchanged')}
   result.passed=true
 }catch(error){result.failure={name:error.name,message:error.message}}
 finally{
-  await stopProbeProcesses(process.pid+1000000000,privateRoot);result.cleanup.remaining=await listProbeProcesses(process.pid+1000000000,privateRoot);assert.deepEqual(result.cleanup.remaining,[])
-  await rm(privateRoot,{recursive:true});result.cleanup.rootRemoved=true
+  result.cleanup.errors=[]
+  try{await stopProbeProcesses(process.pid+1000000000,privateRoot)}catch(error){result.cleanup.errors.push({step:'stop-owned-processes',name:error.name,message:error.message,signal:error.signal??null})}
+  try{result.cleanup.remaining=await listProbeProcesses(process.pid+1000000000,privateRoot)}catch(error){result.cleanup.remaining=null;result.cleanup.errors.push({step:'observe-owned-processes',name:error.name,message:error.message,signal:error.signal??null})}
+  if(Array.isArray(result.cleanup.remaining)&&result.cleanup.remaining.length===0){await rm(privateRoot,{recursive:true});result.cleanup.rootRemoved=true}
+  if(result.cleanup.errors.length||result.cleanup.remaining?.length){result.passed=false;result.cleanup.privateRoot=privateRoot;result.failure??={name:'Error',message:'Owned probe cleanup is unconfirmed; its private root is retained.'}}
   await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2))
 }
 console.log(JSON.stringify({passed:result.passed,captureOnly:result.captureOnly,aestheticReview:result.aestheticReview,diagnosticOnly:result.diagnosticOnly,frames:result.render?.rendered.frames.length,receipt:join(evidence,'receipt.json'),...(visualOnly?{review:join(evidence,'review.md')}:{}) ,failure:result.failure}))

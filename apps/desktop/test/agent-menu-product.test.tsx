@@ -3,8 +3,9 @@ import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import * as Menu from '../src/renderer/src/components/HoverDropdownMenu'
-import { AgentRegionMenuActions } from '../src/renderer/src/components/AgentRegionMenuActions'
-import type { RegionMenuEntry } from '../src/renderer/src/components/RegionContextMenu'
+import { AgentMenuContent } from '../src/renderer/src/components/AgentMenuContent'
+import { WorkbenchMenuScope } from '../src/renderer/src/components/WorkbenchMenuScope'
+import { RegionCopyLinkRow, RegionMenuEntryView, type RegionMenuEntry } from '../src/renderer/src/components/RegionContextMenu'
 
 const dom = composerDOM()
 function item(root: ParentNode, label: string) {
@@ -14,7 +15,15 @@ function item(root: ParentNode, label: string) {
 }
 async function mount(entries: RegionMenuEntry[]) {
   await dom.render(<Menu.Root open><Menu.Trigger>Actions</Menu.Trigger><Menu.Content data-product-menu="">
-    <AgentRegionMenuActions entries={entries} controls={<Menu.Item>Take over</Menu.Item>} conversation={<><Menu.Item>Conversation history</Menu.Item><Menu.Item>Session details</Menu.Item></>} />
+    <WorkbenchMenuScope.Provider value={Menu}><AgentMenuContent name="Original Agent" executorLabel="Executor" sessionId="canonical-agent"
+      executionHost={{ id: 'execution-host', label: 'Build machine', kind: 'ssh', configured: true, cwd: '/original' }}
+      links={entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={entries} Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} /> : null}
+      onTakeOver={() => {}} onHistory={() => {}} onRestart={entries.find(entry => entry.kind === 'restart')?.onSelect}
+      extensions={{
+        workspace: entries.some(entry => ['layout', 'promote'].includes(entry.kind)) ? entries.filter(entry => ['layout', 'promote'].includes(entry.kind)).map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index} Item={Menu.Item} Separator={Menu.Separator} Group={Menu.Group} Label={Menu.Label} />) : null,
+        connections: entries.some(entry => entry.kind === 'connector-group') ? entries.filter(entry => entry.kind === 'connector-group').map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index} nested Item={Menu.Item} Separator={Menu.Separator} Group={Menu.Group} Label={Menu.Label} Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal} />) : null
+      }} />
+    </WorkbenchMenuScope.Provider>
   </Menu.Content></Menu.Root>)
   return document.querySelector<HTMLElement>('[data-product-menu]')!
 }
@@ -43,7 +52,10 @@ it('keeps compact exact link actions and connector recovery issues directly in t
   const links = root.querySelector('[role="group"][aria-label="Copy link"]')!
   expect([...links.querySelectorAll('[role="menuitem"]')].map(node => node.getAttribute('aria-label'))).toEqual(['Copy Agent Link', 'Copy Region Link'])
   expect(links.querySelector('[aria-haspopup]')).toBeNull()
-  const chat = root.querySelector('[data-connector-menu-group]')!
+  const disclosure = item(root, 'Connections')
+  await act(async () => { disclosure.focus(); disclosure.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  const connectionMenu = document.getElementById(disclosure.getAttribute('aria-controls')!)!
+  const chat = connectionMenu.querySelector('[data-connector-menu-group]')!
   expect(chat.textContent).not.toContain('observation unavailable')
   const notice = item(chat, 'Team chat service notice')
   await act(async () => { notice.focus(); notice.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
