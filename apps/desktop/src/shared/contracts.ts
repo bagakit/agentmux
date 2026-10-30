@@ -1081,6 +1081,7 @@ export type ProviderCatalogObservation = {
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
 export type SessionInputWriteResult = { ok: true; inputReceipt?: import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | import('@agentmux/core/mote-dialogue').MoteDialogueInputReference } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
+  moteMainRollover?: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision
 } }
 /** The same plain error owner carries read/control results through Electron. */
 export type SessionInputOperationResult<T> = { ok: true; value: T } | { ok: false; error: import('@agentmux/core/delivery-attempt').DeliveryFailure & { code: string } }

@@ -9,11 +9,12 @@ export async function sessionInputWriteResult(write: () => Promise<void | AgentI
     const inputReceipt = await write()
     return { ok: true, ...(inputReceipt ? { inputReceipt } : {}) }
   } catch (error) {
-    const source = error instanceof Error ? error as Error & { code?: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string } : null
+    const source = error instanceof Error ? error as Error & { code?: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string; moteMainRollover?: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision } : null
     return { ok: false, error: {
       code: typeof source?.code === 'string' ? source.code : 'SESSION_INPUT_FAILED',
       message: source?.message ?? String(error),
       ...(source?.logId === undefined ? {} : { logId: source.logId }),
+      ...(source?.moteMainRollover ? { moteMainRollover: source.moteMainRollover } : {}),
       ...(source?.detail === undefined ? {} : { detail: source.detail }),
       ...(source?.controlFailure === undefined ? {} : { controlFailure: source.controlFailure })
     } }

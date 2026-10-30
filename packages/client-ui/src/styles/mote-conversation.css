@@ -7,7 +7,7 @@
 .mote-conversation__issue, .mote-conversation__muted { color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.6; overflow-wrap: anywhere; }
 .mote-conversation__issue { padding: 8px 0; }
 .mote-conversation__messages[hidden], .mote-conversation__history[hidden] { display: none; }
-.mote-conversation__handoff { display: flex; justify-content: space-between; gap: 12px; padding-block: 10px; margin-block: 8px; border-block: 1px solid var(--line-soft); font-size: var(--fs-meta, 12px); color: var(--text-3); }
+.mote-conversation__handoff { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; padding-block: 10px; margin-block: 8px; border-block: 1px solid var(--line-soft); font-size: var(--fs-meta, 12px); color: var(--text-3); }
 .mote-conversation__handoff details { min-width: 0; }
 .mote-conversation__handoff p { overflow-wrap: anywhere; }
 .mote-work-event { margin-block: 8px; min-width: 0; border-block: 1px solid var(--line-soft); background: transparent; }

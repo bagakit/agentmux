@@ -1,0 +1,64 @@
+.mote-start { position: relative; flex: 1; width: 100%; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: clip; isolation: isolate; container: mote-start / inline-size; color: var(--text); background: var(--surface-0); }
+.mote-start__background { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: layout paint; }
+.mote-start__background::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 8%, var(--surface-0) 88%); }
+.mote-start__brand-art { position: absolute; width: min(740px, 110%); aspect-ratio: 1; inset-inline-start: 50%; top: -16%; transform: translateX(-50%); opacity: .055; animation: mote-start-drift 28s ease-in-out infinite alternate; animation-play-state: paused; }
+.mote-start__brand-art > img, .mote-start__brand-art > svg { display: block; width: 100%; height: 100%; object-fit: contain; }
+.mote-start__contour { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: var(--green); stroke-width: 1; opacity: .11; transform-origin: center; animation: mote-start-contour 32s ease-in-out infinite alternate; animation-play-state: paused; }
+.mote-start[data-active='true']:has(.mote-start__portrait .mote-identity-motion[data-mote-visible='on']) .mote-start__brand-art,
+.mote-start[data-active='true']:has(.mote-start__portrait .mote-identity-motion[data-mote-visible='on']) .mote-start__contour { animation-play-state: running; }
+.mote-start__content { position: relative; box-sizing: border-box; width: min(100%, 700px); min-height: 100%; margin-inline: auto; padding: 22px clamp(20px, 5cqw, 48px) 28px; display: flex; flex-direction: column; }
+.mote-start__identity { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-start__name { color: var(--text-2); font-weight: 550; overflow-wrap: anywhere; }
+.mote-start__wordmark { flex: none; padding-inline-start: 9px; border-inline-start: 1px solid var(--line-soft); font-size: 10px; letter-spacing: .08em; }
+.mote-start__identity > :last-child:not(.mote-start__wordmark) { margin-inline-start: auto; }
+.mote-start__invitation { display: grid; justify-items: center; gap: 12px; margin-block: clamp(12px, 4vh, 44px) 24px; text-align: center; }
+.mote-start__portrait { display: grid; place-items: center; width: 172px; height: 172px; flex: none; }
+.mote-start__portrait > .mote-identity-motion { max-width: 100%; max-height: 100%; }
+.mote-start__portrait :is(.space-object-icon, .mote-identity-motion, .mote-face, .space-object-icon__avatar, .space-object-icon > svg) { width: 100%; height: 100%; flex: none; }
+.mote-start__portrait > * { max-width: 100%; max-height: 100%; }
+.mote-start__settings { background: transparent; border: 0; color: var(--text-3); padding: 6px 8px; min-height: 32px; font: inherit; cursor: pointer; }
+.mote-start__greeting { min-width: 0; max-width: 100%; }
+.mote-start__eyebrow { color: var(--text-3); font-size: var(--fs-meta, 12px); letter-spacing: .03em; }
+.mote-start__greeting h1 { margin: 8px 0 0; font-size: clamp(23px, 4.3cqw, 32px); line-height: 1.4; font-weight: 550; letter-spacing: -.025em; text-wrap: balance; overflow-wrap: anywhere; }
+.mote-start__composer { min-width: 0; width: 100%; }
+.mote-start__composer .composer { width: 100%; }
+.mote-workface__period { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px 20px 24px; }
+.mote-start__notice { margin-block-start: 10px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.55; overflow-wrap: anywhere; }
+.mote-start__notice > p { margin: 0; }
+.mote-start__notice details > summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; gap: 6px; }
+.mote-start__history { margin-block-start: 28px; padding-block-start: 18px; border-block-start: 1px solid var(--line-soft); }
+.mote-start-history { min-width: 0; }
+.mote-start-history > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mote-start-history h2 { margin: 0; color: var(--text-3); font-size: var(--fs-meta, 12px); font-weight: 500; }
+.mote-start-history > header > button { display: inline-flex; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta, 12px); padding: 5px 0 5px 10px; min-height: 32px; cursor: pointer; }
+.mote-start-history ol { list-style: none; padding: 0; margin: 6px 0 0; }
+.mote-start-history li + li { border-block-start: 1px solid var(--line-soft); }
+.mote-start-history__open { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; min-height: 58px; padding: 12px 0; border: 0; background: transparent; color: var(--text-3); font: inherit; text-align: start; cursor: pointer; }
+.mote-start-history__mark { align-self: flex-start; display: flex; padding-top: 2px; color: var(--text-3); }
+.mote-start-history__copy { min-width: 0; flex: 1; }
+.mote-start-history__copy > strong { display: block; color: var(--text-2); font-size: var(--fs-body, 13px); line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; }
+.mote-start-history__copy > span, .mote-start-history__copy > small { display: block; margin-block-start: 4px; color: var(--text-3); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.mote-start-history__copy > small.mote-start-history__coverage { font-size: 10px; }
+.mote-start-history__reason { flex: none; max-width: 100px; font-size: 10px; line-height: 1.5; text-align: end; }
+.mote-start-history li[data-current='true'] .mote-start-history__reason { color: var(--green-text); }
+.mote-start-history__open:hover .mote-start-history__copy > strong { color: var(--text); }
+.mote-start-history button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm, 6px); }
+.mote-start-history > p { color: var(--text-3); font-size: var(--fs-meta, 12px); }
+@container mote-start (max-width: 520px) {
+  .mote-start__content { padding: 18px 18px 24px; }
+  .mote-start__invitation { gap: 10px; margin-block: 20px; }
+  .mote-start__portrait { width: 136px; height: 136px; }
+  .mote-start__greeting h1 { font-size: 24px; }
+  .mote-start-history__reason { max-width: 70px; }
+  .mote-start__notice details > summary, .mote-start-history > header > button { min-height: 44px; }
+}
+@media (max-height: 620px) {
+  .mote-start__invitation { grid-template-columns: 72px minmax(0, 1fr); gap: 14px; justify-items: start; align-items: center; margin-block: 12px 18px; text-align: start; }
+  .mote-start__portrait { width: 72px; height: 72px; }
+  .mote-start__greeting h1 { font-size: 22px; margin-block-start: 4px; }
+  .mote-start__eyebrow { font-size: 11px; }
+  .mote-start__history { margin-block-start: 18px; padding-block-start: 12px; }
+}
+@keyframes mote-start-drift { from { transform: translateX(-50%) translateY(0) rotate(-2deg); } to { transform: translateX(-50%) translateY(14px) rotate(2deg); } }
+@keyframes mote-start-contour { from { transform: translateY(0) scale(1); } to { transform: translateY(-12px) scale(1.04); } }
+@media (prefers-reduced-motion: reduce) { .mote-start__brand-art, .mote-start__contour { animation: none; } }

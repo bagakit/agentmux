@@ -121,6 +121,17 @@ export function AgentSessionComposer({
   const sendingId = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerInFlight?.[sessionId])
   const sendingPhase = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerInFlightPhase?.[sessionId])
   const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
+  const rolloverHandled = useRef<string | null>(null)
+  const rollovers = queuedEntries.filter(entry => !entry.archived && entry.mainRollover)
+  const openRollover = (entry: AgentSteerQueueEntry) => {
+    if (!entry.mainRollover || !moteWorkface?.startRollover) return
+    rolloverHandled.current = entry.operationId
+    moteWorkface.startRollover({ sessionId, decision: entry.mainRollover, query: { operationId: entry.operationId, prompt: entry.text,
+      ...(entry.sourceChannel ? { sourceChannel: entry.sourceChannel } : {}), ...(entry.inputImages ? { inputImages: [...entry.inputImages] } : {}) } })
+  }
+  useEffect(() => {
+    if (visible && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
+  }, [visible, queuedEntries, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const moteMain = motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
@@ -326,7 +337,7 @@ export function AgentSessionComposer({
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={pending} mailbox={mailbox}
+    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{pending}{rollovers.length > 1 && moteWorkface?.startRollover ? <details><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <button key={entry.operationId} type="button" onClick={() => openRollover(entry)}>{entry.text.slice(0, 80)} · 接到新对话</button>)}</details> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}

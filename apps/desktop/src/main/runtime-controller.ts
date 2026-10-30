@@ -1860,6 +1860,9 @@ export class RuntimeController {
         : { ...content, ...capturedCondition, ...(choice.execution ? { execution: choice.execution } : {}), ...(choice.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}) }
       const result = await this.trackHostOperation(control.hostId, () => this.callOriginalCore(
         choice.moteMain!.target.expectedResource.hostId, 'space.mote.dialogue.input.submit', { ...choice.moteMain!, input }, { transport: 'unix' }))
+      if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision) throw Object.assign(
+        new AgentMuxError('The original Mote policy requires a new Main period. This Query was not delivered to the previous Main.', 'MOTE_MAIN_ROLLOVER_REQUIRED'),
+        { moteMainRollover: result.rollover.decision })
       if ('admissionIntent' in capturedCondition) {
         if (!result.input) throw new AgentMuxError('The original main input has no confirmed receipt yet. Its role and operation are retained; inspect the original request before sending again.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
         return result.input

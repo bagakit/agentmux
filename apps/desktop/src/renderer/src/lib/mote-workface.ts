@@ -10,6 +10,8 @@ import { scratchTopicKind } from './scratch-topic-snapshots'
 import { homeZoneId } from '../../../shared/space-addresses'
 
 export type MoteWorkfaceScope = { topic: ScratchTopicSnapshot; workspace: WorkspaceRecord; rootPath: string; issue?: string }
+export type MoteRolloverStart = { decision: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision;
+  query: import('@agentmux/core/mote-dialogue').MoteMainDeferredInput; sessionId: string }
 export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   floating: boolean
   defaultConversation?: MoteDefaultConversation | undefined
@@ -23,6 +25,7 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   showThread?(reference: WorkbenchProjectionSelection): boolean
   showOriginalWorkface?(): void
   showConversation?(): void
+  startRollover?(input: MoteRolloverStart): void
   selectTab(tabId: string, groupId: string): void
   selectReference(reference: WorkbenchProjectionSelection): boolean
 }) | null>(null)

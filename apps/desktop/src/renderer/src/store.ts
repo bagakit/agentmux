@@ -701,6 +701,8 @@ export type AgentSteerOptions = {
 }
 
 export type AgentSteerQueueEntry = {
+  /** Original Core policy reply; this Query was not applied to the previous Main. */
+  mainRollover?: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision
   /** Original logical-main role at explicit input; never updated from later presentation. */
   moteMain?: MoteMainInputSelection
   /** Original explicitly submitted workface, retained across retry; never a primary claim. */
@@ -11125,6 +11127,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (carrier?.state === 'not-applied') return 'unconfirmed'
       if (originalDrain?.submitted.has(operationId) || !entry.directInputBinding && confirmedSteerDelivery(get().timelines[sessionId], session?.kind === 'agent' ? session.control : undefined, operationId)) return 'submitted'
       if (originalDrain?.failures.has(operationId)) throw originalDrain.failures.get(operationId)
+      const rollover = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
+      // Core explicitly kept this Query off the old Main. The original setup
+      // now owns its next step; this normal policy result is not a send failure.
+      if (rollover?.mainRollover?.queryOperationId === operationId && rollover.text === entry.text &&
+        JSON.stringify(rollover.moteMain) === JSON.stringify(entry.moteMain)) return 'unconfirmed'
       // Core owns accepted waiting after its typed receipt. It is not a failed
       // submission, and another caller must not dispatch it through a second route.
       const receipt = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)?.inputReceipt
@@ -11524,6 +11531,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!get().agentSteerQueues[sessionId]?.some(item =>
               drain.explicitSteers.has(item.operationId))) return
           } catch (error) {
+            const { originalMoteRollover } = await import('./lib/mote-main-rollover')
+            const rollover = originalMoteRollover(error, entry, { hostId: attemptHostId, agentSessionId: attemptSessionId })
+            if (rollover) {
+              set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item => matchesAttempt(item)
+                  ? { ...item, mainRollover: rollover, status: 'deferred' as const, awaitingExplicitSend: true as const } : item) } }))
+              return
+            }
             drain.failures.set(entry.operationId, error)
             const failure = describeError(error)
             deliveryAttempt.diagnostic = await recordMessageDeliveryFailure(deliveryAttempt.seed, error, deliveryAttempt.stage)

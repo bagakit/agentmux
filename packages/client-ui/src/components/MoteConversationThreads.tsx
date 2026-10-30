@@ -13,6 +13,9 @@ import { semanticIconComponent } from '../theme/icons.js'
 import { TextInput } from '../input/index.js'
 import { AgentMarkdown } from './AgentMarkdown.js'
 import '../styles/mote-conversation.css'
+import { MotePeriodConversation } from './MotePeriodConversation.js'
+export { MotePeriodConversation } from './MotePeriodConversation.js'
+import { moteConversationPeriodLabel, moteConversationTransitionLabel } from './MoteConversationStart.js'
 const ThreadIcon = semanticIconComponent('object.conversations')
 const SearchIcon = semanticIconComponent('action.search')
 const DisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -54,7 +57,7 @@ function EarlierConversation({ source, client, visible, name, geometry, describe
       ? { ...original(speaker, size), name, ...(mainAvatar ? { avatar: mainAvatar(size) } : {}) } : original(speaker, size)
   }, [describeSpeaker, reference.agentSessionId, name, mainAvatar])
   return <section ref={work.ref} className="mote-conversation__earlier" data-mote-earlier-source={JSON.stringify(reference)}>
-    <div className="mote-conversation__handoff"><span>{name} · 此前的交流</span><details><summary>来源</summary><p>{reference.hostId} / {reference.agentSessionId}</p><p>原 Session 全段；没有推断消息切点。</p></details></div>
+    <div className="mote-conversation__handoff"><span>{name} · 原 Agent 对话</span><small>完整 Session，可能包含其他时期的工作</small><details><summary>来源</summary><p>{reference.hostId} / {reference.agentSessionId}</p><p>原 Session 全段；没有推断消息切点。</p></details></div>
     {view.error || view.observationError ? <p role="status">{(view.error ?? view.observationError)?.message}<button type="button" onClick={() => void view.refresh()}>重读原对话</button></p> : null}
     {reading ? <ConversationView sessionId={reference.agentSessionId} executionHostId={reference.hostId} records={reading.records} originalRecords={reading.originalRecords}
       page={reading.historyPage ?? null} coverage={reading.timeline.coverage} coverageSummary="阅读范围与来源" showInputSource={false} detailsOnlyMetadata sourceLabelsInDetails
@@ -63,6 +66,7 @@ function EarlierConversation({ source, client, visible, name, geometry, describe
     {view.hasMore ? <button type="button" className="mote-conversation__link" onClick={() => void view.earlier()}>更早的消息</button> : null}
   </section>
 }
+export { EarlierConversation as MoteOriginalConversation }
 function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onExpand, refreshSource, discovering = false, onSummary }: {
   event: MoteWorkEvent; read: MoteWorkReader; visible: boolean; memberName?: ((source: Work) => string) | undefined; onOpen?: ((source: Work) => void) | undefined
   expanded: boolean; onExpand(): void; refreshSource: MoteDialoguePage | null; discovering?: boolean
@@ -174,11 +178,13 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
 }
 
 function EarlierSource({ source, ...props }: Parameters<typeof EarlierConversation>[0]) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false), [original, setOriginal] = useState(false)
   return <details className="mote-conversation__source" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>此前的主对话 <span>{source.reference.hostId} / {source.reference.sessionId}</span></summary>
-    <p className="mote-conversation__muted">此来源未记录主角色的消息切点。展开查看原 Session 全段；轮转后的其他工作也可能在内。</p>
-    <EarlierConversation {...props} source={source} visible={props.visible && open} />
+    <summary>此前的主对话 <span>{moteConversationPeriodLabel(source.period)} · {moteConversationTransitionLabel(source.period)}</span></summary>
+    {source.period ? <><MotePeriodConversation {...props} source={source} visible={props.visible && open} onOpenOriginal={() => setOriginal(true)} />
+      {original && <details open><summary>原 Agent 对话 · 完整 Session</summary><EarlierConversation {...props} source={source} visible={props.visible && open} /></details>}</> : <>
+      <p className="mote-conversation__muted">此来源未记录主角色的消息切点。展开查看原 Session 全段；轮转后的其他工作也可能在内。</p>
+      <EarlierConversation {...props} source={source} visible={props.visible && open} /></>}
   </details>
 }
 
@@ -222,14 +228,14 @@ export function MoteConversationThreads({ page, issue, actor, name, visible, con
   const current = Boolean(main && sameActor(actor, { hostId: main.hostId, agentSessionId: main.sessionId }))
   const sources = useMemo(() => {
     const unique = new Map<string, Source>()
-    for (const link of [...page?.links ?? []].reverse()) if (link.kind === 'main' && !sameActor(actor, { hostId: link.reference.hostId, agentSessionId: link.reference.sessionId })) {
-      const key = JSON.stringify([link.reference.hostId, link.reference.sessionId]); if (!unique.has(key)) unique.set(key, link)
+    for (const link of [...page?.links ?? []].reverse()) if (link.kind === 'main' && (link.period ? link.period.roleRevision !== page?.main.roleRevision : !sameActor(actor, { hostId: link.reference.hostId, agentSessionId: link.reference.sessionId }))) {
+      const key = link.period?.id ?? JSON.stringify([link.roleRevision, link.operationId]); if (!unique.has(key)) unique.set(key, link)
     }
     return [...unique.values()]
   }, [page?.links, actor.hostId, actor.agentSessionId])
   return <div className="mote-conversation" data-mote-discussion={page?.main.identity?.moteId}>
     {issue ? <p role="status" className="mote-conversation__issue">{issue} 原对话与输入仍可用。</p> : null}
-    {current ? sources.map(source => <EarlierSource key={JSON.stringify([source.reference.hostId, source.reference.sessionId])} source={source} client={conversationClient} visible={visible} name={name} geometry={readingGeometry} describeSpeaker={describeSpeaker} mainAvatar={mainAvatar} />) : null}
+    {current ? sources.map(source => <EarlierSource key={source.period?.id ?? JSON.stringify([source.roleRevision, source.operationId])} source={source} client={conversationClient} visible={visible} name={name} geometry={readingGeometry} describeSpeaker={describeSpeaker} mainAvatar={mainAvatar} />) : null}
     {renderCurrent([])}
     {current && page && work ? <InlineWorkThreads page={page} actor={actor} visible={visible} work={work} /> : null}
     {current && page?.next ? <button type="button" className="mote-conversation__link" onClick={onOlder}>更早的主对话来源</button> : null}
