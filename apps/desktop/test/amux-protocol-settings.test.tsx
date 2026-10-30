@@ -57,7 +57,7 @@ it('a new Core contribution automatically reaches the real Settings directory, O
   expect(dom.container.querySelector('[data-protocol-example]')).toBeNull()
 })
 
-it('real settings search locates a new contribution and explicitly opens its actual shared card', async () => {
+it('real settings search reveals the exact contribution and its actual shared card', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const search = connected<HTMLInputElement>('[aria-label="Search settings"]')
@@ -70,8 +70,8 @@ it('real settings search locates a new contribution and explicitly opens its act
   const row = connected<HTMLDetailsElement>('[data-settings-field="catalog-extension-probe"]')
   expect(document.activeElement).toBe(row)
   expect(row.hasAttribute('data-settings-search-highlight')).toBe(true)
-  expect(row.open).toBe(false)
-  expect(row.querySelector('.log-turn')).toBeNull()
+  // Selecting a concrete search target reveals its original disclosure in SettingsPanel.
+  expect(row.open).toBe(true)
   await toggle('catalog-extension-probe', true)
   expect(row.querySelector('.conversation-protocol')?.getAttribute('data-protocol-kind')).toBe('generic')
   expect(row.querySelector('.conversation-protocol dd')?.textContent).toBe('sample')
