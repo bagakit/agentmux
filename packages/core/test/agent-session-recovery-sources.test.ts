@@ -116,5 +116,5 @@ it('rejects malformed recovery sources at the public owner while unrelated healt
   expect(status).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled()
   expect((await f.store.readMetadata(session.agentSessionId))?.continuityOperations).toBeUndefined()
   await expect(f.client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, data: 'healthy raw input', source: 'user' })).resolves.toMatchObject({ runId: session.run.runId })
-  expect(f.inner.kernel.input).toHaveBeenCalledTimes(1); expect(start).not.toHaveBeenCalled()
+  expect(f.rawInput).toHaveBeenCalledTimes(1); expect(start).not.toHaveBeenCalled()
 })
