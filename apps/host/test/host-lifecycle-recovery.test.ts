@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { appendFile, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture.js'
@@ -35,9 +35,9 @@ afterEach(async context => {
 })
 const settle = <T>(promise: Promise<T>) => promise.then(value => ({ value }), error => ({ error }))
 function deferred<T = void>() { let resolve!: (value: T | PromiseLike<T>) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
-const root = resolve(import.meta.dirname, '../../..'), loader = join(import.meta.dirname, 'host-lifecycle-recovery-node-loader.mjs')
+const loader = join(import.meta.dirname, 'host-lifecycle-recovery-node-loader.mjs')
 function sourceChildren() {
-  vi.stubEnv('NODE_OPTIONS', ['--experimental-transform-types', '--import', JSON.stringify(loader)].join(' '))
+  vi.stubEnv('NODE_OPTIONS', ['--import', JSON.stringify(loader)].join(' '))
 }
 async function hostFixture() {
   sourceChildren()
@@ -113,7 +113,7 @@ it('Host lifecycle repeats the same disposal outcome without replaying resource 
 })
 
 it('Host lifecycle repairs only the failed original SSH route and cancels a stale candidate', async () => {
-  sourceChildren(); vi.stubEnv('AGENTMUX_TEST_OWNER_ENTRY', join(import.meta.dirname, 'fixtures/host-lifecycle-runtime.mjs'))
+  sourceChildren(); vi.stubEnv('AGENTMUX_TEST_OWNER_ENTRY', process.env.HOST_LIFECYCLE_OWNER_ENTRY!)
   const f = await headlessFixture(); cleanups.push(() => f.cleanup())
   const seed = await f.client(), run = await seed.createTerminal({ command: process.execPath, args: ['-e', 'process.stdin.pipe(process.stdout)'], workspacePath: f.root, createOperationId: 'original-route-terminal' })
   cleanups.push(() => seed.stopTerminal({ runId: run.runId }))
@@ -122,7 +122,7 @@ it('Host lifecycle repairs only the failed original SSH route and cancels a stal
   vi.stubEnv('PATH', bin + ':' + process.env.PATH); vi.stubEnv('AGENTMUX_FAKE_SSH_HOME', f.root)
   vi.stubEnv('HOST_LIFECYCLE_ROUTE_READY', ready); vi.stubEnv('HOST_CONFIG_SSH_TRACE', trace)
   const command = join(bin, 'amux'), quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
-  await writeFile(command, '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' + quote(join(root, 'packages/core/src/agentmux.ts')) + ' "$@"\n', { mode: 0o700 })
+  await writeFile(command, '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' + quote(process.env.HOST_LIFECYCLE_CLI_ENTRY!) + ' "$@"\n', { mode: 0o700 })
   const local = { id: 'local', kind: 'local', label: 'Local' }, remote = (hostname: string, runtimeId = f.owner.runtimeId) => ({ id: 'remote', kind: 'ssh', label: 'Original route', hostname, remoteCommand: command, remoteSocketPath: f.socketPath, runtimeId })
   const save = async (host?: ReturnType<typeof remote>) => { await writeFile(configPath + '.next', JSON.stringify({ hosts: [local, ...(host ? [host] : [])] })); await rename(configPath + '.next', configPath) }
   const observations = async () => { try { return (await readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) } catch { return [] } }

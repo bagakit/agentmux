@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { lifecycleRecoveryMutations } from '../test/host-lifecycle-recovery-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..'), directory = join(root, '.local/state/mobile-independent-host/host-lifecycle-recovery')
 await mkdir(directory, { recursive: true })
@@ -12,6 +12,7 @@ const harnessPaths = ['apps/host/scripts/verify-host-lifecycle-recovery.mjs', 'a
   'apps/host/test/fixtures/host-lifecycle-runtime.mjs', 'apps/host/test/fixtures/host-lifecycle-ssh.mjs', 'apps/host/test/fixtures/host-configuration-ssh.mjs',
   'packages/core/test/helpers/public-rpc-owner.ts', 'packages/core/test/helpers/headless-runtime-fixture.ts', 'packages/core/test/helpers/fixture-values.ts',
   'packages/core/test/helpers/workspace-source-export.mjs',
+  'packages/core/test/helpers/private-node-source-bundle.mjs',
   'packages/core/test/fixtures/fake-system-ssh.mjs', 'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts',
   'package.json', 'pnpm-lock.yaml', ...['core', 'identity', 'relay', 'client-ui', 'capsule', 'connectors', 'demand', 'diagnostic-evidence'].map(name => 'packages/' + name + '/package.json'),
   'apps/host/package.json', `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`, `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`]
@@ -41,12 +42,25 @@ try {
     const failures = rows.filter(value => value.status === 'failed'), passed = rows.filter(value => value.status === 'passed')
     const evaluations = (await readFile(loaded, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line))
     const observations = (await readFile(facts, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const bundles = await Promise.all(JSON.parse(await readFile(join(generated, 'node-bundles.json'), 'utf8')).map(async value => {
+      const bytes = await readFile(value.provenance), record = JSON.parse(bytes)
+      assert.equal(record.schema, 'agentmux.private-node-source-bundle.v1')
+      assert.equal(record.file, relative(root, value.file))
+      assert.equal(record.bundleSHA256, sha(await readFile(value.file)), 'The private Node artifact must match its actual compilation provenance')
+      assert.ok(record.sources.length > 0)
+      return { name: value.name, provenanceSHA256: sha(bytes), ...record }
+    }))
+    assert.deepEqual(bundles.map(value => value.name), ['owner', 'listener', 'cli'])
+    for (const row of evaluations.filter(value => value.surface === 'node-process')) {
+      assert.ok(bundles.some(value => value.sources.some(source => source.path === row.path && source.originalSHA256 === row.originalSHA256)),
+        'The actual Node evaluation must belong to the recorded original source bundle: ' + row.path)
+    }
     const cleanup = observations.filter(value => Object.hasOwn(value, 'cleanup'))
     receipt.runs.push({ label, code: run.code, signal: run.signal, passed: report.numPassedTests, failed: report.numFailedTests,
       selected: passed.length + failures.length, collected: report.numTotalTests, skipped: report.numPendingTests,
       evaluations: [...new Map(evaluations.map(value => [JSON.stringify(value), value])).values()], observations,
       failures: failures.map(value => ({ name: value.fullName, messages: value.failureMessages })), reportSHA256: sha(await readFile(result)),
-      generatedIdentitySHA256: sha(await readFile(join(generated, 'identity-runtime-source.mjs'))) })
+      generatedIdentitySHA256: sha(await readFile(join(generated, 'identity-runtime-source.mjs'))), bundles })
     await save()
     assert.equal(run.signal, null); assert.ok(rows.length > 0); assert.equal(rows.length, report.numTotalTests)
     assert.equal(passed.length, report.numPassedTests); assert.equal(failures.length, report.numFailedTests)
@@ -71,8 +85,15 @@ try {
     }
     process.stdout.write(JSON.stringify({ label, passed: report.numPassedTests, failed: report.numFailedTests }) + '\n')
   }
-  receipt.inputs = await hashes([...new Set(receipt.runs.flatMap(run => run.evaluations.map(value => value.path)))])
+  receipt.inputs = await hashes([...new Set(receipt.runs.flatMap(run => [
+    ...run.evaluations.map(value => value.path), ...run.bundles.flatMap(bundle => bundle.sources.map(value => value.path))
+  ]))])
   for (const run of receipt.runs) for (const row of run.evaluations) assert.equal(row.originalSHA256, receipt.inputs[row.path], 'An evaluated original input changed: ' + row.path)
+  for (const run of receipt.runs) for (const bundle of run.bundles) {
+    for (const source of bundle.sources) assert.equal(source.originalSHA256, receipt.inputs[source.path], 'A private bundle source changed: ' + source.path)
+    assert.equal(bundle.bundleSHA256, sha(await readFile(join(root, bundle.file))), 'A private Node artifact changed')
+    assert.equal(bundle.provenanceSHA256, sha(await readFile(join(root, bundle.file + '.provenance.json'))), 'A private Node compilation record changed')
+  }
   assert.deepEqual(await hashes(harnessPaths), receipt.harness, 'The test harness inputs changed')
   receipt.passed = true; receipt.unchanged = true; await save()
   await writeFile(join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
