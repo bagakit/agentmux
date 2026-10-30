@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fixtureEpoch } from './helpers/fixture-values.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -21,6 +21,7 @@ import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { AgentMuxError } from '../src/errors.js'
 import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import { defineRun } from '@ctxmux/sdk'
+import { serializeMoteQuickMode } from '../../../apps/host/src/mote-model.js'
 
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -478,4 +479,87 @@ it('the shared original-record outcome requires the complete terminal input and 
   refused.terminalPromptSubmission!.payload.acknowledged=false;refused.terminalPromptSubmission!.submit.acknowledged=false
   expect(agentPromptSubmissionOutcome(refused)).toBe('not-applied')
   expect(agentPromptSubmissionOutcome(null)).toBe('unknown')
+})
+
+function mainEntry(main: import('../src/mote-dialogue.js').MoteMainSnapshot, operationId: string) {
+  if (!main.current || !main.roleRevision) throw Error('Expected nonempty original main role')
+  return { target:main.target, expectedRoleRevision:main.roleRevision, reference:main.current, expectedRun:{runId:'run-primary'}, operationId }
+}
+
+it('explicit main entry restores the exact original Session once without input and retains its full admission after a role switch',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-original'),runtime=endedMainRuntime(f)
+  const ensure=vi.spyOn(f.client,'ensureAgentContinuity')
+  expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual({operation:null})
+  const accepted=await f.rpc.call('space.mote.dialogue.recovery.ensure',request)
+  expect(accepted.operation,JSON.stringify(accepted)).toMatchObject({kind:'resumed',operationId:request.operationId,agentSessionId:'primary',previousRun:request.expectedRun,newRun:runtime.recovered,
+    moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}})
+  expect(accepted.operation?.launchInput).toBeUndefined();expect(accepted.operation?.messageInput).toBeUndefined()
+  expect(ensure).toHaveBeenCalledTimes(1);expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([])
+  await switchMain(f,'member','switch-after-entry')
+  expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(accepted)
+  expect(await f.rpc.call('space.mote.dialogue.recovery.ensure',request)).toEqual(accepted)
+  expect(runtime.started).toHaveLength(1);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  const retained=await f.client.readAgentSession('primary')
+  expect(retained?.continuityOperations?.[request.operationId]?.moteMainEntry).toEqual(accepted.operation?.moteMainEntry)
+})
+
+it('explicit main entry rejects stale full references and role generations before any original Start',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-stale'),runtime=endedMainRuntime(f)
+  for(const stale of [{...request,expectedRoleRevision:'stale-role'},{...request,reference:{...request.reference,regionId:'another-region'}}])
+    await expect(f.rpc.call('space.mote.dialogue.recovery.ensure',stale)).rejects.toMatchObject({code:'MOTE_MAIN_CHANGED'})
+  await switchMain(f,'member','switch-before-entry')
+  await expect(f.rpc.call('space.mote.dialogue.recovery.ensure',request)).rejects.toMatchObject({code:'MOTE_MAIN_CHANGED'})
+  expect(runtime.started).toEqual([]);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('explicit main entry retains an unknown original Start for inspect and never starts again on another entry',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-unknown'),runtime=endedMainRuntime(f,{lostStart:true})
+  const ensure=vi.spyOn(f.client,'ensureAgentContinuity'),first=await f.rpc.call('space.mote.dialogue.recovery.ensure',request)
+  expect(first.operation).toMatchObject({operationId:request.operationId,reason:'operation-unconfirmed'})
+  expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(first)
+  expect(await f.rpc.call('space.mote.dialogue.recovery.ensure',request)).toEqual(first)
+  expect(await f.rpc.call('space.mote.dialogue.recovery.ensure',{...request,operationId:'another-entry'})).toEqual(first)
+  expect(ensure).toHaveBeenCalledTimes(1);expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([])
+})
+
+it('explicit main entry keeps stopped or disabled original execution and its healthy manual capabilities',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-disabled'),runtime=endedMainRuntime(f)
+  const read=f.quick.read.bind(f.quick)
+  vi.spyOn(f.quick,'read').mockImplementation(async input=>{const original=await read(input);return {...original,defaults:{...original.defaults,presence:{enabled:false,intervalMs:1800000}}}})
+  await expect(f.rpc.call('space.mote.dialogue.recovery.ensure',request)).rejects.toMatchObject({code:'MOTE_MAIN_RECOVERY_PAUSED'})
+  expect((await f.rpc.call('space.mote.dialogue.read',{target:f.target})).main.current).toEqual(main.current)
+  expect(runtime.started).toEqual([]);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('explicit main entry is discoverable through actual CLI and rejects managed-agent wake authority',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-cli'),runtime=endedMainRuntime(f)
+  const cli=async(args:string[],env:Record<string,string>,input?:unknown)=>await runSourceObjectCli(['--endpoint','unix://'+join(f.root,'dialogue.sock'),...args],objectCliEnvironment(f.root,env),input?JSON.stringify(input):'',30000,new URL('./fixtures/a2a-resumed-inbox/source-loader.mjs',import.meta.url))
+  // Original Unix human transport: no Agent capability or environment impersonation.
+  const guide=await cli(['mote','--skill'],{})
+  expect(guide.code,guide.stderr).toBe(0);expect(guide.stdout).toContain('space mote dialogue recovery ensure');expect(guide.stdout).toContain('space mote dialogue recovery inspect')
+  const help=await cli(['space','mote','dialogue','recovery','ensure','--help'],{})
+  expect(help.code,help.stderr).toBe(0);expect(help.stdout).toContain('expectedRoleRevision');expect(help.stdout).toContain('--input')
+  const observed=await cli(['space','mote','dialogue','recovery','inspect','--input','-'],{},request)
+  expect(observed.code,observed.stderr).toBe(0);expect(JSON.parse(observed.stdout).result).toEqual({operation:null})
+  const denied=await cli(['space','mote','dialogue','recovery','ensure','--input','-'],{AGENTMUX_AGENT_SESSION_ID:'primary',AGENTMUX_AGENT_CAPABILITY:f.capability},request)
+  expect(denied.code).not.toBe(0);expect(denied.stdout+denied.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  const result=await cli(['space','mote','dialogue','recovery','ensure','--input','-'],{},request)
+  expect(result.code,result.stderr).toBe(0);expect(JSON.parse(result.stdout).result.operation.kind).toBe('resumed')
+  expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([])
+})
+
+
+it('explicit main entry qualifies the resource Host and restores through the actual other Host SDK without retargeting input',async()=>{
+  const f=await fixture(),before=await f.main.readCurrentMoteMain(f.target),reference={...before.current!,hostId:'execution-host'}
+  await writeFile(f.motePath,serializeMoteQuickMode('',{conversation:reference}))
+  const main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-two-hosts'),runtime=endedMainRuntime(f),ensure=vi.spyOn(f.client,'ensureAgentContinuity'),hostedEnsure=vi.spyOn(f.hosted,'ensureAgentContinuity')
+  const server=new AgentMuxControlServer({socketPath:join(f.root,'two-host-entry.sock'),coreClients:()=>[{hostId:'local',client:f.client},{hostId:'execution-host',client:f.hosted}],moteDialogue:f.dialogue,moteQuickPreferences:f.quick})
+  await server.start();closes.push(()=>server.stop())
+  const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}});closes.push(()=>rpc.dispose())
+  expect(await rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual({operation:null})
+  const result=await rpc.call('space.mote.dialogue.recovery.ensure',request)
+  expect(result.operation).toMatchObject({kind:'resumed',moteMainEntry:{target:{expectedResource:{hostId:'local'}},reference:{hostId:'execution-host',sessionId:'primary'}},newRun:runtime.recovered})
+  expect(ensure).toHaveBeenCalledTimes(1);expect(hostedEnsure).toHaveBeenCalledTimes(1);expect(ensure.mock.calls[0]![0]).toMatchObject({agentSessionId:'primary',moteMainEntry:{reference,target:f.target}})
+  expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([])
+  expect(await rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(result)
 })
