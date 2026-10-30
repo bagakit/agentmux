@@ -107,6 +107,8 @@ it('healthy transport and one refusal stay separate and retained source failure 
  // This typed single-message refusal is a presentation leaf, not a fake SDK effect.
  const refusal=connectorGroupSummary({...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:[{ingressId:'refused-message',sourceConnectionId:f.binding.connectionId,kind:'message',state:'refused',code:'INGRESS_CONTENT_UNSUPPORTED',codeRecorded:true,bindingId:f.binding.bindingId,bindingRevision:f.binding.revision,targetConnectionId:f.binding.connectionId,scope:'current-binding',inputOperationId:null,recording:{state:'refused',code:'INGRESS_CONTENT_UNSUPPORTED'},coreStatus:null,coreObservation:'not-started',nativeAdoption:null,waiting:null}]}}})
  expect(refusal.incoming.value).toBe('Message type not supported');expect(refusal.incoming.receiver).toBe('Receiver connected');expect(refusal.problems.some(p=>p.kind==='receiver-stopped')).toBe(false)
+ const intake=connectorGroupSummary({...report,connection:{...report.connection,value:{...report.connection.value!,intake:{state:'unknown',reason:'check-failed'}}}})
+ expect(intake.incoming.value).toBe('Inputs need checking');expect(intake.incoming.receiver).toBe('Receiver connected');expect(intake.problems.some(p=>p.kind==='receiver-stopped')).toBe(false)
  const unknown=connectorGroupSummary({...report,connection:{...report.connection,issue:'read-unavailable',retained:true}})
  expect(unknown.incoming.value).toBe('Connection unconfirmed');expect(unknown.incoming.tone).toBe('muted');f.unchanged()
 })
@@ -122,6 +124,29 @@ it('a ready receiver with an unconfirmed transport observation never claims auto
   expect(dom.container.querySelector('[data-receiver-action="recover"]')).toBeNull()
  }
  expect(f.wire.sockets).toHaveLength(1);f.unchanged()
+})
+it('a known original non-scheduled decision cannot permanently gate an ended receiver, while an unknown reply retains its ID',async()=>{
+ const f=await fixture(true),record=await f.record(),report=await readGroupDiagnosis((method,params)=>api.connections.call(method,params,f.target),groupTarget(f.binding))
+ const original={operationId:'known-original-decision',connectionId:f.binding.connectionId,expectedRevision:record.revision,receiverRef:record.receiver!.ref}
+ useAppStore.setState({connectorRoomIntents:{[original.operationId]:{method:'connection.receiver.recover',input:original,target:groupTarget(f.binding),hostingTarget:f.target,phase:'may-have-dispatched'}}})
+ const actual=f.source.getMockImplementation()!
+ // The actual public route still checks identity; typed returned decisions here
+ // qualify the UI branch only. The real Host effect is covered by the lost-reply case.
+ for(const disposition of [null,'disabled','unconfirmed','joined','scheduled'] as const){
+  f.source.mockImplementation(async(method,params,target)=>{const result=await actual(method,params,target);return method==='connection.receiver.inspect'?{...result,operation:disposition?{operationId:original.operationId,connectionId:original.connectionId,configurationRevision:original.expectedRevision,receiverRef:original.receiverRef,disposition}:null}:result})
+  await dom.render(null);await dom.render(<ConnectorReceiverControl binding={f.binding} connection={record} observed={report.connection} hostingTarget={f.target} onRefresh={()=>{}}/>)
+  await wait(()=>expect(f.calls.filter(c=>c.method==='connection.receiver.inspect').length).toBeGreaterThan(0))
+  await wait(()=>expect(!!dom.container.querySelector('[data-receiver-action="recover"]')).toBe(disposition!==null&&disposition!=='scheduled'))
+ }
+ expect(f.calls.filter(c=>c.method==='connection.receiver.recover')).toHaveLength(0)
+ f.source.mockImplementation(async(method,params,target)=>{const result=await actual(method,params,target);return method==='connection.receiver.inspect'?{...result,operation:{operationId:original.operationId,connectionId:original.connectionId,configurationRevision:original.expectedRevision,receiverRef:original.receiverRef,disposition:'unconfirmed'}}:result})
+ await dom.render(null);await dom.render(<ConnectorReceiverControl binding={f.binding} connection={record} observed={report.connection} hostingTarget={f.target} onRefresh={()=>{}}/>)
+ await wait(()=>expect(dom.container.querySelector('[data-receiver-action="recover"]')).not.toBeNull())
+ f.wire.state.endpointCode=0;await dom.click('[data-receiver-action="recover"]')
+ await wait(()=>expect(f.calls.filter(c=>c.method==='connection.receiver.recover')).toHaveLength(1))
+ const next=f.calls.find(c=>c.method==='connection.receiver.recover')!
+ expect(next.params.operationId).not.toBe(original.operationId);expect(next.params).toEqual({...original,operationId:next.params.operationId});expect(next.target).toEqual(f.target)
+ f.unchanged()
 })
 it('a healthy receiver preserves the current original Core wait and its existing input action',async()=>{
  const f=await fixture()

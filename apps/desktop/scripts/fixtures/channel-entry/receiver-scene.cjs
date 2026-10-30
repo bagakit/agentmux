@@ -5,8 +5,8 @@ module.exports=async({win,read,until,click,press,settle,layout,open,close,captur
  const editor='[data-workbench-region-id="channel-preview-region"] [data-agent-composer] [role="textbox"][aria-label="Message Agent"]'
  await until('document.querySelector('+JSON.stringify(editor)+')')
  await click(editor);win.webContents.selectAll();await until('getSelection().toString()==="Keep this original research draft."')
- await win.webContents.insertText('Keep this original research draft.');win.webContents.selectAll()
- await until('getSelection().toString()==="Keep this original research draft."')
+ await win.webContents.insertText('Keep this original research draft.');await settle()
+ await until('document.querySelector('+JSON.stringify(editor)+').textContent==="Keep this original research draft."')
  const beforeKey=await read('window.__connectionsTrustedEvents.length')
  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Left'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Left'});await settle()
  const events=await read('window.__connectionsTrustedEvents.slice('+beforeKey+')')
