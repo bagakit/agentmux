@@ -16,7 +16,9 @@ const sources = ['apps/mobile/src/connection/MobileConnectionRoot.tsx', 'apps/mo
   'apps/mobile/test/mobile-recovery-connection.test.tsx', 'apps/mobile/test/mobile-update-connection.test.tsx']
 const harness = ['apps/mobile/scripts/verify-mobile-recovery-usability.mjs', 'apps/mobile/test/mobile-recovery-usability.config.mts',
   'apps/mobile/test/mobile-recovery-mutations.mjs', 'apps/mobile/test/mobile-web.config.mts', 'apps/mobile/test/device-locks.ts',
-  'apps/mobile/test/conversation-fixture.tsx', 'apps/mobile/src/mobile.css', 'packages/core/package.json', 'apps/host/package.json', 'packages/diagnostic-evidence/package.json',
+  'apps/mobile/test/conversation-fixture.tsx', 'apps/mobile/src/mobile.css', 'packages/core/test/helpers/workspace-source-export.mjs',
+  ...['core', 'identity', 'relay', 'client-ui', 'layout', 'capsule', 'connectors', 'demand', 'diagnostic-evidence', 'git'].map(name => 'packages/' + name + '/package.json'),
+  'apps/host/package.json', 'apps/mobile/package.json', 'apps/desktop/package.json',
   'packages/identity/src/index.ts', 'packages/identity/src/runtime-entry.ts', 'packages/identity/scripts/runtime-bundle.mjs']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const identityModuleSHA256 = hash(`export const identityRuntimeSource = ${JSON.stringify((await bundleIdentityRuntime()).source)};\n`)

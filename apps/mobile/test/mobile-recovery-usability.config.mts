@@ -4,6 +4,7 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import base from './mobile-web.config.mts'
 import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtime-bundle.mjs'
+import { workspaceSourceExport } from '../../../packages/core/test/helpers/workspace-source-export.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), mutant = process.env.MOBILE_RECOVERY_MUTANT, loaded = process.env.MOBILE_RECOVERY_LOADED
 import { recoveryMutations } from './mobile-recovery-mutations.mjs'
@@ -11,17 +12,17 @@ const connection = 'apps/mobile/src/connection/MobileConnectionRoot.tsx', creati
 if (mutant && !Object.hasOwn(recoveryMutations, mutant)) throw Error('Unknown original Mobile recovery mutation')
 const variant = mutant ? recoveryMutations[mutant] : undefined
 const identityModule = `export const identityRuntimeSource = ${JSON.stringify((await bundleIdentityRuntime()).source)};\n`
-const hostAliases = Object.entries(JSON.parse(readFileSync(resolve(root, 'apps/host/package.json'), 'utf8')).exports).map(([key, entry]) => ({
-  find: '@agentmux/host' + (key === '.' ? '' : key.slice(1)), replacement: resolve(root, 'apps/host', (entry as { import: string }).import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'))
-}))
 const observed = new Set([connection, creation, 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/mobile-web/update-safety.ts',
   'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-value.ts', 'packages/core/src/public-rpc-service.ts',
   'packages/diagnostic-evidence/src/index.ts', 'packages/diagnostic-evidence/src/protocol.ts', 'packages/diagnostic-evidence/src/query.ts',
   'apps/desktop/src/renderer/src/lib/space-agent-control.ts', 'apps/mobile/test/mobile-agent-create.test.tsx', 'apps/mobile/test/mobile-recovery-connection.test.tsx', 'apps/mobile/test/mobile-update-connection.test.tsx'])
 export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/mobile-recovery-usability', mutant ?? 'baseline'),
-  resolve: { ...base.resolve, alias: [{ find: '@agentmux/diagnostic-evidence', replacement: resolve(root, 'packages/diagnostic-evidence/src/index.ts') }, ...hostAliases, ...(base.resolve?.alias as { find: string; replacement: string }[]).map(entry => entry.find === '@agentmux/identity/runtime-source' ? { ...entry, replacement: 'virtual:mobile-recovery-identity-source' } : entry)].sort((a, b) => b.find.length - a.find.length) },
+  resolve: { ...base.resolve, alias: (base.resolve?.alias as { find: string; replacement: string }[]).map(entry => entry.find === '@agentmux/identity/runtime-source' ? { ...entry, replacement: 'virtual:mobile-recovery-identity-source' } : entry) },
   plugins: [...(base.plugins ?? []), { name: 'actual-mobile-recovery-input', enforce: 'pre',
-    resolveId(id) { if (id === 'virtual:mobile-recovery-identity-source') return '\0' + id },
+    resolveId(id) {
+      if (id === 'virtual:mobile-recovery-identity-source' || id === '@agentmux/identity/runtime-source') return '\0virtual:mobile-recovery-identity-source'
+      return workspaceSourceExport(root, id)
+    },
     load(id) {
       if (id !== '\0virtual:mobile-recovery-identity-source') return
       const row = { path: 'virtual:mobile-recovery-identity-source', generated: true, loadedSHA256: createHash('sha256').update(identityModule).digest('hex') }
