@@ -15,12 +15,13 @@ import { recoverMobileAgent } from './conversation/mobile-agent-recovery'
 import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { mobileMoteInputSource } from './conversation/mote-input-source'
+import { MobileMoteThreads } from './navigation/MobileMoteThreads'
 import { MobileMoteTeamPanel, MobileMoteTeamSummary, mobileMoteRecipient } from './navigation/MobileMoteTeam'
 import { useMobileMoteTeam } from './navigation/use-mobile-mote-team'
 import { mobileMoteMainIdentity, mobileMoteMemberName, type MobileMoteMember } from './navigation/mobile-mote-team'
 import { mobileMoteMemberIdentity } from './navigation/mobile-mote-team'
 import type { MobileMoteWork } from './conversation/MobileMoteConversation'
-import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
+import { isPrimaryMoteSpace, type MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import { useMoteDialogue, type MoteDialogueReader } from '@agentmux/client-ui/use-mote-dialogue'
 
 import { useHostAppearance } from './appearance/useHostAppearance'
@@ -186,10 +187,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const navigationRevision = useRef(0)
   const originalConnection = useRef({ client, connected }); originalConnection.current = { client, connected }
   // A direct Agent navigation stays direct until the user returns to the main conversation.
-  const [moteDirectAgent, setMoteDirectAgent] = useState(false)
+  const [moteDirectAgent, setMoteDirectAgent] = useState(initial.current.presentation?.moteView?.directAgent ?? false)
+  const [moteView, setMoteView] = useState<Pick<NonNullable<MobilePresentationRoute['moteView']>, 'spaceId' | 'section' | 'detail'> | null>(initial.current.presentation?.moteView ?? null)
   const openSession = useCallback((id: string, identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
-    if (identity.mote) setRecentMoteSpaceId(identity.mote.spaceId)
+    if (identity.mote) { setRecentMoteSpaceId(identity.mote.spaceId); setMoteView({ spaceId: identity.mote.spaceId, section: 'threads', detail: true }) }
     setObjectIdentity(identity); setIdentityRecipient(id); setShowGoalWork(false); setMoteDirectAgent(true)
     setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' }))
     setShowSession(true)
@@ -197,6 +199,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const openMainAgent = useCallback((id: string, identity: MobileObjectIdentity, hostId: string) => {
     openSession(id, identity)
     setMoteDirectAgent(false)
+    if (identity.mote) setMoteView({ spaceId: identity.mote.spaceId, section: 'discussion', detail: false })
     const revision = navigationRevision.current, source = client
     if (!source || !connected) { setNotice('连接暂不可用；主 Agent 的原身份、历史与草稿保留，可连接后显式恢复。'); return }
     void recoverMobileAgent({ client: source, agentSessionId: id, expectedHostId: hostId, mode: 'open',
@@ -213,6 +216,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     setSecondary('topics')
   }
   const openPrimaryWorkface = (value: MobilePrimaryWorkface) => {
+    if (value === 'mote') { void enterMote(recentMoteSpaceId); return }
     navigationRevision.current += 1
     if (value === 'goals' || value === 'topics') setSecondary(value)
     else { setHome(value); setSecondary(null) }
@@ -255,7 +259,34 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     startupProfile.current = null
     setProfileIdentity(identity); setProfileSourcePath(null); setSheet('identity')
   }, [])
-  const selectMote = useCallback((id: string) => { navigationRevision.current += 1; setRecentMoteSpaceId(id) }, [])
+  // An explicit Mote entry resolves its saved Main; directory refreshes never navigate.
+  const enterMote = useCallback(async (spaceId: string | null) => {
+    const revision = ++navigationRevision.current, source = client
+    const runtime = source?.runtimeOwnerIdentity?.(), recordId = getDeviceWorkface().recordIdentity()
+    setHome('mote'); setSecondary(null); setShowSession(false); setShowGoalWork(false)
+    if (spaceId) setRecentMoteSpaceId(spaceId)
+    const isCurrent = () => {
+      const current = source?.runtimeOwnerIdentity?.()
+      return navigationRevision.current === revision && originalConnection.current.client === source && originalConnection.current.connected &&
+        current?.runtimeId === runtime?.runtimeId && current?.ownerInstanceId === runtime?.ownerInstanceId && getDeviceWorkface().recordIdentity() === recordId
+    }
+    if (!source?.forwardRpc || !connected) { setNotice('原 Mote 主对话暂未核对；原引用与草稿保留，可从 Mote 目录继续原对话或查看配置。'); return }
+    try {
+      const { catalog } = await source.forwardRpc('space.ls', { target: spaceId ? { spaceId } : {}, presentation: true })
+      if (!isCurrent()) return
+      const owners = catalog.spaces.filter(owner => owner.kind === 'mote' && (spaceId ? owner.spaceId === spaceId : isPrimaryMoteSpace(owner)))
+      if (owners.length !== 1) { setNotice('原 Mote 身份尚未唯一确认；原对话与草稿保留，请在 Mote 目录选择原对象。'); return }
+      const owner = owners[0]!
+      // This entry is for one exact object; an unbound Mote cannot borrow another Main.
+      const target = mobileChatStart({ ...catalog, spaces: [owner] }, owner.spaceId)
+      const facts = target.identity?.mote?.facts
+      const main = facts?.quickMode.status === 'saved' ? facts.quickMode.defaults.conversation : undefined
+      if (target.issue) setNotice(target.issue)
+      if (target.sessionId && target.identity && main) openMainAgent(target.sessionId, target.identity, main.hostId)
+      else if (target.identity) openProfile(target.identity)
+    } catch (error) { if (isCurrent()) setNotice(`原 Mote 主对话未能核对：${error instanceof Error ? error.message : String(error)}。原引用与草稿保留，可从原目录重试。`) }
+  }, [client, connected, openMainAgent, openProfile])
+  const selectMote = useCallback((id: string) => { void enterMote(id) }, [enterMote])
   const [profileBack, setProfileBack] = useState<(() => void) | null>(null)
   const [spatialBack, setSpatialBack] = useState<(() => void) | null>(null)
   const [topicsBack, setTopicsBack] = useState<(() => void) | null>(null)
@@ -313,7 +344,8 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       if (target.identity) { setObjectIdentity(target.identity); setIdentityRecipient(target.sessionId) }
       if (!target.sessionId) return
       chatStartDone.current = true
-      setHome('mote'); setSecondary(null)
+      setHome('mote'); setSecondary(null); setMoteDirectAgent(false)
+      if (target.identity?.mote) setMoteView({ spaceId: target.identity.mote.spaceId, section: 'discussion', detail: false })
       setWorkface(value => ({ ...value, selectedSessionId: target.sessionId, panel: 'conversation' }))
       setShowSession(true); setShowGoalWork(false)
     }).catch(error => { if (isCurrent()) setChatStartIssue(error instanceof Error ? error.message : String(error)) })
@@ -350,6 +382,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
   const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
     ...(recentMoteSpaceId ? { recentMoteSpaceId } : {}),
+    ...(moteView ? { moteView: { ...moteView, directAgent: moteDirectAgent } } : {}),
     ...(initial.current.presentation?.goals || goalsContext.goalId !== null ? { goals: goalsContext } : {}),
     ...(initial.current.presentation?.survey !== undefined || surveyContext.zoneId !== null ? { survey: surveyContext } : {}),
     ...(initial.current.presentation?.spatial !== undefined || spatialContext.spaceId !== null ? { spatial: spatialContext } : {}),
@@ -392,7 +425,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
 
   const exposed = sheet === null
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
-  const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'
+  const moteSection = moteView && moteView.spaceId === objectIdentity?.mote?.spaceId ? moteView.section : moteDirectAgent ? 'threads' : 'discussion'
+  const threadDetail = moteSection === 'threads' && moteView && moteView.spaceId === objectIdentity?.mote?.spaceId && moteView.detail
+  const threadsVisible = Boolean(moteConversation && moteSection === 'threads' && !threadDetail)
+  const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal' && !threadsVisible
   const moteTitle = objectIdentity?.mote?.name ?? 'Mote 名称未确认'
   const teamSpaceId = identityRecipient === workface.selectedSessionId ? objectIdentity?.mote?.spaceId ?? null : null
   const moteContent = identityRecipient === workface.selectedSessionId ? objectIdentity?.mote?.contentReference ?? objectIdentity?.mote?.facts?.content : undefined
@@ -406,7 +442,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     return client.forwardRpc('space.mote.dialogue.read', input)
   }, [client])
   const moteDialogue = useMoteDialogue(client ? readMoteDialogue : undefined, moteTarget,
-    connected && (exposed && conversationVisible || sheet === 'team'), teamReading.team?.facts?.quickMode.status === 'saved' ? teamReading.team.facts.quickMode.version : undefined)
+    connected && (exposed && (conversationVisible || threadsVisible) || sheet === 'team'), teamReading.team?.facts?.quickMode.status === 'saved' ? teamReading.team.facts.quickMode.version : undefined)
   const team = useMemo(() => {
     const original = teamReading.team
     if (!original || !moteTarget) return original
@@ -428,7 +464,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     openSession(id, identity); setShowGoalWork(work); setSheet(null)
   }
   const returnToMoteMain = (original?: MoteDefaultConversation) => {
-    const main = original ?? moteDialogue.page?.main.current ?? team?.main?.reference
+    const main = original ?? (moteDialogue.page?.main.status === 'ready' && !moteDialogue.unavailable ? moteDialogue.page.main.current : team?.main?.reference)
     const identity = team && main ? mobileMoteMainIdentity(original ? { ...team, main: { reference: original, confirmed: true } } : team)
       : original && objectIdentity?.mote && identityRecipient === workface.selectedSessionId
         ? { name: '原主对话', project: objectIdentity.project, mote: objectIdentity.mote } : undefined
@@ -436,7 +472,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     let current
     try { current = client?.agentSession(main.sessionId) } catch { /* Keep the saved original target, rather than selecting another Agent. */ }
     if (!current || current.agentSessionId !== main.sessionId || current.hostId !== main.hostId) { setNotice('当前连接尚未匹配原主对话；已有引用和当前讨论保留，请刷新或接回对应的工作环境。'); return }
-    openSession(main.sessionId, identity); setMoteDirectAgent(false); setSheet(null)
+    openSession(main.sessionId, identity); setMoteDirectAgent(false); setMoteView({ spaceId: identity.mote!.spaceId, section: 'discussion', detail: false }); setSheet(null)
   }
   const workMember = (source: MobileMoteWork) => team?.members.find(member => member.hostId === source.origin.hostId && member.sessionId === source.origin.recipientSessionId)
   const openMoteWork = (source: MobileMoteWork) => {
@@ -467,12 +503,17 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         {showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible} />{terminalToggle}<IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
-    {workspaceVisible && showSession && teamSpaceId && <MobileMoteTeamSummary team={team} recipient={sessionTitle ?? '收件人名称未确认'}
+    {workspaceVisible && showSession && teamSpaceId && !moteConversation && <MobileMoteTeamSummary team={team} recipient={sessionTitle ?? '收件人名称未确认'}
       role={moteTarget ? !moteDialogue.unavailable && moteDialogue.page?.main.status === 'ready' && moteDialogue.page.main.current && selected?.hostId
         ? moteDialogue.page.main.current.sessionId === workface.selectedSessionId && moteDialogue.page.main.current.hostId === selected.hostId ? '主 Agent' : '成员'
         : '主角色待核对' : mobileMoteRecipient(team, workface.selectedSessionId, selected?.hostId)} issue={teamReading.issue}
       onOpen={() => setSheet('team')} onMain={() => returnToMoteMain()}
       showMain={Boolean(team?.main?.confirmed && (team.main.reference.sessionId !== workface.selectedSessionId || team.main.reference.hostId !== selected?.hostId))} />}
+    {moteConversation && teamSpaceId ? <nav className="mobile-mote-navigation" aria-label="Mote 导航" role="tablist">
+      <button type="button" role="tab" aria-selected={moteSection === 'discussion'} onClick={() => returnToMoteMain()}>Discussion</button>
+      <button type="button" role="tab" aria-selected={moteSection === 'threads'} onClick={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) }}>Threads</button>
+      <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" onClick={() => setSheet('team')}>团队{team?.members.some(member => member.request) ? ' · 需要你' : ''}</button>
+    </nav> : null}
     <main className="mobile-main" tabIndex={-1}>
       {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
@@ -507,7 +548,13 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>
         <MobileGoalWork loadWhen={workspaceVisible && showSession && showGoalWork} onLoadReturn={returnToConversation} client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && showSession && showGoalWork} />
       </section>
-      <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal'}>
+      <section className="mobile-mote-threads-panel" hidden={!threadsVisible}>
+        <MobileMoteThreads client={client} dialogue={moteDialogue} team={team} issue={teamReading.issue} visible={exposed && threadsVisible}
+          currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId} onOpen={openTeamMember} onWork={openMoteWork}
+          onMain={() => returnToMoteMain()} onConfigure={() => { if (objectIdentity) openProfile(objectIdentity) }}
+          onRefresh={() => { teamReading.refresh(); moteDialogue.refresh() }} />
+      </section>
+      <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal' || threadsVisible}>
         {!workface.selectedSessionId && <div className="mobile-chat-start">
           <ThemeObjectConversationIcon size={24} /><h1>继续对话</h1>
           <p>{chatStartIssue ?? '正在找回原对话…'}</p>
@@ -517,8 +564,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartDone.current = false; chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
         </div>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
+          {moteConversation && threadDetail ? <div className="mobile-mote-thread-return"><span>原 Agent 对话 · {sessionTitle ?? '成员'}</span><button type="button" onClick={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId!, section: 'threads', detail: false }) }}>返回 Threads</button></div> : null}
           <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} moteMemberName={moteMemberName} moteTarget={moteTarget} moteDialogue={moteDialogue} moteDirectAgent={moteDirectAgent} moteName={moteTitle} moteAppearance={team?.appearance ?? objectIdentity?.mote?.appearance}
             moteWorkMemberName={source => workMember(source)?.name ?? source.origin.recipientSessionId} onOpenMoteWork={openMoteWork} onReturnMoteMain={returnToMoteMain}
+            onShowMoteThreads={() => { if (teamSpaceId) { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) } }}
             moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
             onShowGoals={trigger => { goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true) }} openHttpLink={openBrowserHttpLink} />
         </div>
@@ -585,7 +634,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
-          <MobileMoteProfile loadWhen={sheet === 'identity'} loadingReturn={false} onLoadReturn={requestBack} identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
+          <MobileMoteProfile loadWhen={sheet === 'identity'} loadingReturn={false} onLoadReturn={requestBack} identity={profileIdentity} client={client} onOpenMain={() => { setSheet(null); void enterMote(profileIdentity?.mote?.spaceId ?? null) }} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
             openSession(id, profileIdentity); setShowGoalWork(true); setSheet(null)
           }} />
         </> : sheet === 'agent' && menuTarget ? <>

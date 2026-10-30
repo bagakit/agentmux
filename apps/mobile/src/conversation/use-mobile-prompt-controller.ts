@@ -90,6 +90,7 @@ type MobilePromptControllerOptions = {
   agentSessionId: string | null
   moteSource?: AgentInputMoteSource | undefined
   moteMain?: MobileMoteMainInput | undefined
+  moteMainIssue?: string | undefined
   moteDirectAgent?: boolean | undefined
   session: AgentMuxAgentSession | null
   timeline: AgentTimelineSnapshot | null
@@ -109,7 +110,7 @@ export type MobilePromptPreparation = {
 type PendingInputAction = { cancelled: boolean; dispatched: boolean; saving: boolean; allowUpdate: () => void }
 
 /** Coordinates original device intents with Core; local-drafts remains the durable owner. */
-export function useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteDirectAgent, session, timeline, connection,
+export function useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, session, timeline, connection,
   disconnected, visible, refresh }: MobilePromptControllerOptions) {
   const draftKey = JSON.stringify(['draft', agentSessionId])
   const drafts = useRef(local.drafts), attempts = useRef(local.attempts)
@@ -433,6 +434,10 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
     const originalMoteSource = frozenMoteSource ? structuredClone(frozenMoteSource) : undefined
     const existing = attempts.current.get(selectedKey)
     const initialBody = originalBody?.draft ?? drafts.current.get(selectedKey) ?? ''
+    if (!originalBody && !moteDirectAgent && moteMainIssue && !(existing?.moteMain && existing.phase === 'unknown' && existing.draft === initialBody)) {
+      setPreparationIssue({ client, sessionId: agentSessionId, message: moteMainIssue })
+      return
+    }
     const frozenMain = originalBody ? originalBody.moteMain : !moteDirectAgent && existing?.moteMain && existing.draft === initialBody ? existing.moteMain : moteMain
     const originalMain = frozenMain ? structuredClone(frozenMain) : undefined
     const originalGuide = originalBody ? originalBody.agentMuxNote : originalMain ? undefined : originalMoteSource ? MOTE_INPUT_GUIDANCE : undefined

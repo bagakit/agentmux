@@ -1,7 +1,6 @@
 import { useMobileCommands } from './use-mobile-commands'
 import { useMobileAgentReferences } from './use-mobile-agent-references'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
-import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -24,7 +23,8 @@ import {
 } from '@agentmux/client-ui'
 import { errorMessage } from './delivery'
 import { createLocalDrafts, type PromptAttempt, type ResponseAttempt } from './local-drafts'
-import { useHostedConversation, type MobileConnection } from './use-hosted-conversation'
+import type { MobileConnection } from './use-hosted-conversation'
+import { useMobileConversationReading } from './use-mobile-conversation-reading'
 import { MobileMessageTools, MobilePosturePicker } from './MobileMessageTools'
 import { MobileSkillsPicker } from './MobileSkillsPicker'
 import { MobileMailbox } from './MobileMailbox'
@@ -37,7 +37,7 @@ import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
 import { MobileMoteConversation, type MobileMoteWork, type MobileMoteDialogue } from './MobileMoteConversation'
 import type { MoteDefaultConversation, MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { observedMobileMoteMain } from './mote-main-input'
+import { mobileMoteMainInputIssue, retainMobileMoteMain, type MobileMoteMainInput } from './mote-main-input'
 import { MobileMoteSpeakerAvatar } from './MobileMoteSpeakerAvatar'
 import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
 import type { DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
@@ -73,10 +73,11 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   moteName?: string | undefined
   moteWorkMemberName?(source: MobileMoteWork): string
   onOpenMoteWork?(source: MobileMoteWork): void
-  onReturnMoteMain?(reference: MoteDefaultConversation): void
+  onShowMoteThreads?(): void
+  onReturnMoteMain?(reference?: MoteDefaultConversation): void
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onReturnMoteMain,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, onReturnMoteMain,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -86,13 +87,11 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       return client.readMessage({ messageId, ...(notificationId === undefined ? {} : { notificationId }) })
     }
   }), [platform, client, agentSessionId])
-  const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
-  const presentation = useRef<ConversationPresentationController | null>(null)
-  const presentationIntent = useRef(0)
-  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected',
-    frame => presentation.current?.canPresent(frame, { preserveAnchor: !follow.current.following }) !== false)
+  const feed = useRef<HTMLDivElement>(null)
+  const { reading, readers, follow, presentation, presentationIntent, readingKey } = useMobileConversationReading(
+    client, agentSessionId, moteTarget, visible && connection.state === 'connected', feed)
   const [jump, setJump] = useState(false)
-  useEffect(() => { follow.current = initFollowState(); setJump(false) }, [agentSessionId])
+  useLayoutEffect(() => { setJump(shouldShowJumpToLatest(follow.current)) }, [follow])
   useLayoutEffect(() => {
     const node = feed.current
     if (!visible || !node) return
@@ -124,10 +123,14 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
-  const moteMain = useMemo(() => moteDirectAgent ? undefined : observedMobileMoteMain(moteDialogue?.page?.main, moteTarget, agentSessionId),
-    [moteDirectAgent, moteDialogue?.page?.main, moteTarget, agentSessionId])
+  const mainObservation = useRef<MobileMoteMainInput | undefined>(undefined)
+  const moteMain = moteDirectAgent ? undefined : retainMobileMoteMain(mainObservation.current,
+    moteDialogue?.page?.main, moteTarget, agentSessionId)
+  mainObservation.current = moteMain
+  const moteMainIssue = moteDirectAgent ? undefined : mobileMoteMainInputIssue(moteDialogue?.page?.main, moteTarget, agentSessionId, Boolean(moteDialogue?.unavailable))
+    ?? (moteTarget && !moteMain ? '主对话角色尚未核对。原正文和草稿保留；可重新核对，或从 Threads 明确打开原 Agent。' : undefined)
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteDirectAgent,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
@@ -415,6 +418,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
 
   return <ClientUiProvider platform={conversationPlatform}><MobileNoticeScope owner={client} identity={[ agentSessionId, session?.run.runId]}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
+      {readers}
       {!available || connection.issue ? <MobileNotice identity={[connection.state,connection.issue,available]} className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</MobileNotice> : null}
       {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
       {questionCapability.issue ? <MobileNotice identity={[questionCapability.issue]} className="mobile-conversation__notice" role="status">
@@ -449,15 +453,19 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
+        {moteMainIssue ? <div className="mobile-mote-main-handoff" role="status"><span>{moteMainIssue}</span>
+          {moteDialogue ? <button type="button" onClick={() => moteDialogue.refresh()}>重新核对主对话</button> : null}
+          {onReturnMoteMain ? <button type="button" onClick={() => onReturnMoteMain()}>返回当前主对话</button> : null}
+        </div> : null}
         {agentSessionId ? <MobileMoteConversation client={pageClient ?? null} agentSessionId={pageSessionId ?? agentSessionId} hostId={reading.pageOwner?.hostId}
-          target={pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined} dialogue={moteDialogue} name={moteName ?? 'Mote'}
-          visible={visible} records={reading.projection?.records ?? []} describeSpeaker={describeSpeaker}
+          target={!moteDirectAgent && pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined} dialogue={moteDialogue} name={moteName ?? 'Mote'}
+          visible={visible} describeSpeaker={describeSpeaker}
           mainAvatar={mainAvatar}
           {...(moteWorkMemberName ? { memberName: moteWorkMemberName } : {})} {...(onOpenMoteWork ? { onOpenWork: onOpenMoteWork } : {})}
-          {...(onReturnMoteMain ? { onReturnMain: onReturnMoteMain } : {})}
+          {...(onShowMoteThreads ? { onShowThreads: onShowMoteThreads } : {})}
           readingGeometry={{ viewport: () => feed.current, following: () => follow.current.following && !reading.olderWindow,
             pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }}
-          renderCurrent={insertions => <ConversationView insertions={insertions}
+          renderCurrent={insertions => <ConversationView key={readingKey} insertions={insertions}
             readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails detailsOnlyMetadata coverageSummary="阅读范围与来源" readingGeometry={{ viewport: () => feed.current,
             following: () => follow.current.following && !reading.olderWindow,
             pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }} presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}

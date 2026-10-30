@@ -9,18 +9,19 @@ import type { MobileObjectIdentity } from './MobileIdentity'
 import { isMoteFilePath, moteFileSources } from '../recovery/mote-file-drafts'
 import { createBrowserPlatform } from '../platform/browser'
 import { MobileMoteQuickEditor } from './MobileMoteQuickEditor'
+import { MobileMoteMainActions } from './MobileMoteMainActions'
 import { MobileMoteFileEditor } from './MobileMoteFileEditor'
 
 type Props = { identity: MobileObjectIdentity; client: AgentMuxHostedClient | null; visible?: boolean;
   sourcePath?: string | null; onSourceChange?(path: string | null): void;
   copyText?: ClientUiPlatform['copyText'];
-  onOpenGoals?(agentSessionId: string): void; onBackChange?(back: (() => void) | null): void }
+  onOpenGoals?(agentSessionId: string): void; onOpenMain?(): void; onBackChange?(back: (() => void) | null): void }
 /** Original source text and saved facts. This surface cannot create, configure or operate a Run. */
 export function MobileMoteProfile(props: Props) {
   const content = props.identity.mote?.contentReference ?? props.identity.mote?.facts?.content
   return <MoteProfile key={JSON.stringify([props.identity.mote?.spaceId, content?.hostId, content?.workspaceId, content?.workspacePath, content?.zoneId])} {...props} />
 }
-function MoteProfile({ identity, client, visible = true, sourcePath, onSourceChange, onOpenGoals, onBackChange, copyText }: Props) {
+function MoteProfile({ identity, client, visible = true, sourcePath, onSourceChange, onOpenGoals, onBackChange, copyText, onOpenMain }: Props) {
   const spaceId = identity.mote?.spaceId
   const reference = identity.mote?.contentReference ?? identity.mote?.facts?.content ?? null
   const [facts, setFacts] = useState<AgentMuxMotePresentation | null>(() => identity.mote?.facts ? { ...identity.mote.facts, content: reference } : null)
@@ -126,6 +127,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       {document && <><AgentMarkdown content={document.content} sourcePath={document.path} {...(read?.resource?.workspacePath ? { workspaceRoot: read.resource.workspacePath } : {})} />
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
     </section> : <>
+      {spaceId && content && <MobileMoteMainActions client={client} target={{ spaceId, zoneId: content.zoneId, expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }} visible={visible} onConfigure={() => setQuickEditing(true)} onBound={() => setRefresh(value => value + 1)} onOpenMain={onOpenMain} />}
       {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置<small>Agent、主对话与自动心跳</small></span></button>}
       <dl className="mobile-mote-profile__defaults"><dt>主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的主对话'}</span><small>{facts?.conversation ? '原展示位置已确认' : '保存引用尚未确认；原会话保留'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '原配置未确认'}</dd>
         <dt>新对话 Agent</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '原配置未确认')}</dd>

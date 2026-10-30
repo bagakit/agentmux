@@ -1,0 +1,24 @@
+.mobile-mote-navigation { display: flex; align-items: center; gap: 4px; padding: 0 10px; min-height: 44px; border-bottom: 1px solid var(--line-soft); background: var(--surface-0); }
+.mobile-mote-navigation button { min-height: 44px; border: 0; background: transparent; color: var(--text-2); padding: 0 12px; font: inherit; font-size: 13px; }
+.mobile-mote-navigation button[aria-selected="true"] { color: var(--text-0); font-weight: 650; box-shadow: inset 0 -2px var(--green); }
+.mobile-mote-navigation .mobile-mote-team-button { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+.mobile-mote-threads { width: 100%; min-width: 0; padding: 8px 12px 20px; overflow-wrap: anywhere; }
+.mobile-mote-threads-panel { min-height: 0; overflow: auto; flex: 1; }
+.mobile-mote-threads .mote-work-event__summary { min-height: 52px; }
+.mobile-mote-threads .mote-work-event__summary strong { font-size: 13px; }
+.mobile-mote-threads .mote-work-event__actions button, .mobile-mote-threads .mote-conversation__link { min-height: 44px; }
+.mobile-mote-thread-return { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; min-height: 44px; border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--text-2); }
+.mobile-mote-thread-return button { min-height: 44px; border: 0; background: transparent; color: var(--text-0); font: inherit; }
+.mobile-mote-setup { padding: 24px 20px; }
+.mobile-mote-setup button { min-height: 44px; }
+
+.mobile-mote-main-handoff { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; color: var(--text-2); font-size: 12px; line-height: 1.5; border-bottom: 1px solid var(--line-soft); }
+.mobile-mote-main-handoff button { min-height: 44px; background: transparent; border: 0; padding: 0; color: var(--text-0); font: inherit; }
+.mobile-mote-setup { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.mobile-mote-setup h3 { margin: 0 0 6px; font-size: 14px; }
+.mobile-mote-setup p { color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.mobile-mote-setup button { margin: 0 8px 4px 0; font: inherit; font-size: 13px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 0 10px; background: var(--surface-1); color: var(--text-0); }
+.mobile-app { --mote-thread-control-height: 44px; --mote-thread-input-font: 16px; }
+
+.mobile-header.mobile-header--session .mobile-session-toolbar .mobile-session-title { display: block; -webkit-line-clamp: unset; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mobile-header .mobile-session-identity { min-width: 0; }

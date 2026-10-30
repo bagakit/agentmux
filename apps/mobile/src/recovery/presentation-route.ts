@@ -14,6 +14,8 @@ export type MobilePresentationRoute = {
   primary: MobilePrimaryWorkface | 'survey'; showSession: boolean; showGoalWork: boolean
   /** Last explicit Mote selection on this device; never an execution target. */
   recentMoteSpaceId?: string
+  /** Navigation intent only; it grants no Main role or input authority. */
+  moteView?: { spaceId: string; section: 'discussion' | 'threads'; detail: boolean; directAgent: boolean }
   identity: MobileObjectReference | null
   profile: { identity: MobileObjectReference; sourcePath: string | null } | null
   topics?: MobileTopicsRoute
@@ -113,7 +115,11 @@ export function retainObjectReference(identity: MobileObjectIdentity | null): Mo
       ...(content ? { contentReference: content } : {}) } } : {}) }
 }
 export function parsePresentationRoute(value: unknown): MobilePresentationRoute {
-  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'survey', 'spatial', 'goals', 'recentMoteSpaceId'])
+  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'survey', 'spatial', 'goals', 'recentMoteSpaceId', 'moteView'])
+  if (v.moteView !== undefined) {
+    const view = object(v.moteView, ['spaceId','section','detail','directAgent'])
+    if (!spatialId(view.spaceId) || !['discussion','threads'].includes(String(view.section)) || typeof view.detail !== 'boolean' || typeof view.directAgent !== 'boolean') invalid()
+  }
   if (v.recentMoteSpaceId !== undefined && !spatialId(v.recentMoteSpaceId)) invalid()
   if (!['goals', 'topics', 'mote', 'focus', 'space', 'survey'].includes(String(v.primary)) ||
     typeof v.showSession !== 'boolean' || typeof v.showGoalWork !== 'boolean' || v.showGoalWork && !v.showSession) invalid()

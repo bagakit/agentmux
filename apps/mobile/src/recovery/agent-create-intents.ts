@@ -1,3 +1,4 @@
+import { parseMoteMainCreationIntent, type MoteMainCreationIntent } from '@agentmux/core/spatial-graph'
 /** The authored mobile form is a bounded subset of public agent.open, not a second creation owner. */
 export type MobileAgentCreateDestination = { spaceId: string; zoneId: string } & (
   | { newTab: true; tabId?: never; regionId?: never }
@@ -5,7 +6,7 @@ export type MobileAgentCreateDestination = { spaceId: string; zoneId: string } &
 )
 export type MobileAgentCreateIntent = {
   runtimeId: string; deviceHostId: string | null
-  input: { operationId: string; content: { kind: 'new-agent'; executorId: string; prompt?: string }; destination: MobileAgentCreateDestination; focus: false }
+  input: { operationId: string; content: { kind: 'new-agent'; executorId: string; prompt?: string }; destination: MobileAgentCreateDestination; focus: false; moteMain?: MoteMainCreationIntent }
   phase: 'sending' | 'unknown' | 'confirmed'
   agentSessionId?: string
 }
@@ -17,7 +18,7 @@ export function parseMobileAgentCreateIntent(value: unknown): MobileAgentCreateI
   }
   const id = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 65536 && !/[\0\r\n]/u.test(value)
   const item = object(value, ['runtimeId', 'deviceHostId', 'input', 'phase', 'agentSessionId'])
-  const input = object(item.input, ['operationId', 'content', 'destination', 'focus'])
+  const input = object(item.input, ['operationId', 'content', 'destination', 'focus', 'moteMain'])
   const content = object(input.content, ['kind', 'executorId', 'prompt'])
   const rawDestination = input.destination as Record<string, unknown> | null
   const newTab = rawDestination?.newTab === true
@@ -26,5 +27,9 @@ export function parseMobileAgentCreateIntent(value: unknown): MobileAgentCreateI
     !(content.prompt === undefined || typeof content.prompt === 'string') || !id(destination.spaceId) || !id(destination.zoneId) ||
     !(newTab || id(destination.tabId) && id(destination.regionId)) || input.focus !== false ||
     !['sending', 'unknown', 'confirmed'].some(phase => phase === item.phase) || !(item.agentSessionId === undefined || id(item.agentSessionId))) invalid()
+  if (input.moteMain !== undefined) {
+    const main = parseMoteMainCreationIntent(input.moteMain)
+    if (!newTab || main.target.spaceId !== destination.spaceId || main.target.zoneId !== destination.zoneId || main.baseline.defaults.executorId !== content.executorId) invalid()
+  }
   return structuredClone(value) as MobileAgentCreateIntent
 }

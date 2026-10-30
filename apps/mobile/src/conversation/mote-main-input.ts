@@ -24,6 +24,20 @@ export function observedMobileMoteMain(snapshot: MoteMainSnapshot | undefined, t
   // wrong Host cannot turn this logical-main request into a generic Agent send.
   return parseMobileMoteMainInput({ target, identity: snapshot.identity, expectedRoleRevision: snapshot.roleRevision, reference: snapshot.current })
 }
+/** Missing or changed observations cannot rewrite an already selected Discussion
+ * as a direct Agent intent. Core still qualifies this original role at intake. */
+export function retainMobileMoteMain(previous: MobileMoteMainInput | undefined, snapshot: MoteMainSnapshot | undefined,
+  target: MotePreferencesTarget | undefined, agentSessionId: string | null): MobileMoteMainInput | undefined {
+  return observedMobileMoteMain(snapshot, target, agentSessionId) ?? (previous && target &&
+    sameMotePreferencesTarget(previous.target, target) && previous.reference.sessionId === agentSessionId ? previous : undefined)
+}
+/** A known new Main cannot silently turn a logical Discussion input into a generic old-Agent send. */
+export function mobileMoteMainInputIssue(snapshot: MoteMainSnapshot | undefined, target: MotePreferencesTarget | undefined,
+  agentSessionId: string | null, unavailable: boolean): string | undefined {
+  if (!target || !agentSessionId || unavailable || snapshot?.status !== 'ready' || !sameMotePreferencesTarget(target, snapshot.target)) return
+  if (!snapshot.current || snapshot.current.sessionId !== agentSessionId)
+    return '主 Agent 已更换或解除绑定。原正文和草稿保留；返回当前主对话，或从 Threads 明确选择原 Agent 继续。'
+}
 function originalInspection(value: MoteDialogueInputInspection, source: MobileMoteMainInput, input: { operationId: string; agentSessionId: string; expectedRun: { runId: string } }) {
   const route = value.route
   if (!route) return value

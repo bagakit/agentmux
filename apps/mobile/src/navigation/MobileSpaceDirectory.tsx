@@ -64,7 +64,7 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
     return <div className="mobile-mote-directory">
       <nav className="mobile-mote-rail" aria-label="切换 Mote">{shown.map(space => <button type="button" key={space.spaceId}
         className="mobile-mote-choice" data-space-id={space.spaceId} aria-pressed={selected?.spaceId === space.spaceId}
-        aria-label={`选择 Mote · ${space.name}`} title={space.name} onClick={() => onSelect(space)}>
+        aria-label={`打开 Mote 主对话 · ${space.name}`} title={space.name} onClick={() => onSelect(space)}>
         {renderIdentity(space)}<span>{space.name}</span>
       </button>)}</nav>
       {!shown.length && <p className="mobile-spatial-empty">没有匹配的 Mote。</p>}
