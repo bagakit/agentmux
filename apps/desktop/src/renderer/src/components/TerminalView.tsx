@@ -1341,7 +1341,7 @@ export function TerminalView({
 
     // Initial attach and reconnect consume the same authoritative ordering. Synthetic bytes
     // bypass original-output inspectors, while input readiness keeps its existing live owner.
-    const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }, preserve = false): Promise<void> => {
+    const applyContinuation = async (snapshot: Pick<AgentMuxRunAttachment, 'terminal' | 'replay' | 'resizeRevision'> & { run: Pick<AgentMuxRunAttachment['run'], 'runId' | 'latestOutputBytes'> }, preserve = false): Promise<boolean> => {
       latestObservedOutputBytes = snapshot.run.latestOutputBytes
       continuationObservation = { type: snapshot.terminal.type,
         ...('reason' in snapshot.terminal ? { reason: snapshot.terminal.reason } : {}) }
@@ -1356,14 +1356,14 @@ export function TerminalView({
         // Keep its canvas and disclose the continuation gap; the new live stream starts at its real cut.
         acceptUncontinuedSnapshot(snapshot, snapshot.terminal.type === 'unknown' || snapshot.terminal.type === 'unavailable'
           ? snapshot.terminal : { type: 'unavailable', reason: 'source_gap' })
-        return
+        return false
       }
       replayingContinuation = true
       try {
         let geometrySteps = 0
         for (let index = 0; index < steps.length; index += 1) {
           const step = steps[index]!
-          if (disposed) return
+          if (disposed) return false
           if (step.type === 'restore') {
             if (preserve) continue
             const checkpoint = step.checkpoint
@@ -1374,7 +1374,7 @@ export function TerminalView({
               await restoreTerminalCheckpoint(step.restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), async (data) => {
                 if (!disposed) await writeTerminal(data, 'checkpoint')
               })
-              if (disposed) return
+              if (disposed) return false
               if (checkpoint.size.cols !== checkpoint.restoreSize.cols || checkpoint.size.rows !== checkpoint.restoreSize.rows) {
                 viewport.acceptOwnerSize(checkpoint.size)
               }
@@ -1384,7 +1384,7 @@ export function TerminalView({
             } finally {
               terminal.options.scrollback = scrollback
             }
-            if (disposed) return
+            if (disposed) return false
             cursor = step.checkpoint.throughByte
             resizeRevision = step.checkpoint.resizeRevision
           } else if (step.type === 'resized') {
@@ -1425,6 +1425,7 @@ export function TerminalView({
         replayingContinuation = !readyForLiveOutput
       }
       incidents?.mark('replay-applied')
+      return continuationKnown
     }
 
     const acceptUncontinuedSnapshot = (snapshot: { run: Pick<AgentMuxRunAttachment['run'], 'latestOutputBytes'> & Partial<Pick<AgentMuxRunAttachment['run'], 'cols' | 'rows'>>; resizeRevision: number }, absence: TerminalContinuationAbsence): void => {
@@ -1435,12 +1436,12 @@ export function TerminalView({
         viewport.acceptOwnerSize({ cols: snapshot.run.cols, rows: snapshot.run.rows })
       }
       liveGapRedrawPending = false
-      continuationKnown = false
       recordContinuationAbsence(absence)
       setContinuationAbsence({ ...absence, duringReconnect: true })
     }
 
     const recordContinuationAbsence = (absence: TerminalContinuationAbsence): void => {
+      continuationKnown = false
       continuationObservation = absence
       if (recordedContinuationAbsence?.type !== absence.type || recordedContinuationAbsence?.reason !== absence.reason) {
         incidents?.capture('terminal-continuation-unavailable', 'observation-unavailable')
@@ -1462,17 +1463,14 @@ export function TerminalView({
             const previousCursor = cursor
             viewport.beginReplay()
             try {
-              await applyContinuation(snapshot)
+              const continued = await applyContinuation(snapshot, true)
               if (disposed) return
-              gapIncidentActive = false
-              historyReadIncidentActive = false
+              if (!continued) continue
               recordedContinuationAbsence = null
-              incidents?.capture('terminal-recovered', 'observation-restored')
-              setContinuationAbsence(null)
+              incidents?.capture('terminal-recovered', 'observation-restored', undefined, null)
               setReplaySizeUnknown(false)
-              setReplayGap(false)
-              setRuntimeHistoryGap(false)
-              liveGapRedrawPending = false
+              // A continuous suffix confirms this canvas, not an older missing byte range.
+              // Keep history-gap/read failures until their original recovery actually fills them.
               setHistoryBoundary(terminalHistoryBoundary(terminal.buffer.active, terminal.rows, terminal.options.scrollback!))
             } catch (error) {
               if (!disposed) incidents?.capture('terminal-replay-failed', 'replay-failed', error)
