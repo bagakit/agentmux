@@ -454,7 +454,7 @@ export class PublicationStore {
   checkpoint(boundary: PublicationBoundary, sourceHostId: string, origin?: ConversationCheckpoint): ConversationCheckpoint {
     return this.transaction(() => {
       const query = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?')
-      this.retainMissingCapturedStart(boundary)
+      this.reconcileCapturedStartGap(boundary)
       const saved = this.retainedCheckpoint(boundary)
       if (saved) {
         const checkpoint = saved
@@ -477,9 +477,16 @@ export class PublicationStore {
       return checkpoint
     })
   }
-  private retainMissingCapturedStart(boundary: PublicationBoundary): void {
-    if (boundary.sourceFrontier?.frontier.cuts.some(cut => cut.kind === 'captured')) return
+  private reconcileCapturedStartGap(boundary: PublicationBoundary): void {
     const gap: ConnectionDeliveryGap = { gapId: 'gap-' + digest([...scopeKey(boundary), 'captured-start']), reason: 'start-cut-unconfirmed', code: 'PUBLICATION_CAPTURED_START_UNCONFIRMED' }
+    if (boundary.scope.publication === 'future-native-user-facing') {
+      // Only this owner's derived obligation was outside the frozen source scope.
+      // Retain its original record; genuine content gaps have independent identities.
+      this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.state','resolved') WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=? AND reason='content-accounted' AND decision_json=?")
+        .run(...scopeKey(boundary), gap.gapId, digest(gap), encode({ kind: 'gap', gap, state: 'unresolved' }))
+      return
+    }
+    if (boundary.sourceFrontier?.frontier.cuts.some(cut => cut.kind === 'captured')) return
     this.saveDecision(boundary, gap.gapId, digest(gap), { kind: 'gap', gap, state: 'unresolved' })
   }
   private saveDecision(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, id: string, revision: string, value: unknown): void {
@@ -643,7 +650,7 @@ export class PublicationStore {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
-      this.retainMissingCapturedStart(boundary)
+      this.reconcileCapturedStartGap(boundary)
       if (options.queryFeedback) projectQueryFeedback(this, boundary, units, options.queryAuthorized)
       const replyProjections = options.replyMetadata ? this.acceptReplyFacts(boundary, units) : []
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
