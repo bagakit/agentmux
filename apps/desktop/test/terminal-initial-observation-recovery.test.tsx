@@ -13,6 +13,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { bridge, owningBridge } from './fixtures/terminal-observation-bridge'
+import { restoredTerminalConnection } from './fixtures/terminal-connection-event'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
@@ -120,27 +121,34 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  disposeUi?.(); disposeUi = undefined
-  useAppStore.persist.setOptions(persistenceOptions)
-  await act(async () => root?.unmount())
-  release?.(); release = undefined
-  try { await owner?.dispose() }
-  catch (error) { resource({ event: 'cleanup-error', detail: inspect(error, { depth: 8 }) }); throw error }
-  finally { await observationRpc?.dispose(); observationRpc = undefined; await scope?.cleanup() }
+  const errors: unknown[] = []
+  for (const close of [
+    async () => { disposeUi?.(); disposeUi = undefined },
+    async () => useAppStore.persist.setOptions(persistenceOptions),
+    async () => { await act(async () => root?.unmount()) },
+    async () => { release?.(); release = undefined },
+    async () => owner?.dispose(),
+    async () => { await observationRpc?.dispose(); observationRpc = undefined },
+    async () => scope?.cleanup()
+  ]) {
+    try { await close() }
+    catch (error) { errors.push(error); resource({ event: 'cleanup-error', detail: inspect(error, { depth: 8 }) }) }
+  }
   resource({ event: 'released', root: scope?.root, nativePid: scope?.nativeProcessId, ownerPid: scope?.ownerProcess.pid })
   if (run?.pid) expect(() => process.kill(run.pid!, 0)).toThrow()
   useAppStore.setState(original, true)
   document.body.replaceChildren(); bridge.listeners.clear(); vi.restoreAllMocks(); vi.unstubAllEnvs()
+  if (errors.length) throw new AggregateError(errors, 'Private terminal observation cleanup failed')
 })
 
-async function create(kind: 'terminal' | 'agent') {
+async function create(kind: 'terminal' | 'agent', output?: string) {
   received = join(scope.root, 'received.bytes')
   const client = owner.client as Awaited<ReturnType<typeof scope.client>>
   const script = resolve('apps/desktop/test/fixtures/input-authority-pty.mjs')
   let control: SessionControl
   if (kind === 'terminal') {
     run = await client.createTerminal({ createOperationId: 'original-terminal', workspacePath: scope.root,
-      command: process.execPath, args: [script, received], cols: 80, rows: 24 })
+      command: process.execPath, args: [script, received, ...(output ? [output] : [])], cols: 80, rows: 24 })
     control = { kind, hostId: 'local', runId: run.runId, run: { runId: run.runId } }
   } else {
     const session = await client.createAgent({ createOperationId: 'original-agent', providerId: 'codex', executorId: 'codex',
@@ -403,6 +411,33 @@ it('bounds one failure window and re-arms only after the failed consumer is show
   await mount(session)
   await act(async () => await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(4), { timeout: 1600 }))
 }, 15000)
+
+it('connection restoration re-arms an exhausted original terminal through the actual Host event bridge exactly once', async () => {
+  const output = join(scope.root, 'reconnected-output.txt')
+  const session = await create('terminal', output)
+  const originalAttach = owner.runtime.attachSession.bind(owner.runtime)
+  const attaching = vi.spyOn(owner.runtime, 'attachSession').mockRejectedValue(failure())
+  const refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment')
+  const terminal = await mount(session)
+  await act(async () => await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(3), { timeout: 5000 }))
+  await act(async () => await wait(650))
+  expect(attaching).toHaveBeenCalledTimes(4); expect(observation(session)?.liveReady).toBe(false)
+  attaching.mockImplementation(originalAttach)
+  const restored = (hostId: string) => owner.sender.send(SESSION_EVENT_CHANNEL, restoredTerminalConnection(hostId))
+  await act(async () => { restored('foreign-host'); await wait(650) })
+  expect(refresh).toHaveBeenCalledTimes(3)
+  await act(async () => { restored(session.control.hostId); restored(session.control.hostId) })
+  await act(async () => await vi.waitFor(() => expect(observation(session)?.liveReady).toBe(true), { timeout: 2500 }))
+  expect(refresh).toHaveBeenCalledTimes(4); expect(attaching).toHaveBeenCalledTimes(5)
+  expect(text(terminal)).toContain('private-input-owner-ready')
+  await writeFile(output, 'live-after-original-owner-restored\n')
+  await act(async () => await until(() => text(terminal), value => value.includes('live-after-original-owner-restored'), 'reconnected original live output'))
+  await act(async () => { restored(session.control.hostId); await wait(650) })
+  expect(refresh).toHaveBeenCalledTimes(4); expect(fixture.terminals).toEqual([terminal])
+  await originalRunRemains(session)
+  resource({ event: 'connection-restored', runId: run.runId, pid: run.pid, reads: refresh.mock.calls.length,
+    foreignHostReads: 0, healthyReads: 0, liveOutput: true, acceptedInputBytes: 0 })
+}, 20000)
 
 it('cancels a hidden or replaced consumer wake', async () => {
   const session = await create('terminal')

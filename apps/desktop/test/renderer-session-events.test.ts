@@ -2,6 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxDesktopApi, AgentMuxPreloadApi, AppConfig, RuntimeEvent, SessionControl, SessionSnapshot } from '../src/shared/contracts'
+import { restoredTerminalConnection } from './fixtures/terminal-connection-event'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 type Listener = (event: RuntimeEvent) => void
@@ -43,7 +44,7 @@ beforeEach(async () => {
     releases.push(release)
     return release
   })
-  const preload = { sessions: { onEvent: subscribe }, control: {} } as unknown as AgentMuxPreloadApi
+  const preload = { sessions: { onEvent: subscribe }, control: {}, hosts: {} } as unknown as AgentMuxPreloadApi
   window.agentmux = preload
   api = (await import('../src/renderer/src/lib/api')).api
 })
@@ -85,6 +86,46 @@ it('keeps resize and byte event order for every matching view without extra brid
   expect(second).toEqual(events)
   expect(first[0]).toBe(second[0])
   expect(subscribe).toHaveBeenCalledTimes(1)
+})
+
+it('connection restoration reaches every original Host reader and semantic registration without touching other Hosts', () => {
+  const first: RuntimeEvent[] = [], second: RuntimeEvent[] = [], foreign: RuntimeEvent[] = [], global: RuntimeEvent[] = []
+  onEvent(event => first.push(event), control())
+  onEvent(event => second.push(event), control('second-run'))
+  onEvent(event => foreign.push(event), control('target-run', 'foreign-host'))
+  onEvent(event => global.push(event))
+  const restored = restoredTerminalConnection('target-host')
+  emit(restored)
+  expect(first).toEqual([restored]); expect(second).toEqual([restored]); expect(global).toEqual([restored])
+  expect(first[0]).toBe(restored); expect(second[0]).toBe(restored); expect(global[0]).toBe(restored)
+  expect(foreign).toEqual([])
+  const bytes = output()
+  emit(bytes)
+  expect(first).toEqual([restored, bytes])
+  expect(second).toEqual([restored]); expect(foreign).toEqual([]); expect(global).toEqual([restored])
+  expect(subscribe).toHaveBeenCalledTimes(1)
+})
+
+it('connection restoration freezes all matching registrations before callback reentry and preserves callback failures', () => {
+  const calls: string[] = [], failure = new Error('Original semantic consumer failed')
+  let removeSecond = () => {}
+  onEvent(() => {
+    calls.push('semantic'); removeSecond()
+    onEvent(() => calls.push('late'), control('late-run'))
+    throw failure
+  })
+  const repeated = () => calls.push('same')
+  onEvent(repeated, control())
+  onEvent(repeated, control())
+  removeSecond = onEvent(() => calls.push('second'), control('second-run'))
+  const restored = restoredTerminalConnection('target-host')
+  expect(() => emit(restored)).toThrow(failure)
+  expect(calls).toEqual(['semantic', 'same', 'same', 'second'])
+  expect(() => emit(restored)).toThrow(failure)
+  expect(calls).toEqual(['semantic', 'same', 'same', 'second', 'semantic', 'same', 'same', 'late'])
+  disposers.forEach(dispose => dispose())
+  expect(releases[0]).toHaveBeenCalledTimes(1)
+  expect(listeners.size).toBe(0)
 })
 
 it('routes reader loss and confirmed reread only to the original Host and Run without changing semantic subscriptions', () => {

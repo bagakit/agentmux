@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "../src/renderer/src/lib/session-events.ts",
+    "fixtures/terminal-connection-event.ts"
+  ]
+}

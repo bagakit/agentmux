@@ -5,6 +5,7 @@ import { localRuntimeConnector } from '../helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { expect, vi } from 'vitest'
 import { AgentMuxError, AgentMuxMemoryAgentSessionStore, type AgentMuxClient, type AgentMuxAgentSessionStore } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
@@ -90,7 +91,9 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   } }
   const flush = vi.fn(() => {})
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
-  const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, isLoadingMainFrame: () => false,
+  const mainFrame = { url: pathToFileURL(join(root, 'renderer', 'index.html')).href, parent: null, framesInSubtree: [] }
+  const sender = Object.assign(new EventEmitter(), { id: 771, mainFrame, getURL: () => mainFrame.url,
+    isDestroyed: () => false, isLoadingMainFrame: () => false,
     send: vi.fn((channel: string, value: unknown) => {
       for (const listener of bridge.listeners.get(channel) ?? []) listener({}, structuredClone(value))
     }),
@@ -105,12 +108,12 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
     await bridge.handlers.get('notesStorage:inspect')?.({ sender }).catch(() => {})
     await rm(root, { recursive: true, force: true }); throw error
   }
-  await bridge.handlers.get('notesStorage:inspect')!({ sender })
+  await bridge.handlers.get('notesStorage:inspect')!({ sender, senderFrame: mainFrame })
   const dispose = async () => { try { await release() } finally { await rm(root, { recursive: true, force: true }) } }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
-    return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...structuredClone(values))
+    return await handler!({ sender, senderFrame: mainFrame } as unknown as IpcMainInvokeEvent, ...structuredClone(values))
   })
   expect(bridge.api).not.toBeNull()
   return { client, sender, flush, pauseTarget, dispose, runtime }
