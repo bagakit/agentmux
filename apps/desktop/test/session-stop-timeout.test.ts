@@ -104,19 +104,20 @@ describe('withStopTimeout：等收尾必须有上限', () => {
 describe('超时文案：说清哪一步没走通、Agent 什么状态、怎么恢复', () => {
   const message = sessionStopTimeoutError(SESSION_STOP_TIMEOUT_MS).message
 
-  it('明确说 Agent 没受影响——这是第 2 类失败，不是"你的 Agent 死了"', () => {
-    // 服务窗式提醒的第一要件：不能让用户以为自己的 Agent 出了事。
-    expect(message).toContain('Agent is unaffected')
+  it('unknown does not promise the original Stop had no effect', () => {
+    expect(message).toContain('Stop may already have applied')
+    expect(message).toContain('result is unconfirmed')
+    expect(message).not.toContain('unaffected')
   })
 
   it('点名没走通的是我们这一步，不是 Agent', () => {
-    expect(message).toContain('handshake did not complete')
+    expect(message).toContain('no response from the Runtime')
   })
 
   it('给出从当前状态真能走通的恢复动作', () => {
     // 文案点名的动作必须从这个状态真的够得着。此刻 View 还在（失败路径保留投影），
     // 所以"再关一次"是真能走的——租约已经随这次拒绝释放了。
-    expect(message).toContain('close it again')
+    expect(message).toContain('Continue the same Stop')
   })
 
   it('带上等了多久，用户才知道这不是自己手滑', () => {
@@ -160,11 +161,11 @@ describe('接线：上限接在那条唯一的共同出口上', () => {
     ).toBe(true)
   })
 
-  it('只有 stop 带这个上限，没有顺手套到别的 invoke 上', () => {
+  it('Stop and Restart share only the existing lifecycle receipt budget', () => {
     // 过度防御的反面：给每条 IPC 都套一分钟上限，会把长连接、订阅和正常的慢操作一起掐掉。
     // 这个上限的理由是"等进程收尾"，别的操作没有这个理由。
     const wrapped = [...preload.matchAll(/withStopTimeout\(\s*ipcRenderer\.invoke\('([^']+)'/g)]
       .map((match) => match[1])
-    expect(wrapped, 'withStopTimeout 套到了 sessions:stop 之外的通道上').toEqual(['sessions:stop'])
+    expect(wrapped, 'Only the original Stop/Restart lifecycle observers use this wait.').toEqual(['sessions:restart', 'sessions:stop'])
   })
 })

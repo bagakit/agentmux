@@ -239,3 +239,18 @@ it('explains an unavailable resource Workspace and keeps the unplaced Agent and 
   expect(f.container.textContent).toContain('resource Workspace is not available')
  } finally { await f.close() }
 })
+
+it('an unobserved retained Agent keeps a readable-work-surface action without claiming cached exit as current', async () => {
+ const f = await fixture()
+ try {
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === f.other.id
+   ? { ...session, processState: 'exited', runUnobserved: true } as typeof session : session) })))
+  await act(async () => f.container.querySelector<HTMLButtonElement>(`button.focus-context[data-session-id="${f.other.id}"]`)!.click())
+  const notice = f.container.querySelector('.focus-location-recovery')
+  expect(notice?.textContent).toContain('current Run state is unknown')
+  expect(notice?.textContent).not.toContain('Its Run is exited')
+  expect(notice?.textContent).toContain('Open the original conversation in a new Tab')
+  expect(notice?.querySelector('[data-focus-open-placeless]')).not.toBeNull()
+  expect(useAppStore.getState().sessions.find(session => session.id === f.other.id)?.control).toEqual(f.other.control)
+ } finally { await f.close() }
+})

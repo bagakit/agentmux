@@ -138,8 +138,11 @@ it('a rejected or timed-out stop preserves state, reports its exact subject and 
   expect(useAppStore.getState().error).toContain('timeout'); expect(useAppStore.getState().errorNoticeContext?.summary).toContain('unconfirmed')
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(target.control); retained(before)
   expect(api.sessions.stop).toHaveBeenCalledTimes(1)
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Stop not confirmed')
+  const continuation = document.querySelector<HTMLButtonElement>('[data-confirm-label="Continue Stop"]')!
+  expect(continuation.disabled).toBe(false)
   vi.mocked(api.sessions.stop).mockClear()
-  await open(); await act(async () => confirm().click()); await settle()
+  await act(async () => continuation.click()); await settle()
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control); retained(before)
 })
 
@@ -321,5 +324,5 @@ it('admits the original card with an unobserved Run and retains the Core failure
   expect(useAppStore.getState().sessions).toBe(before.sessions); retained(before)
   expect(useAppStore.getState().error).toContain('Core could not confirm')
   expect(useAppStore.getState().errorNoticeContext?.subject).toEqual(original.control)
-  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Review its status, then retry Stop Agent')
+  expect(useAppStore.getState().errorNoticeContext?.summary).toContain('Continue Stop to check and finish that same operation')
 })
