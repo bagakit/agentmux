@@ -156,12 +156,19 @@ including historical revisions, without being the bot creator. To explicitly ret
 delivery, save {operationId,source} from its owner-qualified retrySource and use connection delivery
 retry --input FILE|-. Each exact message or content-upload source attempt accepts one durable
 continuation; retain that complete input after a lost reply. Repeating it observes the same accepted
-edge and current delivery, without selecting a newer failed source or requeueing it. A new failure
-requires a new explicit action with its own source. The Host rechecks the original binding and
+edge and current delivery, without selecting a newer failed source or requeueing it. An explicit retry of a new failure
+requires its own source. The Host rechecks the original binding and
 audience, current publication authority and Runtime; bot enrollment ownership is not required.
 An unknown content upload qualifies only before any message preparation or attempt; unknown message
 effects remain inspect-only. Late old upload results cannot undo accepted pending work or change
-a newer frozen message. Acceptance, queue fate and platform success are separate facts. Receipt reads alone
+a newer frozen message. Acceptance, queue fate and platform success are separate facts.
+A qualified native no-effect message rate limit can recover through the original Host tick and
+same source edge. Optional wait {reason:"rate-limit",notBefore,basis:"native"|"local"} on pending
+or qualified rate-limited delivery is the fixed earliest retry time, not permission or success.
+Valid native deadlines are retained; missing or invalid hints use the local five-second cooldown.
+An early accepted retry and new messages in the same native quota scope remain pending behind
+the common claim gate. Inspect/list/retry expose the same wait after restart without private
+scope keys or headers. Unknown effects and permanent rejections do not gain automatic retries. Receipt reads alone
 grant no write or administration authority. A newer confirmed operation does not prove complete
 synchronization. Diagnosis returns no bodies, member identities,
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
