@@ -1,3 +1,5 @@
+import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
+import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteInputSource } from '../lib/mote-input-source'
 import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
@@ -7,7 +9,7 @@ import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagno
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -92,6 +94,8 @@ export function AgentSessionComposer({
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
 }) {
+  const moteWorkface = useContext(MoteWorkfaceContext)
+  const motePresentation = useWorkbenchBrowserPresentation()
   const moteDialogue = useMoteDialogueView()
   const main = moteDialogue?.page?.main
   useObservedConsumerCommit('composer', visible)
@@ -119,7 +123,7 @@ export function AgentSessionComposer({
   const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
-  const moteMain = moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
+  const moteMain = motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
     main.current.sessionId === session.control.agentSessionId && main.current.hostId === session.control.hostId
     ? { target: moteDialogue.target, expectedRoleRevision: main.roleRevision } : undefined
   const nativeService = useRunService(session)
@@ -174,8 +178,20 @@ export function AgentSessionComposer({
     providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const queueStatusPrompt = submitMode.canType && session?.kind === 'agent' && Boolean(session.pendingInteraction)
 
+  function acceptsMoteMainInput(): boolean {
+    const direct = motePresentation.moteInputIntent === 'member' || moteWorkface?.memberIntent
+    const logicalMain = !direct && (motePresentation.moteInputIntent === 'main' || motePresentation.surface === 'mote' || moteWorkface?.section === 'discussion')
+    if (logicalMain && !moteMain) {
+      feedback.report(main?.status === 'ready'
+        ? '主 Agent 已更换或解除绑定。原输入尚未发送，草稿保留；返回当前主对话，或从 Threads 明确选择这位 Agent 继续。'
+        : '主对话的原角色来源暂未确认。原输入尚未发送，草稿保留；重读主对话，或从 Threads 明确选择这位 Agent 继续。')
+      return false
+    }
+    return true
+  }
+
   function sendStatusPrompt(prompt: ComposerShortcut): boolean {
-    if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt)) return false
+    if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt) || !acceptsMoteMainInput()) return false
     // State actions leave the independently authored Composer draft intact.
     const accepted = queueStatusPrompt
       ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
@@ -187,7 +203,7 @@ export function AgentSessionComposer({
   }
 
   function submit(): void {
-    if (!submitMode.canSubmit || !text.trim()) return
+    if (!submitMode.canSubmit || !text.trim() || !acceptsMoteMainInput()) return
     const { text: value, inputImages } = expandComposerInput(text)
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
     if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
@@ -198,6 +214,7 @@ export function AgentSessionComposer({
   }
 
   function queue(): void {
+    if (!acceptsMoteMainInput()) return
     const { text: value, inputImages } = expandComposerInput(text)
     if (!value.trim()) return
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return

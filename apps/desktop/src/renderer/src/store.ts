@@ -1,3 +1,4 @@
+import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
 import { initialNativeComposerBinding } from './lib/initial-native-composer-binding'
@@ -927,6 +928,8 @@ export type AppState = GitReadingActions & {
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
+  /** Ephemeral explicit Mote navigation; never persisted or an execution authority. */
+  moteDiscussionEntry: { workspaceId: string; topicId: string; token: string; memberReference?: WorkbenchProjectionSelection } | null
   workbenchNavigationInputPolicy: 'preserve' | 'target' | null
   desktopNavigationNotice: AgentMuxSpatialIssue | null
   config: AppConfig | null
@@ -1011,6 +1014,7 @@ export type AppState = GitReadingActions & {
   botTaskSelections: BotTaskSelections
   manualConnectionSelections: Partial<Record<ManualConnectionIntent['channel'], ManualConnectionIntent['target']>>
   manualConnectionIntents: Record<string, ManualConnectionIntent>
+  moteMainCreationReferences: Record<string, MoteMainCreationReference>
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   moteChatIntents: Record<string, MoteChatIntent>
   agentComposerDrafts: Record<string, string>
@@ -3791,6 +3795,7 @@ type PersistedAppState = {
   botTaskSelections?: BotTaskSelections
   manualConnectionSelections?: Partial<Record<ManualConnectionIntent['channel'], ManualConnectionIntent['target']>>
   manualConnectionIntents?: Record<string, ManualConnectionIntent>
+  moteMainCreationReferences?: Record<string, MoteMainCreationReference>
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   moteChatIntents?: Record<string, MoteChatIntent>
   agentComposerDrafts?: Record<string, string>
@@ -4069,6 +4074,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     botTaskSelections: state.botTaskSelections,
     manualConnectionIntents: state.manualConnectionIntents,
     manualConnectionSelections: state.manualConnectionSelections,
+    moteMainCreationReferences: state.moteMainCreationReferences,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     moteChatIntents: state.moteChatIntents,
     agentComposerDrafts: state.agentComposerDrafts,
@@ -4484,6 +4490,19 @@ export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding
   if (useAppStore.getState().spatialRequests[binding.requestId]) return null
   useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [binding.requestId]: binding } }))
   return await saveWorkbenchSelection(false)
+}
+/** Preserve the original create key before dispatch; facts stay with Core/Files/dialogue. */
+export async function retainMoteMainCreationReference(reference: MoteMainCreationReference, expectedOperationId: string | null): Promise<void> {
+  const key = JSON.stringify(reference.target), parsed = restoredMoteMainCreationReferences({ [key]: reference })[key]
+  if (!parsed) throw new Error('The original Mote creation reference is invalid.')
+  let changed = false
+  useAppStore.setState(state => {
+    if ((state.moteMainCreationReferences[key]?.operationId ?? null) !== expectedOperationId) return state
+    changed = true
+    return { moteMainCreationReferences: { ...state.moteMainCreationReferences, [key]: parsed } }
+  })
+  if (!changed) throw new Error('Another original Main creation request is retained. Inspect it without starting another Agent.')
+  await flushMessageWorkbench(false)
 }
 /** Advance the same Browser creation admission before handoff or first input. */
 export async function retainBrowserAgentIntent(requestId: string, expected: NonNullable<SpatialRequestBinding['browserAgent']>,
@@ -5021,6 +5040,7 @@ function settleNativeBrowserProjectionNotice(state: AppState, browserId: string)
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   workbenchSpaceSelection: null,
+  moteDiscussionEntry: null,
   workbenchNavigationInputPolicy: null,
   desktopNavigationNotice: null,
   projectGroups: [],
@@ -5042,6 +5062,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   botTaskSelections: {},
   manualConnectionIntents: {},
   manualConnectionSelections: {},
+  moteMainCreationReferences: {},
   moteConnectionSaveIntents: {},
   moteChatIntents: {},
   retainedSpatialFocus: null,
@@ -8789,10 +8810,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
     }
+    const moteEntryToken = reveal && !options?.newTab ? mintObjectId() : undefined
     const showConversation = (snapshot: ScratchTopicSnapshot) => {
       const rootPath = scratchTopicLogicalPath(workspace, snapshot)
-      if (rootPath !== null && !snapshot.readError && scratchTopicKind(snapshot.id, [snapshot]) === 'mote')
+      if (rootPath !== null && !snapshot.readError && scratchTopicKind(snapshot.id, [snapshot]) === 'mote') {
         showMoteConversation({ workspace, topic: snapshot, rootPath })
+        if (moteEntryToken) {
+          const choice = get().workbenchSpaceSelection
+          const memberReference = options?.tabId && choice?.groupId && choice.tabId && choice.regionId ? { displayWorkspaceId: choice.workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId } : undefined
+          set({ moteDiscussionEntry: { workspaceId: workspace.id, topicId, token: moteEntryToken, ...(memberReference ? { memberReference } : {}) } })
+        }
+      }
     }
     const remember = (snapshot: ScratchTopicSnapshot) => set(current => {
       const scope = scratchTopicsScope(workspace), previous = current.scratchTopicSnapshots[workspace.id]
@@ -12450,7 +12478,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, moteMainCreationReferences: restoredMoteMainCreationReferences(state.moteMainCreationReferences), agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

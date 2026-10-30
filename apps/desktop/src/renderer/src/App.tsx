@@ -259,7 +259,23 @@ function DesktopApp() {
   const moteProjection = useMemo(() => {
     return moteWorkbenchProjection(surveyCatalog, tabs, moteFloating, selectMoteReference, layouts)
   }, [surveyCatalog, moteFloating.targetTabId, moteFloating.targetTopicId, moteFloating.reference, moteFloating.targetAgent, tabs, layouts, agentFocus.pmo.sessionId, selectMoteReference])
+  const retainedMoteViews = useRef<{ owner: string; targets: WorkbenchViewTargets }>({ owner: '', targets: {} })
   const moteViewTargets = useMemo(() => {
+    const owner = JSON.stringify([moteFloating.targetTopicId, moteFloating.agentTarget])
+    const retain = (current: WorkbenchViewTargets | undefined): WorkbenchViewTargets => {
+      const previous = retainedMoteViews.current.owner === owner ? retainedMoteViews.current.targets : {}
+      const merged: Record<string, readonly WorkbenchViewTarget[]> = { ...current }
+      for (const [tabId, occurrences] of Object.entries(previous)) {
+        if (!tabs[tabId]) continue
+        const next = merged[tabId] ?? []
+        const parked = occurrences.filter(old => !next.some(target => target.hostId === old.hostId) &&
+          (!old.reference || Boolean(tabs[tabId]?.regions[old.reference.regionId])))
+          .map(target => ({ ...target, active: false, visible: false }))
+        if (parked.length) merged[tabId] = [...next, ...parked]
+      }
+      retainedMoteViews.current = { owner, targets: merged }
+      return merged
+    }
     const targets = pmoTeamsTopicFloatingViewTargets(
       moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection.projection)
     const held = moteFloating.reference, tab = held ? tabs[held.tabId] : undefined
@@ -269,11 +285,11 @@ function DesktopApp() {
       held.tabId === pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) &&
       tab.topicId === pmoTeamsTopicFloatingTargetTopicId(moteFloating, tabs) &&
       workbenchDisplayReferenceMatches(layouts[held.displayWorkspaceId], held)) {
-      return { ...targets, [tab.id]: targets[tab.id]!.map(target => ({ ...target,
-        onSelectRegion: (regionId: string) => selectMoteReference({ ...held, regionId }) })) }
+      return retain({ ...targets, [tab.id]: targets[tab.id]!.map(target => ({ ...target,
+        onSelectRegion: (regionId: string) => selectMoteReference({ ...held, regionId }) })) })
     }
-    return targets
-  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference, moteFloating.agentTarget, moteFloating.targetAgent,
+    return retain(targets)
+  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference, moteFloating.agentTarget, moteFloating.targetAgent, moteFloating.conversationIntent,
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
   const [focusWorkfaceView, setFocusWorkfaceView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {

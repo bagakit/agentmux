@@ -58,6 +58,8 @@ export type PmoTeamsTopicFloatingState = {
   /** Advisory UI persistence failure; never disables the retained workspace. */
   preferenceIssue?: string | undefined
   /** Ephemeral explicit-entry intent. Hover and natural pinning do not create one. */
+  conversationIntent?: 'main' | 'member' | undefined
+  threadsEntry?: number | undefined
   conversationEntry?: number | undefined
 }
 
@@ -117,7 +119,7 @@ function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void
     JSON.stringify(resolved.agentTarget) === JSON.stringify(current.agentTarget) && resolved.entryMessage === current.entryMessage &&
     JSON.stringify(resolved.entryContext) === JSON.stringify(current.entryContext) &&
     resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.focusChatTopicId === current.focusChatTopicId &&
-    resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && !retryPreference) return
+    resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && resolved.conversationIntent === current.conversationIntent && resolved.threadsEntry === current.threadsEntry && !retryPreference) return
   state = resolved
   if (persist && (resolved.open !== current.open || JSON.stringify(resolved.agentTarget) !== JSON.stringify(current.agentTarget) || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
     try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open, agentTarget: resolved.agentTarget,
@@ -265,7 +267,7 @@ export function pmoTeamsTopicFloatingViewTargets(
     const targets: Record<string, WorkbenchViewTarget[]> = {}
     for (const reference of references) (targets[reference.tabId] ??= []).push({
       hostId: workbenchProjectionSlotId(PMO_FLOATING_TAB_SLOT_PREFIX, reference),
-      active: floating.open, visible: true, surface: 'mote', reference, projection, retainedRegionId: reference.regionId,
+      active: floating.open, visible: true, surface: 'mote', moteInputIntent: floating.agentTarget ? 'member' : floating.conversationIntent ?? 'main', reference, projection, retainedRegionId: reference.regionId,
       onSelectRegion: regionId => projection.onSelect({ ...reference, regionId })
     })
     return targets
@@ -276,7 +278,7 @@ export function pmoTeamsTopicFloatingViewTargets(
   if (!tab || !floating.agentTarget && (tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId)) return undefined
   // An unknown address keeps only its original entity, never a guessed occurrence.
   return { [tab.id]: [{
-    hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true, surface: 'mote'
+    hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true, surface: 'mote', moteInputIntent: floating.agentTarget ? 'member' : floating.conversationIntent ?? 'main'
   }] }
 
 }
@@ -295,6 +297,14 @@ export function leavePmoTeamsTopicFloatingPreview(): void {
 }
 export function keepPmoTeamsTopicFloatingPreview(): void { cancelClose() }
 
+/** Navigate the already-open exact Mote shell without creating a Main recovery entry. */
+export function requestPmoTeamsTopicFloatingThreads(topicId: string): boolean {
+  const current = snapshot()
+  if (!current.open || current.agentTarget || pmoTeamsTopicFloatingTargetTopicId(current, useAppStore.getState().tabs) !== topicId) return false
+  update({ threadsEntry: nextConversationEntry() })
+  return true
+}
+
 /** Pinning reuses the visible surface and the original input/focus owners. */
 export function pinPmoTeamsTopicFloating(): void {
   cancelClose()
@@ -311,20 +321,20 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
   const tabId = options?.targetTabId?.trim() ?? options?.reference?.tabId
   const topicId = options?.targetTopicId?.trim() ?? (tabId ? current.tabs[tabId]?.topicId : undefined)
   const retargeted = Boolean(topicId && topicId !== previous.targetTopicId || tabId && tabId !== previous.targetTabId)
-  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, agentTarget: undefined, entryMessage: undefined, entryContext: undefined, ...(topicId ? { targetTopicId: topicId } : {}),
+  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, threadsEntry: undefined, agentTarget: undefined, entryMessage: undefined, entryContext: undefined, ...(topicId ? { targetTopicId: topicId } : {}),
     ...(tabId ? { targetTabId: tabId } : topicId && topicId !== previous.targetTopicId ? { targetTabId: undefined } : {}),
     ...(suppliedReference ? { reference: suppliedReference } : retargeted ? { reference: undefined } : {}),
     ...(tabId || suppliedReference || retargeted ? { targetAgent: undefined } : {}) }
-  if (!tabId && !suppliedReference && (!previous.open || topicId && topicId !== previous.targetTopicId)) next = floatingMoteDefaultSelection(next)
+  if (!tabId && !suppliedReference) next = floatingMoteDefaultSelection(next)
   next = initialFloatingSelection(next)
   const layout = current.layouts[SCRATCH_WORKSPACE_ID]
   const resolvedTopicId = pmoTeamsTopicFloatingTargetTopicId(next, current.tabs)
   const resolvedTabId = pmoTeamsTopicFloatingTargetTabId(next, current.tabs, layout, current.agentFocus.pmo.sessionId)
-  const isOpening = !previous.open || resolvedTopicId !== pmoTeamsTopicFloatingTargetTopicId(previous, current.tabs) ||
+  const isOpening = !tabId && !suppliedReference || !previous.open || resolvedTopicId !== pmoTeamsTopicFloatingTargetTopicId(previous, current.tabs) ||
     resolvedTabId !== pmoTeamsTopicFloatingTargetTabId(previous, current.tabs, layout, current.agentFocus.pmo.sessionId) ||
     Boolean(suppliedReference && (!previous.reference || !sameWorkbenchProjectionSelection(suppliedReference, previous.reference)))
   if (isOpening) {
-    next = { ...next, conversationEntry: nextConversationEntry() }
+    next = { ...next, conversationEntry: nextConversationEntry(), conversationIntent: tabId || suppliedReference ? 'member' : 'main' }
     const workspace = current.config?.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)
     const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
     const topic = topics?.find(one => one.id === resolvedTopicId)

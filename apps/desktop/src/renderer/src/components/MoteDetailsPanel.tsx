@@ -56,8 +56,8 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   const frame = useMoteSpace()
   const presentation = useSpaceContentPresentation()
   const space = presentation && frame?.topicId === scope.topic.id ? frame : null
-  const discussion = space?.section === 'discussion'
-  const section = space && space.section !== 'discussion' ? space.section : localSection
+  const discussion = space?.section === 'discussion' || space?.section === 'threads'
+  const section = space && space.section !== 'discussion' && space.section !== 'threads' ? space.section : localSection
   const setSection = (next: MoteSection) => { setLocalSection(next); space?.select(next) }
   const [nameOpen, setNameOpen] = useState(false)
   const [introductionOpen, setIntroductionOpen] = useState(false)

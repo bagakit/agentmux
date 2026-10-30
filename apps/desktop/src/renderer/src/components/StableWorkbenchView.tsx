@@ -131,7 +131,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, windowTarget, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, moteInputIntent, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, windowTarget, kind = 'tab', children }: {
   homeId: string
   /** Only the unique primary View carries an input-retention identity. */
   primaryTabId?: string | undefined
@@ -143,6 +143,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   visible?: boolean
   retainedRegionId: string | null
   surface?: import('../lib/workbench-presentation').WorkbenchViewTarget['surface']
+  moteInputIntent?: 'main' | 'member' | undefined
   survey?: boolean | undefined
   controlsOpen?: boolean | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
@@ -190,8 +191,8 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const displayReference = useMemo(() => windowPlacement && frozenTarget.current && reference
     ? { ...reference, displayWorkspaceId: frozenTarget.current.displayWorkspaceId, groupId: frozenTarget.current.groupId, tabId: frozenTarget.current.tabId,
       ...(frozenTarget.current.kind === 'region' ? { regionId: frozenTarget.current.regionId } : {}) } : reference, [windowPlacement, reference])
-  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
-    [presentedActive, retainedRegionId, placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
+  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, moteInputIntent, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
+    [presentedActive, retainedRegionId, placedHostId, surface, moteInputIntent, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)

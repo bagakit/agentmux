@@ -15,6 +15,12 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   defaultConversation?: MoteDefaultConversation | undefined
   /** This surface's local chrome choice; it owns no Agent role or execution state. */
   presentation?: 'conversation' | 'workface'
+  section?: 'discussion' | 'threads'
+  bodyVisible?: boolean
+  memberIntent?: boolean
+  entryToken?: string | undefined
+  showThreads?(): void
+  showThread?(reference: WorkbenchProjectionSelection): boolean
   showOriginalWorkface?(): void
   showConversation?(): void
   selectTab(tabId: string, groupId: string): void

@@ -38,7 +38,7 @@ export function MoteWorkfaceCooperation(props: Omit<Parameters<typeof MoteCooper
 /** One compact reading surface over original members. All actions navigate existing owners. */
 export function MoteCooperation({ scope, active, reference, onSelect, actions, presentation = 'bar' }: {
   scope: MoteWorkfaceScope; active: boolean; reference?: WorkbenchProjectionSelection | null | undefined
-  onSelect(reference: WorkbenchProjectionSelection): boolean; actions?: ReactNode; presentation?: 'bar' | 'navigation'
+  onSelect(reference: WorkbenchProjectionSelection): boolean; actions?: ReactNode; presentation?: 'bar' | 'navigation' | 'threads'
 }) {
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
     spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
@@ -168,9 +168,9 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     } catch (error) { if (!controller.signal.aborted) setIssue(error instanceof Error ? error.message : String(error)) }
     finally { unsubscribe(); for (const event of events) document.removeEventListener(event, cancel, true); if (navigation.current === controller) navigation.current = null }
   }
-  const ordered = [...attention, ...members.filter(member => !attention.includes(member)).sort((a, b) => Number(isPrimary(b)) - Number(isPrimary(a)))]
+  const ordered = [...attention, ...members.filter(member => !attention.includes(member)).sort((a, b) => Number(isPrimary(b)) - Number(isPrimary(a)))].filter(member => presentation !== 'threads' || !isPrimary(member))
   const membersPanel = <div className="mote-cooperation__team-body" id={id} data-mote-team>
-      <div className="mote-cooperation__team-heading"><strong>Team work</strong><span>{members.length} Agent{members.length === 1 ? '' : 's'}</span></div>
+      <div className="mote-cooperation__team-heading"><strong>{presentation === 'threads' ? '其他 Agent' : 'Team work'}</strong><span>{ordered.length} Agent{members.length === 1 ? '' : 's'}</span></div>
       {scope.issue || !spaceId ? <p className="mote-cooperation__issue" role="status">{spaceId ? 'Showing the last confirmed members and their original conversations.' : 'Original team bindings are not confirmed. Existing members and conversations are kept.'}</p> : null}
       {humanGoals.map(goal => <button key={goal.id} type="button" className="mote-cooperation__goal" onClick={() => openGoal(goal.id)}>
         <span>Needs your review</span><strong>{goal.title}</strong><Forward size={14} /></button>)}
@@ -197,6 +197,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     </div>
   const editDialog = editing ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)}
       onClose={() => setEditing(false)} returnFocus={() => trigger.current} /> : null
+  if (presentation === 'threads') return <section className="mote-cooperation mote-cooperation--threads" aria-label="其他 Agent 对话">{issue ? <p role="status">{issue}</p> : null}{membersPanel}</section>
   if (presentation === 'navigation') return <Dialog.Root modal={false} open={expanded && active} onOpenChange={setExpanded}>
     <section className="mote-cooperation mote-cooperation--navigation" data-mote-cooperation={scope.topic.id} aria-label="Mote cooperation">
       <Dialog.Trigger asChild><button type="button" ref={trigger} className="mote-cooperation__team" aria-label="Team work" title="Team and cooperation settings"
