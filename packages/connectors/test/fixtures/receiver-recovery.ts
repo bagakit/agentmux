@@ -57,11 +57,12 @@ export async function receiverRecoveryFixture(cleanup: Array<() => void | Promis
   const callCli = (path: string, args: string[], input = '') => runCompiledObjectCli(['--endpoint', 'unix:' + path, 'connection', ...args,
     ...(args[0] === 'receiver' && !args.includes('--help') && !args.includes('--runtime') ? ['--runtime', fence.runtimeId] : [])], objectCliEnvironment(f.root), input)
   const cli = (args: string[], input = '') => callCli(directServer.path, args, input)
+  const rootCli = (args: string[], input = '') => runCompiledObjectCli(['--endpoint', 'unix:' + directServer.path, ...args], objectCliEnvironment(f.root), input)
   const cliForwarded = (args: string[], input = '') => callCli(server.path, args, input)
   const recover = (input: ConnectionReceiverRecoverInput) => hosted.forwardRpc!('connection.receiver.recover', input)
   const ready = () => waitReceiver(async () => expect((await current()).receiver?.state).toBe('ready'))
   const unchanged = () => { expect(f.client.agentSession(f.input.agentSessionId).run).toEqual(f.session.run); expect(starts).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled() }
-  return { ...f, wire, owner, get services() { return services }, adapter, get rpc() { return rpc }, hosted, downstream, server, directServer, fence, identity, forwarded, current, target, recover, cli, cliForwarded, ready, unchanged,
+  return { ...f, wire, owner, get services() { return services }, adapter, get rpc() { return rpc }, hosted, downstream, server, directServer, fence, identity, forwarded, current, target, recover, cli, rootCli, cliForwarded, ready, unchanged,
     async reconnect() { rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }) },
     async restart() { await services.close(); services = await create() } }
 }

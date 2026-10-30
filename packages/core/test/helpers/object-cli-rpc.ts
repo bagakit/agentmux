@@ -82,6 +82,7 @@ export class ObjectCliProbe {
 export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
+    'runtime.owner.identity': [],
     'connection.receiver.recover': ['--input', '-', '--runtime', 'runtime-original'], 'connection.receiver.inspect': ['--operation-id', 'receiver-original', '--runtime', 'runtime-original'],
     'connection.api.identities': ['--session', 'SID'], 'connection.api.request': ['--input', input], 'connection.api.inspect': ['--operation-id', 'OP'],
     'app.mobile.assets.inspect': ['--input', '-'], 'app.mobile.assets.activate': ['--input', '-'],

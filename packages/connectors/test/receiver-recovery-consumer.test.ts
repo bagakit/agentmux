@@ -5,9 +5,26 @@ import { fork } from 'node:child_process'
 import { once } from 'node:events'
 import { connectAgentMuxRpc } from '../../core/src/index.js'
 import { receiverRecoveryFixture, waitReceiver } from './fixtures/receiver-recovery.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const result = (r: { code: number | null; stdout: string; stderr: string }) => { expect(r.code, r.stdout + r.stderr).toBe(0); return JSON.parse(r.stdout).result }
+
+it('pure compiled CLI discovers the original Runtime before same-receiver recovery and inspection', async () => {
+  const f = await receiverRecoveryFixture(cleanup, { endpointCode: 514 })
+  await waitReceiver(async () => expect((await f.current()).receiver?.state).toBe('ended'))
+  expect(result(await f.rootCli(['connection', 'owner', 'inspect'])).ownership).toBe('local')
+  const { owner } = result(await f.rootCli(['runtime', 'owner', 'identity']))
+  const connection = result(await f.rootCli(['connection', 'inspect', '--connection', 'feishu-connection'])).connection
+  const input = { operationId: 'pure-cli-original', connectionId: connection.config.connectionId, expectedRevision: connection.revision, receiverRef: connection.receiver.ref }
+  f.wire.state.endpointCode = 0
+  expect(result(await f.rootCli(['connection', 'receiver', 'recover', '--input', '-', '--runtime', owner.runtimeId], JSON.stringify(input))).operation.disposition).toBe('scheduled')
+  await f.ready()
+  expect(result(await f.rootCli(['connection', 'receiver', 'inspect', '--operation-id', input.operationId, '--runtime', owner.runtimeId])).operation.operationId).toBe(input.operationId)
+  const help = await f.rootCli(['runtime', 'owner', 'identity', '--help']), skill = await f.rootCli(['runtime', '--skill'])
+  expect(help.code).toBe(0); expect(help.stdout).toContain('typed owner'); expect(skill.code).toBe(0); expect(skill.stdout).toContain('runtime owner identity')
+  expect(f.wire.sockets).toHaveLength(1); f.unchanged()
+})
 
 it('healthy original receivers are administered through actual Hosted forwarding and compiled CLI without rotation', async () => {
   const f = await receiverRecoveryFixture(cleanup); await f.ready()
@@ -84,6 +101,7 @@ it('original journal inspection survives actual management-process death and a n
   const f = await receiverRecoveryFixture(cleanup); await f.ready()
   const input = await f.target('process-original'), admitted = await f.recover(input)
   await f.services.close()
+  const seenOwners: string[] = []
   for (let generation = 0; generation < 2; generation++) {
     const child = fork(new URL('./fixtures/receiver-journal-owner.mjs', import.meta.url), [join(f.root, 'receiver-host'), f.fence.runtimeId], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] })
     let stderr = ''; child.stderr!.on('data', data => { stderr += data })
@@ -91,11 +109,17 @@ it('original journal inspection survives actual management-process death and a n
     const ready = await Promise.race([once(child, 'message').then(([value]) => value as { socketPath: string }), once(child, 'exit').then(() => { throw Error('Private journal process failed: ' + stderr) })])
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: ready.socketPath } }); cleanup.push(() => rpc.dispose())
     const { owner } = await rpc.call('runtime.owner.identity', {}), runtimeFence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    const cli = (args: string[], stdin = '') => runCompiledObjectCli(['--endpoint', 'unix:' + ready.socketPath, ...args], objectCliEnvironment(f.root), stdin)
+    const discovered = result(await cli(['runtime', 'owner', 'identity'])).owner
+    expect(discovered.runtimeId).toBe(f.fence.runtimeId); seenOwners.push(discovered.ownerInstanceId)
+    expect(result(await cli(['connection', 'receiver', 'inspect', '--operation-id', input.operationId, '--runtime', discovered.runtimeId])).operation).toEqual(admitted.operation)
+    expect(result(await cli(['connection', 'receiver', 'recover', '--input', '-', '--runtime', discovered.runtimeId], JSON.stringify(input))).operation).toEqual(admitted.operation)
     expect((await rpc.call('connection.receiver.inspect', { operationId: input.operationId }, { runtimeFence })).operation).toEqual(admitted.operation)
     expect((await rpc.call('connection.receiver.recover', input, { runtimeFence })).operation).toEqual(admitted.operation)
     expect(f.wire.sockets).toHaveLength(1)
     const ended = once(child, 'exit'); child.kill('SIGKILL'); await ended; await rpc.dispose()
   }
+  expect(new Set(seenOwners).size).toBe(2)
   f.unchanged()
 })
 
