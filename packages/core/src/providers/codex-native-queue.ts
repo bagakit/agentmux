@@ -34,13 +34,21 @@ async function closeFailedPreparation(dispose: () => Promise<void>, error: unkno
   throw error
 }
 
-async function assertFile(file: FileObject): Promise<void> {
-  const input = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-  try { const stat = await input.stat({ bigint: true }); if (!stat.isFile() || stat.dev !== file.device || stat.ino !== file.inode) throw unavailable() }
+async function fileObject(path: string): Promise<FileObject> {
+  const input = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+  try {
+    const stat = await input.stat({ bigint: true })
+    if (!stat.isFile()) throw unavailable()
+    return { path, device: stat.dev, inode: stat.ino }
+  }
   finally { await input.close() }
 }
 
-function stores(files: NativeProcessFile[]): { queue: NativeProcessFile; state: NativeProcessFile } {
+async function assertFile(file: FileObject): Promise<void> {
+  if (!sameFile(await fileObject(file.path), file)) throw unavailable()
+}
+
+async function stores(files: NativeProcessFile[]): Promise<{ queue: NativeProcessFile; state: FileObject }> {
   const exact = (name: string) => {
     const candidates = files.filter(file => basename(file.path) === name && (file.access === 'w' || file.access === 'u'))
     const unique = [...new Map(candidates.map(file => [JSON.stringify(identity(file)), file])).values()]
@@ -48,8 +56,12 @@ function stores(files: NativeProcessFile[]): { queue: NativeProcessFile; state: 
     return unique[0]!
   }
   // These names belong to the qualified native storage protocol, not to an Executor.
-  const queue = exact('queue_1.sqlite'), state = exact('state_5.sqlite')
-  if (dirname(queue.path) !== dirname(state.path)) throw unavailable()
+  const queue = exact('queue_1.sqlite')
+  // The writable queue binds the original store. Metadata uses a separate native
+  // connection pool: its descriptor need not stay resident or writable. Bind the
+  // existing same-root file instead, retaining any contradictory OS observation.
+  const state = await fileObject(join(dirname(queue.path), 'state_5.sqlite'))
+  if (files.some(file => file.path === state.path && !sameFile(file, state))) throw unavailable()
   return { queue, state }
 }
 
@@ -131,22 +143,25 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
   await assertFile(executable)
   const version = await runProcess(executable.path, ['--version'], { signal, timeoutMs: 2_000, maxOutputBytes: 4096 })
   if (version.exitCode !== 0 || version.stderr || !['codex-cli 0.163.0', 'codex-cli 0.165.0', 'codex-cli 0.166.0'].includes(version.stdout.trim())) throw unavailable()
-  const storage = stores(await nativeProcessFiles(owner, signal, 'process'))
+  const storage = await stores(await nativeProcessFiles(owner, signal, 'process'))
   await assertFile(storage.queue); await assertFile(storage.state)
   const helper = await openQueueHelper(executable.path, dirname(storage.queue.path), context.workspacePath, signal)
   try {
     const helperBirth = await nativeProcessBirth(helper.processId, signal)
+    const assertStorage = async (): Promise<void> => {
+      const sourceStores = await stores(await nativeProcessFiles(owner, signal, 'process'))
+      const helperStores = await stores(await nativeProcessFiles(helper.processId, signal, 'process'))
+      if (!sameFile(sourceStores.queue, storage.queue) || !sameFile(sourceStores.state, storage.state) ||
+          !sameFile(helperStores.queue, storage.queue) || !sameFile(helperStores.state, storage.state)) throw unavailable()
+      await assertFile(storage.queue); await assertFile(storage.state)
+    }
     const assertCurrent = async (): Promise<void> => {
       signal.throwIfAborted()
       if (await nativeProcessBirth(processId, signal) !== rootBirth || await nativeProcessBirth(owner, signal) !== ownerBirth ||
           await nativeProcessBirth(helper.processId, signal) !== helperBirth) throw unavailable()
       const current = await locateAppServerNativeSession(context, codexMainNativeRecord, 'run-group', { id: original.id, path: original.file.path })
       if (!current || current.id !== original.id || current.file.processId !== owner || !sameFile(current.file, original.file) || current.file.path !== original.file.path) throw unavailable()
-      const sourceStores = stores(await nativeProcessFiles(owner, signal, 'process'))
-      const helperStores = stores(await nativeProcessFiles(helper.processId, signal, 'process'))
-      if (!sameFile(sourceStores.queue, storage.queue) || !sameFile(sourceStores.state, storage.state) ||
-          !sameFile(helperStores.queue, storage.queue) || !sameFile(helperStores.state, storage.state)) throw unavailable()
-      await assertFile(storage.queue); await assertFile(storage.state); await assertFile(executable)
+      await assertStorage(); await assertFile(executable)
       const read = await helper.request('thread/read', { threadId: original.id, includeTurns: false }), thread = read?.thread
       // A helper reads the saved object without loading it. Null live capabilities
       // stay unknown. In this native version queue/add uses the same ownership
@@ -154,6 +169,7 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
       if (thread?.id !== original.id || thread.path !== original.file.path || thread.ephemeral !== false ||
           thread.canAcceptDirectInput === false || !codexMainNativeRecord({ source: thread.source,
             ...(thread.threadSource === null ? {} : { thread_source: thread.threadSource }) })) throw unavailable()
+      await assertStorage()
     }
     await assertCurrent()
     const plan = { kind: 'native-rpc' as const, protocolId: PROTOCOL, sourceId: nativeInputSourceId(target), threadId: original.id,
