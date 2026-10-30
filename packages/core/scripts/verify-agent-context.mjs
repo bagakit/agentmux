@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url'
 
 // Approved narrow slices do not consume the legacy full/default receipt.
 if (process.argv.length > 2) {
-  assert.ok(process.argv[2] === '--history-metadata' && process.argv.slice(3).every(arg => arg === '--development') && process.argv.length <= 4,
-    'Usage: verify-agent-context.mjs [--history-metadata [--development]]')
-  await import('./verify-agent-context-history-metadata.mjs')
+  assert.ok(['--history-metadata', '--continuation'].includes(process.argv[2]) && process.argv.slice(3).every(arg => arg === '--development') && process.argv.length <= 4,
+    'Usage: verify-agent-context.mjs [--history-metadata|--continuation [--development]]')
+  await import('./verify-agent-context-slices.mjs')
   process.exit(process.exitCode ?? 0)
 }
 

@@ -12,6 +12,8 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
+import type { AgentContextPage, AgentContextParams } from '../src/agent-context.js'
+import { AgentMuxError } from '../src/errors.js'
 import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 
@@ -326,4 +328,112 @@ it.each(['creation', 'forkedFrom', 'toolExecution'] as const)('history metadata:
     expect(() => parseRpcNativeResult('agent.context', { ...page, descriptor: { ...page.descriptor, history } }, input))
       .toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
   }
+})
+
+async function contextCli(f: Awaited<ReturnType<typeof endpoint>>, input: AgentContextParams): Promise<AgentContextPage> {
+  const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
+  const output = await promisify(execFile)(process.execPath, [cli, '--endpoint', `unix:${f.socketPath}`, 'agent', 'context',
+    '--host', input.hostId, '--session', input.agentSessionId, '--limit', String(input.limit ?? 30),
+    ...(input.cursor === undefined ? [] : ['--cursor', input.cursor])], {
+    env: objectCliEnvironment(f.root), timeout: 15_000, maxBuffer: 4 * 1024 * 1024 })
+  const response = JSON.parse(output.stdout)
+  expect(response).toMatchObject({ ok: true, operation: 'agent.context' })
+  return response.result
+}
+
+/** Occupy the real Client's four read slots; released reads use the original Provider and native file. */
+async function holdNativeReads(f: Awaited<ReturnType<typeof endpoint>>) {
+  const provider = f.client.providers.get(f.session.providerId), read = provider.readSessionHistoryPage!
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const reader = vi.fn<NonNullable<typeof provider.readSessionHistoryPage>>(async context => { await held; return read(context) })
+  f.client.providers.replace({ ...provider, readSessionHistoryPage: reader })
+  const pending = Promise.allSettled(Array.from({ length: 4 }, () => f.client.sessionHistoryPage(f.session.agentSessionId, { limit: 1 })))
+  const finish = async () => {
+    release()
+    const results = await pending
+    f.client.providers.replace(provider)
+    const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+    if (failures.length) throw new AggregateError(failures, 'Private original native reads did not settle')
+    return results.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+  }
+  close.push(async () => { await finish() })
+  await vi.waitFor(() => expect(reader).toHaveBeenCalledTimes(4))
+  return { reader, finish }
+}
+
+it.each(['claude', 'pi'] as const)('continuation: %s real Client BUSY preserves both source positions through Unix and compiled CLI', async provider => {
+  const f = await endpoint(provider), before = await f.bytes()
+  const timeline = vi.spyOn(f.client, 'sessionTimeline'), native = vi.spyOn(f.client, 'sessionHistoryPage')
+  const first = await f.rpc.call('agent.context', f.input)
+  expect(first.captured!.items.map(item => item.id)).toEqual(['captured-2'])
+  expect(first.captured!.items[0]!.content).toBe(fullText)
+  expect(first.native!.items[0]!.contentParts).toEqual([{ kind: 'text', text: fullText, contentEligibility: 'unconfirmed' }])
+  const held = await holdNativeReads(f), callsBefore = native.mock.calls.length
+  const unavailable = await contextCli(f, { ...f.input, limit: 30, cursor: first.nextCursor! })
+  expect(native).toHaveBeenCalledTimes(callsBefore + 1); expect(held.reader).toHaveBeenCalledTimes(4)
+  expect(unavailable.native).toBeNull()
+  expect(unavailable.unavailable).toContainEqual(expect.objectContaining({ source: 'native', code: 'AGENT_SESSION_HISTORY_BUSY' }))
+  expect(unavailable.captured!.items.map(item => item.id)).toEqual(['captured-0', 'captured-1'])
+  expect(unavailable.nextCursor).not.toBeNull()
+  const original = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString()), next = JSON.parse(Buffer.from(unavailable.nextCursor!, 'base64url').toString())
+  expect(next).toMatchObject({ nativeCursor: original.nativeCursor, nativeDone: false, capturedOffset: 3, capturedDone: true })
+  expect(original.nativeCursor).toBeTypeOf('string')
+  const settled = await held.finish()
+  expect(settled).toHaveLength(4)
+  for (const page of settled) expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: fullText, contentEligibility: 'unconfirmed' }])
+  const resumed = await contextCli(f, { ...f.input, limit: 30, cursor: unavailable.nextCursor! })
+  expect(timeline).toHaveBeenCalledTimes(3) // Keep the original capturedDone metadata observation.
+  expect(resumed.captured!.items).toEqual([])
+  expect(resumed.native!.items.map(item => item.id)).toEqual(['native-0', 'native-1'])
+  expect([first, unavailable, resumed].flatMap(page => page.captured?.items.map(item => item.id) ?? []).sort()).toEqual(['captured-0', 'captured-1', 'captured-2'])
+  expect([first, unavailable, resumed].flatMap(page => page.native?.items.map(item => item.id) ?? []).sort()).toEqual(['native-0', 'native-1', 'native-2'])
+  expect(resumed.nextCursor).toBeNull()
+  expect(await f.bytes()).toEqual(before)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled(); expect(f.connect).not.toHaveBeenCalled()
+})
+
+it('continuation: captured unavailability keeps its original window after native completion', async () => {
+  const f = await endpoint('pi'), before = await f.bytes(), first = await f.rpc.call('agent.context', f.input)
+  const timeline = vi.spyOn(f.store, 'loadTimeline').mockRejectedValueOnce(new AgentMuxError('Private captured read is temporarily unavailable.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))
+  const native = vi.spyOn(f.client, 'sessionHistoryPage')
+  const unavailable = await f.rpc.call('agent.context', { ...f.input, limit: 30, cursor: first.nextCursor! })
+  expect(timeline).toHaveBeenCalledOnce(); expect(native).toHaveBeenCalledOnce()
+  expect(unavailable.captured).toBeNull()
+  expect(unavailable.unavailable).toContainEqual(expect.objectContaining({ source: 'captured', code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' }))
+  expect(unavailable.native!.items.map(item => item.id)).toEqual(['native-0', 'native-1'])
+  expect(unavailable.nextCursor).not.toBeNull()
+  const original = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString()), next = JSON.parse(Buffer.from(unavailable.nextCursor!, 'base64url').toString())
+  expect(next).toMatchObject({ capturedAnchorId: original.capturedAnchorId, capturedIdsHash: original.capturedIdsHash,
+    capturedCount: 3, capturedOffset: 1, capturedDone: false, nativeDone: true })
+  const resumed = await contextCli(f, { ...f.input, limit: 30, cursor: unavailable.nextCursor! })
+  expect(timeline).toHaveBeenCalledTimes(2); expect(native).toHaveBeenCalledOnce()
+  expect(resumed.captured!.items.map(item => item.id)).toEqual(['captured-0', 'captured-1'])
+  expect(resumed.native).toBeNull(); expect(resumed.nextCursor).toBeNull()
+  expect([first, unavailable, resumed].flatMap(page => page.captured?.items.map(item => item.id) ?? []).sort()).toEqual(['captured-0', 'captured-1', 'captured-2'])
+  expect(await f.bytes()).toEqual(before)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled(); expect(f.connect).not.toHaveBeenCalled()
+})
+
+it('continuation: first-page unavailability stays unread until explicit continuation reaches actual completion', async () => {
+  const f = await endpoint(), before = await f.bytes(), held = await holdNativeReads(f)
+  const timeline = vi.spyOn(f.store, 'loadTimeline').mockRejectedValueOnce(new AgentMuxError('Private captured read is temporarily unavailable.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))
+  const native = vi.spyOn(f.client, 'sessionHistoryPage')
+  const unavailable = await contextCli(f, { ...f.input, limit: 30 })
+  expect(timeline).toHaveBeenCalledOnce(); expect(native).toHaveBeenCalledOnce(); expect(held.reader).toHaveBeenCalledTimes(4)
+  expect(unavailable.captured).toBeNull(); expect(unavailable.native).toBeNull(); expect(unavailable.nextCursor).not.toBeNull()
+  expect(unavailable.unavailable).toEqual(expect.arrayContaining([
+    expect.objectContaining({ source: 'captured', code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' }),
+    expect.objectContaining({ source: 'native', code: 'AGENT_SESSION_HISTORY_BUSY' })]))
+  expect(JSON.parse(Buffer.from(unavailable.nextCursor!, 'base64url').toString())).toMatchObject({ capturedCount: null, capturedOffset: 0,
+    capturedAnchorId: null, capturedIdsHash: null, capturedDone: false, nativeCursor: null, nativeDone: false })
+  await held.finish()
+  const resumed = await f.rpc.call('agent.context', { ...f.input, limit: 30, cursor: unavailable.nextCursor! })
+  expect(resumed.captured!.items.map(item => item.id)).toEqual(['captured-0', 'captured-1', 'captured-2'])
+  expect(resumed.native!.items.map(item => item.id)).toEqual(['native-0', 'native-1', 'native-2'])
+  expect(resumed.captured!.items.at(-1)!.content).toBe(fullText)
+  expect(resumed.native!.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: fullText, contentEligibility: 'unconfirmed' }])
+  expect(resumed.nextCursor).toBeNull(); expect(native).toHaveBeenCalledTimes(2); expect(timeline).toHaveBeenCalledTimes(2)
+  expect(await f.bytes()).toEqual(before)
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled(); expect(f.connect).not.toHaveBeenCalled()
 })

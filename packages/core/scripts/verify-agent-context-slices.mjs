@@ -9,7 +9,8 @@ import { workspaceSourceExport } from '../test/helpers/workspace-source-export.m
 import { bundleIdentityRuntime } from '../../identity/scripts/runtime-bundle.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
-const development = process.argv.includes('--development'), mode = 'history-metadata'
+const development = process.argv.includes('--development'), mode = process.argv[2]?.slice(2)
+assert.ok(['history-metadata', 'continuation'].includes(mode), 'Select the exact Context slice')
 const directory = join(root, 'packages/core/.tmp/agent-context-' + mode)
 await fs.mkdir(directory, { recursive: true })
 const attempt = await fs.mkdtemp(join(directory, 'attempt-')), copy = join(attempt, 'source')
@@ -21,19 +22,37 @@ const copyFiles = ['packages/core/src', 'packages/core/package.json', 'packages/
   'packages/core/test/helpers/fixture-values.ts', 'packages/core/test/helpers/object-cli-rpc.ts']
 const monitored = ['packages/core/src/agent-session-store.ts', 'packages/core/src/rpc-native-codec.ts', 'packages/core/src/public-rpc-service.ts',
   'packages/core/src/public-rpc-client.ts', 'packages/core/src/agent-context.ts', 'packages/core/src/agentmux.ts']
-const expected = [
+const metadata = [
   'history metadata: claude active and retired original fields survive FileStore, Unix and compiled CLI',
   'history metadata: pi active and retired original fields survive FileStore, Unix and compiled CLI',
   ...['creation', 'forkedFrom', 'toolExecution'].map(field => 'history metadata: rejects malformed ' + field + ' and unknown metadata through the original decoder'),
   'binds cursor to exact Host, Session and native locator, and validates strict source payloads',
   'retains the original context source while exposing a different observed native identity'
 ]
-const variants = [
-  { name: 'old-history-allowlist', pattern: 'history metadata: .* active and retired', names: expected.slice(0, 2),
+const continuation = [
+  'continuation: claude real Client BUSY preserves both source positions through Unix and compiled CLI',
+  'continuation: pi real Client BUSY preserves both source positions through Unix and compiled CLI',
+  'continuation: captured unavailability keeps its original window after native completion',
+  'continuation: first-page unavailability stays unread until explicit continuation reaches actual completion',
+  'binds cursor to exact Host, Session and native locator, and validates strict source payloads',
+  'routes an exact configured remote Host through its original forwardRpc namespace'
+]
+const expected = mode === 'history-metadata' ? metadata : continuation
+const pattern = mode === 'history-metadata' ? 'history metadata:|binds cursor to exact Host|retains the original context source'
+  : 'continuation:|binds cursor to exact Host|routes an exact configured remote Host'
+const owner = mode === 'history-metadata' ? 'packages/core/src/rpc-native-codec.ts' : 'packages/core/src/agent-context.ts'
+const variants = mode === 'history-metadata' ? [
+  { name: 'old-history-allowlist', pattern: 'history metadata: .* active and retired', names: metadata.slice(0, 2),
     from: '        if (descriptor.history !== undefined && !isDeepStrictEqual(',
     to: "        if (descriptor.history !== undefined) record(descriptor.history, ['providerId', 'executorId', 'workspacePath', 'createdAt', 'nativeHandle', 'observedNativeHandle', 'previousNativeHandle'])\n        if (descriptor.history !== undefined && !isDeepStrictEqual(" },
-  { name: 'skip-history-normalization', pattern: 'history metadata: rejects malformed', names: expected.slice(2, 5),
+  { name: 'skip-history-normalization', pattern: 'history metadata: rejects malformed', names: metadata.slice(2, 5),
     from: '        if (descriptor.history !== undefined && !isDeepStrictEqual(', to: '        if (false && !isDeepStrictEqual(' }
+] : [
+  { name: 'presence-gated-completion', pattern: 'continuation:', names: continuation.slice(0, 4),
+    from: '  const hasMore = !cursor.capturedDone || !cursor.nativeDone',
+    to: '  const hasMore = timeline !== null && !cursor.capturedDone || native !== null && !cursor.nativeDone' },
+  { name: 'reset-unavailable-native-position', pattern: 'continuation: .* real Client BUSY', names: continuation.slice(0, 2),
+    from: '  if (native) {', to: '  if (!native && !cursor.nativeDone) cursor.nativeCursor = null\n  if (native) {' }
 ]
 function original(path) { return path.startsWith(copy + '/') ? join(root, relative(copy, path)) : path }
 async function bind(path) {
@@ -60,7 +79,7 @@ try {
     await fs.mkdir(dirname(join(copy, name)), { recursive: true }); await fs.symlink(join(root, name), join(copy, name), 'dir')
   }
   await fs.writeFile(join(copy, 'package.json'), '{"type":"module"}\n')
-  for (const path of ['packages/core/scripts/verify-agent-context.mjs', 'packages/core/scripts/verify-agent-context-history-metadata.mjs',
+  for (const path of ['packages/core/scripts/verify-agent-context.mjs', 'packages/core/scripts/verify-agent-context-slices.mjs',
     'packages/core/test/helpers/private-node-source-bundle.mjs', 'packages/core/test/helpers/workspace-source-export.mjs',
     'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts', 'tsconfig.base.json', 'pnpm-lock.yaml']) await bind(join(root, path))
   const identity = join(copy, 'identity-runtime-source.mjs')
@@ -177,17 +196,17 @@ export default {root:${JSON.stringify(copy)},plugins:[{name:'context-current-sou
     runs.push({ name, expected: names, exitCode: result.code, signal: result.signal, assertions, evaluations, cleanup, reportSHA256: sha(await fs.readFile(report)), logSHA256: sha(result.stdout + result.stderr) })
     assert.deepEqual(assertions.map(item => item.fullName.trim()).sort(), [...names].sort(), 'Exact nonempty selected test set')
     assert.equal(cleanup.length, names.length); assert.ok(cleanup.every(value => value.cleanupErrors.length === 0 && value.removedRoots.length > 0))
-    const effectiveCodec = sha(await fs.readFile(join(copy, 'packages/core/src/rpc-native-codec.ts')))
-    assert.ok(evaluations.some(value => value.path === 'packages/core/src/rpc-native-codec.ts' && value.sourceSHA256 === effectiveCodec), 'Actual selected decoder source must execute')
-    if (red) assert.notEqual(effectiveCodec, inputs['packages/core/src/rpc-native-codec.ts'])
+    const effectiveOwner = sha(await fs.readFile(join(copy, owner)))
+    assert.ok(evaluations.some(value => value.path === owner && value.sourceSHA256 === effectiveOwner), 'Actual selected Context owner source must execute')
+    if (red) assert.notEqual(effectiveOwner, inputs[owner])
     assert.equal(result.signal, null); assert.equal(result.code, red ? 1 : 0, 'Unexpected test result: ' + name)
     if (red) assert.ok(assertions.some(item => item.status === 'failed' && item.failureMessages.some(text => text.includes('AssertionError'))), 'Only actual assertion RED qualifies')
     else assert.ok(assertions.every(item => item.status === 'passed'))
     console.log(name + ': ' + (red ? 'assertion RED' : names.length + ' GREEN'))
   }
-  await test('baseline', 'history metadata:|binds cursor to exact Host|retains the original context source', expected)
+  await test('baseline', pattern, expected)
   if (!development) {
-    const path = join(copy, 'packages/core/src/rpc-native-codec.ts'), baseline = await fs.readFile(path, 'utf8')
+    const path = join(copy, owner), baseline = await fs.readFile(path, 'utf8')
     for (const variant of variants) {
       assert.equal(baseline.split(variant.from).length, 2, 'Unique current source mutation anchor')
       await fs.writeFile(path, baseline.replace(variant.from, variant.to))
