@@ -544,7 +544,7 @@ export type AgentCapabilities = {
   /** Native copies preserve their Provider context and receive a new conversation identity. */
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
-  /** Exact async answers use the original managed native actor when declared. */
+  /** Exact async answers use the original native input queue when declared. */
   asyncQuestionReply?: 'native-input'
   /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
   promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' }

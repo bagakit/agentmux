@@ -31,9 +31,13 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
     const addressed = plan.operation !== 'queue-idle' && target?.kind === 'native-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
       isDeepStrictEqual(target.source, source) && plan.expectedTurnId === target.expectedTurnId
     const questionReply = key.kind === 'prompt' && intent.message?.questionReply
+    // An editable native queue entry adopts the frozen answer only while its
+    // actual content still matches. A retained correlation alone is insufficient.
+    const frozenContent = item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt
     const defaultInput = (key.kind === 'message' || questionReply && isDeepStrictEqual(questionReply.source, source)) &&
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
-      (intent.execution ?? 'default') === 'default' && plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
+      (intent.execution ?? 'default') === 'default' && plan.expectedTurnId === undefined &&
+      (plan.operation === 'start-or-steer' || questionReply && plan.operation === 'queue-idle' && frozenContent)
     const sessionInput = target?.kind === 'session-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
       intent.execution === 'immediate' && plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
     // Native queue entries can be edited by their original user. Correlation alone
@@ -43,7 +47,7 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
       intent.message.authorAgentSessionId === undefined && intent.message.authorHuman === undefined && intent.message.authorExternal === undefined &&
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
       (intent.execution ?? 'default') === 'default' && plan.operation === 'queue-idle' && plan.expectedTurnId === undefined &&
-      item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt
+      frozenContent
     if (!addressed && !defaultInput && !sessionInput && !notification) return unconfirmed()
     return { ...original, conversation: { ...conversation, adoptedInput: { key, ...(notification ? { purpose: 'a2a-notification' as const } : {}) } } }
   } catch {

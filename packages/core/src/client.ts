@@ -7114,7 +7114,9 @@ export class AgentMuxClient {
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertCurrentSubmission, transportQualification,
               inputKey,
               { ...(authority ? { authority } : {}), ...inputControl,
-                ...(questionReply ? { requiredNativeSource: questionReply.source } : {}),
+                // Historical asynchronous answers are new native input, not a live
+                // callback or steer. The original thread owns idle queue dispatch.
+                ...(questionReply ? { requiredNativeSource: questionReply.source, nativeIdleOnly: true as const } : {}),
                 ...(platformNotification?.mode === 'idle' ? { idleOnly: platformNotification.idle! } : {}) }, diagnostic)
           }, { kind: 'semantic', bytes: null, work: 'prompt-submit' }, { renderObservation, protocolInput: transportQualification ? protocolInput : undefined,
             onQueued: releasePreparationObservation, retainPreclaimYield: release => { releasePreparationObservation = release },
