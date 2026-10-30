@@ -107,6 +107,10 @@ Goal 是长期产品目标，沿底层 Demand 身份持久化；它不属于 Cor
 
 Core 持有 Provider、AgentSession、语义恢复及持久空间身份／关系；ctxmux 持有 Run、PTY、ordered bytes 与 Runtime 生命周期。Demand 包只持领域关系，不启动或管理 Agent 进程。Demand 与 Project／Session／Attempt 的关联保存稳定 ID 与可验证引用；历史关联、当前执行和 unknown 分别表达，不存在的观察不能伪成 running。
 
+同一原 Demand root 的写入与持久回执确认由该包串行。新锁协议先原子公开完整标识，当前写入资格随稳定 inode 的内核句柄持有，owner 结束或崩溃后可在原数据上重新取得；路径仅首次不覆盖发布，合法 owner 不替换路径，释放不删除锁路径。外部手工替换或删除不属于该协议保证。等待只影响本次原 root 写入，不能阻塞 Core 事件循环、其他 root 或普通原事实读取。保同一 Goal、正文、关联、revision 与 operation，未知提交不重放，不重建空 Store。
+
+旧格式、不完整或畸形锁记录保字节并明确 unknown；文件中的 PID/time、本机进程查询或取得 advisory 锁均不授权转换或抢占。旧活 writer 自行完成并释放路径后，下一次明确调用可进入新协议。这不提供通用旧遗锁写恢复，也不把该历史责任标为已解决。
+
 ### 公开名称与接口来源
 
 公开 GUI 单项为 Goal，Desktop RPC／CLI 使用现有 `goal.*`／`amux goal`；底层类型、文件和包保留 Demand 身份及领域名，独立文件工具是 `agentmux-demand`。这些是不同入口对同一领域事实的访问，不按改名重发身份，也不为旧 `task.*` 建同义兼容层。准确语法、参数、权限与回执只见[公共能力来源](../../specs/public-capabilities.md#cli-与服务的当前来源)、[公共 CLI parser](../../../packages/core/src/agentmux-cli-commands.ts)和[Demand CLI](../../../packages/demand/src/cli.ts)，本页不另手抄命令词典。

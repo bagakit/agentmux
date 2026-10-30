@@ -22,8 +22,21 @@ await store.addDecision(receipt.demand.id, {
 ```
 
 The store is `<root>/store.json` with schema `agentmux.demand-store.v1`. Mutations
-use an in-process queue, an exclusive lock file, an `fsync`ed temporary file, and an
-atomic rename. Corrupt snapshots and lock failures raise `StoreError` with `code`,
+use an in-process queue, a nonblocking kernel FD lock on a permanent
+`store.lock` inode, an `fsync`ed temporary snapshot, and an atomic rename. The
+complete lock marker is published with a no-replace hard link while already
+locked; closing the handle or process death releases ownership. Waiting is
+asynchronous and bounded; ordinary reads and other roots remain available.
+Protocol owners never replace or unlink the lock path.
+
+Old, incomplete or unrecognized lock files remain explicitly unknown. The store
+preserves their bytes and permits ordinary reads, but never infers ownership from
+a PID, age or an advisory lock. An old live writer may finish and unlink its own
+lock; the next explicit call can then enter the new protocol. There is no automatic
+legacy lock conversion, and this does not solve abandoned legacy locks. Manual
+replacement or deletion of a published lock is outside the protocol guarantee.
+
+Corrupt snapshots and lock failures raise `StoreError` with `code`,
 `phase`, and `path`; they never become an empty replacement.
 
 The standalone `agentmux-demand` binary reads the same API. Pass `--root` (or set
