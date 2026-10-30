@@ -155,6 +155,7 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     incomingProblem = 'intake-unconfirmed'; tone = 'muted'
     add(incomingProblem, value, detail, 'muted', { kind: 'incoming', label: 'View input details' })
   }
+  if (!currentReceiverGap && !incomingProblem && row?.coreStatus === 'admitted' && row.scope === 'current-binding') value = 'Last message: Accepted by Agent'
   const remaining = problems.filter(problem => problem.kind !== outgoing.problem && problem.kind !== incomingProblem).map(problem => problem.title).join(' · ')
   const note = [remaining, retained ? 'Earlier observations are kept; the latest check is incomplete.' : null].filter(Boolean).join(' ') || null
   return { problems, outgoing, incoming: { direction: 'incoming', title: 'Group → Agent', value, detail, tone, ...(report && !currentReceiverGap ? { receiver: receiverText } : {}), ...(earlierIncoming ? { secondary: earlierIncoming } : {}), ...(incomingProblem ? { problem: incomingProblem } : {}) }, retained, note }

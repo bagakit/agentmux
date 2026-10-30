@@ -59,6 +59,8 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
   useEffect(() => { if (retained) void run('inspect') }, [key, retained?.input.operationId])
   if (!canStart && !retained) return null
   const complete = !!operation && receiver?.state === 'ready'
+  const automatic = receiver?.state === 'starting' || receiver?.state === 'recovering' ||
+    receiver?.state === 'ended' && receiver.nextAttemptAt !== undefined && receiver.nextAttemptAt > Date.now()
   const status = complete ? 'Recovery recorded' : operation?.disposition === 'scheduled' ? 'Reconnect requested' : operation?.disposition === 'joined' ? 'Joining original recovery' :
     operation?.disposition === 'already-ready' ? 'No reconnect was needed' : operation?.disposition === 'not-current' ? 'Original receiver changed' :
     operation?.disposition === 'disabled' ? 'Automatic receiving is off' : operation ? 'Connection unconfirmed' : ''
@@ -67,7 +69,7 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
     <div className="agent-connector-row">
       {canStart ? <button type="button" className="small-button" disabled={busy} data-receiver-action="recover" onClick={() => void run('new')}>Reconnect bot</button> : null}
       {retained && !complete ? <><button type="button" className="small-button" disabled={busy} data-receiver-action="inspect" onClick={() => void run('inspect')}>Check recovery</button>
-        {!canStart ? <button type="button" className="agent-connector-text-action" disabled={busy} data-receiver-action="continue" onClick={() => void run('continue')}>Continue recovery</button> : null}</> : null}
+        {!canStart && !automatic ? <button type="button" className="agent-connector-text-action" disabled={busy} data-receiver-action="continue" onClick={() => void run('continue')}>Continue recovery</button> : null}</> : null}
     </div>
     {busy ? <small role="status">Checking original receiver…</small> : null}
     {issue ? <small role="status">{issue}</small> : null}
