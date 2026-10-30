@@ -420,7 +420,7 @@ Topic rail 以紧凑的 Tab 图标簇表达打开面，不再用宽大的 chip �
 
 ### Agent More 的动作层级
 
-Focus 卡片、Agents 列表与 Agent Region 的右键／More 沿同一共享 Agent 菜单的名称、动作和控件语言呈现；入口特有内容通过扩展位进入同一层级，不另画菜单外观。打开位置沿各自手势避让，名称确认准确 Agent。身份头部左侧用紧凑名称与低强调的 Executor／Host 建立上下文，右侧直接提供本次已确认的 Copy Agent Link／Copy Region Link 图标，Agent 链接在前；复制仍是一级可达的原动作。长名称先有界省略并可按需读全，不能挤掉复制图标及完整命中区。复制组不再另占带 `Copy link` 短标题的一行，但保稳定分组名称、各项完整可访问名称及真正的 hover／键盘说明，不只依赖原生 title。身份两行与复制组成同一紧凑头部，共用菜单边距，不分别叠加上下留白。
+Focus 卡片、Agents 列表与 Agent Region 的右键／More 沿同一共享 Agent 菜单的名称、动作和控件语言呈现；入口特有内容通过扩展位进入同一层级，不另画菜单外观。打开位置沿各自手势避让，名称确认准确 Agent。身份头部左侧的紧凑名称与必要 Host 信息保稳定边距和对齐，Host 保低强调；Executor 不再以独立文字重复占标题空间，而在右侧 `Copy Agent Link` 旁使用共享 Executor 头像，点击复制对应原生 Session ID。头像、对象链接图标与名称形成同一紧凑头部，基线与垂直位置协调，不另起一行。对象链接继续直接提供本次已确认的 `Copy Agent Link`／`Copy Region Link`，Agent 链接在 Region 链接前；各复制入口仍是一级可达的动作。长名称先有界省略并可按需读全，不能挤掉头像、复制图标及完整命中区。复制组不再另占带 `Copy link` 短标题的一行，但保稳定分组名称、各项完整可访问名称及真正的 hover／键盘说明，不只依赖原生 title。头像的提示清楚区分 Executor 身份与“复制原生 Session ID”，不能让用户把头像复制误认成 amux 链接或打开设置；完整 Executor 名称与身份仍在按需说明及详情中可读。头部共用菜单边距，不分别叠加上下留白；原生 ID 的来源、未知与失败边界只见[共享菜单行为](../behavior/agent-capabilities-and-messaging.md#共享-agent-菜单)。
 
 Conversation history 与 Session details 相邻，会话控制与资料阅读可辨，Take over、Fork current conversation 与 Restart Session、Stop Agent 保持同一控制组，Stop 位于该组末项并保留原确认与后果说明。首层优先常用动作，长说明、连接设置与维护等低频内容按需收纳，不为每项扩展增加常驻组头或把菜单拉成整页资料。分组之间仅作必要分隔，不为实现片段插入横线或叠加分隔线两侧与组内的重复留白；原始 ID、目录与原生来源不支配首层宽度和高度。具体能力与扩展边界只见[共享菜单行为](../behavior/agent-capabilities-and-messaging.md#共享-agent-菜单)。Focus 顶栏的 Tab 操作入口沿[Focus 操作栏](focus-context.md#操作栏与原工作面)表达不同作用域。
 

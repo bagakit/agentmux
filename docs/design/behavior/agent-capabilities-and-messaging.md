@@ -195,6 +195,8 @@ Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共
 
 菜单明确区分准确 Host／Session／Run 的会话动作与需要准确空间 occurrence 的动作。Focus 按 Agent 聚合，无确认位置或有多个位置时不借当前焦点、同名对象或首位置构造 Tab／Region 目标；已有准确 Session 控制不因缺少位置而消失。原卡片导航和改名编辑、终端正文的复制／粘贴／路径／输出上下文、Region 布局动作各由调用入口提供，仍遵循[Focus 卡片](focus-context.md#卡片内容预览与-agent-操作)和[Agent Region](spaces-and-layout.md#agent-region-关闭与身份入口)的原对象与焦点边界。
 
+菜单中的 Executor 头像提供复制对应原生 Session ID 的直接动作，与 `Copy Agent Link` 的 amux 对象链接明确区分。原生 ID 只取准确 Agent 由 Core 已采用的 typed `nativeHandle` 中的原生 Session ID，完整复制原值；不从标题、终端文字、记录路径、amux Session ID、Run ID、未采用的观察或候选推导。该动作只读已有身份，不自动检查、采用、切换或恢复对话。原生身份未知、类型或对象不匹配时明确说明本次没有复制，不将占位文字或其他身份写入剪贴板；这次复制的缺口不影响原菜单、健康 Agent、输入或其他已确认能力。头像图形复用[Executor 身份组件](#executor-身份组件与信息面板)，本次复制动作与完整键鼠说明由共享菜单持有。
+
 通用复制和已有一级布局动作保持直接可达；长说明、连接设置与维护等低频内容按需进入，不把所有资料和系统扩展平铺成整页长菜单。按需收纳不删除能力、隐藏必要服务问题或改写权限：失败步骤、当前运行状态与可达恢复入口仍沿原服务窗可发现，准确目标不成立只拒绝该次操作。复用与扩展不增加逐卡历史扫描、后台轮询或无关 Session 订阅；原确认取消、菜单关闭和返回仍保较晚主动焦点、草稿、原工作面与健康 Run。具体密度只定义在[Agent 菜单的动作层级](../presentation/spaces-and-layout.md#agent-more-的动作层级)。
 
 ## Agents、队列与 Message Tools
