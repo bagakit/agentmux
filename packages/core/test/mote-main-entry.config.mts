@@ -3,13 +3,16 @@ import original from './a2a-resumed-inbox.config.mts'
 import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 const variants={
+ 'entry-foreign-unknown':['packages/core/src/public-rpc-service.ts','if (!prior && pending && !sameMoteMainEntrySource(pending.moteMainEntry, source))','if (false && !prior && pending && !sameMoteMainEntrySource(pending.moteMainEntry, source))'],
+ 'entry-codec-foreign-unknown':['packages/core/src/mote-dialogue-contract.ts','!unconfirmedMoteMainEntryOperation(op) || !sameMoteMainEntrySource(op.moteMainEntry, query)','!unconfirmedMoteMainEntryOperation(op)'],
+ 'entry-inspect-unknown-missing':['packages/core/src/public-rpc-service.ts',"return { operation: prior ?? pending }","return { operation: prior ?? null }"],
  'entry-stale-role':['packages/core/src/public-rpc-service.ts','main.roleRevision !== input.expectedRoleRevision || !isDeepStrictEqual(main.current, input.reference)','!isDeepStrictEqual(main.current, input.reference)'],
  'entry-full-reference':['packages/core/src/public-rpc-service.ts','|| !isDeepStrictEqual(main.current, input.reference)', ''],
- 'entry-unknown-replay':['packages/core/src/public-rpc-service.ts','const unresolved = original.continuity','const unresolved = undefined'],
+ 'entry-unknown-replay':['packages/core/src/public-rpc-service.ts','const unresolved = original?.continuity','const unresolved = undefined'],
  'entry-source-drop':['packages/core/src/agent-session-recovery/continuity-attempt.ts',"trigger: input.trigger ?? 'manual',\n    ...(input.moteMainEntry ? { moteMainEntry: structuredClone(input.moteMainEntry) } : {}),","trigger: input.trigger ?? 'manual',"],
  'entry-ignore-pause':['packages/core/src/public-rpc-service.ts','prefs.defaults?.presence?.enabled === false','false'],
  'entry-wrong-host':['packages/core/src/public-rpc-service.ts','scope.hostId === input.reference.hostId','scope.hostId === input.target.expectedResource.hostId'],
- 'entry-inspect-writes':['packages/core/src/public-rpc-service.ts',"if (method === 'space.mote.dialogue.recovery.inspect') return { operation: prior ?? null }",'if (false) return { operation: prior ?? null }'],
+ 'entry-inspect-writes':['packages/core/src/public-rpc-service.ts',"if (method === 'space.mote.dialogue.recovery.inspect') return { operation: prior ?? pending }",'if (false) return { operation: prior ?? null }'],
  'entry-agent-author':['packages/core/src/public-rpc-service.ts',"if (caller) throw new AgentMuxError('Opening a Mote main dialogue requires", "if (false) throw new AgentMuxError('Opening a Mote main dialogue requires"]
 } as const
 const name=process.env.MOTE_ENTRY_MUTATION as keyof typeof variants|undefined

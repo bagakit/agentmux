@@ -72,15 +72,16 @@ it('entry hook ignores background and missing explicit tokens, then inspects and
  await vi.waitFor(()=>expect(container.textContent).toContain('尚未确认'))
 })
 
-it('entry hook preserves the original durable key after a lost ACK, remount and another explicit open',async()=>{
+it.each(['explicit-open','another-explicit-open'])('entry hook preserves the original unknown operation after a lost ACK and remount (%s)',async token=>{
  setup();const retained=new Map<string,AgentMuxContinuityOperation>()
- const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockImplementation(async request=>({operation:retained.get(request.operationId)??null}))
+ const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockImplementation(async()=>({operation:retained.values().next().value??null}))
  const ensure=vi.spyOn(api.moteDialogue,'ensureRecovery').mockImplementation(async request=>{retained.set(request.operationId,operation(request));throw new Error('Original ACK lost')})
  const first=await root();await act(async()=>first.root.render(<Entry token="explicit-open"/>));await vi.waitFor(()=>expect(ensure).toHaveBeenCalledTimes(1))
  await act(async()=>first.root.render(<div/>))
- const second=await root();await act(async()=>second.root.render(<Entry token="another-explicit-open"/>))
+ const second=await root();await act(async()=>second.root.render(<Entry token={token}/>))
  await vi.waitFor(()=>expect(inspect).toHaveBeenCalledTimes(2));expect(ensure).toHaveBeenCalledTimes(1)
- expect(inspect.mock.calls[1]![0].operationId).toBe(ensure.mock.calls[0]![0].operationId)
+ if(token==='explicit-open')expect(inspect.mock.calls[1]![0].operationId).toBe(ensure.mock.calls[0]![0].operationId)
+ else expect(inspect.mock.calls[1]![0].operationId).not.toBe(ensure.mock.calls[0]![0].operationId)
  await vi.waitFor(()=>expect(second.container.textContent).toContain('尚未确认'))
 })
 
@@ -118,4 +119,19 @@ it('entry hook settles the initial role-read failure without an infinite loading
  const {root:r,container}=await root();await act(async()=>r.render(<Entry token="role-failure"/>))
  await vi.waitFor(()=>expect(container.querySelector('output')?.getAttribute('data-entry-status')).toBe('unconfirmed'))
  expect(container.textContent).toContain('Original role source unavailable');expect(inspect).not.toHaveBeenCalled();expect(ensure).not.toHaveBeenCalled()
+})
+
+
+it('entry hook keeps its own Mote target and full reference when the same Session has a foreign unknown operation',async()=>{
+ setup();let current!:MoteDialogueRecoveryRequest
+ const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockImplementation(async request=>{current=request;throw new Error('Original operation belongs to another Mote or producer')})
+ const ensure=vi.spyOn(api.moteDialogue,'ensureRecovery')
+ const read=await api.moteDialogue.read({target:{spaceId:'unused',zoneId:'unused',expectedResource:{hostId:'local',workspaceId:scratchWorkspace.id,workspacePath:scratchWorkspace.path}}})
+ const foreign=operation({target:{...read.main.target,zoneId:'foreign-mote'},reference,expectedRoleRevision:'foreign-role',expectedRun:defaultAgent.control.run,operationId:'foreign-original-unknown'})
+ useAppStore.setState(state=>({sessions:state.sessions.map(session=>session.id===defaultAgent.id?{...session,continuity:foreign}:session)}))
+ const {root:r,container}=await root();await act(async()=>r.render(<Entry token="foreign-unknown"/>))
+ await vi.waitFor(()=>expect(container.textContent).toContain('Original operation belongs to another Mote or producer'))
+ expect(current.reference).toEqual(reference);expect(current.target.zoneId).not.toBe('foreign-mote');expect(current.expectedRoleRevision).toBe('original-role');expect(current.operationId).not.toBe(foreign.operationId)
+ const frozen=structuredClone(current);await act(async()=>container.querySelector<HTMLButtonElement>('button')!.click())
+ await vi.waitFor(()=>expect(inspect).toHaveBeenCalledTimes(2));expect(current).toEqual(frozen);expect(ensure).not.toHaveBeenCalled()
 })

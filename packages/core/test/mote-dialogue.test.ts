@@ -12,7 +12,7 @@ import { createHostContent } from '../../../apps/host/src/content-owner.js'
 import { HostMoteQuickPreferences } from '../../../apps/host/src/mote-quick-preferences.js'
 import { spatialCatalog } from '../src/spatial-state.js'
 import { MOTE_INPUT_GUIDANCE } from '../src/mote-input-source.js'
-import { agentPromptSubmissionOutcome } from '../src/mote-dialogue.js'
+import { agentPromptSubmissionOutcome, parseMoteDialogueResult } from '../src/mote-dialogue.js'
 import type { AgentPromptSubmissionRecord } from '../src/types.js'
 import { createAgentInputContextCaptureRecord, type AgentInputContextCaptureReader, type AgentInputContextCaptureRecord } from '../src/agent-input-context-capture.js'
 import { createMoteInputFixture, moteInputTestSource } from './helpers/mote-input-owner.js'
@@ -517,9 +517,37 @@ it('explicit main entry retains an unknown original Start for inspect and never 
   const ensure=vi.spyOn(f.client,'ensureAgentContinuity'),first=await f.rpc.call('space.mote.dialogue.recovery.ensure',request)
   expect(first.operation).toMatchObject({operationId:request.operationId,reason:'operation-unconfirmed'})
   expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(first)
+  expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',{...request,operationId:'new-explicit-entry'})).toEqual(first)
+  expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',{...request,operationId:'new-role-entry',expectedRoleRevision:'later-role-generation'})).toEqual(first)
   expect(await f.rpc.call('space.mote.dialogue.recovery.ensure',request)).toEqual(first)
   expect(await f.rpc.call('space.mote.dialogue.recovery.ensure',{...request,operationId:'another-entry'})).toEqual(first)
   expect(ensure).toHaveBeenCalledTimes(1);expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([])
+})
+
+it('explicit main entry rejects another Mote or full reference without exposing its unresolved original operation',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-other-mote'),runtime=endedMainRuntime(f,{lostStart:true})
+  const first=await f.rpc.call('space.mote.dialogue.recovery.ensure',request),ensure=vi.spyOn(f.client,'ensureAgentContinuity')
+  for(const foreign of [{...request,target:{...request.target,zoneId:'another-mote'}},{...request,reference:{...request.reference,regionId:'another-region'}}]){
+    const query={...foreign,operationId:'new-foreign-entry'}
+    for(const method of ['space.mote.dialogue.recovery.inspect','space.mote.dialogue.recovery.ensure'] as const)
+      await expect(f.rpc.call(method,query)).rejects.toMatchObject({code:'AGENT_CONTINUITY_OPERATION_CONFLICT'})
+    const operation={...first.operation!,moteMainEntry:{target:foreign.target,reference:foreign.reference,expectedRoleRevision:foreign.expectedRoleRevision}}
+    expect(()=>parseMoteDialogueResult('space.mote.dialogue.recovery.inspect',{operation},{...request,operationId:'new-codec-entry'})).toThrow(expect.objectContaining({code:'CONTROL_PROTOCOL_ERROR'}))
+  }
+  expect(()=>parseMoteDialogueResult('space.mote.dialogue.recovery.inspect',{operation:{...first.operation!,moteMainEntry:undefined}},{...request,operationId:'new-codec-entry'})).toThrow(expect.objectContaining({code:'CONTROL_PROTOCOL_ERROR'}))
+  expect(await f.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(first)
+  expect(ensure).not.toHaveBeenCalled();expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('explicit main entry preserves an unresolved non-Mote producer without starting or adopting it',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-after-native-producer'),runtime=endedMainRuntime(f,{lostStart:true})
+  const original=await f.client.ensureAgentContinuity({agentSessionId:'primary',expectedRun:request.expectedRun,operationId:'original-native-recovery',trigger:'manual',policy:{continuationEnabled:false,reminderMode:'off',retryMaxAttempts:0,recheckMaxAttempts:0}})
+  expect(original.continuity).toMatchObject({reason:'operation-unconfirmed',operationId:'original-native-recovery'})
+  const ensure=vi.spyOn(f.client,'ensureAgentContinuity')
+  for(const method of ['space.mote.dialogue.recovery.inspect','space.mote.dialogue.recovery.ensure'] as const)
+    await expect(f.rpc.call(method,request)).rejects.toMatchObject({code:'AGENT_CONTINUITY_OPERATION_CONFLICT'})
+  expect((await f.client.readAgentSession('primary'))?.continuity).toEqual(original.continuity)
+  expect(ensure).not.toHaveBeenCalled();expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('explicit main entry keeps stopped or disabled original execution and its healthy manual capabilities',async()=>{
