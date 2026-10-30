@@ -104,6 +104,39 @@ it('a delayed firstsave action points to the original generation after explicit 
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
+it('a delayed received action joins existing work and a reopened owner never wakes the later Core generation', async () => {
+  const f = await fixture(), received = await f.receive(), source = (await f.ingress.inspect({ ingressId: received.ingress.ingressId })).rejoinSource!
+  expect(source.kind).toBe('received')
+  const request = { ingressId: received.ingress.ingressId, operationId: 'original-received-action', source }
+  let accept!: () => void, proceed!: () => void, calls = 0, settled = false
+  const accepted = new Promise<void>(resolve => { accept = resolve }), actorBarrier = new Promise<void>(resolve => { proceed = resolve })
+  const action = f.ingress.rejoin(request, { ...context, assertCurrent: async () => { if (++calls === 2) { accept(); await actorBarrier } } })
+  void action.then(() => { settled = true })
+  await accepted
+  const submit = f.client.submitAgentMessage.bind(f.client)
+  let captured!: Parameters<typeof f.client.submitAgentMessage>, capturedReady!: () => void, release!: () => void
+  const ready = new Promise<void>(resolve => { capturedReady = resolve }), producerBarrier = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(f.client, 'submitAgentMessage').mockImplementationOnce(async (...args) => { captured = args; capturedReady(); await producerBarrier; return await submit(...args) })
+  const producer = f.ingress.dispatch(request.ingressId)
+  await ready
+  const original = (await submit(...captured))!
+  await f.client.stopAgentInputWaiting({ ref: original.ref, cancelOperationId: 'stop-original-before-old-received-action' })
+  const current = await f.client.rejoinAgentInputWaiting({ ref: original.ref }, captured[1])
+  expect(current.ref.waitGeneration).toBe(2)
+  const wake = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
+  proceed()
+  // The reopened owner has no in-memory producer. It can only ensure original custody.
+  const restored = await new DurableIngressHost(f.options).rejoin(request, context)
+  expect(restored.action.inputRef).toEqual(original.ref)
+  expect(restored.inspection.inputReceipt!.ref).toEqual(current.ref)
+  expect(settled).toBe(false) // The existing owner only joined its already-running original producer.
+  release(); await producer
+  expect((await action).action).toEqual(restored.action)
+  expect(wake).toHaveBeenCalled()
+  expect(wake.mock.calls.every(([input]) => input.scope === 'wake-only' && input.ref.waitGeneration === 1)).toBe(true)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
 it('retains an allowed action identity that is also a JavaScript prototype property', async () => {
   const f = await fixture(), first = await beforeFirstsave(f), request = { ...first.request, operationId: '__proto__' }
   const result = await f.ingress.rejoin(request, context)

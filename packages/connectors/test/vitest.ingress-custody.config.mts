@@ -19,7 +19,8 @@ const mutations: Record<string, { path: string; replacements: [string, string][]
   'deny-managed-recipient': { path: 'packages/core/dist/public-rpc-service.js', replacements: [["if (caller && method === 'connection.ingress.rejoin') {", 'if (false) {']] },
   'bypass-frozen-recipient-scope': { path: 'packages/core/dist/connection-agent-access.js', replacements: [['target.hostId === session.hostId && target.agentSessionId === session.agentSessionId', 'true']] },
   'global-action-history-dependency': { path: 'packages/connectors/dist/durable-ingress.js', replacements: [['// The Hosting Runtime and ingress row scope this action identity.', "const foreign = this.database.prepare('SELECT ingress_id FROM connection_ingress_message, json_each(rejoin_json) WHERE json_each.key=? LIMIT 1').get(input.operationId); if (foreign && foreign.ingress_id !== input.ingressId) fail('INGRESS_REJOIN_CONFLICT');"]] },
-  'public-managed-source-replaced': { path: 'packages/core/dist/public-rpc-service.js', replacements: [["owner.ingress.rejoin(parseConnectionParams(method, input),", "owner.ingress.rejoin({ ...parseConnectionParams(method, input), source: (await owner.ingress.inspect({ ingressId: input.ingressId })).rejoinSource },"]] }
+  'public-managed-source-replaced': { path: 'packages/core/dist/public-rpc-service.js', replacements: [["owner.ingress.rejoin(parseConnectionParams(method, input),", "owner.ingress.rejoin({ ...parseConnectionParams(method, input), source: (await owner.ingress.inspect({ ingressId: input.ingressId })).rejoinSource },"]] },
+  'received-action-follows-latest': { path: 'packages/connectors/dist/durable-ingress.js', replacements: [["await this.dispatchOriginal(input.ingressId, undefined, true)", 'await this.dispatch(input.ingressId)']] }
 }
 if (selected && !mutations[selected]) throw Error('Unknown ingress custody mutation')
 export default defineConfig({ root, cacheDir: '.cache/ingress-custody', plugins: [{
