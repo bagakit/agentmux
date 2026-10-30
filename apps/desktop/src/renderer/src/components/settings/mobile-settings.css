@@ -7,6 +7,14 @@
 .device-management__intro .settings-group-note { max-width: 64ch; margin: var(--sp-2) 0 0; line-height: 1.65; }
 .device-management[data-device-view='settings'] .device-management__actions { justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-3); }
 .device-management[data-device-view='settings'] .device-management__actions > button { flex: none; margin-right: 0; }
+.device-management__relationship { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--sp-3); margin: 0; padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
+.device-management__relationship > div { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text-2); }
+.device-management__relationship > div > svg { flex: none; color: var(--green); }
+.device-management__relationship > div > span { display: grid; gap: var(--sp-1); min-width: 0; }
+.device-management__relationship strong { font-size: var(--fs-meta); font-weight: 550; }
+.device-management__relationship small, .device-management__relationship figcaption { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.device-management__relationship-link { display: grid; justify-items: center; gap: var(--sp-1); padding-inline: var(--sp-3); color: var(--text-3); }
+.device-management__relationship figcaption { grid-column: 1 / -1; }
 .device-management[data-device-view='settings'] .device-management__devices { margin-top: var(--sp-7); padding-top: 0; border: 0; }
 .device-management__devices > .settings-pane-toolbar { align-items: flex-start; }
 .device-management__devices > .settings-pane-toolbar > div { flex: 1; min-width: 0; }
@@ -34,4 +42,6 @@
   .device-management[data-device-view='settings'] .device-management__connection { padding: var(--sp-4); }
   .device-management__intro { gap: var(--sp-3); }
   .device-management__phone { width: 40px; height: 48px; }
+  .device-management__relationship { grid-template-columns: minmax(0, 1fr); }
+  .device-management__relationship-link { justify-items: start; padding-inline: 0; display: flex; align-items: center; }
 }

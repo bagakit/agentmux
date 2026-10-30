@@ -1,5 +1,5 @@
 import { Textarea } from '@agentmux/client-ui/input'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -72,7 +72,12 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
         <span className="device-management__phone"><ThemeObjectPhoneIcon size={28} aria-hidden="true" /></span>
         <div><h3>Connect your phone</h3><p className="settings-group-note">Keep both devices on the same Wi-Fi. Scan the code with your phone camera, or open the connection link on your phone.</p></div>
       </div>
-  
+      <figure className="device-management__relationship" aria-label="Desktop and phone relationship">
+        <div><SemanticIcon name="object.display" size={20} aria-hidden="true" /><span><strong>This desktop</strong><small>Your Agent workspace</small></span></div>
+        <span className="device-management__relationship-link"><ThemeObjectConnectionCodeIcon size={15} aria-hidden="true" /><small>Connection link</small></span>
+        <div><ThemeObjectPhoneIcon size={20} aria-hidden="true" /><span><strong>Your phone</strong><small>Opens the remote view</small></span></div>
+        <figcaption>How it works · Connection status appears under Devices.</figcaption>
+      </figure>
       <div className="settings-pane-toolbar device-management__actions">
         <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : url ? <ThemeActionRefreshIcon size={16} /> : <ThemeObjectConnectionCodeIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : url ? 'Refresh code' : 'Scan to connect'}</button>
         <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
@@ -114,7 +119,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
             <button className="danger-button" disabled={busy} onClick={() => { void revoke(device.deviceId) }}>Revoke access</button>
           </div>
         </details>)}
-        {list && !devices.length && <p className="settings-group-note">No devices paired yet. Your phone will appear after opening the link.</p>}
+        {list && !devices.length && <p className="settings-group-note">No devices paired yet. Open the connection link on your phone to get started.</p>}
       </details>
     </div>
   </section>

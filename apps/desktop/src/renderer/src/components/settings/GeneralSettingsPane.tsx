@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { api } from '../../lib/api'
 import { crashLogRevealNotice } from '../../lib/crash-log-reveal'
 import type { CrashLogRevealResult } from '../../../../shared/contracts'
@@ -59,17 +60,17 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
         <header><span>Data & recovery</span><small>Stored on this machine</small></header>
         <dl>
           <div>
-            <dt data-settings-field="local-data">Local data</dt>
-            <dd>AgentMux keeps your workspace configuration on this machine.</dd>
+            <dt data-settings-field="local-data"><SemanticIcon name="object.folder" size={16} aria-hidden="true" />Local data</dt>
+            <dd>Workspace configuration is saved on this Mac.</dd>
           </div>
           <div>
-            <dt data-settings-field="session-recovery">Session recovery</dt>
+            <dt data-settings-field="session-recovery"><SemanticIcon name="object.session-recovery" size={16} aria-hidden="true" />Session recovery</dt>
             <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.
               {onOpenRecovery && <button type="button" className="small-button" onClick={onOpenRecovery}>Open Session recovery</button>}
             </dd>
           </div>
           <div>
-            <dt data-settings-field="system-ssh">System SSH</dt>
+            <dt data-settings-field="system-ssh"><SemanticIcon name="object.host" size={16} aria-hidden="true" />System SSH</dt>
             <dd>Connection metadata and key file paths stay on this machine; private key contents are never stored.
               {onOpenHosts && <button type="button" className="small-button" onClick={onOpenHosts}>Open Hosts</button>}
             </dd>

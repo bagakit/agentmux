@@ -8,6 +8,7 @@ import { BrowserResources } from '../browser/BrowserResources'
 import { useBrowserDirectory } from '../../lib/use-browser-directory'
 import { usePerformanceObservation } from '../../lib/use-performance-observation'
 import { api } from '../../lib/api'
+import { SettingsConceptSummary } from './SettingsConceptSummary'
 import './browser-settings.css'
 
 export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean }
@@ -42,6 +43,8 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
 
   return (
     <div className="settings-pane-stack settings-browser">
+      <SettingsConceptSummary icon="object.browser" title="Pages, permissions and connections"
+        description="Control how agents use browser pages, then inspect page resources and connected browsers below." />
       <div className="settings-browser__preferences">
       <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>

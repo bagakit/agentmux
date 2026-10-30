@@ -62,10 +62,10 @@ export function ProfileSettingsPane({ profile, onSave }: {
   }
 
   return <div className="settings-pane-stack settings-profile" aria-label="My Profile">
-    <section className="settings-profile__identity">
+    <section className="settings-profile__identity" aria-label="Your identity">
       <div className="settings-profile__photo" data-settings-field="profile-photo">
       <div className="settings-profile__portrait" role="img" aria-label={value.displayName || 'Your avatar'}>
-        {value.avatar ? <img src={value.avatar} alt="" /> : <ThemeObjectUserIcon size={34} strokeWidth={1.5} aria-hidden="true" />}
+        {value.avatar ? <img src={value.avatar} alt="" /> : <><ThemeObjectUserIcon size={34} strokeWidth={1.5} aria-hidden="true" /><span className="settings-profile__portrait-label" aria-hidden="true">You</span></>}
       </div>
       <div className="settings-profile__image-actions">
         <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
@@ -73,6 +73,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
       </div>
       </div>
       <div className="settings-profile__identity-text">
+        <div className="settings-profile__identity-heading"><h3>Your identity</h3><small>On this Mac</small></div>
         <label htmlFor="profile-display-name" data-settings-field="display-name">Display name</label>
         <TextInput id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
           placeholder="Your name" autoComplete="nickname" onChange={event => draft.setField('displayName', event.currentTarget.value)} />
@@ -90,7 +91,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
     <section className="settings-profile__context" data-settings-field="profile-about">
       <header><h3><label htmlFor="profile-about">About you &amp; how you work</label></h3><p>Your work, experience and communication preferences.</p></header>
       <ComposerTextarea id="profile-about" aria-label="About you and how you work" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
-        rows={6} placeholder="Your work, experience, and how you prefer agents to communicate."
+        rows={6} placeholder="For example: I build desktop apps. Prefer concise answers, concrete examples and clear tradeoffs."
         onValueChange={value => draft.setField('about', value)} />
       <div className="settings-profile__context-footer"><span>This is your context. Each Mote keeps its own role and instructions.</span><small>{value.about.length} / {USER_PROFILE_ABOUT_LIMIT}</small></div>
     </section>

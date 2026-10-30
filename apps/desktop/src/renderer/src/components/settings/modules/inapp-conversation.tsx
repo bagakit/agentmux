@@ -35,6 +35,10 @@ export const inappConversationSettingsModule = {
       <section className="inapp-conversation__intro" data-settings-field="conversation-view">
         <h3>One Session, two views</h3>
         <p className="settings-group-note">Read messages and work in the same Agent Session. Use Show Activity or Show Terminal in its input toolbar to switch that Agent’s view.</p>
+        <div className="inapp-conversation__session" aria-label="View relationship">
+          <SemanticIcon name="object.agent" size={17} aria-hidden="true" />
+          <strong>One Agent Session</strong><span>Same conversation · Same input draft</span>
+        </div>
         <div className="inapp-conversation__views" aria-label="Conversation view examples">
           <figure className="inapp-conversation__view" data-example-view="activity"><figcaption><SemanticIcon name="object.conversations" size={15} aria-hidden="true" /><strong>Activity</strong><span>Reading example</span></figcaption>
             <div className="inapp-conversation__activity"><ClientUiProvider platform={platform}><ConversationMessage content={question} speaker={{ role: 'human', id: 'inapp-example-human' }} name="You" messageId="inapp-example-question" compact expandedContent detailsOnlyMetadata />
