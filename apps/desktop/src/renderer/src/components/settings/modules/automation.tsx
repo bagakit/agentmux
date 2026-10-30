@@ -7,6 +7,7 @@ import { ContinuationSettingsPane } from '../ContinuationSettingsPane'
 import { AutomationDefaultsSettingsPane, AUTOMATION_DEFAULTS_SEARCH_TARGETS, automationDefaultsSavedSummary } from '../AutomationDefaultsSettingsPane'
 import { saveContinuitySettings } from '../save-continuity-settings'
 import type { SettingsModule } from '../settings-catalog'
+import { SettingsConceptSummary } from '../SettingsConceptSummary'
 
 async function saveDefaults(value: AutomationDefaults, expected: AutomationDefaults): Promise<void> {
   const current = useAppStore.getState().config
@@ -27,6 +28,9 @@ export const automationSettingsModule = {
   savedSummary: config => `Continuation ${normalizeAgentContinuityPolicy(config.continuity).continuationEnabled ? 'on' : 'off'} · ${automationDefaultsSavedSummary(config.automation)}`,
   Pane({ config }) {
     return <div className="settings-pane-stack" data-automation-settings>
+      <SettingsConceptSummary icon="object.automation" title="Keep work moving between turns"
+        description="Control continuation after recovery and the defaults used by new automated tasks."
+        steps={[{ label: 'Recover', detail: 'Reconnect interrupted work.' }, { label: 'Continue', detail: 'Apply your continuation preferences.' }, { label: 'Check in', detail: 'Use progress and follow-up defaults.' }]} />
       <ContinuationSettingsPane preferences={config.continuity} onSave={saveContinuitySettings} />
       <AutomationDefaultsSettingsPane preferences={config.automation} onSave={saveDefaults} />
     </div>

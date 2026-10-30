@@ -4,6 +4,7 @@ import { A2A_NOTIFICATION_IDS, a2aNotificationPresentation, type A2ANotification
 import { NOTIFICATION_TIERS, type NotificationSettings } from '../../../../shared/notification-presentation'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
+import { SettingsConceptSummary } from './SettingsConceptSummary'
 import './a2a-settings.css'
 
 const choices = {
@@ -26,7 +27,9 @@ export function A2ASettingsPane({ notifications, globalNotifications, onSave, on
     submitted.finish(await save.run(() => onSave(submitted.value, submitted.expected)))
   }
   return <div className="settings-pane-stack" data-a2a-settings>
-    <p className="a2a-settings__scope">Choose how Agent messages notify you when the receiving Agent is in the background.</p>
+    <SettingsConceptSummary icon="object.agent-messaging" title="A handoff with the original message"
+      description="Agents exchange messages through their mailboxes. Choose how background arrivals notify you."
+      steps={[{ label: 'Send', detail: 'Keep the original message and its ID.' }, { label: 'Read', detail: 'The receiving Agent opens the original.' }, { label: 'Respond', detail: 'A reply or acceptance is a separate action.' }]} />
     <section className="settings-group" data-settings-field="a2a-notifications">
       <header><span>Incoming message notifications</span><small>Saved: {choices[notifications][0]}</small></header>
       <div className="a2a-settings__choice-preview">

@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { DEFAULT_TOOLKIT_WORKSPACE_PATH, type ToolkitToolConfiguration, type ToolkitConfigurationFields } from '@agentmux/core/control'
+import { DEFAULT_TOOLKIT_WORKSPACE_PATH, type ToolkitToolConfiguration, type ToolkitConfigurationFields, type ToolkitToolFields } from '@agentmux/core/control'
 import { DEFAULT_MOBILE_CONNECTION_PREFERENCES, MOBILE_CONNECTION_TOOL_ID, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon } from '../toolkit/ToolkitIcon'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
@@ -14,7 +14,9 @@ import { ToolkitToolEditor } from './ToolkitToolEditor'
 import { useToolkitPaletteDrafts } from './use-toolkit-palette-drafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { isInlineDraft, isPackageDraft, toolkitDraftDirty, toolkitFields, useToolkitDrafts, type ToolkitDraftWriter } from './use-toolkit-drafts'
-const ThemeObjectToolsIcon = semanticIconComponent('object.tools')
+import { SettingsConceptSummary } from './SettingsConceptSummary'
+import './settings-starting-points.css'
+const ThemeObjectToolsIcon = semanticIconComponent('object.tool-library')
 
 
 const ThemeActionInstallPackageIcon = semanticIconComponent('action.install-package')
@@ -28,6 +30,10 @@ const ThemeObjectPhoneIcon = semanticIconComponent('object.phone')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionCreateIcon = semanticIconComponent('action.create')
 
+const workspaceStartingPoint: Partial<ToolkitToolFields> = {
+  name: 'Workspace snapshot', enabled: false,
+  script: 'console.log(JSON.stringify({ directory: process.cwd(), node: process.version }, null, 2))\n'
+}
 
 function shortDirectory(path: string) {
   const segments = path.split(/[\\/]/u).filter(Boolean)
@@ -87,10 +93,10 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
     ;(row ?? searchInput.current)?.focus(); focusBack.current = false
   }, [selectedId, view])
   function open(id: string) { setSelectedId(id); setView('editor') }
-  function add() {
+  function add(startingPoint?: Partial<ToolkitToolFields>) {
     if (entries.length >= 128) return
     const id = mintObjectId()
-    resource.add(id, { name: '', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: DEFAULT_TOOLKIT_WORKSPACE_PATH, script: "console.log('Hello from your toolkit')\n", args: [], actions: [] })
+    resource.add(id, { name: '', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: DEFAULT_TOOLKIT_WORKSPACE_PATH, script: "console.log('Hello from your toolkit')\n", args: [], actions: [], ...startingPoint })
     focusNewName.current = true; setQuery(''); open(id)
   }
   function install() {
@@ -133,7 +139,21 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
       <div className="toolkit-workbench__detail">
         <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
         <div hidden={selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={selectedId !== MOBILE_CONNECTION_TOOL_ID}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('手机连接显示配置尚未加载，草稿保留。'); await onSaveMobileConnection(value, expected) }} /></div>
-        {selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? isPackageDraft(selected) ? <ToolkitPackageEditor key={selectedId} id={selectedId} entry={selected} fact={selected.expected ? packageFact(selected.expected, metadata.packages) : undefined} active={active && (!narrow || view === 'editor')} pathInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={() => onRunTool(selectedId)} onBack={back} onRefresh={metadata.refresh} /> : isInlineDraft(selected) ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} palette={palettes.forTool(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => { const id = selectedId; void (async () => { if (toolkitDraftDirty(selected) && !await resource.save(id, writer)) return; await palettes.save(id) })() }} onRemove={remove} onRun={definition => onRunTool(definition.id)} onBack={back} /> : null : <section className="toolkit-workbench__empty"><ThemeObjectToolsIcon size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Create a custom tool'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Add your script and optional actions, or install a local package. Built-in tools are ready in the library.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> Create your first tool</button> : null}</section>}
+        {selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? isPackageDraft(selected) ? <ToolkitPackageEditor key={selectedId} id={selectedId} entry={selected} fact={selected.expected ? packageFact(selected.expected, metadata.packages) : undefined} active={active && (!narrow || view === 'editor')} pathInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={() => onRunTool(selectedId)} onBack={back} onRefresh={metadata.refresh} /> : isInlineDraft(selected) ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} palette={palettes.forTool(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => { const id = selectedId; void (async () => { if (toolkitDraftDirty(selected) && !await resource.save(id, writer)) return; await palettes.save(id) })() }} onRemove={remove} onRun={definition => onRunTool(definition.id)} onBack={back} /> : null : toolId && toolId === selectedId ? <section className="toolkit-workbench__empty"><ThemeObjectToolsIcon size={28} /><h3>This saved tool is unavailable.</h3><p>The requested tool is not in the current configuration. No other tool has been substituted.</p></section> : <section className="settings-starting-points" aria-label="Tool starting points">
+          <SettingsConceptSummary icon="object.tool-library" title="A small tool for your workflow"
+            description="Combine a script, its results and optional actions. Built-in tools are ready in the library." />
+          <button type="button" className="settings-starting-points__item" disabled={entries.length >= 128}
+            data-tool-starting-point="workspace-snapshot" onClick={() => add(workspaceStartingPoint)}>
+            <span><strong>Workspace snapshot</strong><code>Node.js</code></span>
+            <small>Show the working directory and Node version as a JSON result. Start with this read-only script and adapt it.</small>
+            <span className="settings-starting-points__action">Edit this tool <ThemeActionCreateToolIcon size={12} aria-hidden="true" /></span>
+          </button>
+          <p className="settings-starting-points__note">Opens a disabled, unsaved draft. Review the script and working directory before saving or running it.</p>
+          <div className="settings-starting-points__alternatives">
+            <button type="button" className="small-button" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> Create your first tool</button>
+            <button type="button" className="small-button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Choose a local package</button>
+          </div>
+        </section>}
       </div>
     </div>
   </div>

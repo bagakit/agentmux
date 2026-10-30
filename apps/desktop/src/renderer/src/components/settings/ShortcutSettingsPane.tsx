@@ -13,7 +13,9 @@ import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
+import { SettingsConceptSummary } from './SettingsConceptSummary'
 import './settings-prompts-editor.css'
+import './settings-starting-points.css'
 
 const ThemeActionCreatePromptIcon = semanticIconComponent('action.create-prompt')
 const ThemeActionAddQuickRepliesIcon = semanticIconComponent('action.add-quick-replies')
@@ -26,6 +28,12 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 type PromptScope = { kind: 'all' } | { kind: 'shared' } | { kind: 'provider'; providerId: string }
+
+const promptStartingPoints = [
+  { keyword: 'review', label: 'Review changes', body: 'Review the current changes. Find concrete bugs and regressions, cite the affected files and explain why each finding matters. State any gaps in verification.' },
+  { keyword: 'recap', label: 'Summarize findings', body: 'Summarize the findings so far: the conclusion, supporting evidence, open questions and the next useful step. Link the relevant files or sources.' },
+  { keyword: 'plan', label: 'Plan next steps', body: 'Read the current task and relevant project context. Propose a short sequence of concrete steps, with a clear way to verify the outcome of each step.' }
+] as const
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'
 const providerName = (prompt: ComposerShortcut) => prompt.providerId ? `${agentProviderLabel(prompt.providerId)} only` : 'Every Agent'
@@ -130,9 +138,9 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     open(additions[0]!.id)
   }
   function open(id: string): void { setSelectedId(id); setView('editor') }
-  function add(): void {
+  function add(startingPoint?: Pick<ComposerShortcut, 'keyword' | 'label' | 'body'>): void {
     const id = mintObjectId()
-    resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '',
+    resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '', ...startingPoint,
       ...(scope.kind === 'provider' ? { providerId: scope.providerId } : {}) } }))
     setQuery('')
     focusNewName.current = true
@@ -177,7 +185,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   }
 
   return (
-    <div className="settings-pane-stack prompt-workbench" data-view={view}>
+    <div className="settings-pane-stack prompt-workbench" data-view={view} data-creation-empty={!drafts.length}>
       <div className="prompt-scope" role="group" aria-label="Prompt authoring scope">
         <button type="button" data-prompt-scope="all" aria-pressed={scope.kind === 'all'} onClick={() => setScope({ kind: 'all' })}>All prompts <span>{drafts.length}</span></button>
         <button type="button" data-prompt-scope="shared" aria-pressed={scope.kind === 'shared'} onClick={() => setScope({ kind: 'shared' })}>Shared <span>{drafts.filter(candidate => candidate.providerId === undefined).length}</span></button>
@@ -188,7 +196,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       </div>
       <div className="settings-pane-toolbar prompt-workbench__toolbar">
         <span className="settings-resource-count">{visible.length === drafts.length ? drafts.length : `${visible.length} of ${drafts.length}`} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
-        <button type="button" className="small-button" onClick={add}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
+        <button type="button" className="small-button" onClick={() => add()}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
           <button type="button" className="small-button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</button> : null}
       </div>
@@ -250,6 +258,15 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
             </details>
             <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionCancelIcon size={13} /> Cancel new prompt</>}</button></div>
           </div>
+        </section> : !drafts.length ? <section className="prompt-editor__empty settings-starting-points" aria-label="Prompt starting points">
+          <SettingsConceptSummary icon="object.prompt" title="Keep a useful instruction close"
+            description="Start with an example, edit its wording and save it as a reusable prompt." />
+          <div className="settings-starting-points__list">{promptStartingPoints.map(startingPoint => <button type="button" key={startingPoint.keyword}
+            className="settings-starting-points__item" data-prompt-starting-point={startingPoint.keyword} onClick={() => add(startingPoint)}>
+            <span><strong>{startingPoint.label}</strong><code>{startingPoint.keyword}</code></span><small>{startingPoint.body}</small>
+            <span className="settings-starting-points__action">Edit this prompt <ThemeActionCreatePromptIcon size={12} aria-hidden="true" /></span>
+          </button>)}</div>
+          <p className="settings-starting-points__note">Examples open as unsaved drafts. You choose when to save or send them.</p>
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
       </div>
       {problems.length ? <div className="prompt-validation" role="status"><strong>Check {problemsById.size} {problemsById.size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}

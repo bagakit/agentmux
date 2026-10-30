@@ -4,6 +4,7 @@ import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ClientUiProvider, useClientUiPlatform } from '@agentmux/client-ui/platform'
 import { useMemo, useRef, useState, type RefObject } from 'react'
 import type { SettingsModule } from '../settings-catalog'
+import { SettingsConceptSummary } from '../SettingsConceptSummary'
 import '../../../styles/settings-amux-protocols.css'
 
 /** Examples use the real message reader without resolving fictional objects or user identities. */
@@ -50,7 +51,11 @@ function AmuxProtocolsPane({ active }: { active: boolean }) {
     firstExample.current.querySelector('summary')?.focus()
   }
   return <div className="settings-pane-stack amux-protocols" aria-label="amux protocol reference">
-    <div className="amux-protocols__intro"><p className="settings-group-note">Explore supported message formats and compare each rendered card with its original text. Examples are read-only and do not contact Agents, open links or execute protocol hints.</p><button type="button" className="small-button" onClick={openFirstExample}>View first example</button></div>
+    <SettingsConceptSummary icon="object.amux-protocols" title="Structured text, readable cards"
+      description="Open a format to compare its original text with the real message reader."
+      steps={[{ label: 'Original text', detail: 'Inspect the exact format and fields.' }, { label: 'Message card', detail: 'See how the shared reader presents it.' }]}
+      action={<button type="button" className="small-button" onClick={openFirstExample}>View first example</button>} />
+    <p className="settings-group-note amux-protocols__read-only">Read-only examples do not contact Agents, open links or execute protocol hints.</p>
     <div className="amux-protocols__list">{AGENTMUX_PROTOCOL_CATALOG.map((entry, index) => <ProtocolRow key={entry.id} entry={entry} active={active} rowRef={index === 0 ? firstExample : undefined} />)}</div>
   </div>
 }

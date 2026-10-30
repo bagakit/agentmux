@@ -6,6 +6,7 @@ import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_IDS, t
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft, useSettingDraftRecord } from './use-setting-draft'
 import { KeyboardShortcutsPane } from './KeyboardShortcutsPane'
+import { SettingsConceptSummary } from './SettingsConceptSummary'
 
 const completionFields = [
   { key: 'command', label: 'Commands', detail: 'Agent commands and saved prompts' },
@@ -42,6 +43,9 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
   }
 
   return <div className="settings-pane-stack" data-message-tool-settings>
+    <SettingsConceptSummary icon="object.user-input" title="Your message, ready to send"
+      description="Write instructions, bring in context and reuse prompts from one input."
+      steps={[{ label: 'Write', detail: 'Keep your instruction in the input.' }, { label: 'Add context', detail: 'Find commands, skills, Agents and files.' }, { label: 'Send', detail: 'Review the message before submitting.' }]} />
     <figure className="message-tool-preview" aria-label="Input preview">
       <figcaption><span>Input preview</span><span>{draft.dirty || inputDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
       <div className="message-tool-preview__composer" data-layout={draft.value}>
