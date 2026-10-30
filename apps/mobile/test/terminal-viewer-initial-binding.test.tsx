@@ -6,7 +6,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { MobileTerminalReading } from '../src/terminal/reader'
 import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
 
-const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement }>)
+const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement; input(data: string): void }>)
 const selectedText = vi.hoisted(() => ({ value: 'Retained terminal selection' }))
 const unicodeRefusal = vi.hoisted(() => ({ active: false }))
 const readings = vi.hoisted(() => [] as Array<(reading: MobileTerminalReading) => void>)
@@ -27,8 +27,11 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
   getSelection() { return selectedText.value }
   scrollToLine() {}
   focus() {}
-  onUserInput() { return { dispose() {} } }
-  onData() { return { dispose() {} } }
+  userInput?: () => void
+  dataInput?: (data: string) => void
+  onUserInput(listener: () => void) { this.userInput = listener; return { dispose() {} } }
+  onData(listener: (data: string) => void) { this.dataInput = listener; return { dispose() {} } }
+  input(data: string) { this.userInput?.(); this.dataInput?.(data) }
   onBinary() { return { dispose() {} } }
   dispose() { this.textarea.remove() }
 } }))
@@ -223,4 +226,19 @@ it('keeps original observation issues after successful copy and treats an empty 
   expect(details.textContent).toContain('请先选中需要复制的终端文字')
   expect(view.node.querySelector('.mobile-terminal-notice')).toBeNull()
   expect(clipboard).toHaveBeenCalledTimes(1); expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
+})
+
+
+it('the mounted original Viewer forwards keyboard events to one coalesced original control queue', async () => {
+  const p = port(), view = await mount(p.client)
+  let release!: (value: unknown) => void
+  p.write.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  p.write.mockImplementation(async input => ({ runId: 'original-run', appliedByteRange: { startByte: 1, endByte: 3 }, acceptedThroughByte: 3 }))
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  await act(async () => { const canvas = canvases.at(-1)!; canvas.input('a'); canvas.input('b'); canvas.input('c') })
+  expect(p.write.mock.calls.map(([input]) => input.data)).toEqual(['a'])
+  await act(async () => { release({ runId: 'original-run', appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1 }); for (let index = 0; index < 8; index++) await Promise.resolve() })
+  expect(p.write.mock.calls.map(([input]) => input.data)).toEqual(['a', Uint8Array.of(98, 99)])
+  expect(p.write.mock.calls.every(([input]) => input.agentSessionId === 'initial-original-session' && input.expectedRun.runId === 'original-run')).toBe(true)
+  expect(p.resize).not.toHaveBeenCalled()
 })

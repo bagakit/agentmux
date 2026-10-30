@@ -53,7 +53,7 @@ describe('explicit original Run terminal control', () => {
     expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['a'])
     expect(h.control.facts()).toMatchObject({ phase: 'sending', queuedBytes: 7 })
     first.resolve({ runId: 'run-original', appliedByteRange: { startByte: 20, endByte: 21 }, acceptedThroughByte: 21 }); await settle()
-    expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['a', '你好', 'c'])
+    expect(h.write.mock.calls.map(([input]) => input.data)).toEqual(['a', new TextEncoder().encode('你好c')])
     expect(h.control.facts()).toMatchObject({ phase: 'idle', queuedBytes: 0 }); expect(h.backing.size).toBe(0)
     h.control.dispose()
   })
