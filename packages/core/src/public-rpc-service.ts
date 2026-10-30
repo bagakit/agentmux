@@ -1005,9 +1005,12 @@ export class AgentMuxRpcService {
           : await delivery.retry(parseConnectionDeliveryParams(method, params), administration)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
-      if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls' || method === 'connection.ingress.authority' || method === 'connection.ingress.record-authority') {
+      if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls' || method === 'connection.ingress.authority' || method === 'connection.ingress.record-authority' || method === 'connection.ingress.rejoin') {
         if (!owner.ingress) throw new AgentMuxError('Ingress observation is unavailable on this Host. Existing Agents and inputs remain available.', 'CONTROL_UNAVAILABLE')
-        const result = method === 'connection.ingress.record-authority' ? await owner.ingress.recordAuthority(parseConnectionParams(method, params))
+        const result = method === 'connection.ingress.rejoin' ? owner.ingress.rejoin
+          ? await owner.ingress.rejoin(parseConnectionParams(method, params), { ...administration, assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
+          : (() => { throw new AgentMuxError('Original ingress recovery is unavailable on this Host.', 'CONTROL_UNAVAILABLE') })()
+          : method === 'connection.ingress.record-authority' ? await owner.ingress.recordAuthority(parseConnectionParams(method, params))
           : method === 'connection.ingress.inspect' ? await owner.ingress.inspect(parseConnectionParams(method, params))
           : method === 'connection.ingress.authority' ? await owner.ingress.authority(parseConnectionParams(method, params))
           : await owner.ingress.list(parseConnectionParams(method, params))

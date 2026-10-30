@@ -9,7 +9,7 @@ import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, par
 import type { ConnectionHost } from './connection-host.js'
 import { parseChannelTranscriptQuote, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
 import { ingressContextRevision, IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
-import type { ConnectionIngressRuntimeObservation } from '@agentmux/core/connections'
+import type { ConnectionIngressRuntimeObservation, ConnectionIngressRejoinInput, ConnectionIngressRejoinAction, ConnectionIngressRejoinSource, RoomBindingCallContext } from '@agentmux/core/connections'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
 export type VerifiedIngressMessage = {
@@ -113,6 +113,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       // A derived work index on the original intake, never an input receipt or another queue.
       // Existing claims are observed once in bounded pages before they can leave this index.
       const messageColumns = this.database.prepare('PRAGMA table_info(connection_ingress_message)').all().map(column => column.name)
+      if (!messageColumns.includes('rejoin_json')) this.database.exec("ALTER TABLE connection_ingress_message ADD COLUMN rejoin_json TEXT NOT NULL DEFAULT '{}'")
       if (!messageColumns.includes('input_settled')) this.database.exec('ALTER TABLE connection_ingress_message ADD COLUMN input_settled INTEGER NOT NULL DEFAULT 0')
       this.database.exec("CREATE INDEX IF NOT EXISTS connection_ingress_pending_input ON connection_ingress_message(connection_id,sequence) WHERE input_settled=0 AND json_extract(record_json,'$.state')='claimed'")
       const columns = this.database.prepare('PRAGMA table_info(connection_ingress_event)').all().map(column => column.name)
@@ -509,21 +510,36 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (current.state !== 'received') return { record: current, own: false as const }
       const channelProfile = this.options.connections.readChannelActor(current.connectionId, current.actor)
       const target = this.options.inputTarget?.(current, original.binding) ?? original.binding.inputTarget ?? { kind: 'manual-actor' as const }
-      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...target, expectedRun } }
+      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), createdAt: Date.now(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...target, expectedRun } }
       this.authorize(current, frozen)
       const next = this.write({ ...current, state: 'claimed', input: frozen })
       this.contextPositions?.claimed(next)
       return { record: next, own: true as const }
     })
     if (!claimed.own) return await this.inspect({ ingressId })
-    const ref = claimed.record.input!
-    const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: ref.messageId, operationId: ref.operationId, createdAt: Date.now(),
+    return await this.ensureOriginalInput(claimed.record)
+  }
+  /** Ensure custody of one frozen request; Core alone decides its original effect. */
+  private async ensureOriginalInput(record: ConnectionIngressMessage): Promise<ConnectionIngressInspection> {
+    if (!record.input?.admissionIntent) return await this.inspect({ ingressId: record.ingressId })
+    const retained = this.transaction(() => {
+      const current = this.read(record.ingressId)
+      if (!current || current.kind === 'action' || !current.input) fail('INGRESS_INPUT_MISMATCH')
+      if (current.input.createdAt !== undefined) return current
+      // Historical missing envelope time is a first reconstruction observation,
+      // not a fabricated native event timestamp or an input eligibility proof.
+      return this.write({ ...current, input: { ...current.input, createdAt: Date.now() } })
+    })
+    const ref = retained.input!, client = this.options.core(ref.hostId, ref.author.authoritySource?.executionRuntimeId)
+    if (!client) return await this.inspect({ ingressId: record.ingressId })
+    const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: ref.messageId, operationId: ref.operationId, createdAt: ref.createdAt!,
       sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), ...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
     try {
-      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(claimed.record))
-    } catch { /* A Core call may have saved or dispatched input. Only inspect this original operation. */ }
-    return await this.continueInput(ingressId, receiverSignal)
+      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(retained))
+    } catch { /* No reply proves neither absence nor a new effect right. Inspect this exact operation. */ }
+    return await this.inspect({ ingressId: record.ingressId })
   }
+
   /** Save the original input before asking Core to carry it through recovery. */
   private async prepareRecipient(record: ConnectionIngressMessage, client: DurableIngressCore,
     messageInputRef?: import('@agentmux/core').AgentInputWaitRef) {
@@ -560,19 +576,20 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private async continueInput(ingressId: string, signal?: AbortSignal): Promise<ConnectionIngressInspection> {
     const original = await this.inspect({ ingressId }), record = original.ingress, receipt = original.inputReceipt
     // Only an exact original receipt grants continuation; silence or an absent reply never does.
-    if (!record || record.kind === 'action' || !record.input || !receipt || receipt.control.state === 'stopped-before-dispatch' ||
-      receipt.control.state !== 'enabled' && receipt.status !== 'not-applied' &&
-      !(receipt.status === 'unknown' && receipt.admission?.admission?.transport === 'launch')) return original
+    if (!record || record.kind === 'action' || !record.input || receipt?.control.state === 'stopped-before-dispatch') return original
+    if (!receipt) return await this.ensureOriginalInput(record)
+    // A scan/ensure is not an explicit successor or reenable action.
+    if (receipt.status !== 'waiting' && receipt.status !== 'unknown') return original
     const delay = this.recoveryDelay.get(ingressId)
     if (delay && delay.nextAt > Date.now() || signal?.aborted) return original
     try {
       const client = this.options.core(record.input.hostId, record.input.author.authoritySource?.executionRuntimeId)
       if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-      const waiting = receipt.status === 'not-applied'
-        ? await client.rejoinAgentInputWaiting({ ref: receipt.ref }, this.context(record)) : receipt
+      const waiting = await client.rejoinAgentInputWaiting({ ref: receipt.ref, scope: 'wake-only' }, this.context(record))
+      if (!isDeepStrictEqual(waiting.ref, receipt.ref)) return await this.inspect({ ingressId })
       await this.prepareRecipient(record, client, waiting.ref)
       signal?.throwIfAborted()
-      await client.rejoinAgentInputWaiting({ ref: waiting.ref }, this.context(record))
+      await client.rejoinAgentInputWaiting({ ref: receipt.ref, scope: 'wake-only' }, this.context(record))
     } finally {
       // Keep the original pending work while bounding repeated unavailable/not-applied attempts.
       const failures = Math.min((delay?.failures ?? 0) + 1, 5)
@@ -647,7 +664,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   async inspect(value: { ingressId: string }, context?: import('@agentmux/core/connections').ConnectionIngressReadContext): Promise<ConnectionIngressInspection> {
     const input = parseIngressParams('connection.ingress.inspect', value), ingress = this.read(input.ingressId)
     await context?.authorize(ingress)
-    if (!ingress?.input) return { ingress, inputReceipt: null, observation: 'not-started' }
+    const source = ingress && ingress.kind !== 'action' ? this.rejoinSource(ingress) : undefined
+    if (!ingress?.input) return { ingress, inputReceipt: null, observation: 'not-started', ...(source ? { rejoinSource: source } : {}) }
     if (ingress.kind === 'action') {
       try {
         const client = this.options.core(ingress.input.hostId, ingress.input.author.authoritySource?.executionRuntimeId)
@@ -658,17 +676,17 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
 
     try {
       const client = this.options.core(ingress.input.hostId, ingress.input.author.authoritySource?.executionRuntimeId)
-      if (!client) return { ingress, inputReceipt: null, observation: 'unavailable' }
+      if (!client) return { ingress, inputReceipt: null, observation: 'unavailable', ...(source ? { rejoinSource: source } : {}) }
       const inputReceipt = await client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: ingress.input.operationId })
       const context = this.inspectContext(ingress, inputReceipt)
-      const result = parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt, observation: 'observed', ...(context ? { context } : {}) }, input)
+      const result = parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt, observation: 'observed', ...(context ? { context } : {}), ...(!inputReceipt && source ? { rejoinSource: source } : {}) }, input)
       if (inputReceipt && (inputReceipt.status === 'admitted' || inputReceipt.status === 'terminal-confirmed' || inputReceipt.status === 'launch-carried')) {
         try { this.database.prepare('UPDATE connection_ingress_message SET input_settled=1 WHERE ingress_id=? AND input_settled=0').run(ingress.ingressId) }
         catch { /* A failed work-index update leaves extra observation work, never erases a valid Core receipt. */ }
         this.recoveryDelay.delete(ingress.ingressId)
       }
       return result
-    } catch { return { ingress, inputReceipt: null, observation: 'unavailable' } }
+    } catch { return { ingress, inputReceipt: null, observation: 'unavailable', ...(source ? { rejoinSource: source } : {}) } }
   }
   private async inspectAction(ingress: ConnectionIngressAction, client: DurableIngressCore): Promise<{ started: boolean; inspection: ConnectionIngressInspection }> {
     const input = ingress.input!
@@ -730,9 +748,54 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return result
   }
   /** Continue the exact saved wait or confirmed-not-applied attempt; unknown effects are read only. */
-  async rejoin(ingressId: string): Promise<ConnectionIngressInspection> {
-    this.recoveryDelay.delete(ingressId)
-    return await this.continueInput(ingressId)
+  async rejoin(value: ConnectionIngressRejoinInput, context: RoomBindingCallContext): Promise<import('@agentmux/core/connections').ConnectionIngressRejoinResult> {
+    const input = parseIngressParams('connection.ingress.rejoin', value)
+    await context.assertCurrent?.()
+    if (context.actor.kind !== 'user' && context.actor.kind !== 'device') throw new AgentMuxError('Original ingress recovery requires its authorized user or device. Existing Core inputs remain controllable by their original participants.', 'CONTROL_PERMISSION_DENIED')
+    const selected = this.transaction(() => {
+      const foreign = this.database.prepare('SELECT ingress_id FROM connection_ingress_message, json_each(rejoin_json) WHERE json_each.key=? LIMIT 1').get(input.operationId)
+      if (foreign && foreign.ingress_id !== input.ingressId) fail('INGRESS_REJOIN_CONFLICT')
+      const record = this.read(input.ingressId)
+      if (!record || record.kind === 'action') fail('INGRESS_REJOIN_SOURCE_UNAVAILABLE')
+      const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
+      const actions = JSON.parse(String(row.rejoin_json)) as Record<string, { actor: RoomBindingCallContext['actor']; action: ConnectionIngressRejoinAction }>
+      const prior = Object.hasOwn(actions, input.operationId) ? actions[input.operationId] : undefined
+      if (prior) {
+        if (!isDeepStrictEqual(prior.actor, context.actor) || !isDeepStrictEqual(prior.action.source, input.source)) fail('INGRESS_REJOIN_CONFLICT')
+        return { record, action: prior.action }
+      }
+      const source = this.rejoinSource(record)
+      const action: ConnectionIngressRejoinAction = { ...input, outcome: source && isDeepStrictEqual(input.source, source) ? 'pending' : 'stale' }
+      actions[input.operationId] = { actor: context.actor, action }
+      this.database.prepare('UPDATE connection_ingress_message SET rejoin_json=? WHERE ingress_id=?').run(JSON.stringify(actions), input.ingressId)
+      return { record, action }
+    })
+    let action = selected.action
+    if (action.outcome === 'pending') {
+      await context.assertCurrent?.()
+      // Current input grants authorize only new advancement; an already stored
+      // handoff remains readable without turning those observations into grants.
+      const inspection = input.source.kind === 'firstsave' ? await this.ensureOriginalInput(selected.record)
+        : input.source.kind === 'received' ? await this.dispatch(input.ingressId) : await this.inspect({ ingressId: input.ingressId })
+      if (inspection.inputReceipt) {
+        action = this.transaction(() => {
+          const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
+          const actions = JSON.parse(String(row.rejoin_json)) as Record<string, { actor: RoomBindingCallContext['actor']; action: ConnectionIngressRejoinAction }>
+          const prior = actions[input.operationId]!
+          if (prior.action.outcome === 'pending') {
+            prior.action = { ...prior.action, outcome: 'handed-off', inputRef: inspection.inputReceipt!.ref }
+            this.database.prepare('UPDATE connection_ingress_message SET rejoin_json=? WHERE ingress_id=?').run(JSON.stringify(actions), input.ingressId)
+          }
+          return prior.action
+        })
+      }
+    }
+    return parseIngressResult('connection.ingress.rejoin', { action, inspection: await this.inspect({ ingressId: input.ingressId }) }, input)
+  }
+  private rejoinSource(record: ConnectionIngressMessage): ConnectionIngressRejoinSource | undefined {
+    if (record.state === 'received') return { kind: 'received', preparationRevision: 0 }
+    const ref = record.input
+    return record.state === 'claimed' && ref?.admissionIntent ? { kind: 'firstsave', messageOperationId: ref.operationId, messageId: ref.messageId, expectedRun: ref.expectedRun } : undefined
   }
   /** Read newest original group events, independently of local receiver aliases or claim success. */
   async listAudience(input: import('@agentmux/core/connections').ConnectionIngressAudienceInput): Promise<import('@agentmux/core/connections').ConnectionIngressAudiencePage> {

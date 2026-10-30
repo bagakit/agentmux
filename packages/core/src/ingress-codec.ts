@@ -5,16 +5,32 @@ import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, parseAgentExternalAuthoritySource } from './external-author.js'
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
+import { validateAgentInputWaitRef } from './agent-input-wait.js'
 import { channelActorKey, parseChannelActorProfileObservation } from './channel-profile.js'
 import { parseChannelTranscriptQuote } from './channel-quote.js'
 import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
 
-export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long', 'connection.ingress.record-authority': 'long' } as const
+export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long', 'connection.ingress.record-authority': 'long', 'connection.ingress.rejoin': 'long' } as const
 export const isIngressMethod = (value: unknown): value is ConnectionIngressMethod => typeof value === 'string' && Object.hasOwn(INGRESS_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Ingress data does not describe its original intake or input.', 'INVALID_CONNECTION_INGRESS') }
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CONNECTION_INGRESS')
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+function rejoinSource(value: unknown): import('./ingress-contract.js').ConnectionIngressRejoinSource {
+  const p = object(value, ['kind', 'messageOperationId', 'messageId', 'expectedRun', 'preparationRevision', 'observationId'])
+  if (p.kind === 'firstsave') {
+    object(p, ['kind', 'messageOperationId', 'messageId', 'expectedRun'])
+    const run = object(p.expectedRun, ['runId'])
+    return { kind: 'firstsave', messageOperationId: text(p.messageOperationId), messageId: text(p.messageId), expectedRun: { runId: text(run.runId) } }
+  }
+  if (p.kind === 'received') {
+    object(p, ['kind', 'preparationRevision'])
+    if (!Number.isSafeInteger(p.preparationRevision) || Number(p.preparationRevision) < 0) fail()
+    return { kind: 'received', preparationRevision: p.preparationRevision as number }
+  }
+  if (p.kind === 'context-observation') { object(p, ['kind', 'observationId']); return { kind: p.kind, observationId: text(p.observationId) } }
+  return fail()
+}
 export function parseConnectionQuestionAnswerSubmissions(value: unknown): import('./ingress-contract.js').ConnectionQuestionAnswerSubmission[] {
   if (!Array.isArray(value) || !value.length || value.length > 100) fail()
   const ids = new Set<string>()
@@ -82,7 +98,8 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...projected, state: 'refused', code: text(p.code) } }
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received', ...(p.code === undefined ? {} : { code: text(p.code) }) } }
   if (p.code !== undefined) fail()
-  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent', 'channelProfile', 'channelQuote', 'contextSource', 'contextObservation']), run = object(input.expectedRun, ['runId'])
+  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'createdAt', 'author', 'admissionIntent', 'channelProfile', 'channelQuote', 'contextSource', 'contextObservation']), run = object(input.expectedRun, ['runId'])
+  if (input.createdAt !== undefined && (!Number.isSafeInteger(input.createdAt) || Number(input.createdAt) < 0)) fail()
   const channelProfile = input.channelProfile === undefined ? undefined : parseChannelActorProfileObservation(input.channelProfile)
   const contextSource = input.contextSource === undefined ? undefined : (() => { const s = object(input.contextSource, ['providerId', 'nativeSessionId']); return { providerId: text(s.providerId), nativeSessionId: text(s.nativeSessionId) } })()
   if (input.contextObservation !== undefined && input.contextObservation !== 'known-publications-unavailable') fail()
@@ -96,9 +113,13 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   if (group?.target && !equal(author.authoritySource, group.target.authoritySource)) fail()
   // Intake retains its receiver alias; the author names the independently authorized Binding connection.
   if (operationId === messageId || !equal(author.actor, actor) || author.externalMessageId !== base.externalMessageId || author.externalConversationId !== base.externalConversationId) fail()
-  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {}), ...(contextSource ? { contextSource } : {}), ...(input.contextObservation ? { contextObservation: 'known-publications-unavailable' as const } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
+  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt as number }), author, ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {}), ...(contextSource ? { contextSource } : {}), ...(input.contextObservation ? { contextObservation: 'known-publications-unavailable' as const } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
 }
 export function parseIngressParams<M extends ConnectionIngressMethod>(method: M, value: unknown): ConnectionIngressParamsMap[M] {
+  if (method === 'connection.ingress.rejoin') {
+    const p = object(value, ['ingressId', 'operationId', 'source'])
+    return { ingressId: text(p.ingressId), operationId: text(p.operationId), source: rejoinSource(p.source) } as ConnectionIngressParamsMap[M]
+  }
   if (method === 'connection.ingress.record-authority') return parseExternalConversationReference(value) as ConnectionIngressParamsMap[M]
   if (method === 'connection.ingress.authority') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionIngressParamsMap[M] }
   if (method === 'connection.ingress.inspect') { const p = object(value, ['ingressId']); return { ingressId: text(p.ingressId) } as ConnectionIngressParamsMap[M] }
@@ -107,6 +128,18 @@ export function parseIngressParams<M extends ConnectionIngressMethod>(method: M,
   return { connectionId: text(p.connectionId), ...(p.bindingId === undefined ? {} : { bindingId: text(p.bindingId) }), ...(p.afterIngressId === undefined ? {} : { afterIngressId: text(p.afterIngressId) }), ...(p.limit === undefined ? {} : { limit: p.limit as number }) } as ConnectionIngressParamsMap[M]
 }
 export function parseIngressResult<M extends ConnectionIngressMethod>(method: M, value: unknown, input: ConnectionIngressParamsMap[M]): ConnectionIngressResultMap[M] {
+  if (method === 'connection.ingress.rejoin') {
+    const p = object(value, ['action', 'inspection']), action = object(p.action, ['ingressId', 'operationId', 'source', 'outcome', 'inputRef'])
+    const request = parseIngressParams('connection.ingress.rejoin', { ingressId: action.ingressId, operationId: action.operationId, source: action.source })
+    if (!equal(request, input) || !['pending', 'handed-off', 'stale'].includes(String(action.outcome))) fail()
+    const inputRef = action.inputRef === undefined ? undefined : validateAgentInputWaitRef(action.inputRef)
+    if (action.outcome === 'handed-off' && !inputRef || action.outcome === 'stale' && inputRef) fail()
+    const inspection = parseIngressResult('connection.ingress.inspect', p.inspection, { ingressId: request.ingressId })
+    if (inputRef && (inputRef.key.kind !== 'message' || inspection.ingress?.kind === 'action' || !inspection.ingress?.input ||
+        inputRef.key.agentSessionId !== inspection.ingress.input.agentSessionId || inputRef.key.messageId !== inspection.ingress.input.messageId ||
+        !equal(inputRef.key.expectedRun, inspection.ingress.input.expectedRun))) fail()
+    return { action: { ...request, outcome: action.outcome as 'pending' | 'handed-off' | 'stale', ...(inputRef ? { inputRef } : {}) }, inspection } as ConnectionIngressResultMap[M]
+  }
   if (method === 'connection.ingress.record-authority') return parseExternalConversationAuthority(value) as ConnectionIngressResultMap[M]
   if (method === 'connection.ingress.authority') {
     const p = object(value, ['ingress', 'authority', 'code']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
@@ -118,7 +151,7 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
-    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
+    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'questionReceipt', 'observation', 'context', 'rejoinSource']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     const receipt = p.inputReceipt === null ? null : parseAgentInputSubmissionReceipt(p.inputReceipt)
     if (ingress && ingress.ingressId !== (input as ConnectionIngressParamsMap['connection.ingress.inspect']).ingressId || !['not-started', 'observed', 'unavailable'].includes(String(p.observation))) fail()
     if (!ingress?.input && (receipt || p.observation !== 'not-started') || ingress?.input && p.observation === 'not-started' || p.observation === 'unavailable' && receipt) fail()
@@ -153,7 +186,11 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     const context = p.context === undefined ? undefined : parseIngressContextObservation(p.context)
     if (context && (!ingress?.input?.channelQuote || context.coverage !== ingress.input.channelQuote.coverage ||
         context.quotedMessages !== ingress.input.channelQuote.records.length || context.gapCount !== ingress.input.channelQuote.gaps.length)) fail()
-    return { ingress, inputReceipt: receipt, observation: p.observation, ...(context ? { context } : {}) } as ConnectionIngressResultMap[M]
+    const source = p.rejoinSource === undefined ? undefined : rejoinSource(p.rejoinSource)
+    if (source && (!ingress || ingress.kind === 'action' || source.kind === 'context-observation' || receipt ||
+      source.kind === 'firstsave' && (!ingress.input || source.messageOperationId !== ingress.input.operationId || source.messageId !== ingress.input.messageId || !equal(source.expectedRun, ingress.input.expectedRun)) ||
+      source.kind === 'received' && ingress.state !== 'received')) fail()
+    return { ingress, inputReceipt: receipt, observation: p.observation, ...(context ? { context } : {}), ...(source ? { rejoinSource: source } : {}) } as ConnectionIngressResultMap[M]
   }
   const p = object(value, ['ingresses', 'nextAfterIngressId']), expected = input as ConnectionIngressParamsMap['connection.ingress.ls']
   if (!Array.isArray(p.ingresses) || p.ingresses.length > (expected.limit ?? 25)) fail()

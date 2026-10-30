@@ -6457,8 +6457,9 @@ export class AgentMuxClient {
     return assertCurrent
   }
 
-  async rejoinAgentInputWaiting(input: { ref: AgentInputWaitRef; caller?: { agentSessionId: string; capability: string } }, context?: AgentInputCallContext): Promise<AgentInputSubmissionReceipt> {
+  async rejoinAgentInputWaiting(input: { ref: AgentInputWaitRef; scope?: 'wake-only'; caller?: { agentSessionId: string; capability: string } }, context?: AgentInputCallContext): Promise<AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
+    if (input.scope !== undefined && input.scope !== 'wake-only') throw new AgentMuxError('Unknown original input continuation scope.', 'INVALID_AGENT_INPUT_CONTROL')
     const ref = validateAgentInputWaitRef(input.ref), saved = await this.messageQueue.inspectInput({ key: ref.key })
     if (!saved) throw new AgentMuxError('The original input has no controlled waiting contract.', 'AGENT_INPUT_NOT_FOUND')
     const recipientContinuation = await this.inputRecipientContinuation(saved.intent, input.caller)
@@ -6466,6 +6467,7 @@ export class AgentMuxClient {
     if (!isDeepStrictEqual(ref, saved.control.ref)) return (await this.inspectAgentInput({ key: ref.key }))!
     const prior = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
     const refused = prior && agentInputSubmissionStatus(saved.control, prior) === 'not-applied'
+    if (input.scope === 'wake-only' && (refused || saved.control.state === 'stopped-before-dispatch')) return (await this.inspectAgentInput({ key: ref.key }))!
     const continueGate = !prior && saved.control.state === 'dispatch-authorized' && saved.control.handoff !== undefined
     if ((prior || saved.control.state === 'dispatch-authorized' && !continueGate) && !refused) {
       if (prior?.admission?.transport === 'launch' && prior.admission.launch.outcome === 'launch-carried') await this.recordLaunchMessageDelivery(prior.admission.inputKey!)
@@ -7323,6 +7325,21 @@ export class AgentMuxClient {
       envelope.recipientRunId !== null && envelope.recipientRunId !== expectedRun.runId) {
       throw new AgentMuxError('Message recipient does not match its exact prompt intent.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
+    // An exact controlled request can already belong to the original input
+    // owner even when today's Run or external authorization cannot be observed.
+    // Reuse the same read scope as inspect; fresh authority still owns advancement.
+    if (retained && admissionIntent.kind !== 'exact-condition') {
+      if (envelope.sender.kind === 'external' && retained.envelope.operationId !== envelope.operationId) throw new AgentMuxError('This external input names another original operation.', 'MESSAGE_ID_CONFLICT')
+      const original = await this.messageQueue.append({ ...envelope, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}), admissionIntent, execution: 'immediate' })
+      if (!original.input) throw new AgentMuxError('The retained message has no original controlled input contract. Inspect its original claim; it cannot be submitted again.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      await this.assertInputWaitingAuthor(original.input.intent, input.caller)
+      const receipt = (await this.inspectAgentInput({ key: original.input.intent.key }, input.caller))!
+      void this.rejoinAgentInputWaiting({ ref: receipt.ref, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
+        this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
+          message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
+      })
+      return receipt
+    }
     let authorAgentSessionId: string | undefined
     let authority: import('./prompt-submission.js').AgentPromptInputAuthority | undefined
     if (envelope.sender.kind === 'agent-session') {
@@ -7356,6 +7373,7 @@ export class AgentMuxClient {
       return await this.acceptInputWaiting(queued.input.control.ref, original.input, 'message', original.authorAgentSessionId,
         this.inputCallAuthority(original.authority, context), context?.requestSignal, Boolean(original.authority?.externalAuthor))
     }
+    if (admissionIntent.kind !== 'exact-condition') throw new AgentMuxError('The original controlled input could not be confirmed. Its message and historical claims are retained; no legacy direct dispatch was started.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state)) return
     if (queued.delivery.state !== 'queued') throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID')
     const originalIntent: AgentPromptAdmissionIntent = queued.admissionIntent ?? {

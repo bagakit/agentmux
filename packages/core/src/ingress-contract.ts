@@ -1,6 +1,19 @@
 import type { ConnectionActor, ConnectionApplication } from './connections-contract.js'
 import type { AgentExternalMessageAuthor, AgentExternalInteractionAuthor } from './external-author.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import type { RoomBindingCallContext } from './room-binding-contract.js'
+
+/** A source scopes one recovery action; it never grants access or input authority. */
+export type ConnectionIngressRejoinSource =
+  | { kind: 'firstsave'; messageOperationId: string; messageId: string; expectedRun: { runId: string } }
+  | { kind: 'received'; preparationRevision: number }
+  | { kind: 'context-observation'; observationId: string }
+export type ConnectionIngressRejoinInput = { ingressId: string; operationId: string; source: ConnectionIngressRejoinSource }
+export type ConnectionIngressRejoinAction = ConnectionIngressRejoinInput & {
+  outcome: 'pending' | 'handed-off' | 'stale'
+  inputRef?: import('./agent-input-wait.js').AgentInputWaitRef
+}
+export type ConnectionIngressRejoinResult = { action: ConnectionIngressRejoinAction; inspection: ConnectionIngressInspection }
 
 /** A current observation of the frozen input target, never a retry or lifecycle decision. */
 export type ConnectionIngressRuntimeObservation = {
@@ -43,6 +56,8 @@ export type ConnectionIngressMessage = {
     hostId: string; agentSessionId: string; expectedRun: { runId: string }
     /** The author identifies the exact authorized Binding connection, not the transport alias. */
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
+    /** Original envelope creation time, independent of subsequent ensure calls. */
+    createdAt?: number
     /** First-claim display snapshot; cache refresh never changes this original input. */
     channelProfile?: import('./channel-profile.js').ChannelActorProfileObservation
     channelQuote?: import('./channel-quote.js').ChannelTranscriptQuote
@@ -94,6 +109,8 @@ export type ConnectionIngressInspection = {
     source: import('./types.js').AgentSessionHistorySource; recordId: string; questionIds: string[]; outcome: 'saved' | 'unknown' | 'not-applied' | 'submitted' } | null
   interactionReceipt?: { operationId: string; agentSessionId: string; run: { runId: string }; delivery: 'saved' | 'unknown' | 'bytes-accepted' | 'hook-written' | 'acp-acknowledged'; nativeAdoption: 'unknown' } | null
   observation: 'not-started' | 'observed' | 'unavailable'
+  /** Exact original source; absent once Core owns the input. */
+  rejoinSource?: ConnectionIngressRejoinSource
 }
 export type ConnectionIngressPage = { ingresses: ConnectionIngressRecord[]; nextAfterIngressId: string | null }
 export type ConnectionIngressAuthorityCode = 'INGRESS_SERVICE_DISABLED' | 'INGRESS_SERVICE_UNCONFIRMED' | 'INGRESS_CLAIM_UNAVAILABLE' | 'INGRESS_CONNECTION_UNAVAILABLE' | 'INGRESS_BINDING_UNAVAILABLE' | 'INGRESS_ACTOR_NOT_AUTHORIZED' | 'INGRESS_INPUT_OUTSIDE_SCOPE' | 'INGRESS_ADDRESSING_UNCONFIRMED' | 'INGRESS_AUTHORITY_REVISED' | 'INGRESS_TARGET_UNCONFIRMED' | 'INGRESS_STORAGE_UNCONFIRMED'
@@ -115,17 +132,20 @@ export interface ConnectionIngressReadPort {
   list(input: ConnectionIngressListInput): Promise<ConnectionIngressPage>
   authority(input: { operationId: string }): Promise<ConnectionIngressAuthority>
   recordAuthority(input: import('./external-conversation.js').AgentExternalConversationReference): Promise<import('./external-conversation.js').AgentExternalConversationAuthority>
+  rejoin?(input: ConnectionIngressRejoinInput, context: RoomBindingCallContext): Promise<ConnectionIngressRejoinResult>
 }
 export type ConnectionIngressParamsMap = {
   'connection.ingress.inspect': ConnectionIngressInspectInput
   'connection.ingress.ls': ConnectionIngressListInput
   'connection.ingress.record-authority': import('./external-conversation.js').AgentExternalConversationReference
   'connection.ingress.authority': { operationId: string }
+  'connection.ingress.rejoin': ConnectionIngressRejoinInput
 }
 export type ConnectionIngressResultMap = {
   'connection.ingress.inspect': ConnectionIngressInspection
   'connection.ingress.ls': ConnectionIngressPage
   'connection.ingress.record-authority': import('./external-conversation.js').AgentExternalConversationAuthority
   'connection.ingress.authority': ConnectionIngressAuthority
+  'connection.ingress.rejoin': ConnectionIngressRejoinResult
 }
 export type ConnectionIngressMethod = keyof ConnectionIngressParamsMap
