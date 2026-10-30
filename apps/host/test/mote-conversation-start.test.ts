@@ -253,3 +253,94 @@ it('another Mote reusing a bind operation and SID cannot lend its creation-quali
  expect(selectedMain?.kind==='main'&&selectedMain.period?.range.kind).toBe('unconfirmed')
  expect(page.main.current).toEqual(reference);expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
+
+async function handoverSnapshotFixture(unavailable=false,corrupt=false) {
+ const {rpcOwnerFixture}=await import('../../../packages/core/test/helpers/public-rpc-owner.js')
+ const old=await rpcOwnerFixture(['source','neighbor']);closes.push(old.close)
+ for(let index=0;index<31;index++)await old.store.applyTimelineMutation({type:'append',agentSessionId:'source',item:{id:'old-fact-'+index,agentSessionId:'source',kind:'user_message',source:'user',status:'complete',createdAt:Date.now()+index,updatedAt:Date.now()+index,content:'OLD_OWNER_FACT_'+index,title:'Original owner fact'}})
+ vi.spyOn(old.client,'sessionHistoryPage').mockRejectedValue(Error('Original native history temporarily unreadable'))
+ const server=new AgentMuxControlServer({socketPath:join(old.root,'old-context.sock'),coreClients:old.coreClients});await server.start();closes.push(()=>server.stop())
+ const oldRpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}});closes.push(()=>oldRpc.dispose())
+ const reads:any[]=[]
+ const forward=vi.fn(async(method:any,params:any)=>{const page=await oldRpc.call(method,params);if(method==='agent.context'){reads.push(page);if(corrupt)return {...page as any,session:{...(page as any).session,agentSessionId:'WRONG_CONTEXT_SUBJECT'}}}return page})
+ const remote=new Proxy(old.client,{get(target,key){if(key==='forwardRpc')return forward;const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value}})
+ const f=await createMoteConversationStartFixture({extraClients:[{hostId:'old-route',client:remote as any}]});closes.push(f.close)
+ await f.h.store.applyTimelineMutation({type:'append',agentSessionId:'source',item:{id:'new-collision',agentSessionId:'source',kind:'user_message',source:'user',status:'complete',createdAt:Date.now(),updatedAt:Date.now(),content:'NEW_CORE_COLLISION_NEVER_READ',title:'Another Core same SID'}})
+ const state=(await f.spatial.read())!,graph=structuredClone(state.graph),region=graph.regions.find(r=>r.regionId==='old-region')!
+ Object.assign(region,{execution:{hostId:'old-route',cwd:old.root}});await f.spatial.commit({expectedRevision:state.revision,graph})
+ const reference={hostId:'old-route',sessionId:'source',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'},baseline=moteQuickBaseline(await f.quick.read({kind:'quick',target:f.target}))!
+ const selected=await f.rpc.call('space.mote.preferences.save',{kind:'quick',target:f.target,operationId:'select_old_owner',baseline,values:{...baseline.defaults,conversation:reference},destination:{kind:'occurrence',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'}})
+ expect(selected.status,selected.message??'').toBe('saved')
+ if(unavailable)vi.spyOn(old.client,'sessionHistorySources').mockRejectedValue(Error('Original old-Core source temporarily unreadable'))
+ return {f,old,oldRpc,forward,reads,reference}
+}
+function handoverText(result:Awaited<ReturnType<Awaited<ReturnType<typeof createMoteConversationStartFixture>>['setup']>>) {
+ return result.handoverInput?.record?.admission?.intent?.message?.userContent??''
+}
+it('handover carries the original public context page across Core namespaces without a same-SID alias collision',async()=>{
+ const {f,old,forward,reads}=await handoverSnapshotFixture()
+ await f.start('cross_core_handover','Independent original Query',true)
+ const result=await f.setup('cross_core_handover'),text=handoverText(result)
+ expect(result.binding,result.issue??'').toBe('confirmed');expect(text).toContain('OLD_OWNER_FACT_30');expect(text).not.toContain('NEW_CORE_COLLISION_NEVER_READ')
+ expect(text).not.toContain('agent context --host');expect(text).not.toContain('on the original execution Host');expect(text).toContain('not complete history')
+ expect(text).toContain('<amux-original-context-page>')
+ const page=JSON.parse(text.split('<amux-original-context-page>')[1]!.split('</amux-original-context-page>')[0]!.trim())
+ expect(page).toMatchObject({hostId:'old-route',sourceHostId:'local',agentSessionId:'source'});expect(page.captured.items).toHaveLength(30);expect(page.nextCursor).toEqual(expect.any(String));expect(page.unavailable).toEqual(reads[0].unavailable);expect(page.unavailable.some((issue:any)=>issue.source==='native')).toBe(true)
+ expect(page.captured).toEqual(reads[0].captured);expect(page.native).toEqual(reads[0].native)
+ expect(forward.mock.calls.filter(([method])=>method==='agent.context')[0]?.[1]).toMatchObject({hostId:'local',agentSessionId:'source',limit:30})
+ expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed')
+ const originalContextCalls=forward.mock.calls.filter(([method])=>method==='agent.context').length,count=f.h.inner.kernel.input.mock.calls.length
+ await f.setup('cross_core_handover',false);await f.setup('cross_core_handover')
+ expect(forward.mock.calls.filter(([method])=>method==='agent.context')).toHaveLength(originalContextCalls);expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(count)
+ expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled();expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+},45000)
+it('unavailable original context keeps its exact Host and SID while the independent Query reaches the new Main',async()=>{
+ const {f,old,reference}=await handoverSnapshotFixture(true)
+ await f.start('unknown_core_handover','Healthy independent Query',true)
+ const result=await f.setup('unknown_core_handover'),text=handoverText(result)
+ expect(result.issue).toContain('original handover context read is unconfirmed');expect(text).toContain('"hostId":"old-route"');expect(text).toContain('"agentSessionId":"source"')
+ expect(text).not.toContain('agent context --host');expect(text).not.toContain('<amux-original-context-page>');expect(text).toContain('Original old-Core source temporarily unreadable')
+ expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(result.deferredInput?.route?.reference.hostId).toBe('local');expect(result.deferredInput?.route?.reference.sessionId).not.toBe(reference.sessionId)
+ expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled();expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+},45000)
+it('same original Core grants only its local context route and generic handover states no execution-Host claim',async()=>{
+ const f=await fixture();await f.start('same_core_old');await f.setup('same_core_old');await f.start('same_core_new',undefined,true)
+ const result=await f.setup('same_core_new'),text=handoverText(result)
+ expect(text).toContain("agent context --host 'local'");expect(text).not.toContain('on the original execution Host');expect(text).toContain('<amux-original-context-page>')
+ expect(agentPromptSubmissionOutcome(result.handoverInput?.record)).toBe('terminal-confirmed');expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+},45000)
+
+it('two route aliases for the same confirmed Core owner grant its local context command',async()=>{
+ const extra:any[]=[],f=await createMoteConversationStartFixture({extraClients:extra});closes.push(f.close)
+ const {hostedTestOwner}=await import('../../../packages/core/test/helpers/hosted-runtime-port.js')
+ const owner=hostedTestOwner(f.h.client)
+ Object.defineProperty(f.h.client,'runtimeOwnerIdentity',{value:()=>structuredClone(owner),configurable:true})
+ const alias=new Proxy(f.h.client,{get(target,key){if(key==='forwardRpc')return (method:any,params:any)=>f.rpc.call(method,params);const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value}})
+ extra.push({hostId:'same-core-alias',client:alias})
+ const state=(await f.spatial.read())!,graph=structuredClone(state.graph)
+ Object.assign(graph.regions.find(r=>r.regionId==='old-region')!,{execution:{hostId:'same-core-alias',cwd:f.h.root}})
+ await f.spatial.commit({expectedRevision:state.revision,graph})
+ const baseline=moteQuickBaseline(await f.quick.read({kind:'quick',target:f.target}))!,reference={hostId:'same-core-alias',sessionId:'source',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'}
+ const selected=await f.rpc.call('space.mote.preferences.save',{kind:'quick',target:f.target,operationId:'select_same_core_alias',baseline,values:{...baseline.defaults,conversation:reference},destination:{kind:'occurrence',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'}})
+ expect(selected.status,selected.message??'').toBe('saved')
+ await f.start('same_core_alias_new',undefined,true);const result=await f.setup('same_core_alias_new'),text=handoverText(result)
+ expect(text).toContain("agent context --host 'local'");expect(text).not.toContain("agent context --host 'same-core-alias'");expect(text).toContain('<amux-original-context-page>')
+ expect(agentPromptSubmissionOutcome(result.handoverInput?.record)).toBe('terminal-confirmed')
+},45000)
+it('a matching durable runtime ID with a different Core instance never grants a local context route',async()=>{
+ const {f,old}=await handoverSnapshotFixture()
+ const {hostedTestOwner}=await import('../../../packages/core/test/helpers/hosted-runtime-port.js')
+ const newOwner=hostedTestOwner(f.h.client),oldOwner={...hostedTestOwner(old.client),ownerInstanceId:'another-original-core-instance'}
+ Object.defineProperty(f.h.client,'runtimeOwnerIdentity',{value:()=>structuredClone(newOwner),configurable:true})
+ Object.defineProperty(old.client,'runtimeOwnerIdentity',{value:()=>structuredClone(oldOwner),configurable:true})
+ await f.start('different_core_instance',undefined,true);const result=await f.setup('different_core_instance'),text=handoverText(result)
+ expect(text).toContain('OLD_OWNER_FACT_30');expect(text).not.toContain('agent context --host');expect(text).toContain('route has not been confirmed')
+ expect(agentPromptSubmissionOutcome(result.handoverInput?.record)).toBe('terminal-confirmed');expect(old.inner.kernel.stop).not.toHaveBeenCalled()
+},45000)
+it('a malformed direct context port cannot embed another subject and does not block the independent Query',async()=>{
+ const {f,old}=await handoverSnapshotFixture(false,true)
+ await f.start('malformed_context','Original Query remains eligible',true);const result=await f.setup('malformed_context'),text=handoverText(result)
+ expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(result.issue).toContain('original handover context read is unconfirmed')
+ expect(text).not.toContain('<amux-original-context-page>');expect(text).not.toContain('WRONG_CONTEXT_SUBJECT');expect(text).toContain('"hostId":"old-route"');expect(text).toContain('"agentSessionId":"source"')
+ expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled()
+},45000)

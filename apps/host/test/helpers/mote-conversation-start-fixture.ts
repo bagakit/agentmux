@@ -16,7 +16,7 @@ import {HostMoteQuickPreferences} from '../../src/mote-quick-preferences.js'
 import {createHostSpatialAgentControl} from '../../src/spatial-agent-control.js'
 import {ScratchTopics} from '../../src/mote-resources.js'
 import {directoryIdentity,homeZoneId,serializeMoteQuickMode} from '../../src/mote-model.js'
-export async function createMoteConversationStartFixture(input:{providerId?:'codex'|'claude'}={}){
+export async function createMoteConversationStartFixture(input:{providerId?:'codex'|'claude';extraClients?:import('../../../../packages/core/src/public-rpc-service.js').AgentMuxRpcCoreClient[]}={}){
  const closes:Array<()=>unknown|Promise<unknown>>=[]
  const h=await creationInputOwner(true);closes.push(h.close)
  const providerId=input.providerId??'codex'
@@ -35,7 +35,7 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  const dialogue=createHostMoteDialogue({main,spatial,store,clientForHost:()=>h.client})
  const quick=new HostMoteQuickPreferences({main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:async()=>[{id:'saved',name:'Saved',providerId}]})
  const creator=createHostSpatialAgentControl({configurationPath,spatial,runtime:()=>({client:h.client}) as never})
- const options={coreClients:h.coreClients,spatialState:spatial,spatialAgentControl:creator,moteDialogue:dialogue,moteQuickPreferences:quick}
+ const options={coreClients:()=>[...h.coreClients(),...(input.extraClients??[])],spatialState:spatial,spatialAgentControl:creator,moteDialogue:dialogue,moteQuickPreferences:quick}
  const server=new AgentMuxControlServer({socketPath:join(h.root,'main-start.sock'),...options});await server.start();closes.push(()=>server.stop())
  const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}});closes.push(()=>rpc.dispose())
  const target={spaceId,zoneId,expectedResource:{hostId:'local',workspaceId:workspace.id,workspacePath:workspace.path}}
