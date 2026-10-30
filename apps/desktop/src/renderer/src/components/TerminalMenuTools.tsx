@@ -6,6 +6,7 @@ import { isMacPlatform } from '../lib/host-platform'
 import type { TerminalFileMenuAction } from '../lib/terminal-file-action'
 import { terminalSelectionSuppressionHint, type MouseTrackingMode } from '../lib/terminal-selection-mode'
 import { moveAlongWorkbenchActionRow, WorkbenchActionRows } from './WorkbenchActionRows'
+import { WorkbenchMenuSubmenu } from './WorkbenchMenuSubmenu'
 
 export type TerminalMenuToolProps = {
   hasSelection: boolean; historyBoundary: string | null; mouseTrackingMode: MouseTrackingMode
@@ -18,6 +19,7 @@ const Copy = semanticIconComponent('action.copy'), Paste = semanticIconComponent
 const Select = semanticIconComponent('action.select-text'), Find = semanticIconComponent('action.search')
 const Document = semanticIconComponent('object.document'), Bottom = semanticIconComponent('action.current')
 const Clear = semanticIconComponent('action.erase')
+const Information = semanticIconComponent('status.info')
 type Action = { name: string; label: string; icon: ReactNode; onSelect(): void; disabled?: boolean }
 
 /** Original terminal operations in compact rows, without another menu or control owner. */
@@ -49,10 +51,12 @@ export function TerminalMenuTools(props: TerminalMenuToolProps) {
         {action.icon}<span>{action.name}</span>
       </Menu.Item>)}
     </Menu.Group>
-    {hint ? <Menu.Label className="tab-context-menu__hint" role="note">{hint}</Menu.Label> : null}
     {renderRow('terminal-output', 'Output', output)}
-    {props.historyBoundary ? <Menu.Label className="tab-context-menu__hint" role="note">{props.historyBoundary}</Menu.Label> : null}
     {props.pathActions.map(action => <Menu.Item key={action.key} className="tab-context-menu__item"
       title={action.title} onSelect={action.onSelect}><action.icon size={14} /><span>{action.label}</span></Menu.Item>)}
+    {hint || props.historyBoundary ? <WorkbenchMenuSubmenu label="Terminal info" icon={<Information size={14} />}>
+      {hint ? <Menu.Label className="tab-context-menu__hint" role="note">{hint}</Menu.Label> : null}
+      {props.historyBoundary ? <Menu.Label className="tab-context-menu__hint" role="note">{props.historyBoundary}</Menu.Label> : null}
+    </WorkbenchMenuSubmenu> : null}
   </div>
 }
