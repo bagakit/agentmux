@@ -15,9 +15,9 @@
 .mote-origin__copy h4 { margin: var(--sp-3) 0; font-size: var(--fs-display); line-height: 1.45; font-weight: 600; color: var(--text); text-wrap: balance; }
 .mote-origin__copy p { margin: 0; font-size: var(--fs-body); line-height: 1.8; color: var(--text-2); }
 .mote-origin__copy .mote-origin__continuity { margin-top: var(--sp-4); font-size: var(--fs-meta); color: var(--text-3); }
-.mote-origin__figure { margin: 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; background: #f4f2e9; }
+.mote-origin__figure { margin: 0; min-width: 0; display: flex; flex-direction: column; justify-content: center; background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--green) 6%, transparent), transparent 72%), var(--surface-1); }
 .mote-origin__figure img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: contain; }
-.mote-origin__figure figcaption { display: flex; flex-direction: column; gap: var(--sp-1); padding: 0 var(--sp-4) var(--sp-4); color: #425d53; text-align: center; font-size: var(--fs-meta); line-height: 1.6; }
+.mote-origin__figure figcaption { display: flex; flex-direction: column; gap: var(--sp-1); padding: 0 var(--sp-4) var(--sp-4); color: var(--text-2); text-align: center; font-size: var(--fs-meta); line-height: 1.6; }
 .mote-origin__figure figcaption strong { font-weight: 600; }
 .mote-origin__note { margin: var(--sp-2) 0 0; font-size: var(--fs-meta); color: var(--text-3); line-height: 1.6; }
 @container (max-width: 580px) {

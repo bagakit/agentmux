@@ -1,4 +1,4 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { SettingsNavGroup, SettingsModule } from './settings-catalog'
@@ -37,9 +37,9 @@ export function SettingsSidebarNavigation({ groups, selected, activeGroup, navig
     {groups.map(group => {
       const open = searching || expanded.has(group.id)
       return <div key={group.id} className="settings-nav-section" data-settings-group={group.id}>
-        {searching ? <p className="settings-nav-group">{group.title}</p> : <button type="button" className="settings-nav-group" data-settings-group-toggle={group.id} aria-expanded={open} aria-controls={`settings-nav-${group.id}`} title={group.description}
+        {searching ? <p className="settings-nav-group"><span className="settings-group-heading"><SemanticIcon name={group.icon} size={12} aria-hidden="true" />{group.title}</span></p> : <button type="button" className="settings-nav-group" data-settings-group-toggle={group.id} aria-expanded={open} aria-controls={`settings-nav-${group.id}`} title={group.description}
           onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next })}>
-          <span>{group.title}</span><DisclosureIcon size={12} aria-hidden="true" />
+          <span className="settings-group-heading"><SemanticIcon name={group.icon} size={12} aria-hidden="true" />{group.title}</span><DisclosureIcon size={12} aria-hidden="true" />
         </button>}
         <div id={`settings-nav-${group.id}`} className="settings-nav-items" hidden={!open}>
           {group.items.map(item => {

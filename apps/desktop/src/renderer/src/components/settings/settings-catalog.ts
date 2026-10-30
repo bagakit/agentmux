@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { IconAnimation } from '@agentmux/client-ui/icons'
+import type { IconAnimation, SemanticIconId } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
@@ -9,17 +9,17 @@ export type ChannelEntry = { section: SettingsPageId; adapterId: string; title: 
 export type ChannelPresentation = { section: SettingsPageId; title: string; icon: ComponentType<{ size?: number | undefined }> }
 
 export const SETTINGS_GROUPS = [
-  { id: 'preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
-  { id: 'agents', title: 'Agents', description: 'Agent CLIs and session recovery.' },
-  { id: 'mote', title: 'Mote', description: 'Your collaborators and how they grow.' },
-  { id: 'work', title: 'Work', description: 'Organize work, focus attention and pursue goals.' },
-  { id: 'know', title: 'Know', description: 'Develop topics, explore sources and keep notes.' },
-  { id: 'browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
-  { id: 'message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
-  { id: 'remote', title: 'Remote', description: 'Hosts, remote execution, and device access.' },
-  { id: 'conversation-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
-  { id: 'toolkit', title: 'Mods', description: 'Tools that extend your workspace.' }
-] as const
+  { id: 'preferences', icon: 'object.settings-preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
+  { id: 'agents', icon: 'object.settings-agents', title: 'Agents', description: 'Agent CLIs and session recovery.' },
+  { id: 'mote', icon: 'object.mote', title: 'Mote', description: 'Your collaborators and how they grow.' },
+  { id: 'work', icon: 'object.settings-work', title: 'Work', description: 'Organize work, focus attention and pursue goals.' },
+  { id: 'know', icon: 'object.settings-know', title: 'Know', description: 'Develop topics, explore sources and keep notes.' },
+  { id: 'browser-use', icon: 'object.settings-browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
+  { id: 'message-tool', icon: 'object.settings-message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
+  { id: 'remote', icon: 'object.settings-remote', title: 'Remote', description: 'Hosts, remote execution, and device access.' },
+  { id: 'conversation-channels', icon: 'object.settings-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
+  { id: 'toolkit', icon: 'object.settings-mods', title: 'Mods', description: 'Tools that extend your workspace.' }
+] as const satisfies readonly { id: string; icon: SemanticIconId; title: string; description: string }[]
 
 export type SettingsPaneProps = {
   config: AppConfig

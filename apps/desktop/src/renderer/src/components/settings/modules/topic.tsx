@@ -3,7 +3,7 @@ import { TopicDirectorySettingsPane } from '../TopicDirectorySettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
 const TopicIcon = semanticIconComponent('object.topic')
-const PromotionIcon = semanticIconComponent('object.mote')
+const PromotionIcon = semanticIconComponent('object.promotion')
 
 export const topicSettingsModule = {
   id: 'topic', group: 'know', title: 'Topic', icon: TopicIcon,
@@ -14,7 +14,7 @@ export const topicSettingsModule = {
 } as const satisfies SettingsModule
 
 export const motePromotionSettingsModule = {
-  id: 'mote-promotion', group: 'mote', title: '晋升', icon: PromotionIcon,
+  id: 'mote-promotion', group: 'mote', title: 'Promotion', icon: PromotionIcon,
   description: 'Grow an existing Topic into a Mote.',
   keywords: 'mote promotion promote topic growth 晋升 伙伴 成长',
   savedSummary: () => 'Topic → Mote',

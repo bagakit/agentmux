@@ -3,8 +3,8 @@ import { SCRATCH_WORKSPACE_ID } from '../../../../shared/scratch-topics'
 import { openTopicDirectory } from '../../lib/topic-directory-navigation'
 import { useAppStore } from '../../store'
 import type { SettingsPaneProps } from './settings-catalog'
-import topicArt from '../../assets/mote-origin/topic-work.png'
-import promotionArt from '../../assets/mote-origin/grown-team.png'
+import topicArt from '../../assets/settings/topic-atlas.png'
+import promotionArt from '../../assets/settings/promotion-identity.png'
 import './settings-concept-intro.css'
 import '../../styles/settings-workflows.css'
 
@@ -14,7 +14,7 @@ const OpenIcon = semanticIconComponent('action.open-external')
 export function TopicDirectorySettingsPane({ config, onClose, promotion = false }: Pick<SettingsPaneProps, 'config' | 'onClose'> & { promotion?: boolean }) {
   const workspace = config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   return <div className="settings-pane-stack">
-    <section className="settings-concept-intro" aria-label={promotion ? 'Topic 晋升为 Mote' : 'Topic'}>
+    <section className="settings-concept-intro" aria-label={promotion ? 'Promotion' : 'Topic'}>
       <div className="settings-concept-intro__copy">
         <h3 className="settings-concept-intro__title">{promotion ? '让重要的方向，成为长期伙伴。' : '围绕一个主题，积累知识。'}</h3>
         <p className="settings-concept-intro__description">{promotion

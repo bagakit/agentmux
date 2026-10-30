@@ -1,0 +1,3 @@
+.settings-group-heading { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.settings-group-heading > .semantic-icon { display: block; flex: none; color: var(--text-3); opacity: .78; }
+.settings-overview__group .settings-group-heading > .semantic-icon { color: var(--text-2); opacity: .85; }

@@ -11,7 +11,7 @@ const chapters = [
     description: '已经知道需要什么？从 PMO 这样的专家画像建立 Mote，让其中的 Agent 分工，把事情一起做好。',
     continuity: '团队有共同的名字与风格，成员各自承担工作。',
     image: roleTeam,
-    alt: '一个带有 Mote 人格标识的工作室，内部蓝色、琥珀色和紫色的三位 Agent 分别使用电脑、整理任务和记录笔记。',
+    alt: '蓝色、琥珀色和紫色的三位 Agent 把图表、书写和观察三种专长拼入共同的团队画像。',
   },
   {
     label: '从 Topic 开始', path: '从事情成长 · 开始', organization: 'Topic · 一个工作方向',
@@ -19,15 +19,15 @@ const chapters = [
     description: '方向还新，就先建一个 Topic。让其中的 Agent 从具体任务开始，在一次次合作中积累经验、形成分工。',
     continuity: '先有一起做的事，再发现值得长期发展的能力。',
     image: topicWork,
-    alt: 'Topic 的开放工作区里，蓝色、琥珀色和紫色的三位 Agent 处理日常任务，留下图表、任务卡和笔记。',
+    alt: '三位 Agent 围绕同一个 Topic 工作台，汇集资料、图表和笔记，形成共同的上下文。',
   },
   {
-    label: '晋升为 Mote', path: '从事情成长 · 晋升为伙伴', organization: 'Mote · 长期伙伴',
+    label: 'Promotion', path: '从事情成长 · Promotion', organization: 'Mote · 长期伙伴',
     title: '让重要的方向，成为长期伙伴。',
     description: '当一个 Topic 足够重要、被频繁依赖，就让它晋升为 Mote，建立团队人格。原来的 Agent 与积累一起延续。',
     continuity: '成员继续成长：深耕专业，也可以逐渐承担协调。',
     image: grownTeam,
-    alt: '上一幕相同的三位 Agent、图表、任务卡和笔记仍在，工作区建立了 Mote 的名字与人格标识，成员继续专业工作与协调。',
+    alt: '三位原 Agent 带着自己的专长与资料，站在连续的团队平台上；积累的 Topic 核心展开为 Mote 人格。',
   },
 ] as const
 

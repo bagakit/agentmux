@@ -1,4 +1,4 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsModule, SettingsNavGroup } from './settings-catalog'
@@ -47,7 +47,7 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
       <div className="settings-overview__groups" data-settings-directory>
           {groups.map((group) => <section key={group.id} data-settings-group={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
             <header>
-              <h3 id={`settings-overview-${group.id}`}>{group.title}</h3><p>{group.description}</p>
+              <h3 id={`settings-overview-${group.id}`} className="settings-group-heading"><SemanticIcon name={group.icon} size={16} aria-hidden="true" />{group.title}</h3><p>{group.description}</p>
             </header>
             <div className="settings-overview__entries">
               {group.items.map((item) => {

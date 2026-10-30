@@ -6,7 +6,7 @@ import { resolvePerformancePreferences, resolveMobileConnectionPreferences, type
 import { ToolkitSettingsPane } from '../ToolkitSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const ThemeObjectToolsIcon = semanticIconComponent('object.tools')
+const ThemeObjectToolsIcon = semanticIconComponent('object.tool-library')
 
 
 async function savePerformance(performance: PerformancePreferences, expected: PerformancePreferences): Promise<void> {

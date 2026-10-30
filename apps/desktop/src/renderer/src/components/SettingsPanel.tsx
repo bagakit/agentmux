@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
 import type { SettingsNavigationRequest } from './SettingsNavigation'
@@ -14,6 +14,7 @@ import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
 import { SETTINGS_GROUPS, type SettingsModule } from './settings/settings-catalog'
 import { settingsCatalog, settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 import '../styles/settings-search.css'
+import '../styles/settings-groups.css'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')
@@ -196,7 +197,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
               <DropdownMenu.RadioGroup value={showResults ? '' : active} onValueChange={(value) => chooseSection(value as SettingsPageId)}>
                 {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><OverviewIcon size={15} aria-hidden="true" />Overview</DropdownMenu.RadioItem> : null}
                 {navGroups.map((group) => <Fragment key={group.id}>
-                  <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
+                  <DropdownMenu.Label className="settings-section-menu__label"><span className="settings-group-heading"><SemanticIcon name={group.icon} size={12} aria-hidden="true" />{group.title}</span></DropdownMenu.Label>
                   {group.items.map((item) => {
                     const Icon = item.icon
                     return <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item" data-settings-target={item.id}>

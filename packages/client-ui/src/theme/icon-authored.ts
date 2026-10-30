@@ -26,6 +26,58 @@ export const MOTE_COMPANION_PARTS = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "settings-preferences": {
+    shapes: [["path", {"d": "M3 7h18 M3 17h18"}], ["path", {"d": "M8 4v6 M16 14v6"}]],
+    design: { rest: "Quiet controls with two distinct adjustment points.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-agents": {
+    shapes: [["path", {"d": "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"}], ["path", {"d": "m7 9 3 3-3 3 M13 15h4"}]],
+    design: { rest: "Executable command workbench, distinct from a Mote personality.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-work": {
+    shapes: [["path", {"d": "M3 4h8v7H3Z M15 4h6v7h-6Z M3 15h6v6H3Z M13 15h8v6h-8Z"}]],
+    design: { rest: "Several coordinated work surfaces rather than one Space window.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-know": {
+    shapes: [["path", {"d": "M3 8h6v8H3Z M15 3h6v6h-6Z M15 15h6v6h-6Z"}], ["path", {"d": "M9 12h3 M12 6v12 M12 6h3 M12 18h3"}]],
+    design: { rest: "Related knowledge units join into one organized collection.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-browser-use": {
+    shapes: [["path", {"d": "M5 3h14a2 2 0 0 1 2 2v6 M3 18V5a2 2 0 0 1 2-2 M3 8h18 M3 18a2 2 0 0 0 2 2h6"}], ["path", {"d": "m13 11 8 4-4 1-1 5Z"}]],
+    design: { rest: "A browser with a deliberate page interaction cursor.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-message-tool": {
+    shapes: [["path", {"d": "M5 4h13a2 2 0 0 1 2 2v5 M3 12V6a2 2 0 0 1 2-2 M7 9h5"}], ["path", {"d": "M4 16h16 M16 12l4 4-4 4"}]],
+    design: { rest: "An authored input followed by intentional outgoing communication.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-remote": {
+    shapes: [["path", {"d": "M2 4h8v8H2Z M14 12h8v8h-8Z"}], ["path", {"d": "M6 12v5h8 M10 8h8v4"}]],
+    design: { rest: "Two machines connected across their original environments.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-channels": {
+    shapes: [["path", {"d": "M3 4h7v6H6l-3 2Z M14 14h7v6h-4l-3 2Z"}], ["path", {"d": "M10 7h7v7 M3 17h6 M6 14v6"}]],
+    design: { rest: "Distinct conversation channels connected through one route.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "settings-mods": {
+    shapes: [["path", {"d": "M3 3h7v7H3Z M14 3h7v7h-7Z M3 14h7v7H3Z"}], ["path", {"d": "M17.5 13v9 M13 17.5h9"}]],
+    design: { rest: "A modular workspace with a deliberate extension point.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "promotion-rise": {
+    shapes: [["path", {"d": "M3 20h5v-6h6V8h6V3"}], ["path", {"d": "M15 3h5v5"}]],
+    design: { rest: "Accumulated work grows through connected steps; a distinct promotion destination.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "agent-message-relay": {
+    shapes: [["path", {"d": "M3 4h9v7H6l-3 2Z M12 13h9v7h-6l-3 2Z"}], ["path", {"d": "M15 5h5v5 M9 19H4v-5"}]],
+    design: { rest: "Two original message endpoints exchange content without implying delivery success.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "automation-route": {
+    shapes: [["path", {"d": "M6 4h12v5 M18 15v5H6v-5"}], ["path", {"d": "M3 9h6v6H3Z M15 9h6v6h-6Z"}]],
+    design: { rest: "A repeatable route connects explicit work stages without a live animation.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
+  "library-tools": {
+    shapes: [["path", {"d": "M3 8h18v12H3Z M8 8V5h8v3 M3 13h18"}], ["path", {"d": "M10 12v3h4v-3"}]],
+    design: { rest: "A carried toolkit with a distinct handle and clasp; separate from the Mods extension group.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
+  },
   "space-workchamber": {
     shapes: [["rect", { "x": "2.5", "y": "4", "width": "19", "height": "16", "rx": "2" }], ["path", { "d": "M9.5 4v16", "data-semantic-icon-part": "selection-pane" }]],
     design: {
@@ -601,7 +653,7 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "skill-guide": {
-    shapes: [["path",{"d":"M5 3h14v18H5Z M8 7h8 M8 11h8 M8 16l2 2 5-4"}]],
+    shapes: [["path",{"d":"M5 3h10l4 4v14H5Z M15 3v5h4 M8 7h8 M8 11h8 M8 16l2 2 5-4"}]],
     design: {
       rest: "指南页、行文与检查记号，表达指导材料",
       motion: { kind: "still", animation: "none", description: "当前消费表达对象/记录或入口，未提供持续活动事实；实际面板/选中/布局变化已表达动作结果，保持图标静止减少重复反馈。", trigger: "沿现有对象身份、分类、导航、记录或工具入口；hover/focus沿宿主短反馈" }
@@ -650,11 +702,8 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "topic-card": {
-    shapes: [["path",{"d":"M4 4h16v12H9l-5 5Z M8 8h8 M8 12h5"}]],
-    design: {
-      rest: "对话卡片与正文线，有对象轮廓",
-      motion: { kind: "still", animation: "none", description: "当前消费表达对象/记录或入口，未提供持续活动事实；实际面板/选中/布局变化已表达动作结果，保持图标静止减少重复反馈。", trigger: "沿现有对象身份、分类、导航、记录或工具入口；hover/focus沿宿主短反馈" }
-    }
+    shapes: [["path", {"d": "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"}], ["path", {"d": "M7 7h4 M7 17h10"}], ["path", {"d": "M14.5 11a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z"}]],
+    design: { rest: "An indexed topic core and its accumulated notes.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
   },
   "tab-item": {
     shapes: [["path",{"d":"M3 8h18v13H3Z M4 8V3h8v5 M15 5h5v3"}]],
@@ -699,11 +748,8 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "prompt-sheet": {
-    shapes: [["path",{"d":"M5 3h9l5 5v13H5Z M14 3v5h5"}],["path",{"d":"M8 12h4 M15 11v7 M8 17h3"}]],
-    design: {
-      rest: "折角纸页与局部输入竖线",
-      motion: { kind: "still", animation: "none", description: "当前消费表达对象/记录或入口，未提供持续活动事实；实际面板/选中/布局变化已表达动作结果，保持图标静止减少重复反馈。", trigger: "沿现有对象身份、分类、导航、记录或工具入口；hover/focus沿宿主短反馈" }
-    }
+    shapes: [["path", {"d": "M5 3h10l4 4v14H5Z M15 3v5h4"}], ["path", {"d": "M8 12h8 M8 16h5"}]],
+    design: { rest: "A reusable instruction page with authored lines, distinct from an executing terminal.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
   },
   "session-resume": {
     shapes: [["path",{"d":"M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2"}],["path",{"d":"M2 12h12 M10 8l4 4-4 4","data-semantic-icon-part":"feedback-forward","pathLength":"1"}]],
@@ -818,7 +864,7 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "suggestion-snooze": {
-    shapes: [["path",{"d":"M5 3h14v18H5Z M8 9h8l-8 7h8"}]],
+    shapes: [["path",{"d":"M5 3h10l4 4v14H5Z M15 3v5h4 M8 9h8l-8 7h8"}]],
     design: {
       rest: "纸页内Z式休眠符号；非停止Agent或静音通知",
       motion: { kind: "still", animation: "none", description: "图形经实际CSS mask投影，无独立内部部位；真实内容/折叠/缩放变化已经给出结果，静止图标更清楚。", trigger: "原Monaco/Excalidraw控件值与动作；不新增内部动画renderer" }
