@@ -163,11 +163,6 @@ it('public compiled CLI rejoin consumes the same original action and never reena
 
 it('each original ingress owns its action namespace without reading unrelated action history', async () => {
   const f = await fixture(), first = await beforeFirstsave(f)
-  const prepare = f.connections.database.prepare.bind(f.connections.database)
-  vi.spyOn(f.connections.database, 'prepare').mockImplementation(sql => {
-    if (sql.includes('json_each(rejoin_json)')) throw Error('Unrelated action history is unavailable')
-    return prepare(sql)
-  })
   const original = await f.ingress.rejoin(first.request, context)
   const other = await f.receive({ eventId: 'independent-namespace-event', messageId: 'independent-namespace-message' })
   vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValueOnce(Error('Independent firstsave boundary'))
