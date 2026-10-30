@@ -47,6 +47,7 @@ app.whenReady().then(async () => {
     await tap('[data-capture-control=' + JSON.stringify(selected) + ']', label)
   }
   const capture = async name => {
+    if (mode === 'quiet-run-status' && phase === 'details-only' && name !== 'quiet-run-status-member-details-390-light') return
     if (mode === 'commands-entry' && !name.startsWith('commands-')) return
     if (mode === 'notice-center' && !name.startsWith('notices-')) return
     if (mode === 'notice-light' && !['notices-settings-light-short', 'notices-restored-light-short'].includes(name)) return
@@ -68,6 +69,10 @@ app.whenReady().then(async () => {
     await button('日常协作', '.mobile-mote-agents')
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
+  }
+  if (mode === 'quiet-run-status') {
+    await require('./quiet-run-status.cjs')({ read, until, resize, tap, button, capture, result })
+    result.passed = true; return
   }
   if (mode === 'creation-update') {
     await require('./creation-update.cjs')({ read, until, resize, tap, button, capture, result })

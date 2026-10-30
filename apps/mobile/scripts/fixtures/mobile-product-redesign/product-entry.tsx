@@ -361,6 +361,20 @@ function Scene() {
       catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!.name = '负责资料阅读、证据核对与长名称展示的研究成员'
       catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!.stateLabel = '等待你的原请求答复'
     },
+    prepareQuietRunStatus: () => {
+      const unknown = catalog.agentPresentation!.find(value => value.agentSessionId === result.agentSessionId)!
+      const current = catalog.agentPresentation!.find(value => value.agentSessionId === main.agentSessionId)!
+      Object.assign(unknown, { group: 'idle', state: 'disconnected', stateMark: 'unknown', presenceUnknown: true,
+        stateLabel: 'Run not observed', detail: '本次未取得原会话的运行状态。原会话和工作面仍然保留。', project: current.project, projectGroup: current.projectGroup })
+      const attention = catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!
+      Object.assign(attention, { stateMark: 'attention', stateLabel: '权限请求', presenceUnknown: true })
+      Object.assign(catalog.agentPresentation!.find(value => value.agentSessionId === claude.agentSessionId)!,
+        { group: 'attention', state: 'error', stateMark: 'error', stateLabel: '出错', presenceUnknown: true })
+      const tab = catalog.tabs.find(value => value.tabId === 'tab-mote')!
+      tab.regionIds.push('region-result-mote')
+      catalog.regions.push({ ...catalog.regions.find(value => value.regionId === 'region-result')!, tabId: tab.tabId, regionId: 'region-result-mote' })
+      catalog.locations.push({ ...catalog.locations.find(value => value.regionId === 'region-mote')!, regionId: 'region-result-mote' })
+    },
     prepareFocusState: () => {
       catalog.agentPresentation![1]!.stateMark = 'unknown'
       catalog.agentPresentation![1]!.stateLabel = 'Activity not confirmed'
