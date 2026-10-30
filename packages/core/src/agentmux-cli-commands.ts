@@ -217,6 +217,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     } })),
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   ...AGENTMUX_NATIVE_DESKTOP_CLI_COMMANDS,
+  empty('runtime.owner.identity', 'Read the selected semantic Runtime identity and current owner instance through the original typed owner. This does not confirm native receiver health or grant management authority.'),
   command('runtime.network.inspect', '--runtime ID --owner ID', 'Read the exact semantic Runtime owner process network interfaces without connecting Native or recovering Sessions. Interface addresses are not connected peers or public egress.',
     { '--runtime': 'data', '--owner': 'data' }, f => ({ fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) } })),
   command('notebook.scan', '--workspace ID --path DIR [--max-files N] [--max-directories N] [--max-bytes N] [--query TEXT [--limit N]]', 'Rebuild a read-only outline/reference/fulltext projection from exact original Markdown files, without an App index. Never writes source, catalog, authors or history; partial scope is explicit.',
