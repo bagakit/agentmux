@@ -16,6 +16,8 @@ import { deriveFocusProjectLanes, focusProjectKey } from './focus-project-lanes'
 import { focusStateMarkKind } from '@agentmux/client-ui/focus-state-mark'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { originalTopicAddress } from '../../../shared/space-addresses'
+import { orderFocusPresentation } from '@agentmux/client-ui/focus-order'
+import { resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 import { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
 type State = { tabs?: Record<string, WorkbenchTab> } & Omit<Parameters<ReturnType<typeof createFocusProjectionSelector>>[0], 'timelines'> & { timelines: Record<string, RendererAgentTimelineSnapshot> } & { spaceObjectIcons: SpaceIconOverrides; spaceZoneBindings: SpaceZoneBindings }
 const originalFocus = createFocusProjectionSelector()
@@ -26,7 +28,7 @@ export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCa
   const workspaces = new Map(state.config?.workspaces.map(value => [value.id, value]))
   const lanes = deriveFocusProjectLanes(projection.laneContexts, state.config, undefined, state.tabs ?? {}, Date.now(), state.scratchTopicSnapshots)
   const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
-  return projection.contexts.map(row => {
+  return orderFocusPresentation(projection.contexts.map(row => {
     const lane = byContext.get(row.id)
     const projectWorkspace = lane?.projectWorkspaceId ? workspaces.get(lane.projectWorkspaceId) : undefined
     const objectLane = lane?.objectKind === 'mote' || lane?.objectKind === 'topic'
@@ -38,9 +40,9 @@ export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCa
     const avatar = executorId ? state.config?.executors[executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[executorId] : undefined
     return { agentSessionId: original?.control.kind === 'agent' ? original.control.agentSessionId : row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
       detail: row.detail, group: row.bucket, state: row.state, providerId: row.providerId ?? '',
-      stateMark: focusStateMarkKind(row), stateLabel: row.stateLabel, presenceUnknown: row.runUnobserved === true, ...(projectGroup ? { projectGroup } : {}),
+      stateMark: focusStateMarkKind(row), stateLabel: row.stateLabel, presenceUnknown: row.runUnobserved === true, lastActivityAt: row.lastActivityAt ?? null, ...(projectGroup ? { projectGroup } : {}),
       recap: row.recap ? { text: row.recap.text, source: row.recap.source } : null, ...(avatar ? { avatar } : {}) }
-  })
+  }), resolveFocusRecentActivityHours(state.config?.focus?.recentActivityHours) * 3_600_000)
 }
 
 /** Read the original saved preferences and their exact occurrence; no Mobile parser or preference store. */

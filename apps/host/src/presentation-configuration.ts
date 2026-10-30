@@ -1,11 +1,13 @@
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { workspaceOwnsSessionPath } from './mote-topic-model.js'
 import type { FileWorkspace } from './file-resource-model.js'
+import { resolveFocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
 export type PresentationWorkspace = FileWorkspace & { name: string; branch?: string }
 export type PresentationConfiguration = {
   workspaces: PresentationWorkspace[]
   executors: Record<string, { providerId: string; label: string; avatar?: { tint?: string; badge?: string } }>
   appearance: { spaceObjectIcons?: Record<string, unknown>; agentAvatars?: Record<string, { tint?: string; badge?: string }> }
+  focus?: { recentActivityHours: number }
 }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 /** One fresh read of original metadata; this object never owns configuration or launch policy. */
@@ -24,7 +26,7 @@ export async function readPresentationConfiguration(path: string): Promise<Prese
     executors[id] = { providerId: value.providerId, label: value.label, ...(avatar(value.avatar) ? { avatar: avatar(value.avatar)! } : {}) }
   }
   const appearance = record(raw.appearance) ? raw.appearance : {}
-  return { workspaces, executors, appearance: {
+  return { workspaces, executors, focus: { recentActivityHours: resolveFocusRecentActivityHours(record(raw.focus) ? raw.focus.recentActivityHours : undefined) }, appearance: {
     ...(record(appearance.spaceObjectIcons) ? { spaceObjectIcons: appearance.spaceObjectIcons } : {}),
     ...(record(appearance.agentAvatars) ? { agentAvatars: Object.fromEntries(Object.entries(appearance.agentAvatars).flatMap(([key, value]) => avatar(value) ? [[key, avatar(value)!]] : [])) } : {}) } }
 }

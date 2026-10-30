@@ -1,5 +1,6 @@
 import { agentInteractionActiveRequest, type AgentMuxClient, type AgentMuxAgentSession, type AgentMuxRpcServiceOptions } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { AgentMuxAgentPresentation } from '@agentmux/core/control'
 import { displayLabelDocument, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
@@ -8,6 +9,7 @@ import { resolveAgentName, firstPromptFromTimeline } from '@agentmux/client-ui/d
 import { launcherTimelineRecap } from '@agentmux/client-ui/conversation-recap'
 import { agentPresentationState } from '@agentmux/client-ui/agent-presentation'
 import { focusStateMarkKind } from '@agentmux/client-ui/focus-state-mark'
+import { focusActivityEntryAt, focusLastTaskActivityAt, orderFocusPresentation, resolveFocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
 import { configuredAgentFallbackLabel, readPresentationConfiguration, type PresentationConfiguration } from './presentation-configuration.js'
 import { ScratchTopics } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID, workspaceOwnsSessionPath } from './mote-topic-model.js'
@@ -30,6 +32,34 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
     const names = displayLabelDocument(graph).labels
     const zones = new Map(catalog.zones.map(zone => [zone.zoneId, zone])), tabs = new Map(catalog.tabs.map(tab => [tab.tabId, tab]))
     const spaces = new Map(catalog.spaces.map(space => [space.spaceId, space]))
+    type ObjectPresentation = { group: NonNullable<AgentMuxAgentPresentation['projectGroup']>; issue?: string }
+    const objectReads = new Map<string, Promise<ObjectPresentation | undefined>>()
+    const objectForZone = (zoneId: string): Promise<ObjectPresentation | undefined> => {
+      const zone = zones.get(zoneId), source = graph.resources['zone:' + zoneId]
+      if (!zone?.hostId || !source || typeof source !== 'object' || Array.isArray(source)
+        || (source.contentKind !== 'topic' && source.contentKind !== 'mote') || source.workspaceId !== zone.workspaceId
+        || typeof source.topicId !== 'string' || typeof source.spaceId !== 'string') return Promise.resolve(undefined)
+      const objectHostId = zone.hostId, contentId = source.spaceId, topicId = source.topicId
+      const key = JSON.stringify([objectHostId, zone.workspaceId, contentId, topicId])
+      const previous = objectReads.get(key)
+      if (previous) return previous
+      const read = (async (): Promise<ObjectPresentation | undefined> => {
+        const original = spaces.get(contentId)
+        if (original && original.hostId === objectHostId && original.topicId === topicId) return { group: {
+          key: original.spaceId, projectId: original.spaceId, hostId: original.hostId, name: original.name, spaceId: original.spaceId } }
+        const group = { key: contentId, projectId: contentId, hostId: objectHostId, name: '名称未确认的 Topic', spaceId: null }
+        const workspace = configuration.workspaces.find(value => value.id === zone.workspaceId && value.hostId === objectHostId)
+        try {
+          const copy = workspace ? await topics.readDisplayCopy(workspace, topicId) : null
+          if (!copy?.identityDirectoryPath || directoryIdentity(objectHostId, copy.identityDirectoryPath) !== contentId) {
+            return { group, issue: copy?.readError ?? 'The original Topic name and directory identity are unconfirmed. Refresh this same directory; its workface is retained.' }
+          }
+          return { group: { ...group, name: copy.title }, ...(copy.readError ? { issue: copy.readError } : {}) }
+        } catch (error) { return { group, issue: message(error) } }
+      })()
+      objectReads.set(key, read)
+      return read
+    }
     const bySession = new Map<string, typeof catalog.regions>()
     for (const region of catalog.regions) if (region.agentSessionId) {
       const previous = bySession.get(region.agentSessionId) ?? []; previous.push(region); bySession.set(region.agentSessionId, previous)
@@ -73,9 +103,19 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
       if (conversation.status === 'rejected') issue = [issue, message(conversation.reason)].filter(Boolean).join('\n')
       const original = exact?.session ?? known
       const resource = original ? configuration.workspaces.find(workspace => workspaceOwnsSessionPath(workspace, { ...original, hostId: hostId! })) : undefined
-      const place = regions[0] && tabs.get(regions[0].tabId), zone = place?.zoneId ? zones.get(place.zoneId) : undefined
-      const ownerSpaces = zone ? catalog.bindings.filter(binding => binding.zoneId === zone.zoneId).map(binding => spaces.get(binding.spaceId)).filter(Boolean) : []
-      const project = resource?.name ?? (ownerSpaces.length === 1 ? ownerSpaces[0]!.name : 'Project unconfirmed')
+      const ownerZoneIds = new Set(regions.flatMap(region => {
+        const zoneId = tabs.get(region.tabId)?.zoneId
+        return zoneId ? [zoneId] : []
+      }))
+      const ownerSpaces = [...new Set(catalog.bindings.filter(binding => ownerZoneIds.has(binding.zoneId)).map(binding => binding.spaceId))]
+        .flatMap(id => spaces.get(id) ? [spaces.get(id)!] : [])
+      const objects = [...new Map((await Promise.all([...ownerZoneIds].map(objectForZone))).flatMap(value => value ? [[value.group.key, value] as const] : [])).values()]
+      const originalObject = objects.length === 1 ? objects[0] : undefined
+      if (originalObject?.issue) issue = [issue, originalObject.issue].filter(Boolean).join('\n')
+      // A unique durable object binding survives unavailable execution metadata.
+      // Do not collapse Topics/Motes into their shared Scratch resource or select a first placement.
+      const objectOwner = ownerSpaces.length === 1 && (ownerSpaces[0]!.kind === 'topic' || ownerSpaces[0]!.kind === 'mote') ? ownerSpaces[0] : undefined
+      const project = objects.length > 1 ? '对象归属未确认' : originalObject?.group.name ?? objectOwner?.name ?? resource?.name ?? (ownerSpaces.length === 1 ? ownerSpaces[0]!.name : 'Project unconfirmed')
       const statusFact = exact ? exact.run.state === 'running' ? currentAgentSemanticStatus(exact.session.semanticStatus)
         ?? projectRunProcessStatus({ state: exact.run.state, source: 'run-process', observedAt: exact.run.observedAt, ...runExitFacts(exact.run) })
         : projectRunProcessStatus({ state: exact.run.state, source: 'run-process', observedAt: exact.run.observedAt, ...runExitFacts(exact.run) })
@@ -91,15 +131,22 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
       const presentation = agentPresentationState(facts, exact?.observation, result)
       const recap = launcherTimelineRecap(records)
       const projectRoot = resource ? configuration.workspaces.find(workspace => workspace.hostId === resource.hostId && workspace.path === (resource.repoPath ?? resource.path)) ?? resource : undefined
-      const projectGroup = projectRoot ? { key: JSON.stringify([projectRoot.hostId, projectRoot.id]), projectId: projectRoot.id, hostId: projectRoot.hostId, name: projectRoot.name, spaceId: directoryIdentity(projectRoot.hostId, projectRoot.repoPath ?? projectRoot.path) } : undefined
+      const boundOwner = objectOwner ?? (!projectRoot && ownerSpaces.length === 1 ? ownerSpaces[0] : undefined)
+      const projectGroup = objects.length > 1 ? undefined : originalObject?.group ?? (boundOwner ? { key: boundOwner.spaceId, projectId: boundOwner.projectId ?? boundOwner.spaceId,
+        hostId: boundOwner.hostId, name: boundOwner.name, spaceId: boundOwner.spaceId }
+        : projectRoot ? { key: JSON.stringify([projectRoot.hostId, projectRoot.id]), projectId: projectRoot.id, hostId: projectRoot.hostId, name: projectRoot.name, spaceId: directoryIdentity(projectRoot.hostId, projectRoot.repoPath ?? projectRoot.path) } : undefined)
+      const entered = focusActivityEntryAt(original?.semanticStatus)
+      const lastActivityAt = focusLastTaskActivityAt(timeline?.items ?? [], entered)
       const executor = original ? configuration.executors[original.executorId] : undefined
       const avatar = executor?.avatar ?? (original ? configuration.appearance.agentAvatars?.[original.executorId] : undefined)
       const label = names[nameTargetKey({ kind: 'agent-session', id: agentSessionId })]?.value
-      const fallback = original ? configuredAgentFallbackLabel(configuration, { ...original, hostId: hostId! }) : agentSessionId
+      const retainedNames = [...new Set(regions.flatMap(region => tabs.get(region.tabId)?.name ? [tabs.get(region.tabId)!.name!] : []))]
+      const fallback = original ? configuredAgentFallbackLabel(configuration, { ...original, hostId: hostId! })
+        : retainedNames.length === 1 ? retainedNames[0]! : '会话信息未确认'
       return { agentSessionId, name: resolveAgentName({ userName: label, firstPrompt: firstPromptFromTimeline(timeline), fallback }).name,
         project, detail: issue ?? statusFact.detail ?? recap?.text ?? presentation.stateLabel, group: presentation.bucket,
         state: presentation.state, providerId: original?.providerId ?? '', recap: recap ? { text: recap.text, source: recap.source } : null,
-        stateLabel: presentation.stateLabel, presenceUnknown: !exact,
+        stateLabel: presentation.stateLabel, presenceUnknown: !exact, lastActivityAt,
         stateMark: focusStateMarkKind({ ...presentation, activitySemantic: exact?.observation.semantic, runUnobserved: !exact, processState: exact?.run.state }),
         ...(avatar ? { avatar } : {}), ...(projectGroup ? { projectGroup } : {}) }
     }))
@@ -142,6 +189,6 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
       }
       return { ...base, ...(space.kind === 'folder' ? { preset: 'project' } : {}) }
     }))
-    return { agentPresentation, motePresentation, appearance }
+    return { agentPresentation: orderFocusPresentation(agentPresentation, resolveFocusRecentActivityHours(configuration.focus?.recentActivityHours) * 3_600_000), motePresentation, appearance }
   }
 }

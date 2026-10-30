@@ -7,6 +7,7 @@ import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot
 import { topicSpaceIconTarget } from './space-object-appearance'
 import { FOCUS_RECENT_PROJECT_HOURS, resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 import { directoryIdentity } from '../../../shared/space-addresses'
+import { compareFocusWork, focusWorkPriority } from '@agentmux/client-ui/focus-order'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -99,15 +100,13 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
     if (!groupRanks.has(key)) groupRanks.set(key, groupRanks.size)
     const at = row.lastActivityAt
     if (at != null && Number.isFinite(at) && at > 0 && at <= now) activity.set(key, Math.max(activity.get(key) ?? 0, at))
-    const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1 : at != null && at > 0 && at <= now
-      ? now - at <= recentActivityMs ? 2 : 3 : 4
+    const priority = focusWorkPriority(row.bucket, at, now, recentActivityMs)
     priorities.set(key, Math.min(priorities.get(key) ?? priority, priority))
   }
   for (const lane of lanes.values()) lane.lastActivityAt = activity.get(activityKey(lane)) ?? null
   return [...lanes.values()].sort((a, b) => {
     const first = activityKey(a), second = activityKey(b)
-    return priorities.get(first)! - priorities.get(second)!
-      || (priorities.get(first)! < 3 ? (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) : 0)
+    return compareFocusWork({ priority: priorities.get(first)!, lastActivityAt: a.lastActivityAt }, { priority: priorities.get(second)!, lastActivityAt: b.lastActivityAt })
       || groupRanks.get(first)! - groupRanks.get(second)!
   })
 }

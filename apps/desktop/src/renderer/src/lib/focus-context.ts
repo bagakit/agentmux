@@ -15,6 +15,8 @@ import { sessionRecentActivity } from './session-recency'
 import { agentStateEnteredAt } from './agent-state-time'
 import { launcherTimelineRecap, type LauncherRecap } from '@agentmux/client-ui/conversation-recap'
 import { observeAgentSession } from './agent-observation'
+import { focusActivityEntryAt, focusLastTaskActivityAt } from '@agentmux/client-ui/focus-order'
+export { focusLastTaskActivityAt } from '@agentmux/client-ui/focus-order'
 import { agentPresentationBucket, agentPresentationState, activityObservationPresentation } from '@agentmux/client-ui/agent-presentation'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 
@@ -98,25 +100,9 @@ export function createFocusNavigationSummarySelector() {
   }
 }
 export function focusActivityEntryTime(session: SessionSnapshot): number | undefined {
-  const activity = session.kind === 'agent' ? session.semanticStatus : undefined
-  if (!activity || !isAgentActivityStatusSource(activity.source)) return undefined
-  const now = Date.now()
-  const held = [activity.stateEnteredAt, activity.aggregateActivityAt].filter((at): at is number => at !== undefined && Number.isFinite(at) && at > 0 && at <= now)
-  return held.length ? Math.max(...held) : undefined
+  return focusActivityEntryAt(session.kind === 'agent' ? session.semanticStatus : undefined)
 }
 /** Held task timestamps only; visits, output bytes and repeated observations are absent. */
-export function focusLastTaskActivityAt(items: readonly AgentTimelineItem[], enteredAt?: number, now = Date.now()): number | null {
-  let latest: number | null = null
-  const remember = (at: number | undefined) => {
-    if (at !== undefined && Number.isFinite(at) && at > 0 && at <= now) latest = Math.max(latest ?? 0, at)
-  }
-  remember(enteredAt)
-  for (const item of items) {
-    if (item.kind !== 'lifecycle') remember(item.updatedAt)
-    else if (item.activityState && 'state' in item.activityState && isAgentActivityStatusSource(item.source)) remember(item.activityState.stateEnteredAt)
-  }
-  return latest
-}
 function workingEntryTime(session: SessionSnapshot): number | null {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
   const time = activity?.stateEnteredAt

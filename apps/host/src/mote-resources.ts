@@ -415,6 +415,16 @@ export class ScratchTopics {
     }
   }
 
+  /** Exact directory copy for presentation; no Wiki, personality or collaborator bodies. */
+  async readDisplayCopy(workspace: WorkspaceRecord, topicId: string): Promise<Pick<ScratchTopicSnapshot, 'id' | 'identityDirectoryPath' | 'title' | 'summary' | 'readError'> | null> {
+    requireScratchWorkspace(workspace)
+    const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!resolved) return null
+    const directory = await scratchDirectoryAddress(workspace.path, topicId, resolved)
+    const identity = await this.identityFact(workspace, topicId, directory)
+    return { id: topicId, ...identity, ...topicCopy(await readRegularFile(join(resolved, 'topic.md'))) }
+  }
+
   async read(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot | null> {
     requireScratchWorkspace(workspace)
     const directoryName = scratchTopicDirectoryName(topicId)

@@ -387,12 +387,13 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Appearance issue', code) } : {}) }
   }, 'Appearance', code), item => item.spaceId, 'Appearance', code) : undefined
   const agentPresentation = Object.hasOwn(source, 'agentPresentation') ? unique(list(source.agentPresentation, value => {
-    const item = fields(value, ['agentSessionId', 'name', 'project', 'detail', 'group', 'state', 'providerId', 'recap', 'avatar', 'stateMark', 'stateLabel', 'presenceUnknown', 'projectGroup'], code)
+    const item = fields(value, ['agentSessionId', 'name', 'project', 'detail', 'group', 'state', 'providerId', 'recap', 'avatar', 'stateMark', 'stateLabel', 'presenceUnknown', 'lastActivityAt', 'projectGroup'], code)
     const recap = item.recap === null ? null : fields(item.recap, ['text', 'source'], code)
     const avatar = Object.hasOwn(item, 'avatar') ? fields(item.avatar, ['tint', 'badge'], code) : undefined
     const grouping = Object.hasOwn(item, 'projectGroup') ? fields(item.projectGroup, ['key', 'projectId', 'hostId', 'name', 'spaceId'], code) : undefined
     if (Object.hasOwn(item, 'stateMark') && (typeof item.stateMark !== 'string' || !['error', 'attention', 'working', 'results', 'unknown', 'interrupted', 'recovery', 'idle'].includes(item.stateMark))) fail('Agent presentation state mark is invalid.', code)
     if (Object.hasOwn(item, 'presenceUnknown') && typeof item.presenceUnknown !== 'boolean') fail('Agent presence presentation is invalid.', code)
+    if (Object.hasOwn(item, 'lastActivityAt') && item.lastActivityAt !== null && (typeof item.lastActivityAt !== 'number' || !Number.isFinite(item.lastActivityAt) || item.lastActivityAt <= 0)) fail('Agent task activity time is invalid.', code)
 
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent presentation', code),
       name: string(item.name, 'Agent name', code), project: string(item.project, 'Project name', code),
@@ -402,6 +403,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(Object.hasOwn(item, 'stateMark') ? { stateMark: item.stateMark as NonNullable<import('./space-control.js').AgentMuxAgentPresentation['stateMark']> } : {}),
       ...(Object.hasOwn(item, 'stateLabel') ? { stateLabel: string(item.stateLabel, 'State label', code) } : {}),
       ...(Object.hasOwn(item, 'presenceUnknown') ? { presenceUnknown: item.presenceUnknown as boolean } : {}),
+      ...(Object.hasOwn(item, 'lastActivityAt') ? { lastActivityAt: item.lastActivityAt as number | null } : {}),
       ...(grouping ? { projectGroup: { key: spaceControlId(grouping.key, 'Project group key', code, true), projectId: spaceControlId(grouping.projectId, 'Project identity', code, true), hostId: spaceControlId(grouping.hostId, 'Project Host', code), name: string(grouping.name, 'Project group name', code), spaceId: grouping.spaceId === null ? null : spaceControlId(grouping.spaceId, 'Project Space', code, true) } } : {}),
 
       ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code) } : {}) } } : {}) }

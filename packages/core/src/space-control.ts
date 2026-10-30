@@ -100,6 +100,8 @@ export type AgentMuxAgentPresentation = {
   stateMark?: 'error' | 'attention' | 'working' | 'results' | 'unknown' | 'interrupted' | 'recovery' | 'idle'
   stateLabel?: string
   presenceUnknown?: boolean
+  /** Original task event / semantic state entry, never transport or byte activity. Presentation only. */
+  lastActivityAt?: number | null
   projectGroup?: { key: string; projectId: string; hostId: string; name: string; spaceId: string | null }
 
 }
