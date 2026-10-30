@@ -40,7 +40,9 @@ export const goalOwnerRecoveryMutations = {
     [manager, 'for (const loopId of this.goalLoops.get(goalId) ?? [])', "for (const loopId of this.list().filter(loop => loop.taskSource?.kind === 'goal' && loop.taskSource.goalId === goalId).map(loop => loop.loopId))"]] },
   'cancellation-delayed': { pattern: 'same local mutation delivery', edits: [[manager,
     '// Confirmed original owner updates cancel any in-flight input synchronously.\n        this.cancelDelivery(loop.loopId)',
-    '// Confirmed original owner updates cancel any in-flight input synchronously.\n        queueMicrotask(() => this.cancelDelivery(loop.loopId))']] }
+    '// Confirmed original owner updates cancel any in-flight input synchronously.\n        queueMicrotask(() => this.cancelDelivery(loop.loopId))']] },
+  'directory-sync-ack-omitted': { pattern: 'after-replace directory sync uncertainty', edits: [['apps/host/src/continuous-progress-loop-store.ts',
+    'durableWriteFile(this.path, content, { requireDirectorySync: true })', 'durableWriteFile(this.path, content)']] }
 }
 export const goalOwnerRecoverySources = [manager, ...observers,
   'apps/host/src/goals.ts', 'apps/host/src/goal-runtime.ts', 'apps/host/src/continuous-progress-loop-store.ts',
