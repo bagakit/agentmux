@@ -4,15 +4,14 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
+import { verifySourceBoundProof } from './lib/source-bound-proof.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
 const { build } = require('esbuild'), digest = bytes => createHash('sha256').update(bytes).digest('hex')
-const directory = join(root, 'packages/core/.tmp/native-startup-join'); await mkdir(directory, { recursive: true })
-const attempt = await mkdtemp(join(directory, 'attempt-')), worker = join(attempt, 'worker.mjs')
 const sources = ['packages/core/src/providers/codex-managed-run.ts', 'packages/core/src/providers/codex-managed-frontend.ts',
   'packages/core/src/providers/codex-native-rpc.ts', 'packages/core/test/native-startup-join.test.ts',
   'packages/core/test/fixtures/native-startup-join.cjs', 'packages/core/test/native-startup-join.config.mts',
-  'packages/core/scripts/verify-native-startup-join.mjs']
+  'packages/core/scripts/verify-native-startup-join.mjs', 'packages/core/scripts/lib/source-bound-proof.mjs']
 const inputs = Object.fromEntries(await Promise.all(sources.map(async path => [path, digest(await readFile(join(root, path)))])))
 const variants = [{ name: 'candidate', count: 5 },
   { name: 'skip-native-join', file: 'codex-managed-frontend.ts',
@@ -31,6 +30,14 @@ const variants = [{ name: 'candidate', count: 5 },
     from: 'if (initialFrontendPending) { initialFrontendWake = true; return initialFrontendPending }',
     to: 'if (false && initialFrontendPending) return initialFrontendPending',
     test: 'retains one delayed join', count: 1 }]
+if (process.env.AGENTMUX_REUSE_SOURCE_BOUND_PROOF === '1') {
+  assert.ok(!process.argv.includes('--candidate-only'), 'Candidate-only mode cannot reuse a full mutation qualification')
+  console.log(await verifySourceBoundProof(join(root, '.local/state/frontend-startup-convergence/t1-proof.json'), {
+    inputs, minPassed: variants[0].count, mutations: variants.slice(1).map(variant => variant.name)
+  })); process.exit(0)
+}
+const directory = join(root, 'packages/core/.tmp/native-startup-join'); await mkdir(directory, { recursive: true })
+const attempt = await mkdtemp(join(directory, 'attempt-')), worker = join(attempt, 'worker.mjs')
 const receipt = { schema: 'agentmux.native-startup-join-proof.v1', passed: false, sourceStable: false, userRuntimeTouched: false, inputs, results: [] }
 try {
   for (const variant of process.argv.includes('--candidate-only') ? variants.slice(0, 1) : variants) {
@@ -68,7 +75,9 @@ try {
       failed.every(test => /AssertionError|expected .+ to /su.test(test.failureMessages.join('\n')) ||
         /Caused by: AssertionError: expected .+ to /su.test(result.output))
     receipt.results.push({ name: variant.name, code: result.code, total: active.length, failed: failed.length, semanticRed,
-      worker: digest(await readFile(worker)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
+      worker: digest(await readFile(worker)), failedTests: failed.map(test => test.fullName),
+      assertionHead: failed.map(test => test.failureMessages[0]?.split('\n')[0]),
+      failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     if (variant.from) assert.ok(semanticRed, 'Source mutation needs behavior-bearing assertion RED: ' + variant.name)
     else assert.equal(result.code, 0, 'Actual Provider launcher baseline failed: ' + report)
     process.stdout.write(variant.name + ': ' + (variant.from ? 'assertion RED' : 'GREEN') + '\n')
