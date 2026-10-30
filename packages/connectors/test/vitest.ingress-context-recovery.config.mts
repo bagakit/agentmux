@@ -7,6 +7,8 @@ export default defineConfig({ ...base, cacheDir: '.cache/ingress-context-recover
   name: 'ingress-original-context-loaded-mutants', enforce: 'pre', transform(original, id) {
     const path = relative(base.root!, id.split('?')[0]!)
     const variants: Record<string, { path: string; before: string; after: string }> = {
+      'local-result-awaits-body': { path: 'packages/connectors/src/durable-ingress.ts', before: 'void this.dispatchOriginal(input.ingressId, undefined, true).catch', after: 'await this.dispatchOriginal(input.ingressId, undefined, true).catch' },
+      'local-result-reads-core': { path: 'packages/connectors/src/durable-ingress.ts', before: "input.source.kind === 'context-observation' ? this.inspectLocal(input.ingressId)", after: "input.source.kind === 'context-observation' ? await this.inspect({ ingressId: input.ingressId })" },
       'weak-observation-release': { path: 'packages/connectors/src/durable-ingress.ts', before: 'await observeRead(call(accurate), accurate)', after: 'await call(accurate)' },
       'core-inspect-signal': { path: 'packages/connectors/src/core-ingress-port.ts', before: "invoke('inspectAgentInput', [input], fence, signal)", after: "invoke('inspectAgentInput', [input], fence)" },
       'public-context-dispatch': { path: 'packages/connectors/src/durable-ingress.ts', before: 'action = this.endContextObservation(input, selected.record)', after: "action = { ...selected.action, outcome: 'stale' }" },

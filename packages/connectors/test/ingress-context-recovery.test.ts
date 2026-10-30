@@ -270,10 +270,66 @@ it('ending an exact old observation never accepts its original body into a chang
   await f.inner.registry.load('local')
   const result = await f.rpc.call('connection.ingress.rejoin', request, { credentials: f.credentials })
   expect(result.action).toEqual({ ...request, outcome: 'context-ended' })
-  expect(result.inspection.ingress).toMatchObject({ body: received.body, input: { admissionIntent: { kind: 'native-conversation', source: f.source } } })
+  const retained = await vi.waitFor(async () => { const value = await f.inspect(received.ingressId); expect(value.ingress?.input?.admissionIntent).toMatchObject({ kind: 'native-conversation', source: f.source }); return value })
+  expect(retained.ingress).toMatchObject({ body: received.body, input: { admissionIntent: { kind: 'native-conversation', source: f.source } } })
   expect(result.inspection.preparation?.source).toEqual(f.source)
   expect(nativeSignal!.aborted).toBe(true)
   expect((await f.rpc.call('connection.ingress.rejoin', request, { credentials: f.credentials })).action).toEqual(result.action)
   release(); await new Promise(resolve => setTimeout(resolve, 100))
   expect(f.nativeSend).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)
+
+it('a durable local context result returns while strong target and later Core inspection are hung, then the same body finishes once', async () => {
+  const f = await channelContextFixture(cleanup)
+  await f.receive('baseline', 1000, 'Original baseline', false)
+  let ingressId: string | undefined, releaseTarget!: () => void, releaseInspect!: () => void, releaseNative!: () => void
+  let targetHeld = false, inspectGate: Promise<void> | undefined
+  cleanup.push(() => { releaseTarget?.(); releaseInspect?.(); releaseNative?.() })
+  const target = f.client.readAgentSession.bind(f.client)
+  vi.spyOn(f.client, 'readAgentSession').mockImplementation(async id => {
+    const value = await target(id)
+    if (!targetHeld && ingressId && id === 'original-agent') {
+      const local = await f.services.ingress!.inspect({ ingressId })
+      if (local.ingress?.state === 'received' && local.preparation?.phase === 'ended') {
+        targetHeld = true; await new Promise<void>(resolve => { releaseTarget = resolve })
+      }
+    }
+    return value
+  })
+  const inspect = f.hosted.inspectAgentInput.bind(f.hosted)
+  vi.spyOn(f.hosted, 'inspectAgentInput').mockImplementation(async input => {
+    const result = await inspect(input)
+    if (ingressId && result) await (inspectGate ??= new Promise<void>(resolve => { releaseInspect = resolve }))
+    return result
+  })
+  f.transport.override(input => input.params?.container_id_type === 'chat'
+    ? new Promise(resolve => { releaseNative = () => resolve({ code: 0, data: { items: f.nativeRows, has_more: false } }) }) : undefined)
+  const received = await f.receive('strong-step-current', 2000, 'Original body continues after its separate strong steps')
+  ingressId = received.ingressId
+  await vi.waitFor(() => expect(releaseNative).toBeDefined())
+  const observation = await f.inspect(ingressId), request = { ingressId, operationId: 'local-result-before-strong-body', source: observation.rejoinSource! }
+  const env = objectCliEnvironment(f.root, { AGENTMUX_AGENT_SESSION_ID: f.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.credentials.capability })
+  const call = () => runCompiledObjectCli(['--endpoint', 'unix:' + f.desktopPath, 'connection', 'ingress', 'rejoin', '--input', '-'], env, JSON.stringify(request))
+  let first: Awaited<ReturnType<typeof call>> | undefined
+  const firstCall = call().then(result => { first = result })
+  await vi.waitFor(() => expect(releaseTarget).toBeDefined())
+  await vi.waitFor(() => expect(first?.code, first?.stdout + String(first?.stderr)).toBe(0), { timeout: 3000 })
+  const local = JSON.parse(first!.stdout).result
+  expect(local).toMatchObject({ action: { ...request, outcome: 'context-ended' }, inspection: { ingress: { state: 'received', body: received.body }, inputReceipt: null, observation: 'not-started' } })
+  expect(f.nativeSend).not.toHaveBeenCalled()
+  releaseTarget()
+  await vi.waitFor(() => expect(releaseInspect).toBeDefined())
+  await vi.waitFor(() => expect(f.nativeSend).toHaveBeenCalledOnce())
+  let repeated: Awaited<ReturnType<typeof call>> | undefined
+  const repeatedCall = call().then(result => { repeated = result })
+  await vi.waitFor(() => expect(repeated?.code, repeated?.stdout + String(repeated?.stderr)).toBe(0), { timeout: 3000 })
+  const pendingCore = JSON.parse(repeated!.stdout).result
+  expect(pendingCore).toMatchObject({ action: local.action, inspection: { ingress: { state: 'claimed', body: received.body }, inputReceipt: null, observation: 'unavailable' } })
+  const frozen = pendingCore.inspection.ingress.input
+  releaseInspect(); await firstCall; await repeatedCall
+  const settled = await f.wait(ingressId, 'admitted')
+  expect(settled.ingress!.input).toEqual(frozen)
+  expect(settled.inputReceipt!.originalControlOperationId).toBe(frozen.operationId)
+  releaseNative(); await new Promise(resolve => setTimeout(resolve, 100))
+  expect(f.nativeSend).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
