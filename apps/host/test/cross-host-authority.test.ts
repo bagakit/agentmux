@@ -19,8 +19,8 @@ afterAll(async () => { if (process.env.CROSS_HOST_FACTS) await writeFile(process
   scope: 'Two actual semantic Hosts, original public Unix/Hosted clients, SQLite ingress and Core journals. Only native Runtime bytes and official Feishu SDK I/O are controlled; no SSH, Linux, live account, default remote-client configuration or migration claim.', facts
 }, null, 2) + '\n') })
 
-async function owner(name: string) {
-  const original = await rpcOwnerFixture(['same-agent'], core, root => ({ providerId: 'claude', executorId: 'claude',
+async function owner(name: string, agentSessionId = 'same-agent') {
+  const original = await rpcOwnerFixture([agentSessionId], core, root => ({ providerId: 'claude', executorId: 'claude',
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'same-native', transcriptPath: join(root, 'native.jsonl') } }))
   cleanup.push(original.close)
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(AGENTMUX_|CTXMUX_)/u.test(key)))
@@ -64,12 +64,12 @@ async function owner(name: string) {
     available: (value: boolean) => { available = value; if (host) (host.client as unknown as typeof original.inner).connected = value }, routes: (value: typeof clients) => { clients = value } }
 }
 
-async function pair() {
+async function pair(separateHostingIdentity = false) {
   const transport = feishuSdkTransport(), http = await feishuPublicationHttp(); cleanup.push(http.close)
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(http.http.request)
-  const hosting = await owner('hosting'), execution = await owner('execution')
+  const hosting = await owner('hosting', separateHostingIdentity ? 'hosting-unrelated-agent' : 'same-agent'), execution = await owner('execution')
   expect(hosting.identity.runtimeId).not.toBe(execution.identity.runtimeId)
-  expect(hosting.client().agentSession('same-agent').run).toEqual(execution.client().agentSession('same-agent').run)
+  if (!separateHostingIdentity) expect(hosting.client().agentSession('same-agent').run).toEqual(execution.client().agentSession('same-agent').run)
   hosting.routes([{ hostId: 'outbound-execution', client: execution.reader }])
   execution.routes([{ hostId: 'original-hosting', client: hosting.reader }])
   const secret = await hosting.rpc.call('connection.credential.store', { operationId: 'synthetic-credential', secret: 'synthetic-feishu-value' },
@@ -127,6 +127,31 @@ it('two actual Hosts authorize a native message through the original hosting dat
   expect(receipt.input).toMatchObject({ status: 'terminal-confirmed', originalControlOperationId: input.operationId })
   expect(f.hosting.native.stop).not.toHaveBeenCalled(); expect(f.execution.native.stop).not.toHaveBeenCalled()
   facts.push({ case: 'two-actual-owners-native-message', source: f.source, intake, journal: original, receipt, hostingEffects: 0, executionEffects: 1 })
+})
+
+it('public managed remote recipient continues its exact claimed message through the original Hosting owner and Runtime pair', async () => {
+  // One exact managed caller route; aggregate endpoints intentionally reject ambiguous equal SIDs.
+  const f = await pair(true); await f.grant()
+  const held = vi.spyOn(f.execution.client(), 'submitAgentMessage').mockRejectedValue(Error('Private original firstsave gap'))
+  await f.receive('managed-original-gap')
+  const original = await vi.waitFor(async () => { const value = await f.intake('managed-original-gap'); expect(value.state).toBe('claimed'); return value })
+  const inspected = await f.hosting.rpc.call('connection.ingress.inspect', { ingressId: original.ingressId })
+  expect(inspected.inputReceipt).toBeNull(); expect(inspected.rejoinSource?.kind).toBe('firstsave')
+  const request = { ingressId: original.ingressId, operationId: 'managed-original-recovery', source: inspected.rejoinSource! }
+  held.mockRestore()
+  const env = objectCliEnvironment(f.execution.original.root, { AGENTMUX_AGENT_SESSION_ID: 'same-agent', AGENTMUX_AGENT_CAPABILITY: f.execution.original.capability })
+  const output = await runCompiledObjectCli(['--endpoint', 'unix:' + f.hosting.socketPath, 'connection', 'ingress', 'rejoin', '--input', '-'], env, JSON.stringify(request))
+  expect(output.code, output.stderr).toBe(0)
+  const result = JSON.parse(output.stdout).result
+  expect(result.action).toMatchObject({ ...request, outcome: 'handed-off' })
+  await vi.waitFor(() => expect(f.execution.native.input).toHaveBeenCalledOnce(), { timeout: 10000 })
+  expect(f.hosting.native.input).not.toHaveBeenCalled()
+  const journal = await new core.DurableAgentMuxMessageQueue(f.execution.client().agentMessageQueuePath()).readByOperationId(original.input!.operationId)
+  expect(journal).toMatchObject({ envelope: { body: original.body, sender: { authoritySource: f.source } } })
+  const again = await runCompiledObjectCli(['--endpoint', 'unix:' + f.hosting.socketPath, 'connection', 'ingress', 'rejoin', '--input', '-'], env, JSON.stringify(request))
+  expect(again.code, again.stderr).toBe(0); expect(JSON.parse(again.stdout).result.action).toEqual(result.action)
+  expect(f.execution.native.input).toHaveBeenCalledOnce()
+  facts.push({ case: 'managed-remote-original-custody', source: f.source, request, result, original, journal, hostingEffects: 0, executionEffects: 1 })
 })
 
 it('the Binding pin survives a missing route and refuses a same-ID foreign execution owner before any record or input journal', async () => {

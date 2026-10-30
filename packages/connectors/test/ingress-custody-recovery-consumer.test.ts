@@ -9,6 +9,7 @@ import { ingressFixture } from './fixtures/ingress.js'
 import { context } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { headlessFixture, until } from '../../core/test/helpers/headless-runtime-fixture.js'
+import { hostedTestOwner } from '../../core/test/helpers/hosted-runtime-port.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
@@ -158,6 +159,88 @@ it('public compiled CLI rejoin consumes the same original action and never reena
   const skill = await runCompiledObjectCli(['connection', '--skill'], objectCliEnvironment(f.root))
   expect(skill.code).toBe(0); expect(skill.stdout).toContain('rejoinSource'); expect(skill.stdout).toContain('connection ingress rejoin')
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('each original ingress owns its action namespace without reading unrelated action history', async () => {
+  const f = await fixture(), first = await beforeFirstsave(f)
+  const prepare = f.connections.database.prepare.bind(f.connections.database)
+  vi.spyOn(f.connections.database, 'prepare').mockImplementation(sql => {
+    if (sql.includes('json_each(rejoin_json)')) throw Error('Unrelated action history is unavailable')
+    return prepare(sql)
+  })
+  const original = await f.ingress.rejoin(first.request, context)
+  const other = await f.receive({ eventId: 'independent-namespace-event', messageId: 'independent-namespace-message' })
+  vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValueOnce(Error('Independent firstsave boundary'))
+  const inspection = await f.ingress.dispatch(other.ingress.ingressId)
+  const otherRequest = { ingressId: other.ingress.ingressId, operationId: first.request.operationId, source: inspection.rejoinSource! }
+  const independent = await f.ingress.rejoin(otherRequest, context)
+  expect(independent.action.outcome).toBe('handed-off')
+  expect(independent.action.inputRef!.key).not.toEqual(original.action.inputRef!.key)
+  expect((await f.ingress.rejoin(first.request, context)).action).toEqual(original.action)
+})
+
+async function publicManaged(f: Awaited<ReturnType<typeof fixture>>) {
+  const hosted = new core.AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client))
+  cleanup.push(() => hosted.dispose())
+  const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'managed-custody.sock'), connections: f.connections,
+    coreClients: f.coreClients, hostedRuntime: () => hosted })
+  await server.start(); cleanup.push(() => server.stop())
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
+  return { rpc, server, credentials: { agentSessionId: f.session.agentSessionId, capability: f.capability } }
+}
+
+it('public managed recipient ensures its frozen message without enrollment ownership and preserves its real actor', async () => {
+  const f = await fixture(true), first = await beforeFirstsave(f), api = await publicManaged(f)
+  const enrollment = vi.spyOn(f.connections, 'ownsEnrollmentConnection').mockResolvedValue(false)
+  const env = objectCliEnvironment(f.root, { AGENTMUX_AGENT_SESSION_ID: f.session.agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.capability })
+  const run = () => runCompiledObjectCli(['--endpoint', 'unix:' + api.server.path, 'connection', 'ingress', 'rejoin', '--input', '-'], env, JSON.stringify(first.request))
+  const stale = await runCompiledObjectCli(['--endpoint', 'unix:' + api.server.path, 'connection', 'ingress', 'rejoin', '--input', '-'], env,
+    JSON.stringify({ ...first.request, operationId: 'managed-stale-source', source: { ...first.request.source, messageId: 'foreign-message' } }))
+  expect(await f.client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: first.original[0].envelope.operationId })).toBeNull()
+  expect(stale.code, stale.stderr).toBe(0); expect(JSON.parse(stale.stdout).result.action.outcome).toBe('stale')
+  const output = await run()
+  expect(output.code, output.stderr).toBe(0)
+  const result = JSON.parse(output.stdout).result
+  expect(result.action).toMatchObject({ ...first.request, outcome: 'handed-off' })
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  const row = f.connections.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(first.request.ingressId)!
+  expect(JSON.parse(String(row.rejoin_json))[first.request.operationId].actor).toEqual({ kind: 'agent', id: f.session.agentSessionId })
+  expect(JSON.parse((await run()).stdout).result.action).toEqual(result.action)
+  expect(enrollment).not.toHaveBeenCalled()
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+})
+
+it.each(['foreign-session', 'foreign-host', 'no-frozen-target', 'wrong-runtime', 'revoked-grant', 'context-cancel-source'] as const)('public managed custody rejects %s advancement while retaining original facts and healthy local input', async scenario => {
+  const f = await fixture(true), first = await beforeFirstsave(f), api = await publicManaged(f)
+  let request = first.request, credentials = api.credentials
+  if (scenario === 'foreign-session') {
+    const prior = (await f.store.readMetadata(f.session.agentSessionId))!
+    await f.store.compareAndSwap(null, { ...prior, agentSessionId: 'foreign-session', run: { runId: 'foreign-run' }, nativeHandle: undefined, nativeBinding: undefined })
+    await f.inner.registry.load('local')
+    credentials = { ...credentials, agentSessionId: 'foreign-session' }
+  }
+  if (scenario === 'foreign-host') {
+    const row = f.connections.database.prepare('SELECT record_json FROM connection_ingress_message WHERE ingress_id=?').get(request.ingressId)!
+    const record = JSON.parse(String(row.record_json)); record.input.hostId = 'foreign-host'
+    f.connections.database.prepare('UPDATE connection_ingress_message SET record_json=? WHERE ingress_id=?').run(JSON.stringify(record), request.ingressId)
+  }
+  if (scenario === 'no-frozen-target') {
+    const received = await f.receive({ eventId: 'unassigned-event', messageId: 'unassigned-message' })
+    request = { ingressId: received.ingress.ingressId, operationId: 'unassigned-action', source: { kind: 'received', preparationRevision: 0 } }
+  }
+  if (scenario === 'revoked-grant') await f.bindings.grant({ ...f.grant, operationId: 'revoke-before-managed-ensure', expectedRevision: 1, state: 'revoked' }, context)
+  if (scenario === 'context-cancel-source') request = { ...request, source: { kind: 'context-observation', observationId: 'unissued-context-source' } }
+  const call = api.rpc.call('connection.ingress.rejoin', request, { credentials,
+    ...(scenario === 'wrong-runtime' ? { runtimeFence: { runtimeId: 'foreign-runtime', ownerInstanceId: 'foreign-owner' } } : {}) })
+  if (scenario === 'revoked-grant') {
+    expect(await call).toMatchObject({ action: { outcome: 'pending' }, inspection: { inputReceipt: null } })
+    expect(await f.ingress.authority({ operationId: first.original[0].envelope.operationId })).toMatchObject({ authority: 'refused' })
+  } else await expect(call).rejects.toMatchObject({ code: scenario === 'wrong-runtime' ? 'RUNTIME_OWNER_MISMATCH' : 'CONTROL_PERMISSION_DENIED' })
+  expect(await f.client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: first.original[0].envelope.operationId })).toBeNull()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  await f.client.submitAgentPrompt({ agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, operationId: 'accurate-independent-input',
+    prompt: 'Healthy local input', authorHuman: true, execution: 'immediate', admissionIntent: { kind: 'manual-actor' } })
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
 })
 
 it('real receiver and owner crashes preserve claimed custody, the accepted action, and a single original PTY effect', async () => {
