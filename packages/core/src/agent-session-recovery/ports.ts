@@ -33,7 +33,7 @@ export type AgentSessionRecoveryPorts = {
   };
   runtime: {
     prepareExecutionEnvironment?(): Promise<void>;
-    readonly kernel: Pick<CtxmuxRunAdapter, "inspectCreation" | "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
+    readonly kernel: Pick<CtxmuxRunAdapter, "prepareStart" | "startPrepared" | "creationRuntimeIdentity" | "inspectPreparedStart" | "inspectRetainedStart" | "inspectCreation" | "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
     assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, durableSessions?: readonly AgentMuxAgentSession[]): void;
     requireCurrentAgentRun(session: AgentMuxAgentSession, durableSessions?: readonly AgentMuxAgentSession[]): Promise<CtxmuxAdapterRun>;
     retireUncommittedRun(runId: string): Promise<void>;
