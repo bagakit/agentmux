@@ -9,6 +9,7 @@ import { moteInputNoticeWire } from '@agentmux/core/mote-input-notice'
 import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test/fixtures/mote-notice'
 
 const originalSourceHost = 'host-original'
+const initialNativeReadFailure = new URLSearchParams(location.search).get('nativeReaderFailure') === '1'
 
 // Opening the private App may request the Reader immediately. Keep those same requests
 // pending until the finite source ports below are ready, rather than painting a fake error.
@@ -96,6 +97,10 @@ api.sessions.inspectMoteInput = async (target, observationId) => {
 const mainText = '把协作体验补完整：主对话要清楚，成员工作能看见，需要我判断时再叫我。'
 function conversation(input: Parameters<typeof api.conversation.readAgentConversation>[0]) {
   reads.push({ operation: 'conversation', target: input })
+  if (initialNativeReadFailure && input.agentSessionId === 'mote-primary') {
+    reads.push({ operation: 'conversation-initial-failure', target: input })
+    throw new Error('Original Native reader failed before its first accepted window; the original Agent and draft remain available.')
+  }
   const nativeSource = { providerId: 'codex', nativeSessionId: input.agentSessionId === 'mote-neighbor' ? 'preview-member-native' : 'original-native-' + input.agentSessionId }
   const isMain = input.agentSessionId === 'mote-primary'
   const projected = projectConversationReading({ agentSessionId: input.agentSessionId, routeHostId: input.hostId, executionHostId: originalSourceHost,

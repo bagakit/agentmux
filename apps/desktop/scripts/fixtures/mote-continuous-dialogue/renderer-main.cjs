@@ -1,0 +1,96 @@
+const { app, BrowserWindow, Menu } = require('electron')
+const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
+const { nativeRendererInput } = require('../settings-connections/native-input.cjs')
+const [html, privateRoot, evidence] = process.argv.slice(2)
+app.setPath('userData', path.join(privateRoot, 'userData'));app.setPath('sessionData', path.join(privateRoot, 'sessionData'))
+const result = {passed:false,captureOnly:true,aestheticReview:'not-performed',images:[],interactions:[],errors:[]};let win
+app.whenReady().then(async()=>{try{
+ Menu.setApplicationMenu(null);win=new BrowserWindow({width:1180,height:850,useContentSize:true,show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}})
+ win.webContents.on('console-message',(_e,d)=>{if(d.level==='error')result.errors.push(d.message)})
+ await win.loadFile(html,{query:{phase:'seed',retained:'1',zoneSelection:'1'}})
+ const {read,until,settle,click}=nativeRendererInput(win,result.interactions,'')
+ await until('window.moteDialogueCapture && window.moteCooperationCapture?.ready','Original full App bootstrap')
+ await read('window.__connectionsTrustedEvents=window.moteCooperationCapture.facts().trustedEvents')
+ win.showInactive();win.focus();win.webContents.focus();await until('document.hasFocus()')
+ const facts=()=>read('window.moteCooperationCapture.facts()'),initial=result.initial=await facts()
+ const floating='document.querySelector("[data-pmo-teams-topic-floating]:popover-open")'
+ const visibleConversation='[...document.querySelectorAll(".mote-conversation")].find(n=>n.checkVisibility())'
+ const visibleButton=text=>`[...${visibleConversation}.querySelectorAll('button')].find(n=>n.checkVisibility() && n.textContent.trim()===${JSON.stringify(text)})`
+ await until(`!!${visibleConversation}?.querySelector('[data-mote-work-event]')`,'Original dialogue and source work rows')
+ assert.ok(await read(`!${floating}.querySelector('.mote-cooperation__issue')`),'The exact healthy main observation does not acquire a false Host-unknown notice')
+ result.navigationPaint=await read(`getComputedStyle(${visibleConversation}.querySelector('.mote-conversation__navigation')).backgroundColor`)
+ assert.ok(!['transparent','rgba(0, 0, 0, 0)'].includes(result.navigationPaint),'The sticky navigation retains a painted surface while original records scroll underneath')
+ const orderedRuns=value=>value.toSorted((a,b)=>a.id.localeCompare(b.id))
+ const capture=async name=>{await settle();win.webContents.sendInputEvent({type:'mouseMove',x:1,y:1});await settle();const current=await facts();assert.deepEqual(current.identities,initial.identities);assert.deepEqual(current.drafts,initial.drafts);assert.deepEqual(orderedRuns(current.runs),orderedRuns(initial.runs));assert.deepEqual(current.writes,[]);const file=name+'.png';await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file);result[name]={body:await read('document.body.innerText'),facts:current}}
+ const chromeAction=text=>`[...${floating}.querySelectorAll('.mote-workface__presentation-action')].find(n=>n.checkVisibility() && n.textContent===${JSON.stringify(text)})`
+ const originalWorkface=await read('window.moteDialogueCapture.workface()')
+ await read(`window.__moteChromeOriginal={body:${floating}.querySelector('.pane-body'),conversation:${visibleConversation},composer:${floating}.querySelector('[aria-label="Message Agent"]')}`)
+ assert.ok(await read(`${floating}.querySelector('.pane-tabbar__workface').hidden && !${floating}.querySelector('.pane-tabbar__workface').checkVisibility()`),'Default dialogue folds generic Tab/Split controls')
+ assert.ok(await read(`![...${floating}.querySelectorAll('.agent-region-header')].some(n=>n.checkVisibility())`),'Default dialogue folds the original Region corner controls')
+ assert.ok(await read(`${visibleConversation}.getBoundingClientRect().height>100`),'The original content retains readable geometry')
+ await click('js:'+chromeAction('原工作面'))
+ await until(`!!${chromeAction('返回主对话')}`,'Original-workface controls remain reachable')
+ assert.ok(await read(`!${floating}.querySelector('.pane-tabbar__workface').hidden && [...${floating}.querySelectorAll('.pane-tabbar__workface button')].some(n=>n.checkVisibility()) && [...${floating}.querySelectorAll('.agent-region-header')].some(n=>n.checkVisibility())`),'Original Tab/Split/Region controls are visible')
+ await capture('00-original-workface-dark')
+ await click('js:'+chromeAction('返回主对话'))
+ await until(`!!${chromeAction('原工作面')}`,'Explicit return restores the compact conversation')
+ assert.ok(await read(`window.__moteChromeOriginal.body===${floating}.querySelector('.pane-body') && window.__moteChromeOriginal.conversation===${visibleConversation} && window.__moteChromeOriginal.composer===${floating}.querySelector('[aria-label="Message Agent"]')`),'The same original body, reader and Composer stay mounted')
+ assert.deepEqual(await read('window.moteDialogueCapture.workface()'),originalWorkface,'Original layout, bindings, tabs, drafts, queues and Runs are unchanged')
+ result.chromeRoundTrip={passed:true,originalWorkface,after:await read('window.moteDialogueCapture.workface()'),sameOriginalDom:true}
+ await capture('01-main-floating-dark')
+ await click('js:'+floating+'.querySelector("[aria-label=\\"Open in Space\\"]")')
+ await until('!'+floating+' && !!document.querySelector(".mote-space-frame__header")')
+ await read(visibleConversation+'.querySelector(".mote-conversation__messages .mote-work-event__summary").scrollIntoView({block:"center"})');await settle();await click('js:'+visibleConversation+'.querySelector(".mote-conversation__messages .mote-work-event__summary")')
+ await until(visibleConversation+'.textContent.includes("主对话与事件历史已接上原来源")')
+ await capture('02-main-thread-expanded-wide-dark')
+ await read(visibleButton('事件历史 · 2')+'.scrollIntoView({block:"center"})');await settle();await click('js:'+visibleButton('事件历史 · 2'))
+ await until(visibleConversation+'.querySelector(".mote-conversation__history").checkVisibility()')
+ win.setContentSize(640,850);await read('window.moteCooperationCapture.theme(true)');await capture('03-event-history-narrow-light')
+ // The original Composer remains mounted while the history is open.
+ assert.ok(await read('!!document.querySelector("[aria-label=\\"Message Agent\\"]")'))
+ const header='document.querySelector(".mote-space-frame__header")'
+ await click('js:[...'+header+'.querySelectorAll("[role=tab]")].find(n=>n.textContent==="Profile")')
+ await click('js:document.querySelector(".mote-profile__preferences > summary")');
+ await click(`js:[...document.querySelectorAll('button')].find(n=>n.checkVisibility() && n.getAttribute('aria-label')==='Edit quick mode')`)
+ await until('!!document.querySelector("[aria-label=\\"Heartbeat interval (minutes)\\"]")')
+ assert.equal(await read('document.querySelector("[aria-label=\\"Heartbeat interval (minutes)\\"]").value'),'30')
+ await capture('04-heartbeat-settings-narrow-light')
+ await click('js:document.querySelector("[aria-label=\\"Close quick mode\\"]")')
+ await click('js:[...'+header+'.querySelectorAll("[role=tab]")].find(n=>n.textContent==="Discussion")')
+ await until('!!'+visibleConversation)
+ await read('window.moteDialogueCapture.switchMain()');await read(visibleConversation+'.scrollIntoView({block:"start"})');await settle()
+ await click('js:'+visibleButton('刷新'))
+ await until(visibleConversation+'.textContent.includes("回到 Mote")')
+ await click('js:'+visibleButton('回到 Mote'))
+ await until(visibleConversation+'.querySelector(".mote-conversation__navigation").textContent.includes("主对话") && !!'+visibleConversation+'.querySelector("[data-mote-earlier-source]")')
+ await capture('05-handover-continuous-main-narrow-light')
+ await read('window.moteDialogueCapture.unknown()');await click('js:'+visibleButton('刷新'))
+ await until(visibleConversation+'.textContent.includes("原事件来源暂未确认")')
+ assert.ok(await read('!!'+visibleConversation+'.querySelector("[data-mote-work-event]")'))
+ await capture('06-unconfirmed-event-source-keeps-main')
+ // A fresh document has never accepted this Native reader's first window.
+ // The independent original Mote/dispatch owner stays healthy in the same App.
+ await win.loadFile(html,{query:{phase:'seed',retained:'1',zoneSelection:'1',nativeReaderFailure:'1'}})
+ await until('window.moteDialogueCapture?.facts().initialNativeReadFailure && window.moteCooperationCapture?.ready','Fresh App with initial Native read failure')
+ await read('window.__connectionsTrustedEvents=window.moteCooperationCapture.facts().trustedEvents')
+ await read('window.moteCooperationCapture.theme(true)');await until(`!!${visibleConversation}`,'Mote conversation is independent of the failed initial reader')
+ await until(`window.moteCooperationCapture.facts().reads.some(r=>r.operation==='conversation-initial-failure')`,'Original Native read actually failed before accepting a window')
+ await until(`${visibleConversation}.textContent.includes('主对话记录的切点尚未读到')`,'Unlocated work keeps its original source without a fabricated Native anchor')
+ const failureOriginal=await read('window.moteDialogueCapture.workface()')
+ await read(`window.__moteFailureOriginal={feed:${visibleConversation}.closest('.activity-feed'),composer:${floating}.querySelector('[aria-label="Message Agent"]')}`)
+ assert.ok(await read(`!!window.__moteFailureOriginal.composer && (window.__moteFailureOriginal.composer.isContentEditable || window.__moteFailureOriginal.composer.tagName==='TEXTAREA' && !window.__moteFailureOriginal.composer.disabled)`),'Healthy original input stays mounted and editable')
+ assert.ok(await read(`!!${floating}.querySelector('.activity-feed__reading-failure-surface')`),'The original Native failure and retry surface remain available')
+ assert.ok(await read(`${floating}.querySelector('.activity-feed__reading-service').checkVisibility()`),'The original Native failure remains a visible non-blocking service notice')
+ await read(visibleButton('事件历史 · 2')+'.scrollIntoView({block:"center"})');await settle();await click('js:'+visibleButton('事件历史 · 2'))
+ const failureCard=visibleConversation+'.querySelector(\'.mote-conversation__history [data-mote-work-event="original-product-work"] .mote-work-event__summary\')'
+ await read(failureCard+'.scrollIntoView({block:"center"})');await settle();await click('js:'+failureCard)
+ await until(visibleConversation+'.querySelector(".mote-conversation__history").textContent.includes("主对话与事件历史已接上原来源")','Actual original dispatch remains readable after initial Native failure')
+ assert.ok(await read('window.moteDialogueCapture.facts().dispatchReads.some(r=>r.target.hostId==="local" && r.target.agentSessionId==="mote-primary" && r.messageId==="original-work-message")'),'The same original dispatch owner was read')
+ assert.ok(await read(`window.__moteFailureOriginal.feed===${visibleConversation}.closest('.activity-feed') && window.__moteFailureOriginal.composer===${floating}.querySelector('[aria-label="Message Agent"]')`),'Original feed and input survive independent event-history navigation')
+ assert.deepEqual(await read('window.moteDialogueCapture.workface()'),failureOriginal,'Read failure and work-history navigation preserve original layout, identities, input and Runs')
+ await capture('07-initial-native-read-failure-keeps-work')
+ result.nativeReaderFailure={passed:true,dialogue:await read('window.moteDialogueCapture.facts()'),sameOriginalFeed:true,sameOriginalComposer:true,originalWorkface:failureOriginal}
+ result.final=await facts();assert.deepEqual(result.final.writes,[]);result.passed=true
+ }catch(error){result.error={message:error.message,stack:error.stack};if(win&&!win.isDestroyed()){result.failureState=await win.webContents.executeJavaScript('({body:document.body.innerText,setup:window.closedTabSetup,dialogue:window.moteDialogueCapture?.facts(),facts:window.moteCooperationCapture?.facts()})').catch(e=>({error:e.message}));await fs.writeFile(path.join(evidence,'failed.png'),(await win.webContents.capturePage()).toPNG())}}
+ finally{if(win&&!win.isDestroyed())try{await win.webContents.executeJavaScript('window.closedTabProof?.dispose()')}catch(e){result.cleanupError=e.message;result.passed=false}await fs.writeFile(path.join(evidence,'renderer-result.json'),JSON.stringify(result,null,2)+'\n');win?.destroy();app.exit(result.passed?0:1)}
+})

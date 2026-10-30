@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  await win.loadFile(html, mode === 'mote-notice-join' ? { query: { 'mote-notice-join': '1' } } : undefined)
+  await win.loadFile(html, ['mote-notice-join', 'mote-dialogue'].includes(mode) ? { query: { [mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -75,6 +75,10 @@ app.whenReady().then(async () => {
   }
   if (mode === 'creation-recovery') {
     await require('./creation-recovery.cjs')({ read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'mote-dialogue') {
+    await require('./mote-dialogue.cjs')({ win, read, until, resize, tap, button, capture, result, openMote })
     result.passed = true; return
   }
   if (mode === 'mote-notice-join') {

@@ -11,6 +11,7 @@ import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 import { MobileApp } from '../../../src/MobileApp'
+import { createMoteDialogueCapture } from './mote-dialogue-fixture'
 import { MobileWebUpdateSafetyProvider } from '../../../src/mobile-web/update-safety'
 import type { MobileWebPageObservation } from '../../../src/mobile-web/use-mobile-web-observation'
 import { createBrowserPlatform } from '../../../src/platform/browser'
@@ -24,6 +25,7 @@ const record = (method: string, params: unknown = {}) => calls.push({ sequence: 
 const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'fixture-original',
   hostId: 'host-original', workspacePath: fixturePath("execution-original"), run: { runId: `run-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1 })
 const main = original('session-mote'), waiting = original('session-waiting'), result = original('session-result')
+const moteDialogueCapture = new URLSearchParams(location.search).get('mote-dialogue') === '1' ? createMoteDialogueCapture() : null
 const ordinaryReply = '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。'
 waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: waiting.agentSessionId,
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },
@@ -123,7 +125,7 @@ const client = {
     return { kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }
   },
   sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: densityScene ? main.providerId : 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
-    items: [...(agentMenuScene && id === main.agentSessionId ? [
+    items: [...(moteDialogueCapture ? [{ id: `${id}-user-original`, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: id === main.agentSessionId ? '先比较两个方向，今天从哪一步开始？' : '沿着原目标，继续之前的讨论。' }] }, { id: `${id}-answer-original`, kind: 'assistant-message' as const, contentParts: [{ kind: 'text' as const, text: id === main.agentSessionId ? '先保留两份依据。我请资料整理核对样本，再一起决定第一步。' : '我接着原目标继续：方案 A 可以先做小实验，原依据与未完成的问题都保留。' }] }] : [...(agentMenuScene && id === main.agentSessionId ? [
       { id: `${id}-user-short`, kind: 'user-message' as const, startedAt: _tailRefreshFixtureEpoch(0, 1), contentParts: [{ kind: 'text' as const, text: '可以，继续。' }] }
     ] : []), { id: `${id}-user-original`, kind: 'user-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 2) } : {}), contentParts: [{ kind: 'text', text: agentMenuScene
       ? '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。手机里的消息头应该紧凑对齐，长内容完整可读，复制和详情都能直接操作。'
@@ -135,7 +137,7 @@ const client = {
           source: { providerId: main.providerId, nativeSessionId: 'native-' + id + '-original-source-reference'.repeat(6) }, sender: '/root/review/layout', recipient: '/root' },
           contentParts: [{ kind: 'text' as const, text: 'Native envelope\n\n**检查完成**，原生回报与完整来源保留。', readingRange: { start: 17, end: 'Native envelope\n\n**检查完成**，原生回报与完整来源保留。'.length }, contentEligibility: 'public' as const }] }
       ] : []),
-      ...(submittedBySession.get(id) ?? []).map(item => ({ id: item.id, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: item.text }] }))] } },
+      ...(submittedBySession.get(id) ?? []).map(item => ({ id: item.id, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: item.text }] }))])] } },
   readAgentInputMailbox: async (input: { agentSessionId: string; maxBytes?: number }) => ({
     agentSessionId: input.agentSessionId, queueId: 'controlled-original-journal',
     cut: { incarnation: 'controlled-original-journal', throughSequence: 0 }, budgetBytes: input.maxBytes ?? 128 * 1024,
@@ -229,6 +231,7 @@ const client = {
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     record(method, params)
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
+    if (moteDialogueCapture) { const reply = moteDialogueCapture.rpc(method, params); if (reply !== undefined) return reply }
     if (method === 'file.upload' && holdFileUpload) return await new Promise(resolve => {
       releaseFileUpload = () => { const { dataBase64: _data, ...identity } = params; resolve({ ...identity, status: 'uploaded', path: '/opaque/原资料截图.png' }) }
     })
@@ -330,6 +333,8 @@ function Scene() {
   const [unconfirmedClient, setUnconfirmedClient] = useState(false)
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   Object.assign(window, { mobileProductScene: {
+    replaceMoteMain: () => { waiting.pendingInteraction = undefined; moteDialogueCapture!.replaceMain() },
+    unconfirmMoteDialogue: () => moteDialogueCapture!.unconfirm(),
     prepareWebUpdate: () => setWebUpdateScene(true),
     prepareCreationUpdate: () => { creationUpdateScene = true; setWebUpdateScene(true) },
     failCreationUpdatePreflight: () => {
@@ -459,7 +464,7 @@ function Scene() {
     holdFileUpload: () => { holdFileUpload = true },
     releaseFileUpload: () => { releaseFileUpload?.() },
     appearanceReady: () => Boolean(appearanceSubscriber),
-    facts: () => ({ calls, record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
+    facts: () => ({ calls, dialogue: moteDialogueCapture?.facts(), record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
       menuAgentName, expectedReply: ordinaryReply, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
