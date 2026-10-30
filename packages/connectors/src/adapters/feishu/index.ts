@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { Readable } from 'node:stream'
 import { Client, WSClient, EventDispatcher, AppType, LoggerLevel, defaultHttpInstance, DefaultCache, type HttpInstance, type HttpRequestOptions, type Logger } from '@larksuiteoapi/node-sdk'
 import { CONNECTION_API_LIMITS, parseConnectionConfig, type ConnectionConfig, type ConnectionObservation } from '@agentmux/core/connections'
+import { observeRead, AgentMuxError } from '@agentmux/core'
 import type { ConnectionAdapter } from '../../connection-host.js'
 import type { ConnectionIngressTransport, ConnectionIngressReceiver, ConnectionReceiverEnd } from '../../connection-receivers.js'
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
@@ -25,6 +26,7 @@ type NativeApiHttpOptions<D> = HttpRequestOptions<D> & { signal?: AbortSignal; m
   transformResponse?: (data: unknown, headers: Record<string, unknown>, status?: number) => FeishuApiHttpResponse }
 type ReceiverState = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botOpenId: string; ws: WSClient | null; observed: boolean }
 type Witness = { receiver: ReceiverState; raw: string }
+type RequestScope = { signal?: AbortSignal; endRead?(reason: Error): void }
 const owners = new Map<string, ReceiverState>()
 const applicationKey = (config: Pick<ConnectionConfig, 'application'>) => JSON.stringify([config.application.domain, config.application.appId])
 const sameConfig = (left: ConnectionConfig, right: ConnectionConfig) => JSON.stringify(parseConnectionConfig(left)) === JSON.stringify(parseConnectionConfig(right))
@@ -34,6 +36,8 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 // Adapter-local native observation policy, aligned with the SDK's 15s endpoint-discovery budget.
 // Neither value is a platform pong SLA, an Agent timeout or a business-input deadline.
 const RECEIVER_HANDSHAKE_MS = 15_000
+// One accurate weak HTTP read; never a whole quote, SDK lifetime or write budget.
+const READ_OBSERVATION_MS = 15_000
 const RECEIVER_PONG_SECONDS = 15
 const questionAnswerRefusals: Readonly<Record<string, string>> = {
   INGRESS_QUESTION_ANSWER_INVALID: 'Answer not sent. Choose one option or enter text for every question, then submit.',
@@ -56,13 +60,13 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly enrollment = createFeishuEnrollment()
   readonly publication = new FeishuPublicationAdapter(this)
   readonly ingress = this
-  readonly readHistory = createFeishuHistory(this)
+  readonly readHistory = createFeishuHistory({ withClient: <T>(config: FeishuClientScope, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal) => this.withReadClient(config, credential, call, signal) })
   readonly transport: ConnectionIngressTransport = { start: input => this.startReceiver(input) }
   readonly rooms = createFeishuRooms((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly roomDiscovery = createFeishuRoomDiscovery((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   private readonly witnesses = new WeakSet<object>()
   private readonly callback = new AsyncLocalStorage<Witness>()
-  private readonly requests = new AsyncLocalStorage<AbortSignal | undefined>()
+  private readonly requests = new AsyncLocalStorage<RequestScope>()
   private readonly apiRequests = new AsyncLocalStorage<FeishuApiScope>()
   private readonly clients = new Map<string, { application: string; credential: string; client: Client }>()
   private closed = false
@@ -84,9 +88,12 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     const transport: HttpInstance = this.options.http ?? defaultHttpInstance as unknown as HttpInstance
     const http = Object.create(transport) as HttpInstance
     http.request = async <T, R = T, D = unknown>(input: HttpRequestOptions<D> & { signal?: AbortSignal }): Promise<R> => {
+      const scope = this.requests.getStore()
+      const signals = [receiverSignal, scope?.signal, input.signal].filter((signal): signal is AbortSignal => signal !== undefined)
+      const signal = signals.length ? AbortSignal.any(signals) : undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
       try {
-        const signal = receiverSignal ?? this.requests.getStore()
-        if (signal?.aborted || input.signal?.aborted) feishuFailure('FEISHU_SDK_REQUEST_CANCELLED')
+        if (signal?.aborted) feishuFailure('FEISHU_SDK_REQUEST_CANCELLED')
         const api = this.apiRequests.getStore()
         let request: NativeApiHttpOptions<D> = { ...input, ...(signal ? { signal } : {}) }
         if (api) {
@@ -112,7 +119,13 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
           }
         }
         if (input.url?.endsWith('/callback/ws/endpoint')) endpoint?.(undefined)
-        const result = await transport.request<T, R, D>(request)
+        if (scope?.endRead) {
+          timer = setTimeout(() => scope.endRead!(new AgentMuxError('This accurate Feishu read exceeded its local observation window.', 'FEISHU_READ_OBSERVATION_EXPIRED')), READ_OBSERVATION_MS)
+          timer.unref?.()
+        }
+        const operation = transport.request<T, R, D>(request)
+        const result = scope?.endRead ? await observeRead(operation, signal) : await operation
+        if (scope?.endRead) signal?.throwIfAborted()
         if (input.url?.endsWith('/callback/ws/endpoint')) {
           endpoint?.(result)
           const response = result as { code?: unknown; data?: { URL?: unknown } }
@@ -123,7 +136,10 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
           }
         }
         return result
-      } catch { return feishuFailure('FEISHU_SDK_REQUEST_FAILED') }
+      } catch {
+        if (scope?.endRead && scope.signal?.aborted) throw scope.signal.reason
+        return feishuFailure('FEISHU_SDK_REQUEST_FAILED')
+      } finally { if (timer) clearTimeout(timer) }
     }
     // The SDK token manager uses post directly rather than request. Keep that exchange in the same caller lifetime.
     http.post = <T, R = T, D = unknown>(url: string, data?: D, options?: HttpRequestOptions<D>): Promise<R> => http.request<T, R, D>({ ...options, method: 'POST', url, ...(data === undefined ? {} : { data }) })
@@ -143,8 +159,14 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   }
   /** Outbound leaves reuse the official authenticated Client; raw SDK errors never escape this call. */
   async withClient<T>(config: FeishuClientScope, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal): Promise<T> {
-    try { return await this.requests.run(signal, () => call(this.client(config, credential))) }
+    try { return await this.requests.run(signal ? { signal } : {}, () => call(this.client(config, credential))) }
     catch { return feishuFailure('FEISHU_SDK_REQUEST_FAILED') }
+  }
+  /** Only declared weak reads borrow this scope. Each actual HTTP exchange gets its own window. */
+  private async withReadClient<T>(config: FeishuClientScope, credential: string, call: (client: Client) => Promise<T>, outerSignal?: AbortSignal): Promise<T> {
+    const controller = new AbortController(), signal = outerSignal ? AbortSignal.any([outerSignal, controller.signal]) : controller.signal
+    signal.throwIfAborted()
+    return await this.requests.run({ signal, endRead: reason => controller.abort(reason) }, () => observeRead(call(this.client(config, credential)), signal))
   }
   private async bot(client: Client): Promise<string> {
     try {

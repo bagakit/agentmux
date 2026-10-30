@@ -1,6 +1,7 @@
 import { ApplicationFlags, type APIMessage } from 'discord-api-types/v10'
 import type { ChannelQuoteRecord, ChannelTranscriptQuote, ConnectionConfig } from '@agentmux/core/connections'
 import type { DiscordClients } from './client.js'
+import { observeRead, AgentMuxError } from '@agentmux/core'
 import { discordConfig, discordId } from './protocol.js'
 
 type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void }
@@ -25,12 +26,23 @@ export function createDiscordHistory(clients: DiscordClients) {
       if (input.knownThreadIds?.some(id => id !== channelId)) gap('thread-scope-unconfirmed')
       if (BigInt(lowerId) > BigInt(throughId)) { gap('range-order-unconfirmed'); return finish() }
       const rest = clients.rest(config, credential)
-      input.assertCurrent?.(); signal.throwIfAborted()
-      const application = await rest.get('/oauth2/applications/@me', { signal }) as { id?: string; flags?: number; bot?: { id?: string } }
+      const read: typeof rest.get = async (path, options) => {
+        const window = AbortSignal.timeout(15_000), current = AbortSignal.any([signal, window])
+        input.assertCurrent?.(); current.throwIfAborted()
+        try {
+          const value = await observeRead(rest.get(path, { ...options, signal: current }), current)
+          input.assertCurrent?.(); current.throwIfAborted()
+          return value
+        } catch (error) {
+          if (window.aborted && !signal.aborted) throw new AgentMuxError('This accurate Discord history read exceeded its local observation window.', 'DISCORD_HISTORY_READ_EXPIRED')
+          throw error
+        }
+      }
+      const application = await read('/oauth2/applications/@me') as { id?: string; flags?: number; bot?: { id?: string } }
       if (application.id !== config.application.appId || !application.bot?.id) { gap('native-application-mismatch'); return finish() }
       const get = async (id: string) => {
         input.assertCurrent?.(); signal.throwIfAborted()
-        const row = await rest.get(`/channels/${channelId}/messages/${id}`, { signal }) as APIMessage
+        const row = await read(`/channels/${channelId}/messages/${id}`) as APIMessage
         if (row.id !== id || row.channel_id !== channelId) throw Error('Native anchor mismatch')
         return row
       }
@@ -59,7 +71,7 @@ export function createDiscordHistory(clients: DiscordClients) {
       const ids = new Set<string>()
       while (!reached) {
         input.assertCurrent?.(); signal.throwIfAborted()
-        const response = await rest.get(`/channels/${channelId}/messages`, { query: new URLSearchParams({ before, limit: '100' }), signal })
+        const response = await read(`/channels/${channelId}/messages`, { query: new URLSearchParams({ before, limit: '100' }) })
         if (!Array.isArray(response)) { gap('native-history-unconfirmed'); break }
         if (response.length === 0) { gap('from-anchor-missing'); break }
         let next: string | undefined
@@ -78,7 +90,7 @@ export function createDiscordHistory(clients: DiscordClients) {
       }
       // An exact current request read is separate from this quote and never repeated here.
       if (through.id !== throughId) gap('through-anchor-missing')
-    } catch { gap(signal.aborted ? 'history-cancelled' : 'native-history-unavailable') }
+    } catch (error) { gap(error instanceof AgentMuxError && error.code === 'DISCORD_HISTORY_READ_EXPIRED' ? 'native-history-observation-expired' : signal.aborted ? 'history-cancelled' : 'native-history-unavailable') }
     return finish()
   }
 }
