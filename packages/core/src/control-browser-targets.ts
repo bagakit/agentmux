@@ -1,6 +1,7 @@
 import type { AgentMuxBrowserControl, AgentMuxBrowserSource, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
+import { parseAmuxObjectLink } from './sharing.js'
 import type { AgentMuxBrowserCertificateRequest } from './browser-targets.js'
 
 function parseBrowserCertificateRequest(value: unknown): AgentMuxBrowserCertificateRequest {
@@ -88,9 +89,15 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   if (row.resource !== undefined && row.source !== 'embedded') throw new AgentMuxError('External Browser resource management is unavailable.', 'CONTROL_PROTOCOL_ERROR')
   const certificateRequest = row.certificateRequest === undefined ? undefined : row.certificateRequest === null ? null : parseBrowserCertificateRequest(row.certificateRequest)
   if (certificateRequest && (row.source !== 'embedded' || certificateRequest.navigationId !== row.navigationId)) throw new AgentMuxError('Browser certificate request belongs to another document.', 'CONTROL_PROTOCOL_ERROR')
+  const objectLink = row.objectLink === undefined ? undefined : text(row.objectLink, 8192)
+  if (objectLink !== undefined) {
+    try { parseAmuxObjectLink(objectLink) }
+    catch { throw new AgentMuxError('Browser object link is invalid.', 'CONTROL_PROTOCOL_ERROR') }
+  }
   return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
     ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
+    ...(objectLink === undefined ? {} : { objectLink }),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
     ...(row.openedFrom === undefined ? {} : { openedFrom: parseBrowserSource(row.openedFrom) }),
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),

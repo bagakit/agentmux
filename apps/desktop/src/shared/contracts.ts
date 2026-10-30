@@ -1242,6 +1242,8 @@ export type BrowserSnapshot = {
   navigationId: string
   profileId: string | null
   url: string
+  /** Stable resource reference from the original owner; never a document URL or input authority. */
+  objectLink?: string
   title: string
   loading: boolean
   canGoBack: boolean

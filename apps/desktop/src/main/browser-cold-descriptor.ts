@@ -3,6 +3,7 @@ import { parseBrowserSource } from '@agentmux/core'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { cloneBrowserViewport, isBrowserViewport, type BrowserViewport } from '../shared/browser-viewport.js'
+import { browserObjectLink } from '../shared/browser-object-link.js'
 
 /** Host resource metadata stays in Core; only Main interprets it as a page to acquire. */
 export type BrowserColdDescriptor = {
@@ -89,9 +90,10 @@ export function coldBrowserTargets(graph: AgentMuxSpatialGraph | null, live: rea
     known.add(id)
     try {
       const saved = browserColdDescriptor(graph, id)
+      const objectLink = browserObjectLink(saved)
       return [{ id, workspaceId: saved.workspaceId, source: 'embedded' as const, mode: saved.mode,
         ...(saved.source ? { openedFrom: saved.source } : {}),
-        status: 'unavailable' as const, url: saved.url, title: saved.title, capabilities: [],
+        status: 'unavailable' as const, url: saved.url, ...(objectLink ? { objectLink } : {}), title: saved.title, capabilities: [],
         control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unconfirmed',
           ...(saved.agent === undefined ? {} : { agent: saved.agent }) },
         warning: [saved.warning, 'The saved page has no confirmed native owner. Display it or run a Browser operation to restore this same identity.'].filter(Boolean).join(' ') }]

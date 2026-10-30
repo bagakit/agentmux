@@ -43,6 +43,8 @@ export type AgentMuxBrowserTarget = {
   mode?: AgentMuxBrowserMode
   status: 'ready' | 'disconnected' | 'revoked' | 'closed' | 'unavailable'
   url: string
+  /** Stable original resource reference when known; url remains the actual document address. */
+  objectLink?: string
   title: string
   /** Absent when an embedded durable description has no native document yet. */
   navigationId?: string

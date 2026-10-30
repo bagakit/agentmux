@@ -46,6 +46,7 @@ import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, Browser
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '../shared/browser-viewport.js'
 import { resolveBrowserAddress } from '../shared/browser-address.js'
+import { browserObjectLink } from '../shared/browser-object-link.js'
 import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { BrowserControlFeedback } from './browser-control-feedback.js'
@@ -446,15 +447,22 @@ export class BrowserViewManager {
     return this.entries.get(id) === entry && entry.view === view ? context : null
   }
 
+  private objectLink(entry: Pick<BrowserEntry, 'storage'>, url: string): string | undefined {
+    return 'capsule' in entry.storage ? browserObjectLink({ url,
+      capsuleId: entry.storage.capsule.record.capsuleId, capsuleOrigin: entry.storage.capsuleOrigin }) : undefined
+  }
+
   private projectTarget(entry: BrowserEntry): AgentMuxBrowserTarget {
     const contents = entry.view.webContents
     const available = !contents.isDestroyed()
     const workspaceId = entry.workspaceId
+    const url = available ? contents.getURL() : ''
+    const objectLink = this.objectLink(entry, url)
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
       ...(entry.source ? { openedFrom: entry.source } : {}),
       control: this.controlState(entry),
       certificateRequest: entry.certificateDecision?.request ?? null,
-      url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
+      url, ...(objectLink ? { objectLink } : {}), title: available ? contents.getTitle().slice(0, 512) : '',
       navigationId: entry.navigationId,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
         !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
@@ -492,18 +500,22 @@ export class BrowserViewManager {
     const released = [...this.releasedEntries.values(), ...[...this.closingViews.keys()].filter(id => !this.entries.has(id) && !this.releasedEntries.has(id))
       .map<ReleasedBrowser>(id => ({ ...this.closingOwners(id)[0]!, cleanupOnly: true }))]
       .map(entry => ({ ...entry, inputShield: entry.inputShield ?? [...(this.inputSurfaceCleanup.get(entry.id) ?? [])][0]?.shield }))
-      .map<AgentMuxBrowserTarget>(entry => ({
-      id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
-      ...(entry.source ? { openedFrom: entry.source } : {}),
-      status: 'unavailable', url: entry.cleanupOnly ? '' : entry.requestedUrl, title: '', capabilities: [],
-      ...(this.closingViews.has(entry.id) ? { warning: NATIVE_CLOSE_WARNING } : entry.inputShield ? { warning: entry.cleanupOnly
-        ? 'This Browser was closed explicitly. Its original native input surface cleanup is unconfirmed; use Close to retry cleanup. Open a new Browser for a fresh page.'
-        : 'The page was released, but its native input surface cleanup is unconfirmed. Reopen or close this original Browser to retry its retained cleanup.' } : {}),
-      resource: { state: entry.inputShield || this.closingViews.has(entry.id) ? 'unknown' : 'released', locations: [],
-        processes: identities([...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
-          ...this.closingOwners(entry.id).filter(owner => !owner.view.webContents.isDestroyed()).map(owner => owner.view.webContents)]),
-        ...(entry.inputShield || this.closingViews.has(entry.id) ? { retention: { status: 'unknown', reasons: ['close-unconfirmed'] } } : {}) }
-    }))
+      .map<AgentMuxBrowserTarget>(entry => {
+        const url = entry.cleanupOnly ? '' : entry.requestedUrl
+        const objectLink = this.objectLink(entry, url)
+        return {
+          id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
+          ...(entry.source ? { openedFrom: entry.source } : {}),
+          status: 'unavailable', url, ...(objectLink ? { objectLink } : {}), title: '', capabilities: [],
+          ...(this.closingViews.has(entry.id) ? { warning: NATIVE_CLOSE_WARNING } : entry.inputShield ? { warning: entry.cleanupOnly
+            ? 'This Browser was closed explicitly. Its original native input surface cleanup is unconfirmed; use Close to retry cleanup. Open a new Browser for a fresh page.'
+            : 'The page was released, but its native input surface cleanup is unconfirmed. Reopen or close this original Browser to retry its retained cleanup.' } : {}),
+          resource: { state: entry.inputShield || this.closingViews.has(entry.id) ? 'unknown' : 'released', locations: [],
+            processes: identities([...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
+              ...this.closingOwners(entry.id).filter(owner => !owner.view.webContents.isDestroyed()).map(owner => owner.view.webContents)]),
+            ...(entry.inputShield || this.closingViews.has(entry.id) ? { retention: { status: 'unknown', reasons: ['close-unconfirmed'] } } : {}) }
+        }
+      })
     return [...live, ...released]
   }
   private readonly entries = new Map<string, BrowserEntry>()
@@ -4481,6 +4493,8 @@ export class BrowserViewManager {
 
   private snapshot(entry: BrowserEntry): BrowserSnapshot {
     const contents = entry.view.webContents
+    const url = contents.getURL() || entry.requestedUrl
+    const objectLink = this.objectLink(entry, url)
     const persistenceWarning = this.operationJournal?.getPersistenceWarning()
     const currentWarnings = [entry.agentWarning, entry.activity.warning ?? persistenceWarning].filter(Boolean).join(' ')
     const warning = this.closingWarning(entry.id, currentWarnings || undefined)
@@ -4494,7 +4508,8 @@ export class BrowserViewManager {
       ...('capsule' in entry.storage ? { capsuleId: entry.storage.capsule.record.capsuleId,
         capsuleOrigin: entry.storage.capsuleOrigin, capsuleOpenOperationIds: [...entry.storage.capsuleOpenOperationIds],
         capsuleActive: this.isCapsuleDocument(entry, contents.mainFrame) } : {}),
-      url: contents.getURL() || entry.requestedUrl,
+      url,
+      ...(objectLink ? { objectLink } : {}),
       title: contents.getTitle(),
       loading: contents.isLoading(),
       canGoBack: contents.navigationHistory.canGoBack(),
