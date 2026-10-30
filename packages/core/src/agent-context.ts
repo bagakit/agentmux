@@ -126,7 +126,7 @@ export async function readAgentContext(owner: AgentContextOwner, input: AgentCon
   if (!current) return invalidCursor()
   if (input.cursor && cursor.binding !== binding(current)) invalidCursor()
   cursor.binding = binding(current)
-  const hasMore = timeline !== null && !cursor.capturedDone || native !== null && !cursor.nativeDone
+  const hasMore = !cursor.capturedDone || !cursor.nativeDone
   return { hostId: input.hostId, sourceHostId: current.hostId, agentSessionId: input.agentSessionId, descriptor: current,
     session: sessions?.find(session => session.agentSessionId === input.agentSessionId && session.hostId === input.hostId) ?? null,
     status, runtimeDiagnostics, captured, native, unavailable,
