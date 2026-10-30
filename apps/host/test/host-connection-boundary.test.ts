@@ -2,7 +2,7 @@ import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as core from '@agentmux/core'
-import type { ConnectionIngressReadPort } from '@agentmux/core/connections'
+import type { ConnectionIngressPort } from '@agentmux/core/connections'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { createRpcExternalInputAuthority } from '../../../packages/connectors/test/helpers/rpc-external-input-authority.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
@@ -22,7 +22,7 @@ async function fixture(explicitAuthority = false) {
     connection: { connectionId: 'client-bot', adapterId: 'fixture', application: { domain: 'chat.example', appId: 'client-app' }, label: 'Original client bot', enabled: false, credentialRef: credential.credentialRef } })
   const configure = vi.spyOn(services.connections, 'configure')
   const list = vi.spyOn(services.connections, 'list')
-  const recordAuthority = vi.fn<ConnectionIngressReadPort['recordAuthority']>(async input => ({ authority: 'current', message: { ...input, hostId: 'local', body: 'Original observed group record', author: {
+  const recordAuthority = vi.fn<ConnectionIngressPort['recordAuthority']>(async input => ({ authority: 'current', message: { ...input, hostId: 'local', body: 'Original observed group record', author: {
     kind: 'external', connectionId: 'client-bot', actor: { application: { domain: 'chat.example', appId: 'client-app' }, idType: 'email', userId: 'member@example.test' }, externalConversationId: 'client-room', externalMessageId: 'client-message', bindingId: 'client-binding', bindingRevision: 1
   } } }))
   const unavailable = async (): Promise<never> => { throw new core.AgentMuxError('This sentinel only exposes its original record lookup.', 'CONTROL_UNAVAILABLE') }
