@@ -10,6 +10,8 @@ const mutations: Record<string, { path: string; before: string; after: string }>
   'drop-discord-user-card': { path: 'packages/connectors/src/adapters/discord/render.ts', before: "human = !!authors?.length && authors.every(kind => kind === 'human')", after: 'human = false' },
   'drop-feishu-input-status': { path: 'packages/connectors/src/adapters/feishu/publication.ts', before: 'const input = human ? operation.payload.inputSubmission : undefined', after: 'const input = undefined' },
   'drop-discord-input-status': { path: 'packages/connectors/src/adapters/discord/render.ts', before: "const input = human && p.kind === 'speech' ? p.inputSubmission : undefined", after: 'const input = undefined' },
+  'drop-feishu-launch-carried': { path: 'packages/connectors/src/adapters/feishu/publication.ts', before: "'launch-carried': 'Included in Agent resume · acceptance not confirmed', ", after: '' },
+  'drop-discord-launch-carried': { path: 'packages/connectors/src/adapters/discord/render.ts', before: "'launch-carried': 'Included in Agent resume · acceptance not confirmed', ", after: '' },
   'drop-desktop-human': { path: 'apps/desktop/src/main/ipc.ts', before: 'return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture)', after: 'return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, false, agentMuxNote, sourceChannel, inputContextCapture)' },
   'drop-mobile-human': { path: 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', before: 'prompt: expandSemanticReferences(original.draft), authorHuman: true,', after: 'prompt: expandSemanticReferences(original.draft), authorHuman: false,' }
 }

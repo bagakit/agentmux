@@ -4,6 +4,7 @@ import type { PublicationOperation } from '../src/publication-store.js'
 import { FeishuAdapter } from '../src/adapters/feishu/index.js'
 import { prepareDiscordPublication } from '../src/adapters/discord/render.js'
 import { feishuConfig } from './fixtures/feishu.js'
+import { feishuCardElements } from './fixtures/feishu-publication.js'
 
 const reference = { hostId: 'local', agentSessionId: 'original-agent', source: { kind: 'captured' as const, recordId: 'original-record' } }
 const external: AgentSessionUserMessageAuthor = { kind: 'external', connectionId: 'original-connection',
@@ -70,4 +71,13 @@ it.each([
   const d2 = JSON.parse(prepareDiscordPublication(original).request.body!)
   expect(f2.elements[1].text.content).toBe(label + '\nReconnect this input in AgentMux')
   expect(d2.components[0].components[1].content).toBe(label + '\nReconnect this input in AgentMux')
+})
+
+it('both native cards preserve launch-carried without claiming Agent acceptance', () => {
+  const original = operation([{ kind: 'human' }]), label = 'Included in Agent resume · acceptance not confirmed'
+  original.payload.inputSubmission = { status: 'launch-carried', observation: 'closed' }
+  const feishu = JSON.parse(JSON.parse(new FeishuAdapter().publication.prepare(original).request.body!).content)
+  expect(feishuCardElements(feishu).at(-1)).toMatchObject({ text: { content: label } })
+  const discord = JSON.parse(prepareDiscordPublication(original).request.body!)
+  expect(discord.components[0].components.at(-1)).toEqual({ type: 10, content: label })
 })
