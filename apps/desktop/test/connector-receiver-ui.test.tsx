@@ -3,6 +3,7 @@ import {act} from 'react'
 import {afterEach,expect,it,vi} from 'vitest'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
+import {appendFileSync} from 'node:fs'
 vi.mock('electron',()=>({app:{getPath:()=>tmpdir()}}))
 import * as core from '../../../packages/core/src/index.js'
 import {ingressFixture} from '../../../packages/connectors/test/fixtures/ingress.js'
@@ -40,15 +41,17 @@ async function fixture(rejected=false){
  const controller=new RuntimeController(f.store,async()=>hosted);cleanup.push(()=>controller.dispose());controller.commit(await controller.prepare(composerConfig))
  const target={hostId:'local',runtimeId:identity.runtimeId},handlers=new Map<string,(...args:any[])=>Promise<unknown>>(),trusted=vi.fn()
  registerConnectorIpc({handleWithEvent:(method,handler)=>handlers.set(method,handler),assertTrusted:trusted,runtime:controller,metadata:{publish(){},observation(){}}})
- const calls:Array<{method:string;params:any;target:any}>=[];let drop=false
- const source=vi.spyOn(api.connections,'call').mockImplementation(async(method,params,owner)=>{calls.push({method,params:structuredClone(params),target:structuredClone(owner)});const reply=await handlers.get('connections:call')!({},method,params,owner);if(method==='connection.receiver.recover'&&drop){drop=false;throw Error('Lost actual Host reply')}return unwrapSessionInputOperationResult(structuredClone(reply)) as any})
+ const calls:Array<{method:string;params:any;target:any}>=[];let drop=false,hold:Promise<void>|undefined,release=()=>{}
+ const source=vi.spyOn(api.connections,'call').mockImplementation(async(method,params,owner)=>{calls.push({method,params:structuredClone(params),target:structuredClone(owner)});const reply=await handlers.get('connections:call')!({},method,params,owner);if(method==='connection.receiver.recover'&&drop){drop=false;throw Error('Lost actual Host reply')}if(method==='connection.receiver.recover')await hold;return unwrapSessionInputOperationResult(structuredClone(reply)) as any})
  await wait(async()=>expect((await services.connections.inspect({connectionId:feishuConfig.connectionId})).connection?.receiver?.state).toBe(rejected?'ended':'ready'))
  const binding=(await services.connections.bindings!.inspect({bindingId:f.input.bindingId})).binding!,record=() => services.connections.inspect({connectionId:feishuConfig.connectionId}).then(r=>r.connection!)
  useAppStore.setState({connectorRoomIntents:{},agentComposerDrafts:{'original-agent':'Keep original draft'}})
  // Controlled config persistence only: actual submitted correlation/AppStore remains original.
  vi.spyOn(api.config,'get').mockResolvedValue(composerConfig)
+ cleanup.push(()=>{if(process.env.RECEIVER_UI_FACTS)appendFileSync(process.env.RECEIVER_UI_FACTS,JSON.stringify({case:expect.getState().currentTestName,target,calls,physicalSockets:wire.sockets.length,starts:starts.mock.calls.length,stops:f.inner.kernel.stop.mock.calls.length,draft:useAppStore.getState().agentComposerDrafts['original-agent']})+'\n')})
  const mount=async()=>dom.render(<ConnectorDeliveryDetails binding={binding} connection={await record()} hostingTarget={target}/>)
- return{...f,wire,services,identity,controller,hosted,rpc,target,calls,trusted,source,binding,record,mount,drop:()=>{drop=true},unchanged(){expect(starts).not.toHaveBeenCalled();expect(f.inner.kernel.stop).not.toHaveBeenCalled();expect(f.inner.kernel.attach).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep original draft')}}
+ cleanup.push(()=>release())
+ return{...f,wire,services,identity,controller,hosted,rpc,target,calls,trusted,source,binding,record,mount,drop:()=>{drop=true},hold(){hold=new Promise<void>(resolve=>{release=resolve})},release:()=>{hold=undefined;release()},unchanged(){expect(starts).not.toHaveBeenCalled();expect(f.inner.kernel.stop).not.toHaveBeenCalled();expect(f.inner.kernel.attach).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep original draft')}}
 }
 it('current stopped receiver outranks earlier accepted input through the original shared summary',async()=>{
  const f=await fixture();f.wire.message('earlier-success');await wait(()=>expect(f.inner.kernel.input).toHaveBeenCalledOnce())
@@ -93,6 +96,39 @@ it('local correlation persistence failure keeps the original in-memory ID and do
 it('healthy transport and one refusal stay separate and retained source failure never certifies current readiness',async()=>{
  const f=await fixture();const report=await readGroupDiagnosis((method,params)=>api.connections.call(method,params,f.target),groupTarget(f.binding));const summary=connectorGroupSummary(report)
  expect(summary.incoming.receiver).toBe('Receiver connected');expect(summary.incoming.value).toBe('No events in this window')
+ // This typed single-message refusal is a presentation leaf, not a fake SDK effect.
+ const refusal=connectorGroupSummary({...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:[{ingressId:'refused-message',sourceConnectionId:f.binding.connectionId,kind:'message',state:'refused',code:'INGRESS_CONTENT_UNSUPPORTED',codeRecorded:true,bindingId:f.binding.bindingId,bindingRevision:f.binding.revision,targetConnectionId:f.binding.connectionId,scope:'current-binding',inputOperationId:null,recording:{state:'refused',code:'INGRESS_CONTENT_UNSUPPORTED'},coreStatus:null,coreObservation:'not-started',nativeAdoption:null,waiting:null}]}}})
+ expect(refusal.incoming.value).toBe('Message type not supported');expect(refusal.incoming.receiver).toBe('Receiver connected');expect(refusal.problems.some(p=>p.kind==='receiver-stopped')).toBe(false)
  const unknown=connectorGroupSummary({...report,connection:{...report.connection,issue:'read-unavailable',retained:true}})
  expect(unknown.incoming.value).toBe('Connection unconfirmed');expect(unknown.incoming.tone).toBe('muted');f.unchanged()
+})
+it('a ready receiver with an unconfirmed transport observation never claims automatic recovery or offers reconnect',async()=>{
+ const f=await fixture(),record=await f.record(),report=await readGroupDiagnosis((method,params)=>api.connections.call(method,params,f.target),groupTarget(f.binding))
+ // A diagnosis can observe the two original owners on either side of a state transition.
+ for(const state of ['unknown','unavailable'] as const){
+  const observed={...report.connection,value:{...report.connection.value!,transport:{state}}}
+  const summary=connectorGroupSummary({...report,connection:observed})
+  expect(summary.incoming.value).toBe('Connection unconfirmed');expect(summary.incoming.problem).toBe('receiver-unconfirmed')
+  expect(summary.incoming.detail).toContain('Receiver reports connected');expect(summary.incoming.detail).not.toContain('reconnecting automatically')
+  await dom.render(<ConnectorReceiverControl binding={f.binding} connection={record} observed={observed} hostingTarget={f.target} onRefresh={()=>{}}/>)
+  expect(dom.container.querySelector('[data-receiver-action="recover"]')).toBeNull()
+ }
+ expect(f.wire.sockets).toHaveLength(1);f.unchanged()
+})
+it('a healthy receiver preserves the current original Core wait and its existing input action',async()=>{
+ const f=await fixture()
+ const provider=(f.client as unknown as {providers:{get(id:string):{planPromptInput(text:string):unknown}}}).providers.get('claude')
+ vi.spyOn(provider,'planPromptInput').mockImplementation(()=>{throw new core.AgentMuxError('Controlled original native input wait','AGENT_NATIVE_INPUT_UNAVAILABLE')})
+ f.wire.message('current-wait');await f.mount()
+ await wait(()=>expect(dom.container.querySelector('[data-direction="incoming"] strong')?.textContent).toBe('Input recovery needed'))
+ expect(dom.container.textContent).toContain('Receiver connected');expect(dom.container.textContent).toContain('Review original input')
+ expect(dom.container.querySelector('[data-receiver-action="recover"]')).toBeNull();f.unchanged()
+})
+it('late original recovery replies never replace a different Bot and group view',async()=>{
+ const f=await fixture(true);await f.mount();await wait(()=>expect(dom.container.querySelector('[data-receiver-action="recover"]')).not.toBeNull())
+ f.wire.state.endpointCode=0;f.hold();await dom.click('[data-receiver-action="recover"]')
+ await wait(()=>expect(f.calls.some(c=>c.method==='connection.receiver.recover')).toBe(true))
+ await dom.render(<ConnectorDeliveryDetails binding={{...f.binding,bindingId:'another-group',externalConversationId:'another-room',connectionId:'another-connection'}} hostingTarget={f.target}/>)
+ f.release();await wait(()=>expect(dom.container.querySelector('[data-direction="incoming"] strong')?.textContent).toBe('Connection unconfirmed'))
+ expect(dom.container.textContent).not.toContain('Reconnect requested');f.unchanged()
 })
