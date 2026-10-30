@@ -201,9 +201,10 @@ stop healthy Agents or replace their Sessions.
 
 `RoomProvisioningHost` borrows `ConnectionHost.database`, its configured adapter
 registry and the original Core spatial read port. Attach its `create` and `inspect`
-methods to `connections.rooms`, preserving that original port's discovery methods;
-Desktop composes this port alongside its original binding owner. The public SDK
-and CLI use the same Host owner:
+methods to `connections.rooms`, preserving that original port's discovery methods.
+The product's [independent Host](../../apps/host/src/connections.ts) composes it
+alongside the binding owner through [createConnectionServices](src/connection-services.ts).
+Desktop, the public SDK and CLI consume that same Host owner:
 
 ```sh
 amux connection room create --input room.json
@@ -296,8 +297,8 @@ avoids guessing a creator ID. Creation, invitation, membership, Binding and
 sharing remain separate original facts.
 [Official sharing-link contract](https://open.feishu.cn/document/server-docs/group/chat/link.md).
 
-The default Desktop composition delegates these methods to the original owner
-and lazy official SDK adapter. Controlled SDK transport tests consume the real
+The default independent Host composition delegates these methods to the original
+owner and lazy official SDK adapter. Controlled SDK transport tests consume the real
 Host, protected RPC and compiled CLI; they do not certify live credentials,
 actual member access or a real group. Full GUI acceptance belongs to the consuming
 journey using this same port.
@@ -306,9 +307,9 @@ journey using this same port.
 
 `RoomBindingHost` borrows a `ConnectionHost`, the original Core spatial read port
 and an exact Host-to-Core checkpoint function. Attach it as `connections.bindings`
-before exposing that connection port through the existing public service. Desktop
-composes these ports from its original spatial owner and original Host clients;
-headless embeddings supply those same ports. The binding owner uses
+before exposing that connection port through the existing public service. The
+independent Host supplies the original Core spatial owner and execution clients;
+other headless embeddings supply those same ports. The binding owner uses
 `connections.database`, including for synchronous reads joined by later delivery
 transactions. It does not create another semantic Runtime or copy topology.
 
@@ -449,7 +450,7 @@ owners; creating or inspecting a binding performs none of those effects.
 
 The required integration target is the [Agent Conversation unified timeline and MECE contract](../../docs/specs/conversation-protocol.md#unified-timeline-and-mece). The conversation view and Feishu connector are consumers of the same Core timeline; connector-specific mapping and authorized sharing requirements belong to the [external conversation behavior contract](../../docs/design/behavior/conversation-mode.md#共同对话协议与外部交流入口). The current source reads and delivery mechanisms below do not certify complete compliance with that target.
 
-`PublicationHost` borrows the original `ConnectionHost.database`, `RoomBindingReadPort` and exact Core conversation reads. `createPublicationConversationPort` adapts existing execution clients; it creates no Runtime, transcript reader or message queue. Desktop's original connection composition starts this owner and exposes its `ConnectionPort.delivery`. Configuration and Binding changes reconcile the same owner; source notifications wake durable catch-up rather than serving as the message log.
+`PublicationHost` borrows the original `ConnectionHost.database`, `RoomBindingReadPort` and exact Core conversation reads. `createPublicationConversationPort` adapts existing execution clients; it creates no Runtime, transcript reader or message queue. The independent Host's `createConnectionServices` composition starts this owner and exposes its `ConnectionPort.delivery`. Configuration and Binding changes reconcile the same owner; source notifications wake durable catch-up rather than serving as the message log.
 
 Each accepted page commits its necessary Outbox effects, explicit skips and source frontier together. Selection includes original assistant speech and typed questions, preserving separate records with equal text. Complete resource-backed text uses the original Core resource reader and verified content digest before exact Unicode fragmentation. The original assistant-only scope excludes process content; broad sharing consumes the original per-part purpose facts rather than presentation roles. Confirmed surplus platform fragments receive explicit withdrawal operations when a source revision shortens the speech.
 
@@ -629,26 +630,31 @@ page cannot starve later retained records. Claimed or unknown input is never
 copied into a second queue or automatically submitted again. Transport service
 facts overlay the original Connection observation, independently of publication.
 
-Desktop composes this intake owner on its original shared database and borrows
-the original Hosted execution transport through `createHostedIngressCorePort`.
+The independent Host composes this intake owner on its original shared database.
+Local execution uses the same Host's Core client; remote execution borrows the
+original Hosted transport through `createHostedIngressCorePort`.
 Private authorization callbacks belong at that execution owner; ordinary Hosted
 RPC arguments cannot carry them or authenticate external authors.
 
 The product Node Host injects `AgentExternalInputAuthorityPort` into its existing
-Headless Runtime. Its default local adapter reads `connection.ingress.authority`
-from the protected original Desktop business endpoint. That pure database lookup
-returns the original claim and current Binding/grant observation without reading
-Core receipts, dispatching, or creating another lease or Store. The executing
-adapter compares exact Host, Session, Run, operation, message, body and author with
+Headless Runtime. Its [local authority adapter](../../apps/host/src/external-input-authority.ts)
+reads the same Host's original ingress owner directly. That database observation
+returns the original claim and current Binding/grant state without reading Core
+receipts, dispatching, or creating another lease or Store. Remote authority follows
+the original hosting Runtime through its configured Hosted client while retaining
+the execution Runtime binding. The executing adapter compares exact Host, Session, Run, operation, message, body and author with
 Core's actual frozen intent before approving that operation. A `current` response
 alone is not serialized permission. A remote embedding supplies its own original
 authority port; a missing owner retains the original claim and limits only the
 external action, without falling back to local manual input.
 
-The integration fixture starts the actual Node Host and original Desktop
-connection composition with a signed HTTP protocol and replay ledger. Native
-connect and ordered byte I/O are controlled test ports; those leaves do not claim
-a production webhook listener, live native CLI acknowledgement or platform delivery.
+The [integration fixture](test/room-public-journey.integration.test.ts) separately
+composes Connection services and includes actual Node Host and Hosted consumers
+with a signed HTTP protocol and replay ledger. Its Node Host receives authority
+through a controlled RPC adapter to the fixture business endpoint; this does not
+prove the production Host composition or its direct local authority path. Native
+connect and ordered byte I/O are also controlled test ports, without claiming a
+production webhook listener, live native CLI acknowledgement or platform delivery.
 
 ## Feishu low-level adapter
 
@@ -786,7 +792,7 @@ or final platform end-to-end delivery.
 ## Feishu publication
 
 The built-in Feishu delegate also exposes the original `PublicationAdapter`.
-The original Desktop `PublicationHost` selects future native public speech,
+The executing Host's original `PublicationHost` selects future native public speech,
 commits its Outbox and calls this leaf automatically. Publication requires no
 model send tool, duplicate queue or adapter-local message cache. Receiver,
 parent reads and publication reuse the same official Client for the exact
@@ -847,7 +853,7 @@ mapping dependencies. Independent publication, subsequent authenticated inputs
 and the original Core Session remain available.
 
 The publication contract tests use the actual pinned SDK and Axios serialization
-against a loopback HTTP server. The default Desktop Host tests consume original
+against a loopback HTTP server. Host and Desktop consumer tests consume original
 SDK callbacks, Core history, Mailbox, Settings and compiled public CLI receipts.
 These controlled ports prove the product call chain and exact bytes; they do not
 certify live credentials, platform permissions or delivery to a real group.
@@ -1212,9 +1218,10 @@ not advertised or executed. Existing messaging and Agent work remain available.
 
 ### Saved Mote profile operations
 
-Desktop composes `space.mote.connection.create/sync/advance/inspect/ls` over
-its original Files, saved-avatar and Connection owners. Core supplies the pure
-contract and strict SDK/CLI parsing; connectors do not acquire a Mote or file
+The [independent Host](../../apps/host/src/mote-connections.ts) composes
+`space.mote.connection.create/sync/advance/inspect/ls` over its original saved Mote
+resources, file preferences and Connection owners. Desktop consumes that public port.
+Core supplies the pure contract and strict SDK/CLI parsing; connectors do not acquire a Mote or file
 configuration store. Each request freezes the exact saved public topic revision,
 optional saved PNG appearance revision, default-file baseline and child IDs
 before enrollment. Only the saved public title/summary and selected saved PNG
