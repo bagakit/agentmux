@@ -118,6 +118,16 @@ owner, with distinct `handoverInput` and `deferredInput` inspections. Prompt ope
 use the original letters/digits/underscore/dash contract. Keep unknown input keys and inspect
 them; never mint another input merely because the page or Host restarted. The canonical
 original-record outcome `admitted` or `terminal-confirmed` proves sending; a route alone does not.
+For handover, the admission service reads the exact previous Host/Session with the
+existing agent.context owner and its normal pagination budget. One typed historical page
+preserves sourceHostId, unavailable sources and nextCursor; it is not complete history.
+The new Agent gets a local live-read command only when its original Core owner is proven
+to be the same instance. A route alias from another endpoint is not a local source identity.
+Otherwise keep the original-owner page and its continuation boundary without inventing a
+live route. A failed source read retains its exact reference and issue; the separately
+frozen Query keeps its original input path. Inspecting or revisiting an existing handover
+input never fetches another page or resends that input.
+
 Creation, old-source association and binding have separate results; native File receipts
 and observed original writer roles are separate evidence. Preference observations carry
 only the actual read summary; source observations carry only their original bind key,
