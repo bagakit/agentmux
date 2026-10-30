@@ -18,6 +18,7 @@ export function configuredHostClients(path: string | undefined) {
   const work = new Set<Promise<void>>()
   let watcher: FSWatcher | undefined, pending: Promise<void> | undefined, retry: NodeJS.Timeout | undefined
   let dirty = false, closed = false, started = false, lastIssue: string | undefined
+  let retryDelay = 1000
   const issue = (step: string) => {
     if (lastIssue === step || closed) return
     lastIssue = step
@@ -62,30 +63,47 @@ export function configuredHostClients(path: string | undefined) {
           const { remoteCommand: _previousCommand, ...originalTarget } = original
           if (!isDeepStrictEqual(target, originalTarget)) {
             const prepared = await previous.client.prepareRoute({ ...config, hostId: config.id }, candidate.controller.signal)
-            try { if (!accepted() || leases.get(config.id) !== previous) return; prepared.assertCurrent(); prepared.activate() }
+            try {
+              // A configuration read already in flight must settle before adopting
+              // its older candidate; removal/revision aborts that exact route.
+              await pending
+              if (!accepted() || leases.get(config.id) !== previous) return
+              prepared.assertCurrent(); prepared.activate()
+            }
             finally { await prepared.dispose() }
           }
           if (!accepted()) return
-          previous.client.setRemoteCommand(config.remoteCommand); previous.config = config
+          previous.client.setRemoteCommand(config.remoteCommand); previous.config = config; retryDelay = 1000
         } else {
           const client = await connectSshAgentMux({ expectedRuntimeId: runtimeId, waitForReady: false, target: { ...config, hostId: config.id } })
+          await pending
           if (!accepted()) { await client.dispose(); return }
           leases.set(config.id, { config, client }); changed()
         }
-      } catch { issue(`Host ${config.id} could not confirm its original Runtime on the configured route.`) }
+      } catch {
+        issue(`Host ${config.id} could not confirm its original Runtime on the configured route.`)
+        if (previous && accepted()) retryObservation()
+      }
       finally { if (routes.get(config.id) === candidate) routes.delete(config.id) } })())
     }
   }
   const retryObservation = () => {
     if (closed || retry) return
-    // Only a failed exact-directory watcher is retried; healthy observation does no polling.
-    retry = setTimeout(() => { retry = undefined; void refresh() }, 1000).unref()
+    // Only a failed directory watch or existing route confirmation retries this
+    // original configuration. Healthy routes perform no network polling.
+    const delay = retryDelay
+    retryDelay = Math.min(retryDelay * 2, 30_000)
+    retry = setTimeout(() => { retry = undefined; void refresh() }, delay).unref()
   }
   const observe = () => {
     if (closed || watcher || !path || !isAbsolute(path)) return
     try {
       const exact = watch(dirname(path), { persistent: false }, (_event, name) => {
-        if (name === null || String(name) === basename(path)) void refresh()
+        if (name === null || String(name) === basename(path)) {
+          retryDelay = 1000
+          if (retry) { clearTimeout(retry); retry = undefined }
+          void refresh()
+        }
       })
       watcher = exact
       exact.on('error', () => { if (watcher === exact) watcher = undefined; exact.close(); issue('Watching the original Host configuration failed.'); retryObservation() })
