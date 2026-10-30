@@ -8,8 +8,8 @@ import { pathToFileURL } from 'node:url'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
 const { build } = require('esbuild')
-const dispatchMode = process.argv.includes('--dispatch'), compileOnly = process.argv.includes('--compile-only')
-const output = join(root, 'packages/core/.tmp', dispatchMode ? 'prepared-resume-dispatch' : 'durable-direct-resume')
+const resolutionMode = process.argv.includes('--resolution'), dispatchMode = process.argv.includes('--dispatch'), compileOnly = process.argv.includes('--compile-only')
+const output = join(root, 'packages/core/.tmp', resolutionMode ? 'prepared-resume-resolution' : dispatchMode ? 'prepared-resume-dispatch' : 'durable-direct-resume')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-')), packageRoot = join(attempt, 'package')
 await mkdir(join(packageRoot, 'dist'), { recursive: true })
@@ -22,10 +22,14 @@ async function bind(path) {
 }
 for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/lifecycle.ts', 'packages/core/src/agent-session-recovery/reconciliation.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-registry.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/ctxmux-run-adapter.ts',
-  'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/durable-direct-resume.config.mts',
+  'packages/core/test/helpers/prepared-resume-fixture.ts', 'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/durable-direct-resume.config.mts',
   'packages/core/src/prepared-run.ts', 'packages/core/src/terminal-preparation.ts',
   ...(dispatchMode ? ['packages/core/test/prepared-resume-dispatch.test.ts', 'packages/core/test/prepared-resume-dispatch.config.mts',
     'packages/core/test/fixtures/prepared-resume-process.mjs', 'packages/core/scripts/verify-prepared-resume-recovery.mjs'] : []),
+  ...(resolutionMode ? ['packages/core/test/prepared-resume-resolution.test.ts', 'packages/core/test/prepared-resume-resolution.config.mts',
+    'packages/core/test/fixtures/prepared-resume-process.mjs', 'packages/core/scripts/verify-prepared-resume-recovery.mjs',
+    'apps/desktop/test/session-recovery-lost-receipt.config.mts', 'apps/desktop/test/session-recovery-lost-receipt.test.tsx',
+    'apps/desktop/scripts/pending-edit-restart-proof.mjs', 'apps/desktop/scripts/prepared-resume-restart-proof.mjs', 'apps/desktop/scripts/verify-workbench-persistence-restart.mjs'] : []),
   'packages/core/test/agent-start-failure-recovery.test.ts', 'apps/desktop/src/main/runtime-controller.ts',
   'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-client-contract.ts', 'packages/core/src/public-rpc-service.ts',
   'packages/core/scripts/verify-durable-direct-resume.mjs',
@@ -93,8 +97,8 @@ const directVariants = [
 const dispatchVariants = [
   { name: 'candidate' },
   { name: 'dispatch-without-durable-prepare', path: 'packages/core/src/agent-session-recovery/lifecycle.ts',
-    from: 'reservation = await this.ports.sessions.registry.prepareResume(reservation,',
-    to: 'reservation = await (async (_reservation, preparedSession, preparedDispatch) => ({ ...reservation, preparedSession, preparedDispatch }))(reservation,',
+    from: ': await this.ports.sessions.registry.prepareResume(reservation, prepared, dispatch)',
+    to: ': await (async () => ({ ...reservation, preparedSession: prepared, preparedDispatch: dispatch }))()',
     target: 'freezes direct native resume input', expected: 'Original native resume request is not prepared' },
   { name: 'cross-runtime-dispatch', path: 'packages/core/src/ctxmux-run-adapter.ts',
     from: 'if (expected && (parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId ||',
@@ -106,12 +110,41 @@ const dispatchVariants = [
     target: 'mismatching actual RunSpec', expected: 'promise resolved' },
   directVariants.find(variant => variant.name === 'forget-unknown-start')
 ]
-const variants = compileOnly ? [{ name: 'candidate' }] : (dispatchMode ? dispatchVariants : directVariants).flatMap(variant => variant.from
+const resolutionVariants = [
+  { name: 'candidate' },
+  { name: 'missing-is-retired', path: 'packages/core/src/agent-session-recovery/lifecycle.ts',
+    from: "const retirement = observed.outcome === 'retired' ? observed : await ports.runtime.kernel.retirePreparedStart(",
+    to: "const retirement = true ? { ...observed, outcome: 'retired' as const } : await ports.runtime.kernel.retirePreparedStart(",
+    target: 'without old input: file positional', expected: 'to be called 1 times' },
+  { name: 'observer-spends-manual-authorization', path: 'packages/core/src/agent-session-recovery/continuity-attempt.ts',
+    from: 'return await lifecycle.resolvePreparedResume(input, reservation)',
+    to: "return await lifecycle.resolvePreparedResume({ ...input, trigger: 'manual', operationId: reservation.resolution?.receipt.operationId ?? input.operationId }, reservation)",
+    target: 'pre-send owner exit', expected: "to be 'pending'" },
+  { name: 'never-redrive-admitted-retirement', path: 'packages/core/src/agent-session-recovery/lifecycle.ts',
+    from: "      // Durable admission is authorization to redrive this same idempotent fence after a pre-send crash.",
+    to: "      if (observed.outcome === 'not_retired') return result(ports.sessions.registry.get(input.agentSessionId))",
+    target: 'actual admitted-owner process death', expected: "to be 'resumed'" },
+  { name: 'late-original-metadata-overwrites-manual', path: 'packages/core/src/agent-session-store.ts',
+    from: 'if (current && next && resolution && current.continuity!.previousRun.runId === current.run.runId) {',
+    to: 'if (false && current && next && resolution && current.continuity!.previousRun.runId === current.run.runId) {',
+    target: 'pre-send owner exit', expected: 'promise resolved' },
+  { name: 'handoff-loses-successor-reservation', path: 'packages/core/src/agent-session-store.ts',
+    from: '  return { reservation, session: next }', to: '  return { reservation: current, session: next }',
+    target: 'after atomic handoff never resends', expected: 'to be' },
+  { name: 'handoff-replays-unknown-input', path: 'packages/core/src/agent-session-recovery/lifecycle.ts',
+    from: 'const launch = { program: plan.command, args: plan.args, cwd: current.workspacePath, env: launchEnvironment,',
+    to: "const launch = { program: plan.command, args: resolutionHandoff ? [...plan.args, resolutionHandoff.reservation.preparedSession?.continuity?.launchInput?.input.prompt ?? ''] : plan.args, cwd: current.workspacePath, env: launchEnvironment,",
+    target: 'without old input: file positional', expected: 'to not include' },
+  { name: 'lose-public-resolution-relation', path: 'packages/core/src/control-codec.ts',
+    from: '...(result.resolution === undefined ? {} : { resolution: parseResumeResolution(result.resolution) })',
+    to: '...{}', target: 'Hosted, public RPC, compiled CLI', expected: 'to match object' }
+]
+const variants = compileOnly ? [{ name: 'candidate' }] : (resolutionMode ? resolutionVariants : dispatchMode ? dispatchVariants : directVariants).flatMap(variant => variant.from
   ? [variant, { name: 'restore-' + variant.name, target: variant.target }] : [variant])
-const receipt = { schema: 'agentmux.durable-direct-resume-proof.v1', passed: false, sourceStable: false, results: [],
+const receipt = { schema: resolutionMode ? 'agentmux.prepared-resume-resolution-proof.v1' : 'agentmux.durable-direct-resume-proof.v1', passed: false, sourceStable: false, results: [],
   scope: { actual: 'Private Native Runtime + two input carriers + FileStore/Core direct resume/Hosted/public compiled CLI and fatal regression owner',
     controlled: 'Start/commit ACK loss and rejection, exact prepared-operation contention and unknown input receipt', userRuntimeTouched: false,
-    publicContract: 'Existing direct resume and Session inspect; Hosted/Desktop retain the same Core owner; no new capability or Store' } }
+    publicContract: resolutionMode ? 'Explicit no-input manual resume, exact safe pending/retained/retired correlation, same-intent retry through existing Hosted/RPC/CLI/Desktop; no new top-level API or Store; legacy source gap remains unknown' : 'Existing direct resume and Session inspect; Hosted/Desktop retain the same Core owner; no new capability or Store' } }
 const save = () => writeFile(join(attempt, 'receipt.json'), JSON.stringify(receipt, null, 2))
 await save()
 try {
@@ -166,11 +199,12 @@ try {
       await writeFile(join(output, 'compile-only.json'), JSON.stringify({ qualified: false, entry: pathToFileURL(file).href, cli: join(cli, 'bin/amux') }))
       console.log('Compile only; no verification result: ' + join(output, 'compile-only.json')); process.exit(0)
     }
-    const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', dispatchMode ? 'packages/core/test/prepared-resume-dispatch.config.mts' : 'packages/core/test/durable-direct-resume.config.mts',
+    const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', resolutionMode ? 'packages/core/test/prepared-resume-resolution.config.mts' : dispatchMode ? 'packages/core/test/prepared-resume-dispatch.config.mts' : 'packages/core/test/durable-direct-resume.config.mts',
       '--reporter=default', '--reporter=json', '--outputFile=' + report]
     if (variant.target) args.push('-t', variant.target)
     const result = await new Promise((yes, no) => {
       const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, AGENTMUX_TEST_DURABLE_RESUME_ENTRY: pathToFileURL(file).href, AGENTMUX_POST_START_ENTRY: pathToFileURL(file).href, AGENTMUX_TEST_OBJECT_CLI: join(cli, 'bin/amux'),
+        ...(resolutionMode ? { AGENTMUX_TEST_RESOLUTION_HANDOFF_RECEIPT: join(attempt, 'handoff-receipt.json') } : {}),
         ...(variant.from ? { AGENTMUX_TEST_DURABLE_RESUME_MUTANT: variant.name } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] })
       let text = ''; child.stdout.on('data', d => { text += d }); child.stderr.on('data', d => { text += d })
       child.once('error', no); child.once('close', (code, signal) => yes({ code, signal, text }))
@@ -189,9 +223,10 @@ try {
       failed: tests.numFailedTests, total: assertions.filter(test => test.status !== 'pending').length, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests > 0 && (variant.target || tests.numPassedTests === (dispatchMode ? 60 : 57)) && tests.success, 'Actual nonempty direct resume baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests > 0 && (variant.target || tests.numPassedTests === (resolutionMode ? 20 : dispatchMode ? 60 : 57)) && tests.success, 'Actual nonempty direct resume baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
+  if (resolutionMode) await verifyResolutionDesktop()
   const ts = require('typescript'), consumers = []
   const desktop = 'apps/desktop/src/main/runtime-controller.ts', desktopText = await readFile(join(root, desktop), 'utf8')
   const tree = ts.createSourceFile(desktop, desktopText, ts.ScriptTarget.Latest, true)
@@ -221,8 +256,77 @@ try {
   receipt.consumers = consumers
   for (const path of inputs.keys()) await bind(path)
   await rm(packageRoot, { recursive: true, force: true }); await rm(cli, { recursive: true, force: true })
-  receipt.cleanup = { privateBundlesRemoved: true, fixtureProcessesAndDirectories: dispatchMode ? 'verified by exact private Stop/PID and teardown assertions' : 'verified by private fixture teardown assertions' }
+  receipt.cleanup = { privateBundlesRemoved: true, fixtureProcessesAndDirectories: resolutionMode || dispatchMode ? 'verified by exact private Stop/PID and teardown assertions' : 'verified by private fixture teardown assertions' }
   receipt.inputs = Object.fromEntries(inputs); receipt.sourceStable = true; receipt.passed = true; await save()
   await writeFile(join(output, 'latest.json'), JSON.stringify({ receipt: relative(root, join(attempt, 'receipt.json')) }))
   console.log(relative(root, join(attempt, 'receipt.json')))
 } catch (error) { receipt.error = { message: error.message, stack: error.stack }; await save(); throw error }
+
+
+async function verifyResolutionDesktop() {
+  const target = 'second manual GUI|fresh explicit intent|actual original Pane'
+  receipt.renderer = []
+  for (const mutation of [null, 'lose-pending-resolution-id', 'reuse-handed-off-resolution-id']) {
+    for (const restored of mutation ? [false, true] : [false]) {
+      const name = restored ? 'restore-' + mutation : mutation ?? 'candidate'
+      const report = join(attempt, 'renderer-' + name + '.json')
+      const result = await new Promise((yes, no) => {
+        const env = { ...process.env, AGENTMUX_TEST_RESOLUTION_HANDOFF_RECEIPT: join(attempt, 'handoff-receipt.json') }; delete env.AGENTMUX_DESKTOP_RECOVERY_MUTATION
+        if (mutation && !restored) env.AGENTMUX_DESKTOP_RECOVERY_MUTATION = mutation
+        const child = spawn(process.execPath, [require.resolve('vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/test/session-recovery-lost-receipt.config.mts',
+          '-t', target, '--reporter=default', '--reporter=json', '--outputFile=' + report], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
+        let text = ''; child.stdout.on('data', data => { text += data }); child.stderr.on('data', data => { text += data })
+        child.once('error', no); child.once('close', (code, signal) => yes({ code, signal, text }))
+      })
+      await writeFile(join(attempt, 'renderer-' + name + '.log'), result.text)
+      const tests = JSON.parse(await readFile(report, 'utf8')), assertions = tests.testResults.flatMap(test => test.assertionResults), failures = assertions.filter(test => test.status === 'failed')
+      const actualMutation = mutation && !restored
+      const semanticRed = result.code === 1 && !result.signal && result.text.includes('loaded-desktop-recovery-mutation=' + mutation) && failures.some(test =>
+        test.fullName.includes(mutation === 'lose-pending-resolution-id' ? 'second manual GUI' : 'fresh explicit intent') && test.failureMessages.join(' ').includes('AssertionError'))
+      receipt.renderer.push({ name, code: result.code, signal: result.signal, passed: tests.numPassedTests, failed: tests.numFailedTests, semanticRed, failures })
+      await save()
+      assert.ok(actualMutation ? semanticRed : result.code === 0 && tests.success && tests.numPassedTests === 3, 'Current Renderer recovery proof failed: ' + name)
+    }
+  }
+  let desktopReceipt = process.env.AGENTMUX_TEST_PREPARED_RESUME_DESKTOP_RECEIPT
+  if (!desktopReceipt) {
+    desktopReceipt = join(attempt, 'desktop.json')
+    await new Promise((yes, no) => {
+      const child = spawn(process.execPath, [join(root, 'apps/desktop/scripts/verify-workbench-persistence-restart.mjs'), '--prepared-resume', '--receipt-path=' + desktopReceipt],
+        { cwd: root, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' }, stdio: 'inherit' })
+      child.once('error', no); child.once('close', (code, signal) => code === 0 && !signal ? yes() : no(new Error('Private current-source Desktop restart proof failed')))
+    })
+  }
+  desktopReceipt = resolve(desktopReceipt)
+  const proof = JSON.parse(await readFile(desktopReceipt, 'utf8')), buildPath = proof.buildReceipt, build = JSON.parse(await readFile(buildPath, 'utf8'))
+  const summaryPath = join(dirname(buildPath), 'summary.json'), summary = JSON.parse(await readFile(summaryPath, 'utf8'))
+  assert.ok(proof.passed && proof.preparedResume.passed && summary.passed && summary.qualifiedScope === 'prepared-resume')
+  assert.equal(resolve(summary.receiptPath), desktopReceipt); assert.equal(resolve(summary.buildReceiptPath), resolve(buildPath))
+  assert.ok(proof.firstPid !== proof.secondPid && proof.before.split === 70 && proof.after.split === 70)
+  assert.ok(proof.explicitProbe.originalAndNewContextConfirmed && proof.explicitProbe.unknownInputAbsent && proof.inputRequests === 2)
+  assert.ok(proof.originalHandshake.acknowledged && proof.originalHandshake.run.runId === proof.nativeRun.runId)
+  assert.ok(proof.nativeRun.acceptedInputBytes >= proof.originalHandshake.inputByteRange.endByte)
+  assert.equal(proof.afterRun.acceptedInputBytes, proof.nativeRun.acceptedInputBytes)
+  assert.ok(proof.explicitPromptReceipt.acknowledged && proof.explicitPromptReceipt.intent.admissionIntent.kind === 'manual-actor')
+  assert.equal(proof.explicitPromptReceipt.inputKey.expectedRun.runId, proof.nativeRun.runId)
+  assert.equal(proof.explicitPromptReceipt.submissionId, proof.explicitProbe.operationId)
+  assert.ok(proof.httpRequests.length >= proof.totalTransportRequests && proof.httpRequests.every(request => request.unknownInputPresent === false))
+  assert.ok(proof.cleanup.privateServiceAbsent && proof.cleanup.privateHostExited && proof.cleanup.exactNativeStopped && proof.cleanup.privateProcessesReaped && proof.cleanup.privateRootRemoved && build.privateRootRemoved)
+  assert.deepEqual(build.sharedSourceChangesDuringProof, [])
+  assert.ok(build.privateWindowObservations.length === 2 && build.privateWindowObservations.every(window => window.focusable === false && window.focusedEver === false))
+  const commands = build.commands ?? []
+  for (const name of ['private-core-build', 'private-host-build', 'private-desktop-build']) assert.ok(commands.some(command => command.name === name && command.exitCode === 0), 'Current-source typing/build receipt: ' + name)
+  // These two scripts orchestrate this oracle; they are not compiler inputs to the already qualified App.
+  const orchestration = new Set(['packages/core/scripts/verify-durable-direct-resume.mjs', 'packages/core/scripts/verify-prepared-resume-recovery.mjs'])
+  assert.ok(Object.keys(build.sources).length > 100 && Object.keys(build.compiled).length > 100)
+  for (const [path, hash] of Object.entries(build.sources)) if (!orchestration.has(path)) {
+    await bind(path); assert.equal(inputs.get(resolve(root, path)), hash, 'The saved Desktop proof consumed another candidate: ' + path)
+  }
+  for (const path of ['apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/SessionPane.tsx', 'apps/desktop/src/renderer/src/lib/continuity-presentation.ts']) {
+    assert.equal(build.desktopSourceClosure[path], build.sources[path])
+  }
+  receipt.desktop = { receipt: desktopReceipt, receiptSHA256: sha(await readFile(desktopReceipt)), buildReceipt: buildPath,
+    buildSHA256: sha(await readFile(buildPath)), summarySHA256: sha(await readFile(summaryPath)), compiled: build.compiled,
+    consumedExactPriorProof: Boolean(process.env.AGENTMUX_TEST_PREPARED_RESUME_DESKTOP_RECEIPT), scope: proof.scope }
+  await save()
+}

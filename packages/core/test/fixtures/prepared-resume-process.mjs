@@ -1,7 +1,7 @@
 // One private Core process. Only the first process seeds the original Session.
 import { readFile } from 'node:fs/promises'
 const core = await import(process.env.AGENTMUX_TEST_DURABLE_RESUME_ENTRY)
-const { root, storePath, delivery, request } = JSON.parse(await readFile(process.env.AGENTMUX_TEST_RESUME_PROCESS_REQUEST, 'utf8'))
+const { root, storePath, delivery, request, resolution } = JSON.parse(await readFile(process.env.AGENTMUX_TEST_RESUME_PROCESS_REQUEST, 'utf8'))
 const provider = core.defineAgentProvider({ catalog: { id: 'resume-process', label: 'Controlled resume process', executable: process.execPath,
   expectedProcess: 'node', promptDelivery: delivery, readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
   hookStrategy: { kind: 'none' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' },
@@ -45,7 +45,15 @@ async function close() {
 process.once('SIGTERM', async () => { try { await close(); process.exit(0) } catch { process.exit(1) } })
 try {
   await client.connect()
-  if (process.argv[2] === 'seed') {
+  if (process.argv[2] === 'resolution-crash') {
+    client.kernel.observePreparedStartRetirement = async () => {
+      const reservation = await store.readLifecycleReservation(request.agentSessionId)
+      process.send({ phase: 'resolution-admitted', pid: process.pid, starts, inputs, resolution: reservation.resolution.receipt })
+      await new Promise(() => {}) // Parent kills this exact Core process group before any Native retirement.
+    }
+    await client.ensureAgentContinuity(resolution)
+    throw new Error('Private pre-send crash boundary was not reached')
+  } else if (process.argv[2] === 'seed') {
     const ended = await client.kernel.start({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
     while ((await client.kernel.status(ended.runId)).state.type === 'running') await new Promise(done => setTimeout(done, 10))
     const now = Date.now(), previous = { kind: 'agent', agentSessionId: request.agentSessionId, providerId: provider.id, executorId: 'configured-resume',

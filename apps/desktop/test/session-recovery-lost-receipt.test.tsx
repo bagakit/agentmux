@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -226,5 +226,69 @@ it('initialization surface: an unknown observation preserves an already attached
   expect(dom.container.querySelector('.full-page-loading')).toBeNull()
   expect(dom.container.querySelector('[data-runtime-output]')).not.toBeNull()
   expect(dom.container.querySelector('[role="textbox"]')).not.toBeNull()
+  kept()
+})
+
+it('recovery receipt: a second manual GUI action retries the safe pending resolution identity', async () => {
+  const resolution = { operationId, originalOperationId: 'old-start-operation', originalCreationKey: 'old-start-key', runtimeId: 'original-runtime',
+    requestDigest: 'a'.repeat(64), admittedAt: 1, outcome: 'pending' as const }
+  const safe = { ...receipt, resolution }
+  vi.mocked(api.sessions.recover).mockResolvedValue({ ...pending(), continuity: safe })
+  await act(async () => { await useAppStore.getState().recoverSession(id) })
+  expect(useAppStore.getState().sessions[0]?.kind).toBe('agent')
+  await act(async () => { await useAppStore.getState().recoverSession(id) })
+  const calls = vi.mocked(api.sessions.recover).mock.calls
+  expect(calls).toHaveLength(2)
+  expect(calls[1]![2]).toBe(operationId)
+  expect(calls[1]![3]).toEqual({ trigger: 'manual' })
+  kept()
+})
+
+it.skipIf(!process.env.AGENTMUX_TEST_RESOLUTION_HANDOFF_RECEIPT)('recovery receipt: GUI creates a fresh explicit intent after the prior authorization handed off to an unknown successor', async () => {
+  // Produced by the real Native/Core handoff-ACK-loss case, not a hand-authored state.
+  const canonical = JSON.parse(await readFile(process.env.AGENTMUX_TEST_RESOLUTION_HANDOFF_RECEIPT!, 'utf8')) as AgentMuxContinuityOperation
+  expect(canonical).toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed', resolution: { outcome: 'retired' } })
+  const { terminalFrontend, ...ended } = original, subject = canonical.agentSessionId
+  const current = { ...ended, id: subject, control: { ...original.control, agentSessionId: subject, run: canonical.previousRun },
+    processState: 'exited' as const, continuity: canonical, status: { ...ended.status, state: 'error' as const, detail: 'The process exited on its own. Exit code 1.' } }
+  const actualTab = createWorkbenchTab(tab.id, { regionId: 'original-region', workspaceId: 'workspace', kind: 'agent', phase: 'attached', sessionId: subject })
+  useAppStore.setState({ sessions: [current], tabs: { [actualTab.id]: actualTab }, agentComposerDrafts: { [subject]: 'Retain original draft' } })
+  vi.mocked(api.sessions.recover).mockResolvedValue({ kind: 'pending', agentSessionId: subject, previousRun: canonical.previousRun,
+    reason: 'operation-unconfirmed', evidence: canonical.evidence!, continuity: canonical })
+  await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
+  const surface = dom.container.querySelector('[data-workbench-region-id="original-region"] .full-page-loading')!
+  expect(surface.querySelector('.surface-state__title')?.textContent).toBe('Recovery is not confirmed')
+  expect(surface.querySelector('.surface-state__actions')?.querySelectorAll('button')).toHaveLength(1)
+  expect(surface.querySelector('.surface-state__actions button')?.textContent?.trim()).toBe('Continue original')
+  const details = surface.querySelector('.surface-state__details')!
+  expect(details.textContent).toContain('The process exited on its own. Exit code 1.')
+  expect(details.textContent).toContain('Analyze…'); expect(details.textContent).toContain('Read original output')
+  const button = dom.container.querySelector<HTMLButtonElement>('[data-workbench-region-id="original-region"] .session-recovery-actions > button')
+  expect(button).not.toBeNull(); expect(button!.disabled).toBe(false)
+  await act(async () => button!.click())
+  const call = vi.mocked(api.sessions.recover).mock.calls.at(-1)!
+  expect(call[0]).toEqual(current.control); expect(call[2]).not.toBe(canonical.operationId)
+  expect(call[3]).toEqual({ trigger: 'manual' })
+  expect(useAppStore.getState().tabs[actualTab.id]).toEqual(actualTab)
+  expect(useAppStore.getState().agentComposerDrafts[subject]).toBe('Retain original draft')
+  expect(api.sessions.stop).not.toHaveBeenCalled(); expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+})
+
+it('recovery receipt: actual original Pane keeps explicit recovery reachable despite stale lifecycle-busy projection', async () => {
+  const { terminalFrontend, ...ended } = original
+  useAppStore.setState({ sessions: [{ ...ended, processState: 'interrupted', continuity: receipt,
+    status: { ...ended.status, detail: 'The process exited on its own. Exit code 1.', continuity: 'conflict', continuityConflict: 'lifecycle-busy' } }] })
+  vi.mocked(api.sessions.recover).mockResolvedValue(pending())
+  await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
+  expect(dom.container.textContent).toContain('Recovery is not confirmed')
+  expect(dom.container.textContent).toContain('Your conversation and unsent draft are kept. Continue to check and resume this conversation.')
+  const details = dom.container.querySelector('[data-workbench-region-id="original-region"] .full-page-loading .surface-state__details')!
+  expect(details.textContent).toContain(receipt.error)
+  expect(details.textContent).toContain('The process exited on its own. Exit code 1.')
+  const button = dom.container.querySelector<HTMLButtonElement>('[data-workbench-region-id="original-region"] .session-recovery-actions > button')
+  expect(button).not.toBeNull(); expect(button!.disabled).toBe(false)
+  await act(async () => button!.click())
+  expect(api.sessions.recover).toHaveBeenCalled()
+  expect(vi.mocked(api.sessions.recover).mock.calls.at(-1)![3]).toEqual({ trigger: 'manual' })
   kept()
 })

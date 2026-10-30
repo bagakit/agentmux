@@ -15,13 +15,16 @@ const packages = ['core', 'demand', 'client-ui', 'layout', 'relay']
 
 /** A new restart mode reuses the real harness; only its build tree is private. */
 export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
-  assert.ok(['pending-edit', 'steer-recovery', 'prompt-preparation-stage', 'demand-collaboration', 'display-layout-set'].includes(mode), 'Only the owning private proof modes may use this build')
+  assert.ok(['pending-edit', 'steer-recovery', 'prompt-preparation-stage', 'demand-collaboration', 'display-layout-set', 'prepared-resume'].includes(mode), 'Only the owning private proof modes may use this build')
+  const preparedResume = mode === 'prepared-resume'
+  assert.ok(!preparedResume || arguments_.every(a => a === '--prepared-resume' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=')), 'Prepared resume is one exact current-source private restart scenario')
   const displayLayoutSet = mode === 'display-layout-set'
-  const inactiveWindow = displayLayoutSet || arguments_.includes('--inactive-window')
-  assert.ok(!inactiveWindow || mode === 'pending-edit' || displayLayoutSet, 'Non-activating windows belong only to their explicit private proofs')
+  const completeHostBuild = displayLayoutSet || preparedResume
+  const inactiveWindow = completeHostBuild || arguments_.includes('--inactive-window')
+  assert.ok(!inactiveWindow || mode === 'pending-edit' || completeHostBuild, 'Non-activating windows belong only to their explicit private proofs')
   const demandCollaboration = mode === 'demand-collaboration'
   assert.ok(!displayLayoutSet || arguments_.every(a => a === '--display-layout-set' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=') || a.startsWith('--display-layout-set-source-ref=')), 'Display layout restoration is one bounded private restart scenario')
-  const packages = inactiveWindow ? ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors', ...(displayLayoutSet ? ['capsule'] : [])]
+  const packages = inactiveWindow ? ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors', ...(completeHostBuild ? ['capsule', 'native-desktop'] : [])]
     : demandCollaboration ? ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git'] : ['core', 'demand', 'client-ui', 'layout', 'relay']
   const steerRecovery = mode === 'steer-recovery', phaseCapture = mode === 'prompt-preparation-stage'
   assert.ok(!demandCollaboration || arguments_.every(a => a === '--demand-collaboration' || a.startsWith('--receipt-path=') || a.startsWith('--probe-root=') || a.startsWith('--demand-collaboration-source-ref=')), 'Demand collaboration has an explicit bounded test-only mode')
@@ -39,11 +42,11 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   assert.ok(!startupQualification || !(diagnosticOnly || typedCrossCore), 'Startup first Send is a distinct Native qualification')
   assert.ok(!typedFirstHook || typedCrossCore, 'First-Hook qualification must use the two-Core Native mode')
   assert.ok(!(diagnosticOnly && typedCrossCore), 'Distinct bounded proof modes cannot be combined')
-  const environmentKey = displayLayoutSet ? 'AGENTMUX_DISPLAY_LAYOUT_SET_BUILD_RECEIPT' : demandCollaboration ? 'AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT' : phaseCapture ? 'AGENTMUX_PROMPT_PREPARATION_BUILD_RECEIPT' : steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
-  const worker = displayLayoutSet ? 'workspace-layout-restore-restart-proof.mjs' : phaseCapture ? 'prompt-preparation-stage-native-proof.mjs' : steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
-  const resultField = displayLayoutSet ? 'displayLayoutSet' : demandCollaboration ? 'demandCollaboration' : phaseCapture ? 'promptPreparationStage' : finalQualification ? 'steerRecoveryFinal' : startupRestoredOnly ? 'startupRestoredFirstSend' : startupFirstSend ? 'startupFirstSend' : typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
+  const environmentKey = preparedResume ? 'AGENTMUX_PREPARED_RESUME_BUILD_RECEIPT' : displayLayoutSet ? 'AGENTMUX_DISPLAY_LAYOUT_SET_BUILD_RECEIPT' : demandCollaboration ? 'AGENTMUX_DEMAND_COLLABORATION_BUILD_RECEIPT' : phaseCapture ? 'AGENTMUX_PROMPT_PREPARATION_BUILD_RECEIPT' : steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
+  const worker = preparedResume ? 'prepared-resume-restart-proof.mjs' : displayLayoutSet ? 'workspace-layout-restore-restart-proof.mjs' : phaseCapture ? 'prompt-preparation-stage-native-proof.mjs' : steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
+  const resultField = preparedResume ? 'preparedResume' : displayLayoutSet ? 'displayLayoutSet' : demandCollaboration ? 'demandCollaboration' : phaseCapture ? 'promptPreparationStage' : finalQualification ? 'steerRecoveryFinal' : startupRestoredOnly ? 'startupRestoredFirstSend' : startupFirstSend ? 'startupFirstSend' : typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
   const proofId = displayLayoutSet ? (await import('../../../packages/core/dist/object-id.js')).mintObjectId() : globalThis.crypto.randomUUID()
-  const evidence = join(root, displayLayoutSet ? '.tmp/display-layout-set-restart' : demandCollaboration ? '.tmp/demand-collaboration-native' : phaseCapture ? '.tmp/prompt-preparation-stage' : steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(proofId))
+  const evidence = join(root, preparedResume ? '.tmp/prepared-resume-restart' : displayLayoutSet ? '.tmp/display-layout-set-restart' : demandCollaboration ? '.tmp/demand-collaboration-native' : phaseCapture ? '.tmp/prompt-preparation-stage' : steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(proofId))
   // The inner real harness has Unix sockets below this tree. macOS's per-user
   // tmpdir prefix would exceed sockaddr_un's path limit after that nesting.
   const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), displayLayoutSet ? 'amx-ls-' : demandCollaboration ? 'amx-dc-' : phaseCapture ? 'amx-ps-' : steerRecovery ? 'amx-sr-' : 'amx-pe-')))
@@ -67,7 +70,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   assert.ok(!finalQualification || !t010ManifestArgument && !t010ManifestSha, 'Final GUI qualification prohibits product source overlays')
   assert.ok(!t010ManifestArgument && !t010ManifestSha || startupQualification && requestedSourceRef && t010ManifestArgument && /^[0-9a-f]{64}$/.test(t010ManifestSha),
     'A T010 product candidate requires its bounded Native mode, exact full Main SourceRef and manifest hash')
-  const build = { schema: 'agentmux.pending-edit-restart-build.v1', privateRoot, sources: {}, compiled: {},
+  const build = { schema: 'agentmux.pending-edit-restart-build.v1', privateRoot, sources: {}, compiled: {}, commands: [],
     sharedSourceWritten: false, userRunTouched: false, sourceCommit,
     sourceMode: requestedSourceRef ? 'exact-git-archive-with-test-only-overlay' : 'captured-working-source', requestedSourceRef: requestedSourceRef ?? null, ...(finalQualification || demandCollaboration ? { mainAtCapture, productOverlayProhibited: true } : {}), proofOverlays: {}, archive: null }
   let failure, outcome
@@ -84,8 +87,10 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         // deliberately consumes installed dependencies and never mutates them.
         env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' } })
       await writeFile(join(evidence, name + '.log'), reply.stdout + reply.stderr)
+      build.commands.push({ name, executable, args, cwd, exitCode: 0, logSHA256: sha(reply.stdout + reply.stderr) })
     } catch (error) {
       await writeFile(join(evidence, name + '.log'), (error.stdout ?? '') + (error.stderr ?? ''))
+      build.commands.push({ name, executable, args, cwd, exitCode: error.code, signal: error.signal ?? null, logSHA256: sha((error.stdout ?? '') + (error.stderr ?? '')) })
       throw error
     }
   }
@@ -145,7 +150,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       'packages/core/src', 'packages/core/scripts', 'packages/core/guides', 'packages/core/bin', 'packages/core/vendor',
       'packages/demand/src', 'packages/demand/bin', 'packages/relay/src', 'packages/client-ui/src', 'packages/client-ui/scripts', 'packages/layout/src', 'patches', ...(demandCollaboration || inactiveWindow ? ['packages/git/src', 'packages/identity/src'] : []),
       ...(demandCollaboration ? ['packages/core/test/fixtures'] : []), ...(inactiveWindow ? ['packages/core/native', 'packages/diagnostic-evidence/src', 'packages/connectors/src', 'apps/desktop/vendor/drawio/v32.4.1'] : []),
-      ...(displayLayoutSet ? ['packages/identity/scripts', 'packages/capsule/src'] : [])]
+      ...(completeHostBuild ? ['packages/identity/scripts', 'packages/capsule/src', 'packages/native-desktop/src'] : [])]
     for (const directory of directories) {
       if (!requestedSourceRef) {
         try { await cp(join(root, directory), join(privateRoot, directory), { recursive: true }) }
@@ -155,7 +160,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       catch (error) { if (!(directory === 'apps/desktop/brand' && error.code === 'ENOENT')) throw error }
     }
     for (const path of ['package.json', 'tsconfig.base.json', 'tsconfig.shared.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
-      'apps/host/package.json', ...(displayLayoutSet ? ['apps/host/tsconfig.json'] : []), ...(inactiveWindow ? ['test/fixture-values.mjs'] : []), ...packages.flatMap(pkg => ['package.json', 'tsconfig.json', 'tsconfig.build.json'].map(name => 'packages/' + pkg + '/' + name))]) {
+      'apps/host/package.json', ...(completeHostBuild ? ['apps/host/tsconfig.json'] : []), ...(inactiveWindow ? ['test/fixture-values.mjs'] : []), ...packages.flatMap(pkg => ['package.json', 'tsconfig.json', 'tsconfig.build.json'].map(name => 'packages/' + pkg + '/' + name))]) {
       try { const bytes = await readFile(join(requestedSourceRef ? privateRoot : root, path)); await mkdir(dirname(join(privateRoot, path)), { recursive: true }); await writeFile(join(privateRoot, path), bytes); build.sources[path] = sha(bytes) }
       catch (error) { if (error.code !== 'ENOENT') throw error }
     }
@@ -192,7 +197,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         }
       }
     } else {
-    for (const directory of ['node_modules', 'apps/desktop/node_modules', ...(displayLayoutSet ? ['apps/host/node_modules'] : []), ...packages.map(pkg => 'packages/' + pkg + '/node_modules')]) {
+    for (const directory of ['node_modules', 'apps/desktop/node_modules', ...(completeHostBuild ? ['apps/host/node_modules'] : []), ...packages.map(pkg => 'packages/' + pkg + '/node_modules')]) {
       await mkdir(join(privateRoot, directory, '@agentmux'), { recursive: true })
       for (const entry of await readdir(join(root, directory))) {
         if (entry === '@agentmux') continue
@@ -213,7 +218,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         } else await symlink(join(root, directory, entry), join(privateRoot, directory, entry))
       }
       for (const pkg of packages) await symlink(join(privateRoot, 'packages', pkg), join(privateRoot, directory, '@agentmux', pkg), 'dir')
-      if (displayLayoutSet) await symlink(join(privateRoot, 'apps/host'), join(privateRoot, directory, '@agentmux/host'), 'dir')
+      if (completeHostBuild) await symlink(join(privateRoot, 'apps/host'), join(privateRoot, directory, '@agentmux/host'), 'dir')
     }
     }
     if (demandCollaboration) {
@@ -226,7 +231,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         build.privateBuildTools[name] = { executable, packageSha256: sha(packageBytes), executableSha256: sha(await readFile(executable)) }
       }
     }
-    if (steerRecovery || phaseCapture || demandCollaboration || displayLayoutSet) {
+    if (steerRecovery || phaseCapture || demandCollaboration || completeHostBuild) {
       // This candidate's vendored SDK owns both its runtime bundle and TypeScript surface.
       // Sharing the installed SDK can mix a newer/older peer dependency with this archive.
       const artifactDirectory = join(privateRoot, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch)
@@ -310,12 +315,14 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
         reason: 'Concurrent shared-tree resource deletion while production imports still reference this bitmap; private fixture only, no shared restoration.' }
     }
     if (demandCollaboration || inactiveWindow) for (const [pkg, config] of [['identity', 'tsconfig.json'], ['git', 'tsconfig.build.json'], ...(inactiveWindow ? [['diagnostic-evidence', 'tsconfig.json']] : [])]) {
-      await command('private-' + pkg + '-build', process.execPath, displayLayoutSet && pkg === 'identity'
+      await command('private-' + pkg + '-build', process.execPath, completeHostBuild && pkg === 'identity'
         ? [join(privateRoot, 'packages/identity/scripts/build.mjs')]
         : [require.resolve('typescript/bin/tsc'), '-p', 'packages/' + pkg + '/' + config], privateRoot)
       await record(join(privateRoot, 'packages', pkg, 'dist'), build.compiled)
     }
-    if (displayLayoutSet) {
+    if (completeHostBuild) {
+      await command('private-native-desktop-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/native-desktop/tsconfig.json'], privateRoot)
+      await record(join(privateRoot, 'packages/native-desktop/dist'), build.compiled)
       await command('private-capsule-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-b', 'packages/capsule/tsconfig.build.json', '--force'], privateRoot)
       await record(join(privateRoot, 'packages/capsule/dist'), build.compiled)
     }
@@ -324,7 +331,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
     await command('private-core-build', process.execPath, [join(privateRoot, 'packages/core/scripts/build.mjs')], privateRoot)
     if (demandCollaboration || inactiveWindow) { await command('private-client-ui-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/client-ui/tsconfig.build.json'], privateRoot); await record(join(privateRoot, 'packages/client-ui/dist'), build.compiled) }
     if (inactiveWindow) { await command('private-connectors-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/connectors/tsconfig.json'], privateRoot); await record(join(privateRoot, 'packages/connectors/dist'), build.compiled) }
-    if (displayLayoutSet) { await command('private-host-build', process.execPath, [join(privateRoot, 'apps/host/scripts/build.mjs')], privateRoot); await record(join(privateRoot, 'apps/host/dist'), build.compiled) }
+    if (completeHostBuild) { await command('private-host-build', process.execPath, [join(privateRoot, 'apps/host/scripts/build.mjs')], privateRoot); await record(join(privateRoot, 'apps/host/dist'), build.compiled) }
     await record(join(privateRoot, 'packages/demand/dist'), build.compiled)
     await record(join(privateRoot, 'packages/relay/dist'), build.compiled)
     build.workspaceConsumers = {}
@@ -410,13 +417,16 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
       'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx']) {
       assert.equal(build.desktopSourceClosure[path], build.sources[path], 'Private Desktop consumed actual captured production source: ' + path)
     }
+    if (preparedResume) for (const path of ['apps/desktop/src/renderer/src/components/SessionPane.tsx', 'apps/desktop/src/renderer/src/lib/continuity-presentation.ts', 'apps/desktop/src/renderer/src/lib/workbench-persistence.ts']) {
+      assert.equal(build.desktopSourceClosure[path], build.sources[path], 'Actual prepared resume workface and recovery consumer: ' + path)
+    }
     if (displayLayoutSet) for (const path of ['apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts']) {
       assert.equal(build.desktopSourceClosure[path], build.sources[path], 'Actual layout restore and persistence owner: ' + path)
     }
     if (demandCollaboration) for (const path of ['apps/host/src/goal-dispatch-input.ts', 'apps/desktop/src/shared/goal-pmo-origin.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/renderer/src/components/RegionCurrentDemand.tsx', 'apps/desktop/src/renderer/src/components/GoalContinuationControl.tsx', 'apps/desktop/src/renderer/src/components/settings/GoalsSettingsPane.tsx', 'apps/desktop/src/renderer/src/components/GoalAgentPicker.tsx', 'apps/desktop/src/renderer/src/lib/primary-mote-executor.ts', 'apps/desktop/src/renderer/src/lib/goal-current-work.ts']) {
       assert.equal(build.desktopSourceClosure[path], build.sources[path], 'Actual new collaboration consumer: ' + path)
     }
-    if (displayLayoutSet) await command('private-renderer-release', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-renderer-release.mjs')], privateRoot)
+    if (completeHostBuild) await command('private-renderer-release', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-renderer-release.mjs')], privateRoot)
     await record(join(privateRoot, 'apps/desktop/out'), build.compiled)
     await record(join(privateRoot, 'packages/core/dist'), build.compiled)
     assert.ok(Object.keys(build.compiled).length > 100)
@@ -442,13 +452,13 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     delete executionEnvironment.ELECTRON_RUN_AS_NODE
     outcome = await runProbeProcess(process.execPath, [join(privateRoot, 'apps/desktop/scripts', worker), ...args,
       '--probe-root=' + privateRoot, '--receipt-path=' + receiptPath], { cwd: privateRoot, temporaryRoot: privateRoot,
-      env: executionEnvironment, timeoutMs: demandCollaboration ? 600_000 : steerRecovery || phaseCapture ? 300_000 : 130_000, onLine: line => lines.push(line) })
+      env: executionEnvironment, timeoutMs: demandCollaboration ? 600_000 : steerRecovery || phaseCapture || preparedResume ? 300_000 : 130_000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, 'restart.log'), lines.join('\n') + '\n')
     assert.equal(outcome.timedOut, false)
     assert.equal(outcome.exitCode, 0)
     const result = JSON.parse(await readFile(receiptPath, 'utf8'))
     assert.equal(result.passed, true); assert.equal(result[resultField]?.passed, true)
-    if (mode === 'pending-edit' || displayLayoutSet) {
+    if (mode === 'pending-edit' || completeHostBuild) {
       const observed = JSON.parse(await readFile(join(evidence, 'worker-home.json'), 'utf8'))
       assert.equal(observed.pid, outcome.originalPid)
       assert.equal(observed.privateRoot, privateRoot); assert.equal(observed.sourceCommit, sourceCommit)
@@ -459,7 +469,7 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     }
     if (inactiveWindow) {
       const files = (await readdir(inactiveWindowDirectory)).filter(file => file.startsWith('window-') && file.endsWith('.json'))
-      assert.ok(files.length >= 3, 'Seed plus two real App processes report private window identity')
+      assert.ok(files.length >= (preparedResume ? 2 : 3), 'Every seeded/original and restarted private App reports its window identity')
       build.privateWindowObservations = await Promise.all(files.map(async file => JSON.parse(await readFile(join(inactiveWindowDirectory, file), 'utf8'))))
       assert.ok(build.privateWindowObservations.every(window => window.focusable === false && window.focusedEver === false && window.visible === true),
         'Every actual private App window stays visible without taking OS focus')
@@ -489,7 +499,7 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
       if (current !== captured) build[differenceField].push({ path, captured, current })
     }
     const remaining = await listProbeProcesses(-1, privateRoot)
-    if (displayLayoutSet && remaining.length) {
+    if (completeHostBuild && remaining.length) {
       build.cleanup = { privateRootRetained: true, remaining }
       failure ??= new Error('Private restart leaves owned processes; retain its build and fixture tree')
     } else {

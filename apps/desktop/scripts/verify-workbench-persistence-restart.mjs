@@ -9,6 +9,11 @@ import { dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
+if (process.argv.includes('--prepared-resume')) {
+  const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
+  process.exit(await runPendingEditRestart(process.argv.slice(2), 'prepared-resume'))
+}
+
 if (process.argv.includes('--display-layout-set')) {
   const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
   process.exit(await runPendingEditRestart(process.argv.slice(2), 'display-layout-set'))
