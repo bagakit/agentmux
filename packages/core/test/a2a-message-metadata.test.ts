@@ -71,7 +71,7 @@ it('records exact notification preparation and outcome times, retaining the capt
   expect(Object.keys(selected.notification!).sort()).toEqual(['key', 'mode', 'notificationId', 'preparedAt', 'resultRecordedAt', 'state'])
   expect(JSON.stringify(selected)).not.toContain('peer-private')
   expect((await f.rpc.call('message.read', { messageId: 'original' })).message?.notification).toMatchObject({ mode: 'steer', notificationId: 'later-manual', preparedAt: 3_000, resultRecordedAt: 4_000 })
-  expect(await new DurableAgentMuxMessageQueue(f.queue.path).readByMessageId('original', undefined, old.notificationId)).toEqual(selected)
+  expect({ ...await new DurableAgentMuxMessageQueue(f.queue.path).readByMessageId('original', undefined, old.notificationId), inputOrigin: null }).toEqual(selected)
   const page = await f.rpc.call('message.events', { messageId: 'original' })
   expect(page.events.filter(event => event.kind.startsWith('a2a-notification')).map(event => event.at)).toEqual([1_000, 2_000, 3_000, 4_000])
   expect(await f.queue.readJournal()).toEqual(before)
@@ -126,7 +126,7 @@ it('keeps absent historical notification times unknown through real journal impo
   expect(message.notification).toMatchObject({ state: 'submitted', mode: 'idle', preparedAt: null, resultRecordedAt: null })
   expect(await historical.readNotification(notice.notificationId)).not.toHaveProperty('preparedAt')
   expect(await historical.readNotification(notice.notificationId)).not.toHaveProperty('resultRecordedAt')
-  const response = { hostId: 'local', message }
+  const response = { hostId: 'local', message: { ...message, inputOrigin: null } }
   expect(parseRpcNativeResult('message.read', response, { messageId: 'historical', notificationId: notice.notificationId }, f.credentials)).toEqual(response)
   const events = await historical.listMessageEvents({ participantSessionId: 'sender' }, async () => {})
   expect(events.events.filter(event => event.kind.startsWith('a2a-notification')).map(event => event.at)).toEqual([null, null])

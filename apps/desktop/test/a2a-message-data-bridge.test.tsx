@@ -198,7 +198,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     expect(inspect).toHaveBeenCalledWith({ operationId })
     await expect(api.sessions.inspectMessageNotification(recipient, 'another-original-mid', operationId)).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
     await expect(bridge.handlers.get('sessions:inspectMessageNotification')!({ sender: {} }, recipient, 'manual-reference', operationId)).rejects.toThrow('Untrusted')
-    await expect(api.sessions.inspectMessageNotification(recipient, 'manual-reference', 'not-yet-retained')).resolves.toEqual({ hostId: reference.hostId, notification: null, input: null })
+    await expect(api.sessions.inspectMessageNotification(recipient, 'manual-reference', 'not-yet-retained')).resolves.toEqual({ hostId: reference.hostId, notification: null, input: null, inputOrigin: null })
     expect(notify).toHaveBeenCalledTimes(1); expect(await queue.readJournal()).toEqual(beforeInspect)
 
   } finally {
