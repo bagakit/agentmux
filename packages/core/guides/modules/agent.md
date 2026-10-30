@@ -53,6 +53,21 @@ the first item; captured sources still use their current independent cut. An una
 source stays unavailable. Reading a beginning checkpoint grants no earlier-history sharing,
 input retry, new source selection or permission; retain the original audience boundary.
 
+A closed role/source range uses agent conversation changes with its original checkpoint
+and optional through checkpoint. through is a fixed upper source frontier, not a timestamp.
+Keep checkpoint, through and cursor unchanged until a complete frame; then consume the
+returned checkpoint and continue while more is true. Both native and captured sources,
+including original input-journal membership, stay bounded. Never replace a missing role
+boundary with whole-Session content or infer a range from display times.
+
+For a current activity read on one exact original input, agent input inspect --input accepts
+{key,activity:true}. It additionally returns activity and sourceNow without preparing,
+admitting, replaying or stopping input. Ordinary inspect adds no Provider activity read.
+The public SDK equivalent is readAgentInputActivity(key). Native Hook or Provider facts
+qualify this read; a display status, heartbeat or bytes do not establish dialogue expiry.
+Unconfirmed activity preserves the original input, Session and available capabilities.
+Read the Mote module for the separate original Main role and rollover owner.
+
 Trusted first-party human inputs saved by Core also appear in the original captured
 conversation while waiting. The same inputRef and record survive rejoin and dispatch;
 recorded means its public content is saved. inputSubmission retains the original

@@ -53,6 +53,12 @@ amux agent inspect --session '<session-id>'
 
 如果创建回执丢失，先按原 `--operation-id` 业务操作号 `amux space inspect --operation-id '<operation-id>'` 对账，不能盲目重建、拉 Agent 或重发初始任务。`settings workspaces register` 仅登记已有目录，不建 Git worktree，也不拉起 Agent。
 
+## Mote 首问与原输入观察
+
+Mote 的首次 Query 和主动接替使用原 `agent open --input` 中的 `moteMain` 意图，固定原 Mote、MOTE baseline、角色及操作号。创建仍不带用户任务；确认原绑定后，由 `space mote dialogue setup advance` 沿原 Core Main 输入 owner 递交保留的 Query／接替上下文。`setup inspect` 只读，路由存在不代表已发送；未知时保留原输入 key 查询。准确 JSON 与历史 `period.range.after`／`through` 的读法见 [Core Mote guide](../../packages/core/guides/modules/mote.md)，不从标题、时间或 SID 去重猜任期。
+
+`agent input inspect --input` 的 `{key,activity:true}` 可在原输入观察中附加当前原生活动读取，SDK 对应 `readAgentInputActivity(key)`；不带此字段时不新增 Provider 活动读取。它只读原 Session／Run，不能授予输入资格、重发、停止或单独判定对话过期。来源未知时保留原身份、请求和健康能力；自动流转仍由原 Mote 策略与 Main 输入 owner 判定。
+
 ## 移动和切换位置
 
 ```sh

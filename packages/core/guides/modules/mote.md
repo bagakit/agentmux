@@ -110,8 +110,14 @@ Main setup follows one original `agent.open` admission. Freeze its complete Mote
 and `creation:{hostId,operationId}`; that Host is the original spatial admission owner,
 independent from the MOTE resource Host and the created Agent execution Host. Inspect is
 read-only. Explicit human/device advance claims only unstarted original source and CAS
-follow-ups. It never creates, restores, stops or inputs an Agent, and accepts no client
-File receipt. Unknown steps keep their original operation IDs and remain inspect-only.
+follow-ups. It never creates, restores or stops an Agent, and accepts no client File receipt.
+An original admission may retain `deferredInput:{operationId,prompt,sourceChannel?,inputImages?}`
+and `handover:true`; creation still sends no user Query or takeover task. After confirmed
+binding, advance submits those frozen intents through the same original logical Main input
+owner, with distinct `handoverInput` and `deferredInput` inspections. Prompt operation IDs
+use the original letters/digits/underscore/dash contract. Keep unknown input keys and inspect
+them; never mint another input merely because the page or Host restarted. The canonical
+original-record outcome `admitted` or `terminal-confirmed` proves sending; a route alone does not.
 Creation, old-source association and binding have separate results; native File receipts
 and observed original writer roles are separate evidence. Preference observations carry
 only the actual read summary; source observations carry only their original bind key,
@@ -120,6 +126,33 @@ can settle only the matching original bind operation, target, baseline, role and
 After a cross-owner save, explicitly advance that original setup to reconcile its writer
 role or exact source journal; inspecting alone does not mutate the admission. Read the
 original `space.state` graph to discover a pending initial creation across clients.
+
+Main source links may include `period`: its identity is the Mote plus exact role revision,
+not Host/Session. Repeated sources for one period can share that period ID; returning to the
+same Session creates a distinct role. Writer-declared start/end times and transition causes
+are independent from source association time. A bounded period reads the original
+`agent conversation changes --input` with `checkpoint:period.range.after` and the fixed
+`through:period.range.through` when closed. Preserve the exact range on frame continuations;
+after a complete frame, `more` continues from its returned checkpoint. This is forward source
+reading, not an older-history cursor. Retain coverage gaps and exact versioned anchors for
+process details. Whole-session legacy sources and uncertain reused-Session attribution stay
+explicit original Session entries; do not infer a role cut or crop messages by timestamps.
+
+The original input's public `agent input inspect --input` can include `activity:true`
+for a supplementary current native-activity read; SDK `readAgentInputActivity(key)` uses
+the same exact Session/Run. This is read-only and supplies no input permission or expiry
+by itself. Ordinary inspection performs no additional Provider activity read. An unknown
+source keeps the original input and healthy Main available.
+
+Quick preferences can save `conversationRollover:{kind:'keep-current'}` or
+`{kind:'idle',idleMs:...}` through their original MOTE CAS. Missing preserves the current role
+and original recovery. The Host checks only a new explicit Query, using its saved policy
+revision and exact Main input/native idle source; heartbeat, UI time and an unavailable Run
+are not dialogue idle. Before a new input is admitted, a due result has
+`disposition:'rollover-required'` and the original decision. Keep the Query and reuse that
+decision's exact creation operation in original no-input Main setup. Existing pending input
+routes remain on their original Agent. Unknown policy facts retain the healthy current path
+and an explicit source issue, without an automatic replacement.
 
 <!-- amux:generated command:space.mote.dialogue.recovery.ensure -->
 <!-- amux:generated command:space.mote.dialogue.recovery.inspect -->
