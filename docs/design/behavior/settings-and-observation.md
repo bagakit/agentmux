@@ -43,7 +43,7 @@ Agent 工作状态与待处理状态消费同一 Core 语义事实，不能从 r
 
 ### Message Tool 设置分组
 
-Message Tool 在 Settings 中有专门分组，依次提供五个独立入口：User Input、A2A、Automation、Prompts、amux Protocols。导航、搜索、Overview 和窄窗分类沿同一设置目录，不因归组复制配置、输入队列、资源库或协议解析器。User Input 持有初始一行／两行、快捷输入符与关键词建议，并就近展示同源发送／编辑快捷键；保留原配置键、默认、生效范围和单字段保存。
+Message Tool 在 Settings 中有专门分组，依次提供四个独立配置入口：User Input、A2A、Automation、Prompts。amux Protocols 的只读参考归[独立文档阅读入口](#amux-协议参考目录)。导航、搜索、Overview 和窄窗分类沿同一设置目录，不因归组复制配置、输入队列、资源库或协议解析器。User Input 持有初始一行／两行、快捷输入符与关键词建议，并就近展示同源发送／编辑快捷键；保留原配置键、默认、生效范围和单字段保存。
 
 A2A 设置持有面向用户的后台来信提醒偏好：跟随全局遵从 Notifications 的关闭、停留时长和声音；静默不弹用户提醒；提示在全局关闭时仍用 Standard 时长，其余沿全局时长，声音始终沿全局。三种偏好都不对前台可见收件 Agent 重复弹窗，初始化、观察补读和重连不补弹旧信，同 MID 的后续回执不算新来信。它不改变接收 Agent 的入箱、确认空闲时引用通知与按原 MID 主动取信合同，不代表已读、任务接受或授权。消息与原投递事实仍在准确 Agent 的 Inbox／Outbox，不在 Settings 另建收发箱。全局通知呈现仍归 Notifications。
 
@@ -277,7 +277,7 @@ Overview 是 Settings 的普通入口，保留 AgentMux 品牌，并提供清楚
 
 侧栏分组默认全部展开，用户可明确收起或再次展开，各原分区在初次进入时直接可见。手动展开选择在同一设置工作面内保留；搜索临时展示命中组，不因筛选覆盖手动选择，原精确导航使目标组可见。收起组不关闭已访问编辑器或清空草稿，也不改变当前分区事实；当前入口不在可见区域时，选中材质不能停在其他入口上。窄窗分类继续沿原完整目录提供全部入口，展开不形成新的配置层或持久业务身份。
 
-设置命名保持具体产品与对象含义，不用泛化词替代已有具体名称。Agent 配置与会话恢复的分组及具体入口见[分区、资源与配置生效](#分区资源与配置生效)；本机与 SSH 主机管理使用 Hosts，与其真实 Host 身份一致。Prompts、Survey 与 amux Protocols 保持原名称和用途；设置中的 Club 仍进入原 Mote Club，Note 仍编辑原 Notes 偏好。导航命名与分类变化不修改原路由 ID、配置键、对象身份或保存 owner。
+设置命名保持具体产品与对象含义，不用泛化词替代已有具体名称。Agent 配置与会话恢复的分组及具体入口见[分区、资源与配置生效](#分区资源与配置生效)；本机与 SSH 主机管理使用 Hosts，与其真实 Host 身份一致。Prompts、Survey 与 amux Protocols 保持原名称和用途；设置中的 Club 仍进入原 Mote Club，Note 仍编辑原 Notes 偏好。偏好分区的导航命名与分类变化不修改原路由 ID、配置键、对象身份或保存 owner；只读协议参考按[独立文档阅读入口](#amux-协议参考目录)迁移，不保留隐藏设置副本。
 
 Survey 的图标与背景提供本地选图、替换和清除，URL 为可选入口；文件读取和预览失败保留原草稿与已保存设置，选图与预览不隐式保存。Mobile 直接提供扫码连接与复制链接，均消费同一原连接链接，不要求先复制才能发现二维码；读取未知保留原设备与恢复动作。Focus 与 Agent takeover 在窄窗和短屏允许就近查看当前草稿效果并返回原编辑控件，保留输入、草稿和阅读位置；预览不获取实际接管权、发消息或启动工作。
 
@@ -340,9 +340,11 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其五个入口沿[本组职责](#message-tool-设置分组)，Agents 位于 Preferences 之后，分组内依次提供 Agent CLIs（安装与原启动配置）和 Session recovery（原会话恢复、复查与重试）；两页沿原分区身份和保存 owner，不再把 Agent 配置呈现为无标题的孤立入口。Hosts 工作台、[Remote execution](remote-management.md#独立-remote-execution-工作台) 与 Mobile 设备管理归 Remote，Conversation Channels 提供 InApp、Lark 与 Discord 子项，分别面向 App 内对话模式及对应外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其配置入口沿[本组职责](#message-tool-设置分组)，Agents 位于 Preferences 之后，分组内依次提供 Agent CLIs（安装与原启动配置）和 Session recovery（原会话恢复、复查与重试）；两页沿原分区身份和保存 owner，不再把 Agent 配置呈现为无标题的孤立入口。Hosts 工作台、[Remote execution](remote-management.md#独立-remote-execution-工作台) 与 Mobile 设备管理归 Remote，Conversation Channels 提供 InApp、Lark 与 Discord 子项，分别面向 App 内对话模式及对应外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
-- Agents 后依次呈现 Mote、Work、Know：Mote 含 Club 与 Promotion，Work 含 Space、Focus、Goals，Know 含 Topic、Survey、Note。Promotion 为原晋升设置的英文名称，`mote-promotion` 分区身份保持。Club 与 Note 复用原 Mote Club／Notes 分区身份和保存 owner；Topic 管理及晋升沿既有 Topic 的原管理与确认流程，导航不产生新内容库、业务状态或自动动作。侧栏、Overview、窄窗菜单及搜索消费同一编译期目录，移动分组保留原分区直达、草稿与选择反馈。
+- Agents 后依次呈现 Mote、Work、Know：Mote 含 Club 与 Promotion，Work 含 Space、Focus、Goals，Know 含 Topic、Survey、Note。Promotion 为原晋升设置的英文名称，`mote-promotion` 分区身份保持。Club 与 Note 复用原 Mote Club／Notes 分区身份和保存 owner；Topic 管理及晋升沿既有 Topic 的原管理与确认流程，导航不产生新内容库、业务状态或自动动作。侧栏、Overview、窄窗菜单及搜索消费同一编译期目录，移动分组保留原分区直达、草稿与选择反馈。Club 表达伙伴名册，使用独立集合符号；Mote 父分组保持伙伴 IP。
+
+- Topic 提供目录初次打开的 Topics／Knowledge 默认侧面，缺席沿原 Topics。设置通过原 config 与公开 settings inspect/set 保存；只初始化新打开面板，原已打开面板的临时选择、Topic／Category、知识选择、阅读位置和草稿保持。默认 Knowledge 时原知识组件即按实际可见性挂载，不等待用户再点一次，也不常驻挂载隐藏知识面。Promotion 保持 Topic→Mote 的准确显式动作和原确认；页内说明已晋升 Mote 的人格、外观、默认交流与恢复配置，并沿 Club／原 Profile、Quick mode 到达原对象设置，不新建全局晋升策略或复制对象表单。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
@@ -361,11 +363,11 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 - Executor 是启动模板，Session/Run 是独立对象。仍被 retained Session 或已准入启动引用的模板不能删除，界面与 CLI 都具名说明引用，配置不变且不停止、暂停或重建 Agent；引用范围不能只数可见格子或 connected 会话。引用事实读失败，只拒绝这一次危险删除或重绑并说明未知，普通设置和健康输入继续。已缺模板的同 ID 显式重建必须与现 Session 的 Provider 事实一致，只修改配置而不自动执行；冲突事实不能猜一个。已准入启动在完成前同样受引用完整性保护，不因尚未出现 Session 就被删掉依赖；不保存第二份模板或永久删除身份表来掩盖原 context 缺失。
 
-- InApp 作为[App 内对话模式](conversation-mode.md#范围与唯一归属)的配置入口，说明原 Agent 输入工具栏的 Show Activity／Show Terminal 逐会话切换，并可进入原 Input & Mailbox、Appearance 与 Keyboard shortcuts。现有切换保持原 Session 的显示偏好与作用范围，不引入全局模式开关；共享输入、外观、快捷键、Prompts 与 Continuity 保留原配置和保存 owner，不复制表单或因归组整体迁入。只读快捷键和 amux Protocols 参考明确只读，入口不承诺新增可写字段。
+- InApp 作为[App 内对话模式](conversation-mode.md#范围与唯一归属)的配置入口，说明原 Agent 输入工具栏的 Show Activity／Show Terminal 逐会话切换，并可进入原 Input & Mailbox、Appearance 与 Keyboard shortcuts。现有切换保持原 Session 的显示偏好与作用范围，不引入全局模式开关；共享输入、外观、快捷键、Prompts 与 Continuity 保留原配置和保存 owner，不复制表单或因归组整体迁入。快捷键沿原只读 registry；amux Protocols 沿[独立文档阅读入口](#amux-协议参考目录)打开，不再借设置分区承载参考正文。
 - Remote 的 Mobile 沿原设备模块管理手机／浏览器接入与设备授权，仅在可见时读取；离开后结束界面观察，返回再读取当前事实。不以移动入口状态推断 Agent 或整体 App 是否可用。设备模块管理原 Host 的接入与授权，不冒充每个 SSH Host 的授权端点，也不因导航自动邀请、批准、撤销或扩大权限；撤销明确针对该设备原访问权限，范围不限于聊天。连接链接、设备身份与操作归属沿[《手机版 Relay 连接》](public-control.md#手机版-relay-连接)。
 - 外部对话应用的首次接入、已有机器人配置与扫码原操作恢复见[外部对话应用接入](#外部对话应用接入)；环境、手机与机器人应用继续各有准确对象与授权边界。
 
-- Survey 设置提供默认浏览器的系统选择入口；Survey 是 AgentMux 内的工作面，系统选择目标是具备真实 HTTP(S) 接收资格的 AgentMux 应用。当前默认处理程序由 Desktop 向操作系统分别读取 HTTP 与 HTTPS，区分已确认、部分匹配与未知；名字只用于展示，不推断默认资格。明确动作只请求系统选择，交接请求已发出与系统实际已选定分别表达，不保存应用内布尔值冒充系统事实，也不在启动、升级、进入设置或保存其他偏好时自动改默认。查询失败不拿走仍可用的设置入口，失败与未知保原工作面并可刷新观察。公开查询与打开系统设置沿同一 owner，不提供自动更改系统默认的 setter。
+- Survey 设置提供默认浏览器的系统选择入口；Survey 是 AgentMux 内的工作面，系统选择目标是具备真实 HTTP(S) 接收资格的 AgentMux 应用。当前默认处理程序由 Desktop 向操作系统分别读取 HTTP 与 HTTPS，区分已确认、部分匹配与未知；名字只用于展示，不推断默认资格。明确动作只请求系统选择，交接请求已发出与系统实际已选定分别表达，不保存应用内布尔值冒充系统事实，也不在启动、升级、进入设置或保存其他偏好时自动改默认。查询失败不拿走仍可用的设置入口，失败与未知保原工作面并可刷新观察。公开查询与打开系统设置沿同一 owner，不提供自动更改系统默认的 setter。 交付包的 HTTP(S) URL 声明、HTML/XHTML 查看声明、相应文件接收消费者、系统协议／内容类型候选与实际默认浏览器菜单分别核对；其中任何一项不能代签其他项。正式声明的本地网页查看沿原文件／Browser owner，从准确 OS open-file 输入接入，不混入仅接受 HTTP(S) 的原入口。候选修复不能自动改变当前系统默认，也不清理全库注册。
 
 - Browser 的设置 CLI 沿当前 Unix 用户的本地配置管理权限；显式开启自动化要说明能力扩大，但不冒充真人批准，不因浏览器操作失败自动开启，也不绕过已有 Profile 批准、控制交还或原生应用链接选择。界面保存自动化和忘记链接选择时，保护编辑或点击时看到的字段/答案；CLI 的 forget 明确忘记命令处理时当前答案，由同一配置 owner 原子处理，不暗示先前列表的 CAS。forget 回到下次询问，不提供 allow/deny setter，也不覆盖其它链接选择或普通偏好。
 
@@ -564,6 +566,8 @@ Appearance 同时提供主题身份与 dark / light / system 明度选择，编�
 
 ## amux 协议参考目录
 
-Message Tool 下的 amux Protocols 是只读参考，查看本地随产品交付的全部可读格式、用途、精确 wire 示例与原消息卡片预览。目录、搜索定位和摘要直接派生自 Core 同一协议定义；协议格式与维护边界归 [amux 规范](../../specs/amux-protocol.md#通用命名协议与阅读目录)，不在设置复制类型清单、parser 或业务含义。新增原定义随编译自动出现，不要求修改导航壳、另写搜索项或维护文档副本。
+amux Protocols 归 Documentation 的独立只读阅读面，由窗口工具与 InApp 共用同一打开入口；不注册为 Settings 分区，协议格式目录不混入偏好 Overview、侧栏、窄菜单或设置搜索。第一版直接进入原协议参考，不为一个阅读页新建空文档分类、工作区文件或空间类型。关闭阅读面保原工作面、设置草稿和触发点；窗口间的文档可见性不改变 Session、Run 或持久布局。
 
-目录不新建 AppConfig、Main scalar、RPC、运行时发现 Store 或操作入口；本地 Skill／help 使用同一公开定义提供发现，不连接 Runtime、不宣称所连远端或旧安装支持全部格式。预览只使用原共享阅读组件和明确样例，不读用户内容、不触发取信／发送／接续。设置现有搜索、窄窗菜单和信息定位机制继续适用。
+阅读面提供本地随产品交付的全部可读格式、用途、精确 wire 示例与原消息卡片预览。目录、文档内搜索和数量直接派生自 Core 同一协议定义；协议格式与维护边界归 [amux 规范](../../specs/amux-protocol.md#通用命名协议与阅读目录)，不复制类型清单、parser 或业务含义。新增原定义随编译自动出现，原共享 reader 与按需展开保留。
+
+目录不新建 AppConfig、Main scalar、RPC、运行时发现 Store 或业务动作；本地 Skill／help 使用同一公开定义提供发现，不连接 Runtime、不宣称所连远端或旧安装支持全部格式。预览只使用原共享阅读组件和明确样例，不读用户内容、不触发取信／发送／接续。
