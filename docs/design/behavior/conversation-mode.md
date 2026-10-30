@@ -585,7 +585,7 @@ Mote 飞书私聊在原专属会话准备就绪、准确原接收决定与当前
 
 可选前文按每次准确只读资源分别使用本地观察窗：前文位置的原回执读取、仅用于 quote 的凭据等待、原生 anchor、每页历史及必要的 token／HTTP 交换独立结束等待，当前每次为十五秒，不设整段区间的总截止或页数上限。正常慢页和累计超过一个观察窗的完整范围仍按原顺序保全。到期或取消只结束该观察，保留原请求、已确认前缀、准确范围与具名 gap；位置读取失败使用最后确认位置或原保留 baseline，不推进未确认位置。reply 资格、当前 author／grant 与准确目标仍是强前提，失败只阻该输入，不能转换成 quote gap 后放行；弱读取不持全 Host journal 锁，也不关闭健康输入。
 
-原收件持久标识本次 context observer、revision 与冻结来源。准确原 recipient 在既有 frozen Host／Session／Binding／audience 范围内可以结束自己的弱观察，保真实 actor、当前 Runtime 与原强授权；无需 bot enrollment，但同群旁观读取或 source 引用不授予取消资格。取消先消费准确原 source 并保原动作结果，旧 O1 动作或迟到读取不能取消、覆盖或清除 O2；缺耐久前缀时如实保 gap。Core 首次保存仍持完整冻结 wire，后来的 quote 成功不改已冻结内容，也不再 submit 第二条。
+原收件持久标识本次 context observer、revision 与冻结来源。准确原 recipient 在既有 frozen Host／Session／Binding／audience 范围内可以结束自己的弱观察，保真实 actor、当前 Runtime 与原强授权；无需 bot enrollment，但同群旁观读取或 source 引用不授予取消资格。取消先消费准确原 source 并保原动作结果；已耐久完成的本地回执不再等待后续强目标验证、Core 首次保存或 Core 读取，未取到的 Core 观察明确保 unknown／unavailable。旧 O1 动作或迟到读取不能取消、覆盖或清除 O2；缺耐久前缀时如实保 gap。Core 首次保存仍持完整冻结 wire，后来的 quote 成功不改已冻结内容，也不再 submit 第二条。
 
 #### 群触发与同步配置
 
