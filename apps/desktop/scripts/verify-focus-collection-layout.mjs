@@ -1,0 +1,48 @@
+import { resolve } from 'node:path'
+import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
+
+const evidence = process.argv.indexOf('--evidence')
+const collection = 'apps/desktop/src/renderer/src/lib/focus-collection-lanes.ts'
+await verifyRendererSourceMutations({ name: 'focus-collection-layout',
+  evidenceRoot: evidence < 0 ? undefined : resolve(process.argv[evidence + 1]),
+  owningConfig: 'apps/desktop/test/vitest.focus-collection-layout.config.mts',
+  tests: ['apps/desktop/test/focus-collection-layout.test.tsx'],
+  sources: ['vitest.config.ts', 'test/fixture-values.mjs', 'apps/desktop/test/vitest.mote-context.config.mts', collection,
+    'apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx',
+    'apps/desktop/src/renderer/src/components/FocusProjectLanes.tsx',
+    'apps/desktop/src/renderer/src/components/FocusScanLaneContent.tsx',
+    'apps/desktop/src/renderer/src/components/FocusContextCards.tsx',
+    'apps/desktop/src/renderer/src/components/FocusContextCardBody.tsx',
+    'apps/desktop/src/renderer/src/components/FocusContextRow.tsx',
+    'apps/desktop/src/renderer/src/components/AgentContextContent.tsx',
+    'apps/desktop/src/renderer/src/components/FocusTopicLabel.tsx',
+    'apps/desktop/src/renderer/src/components/WorkbenchNameTooltip.tsx',
+    'apps/desktop/src/renderer/src/lib/use-focus-project-order.ts',
+    'apps/desktop/src/renderer/src/lib/use-focus-collection-lanes.ts',
+    'apps/desktop/src/shared/focus-preferences.ts'],
+  mutations: [
+    { label: 'display-zone-claims-original-home', file: collection,
+      before: 'zoneId !== homeZoneId(binding.spaceId)', after: 'false' },
+    { label: 'inferred-default-claims-real-membership', file: collection,
+      before: "if (content.bindings[binding.zoneId]?.relations?.[binding.spaceId] !== true) continue",
+      after: 'if (false) continue' },
+    { label: 'membership-enumeration-splits-collection', file: collection,
+      before: '[...new Set(categoryBindings.get(source[0]!) ?? [])].sort()',
+      after: '[...new Set(categoryBindings.get(source[0]!) ?? [])]' },
+    { label: 'sections-do-not-group-original-topics', file: collection,
+      before: 'return { contexts: [...grouped.values()].flat(), sections }',
+      after: 'return { contexts, sections }' },
+    { label: 'visible-topic-source-lost', file: 'apps/desktop/src/renderer/src/components/FocusTopicLabel.tsx',
+      before: '<span>{topic.name}</span>', after: '<span>{topic.id}</span>' },
+    { label: 'filtered-out-agents-inflate-header', file: 'apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx',
+      before: 'contextIds: lane.contextIds.filter(id => filteredIds.has(id))', after: 'contextIds: lane.contextIds' },
+    { label: 'late-category-destroys-active-editor', file: 'apps/desktop/src/renderer/src/lib/use-focus-collection-lanes.ts',
+      before: 'const pending = membership(desired) !== membership(heldSources) && interacting(rows, pressed)',
+      after: 'const pending = false' },
+    { label: 'display-lanes-inflate-topic-count', file: collection,
+      before: 'return new Set(lane.collection?.topics.map(topic => JSON.stringify([topic.hostId, topic.workspaceId, topic.topicId])) ?? []).size',
+      after: 'return lane.collection?.topics.length ?? 0' },
+    { label: 'collection-read-failure-hidden', file: collection,
+      before: "entry.lane.summary = entry.issues.size ? [...entry.issues].join('\\n') : null",
+      after: 'entry.lane.summary = null' }
+  ] })
