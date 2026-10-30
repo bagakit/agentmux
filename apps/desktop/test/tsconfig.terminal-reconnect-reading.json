@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.json",
+  "include": ["terminal-reconnect-reading.test.tsx", "../src/renderer/src/global.d.ts"]
+}

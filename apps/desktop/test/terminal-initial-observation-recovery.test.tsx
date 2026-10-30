@@ -152,7 +152,7 @@ async function create(kind: 'terminal' | 'agent', output?: string) {
     control = { kind, hostId: 'local', runId: run.runId, run: { runId: run.runId } }
   } else {
     const session = await client.createAgent({ createOperationId: 'original-agent', providerId: 'codex', executorId: 'codex',
-      workspacePath: scope.root, commandOverride: process.execPath, args: [script, received], injectAgentMuxGuide: false, cols: 80, rows: 24 })
+      workspacePath: scope.root, commandOverride: process.execPath, args: [script, received, ...(output ? [output] : [])], injectAgentMuxGuide: false, cols: 80, rows: 24 })
     run = (await client.listRuns()).find(run => run.runId === session.run.runId)!
     expect(run).toBeDefined()
     control = { kind, hostId: 'local', agentSessionId: session.agentSessionId, run: session.run }
@@ -438,6 +438,40 @@ it('connection restoration re-arms an exhausted original terminal through the ac
   resource({ event: 'connection-restored', runId: run.runId, pid: run.pid, reads: refresh.mock.calls.length,
     foreignHostReads: 0, healthyReads: 0, liveOutput: true, acceptedInputBytes: 0 })
 }, 20000)
+
+it('live reconnect preserves the original Native Agent history and selection after its semantic owner restarts', async () => {
+  const output = join(scope.root, 'reconnect-reading-output.txt')
+  const session = await create('agent', output)
+  const client = owner.client as Awaited<ReturnType<typeof scope.client>>
+  const snapshots: import('@agentmux/core').AgentMuxClientEvent[] = []
+  const releaseEvents = client.onEvent(event => {
+    if (event.type === 'terminal-snapshot' && event.run.runId === session.control.run.runId) snapshots.push(event)
+  })
+  const nativePid = scope.nativeProcessId
+  try {
+    const terminal = await mount(session)
+    await act(async () => await vi.waitFor(() => expect(observation(session)?.liveReady).toBe(true)))
+    await writeFile(output, Array.from({ length: 800 }, (_, index) => 'ORIGINAL' + String(index).padStart(3, '0')).join('\r\n'))
+    await act(async () => await until(() => text(terminal), value => value.includes('ORIGINAL799'), 'original live history'))
+    await act(async () => { terminal.scrollToLine(300); terminal.select(0, 300, 11) })
+    const reading = terminal.buffer.active.viewportY, line = terminal.buffer.active.getLine(reading)?.translateToString(true)
+    const selected = terminal.getSelection()
+    expect(reading).toBeLessThan(terminal.buffer.active.baseY); expect(selected.length).toBeGreaterThan(0)
+    await act(async () => { await scope.restart(); await client.connectRuntime() })
+    await act(async () => await until(() => snapshots.length, value => value > 0, 'actual Hosted reconnect snapshot'))
+    await act(async () => await until(() => observation(session)?.liveReady, Boolean, 'original mounted output ready'))
+    expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)?.translateToString(true)).toBe(line)
+    expect(terminal.getSelection()).toBe(selected)
+    await writeFile(output, '\r\nLIVE-AFTER-SEMANTIC-RECONNECT')
+    await act(async () => await until(() => text(terminal), value => value.includes('LIVE-AFTER-SEMANTIC-RECONNECT'), 'original post-reconnect output'))
+    expect(terminal.buffer.active.getLine(terminal.buffer.active.viewportY)?.translateToString(true)).toBe(line)
+    expect(terminal.getSelection()).toBe(selected); expect(fixture.terminals).toEqual([terminal])
+    expect(scope.nativeProcessId).toBe(nativePid)
+    await originalRunRemains(session)
+    resource({ event: 'reading-reconnected', runId: run.runId, pid: run.pid, nativePid,
+      snapshots: snapshots.length, selected: true, originalReading: true, liveOutput: true, acceptedInputBytes: 0 })
+  } finally { releaseEvents() }
+}, 30000)
 
 it('cancels a hidden or replaced consumer wake', async () => {
   const session = await create('terminal')

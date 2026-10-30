@@ -340,7 +340,7 @@ function holdWrite(terminal: BrowserTerminal, marker: string) {
   return {started, release:()=>release()}
 }
 
-it('refreshes in the existing drain after a held write, coalescing only covered work and keeping later live bytes', async () => {
+it('retains the existing drain after a held write, reports a newer checkpoint gap and keeps later live bytes', async () => {
   const terminal=await ready(continuation('old-canvas'))
   const held=holdWrite(terminal,'HELD')
   await act(async()=>{receive(output(fence,'HELD'));await held.started})
@@ -358,28 +358,29 @@ it('refreshes in the existing drain after a held write, coalescing only covered 
     receive(resized(fence+100,4,20,10))
     expect(new TextDecoder().decode(Uint8Array.from(fixture.writes.flatMap(bytes=>[...bytes])))).not.toContain('latest-seed')
     held.release()
-    await vi.waitFor(()=>expect(contents(terminal)).toContain('latest-seedTAILFUTURE'))
+    await vi.waitFor(()=>expect(contents(terminal)).toContain('old-canvasHELDFUTURE'))
   })
   expect(fixture.terminals).toEqual([terminal])
-  expect(fixture.writes.map(bytes=>new TextDecoder().decode(bytes))).toEqual(['old-canvas','HELD','\x1bclatest-seed','TAIL','FUTURE'])
+  expect(fixture.writes.map(bytes=>new TextDecoder().decode(bytes))).toEqual(['old-canvas','HELD','FUTURE'])
   expect(contents(terminal)).not.toContain('obsolete-seed')
-  expect(fixture.grids.slice(-3)).toEqual([{cols:80,rows:24},{cols:40,rows:24},{cols:80,rows:24}])
+  expect(fixture.grids).not.toContainEqual({cols:40,rows:24})
   expect(fixture.grids).not.toContainEqual({cols:20,rows:10})
   expect(attach).toHaveBeenCalledTimes(1)
   expect(recover).not.toHaveBeenCalled()
-  expect(container.textContent).not.toContain('Restoring terminal state')
+  expect(container.textContent).toContain('existing display may be incomplete')
 })
 
-it('keeps healthy raw input available during a held reconnect seed and suppresses its OSC side effects', async () => {
+it('keeps healthy raw input available during a held reconnect suffix and suppresses its OSC side effects', async () => {
   const terminal=await ready(continuation('original'))
-  const seed='\x1bcnew-canvas\x1b]10;?\x07'
-  const held=holdWrite(terminal,seed)
-  await act(async()=>{receive(snapshot(continuation(seed)));await held.started})
+  const tail='held-tail\x1b]10;?\x07'
+  const held=holdWrite(terminal,tail)
+  await act(async()=>{receive(snapshot(continuation('\x1bcnew-canvas',tail)));await held.started})
   expect(readTerminalViewObservation({regionId:origin.regionId,sessionId:session.id,runId:session.control.run.runId}))
     .toMatchObject({liveReady:true,acceptsInput:true})
   await act(async()=>terminal.input('z'))
   expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', expect.objectContaining({ source: 'user' }))
-  await act(async()=>{held.release();await vi.waitFor(()=>expect(contents(terminal)).toContain('new-canvas'))})
+  await act(async()=>{held.release();await vi.waitFor(()=>expect(contents(terminal)).toContain('originalheld-tail'))})
+  expect(contents(terminal)).not.toContain('new-canvas')
   expect(write).toHaveBeenCalledTimes(1)
   expect(fixture.terminals).toEqual([terminal])
 })
@@ -408,8 +409,9 @@ it.each(['unknown','unavailable'] as const)('keeps the canvas on %s reconnect, s
   if(known.terminal.type==='basic-vt') known.terminal.checkpoint.throughByte=uncertain.session.latestOutputBytes+8
   known.session={...session,latestOutputBytes:uncertain.session.latestOutputBytes+8}
   await delivered(snapshot(known))
-  expect(contents(terminal)).toContain('proven-canvas')
-  expect(container.textContent).not.toContain('Restoring terminal state')
+  expect(contents(terminal)).toContain('keep-canvasNEW-LIVE')
+  expect(contents(terminal)).not.toContain('proven-canvas')
+  expect(container.textContent).toContain('existing display may be incomplete')
   expect(fixture.terminals).toEqual([terminal])
   expect(recover).not.toHaveBeenCalled()
 })

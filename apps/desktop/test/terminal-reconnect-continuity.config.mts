@@ -8,14 +8,19 @@ import base from './session-continuity-core.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const owner = 'apps/desktop/src/renderer/src/lib/session-events.ts'
+const terminal = 'apps/desktop/src/renderer/src/components/TerminalView.tsx'
 const variants = {
-  'missing-connection': { from: "core.type === 'connection-state'", to: "false && core.type === 'connection-state'" },
-  'foreign-host': { from: 'hosts.get(event.hostId)?.values() ?? []', to: '[...hosts.values()].flatMap(runs => [...runs.values()])' }
+  'missing-connection': { file: owner, from: "core.type === 'connection-state'", to: "false && core.type === 'connection-state'" },
+  'foreign-host': { file: owner, from: 'hosts.get(event.hostId)?.values() ?? []', to: '[...hosts.values()].flatMap(runs => [...runs.values()])' },
+  'replace-reading': { file: terminal, from: 'const continued = await applyContinuation(snapshot, true)', to: 'const continued = await applyContinuation(snapshot)' },
+  'false-recovery': { file: terminal, from: 'if (!continued) continue', to: 'if (!continued) setContinuationAbsence(null)' },
+  'clear-history-gap': { file: terminal, from: '// A continuous suffix confirms this canvas', to: 'setRuntimeHistoryGap(false)\n              setReplayGap(false)\n              // A continuous suffix confirms this canvas' }
 } as const
 const mutation = process.env.AGENTMUX_TERMINAL_RECONNECT_MUTATION as keyof typeof variants | undefined
 const target = process.env.AGENTMUX_TERMINAL_RECONNECT_TARGET
-assert.equal(process.env.AGENTMUX_TERMINAL_RECONNECT_SCOPE, 'events', 'Exact implemented proof scope')
-assert.ok(target === 'api' || target === 'native', 'Exact product consumer target')
+const scope = process.env.AGENTMUX_TERMINAL_RECONNECT_SCOPE
+assert.ok(scope === 'events' || scope === 'reading', 'Exact implemented proof scope')
+assert.ok(target === 'api' || target === 'native' || target === 'reading' || target === 'checkpoint', 'Exact product consumer target')
 assert.ok(!mutation || Object.hasOwn(variants, mutation), 'Known original-source mutation')
 const chosen = mutation ? variants[mutation] : undefined
 const tracked = new Set([owner,
@@ -37,7 +42,7 @@ export default { ...base, root,
       const file = relative(root, id.split('?')[0]!)
       if (!tracked.has(file)) return
       let loaded = source
-      if (file === owner && chosen) {
+      if (file === chosen?.file) {
         assert.equal(source.split(chosen.from).length - 1, 1, 'Exactly one production mutation anchor')
         loaded = source.replace(chosen.from, chosen.to)
       }
@@ -49,7 +54,9 @@ export default { ...base, root,
   }],
   test: { ...base.test, globalSetup: [],
     include: [target === 'api' ? 'apps/desktop/test/renderer-session-events.test.ts'
-      : 'apps/desktop/test/terminal-initial-observation-recovery.test.tsx'],
+      : target === 'reading' ? 'apps/desktop/test/terminal-reconnect-reading.test.tsx'
+        : target === 'checkpoint' ? 'apps/desktop/test/terminal-checkpoint-continuation.test.tsx'
+          : 'apps/desktop/test/terminal-initial-observation-recovery.test.tsx'],
     testNamePattern: process.env.AGENTMUX_TERMINAL_RECONNECT_PATTERN || undefined,
     passWithNoTests: false, fileParallelism: false, maxWorkers: 1, hookTimeout: 40_000, testTimeout: 30_000
   }
