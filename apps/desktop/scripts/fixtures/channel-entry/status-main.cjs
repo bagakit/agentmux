@@ -103,7 +103,7 @@ app.whenReady().then(async () => {
       }
       const dismiss = async () => { await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')'); assert.equal(await read('document.activeElement?.dataset.channelEntry'), 'feishu') }
       if (receiverRecovery) {
-        await require('./receiver-scene.cjs')({ read, until, click, capture, details, dismiss, result })
+        await require('./receiver-scene.cjs')({ win, read, until, click, press, settle, layout, open, close, capture, details, dismiss, result })
       } else if (sharingCraft) {
         await require('./sharing-craft-scene.cjs')({ win, read, until, click, settle, capture, details, dismiss, tab, result })
       } else if (groupClarity) {
