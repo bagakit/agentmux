@@ -766,7 +766,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       }
       const source = this.rejoinSource(record)
       const action: ConnectionIngressRejoinAction = { ...input, outcome: source && isDeepStrictEqual(input.source, source) ? 'pending' : 'stale' }
-      actions[input.operationId] = { actor: context.actor, action }
+      Object.defineProperty(actions, input.operationId, { value: { actor: context.actor, action }, enumerable: true, writable: true })
       this.database.prepare('UPDATE connection_ingress_message SET rejoin_json=? WHERE ingress_id=?').run(JSON.stringify(actions), input.ingressId)
       return { record, action }
     })
