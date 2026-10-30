@@ -94,6 +94,15 @@ Load only the journey needed now:
   The directed session-conversation intent uses the original Session capability and
   retains controlled waiting; a selected native request never changes to terminal after unknown.
 - Recovery or lifecycle: use the exact action's --help; interrupt, stop, resume and reopen differ.
+  Repeating an unknown original Start operation only observes it; it never sends that Start or input again.
+  A new explicit `agent resume --session SID --operation-id NEW_ID` without text may resolve a fully
+  frozen unknown Start on its exact original Runtime, retaining the same Session/native conversation.
+  Inspect the safe `resolution` relation: pending names the same manual operation to retry; retained
+  names the actual original Run; retired records the old key fence and `continuedBy` successor.
+  Retirement does not mean the old Start had no effects. After handoff, the manual ID identifies the
+  successor Start: an unknown successor needs another explicit manual intent, not replay of that ID.
+  This path sends no old input or automatic reminder. Missing legacy dispatch provenance stays unknown;
+  obtain its original source or an exact retained Run. Inspect/startup never authorizes retirement.
 Before opening or rearranging a workface, read amux space --skill for placement and focus.
 Readers keep their original source/cursor and release only their reader, not the Agent;
 reading, input admission, native adoption and task completion remain separate facts.
