@@ -3,16 +3,19 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { goalOwnerRecoveryMutations, goalOwnerRecoverySources } from '../test/goal-owner-recovery-mutations.mjs'
+import { goalOwnerRecoveryMutations, goalOwnerRecoverySources, prepareGoalOwnerIdentity } from '../test/goal-owner-recovery-mutations.mjs'
 
 const root = resolve(import.meta.dirname, '../../..')
 const directory = resolve(root, '.local/state/mobile-independent-host/review-remediation/goal-owner-recovery')
 await mkdir(directory, { recursive: true })
+await prepareGoalOwnerIdentity(root)
 const hash = value => createHash('sha256').update(value).digest('hex')
 const harness = ['apps/host/scripts/verify-goal-owner-recovery.mjs', 'apps/host/test/goal-owner-recovery-mutations.mjs',
   'apps/host/test/goal-owner-recovery-node-loader.mjs', 'apps/host/test/mobile-web-node-loader.mjs',
   'apps/host/test/vitest.goal-owner-recovery.config.mts', 'apps/host/test/vitest.goals-domain.config.mts',
-  'apps/host/test/vitest.mobile-goals.config.mts', 'apps/host/test/vitest.mobile-discovery.config.mts', 'packages/core/package.json']
+  'apps/host/test/vitest.mobile-goals.config.mts', 'apps/host/test/vitest.mobile-discovery.config.mts',
+  'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts',
+  ...['core', 'identity', 'demand', 'capsule', 'diagnostic-evidence', 'connectors', 'client-ui', 'relay', 'git', 'native-desktop'].map(name => `packages/${name}/package.json`), 'apps/host/package.json']
 const paths = [...new Set([...goalOwnerRecoverySources, ...harness])]
 const inputs = Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(resolve(root, path)))])))
 const checkInputs = async () => {

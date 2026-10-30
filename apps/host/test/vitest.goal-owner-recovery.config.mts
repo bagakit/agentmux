@@ -1,10 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import { resolve, relative } from 'node:path'
 import goals from './vitest.goals-domain.config.mjs'
-import { instrumentGoalOwnerRecovery } from './goal-owner-recovery-mutations.mjs'
+import { instrumentGoalOwnerRecovery, goalOwnerRecoverySource, prepareGoalOwnerIdentity } from './goal-owner-recovery-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..')
+await prepareGoalOwnerIdentity(root)
 export default defineConfig({ ...goals,
-  plugins: [{ name: 'goal-owner-recovery-source', enforce: 'pre', transform(source, id) {
+  plugins: [{ name: 'goal-owner-recovery-source', enforce: 'pre', resolveId(id) { return goalOwnerRecoverySource(root, id) }, transform(source, id) {
     const transformed = instrumentGoalOwnerRecovery(source, relative(root, id.split('?')[0]!), 'vitest')
     return source === transformed ? null : transformed
   } }, ...(goals.plugins ?? [])],
