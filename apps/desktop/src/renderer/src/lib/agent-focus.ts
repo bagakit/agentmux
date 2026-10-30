@@ -193,8 +193,7 @@ export function restoreAgentFocus(candidate: unknown): AgentFocusContext {
 export function sanitizeAgentFocus(
   context: AgentFocusContext,
   sessions: readonly SessionSnapshot[],
-  laneForSession: (session: SessionSnapshot) => AgentFocusLane | null,
-  retainedUnknownSessionIds?: ReadonlySet<string>
+  laneForSession: (session: SessionSnapshot) => AgentFocusLane | null
 ): AgentFocusContext {
   const byId = new Map(sessions.map((session) => [session.id, session]))
   const executionSession = context.execution.sessionId
@@ -203,10 +202,11 @@ export function sanitizeAgentFocus(
   const pmoSession = context.pmo.sessionId
     ? byId.get(context.pmo.sessionId)
     : undefined
-  const executionSessionId = executionSession && laneForSession(executionSession) !== 'pmo'
-    ? executionSession.id
-    : !executionSession && context.execution.sessionId && retainedUnknownSessionIds?.has(context.execution.sessionId)
-      ? context.execution.sessionId : null
+  // Semantic focus is durable even without an open Tab or a live Session projection.
+  // Only an observed incompatible lane can invalidate this original choice.
+  const executionSessionId = executionSession && laneForSession(executionSession) === 'pmo'
+    ? null
+    : context.execution.sessionId
   return {
     execution: {
       sessionId: executionSessionId,
@@ -215,10 +215,9 @@ export function sanitizeAgentFocus(
       history: context.execution.history
     },
     pmo: {
-      sessionId: pmoSession && laneForSession(pmoSession) !== 'execution'
-        ? pmoSession.id
-        : !pmoSession && context.pmo.sessionId && retainedUnknownSessionIds?.has(context.pmo.sessionId)
-          ? context.pmo.sessionId : null
+      sessionId: pmoSession && laneForSession(pmoSession) === 'execution'
+        ? null
+        : context.pmo.sessionId
     }
   }
 }

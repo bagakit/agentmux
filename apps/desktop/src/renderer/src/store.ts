@@ -5500,10 +5500,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // An unobserved owner cannot reclassify and erase a durable coordination focus.
           return workspace ? focusLaneForSession(topicIdForSession(config, session, topics),
             scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspace)) : null
-        },
-        new Set([...persistedSessionIds].filter((id) => (
-          hasAttachedSessionView(workbench.tabs, id)
-        )))
+        }
       )
       // 抢救过的持久化 Tab 必须响亮：静默修好等于用户下次发现某一格不见了却无从查证。
       const repairNotice = describePersistedTabRepairs(workbench.repairs)
