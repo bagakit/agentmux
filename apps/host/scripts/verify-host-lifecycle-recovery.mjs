@@ -11,6 +11,7 @@ const harnessPaths = ['apps/host/scripts/verify-host-lifecycle-recovery.mjs', 'a
   'apps/host/test/host-lifecycle-recovery.config.mts', 'apps/host/test/host-lifecycle-recovery-mutations.mjs', 'apps/host/test/host-lifecycle-recovery-node-loader.mjs',
   'apps/host/test/fixtures/host-lifecycle-runtime.mjs', 'apps/host/test/fixtures/host-lifecycle-ssh.mjs', 'apps/host/test/fixtures/host-configuration-ssh.mjs',
   'packages/core/test/helpers/public-rpc-owner.ts', 'packages/core/test/helpers/headless-runtime-fixture.ts', 'packages/core/test/helpers/fixture-values.ts',
+  'packages/core/test/helpers/workspace-source-export.mjs',
   'packages/core/test/fixtures/fake-system-ssh.mjs', 'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts',
   'package.json', 'pnpm-lock.yaml', ...['core', 'identity', 'relay', 'client-ui', 'capsule', 'connectors', 'demand', 'diagnostic-evidence'].map(name => 'packages/' + name + '/package.json'),
   'apps/host/package.json', `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`, `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`]

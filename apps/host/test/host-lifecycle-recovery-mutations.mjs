@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { workspaceSourceExport } from '../../../packages/core/test/helpers/workspace-source-export.mjs'
 export const lifecycleRecoveryMutations = {
   'authority-permanent-failure': { path: 'apps/host/src/host.ts', before: '.finally(() => { authorityOpening = undefined })', after: '.finally(() => {})', target: 'Host lifecycle restores the original device authority and public link without replacing healthy input' },
   'authority-remints-after-failure': { path: 'apps/host/src/host.ts', before: 'const createIfMissing = !authorityAttempted', after: 'const createIfMissing = true', target: 'Host lifecycle never mints an identity when the failed original file is absent' },
@@ -27,20 +26,5 @@ export function instrumentLifecycleRecovery(source, path, surface) {
 /** The workspace's declared source export, never an implicit reuse of local dist. */
 export function lifecycleSource(root, specifier) {
   if (specifier === '@agentmux/identity/runtime-source') return process.env.HOST_LIFECYCLE_IDENTITY_SOURCE
-  const matched = /^@agentmux\/([^/]+)(.*)$/u.exec(specifier)
-  if (!matched) return
-  const directory = resolve(root, matched[1] === 'host' ? 'apps/host' : 'packages/' + matched[1])
-  const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')), key = matched[2] ? '.' + matched[2] : '.'
-  let value = manifest.exports?.[key], substitution
-  if (!value) for (const [pattern, item] of Object.entries(manifest.exports ?? {}).sort(([a], [b]) => b.length - a.length)) {
-    const [prefix, suffix] = pattern.split('*')
-    if (pattern.includes('*') && key.startsWith(prefix) && key.endsWith(suffix)) { value = item; substitution = key.slice(prefix.length, suffix ? -suffix.length : undefined); break }
-  }
-  let entry = typeof value === 'string' ? value : value?.types?.startsWith('./src/') ? value.types : value?.import
-  if (substitution !== undefined) entry = entry?.replace('*', substitution)
-  if (typeof entry !== 'string') throw Error('The declared workspace source export is unavailable: ' + specifier)
-  const file = resolve(directory, entry.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
-  if (existsSync(file)) return file
-  if (existsSync(file.replace(/\.ts$/u, '.tsx'))) return file.replace(/\.ts$/u, '.tsx')
-  throw Error('The declared workspace source is unavailable: ' + specifier)
+  return workspaceSourceExport(root, specifier)
 }
