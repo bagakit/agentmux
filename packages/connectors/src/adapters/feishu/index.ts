@@ -288,7 +288,8 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
           }
           const status = receiver.ws!.getConnectionStatus()
           return { state: status.state === 'connected' ? 'ready' : status.state === 'reconnecting' ? 'recovering' : 'starting',
-            ...(status.nextConnectTime === undefined ? {} : { nextAttemptAt: status.nextConnectTime }) }
+            ...(status.state !== 'reconnecting' || status.nextConnectTime === undefined || status.nextConnectTime <= Date.now()
+              ? {} : { nextAttemptAt: status.nextConnectTime }) }
         },
         observation: () => {
           const active = this.current(receiver), state = receiver.ws?.getConnectionStatus().state, connected = state === 'connected'
