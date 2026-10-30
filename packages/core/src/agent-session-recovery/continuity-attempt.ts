@@ -3,6 +3,7 @@ import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { parseTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import type { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { inspectAgentSessionInterruption } from './interruption.js'
+import { agentContinuityLastActivityAt } from './continuity-activity.js'
 import { prepareContinuityLaunchInput } from './input.js'
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
@@ -24,7 +25,7 @@ import type { AgentSessionRecoveryPorts } from './ports.js'
 
 type AgentContinuityAttemptContext = {
   ports: AgentSessionRecoveryPorts
-  supervisor: Pick<AgentSessionContinuitySupervisor, 'retainedAutomaticIntent' | 'observe' | 'schedule'>
+  supervisor: Pick<AgentSessionContinuitySupervisor, 'retainedAutomaticIntent' | 'completedRuntimeRestartIntent' | 'observe' | 'schedule'>
   lifecycle: Pick<AgentSessionRunLifecycle, 'buildResumePlan' | 'resumeAgentRun' | 'completePreparedResume'>
   reconciler: AgentSessionRecoveryReconciler
   signal: AbortSignal
@@ -118,7 +119,22 @@ export async function performAgentContinuity(
     return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
       reason: 'operation-unconfirmed', evidence, continuity }
   }
-  const retained = current && supervisor.retainedAutomaticIntent(current, input)
+  let retained = current && supervisor.retainedAutomaticIntent(current, input)
+  let completedRuntimeIntent: { rootId: string; activeId: string } | undefined
+  let retainedRun: Awaited<ReturnType<typeof ports.runtime.kernel.status>> | undefined
+  if (current && retained?.kind === 'resumed' && retained.newRun && sameRun(retained.newRun, current.run) &&
+    input.trigger === 'startup' && !reservation && !reservationObservationUnknown) {
+    try {
+      retainedRun = await ports.runtime.kernel.status(current.run.runId)
+      ports.runtime.assertAgentRun(current, retainedRun)
+      const original = retained
+      retained = supervisor.retainedAutomaticIntent(current, input, retainedRun)
+      if (!retained) completedRuntimeIntent = { rootId: original.intentOperationId ?? original.operationId, activeId: original.operationId }
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_RUN_MISMATCH') throw error
+      // A failed observation retains the original operation; it cannot grant a Start.
+    }
+  }
   if (current && retained) {
     if (retained.initializationRecovery || current.nativeActor?.initializationControl) return await performAgentContinuity(context, { agentSessionId: input.agentSessionId,
       expectedRun: { ...input.expectedRun }, operationId: retained.operationId, trigger: retained.trigger, policy: retained.policy,
@@ -127,7 +143,7 @@ export async function performAgentContinuity(
     let run: AgentMuxRun | null = null
     let evidence: import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
     try {
-      const observed = await ports.runtime.kernel.status(current.run.runId); ports.runtime.assertAgentRun(current, observed); run = ports.events.projectRun(observed, current)
+      const observed = retainedRun ?? await ports.runtime.kernel.status(current.run.runId); ports.runtime.assertAgentRun(current, observed); run = ports.events.projectRun(observed, current)
       evidence = run.state === 'running' ? { kind: 'run-running', observedAt: run.observedAt }
         : { kind: 'run-ended', state: run.state as 'exited' | 'interrupted', observedAt: run.observedAt }
     } catch (error) {
@@ -371,6 +387,7 @@ export async function performAgentContinuity(
           receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
       }
     }
+    const lastActivityAt = agentContinuityLastActivityAt(current)
     if (receipt.intentOperationId) {
       const root = current.continuityOperations?.[receipt.intentOperationId]
       if (!root?.supervision || root.supervision.activeAttemptOperationId !== receipt.operationId ||
@@ -380,9 +397,7 @@ export async function performAgentContinuity(
       admission = { kind: 'resume', reason: 'supervised-retry', interruptedWorking: false }
     } else admission = agentContinuityAdmission({ session: ports.events.projectSession(current), trigger: receipt.trigger, policy,
       admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}),
-      ...(current.recoveryActivity?.run.runId === current.run.runId && current.recoveryActivity.state !== 'unknown' &&
-        current.nativeHandle?.kind === 'provider' && current.recoveryActivity.nativeSessionId === current.nativeHandle.sessionId
-        ? { lastActivityAt: current.recoveryActivity.observedAt } : {}) })
+      ...(lastActivityAt === undefined ? {} : { lastActivityAt }) })
     if (admission.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)
   }
   const handle = current?.nativeHandle
@@ -606,6 +621,17 @@ export async function performAgentContinuity(
     attemptLimit: receipt.supervision?.attemptLimit ?? Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
   // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
   current = await ports.sessions.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
+    if (completedRuntimeIntent) {
+      const pointer = value.continuity?.intentOperationId ?? value.continuity?.operationId
+      const root = value.continuityOperations?.[completedRuntimeIntent.rootId]
+      const active = value.continuityOperations?.[completedRuntimeIntent.activeId]
+      if (pointer !== completedRuntimeIntent.rootId || !root?.supervision || !active ||
+        root.operationId !== completedRuntimeIntent.rootId || active.operationId !== completedRuntimeIntent.activeId ||
+        root.supervision.activeAttemptOperationId !== completedRuntimeIntent.activeId ||
+        !supervisor.completedRuntimeRestartIntent(value, input, retainedRun, root, active)) throw new AgentMuxError(
+        'The completed recovery changed before this startup was admitted. Inspect the original intent; its receipts and Session are retained.',
+        'AGENT_CONTINUITY_SUPERSEDED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    }
     if (value.continuityOperations?.[receipt.operationId]?.action === 'restart' && receipt.action !== 'restart') throw new AgentMuxError(
       'The original operation is an explicit restart. Its receipt and original request are kept.', 'AGENT_CONTINUITY_SUPERSEDED')
     if (value.continuityOperations?.[receipt.operationId]?.supervision?.phase === 'cancelled') throw new AgentMuxError(

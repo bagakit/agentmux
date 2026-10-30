@@ -28,6 +28,7 @@ export function agentContinuityAdmission(input: {
   if (trigger === 'manual' || trigger === 'input') return { kind: 'resume', reason: 'explicit-request', interruptedWorking: false }
   if (!policy.resumeAfterExit) return { kind: 'pending', reason: 'resume-disabled' }
   if (!status || !isAgentActivityStatusSource(status.source)) return { kind: 'pending', reason: 'idle-unknown' }
+  if (status.state === 'done' && status.idleEvidenceConsumed) return { kind: 'pending', reason: 'idle-unknown' }
   const activityAt = input.lastActivityAt ?? (status.state === 'done' ? status.stateEnteredAt : status.observedAt)
   if (activityAt === undefined || !Number.isSafeInteger(activityAt) || activityAt < 0 || activityAt > now) return { kind: 'pending', reason: 'idle-unknown' }
   if (now - activityAt > policy.confirmedIdleWindowMs) return { kind: 'pending', reason: 'idle-window-expired' }
@@ -37,11 +38,7 @@ export function agentContinuityAdmission(input: {
     return now < nextActionAt ? { kind: 'pending', reason: 'active-delay', nextActionAt } : { kind: 'resume', reason: 'recent-activity', interruptedWorking: false }
   }
   if (status.state !== 'done') return { kind: 'pending', reason: 'not-active' }
-  const enteredAt = status.stateEnteredAt
-  if (enteredAt === undefined || !Number.isFinite(enteredAt) || enteredAt < 0 || enteredAt > now) return { kind: 'pending', reason: 'idle-unknown' }
-  return now - enteredAt <= policy.confirmedIdleWindowMs
-    ? { kind: 'resume', reason: 'confirmed-idle', interruptedWorking: false }
-    : { kind: 'pending', reason: 'idle-window-expired' }
+  return { kind: 'resume', reason: 'confirmed-idle', interruptedWorking: false }
 }
 
 function runEvidence(run: AgentMuxRun | null, observedAt: number): AgentMuxAgentContinuityRunEvidence {

@@ -71,7 +71,7 @@ export class AgentSessionContinuitySupervisor {
   }
 
   /** A fresh automatic observer joins the original current intent, never resets its budget or cancellation. */
-  retainedAutomaticIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput): AgentMuxContinuityOperation | undefined {
+  retainedAutomaticIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput, observedRun?: CtxmuxAdapterRun): AgentMuxContinuityOperation | undefined {
     if (!input.trigger || input.input || ['manual', 'input'].includes(input.trigger) || session.continuityOperations?.[input.operationId] ||
       session.hostId !== 'local' || !sameRun(session.run, input.expectedRun)) return
     const pointer = session.continuity, rootId = pointer?.intentOperationId ?? pointer?.operationId
@@ -81,6 +81,7 @@ export class AgentSessionContinuitySupervisor {
       supervision.phase === 'settled' || root.intentOperationId || !active || active.agentSessionId !== session.agentSessionId ||
       active.operationId !== rootId && active.intentOperationId !== rootId ||
       (active.newRun ? !sameRun(active.newRun, session.run) : !sameRun(active.previousRun, session.run))) return
+    if (this.completedRuntimeRestartIntent(session, input, observedRun, root, active)) return
     // Manual policy parked this intent before any recovery action was admitted.
     // A fresh startup may apply its newly authored automatic policy without
     // resetting a started, cancelled, or otherwise unresolved original action.
@@ -93,6 +94,26 @@ export class AgentSessionContinuitySupervisor {
     if (input.trigger === 'startup' && supervision.phase === 'paused' && supervision.reason === 'frontend-retry-budget-exhausted' &&
       (active.kind === 'reattachable' && active.frontendReconnect?.frontendId || active.kind === 'resumed' && active.newRun)) return
     return active
+  }
+
+  /** Positive authority check, reused at the admission CAS after asynchronous observations. */
+  completedRuntimeRestartIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput,
+    observedRun: CtxmuxAdapterRun | undefined, root: AgentMuxContinuityOperation, active: AgentMuxContinuityOperation): boolean {
+    const supervision = root.supervision
+    return Boolean(input.trigger === 'startup' && !input.input && !session.continuityOperations?.[input.operationId] &&
+      session.hostId === 'local' && sameRun(session.run, input.expectedRun) &&
+      root.agentSessionId === session.agentSessionId && active.agentSessionId === session.agentSessionId &&
+      !root.intentOperationId && (active.operationId === root.operationId || active.intentOperationId === root.operationId) &&
+      supervision && supervision.activeAttemptOperationId === active.operationId &&
+      !['cancelled', 'settled'].includes(supervision.phase) && !supervision.cancellation &&
+      !root.action && !active.action && active.kind === 'resumed' && active.newRun && sameRun(active.newRun, session.run) &&
+      !root.launchInput && !active.launchInput && root.nativeTarget &&
+      matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle) &&
+      matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) &&
+      active.nativeTarget?.kind === 'provider' && active.nativeTarget.providerId === session.providerId &&
+      matchesProviderNativeSessionTarget(active.nativeTarget, session.nativeHandle) &&
+      observedRun?.runId === session.run.runId && observedRun.workspacePath === session.workspacePath &&
+      observedRun.state.type === 'interrupted' && observedRun.state.reason === 'daemon_restart')
   }
 
   restore(sessions: readonly AgentMuxStoredAgentSession[]): void {
