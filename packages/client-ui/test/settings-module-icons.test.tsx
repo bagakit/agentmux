@@ -12,16 +12,17 @@ const meanings = {
   'object.user-input': 'user-input-field',
   'object.agent-messaging': 'agent-message-relay',
   'object.amux-protocols': 'protocol-frame',
+  'object.club': 'users',
 } as const
 const ids = Object.keys(meanings) as Array<keyof typeof meanings>
-const related: SemanticIconId[] = ['action.resume-session', 'git.compare', 'object.browser', 'object.inbox', 'object.document', 'action.refresh']
+const related: SemanticIconId[] = ['object.mote', 'object.team', 'action.resume-session', 'git.compare', 'object.browser', 'object.inbox', 'object.document', 'action.refresh']
 function symbol(id: SemanticIconId) { return document.getElementById(semanticIconHref(id).slice(1))! }
 afterEach(() => { removeIconSprite(document); document.body.replaceChildren() })
 
-it('discovers all five module meanings with their independent defaults and static React/native identities', () => {
+it('discovers module meanings with their independent defaults and static React/native identities', () => {
   const catalog = getSemanticIconCatalog()
   const discovered = catalog.icons.filter(icon => Object.hasOwn(meanings, icon.id))
-  expect(discovered).toHaveLength(5)
+  expect(discovered).toHaveLength(ids.length)
   for (const id of ids) {
     expect(discovered.find(icon => icon.id === id), id).toMatchObject({ id, groupId: 'object', defaultGlyph: meanings[id], label: expect.any(String), description: expect.any(String) })
     expect(catalog.glyphs).toContain(meanings[id])
