@@ -5,6 +5,7 @@ import { type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type
 import { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { AgentSessionContinuityInputs } from './input.js'
 import { isDeepStrictEqual } from 'node:util'
+import { createHash } from 'node:crypto'
 import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
 import { parseBrowserInputContext, parseBrowserInputContextSource } from '../browser-input-context.js'
 import { parseAgentInputContextCaptureReference } from '../agent-input-context-capture.js'
@@ -14,13 +15,26 @@ import { type AgentInputCallContext } from '../agent-input-wait.js'
 import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
-import { type AgentMuxLifecycleReservation } from '../agent-session-store.js'
-import { parseAgentContinuityTrigger, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
+import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
+import { normalizeAgentContinuityPolicy, parseAgentContinuityTrigger, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control-contract.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../types.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './resume-contract.js'
 import { safeId } from '../agent-runtime-helpers.js'
 import type { AgentSessionRecoveryPorts } from './ports.js'
+
+/** A native binding can arrive after creation; it must still belong to that exact original Start. */
+function creationFrontendIntent(session: AgentMuxStoredAgentSession): string | undefined {
+  const creation = session.creation, actor = session.nativeActor, handle = session.nativeHandle
+  if (session.hostId !== 'local' || !creation || session.continuity || !actor?.frontendControl || !actor.initializationControl ||
+      handle?.kind !== 'provider' || handle.providerId !== session.providerId ||
+      actor.lifecycleOperationId !== agentLifecycleOperationIdentity('create', session.agentSessionId, creation.createOperationId)) return
+  const createdRun = creation.createdRun ?? (session.initialInput?.lifecycleOperationId === actor.lifecycleOperationId
+    ? session.initialInput.key?.expectedRun : undefined)
+  if (!createdRun || !sameRun(createdRun, session.run)) return
+  return 'creation-frontend-' + createHash('sha256').update(JSON.stringify([session.agentSessionId, session.run,
+    actor.actorId, actor.lifecycleOperationId])).digest('base64url')
+}
 
 /** One recovery owner over the original Session/Runtime/Provider authorities. */
 export class AgentSessionRecoveryService {
@@ -30,6 +44,7 @@ export class AgentSessionRecoveryService {
   private readonly lifetime = new AbortController()
   private readonly lifecycle: AgentSessionRunLifecycle
   private readonly reconciler: AgentSessionRecoveryReconciler
+  private readonly creationObservations = new Set<string>()
   constructor(private readonly ports: AgentSessionRecoveryPorts) {
     this.continuityInputs = new AgentSessionContinuityInputs({ providers: this.ports.providers.providers,
       read: id => this.ports.sessions.registry.get(id),
@@ -270,14 +285,56 @@ export class AgentSessionRecoveryService {
 
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
     run: CtxmuxAdapterRun | null): Promise<AgentMuxStoredAgentSession | null> {
-    return this.lifecycle.completePreparedResume(reservation, run)
+    return this.continuitySupervisor.serialize(reservation.agentSessionId, async () => {
+      const restored = await this.lifecycle.completePreparedResume(reservation, run)
+      if (!restored) return null
+      // Lifecycle commit preserves newer controls/supervision in the Store.
+      // Publish that canonical result, not the older prepared observation.
+      const current = await this.ports.sessions.registry.refresh(restored.agentSessionId, restored.run)
+      this.continuitySupervisor.observe(current, true)
+      return current
+    })
   }
 
   restore(sessions: readonly AgentMuxStoredAgentSession[]): void {
     this.continuityInputs.restore(sessions); this.continuitySupervisor.restore(sessions)
-    for (const session of sessions) this.reconciler.observeInitialInput(session)
+    for (const session of sessions) { this.reconciler.observeInitialInput(session); this.observeCreationFrontend(session) }
   }
-  observe(session: AgentMuxStoredAgentSession, retry = false): void { this.continuitySupervisor.observe(session, retry); this.reconciler.observeInitialInput(session) }
+  observe(session: AgentMuxStoredAgentSession, retry = false): void {
+    this.continuitySupervisor.observe(session, retry); this.reconciler.observeInitialInput(session); this.observeCreationFrontend(session)
+  }
+  private observeCreationFrontend(session: AgentMuxStoredAgentSession): void {
+    const operationId = creationFrontendIntent(session)
+    if (this.lifetime.signal.aborted || !operationId || session.continuityOperations?.[operationId] || this.creationObservations.has(session.agentSessionId)) return
+    this.creationObservations.add(session.agentSessionId)
+    void this.continuitySupervisor.serialize(session.agentSessionId, async () => {
+      if (this.lifetime.signal.aborted) return
+      const original = await this.ports.sessions.store.readMetadata(session.agentSessionId)
+      if (!original || creationFrontendIntent(original) !== operationId || original.continuityOperations?.[operationId]) return
+      const lifecycle = await this.ports.sessions.store.readLifecycleReservation(session.agentSessionId)
+      if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, original.run)) return
+      const run = await this.ports.runtime.kernel.status(original.run.runId)
+      this.ports.runtime.assertAgentRun(original, run, [original])
+      if (run.state.type !== 'running' || original.nativeHandle?.kind !== 'provider') return
+      const observedAt = Date.now(), policy = normalizeAgentContinuityPolicy()
+      const intent: AgentMuxContinuityOperation = { operationId, agentSessionId: original.agentSessionId, trigger: 'creation', policy,
+        previousRun: { ...original.run }, nativeTarget: structuredClone(original.nativeHandle), admittedAt: observedAt, observedAt,
+        rechecks: 0, kind: 'reattachable', reason: 'original-creation', evidence: { kind: 'run-running', observedAt },
+        recoveryInputs: { reminder: '', continuation: '' }, supervision: { phase: 'observing', activeAttemptOperationId: operationId,
+          attemptCount: 1, attemptLimit: 1 + policy.retryMaxAttempts, observedAt, reason: 'original-frontend' } }
+      const current = await this.ports.sessions.updateExactAgentSession(original.agentSessionId, original.run, value => {
+        if (creationFrontendIntent(value) !== operationId || value.continuityOperations?.[operationId] ||
+            !isDeepStrictEqual(value.nativeActor, original.nativeActor) || !matchesProviderNativeSessionTarget(value.nativeHandle, original.nativeHandle)) return value
+        return { ...value, continuity: intent, continuityOperations: { ...value.continuityOperations, [operationId]: intent },
+          updatedAt: Math.max(value.updatedAt + 1, observedAt) }
+      })
+      if (current.continuityOperations?.[operationId]) this.ports.events.publishSession(current)
+    }).catch(error => {
+      if (!this.lifetime.signal.aborted) this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED', message: `Original creation frontend observation is unconfirmed. The Session, backend and input remain available. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', run: session.run, observedAt: Date.now() } })
+    }).finally(() => this.creationObservations.delete(session.agentSessionId))
+  }
   wake(id: string): void { this.continuitySupervisor.wake(id) }
   userInput(id: string, runId: string): Promise<void> { return this.continuityInputs.userInput(id, runId) }
   protocolAccepted(id: string, runId: string, operationId: string, range: {startByte: number; endByte: number}): Promise<void> { return this.continuityInputs.protocolAccepted(id, runId, operationId, range) }

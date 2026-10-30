@@ -21,6 +21,7 @@ type Dependencies = {
 }
 const sameRun = (a: AgentMuxRunRef, b: AgentMuxRunRef) => a.runId === b.runId
 const terminal = (phase: AgentMuxContinuitySupervision['phase']) => ['settled', 'cancelled', 'paused'].includes(phase)
+const reobservableReasons = ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'operation-unconfirmed', 'original-operation-unconfirmed']
 const operationInput = (op: AgentMuxContinuityOperation): AgentMuxAgentContinuityInput => ({ agentSessionId: op.agentSessionId,
   operationId: op.operationId, expectedRun: op.previousRun, trigger: op.trigger, policy: op.policy,
   ...(op.timingOverride ? { timingOverride: op.timingOverride } : {}), ...(op.trigger === 'input' && op.launchInput ? { input: op.launchInput.input } : {}) })
@@ -72,16 +73,40 @@ export class AgentSessionContinuitySupervisor {
 
   /** A fresh automatic observer joins the original current intent, never resets its budget or cancellation. */
   retainedAutomaticIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput, observedRun?: CtxmuxAdapterRun): AgentMuxContinuityOperation | undefined {
-    if (!input.trigger || input.input || ['manual', 'input'].includes(input.trigger) || session.continuityOperations?.[input.operationId] ||
+    const manualFrontend = input.trigger === 'manual' && session.nativeActor?.frontendControl
+    const requested = session.continuityOperations?.[input.operationId]
+    const observer = manualFrontend && requested?.kind === 'pending' && requested.reason === 'recovery-supervised' &&
+      requested.intentOperationId && !requested.supervision && !requested.newRun && !requested.frontendReconnect && !requested.launchInput
+      ? requested : undefined
+    if (!input.trigger || input.input || input.trigger === 'input' || input.trigger === 'manual' && !manualFrontend || requested && !observer ||
       session.hostId !== 'local' || !sameRun(session.run, input.expectedRun)) return
-    const pointer = session.continuity, rootId = pointer?.intentOperationId ?? pointer?.operationId
-    const root = rootId ? session.continuityOperations?.[rootId] : undefined, supervision = root?.supervision
+    const pointer = session.continuity
+    let rootId = observer?.intentOperationId ?? pointer?.intentOperationId ?? pointer?.operationId
+    let root = rootId ? session.continuityOperations?.[rootId] : undefined
+    // A separately authored input may be the latest receipt without replacing
+    // the original frontend owner. It never consumes or resets that owner's budget.
+    if (manualFrontend && !observer && !root?.supervision) {
+      const originals = Object.values(session.continuityOperations ?? {}).filter(operation => {
+        const supervision = operation.supervision, active = supervision && session.continuityOperations?.[supervision.activeAttemptOperationId]
+        return !operation.action && !operation.intentOperationId && supervision &&
+          (!terminal(supervision.phase) || supervision.phase === 'paused' && reobservableReasons.includes(supervision.reason)) &&
+          active && (active.operationId === operation.operationId || active.intentOperationId === operation.operationId) &&
+          sameRun(active.newRun ?? active.previousRun, session.run)
+      })
+      if (originals.length > 1) throw new AgentMuxError('More than one unresolved frontend intent names this Run. Inspect the original operations; existing input remains available.', 'AGENT_CONTINUITY_SUPERSEDED')
+      root = originals[0]; rootId = root?.operationId
+    }
+    const supervision = root?.supervision
     const active = supervision ? session.continuityOperations?.[supervision.activeAttemptOperationId] : undefined
     if (!root || root.operationId !== rootId || root.agentSessionId !== session.agentSessionId || !supervision ||
-      supervision.phase === 'settled' || root.intentOperationId || !active || active.agentSessionId !== session.agentSessionId ||
+      supervision.phase === 'settled' && !observer || root.intentOperationId || !active || active.agentSessionId !== session.agentSessionId ||
       active.operationId !== rootId && active.intentOperationId !== rootId ||
       (active.newRun ? !sameRun(active.newRun, session.run) : !sameRun(active.previousRun, session.run))) return
     if (this.completedRuntimeRestartIntent(session, input, observedRun, root, active)) return
+    // Explicit frontend checks join an unresolved owner; they cannot create a
+    // parallel budget or replace an unknown child action. Closed intents stay history.
+    if (manualFrontend && !observer && (supervision.phase === 'cancelled' || supervision.phase === 'paused' &&
+      !reobservableReasons.includes(supervision.reason))) return
     // Manual policy parked this intent before any recovery action was admitted.
     // A fresh startup may apply its newly authored automatic policy without
     // resetting a started, cancelled, or otherwise unresolved original action.
@@ -127,9 +152,11 @@ export class AgentSessionContinuitySupervisor {
 
   observe(session: AgentMuxStoredAgentSession, retryObservation = false): void {
     if (this.disposed) return
-    const roots = Object.values(session.continuityOperations ?? {}).filter(op => !op.action && op.supervision &&
-      (!terminal(op.supervision.phase) || retryObservation && op.supervision.phase === 'paused' &&
-        ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'original-operation-unconfirmed'].includes(op.supervision.reason)))
+    const roots = Object.values(session.continuityOperations ?? {}).filter(op => {
+      const active = op.supervision && session.continuityOperations?.[op.supervision.activeAttemptOperationId]
+      return !op.action && op.supervision && active && (active.operationId === op.operationId || active.intentOperationId === op.operationId) &&
+        (!terminal(op.supervision.phase) || retryObservation && op.supervision.phase === 'paused' && reobservableReasons.includes(op.supervision.reason))
+    })
     const live = new Set(roots.map(op => op.operationId))
     for (const rootId of this.roots.get(session.agentSessionId) ?? []) if (!live.has(rootId)) this.clearTimer(session.agentSessionId, rootId)
     if (!roots.length) { this.release(session.agentSessionId); return }
@@ -255,22 +282,28 @@ export class AgentSessionContinuitySupervisor {
       !matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) || !matchesProviderNativeSessionTarget(active.nativeTarget, session.nativeHandle)) return await settle('paused', 'original-target-changed')
     // A failed lifecycle read is not evidence that Stop is absent.
     const lifecycle = await this.deps.lifecycle(id)
-    const activeRun = active.newRun ?? (active.frontendReconnect ? active.previousRun : undefined)
+    const activeRun = active.newRun ?? (active.frontendReconnect || active.kind === 'reattachable' ? active.previousRun : undefined)
     if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, session.run) && activeRun &&
       sameRun(activeRun, session.run)) return await settle('cancelled', 'user-stop')
     const cancellation = supervision.cancellation
     if (cancellation && activeRun && sameRun(cancellation.run, activeRun) &&
       sameRun(cancellation.run, session.run) && matchesProviderNativeSessionTarget(root.nativeTarget, cancellation.nativeTarget) && matchesProviderNativeSessionTarget(cancellation.nativeTarget, session.nativeHandle)) return await settle('cancelled', 'explicit-cancellation')
-    if (!activeRun || !sameRun(activeRun, session.run) || active.frontendReconnect && active.kind === 'pending') {
+    const sameRunFrontend = !root.newRun && sameRun(root.previousRun, session.run) &&
+      (root.kind === 'reattachable' || root.frontendReconnect && !root.initializationRecovery)
+    const pendingFrontendOnly = sameRunFrontend &&
+      active.frontendReconnect && active.kind === 'pending' && activeRun && sameRun(activeRun, session.run)
+    const continueOriginalOperation = async () => {
+      if (active.kind === 'pending' && active.nextActionAt === undefined && active.rechecks >= root.policy.recheckMaxAttempts) return await settle('paused', 'original-operation-unconfirmed')
+      if (active.nextActionAt !== undefined && active.nextActionAt > Date.now()) {
+        this.at(id, rootId, active.nextActionAt, () => this.wake(id)); return
+      }
+      await this.deps.perform(operationInput(active), active.intentOperationId)
+    }
+    if (!activeRun || !sameRun(activeRun, session.run) || active.frontendReconnect && active.kind === 'pending' && !pendingFrontendOnly) {
       if (!sameRun(active.previousRun, session.run)) return await settle('paused', 'current-run-changed')
       // Prepared/unknown Start is the same original action. Its own re-entry never starts again.
       if (active.kind === 'starting' || active.reason === 'operation-unconfirmed' || active.kind === 'pending') {
-        if (active.kind === 'pending' && active.nextActionAt === undefined && active.rechecks >= root.policy.recheckMaxAttempts) return await settle('paused', 'original-operation-unconfirmed')
-        if (active.nextActionAt !== undefined && active.nextActionAt > Date.now()) {
-          this.at(id, rootId, active.nextActionAt, () => this.wake(id)); return
-        }
-        await this.deps.perform(operationInput(active), active.intentOperationId)
-        return
+        return await continueOriginalOperation()
       }
       return await settle('paused', 'original-start-unconfirmed')
     }
@@ -299,6 +332,9 @@ export class AgentSessionContinuitySupervisor {
     const process = { run: { ...session.run }, state: run.state.type, observedAt: Date.now(),
       ...(run.state.type === 'exited' ? { exitCode: run.state.code, exitSignal: run.state.signal } : {}) }
     if (run.state.type === 'running') {
+      // Reconcile this exact pending frontend only while its original backend
+      // is alive; an ended frontend-only Run cannot turn into an automatic Start.
+      if (pendingFrontendOnly) return await continueOriginalOperation()
       const frontend = await this.deps.frontend?.(session)
       const exactFrontend = frontend && sameRun(frontend.run, session.run) ? frontend : undefined
       const failedFrontend = exactFrontend?.state === 'detached' && exactFrontend.backendState === 'running' &&
@@ -349,6 +385,9 @@ export class AgentSessionContinuitySupervisor {
       }
       return
     }
+    // A same-Run frontend observation admits no replacement backend. Existing
+    // native-resume roots retain their separately authorized lifecycle policy.
+    if (sameRunFrontend) return await settle('settled', 'frontend-backend-ended', process)
     if (run.state.type !== 'exited' || typeof run.state.code !== 'number' || run.state.signal !== null) return await settle('paused', 'exit-outcome-unverified', process)
     if (run.state.code === 0) return await settle('settled', 'normal-exit', process)
     if (!root.policy.resumeAfterExit) return await settle('paused', 'resume-disabled', process)

@@ -136,10 +136,33 @@ export async function performAgentContinuity(
     }
   }
   if (current && retained) {
-    if (retained.initializationRecovery || current.nativeActor?.initializationControl) return await performAgentContinuity(context, { agentSessionId: input.agentSessionId,
+    if (input.trigger === 'manual') {
+      const rootId = retained.intentOperationId ?? retained.operationId
+      if (!current.continuityOperations?.[input.operationId]) {
+        const observedAt = Date.now()
+        current = await ports.sessions.updateExactAgentSession(current.agentSessionId, current.run, value => {
+          if (value.continuityOperations?.[input.operationId]) return value
+          const root = value.continuityOperations?.[rootId]
+          if (!root?.supervision) throw new AgentMuxError('The original frontend recovery owner changed.', 'AGENT_CONTINUITY_SUPERSEDED')
+          const observer: AgentMuxContinuityOperation = { operationId: input.operationId, agentSessionId: input.agentSessionId,
+            trigger: input.trigger!, policy: structuredClone(root.policy), intentOperationId: rootId, previousRun: { ...input.expectedRun },
+            ...(root.nativeTarget ? { nativeTarget: structuredClone(root.nativeTarget) } : {}), admittedAt: observedAt, observedAt,
+            rechecks: 0, kind: 'pending', reason: 'recovery-supervised', evidence: structuredClone(retained.evidence) }
+          return { ...value, continuity: observer, continuityOperations: { ...value.continuityOperations, [input.operationId]: observer }, updatedAt: Math.max(value.updatedAt + 1, observedAt) }
+        })
+        ports.events.publishSession(current)
+      }
+      const phase = current.continuityOperations?.[rootId]?.supervision?.phase
+      if (phase === 'cancelled' || phase === 'settled') return { kind: 'pending', agentSessionId: input.agentSessionId,
+        previousRun: { ...input.expectedRun }, reason: phase === 'cancelled' ? 'intent-cancelled' : 'recovery-supervised',
+        evidence: retained.evidence as import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence,
+        continuity: structuredClone(current.continuityOperations![input.operationId]!) }
+    }
+    if ((input.trigger !== 'manual' || retained.kind === 'pending' || retained.kind === 'starting') &&
+        (retained.initializationRecovery || current.nativeActor?.initializationControl)) return await performAgentContinuity(context, { agentSessionId: input.agentSessionId,
       expectedRun: { ...input.expectedRun }, operationId: retained.operationId, trigger: retained.trigger, policy: retained.policy,
       ...(retained.timingOverride ? { timingOverride: retained.timingOverride } : {}) }, retained.intentOperationId)
-    supervisor.observe(current)
+    supervisor.observe(current, true)
     let run: AgentMuxRun | null = null
     let evidence: import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
     try {
@@ -259,7 +282,17 @@ export async function performAgentContinuity(
       receipt.supervision = { phase: result.nextActionAt === undefined ? 'paused' : 'observing', activeAttemptOperationId: receipt.operationId,
         attemptCount: 0, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: result.reason }
     }
-    if (result.kind === 'reattachable' && receipt.supervision?.attemptCount === 0) {
+    if (result.kind === 'reattachable' && current?.nativeActor?.frontendControl && current.nativeHandle?.kind === 'provider') {
+      receipt.nativeTarget ??= structuredClone(current.nativeHandle)
+    }
+    const frontendObservation = result.kind === 'reattachable' && receipt.trigger !== 'input' && current?.nativeActor?.frontendControl &&
+      current.nativeHandle?.kind === 'provider' && matchesProviderNativeSessionTarget(receipt.nativeTarget, current.nativeHandle)
+    if (frontendObservation && !receipt.intentOperationId && (!receipt.supervision || receipt.supervision.attemptCount === 0)) {
+      receipt.supervision = { ...receipt.supervision, phase: 'observing', activeAttemptOperationId: receipt.operationId,
+        attemptCount: 1, attemptLimit: receipt.supervision?.attemptLimit ?? 1 + policy.retryMaxAttempts,
+        observedAt: now, reason: 'original-frontend' }
+      delete receipt.supervision.nextAttemptAt
+    } else if (result.kind === 'reattachable' && receipt.supervision?.attemptCount === 0) {
       receipt.supervision = { ...receipt.supervision, phase: 'settled', reason: 'original-run-reattached', observedAt: now }
       delete receipt.supervision.nextAttemptAt
     }
@@ -274,15 +307,20 @@ export async function performAgentContinuity(
           // lifecycle-busy result. The durable original operation remains the reconciliation owner.
           if (latest?.supervision && ((latest.kind === 'starting' && result.kind === 'conflict') ||
               latest.newRun && sameRun(latest.newRun, value.run) && !receipt.newRun)) return value
+          const supervision = frontendObservation && latest?.supervision?.attemptCount === 0 &&
+            !['cancelled', 'settled'].includes(latest.supervision.phase)
+            ? { ...latest.supervision, phase: 'observing' as const, activeAttemptOperationId: receipt.operationId,
+              attemptCount: 1, observedAt: now, reason: 'original-frontend' }
+            : latest?.supervision ?? receipt.supervision
           return { ...retainExecutor(value),
           continuity: { ...structuredClone(receipt), ...resumedFacts(value), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
             ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
             ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
-            ...(value.continuityOperations?.[receipt.operationId]?.supervision ? { supervision: value.continuityOperations[receipt.operationId]!.supervision! } : {}) },
+            ...(supervision ? { supervision } : {}) },
           continuityOperations: { ...value.continuityOperations, [receipt.operationId]: { ...structuredClone(receipt), ...resumedFacts(value),
             ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
             ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
-            ...(value.continuityOperations?.[receipt.operationId]?.supervision ? { supervision: value.continuityOperations[receipt.operationId]!.supervision! } : {}) } } }
+            ...(supervision ? { supervision } : {}) } } }
         })
         ports.events.publishSession(current)
       } catch (error) {
@@ -526,8 +564,8 @@ export async function performAgentContinuity(
         current = await ports.input.continueInitialInput(dispatch, runtime, () => reconciler.assertRecoveryInputCurrent(dispatch, receipt.operationId))
         for (const operation of Object.values(current.continuityOperations ?? {})) if (operation.launchInput?.key?.expectedRun.runId === current.run.runId &&
           operation.launchInput.delivery === 'post-launch') current = await reconciler.settleContinuityPostLaunchInput(current, operation.operationId)
-        if (next.state === 'attached') {
-          current = await reconciler.acceptRecoveredFrontend(current, runtime, next, receipt.initializationRecovery.outputAfterByte)
+        if (next.state === 'attached' || receipt.supervision?.attemptCount === 0) {
+          if (next.state === 'attached') current = await reconciler.acceptRecoveredFrontend(current, runtime, next, receipt.initializationRecovery.outputAfterByte)
           delete receipt.error; delete receipt.errorCode
           return record({ ...decision, session: ports.events.projectSession(current) }, 'initialization-ready')
         }
@@ -565,7 +603,7 @@ export async function performAgentContinuity(
         if (!receipt.frontendReconnect) receipt.nativeTarget = structuredClone(target)
         else if (!matchesProviderNativeSessionTarget(receipt.nativeTarget, target)) throw new AgentMuxError(
           'The original frontend recovery native target changed. Its original operation and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
-        if (automaticFrontend && !receipt.supervision && !receipt.intentOperationId) receipt.supervision = {
+        if ((automaticFrontend || receipt.trigger === 'manual') && !receipt.supervision && !receipt.intentOperationId) receipt.supervision = {
           phase: 'observing', activeAttemptOperationId: receipt.operationId, attemptCount: 1,
           attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'frontend-reconnect-pending' }
         receipt.frontendReconnect ??= { previousFrontendId: frontend!.frontendId, outputAfterByte: run.latestOutputBytes }
@@ -616,6 +654,13 @@ export async function performAgentContinuity(
     throw error
   }
   receipt.kind = 'starting'; receipt.reason = admission?.kind === 'resume' ? admission.reason : 'explicit-request'; receipt.evidence = evidence
+  // An explicit re-entry may continue its own unfinished manual request after
+  // that request's backend ended. A paused observation is not cancellation or
+  // a new budget; the Store still fences the original Start and exact target.
+  if (input.trigger === 'manual' && receipt.trigger === 'manual' && !receipt.intentOperationId &&
+      receipt.supervision?.phase === 'paused' && !receipt.supervision.cancellation) {
+    receipt.supervision = { ...receipt.supervision, phase: 'observing', reason: 'start-pending', observedAt: now }
+  }
   if (!receipt.intentOperationId && !['manual', 'input'].includes(receipt.trigger) && (!receipt.supervision || receipt.supervision.attemptCount === 0)) receipt.supervision = {
     ...receipt.supervision, phase: 'observing', activeAttemptOperationId: receipt.operationId, attemptCount: 1,
     attemptLimit: receipt.supervision?.attemptLimit ?? Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
