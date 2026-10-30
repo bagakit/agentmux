@@ -103,6 +103,42 @@ to original records, not another chat log or task-status store.
 <!-- amux:generated command:space.mote.dialogue.read -->
 <!-- amux:generated command:space.mote.dialogue.link -->
 
+<!-- amux:generated command:space.mote.dialogue.setup.inspect -->
+<!-- amux:generated command:space.mote.dialogue.setup.advance -->
+
+Main setup follows one original `agent.open` admission. Freeze its complete Mote `target`
+and `creation:{hostId,operationId}`; that Host is the original spatial admission owner,
+independent from the MOTE resource Host and the created Agent execution Host. Inspect is
+read-only. Explicit human/device advance claims only unstarted original source and CAS
+follow-ups. It never creates, restores, stops or inputs an Agent, and accepts no client
+File receipt. Unknown steps keep their original operation IDs and remain inspect-only.
+Creation, old-source association and binding have separate results; native File receipts
+and observed original writer roles are separate evidence. Preference observations carry
+only the actual read summary; source observations carry only their original bind key,
+role, complete reference and file revision, without inventing a preferences snapshot. An ordinary preferences save
+can settle only the matching original bind operation, target, baseline, role and occurrence.
+After a cross-owner save, explicitly advance that original setup to reconcile its writer
+role or exact source journal; inspecting alone does not mutate the admission. Read the
+original `space.state` graph to discover a pending initial creation across clients.
+
+<!-- amux:generated command:space.mote.dialogue.recovery.ensure -->
+<!-- amux:generated command:space.mote.dialogue.recovery.inspect -->
+
+An explicit human/device open of Discussion may restore its exact current Main without
+an input. Freeze `target`, `expectedRoleRevision`, the complete `reference`, `expectedRun`
+and `operationId`. A new explicit open uses a new operation ID; the same open and its
+remount retain that ID. First inspect it; only a confirmed absent receipt may be ensured.
+Inspection may discover an original unresolved operation only for the same Session, Run,
+Mote target and complete reference. Retain its returned operation ID and frozen source,
+including an earlier role generation, instead of starting another operation. An unresolved
+operation from another Mote or producer returns a conflict; keep both original identities,
+and never retarget this view or admit a replacement Start. A historical
+completed attachment does not establish that its Run is still alive. The original MOTE owner qualifies the role on the resource Host; the
+reference Host executes original Session continuity. A later role switch cannot redirect
+an admitted operation. Paused, stopped, cancelled, retired and unknown operations remain
+protected. Reading history, hover, hidden mounting, refresh and Threads grant no entry
+intent. Existing conversation records and drafts remain usable while the CLI is offline.
+
 <!-- amux:generated command:space.mote.dialogue.input.submit -->
 <!-- amux:generated command:space.mote.dialogue.input.inspect -->
 
