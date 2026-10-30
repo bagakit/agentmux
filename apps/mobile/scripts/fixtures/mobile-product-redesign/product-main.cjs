@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  await win.loadFile(html)
+  await win.loadFile(html, mode === 'mote-notice-join' ? { query: { 'mote-notice-join': '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -25,11 +25,11 @@ app.whenReady().then(async () => {
   const until = async code => { for (let i = 0; i < 150; i++) { if (await read(`(()=>{try{return Boolean(${code})}catch{return false}})()`)) return; await pause(30) }; throw Error('Renderer condition unavailable: ' + code) }
   const visible = selector => read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return !!n?.getClientRects().length && n.getBoundingClientRect().height>0})()`)
   const resize = async (width, height) => { win.setContentSize(width, height); await until(`innerWidth===${width}&&innerHeight===${height}&&Math.round(document.querySelector('.mobile-app').getBoundingClientRect().height)===${height}`) }
-  const tap = async (selector, label = selector) => {
-    await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'})`)
+  const tap = async (selector, label = selector, { scroll = true } = {}) => {
+    if (scroll) await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'})`)
     await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n?.getClientRects().length)return false;const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===n||n.contains(hit)})()`)
-    const observed = await read(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(n=>n.getClientRects().length);if(nodes.length!==1)throw Error('Actual visible control must be unique: '+${JSON.stringify(selector)}+' ('+nodes.length+')');const n=nodes[0];n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(hit!==n&&!n.contains(hit))throw Error('Actual touch target is covered: '+${JSON.stringify(label)});window.mobileTapFacts={clicked:false,events:[]};window.mobileTapTarget=n;if(!window.mobileTapRecorder){window.mobileTapRecorder=true;for(const type of ['touchstart','touchend','click'])document.addEventListener(type,event=>{if(window.mobileTapTarget===event.target||window.mobileTapTarget?.contains(event.target)){window.mobileTapFacts.events.push({type,observedAt:performance.now()});if(type==='click')window.mobileTapFacts.clicked=true}},{capture:true})}return {x,y,label:n.getAttribute('aria-label')||n.textContent,tag:n.tagName,rect:r.toJSON(),disabled:!!n.disabled}})()`)
+    const observed = await read(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(n=>n.getClientRects().length);if(nodes.length!==1)throw Error('Actual visible control must be unique: '+${JSON.stringify(selector)}+' ('+nodes.length+')');const n=nodes[0];if(${JSON.stringify(scroll)})n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(hit!==n&&!n.contains(hit))throw Error('Actual touch target is covered: '+${JSON.stringify(label)});window.mobileTapFacts={clicked:false,events:[]};window.mobileTapTarget=n;if(!window.mobileTapRecorder){window.mobileTapRecorder=true;for(const type of ['touchstart','touchend','click'])document.addEventListener(type,event=>{if(window.mobileTapTarget===event.target||window.mobileTapTarget?.contains(event.target)){window.mobileTapFacts.events.push({type,observedAt:performance.now()});if(type==='click')window.mobileTapFacts.clicked=true}},{capture:true})}return {x,y,label:n.getAttribute('aria-label')||n.textContent,tag:n.tagName,rect:r.toJSON(),disabled:!!n.disabled}})()`)
     assert.equal(observed.disabled, false, 'Selected actual control is enabled')
     result.operations.push({ action: 'touch', target: label, observed })
     await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: observed.x, y: observed.y, radiusX: 1, radiusY: 1, force: 1, id: 1 }] })
@@ -71,6 +71,10 @@ app.whenReady().then(async () => {
   }
   if (mode === 'creation-recovery') {
     await require('./creation-recovery.cjs')({ read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'mote-notice-join') {
+    await require('./mote-notice-join.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return
   }
   if (mode === 'mote-host-boundaries') {

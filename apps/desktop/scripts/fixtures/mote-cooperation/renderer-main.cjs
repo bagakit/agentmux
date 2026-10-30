@@ -57,7 +57,18 @@ app.whenReady().then(async () => {
     await click('js:' + panel + '.querySelector(".conversation-mote-notice__records > summary")')
     await until('document.querySelector(".conversation-mote-notice__records")?.open', 'Full original result references remain available')
     await read("document.querySelector('[data-pmo-teams-topic-floating]:popover-open .conversation-mote-notice__records').scrollIntoView({block:'start'})")
+    if (process.argv.includes('--notice-only')) {
+      const viewport = await read(`(()=>{let n=document.querySelector('[data-pmo-teams-topic-floating]:popover-open .conversation-mote-notice__records');while(n&&!(n.scrollHeight>n.clientHeight+1&&['auto','scroll'].includes(getComputedStyle(n).overflowY)))n=n.parentElement;if(!n)throw Error('Original reading viewport unavailable');const r=n.getBoundingClientRect();window.noticeToolViewport=n;window.noticeToolWheels=[];n.addEventListener('wheel',event=>window.noticeToolWheels.push({trusted:event.isTrusted,deltaY:event.deltaY}));return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+      if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: viewport.x, y: viewport.y, deltaX: 0, deltaY: -80 })
+      await until(`(()=>{const tools=document.querySelector('[data-pmo-teams-topic-floating]:popover-open .conversation-mote-notice__records .conversation-detail-actions'),r=tools.getBoundingClientRect(),v=window.noticeToolViewport.getBoundingClientRect();return r.top>=v.top&&r.bottom<=v.bottom&&window.noticeToolWheels.some(e=>e.trusted)})()`, 'Original tool row is visible after a genuine reading scroll')
+      result.interactions.push({ kind: 'native-reading-wheel', events: await read('window.noticeToolWheels') })
+    }
     await capture('01c-complete-result-references-wide-dark')
+    if (process.argv.includes('--notice-only')) {
+      result.noticeTools = await read(`(()=>{const n=document.querySelector('[data-pmo-teams-topic-floating]:popover-open .conversation-mote-notice__records'),v=window.noticeToolViewport.getBoundingClientRect();return {viewport:v.toJSON(),tools:[...n.querySelectorAll('button')].map(b=>({text:b.textContent,rect:b.getBoundingClientRect().toJSON()})),originalReferences:n.querySelector('pre').textContent}})()`)
+      result.final = await facts(); result.passed = true; return
+    }
     await read("document.querySelector('[data-pmo-teams-topic-floating]:popover-open .conversation-mote-notice__original > summary').scrollIntoView({block:'center'})")
     await click('js:' + panel + '.querySelector(".conversation-mote-notice__original > summary")')
     await click('js:' + cooperation + '.querySelector("[aria-label=\\"Team work\\"]")')

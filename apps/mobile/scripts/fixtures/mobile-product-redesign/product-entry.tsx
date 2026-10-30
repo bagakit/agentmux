@@ -7,6 +7,7 @@ import { useState } from 'react'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
 import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/session-history'
+import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test/fixtures/mote-notice'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 import { MobileApp } from '../../../src/MobileApp'
@@ -29,6 +30,10 @@ waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-origi
   permissionHook: { receiptId: 'request-original' },
   options: [{ id: 'allow-original', label: '允许本次读取', kind: 'allow-once' }, { id: 'deny-original', label: '拒绝本次读取', kind: 'reject-once' }] } }
 const sessions = [main, waiting, result]
+const joinedNotice = new URLSearchParams(location.search).get('mote-notice-join') === '1' ? moteNoticeCaptureFixture({
+  recipient: main.agentSessionId, member: waiting.agentSessionId,
+  source: { spaceId: 'mote-original', zoneId: 'zone-mote', tabId: 'tab-mote', regionId: 'region-waiting' }
+}) : null
 const category = { categoryId: 'category-original', title: '产品与研究', hostId: 'host-original', spaceId: 'category-space', directoryPath: fixturePath('category'), revision: 'category-revision' }
 const topic = { topicId: 'topic-original', title: '让小实验更容易开始', summary: '保留依据，把讨论变成可以验证的一步。', hostId: 'host-original', zoneId: 'zone-other', directoryPath: fixturePath('other'), categorySpaceIds: ['category-space'], chatIds: ['tab-result'], spatialRevision: 1 }
 const knowledge = { topicId: topic.topicId, entryId: '11111111-1111-4111-8111-111111111111', title: '第一周的实验依据', content: '# 从一个小实验开始\n\n先验证最不确定的假设，再扩大范围。\n\n- 保留原始材料和反例。\n- 用一次实际观察决定下一步。', form: 'reference', certainty: 'fact', revision: 'sha256:' + 'd'.repeat(64), updatedAt: 1,
@@ -154,24 +159,30 @@ const client = {
       kind: 'user-message', userMessages: messages, scan: { examined: input.cursor ? 32 : 200, complete: nextCursor === null },
       ...(input.source === 'native' ? { nativeSource: { providerId: 'codex', nativeSessionId: 'native-' + input.agentSessionId } } : {}) }
   },
-  sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); return { agentSessionId: id, revision: 1, items: [] } },
+  sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); return { agentSessionId: id, revision: joinedNotice && id === main.agentSessionId ? 2 : 1, items: joinedNotice && id === main.agentSessionId ? [joinedNotice.item] : [] } },
+  inspectMoteInput: async (input: Parameters<AgentMuxHostedClient['inspectMoteInput']>[0]) => {
+    record('sdk.inspectMoteInput', input)
+    if (!joinedNotice || input.agentSessionId !== waiting.agentSessionId || input.observationId !== joinedNotice.observation.id) throw Error('Wrong original member observation read')
+    return structuredClone(joinedNotice.inspection)
+  },
   observeSessionHistory: async (id: string) => { record('sdk.observeSessionHistory', { id }); return { source: { providerId: 'codex', nativeSessionId: `native-${id}` }, dispose() { record('sdk.releaseHistory', { id }) } } },
   readAgentConversation: async (input: Parameters<AgentMuxHostedClient['readAgentConversation']>[0]) => {
     const sourceHostId = sessions.find(session => session.agentSessionId === input.agentSessionId)?.hostId ?? 'host-original'
+    if (joinedNotice) record('sdk.noticeFrameIdentity', { routeHostId: input.hostId, sourceHostId, recipientAgentSessionId: input.agentSessionId })
     const rawHistory = await client.sessionHistoryPage(input.agentSessionId)
     const historyPage = densityScene ? { ...rawHistory, ...normalizeSessionHistoryPage(rawHistory.source, rawHistory, 100) } : rawHistory
     const captured = await client.sessionTimeline(input.agentSessionId)
     const timeline = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: sourceHostId,
       historyPage: { ...historyPage, sourceHostId }, timeline: { ...captured, sourceHostId,
-        stream: { epoch: 'original-mobile-stream', sequence: captured.items.length, revision: 1, origin: 'beginning', gaps: [], positions: [] } } })
+        stream: { epoch: 'original-mobile-stream', sequence: captured.items.length, revision: captured.revision, origin: 'beginning', gaps: [], positions: captured.items.map((item, index) => ({ id: item.id, firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) } } })
     const reference = { hostId: input.hostId, agentSessionId: input.agentSessionId }
     const checkpoint = { ...reference, sourceHostId, frontier: { ...reference, scope: timeline.scope, cuts: [] } }
     return { ...reference, sourceHostId, scope: timeline.scope, coverage: timeline.coverage,
       order: { ...timeline.order, direction: 'newest-first' }, budgetBytes: input.maxBytes ?? 128 * 1024, nextCursor: null,
       items: [...timeline.events].reverse().map(event => ({ kind: 'item', item: { event,
         records: timeline.records.filter(recordEntry => event.recordIds.includes(recordEntry.id)) } })),
-      window: { id: 'original-mobile-window', revision: 1, itemCount: timeline.events.length, complete: true,
-        view: 'original-mobile-view', replay: 'original-mobile-replay-1', checkpoint,
+      window: { id: 'original-mobile-window', revision: captured.revision, itemCount: timeline.events.length, complete: true,
+        view: 'original-mobile-view', replay: 'original-mobile-replay-' + captured.revision, checkpoint,
         outside: { older: null, newer: null }, navigation: { older: null, newer: null } } } satisfies AgentConversationReadPage
   },
   readConversationChanges: async (input: Parameters<AgentMuxHostedClient['readConversationChanges']>[0]) => ({ ...await client.readAgentConversation(input), checkpoint: input.checkpoint, more: false }),
@@ -268,7 +279,7 @@ if (!localStorage.getItem('mobile-product-fixture-initialized')) {
 }
 const browserPlatform = createBrowserPlatform()
 const platform = { ...browserPlatform, copyText: async (text: string, reportError: (error: unknown) => void) => {
-  if (!agentMenuScene) return browserPlatform.copyText(text, reportError)
+  if (!agentMenuScene && !joinedNotice) return browserPlatform.copyText(text, reportError)
   record('fixture.copy', { text })
   if (copyFails) { reportError(new Error('原复制回执未确认，原正文保留，可直接重试。')); return false }
   copiedTexts.push(text)
@@ -420,7 +431,7 @@ function Scene() {
     appearanceReady: () => Boolean(appearanceSubscriber),
     facts: () => ({ calls, record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
-      menuAgentName, expectedReply: ordinaryReply, copiedTexts, controlledCopy: agentMenuScene, controlledSdk: true, physicalPhone: false,
+      menuAgentName, expectedReply: ordinaryReply, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
   const app = <MobileApp key={densityMount} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />

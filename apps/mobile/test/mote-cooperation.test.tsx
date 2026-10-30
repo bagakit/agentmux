@@ -2,6 +2,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { MobileApp } from '../src/MobileApp'
+import { moteNoticeCaptureFixture } from '../../../packages/client-ui/test/fixtures/mote-notice'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, mount, mounted, paste, session, waitForElement } from './conversation-fixture'
@@ -228,4 +229,50 @@ it('unknown execution Hosts retain independent original Regions and never borrow
   await click(button(document.body, '关闭面板'))
   expect(editor(f.view.element).textContent).toBe('Host 未知仍保留原主稿'); expect(button(f.view.element, 'Send').disabled).toBe(false)
   expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled(); expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
+})
+
+it('actual App names a qualified member notice through its original reader namespace and retains SID when the execution Host differs', async () => {
+  const f = await setup(), notice = moteNoticeCaptureFixture({ recipient: sid, member: memberId,
+    source: { spaceId, zoneId: 'original-zone', tabId: 'original-tab', regionId: 'member-region' } })
+  const inspect = vi.fn().mockResolvedValue(notice.inspection)
+  f.client.inspectMoteInput = inspect
+  f.setTimeline({ agentSessionId: sid, revision: 2, items: [notice.item] })
+  await act(async () => f.emit({ type: 'agent-timeline', agentSessionId: sid, revision: 2 } as any))
+  const label = await waitForElement(f.view.element, '.conversation-mote-notice__member')
+  expect(label.textContent).toBe('资料研究员')
+  expect(inspect).not.toHaveBeenCalled()
+  const reference = f.view.element.querySelector('[data-conversation-item-ref]')!.getAttribute('data-conversation-item-ref')!
+  expect(reference).toContain('host-original')
+  const details = f.view.element.querySelector<HTMLDetailsElement>('.conversation-mote-notice__original')!
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  await vi.waitFor(() => expect(f.view.element.querySelector('.conversation-mote-notice blockquote')?.textContent).toBe(notice.inspection.inputText))
+  expect(inspect).toHaveBeenCalledExactlyOnceWith({ agentSessionId: memberId, observationId: notice.observation.id })
+  await paste(f.view.element, '联合回流保留原主稿')
+  await act(async () => f.emit({ type: 'agent-session', session: { ...f.sessions.get(memberId)!, hostId: 'foreign-host' } }))
+  await vi.waitFor(() => expect(f.view.element.querySelector('.conversation-mote-notice__member')?.textContent).toBe(memberId))
+  expect(inspect).toHaveBeenCalledOnce(); expect(editor(f.view.element).textContent).toBe('联合回流保留原主稿')
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+})
+
+
+it('actual App retained notice never borrows a new connection name or inspection owner', async () => {
+  const f = await setup(), notice = moteNoticeCaptureFixture({ recipient: sid, member: memberId,
+    source: { spaceId, zoneId: 'original-zone', tabId: 'original-tab', regionId: 'member-region' } })
+  const originalRead = deferred<typeof notice.inspection>(), inspect = vi.fn().mockReturnValue(originalRead.promise)
+  f.client.inspectMoteInput = inspect
+  f.setTimeline({ agentSessionId: sid, revision: 2, items: [notice.item] })
+  await act(async () => f.emit({ type: 'agent-timeline', agentSessionId: sid, revision: 2 } as any))
+  await waitForElement(f.view.element, '.conversation-mote-notice__member')
+  const details = f.view.element.querySelector<HTMLDetailsElement>('.conversation-mote-notice__original')!
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  await vi.waitFor(() => expect(inspect).toHaveBeenCalledOnce())
+  const next = fixture(), nextInspect = vi.fn(), nextRead = deferred<any>()
+  next.client.forwardRpc = f.rpc; next.client.inspectMoteInput = nextInspect
+  next.client.readAgentConversation = vi.fn().mockReturnValue(nextRead.promise)
+  await f.view.render(<MobileApp client={next.client} connection={connected} platform={platform} />)
+  await act(async () => originalRead.resolve(notice.inspection))
+  await vi.waitFor(() => expect(f.view.element.querySelector('.conversation-mote-notice__member')?.textContent).toBe(memberId))
+  expect(inspect).toHaveBeenCalledExactlyOnceWith({ agentSessionId: memberId, observationId: notice.observation.id })
+  expect(nextInspect).not.toHaveBeenCalled(); expect(next.submit).not.toHaveBeenCalled(); expect(next.respond).not.toHaveBeenCalled()
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
 })
