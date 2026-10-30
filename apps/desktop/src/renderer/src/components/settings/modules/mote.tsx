@@ -6,11 +6,11 @@ import { useAppStore } from '../../../store'
 import { MoteDirectorySettingsPane, moteDirectoryViewLabel, type MoteDirectoryDisplay } from '../MoteDirectorySettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const MoteIcon = semanticIconComponent('object.mote')
+const ClubIcon = semanticIconComponent('object.club')
 
 
 export const moteSettingsModule = {
-  id: 'mote', group: 'mote', title: 'Club', icon: MoteIcon,
+  id: 'mote', group: 'mote', title: 'Club', icon: ClubIcon,
   description: 'Directory view and your collaborators’ profiles.',
   keywords: 'mote club collaborator collaborators profile roles soul avatar directory list view size',
   savedSummary: config => `${moteDirectoryViewLabel(config.moteDirectoryView)} · ${config.moteDirectoryAvatarSize ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT}px · Profiles and SOUL`,

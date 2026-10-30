@@ -390,6 +390,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'action.preview': { label: 'View preview', glyph: 'eye' },
   'object.marker': { label: 'Marker', glyph: 'flag' },
   'object.mote': { label: 'Mote', glyph: 'mote-companion' },
+  'object.club': { label: 'Club directory', glyph: 'users' },
   'avatar.badge-spark': { label: 'Spark decoration badge', glyph: 'badge-token' },
   'avatar.badge-bolt': { label: 'Bolt badge', glyph: 'bolt' },
   'avatar.badge-shield': { label: 'Shield badge', glyph: 'shield' },
