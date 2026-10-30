@@ -122,6 +122,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const info = JSON.parse((await command('/usr/bin/plutil', ['-convert', 'json', '-o', '-', join(app, 'Contents/Info.plist')])).stdout)
     assert.ok(info.CFBundleURLTypes.some(type => type.CFBundleURLSchemes.includes('amux')), 'Original amux registration is retained')
     assert.ok(info.CFBundleURLTypes.some(type => type.CFBundleTypeRole === 'Viewer' && ['http', 'https'].every(scheme => type.CFBundleURLSchemes.includes(scheme))), 'Both web schemes must be declared by the actual package')
+    for (const type of ['public.html', 'public.xhtml']) assert.ok(info.CFBundleDocumentTypes?.some(row => row.CFBundleTypeRole === 'Viewer' && row.LSItemContentTypes?.includes(type)), 'The actual package must declare ' + type + ' viewing')
     receipt.artifacts = Object.fromEntries(await Promise.all(['Contents/Info.plist', 'Contents/Resources/app/package-identity.json', 'Contents/Resources/app/out/main/index.js', 'Contents/Resources/app/out/preload/index.cjs'].map(async file => [file, hash(await readFile(join(app, file)))])))
     receipt.handlersBefore = await systemHandlers()
     assert.ok(receipt.handlersBefore.every(item => item.handlerBundleId !== info.CFBundleIdentifier || resolve(item.handler) === app), 'Another copy of this bundle is already the current default. Do not register a competing private copy or change the original handler route.')
@@ -357,9 +358,10 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     }
     const eligible = await systemHandlers()
     receipt.eligibility = eligible
+    receipt.eligibilityBoundary = 'URL handler candidate membership only; this does not prove the System Settings default-browser menu.'
     for (const protocol of eligible) assert.ok(protocol.candidates.some(candidate => resolve(candidate.path) === app && candidate.bundleId === info.CFBundleIdentifier), 'Exact production App must be an eligible ' + new URL(protocol.url).protocol + ' application')
     assert.deepEqual(eligible.map(item => item.handler), receipt.handlersBefore.map(item => item.handler), 'The original OS default handlers are preserved')
-    receipt.cases.push({ name: 'original-public-preload-facts-and-actual-package-eligibility', inspection, eligible })
+    receipt.cases.push({ name: 'original-public-preload-facts-and-url-handler-membership', inspection, eligible })
     const final = await observation(), expectedCounts = new Map([[coldUrl, 1], [warmUrl, 2], [secureUrl, 1], [noWindowUrl, 1]])
     for (const [url, count] of expectedCounts) assert.equal(regions(final).filter(region => region.kind === 'browser' && region.url === url).length, count, 'Exact original Browser count; no silent replay for ' + url)
     assert.equal(regions(final).filter(region => region.kind === 'browser').length, 5, 'The complete original Browser set contains exactly the five explicit URL intents')
