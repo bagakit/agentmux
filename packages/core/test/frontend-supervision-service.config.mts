@@ -9,6 +9,7 @@ const mutations: Record<string, [string, string, string]> = {
   'split-manual-budget': ['supervisor.ts', "const manualFrontend = input.trigger === 'manual' && session.nativeActor?.frontendControl", 'const manualFrontend = false'],
   'forget-observer-identity': ['supervisor.ts', "const observer = manualFrontend && requested?.kind === 'pending'", "const observer = false && requested?.kind === 'pending'"],
   'drop-slow-promotion': ['continuity-attempt.ts', 'const supervision = frontendObservation && latest?.supervision?.attemptCount === 0 &&', 'const supervision = false && latest?.supervision?.attemptCount === 0 &&'],
+  'drop-queued-exact-wake': ['supervisor.ts', 'retryObservation || this.reobservations.has(JSON.stringify([session.agentSessionId, op.operationId]))', 'retryObservation'],
   'drop-original-run-observer': ['supervisor.ts', "active.frontendReconnect || active.kind === 'reattachable'", 'active.frontendReconnect'],
   'resume-ended-frontend-backend': ['supervisor.ts', 'const pendingFrontendOnly = sameRunFrontend &&', 'const pendingFrontendOnly = false &&'],
   'ignore-original-stop': ['supervisor.ts', "if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, session.run) && activeRun &&", "if (false && lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, session.run) && activeRun &&"]

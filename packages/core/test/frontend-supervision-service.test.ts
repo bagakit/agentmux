@@ -186,11 +186,39 @@ it('promotes the original count-zero initialization wait to quiet same-Run super
   expect((await f.root()).supervision?.attemptCount).toBe(0)
   await f.updateFrontend({ state: 'attached', initialization: { lifecycleOperationId: f.actor.lifecycleOperationId,
     phase: 'ready', native: { state: 'confirmed', sessionId: 'original-native' } } })
-  await waitFor(async () => expect((await f.root()).supervision).toMatchObject({ attemptCount: 1, phase: 'observing', reason: 'frontend-attached' }))
+  await waitFor(async () => { const root = await f.root(); expect(root.supervision, JSON.stringify(root)).toMatchObject({ attemptCount: 1, phase: 'observing', reason: 'frontend-attached' }) })
   await f.updateFrontend({ state: 'detached', exitCode: 23 })
   await waitFor(() => expect(f.spawns).toHaveLength(1))
   expect((await f.root()).operationId).toBe('slow-original')
   expect((await f.root()).supervision?.attemptCount).toBe(2)
+})
+
+it('retains a queued exact initialization wake through an ordinary Session publication', async () => {
+  const f = await fixture({ creation: false, native: false })
+  await f.updateFrontend({ state: 'starting' })
+  await f.client.ensureAgentContinuity({ agentSessionId: 'recipient', expectedRun: f.run, operationId: 'slow-published-original',
+    trigger: 'startup', policy: { recheckMaxAttempts: 0 } })
+  await waitFor(async () => expect((await f.root()).supervision).toMatchObject({ phase: 'paused', attemptCount: 0, reason: 'operation-unconfirmed' }))
+  const supervisor = f.inner.recovery.continuitySupervisor
+  let enter!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { enter = resolve }), barrier = new Promise<void>(resolve => { release = resolve })
+  const occupied = supervisor.serialize('recipient', async () => { enter(); await barrier })
+  await entered
+  try {
+    // Provider ready queues the exact wake. An ordinary identity publication can
+    // arrive before its SID owner reads metadata; that publication is not a revoke.
+    await f.updateFrontend({ state: 'attached', initialization: { lifecycleOperationId: f.actor.lifecycleOperationId,
+      phase: 'ready', native: { state: 'confirmed', sessionId: 'original-native' } } })
+    f.inner.recovery.observe((await f.stored())!, false)
+  } finally { release() }
+  await occupied
+  await supervisor.serialize('recipient', async () => {})
+  await waitFor(async () => expect((await f.root()).supervision).toMatchObject({
+    phase: 'observing', attemptCount: 1, reason: 'frontend-attached'
+  }))
+  expect((await f.root()).operationId).toBe('slow-published-original')
+  expect(f.spawns).toHaveLength(0); expect(f.inner.kernel.start).not.toHaveBeenCalled()
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
 it('does not resurrect cancelled creation supervision on repeated observations or restore', async () => {
