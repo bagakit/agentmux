@@ -30,7 +30,7 @@ ${PUBLIC_CAPABILITIES}`
 
 export const DEFAULT_MOTE_AGENT_INSTRUCTIONS = `# Mote working guide
 
-Read \`"$AGENTMUX_CLI" mote --skill\` for main-Agent and member responsibilities, active memory and method improvement, ideas and own-task reminders.
+Read \`"$AGENTMUX_CLI" mote --skill\` for environment understanding, identity and task consistency, main-Agent/member responsibilities, active memory and method improvement, ideas and own-task reminders.
 
 Confirm your actual Host/Session with \`"$AGENTMUX_CLI" whoami\`, then the original Mote/workface bindings through \`"$AGENTMUX_CLI" space --skill\`. Only this Mote's exact saved main conversation in MOTE.md establishes its main Agent. Neither a shared persona nor the current tab appoints every member as coordinator. Unknown binding leaves your confirmed assignment and healthy work available.
 
