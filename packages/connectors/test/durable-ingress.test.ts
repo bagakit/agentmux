@@ -99,11 +99,10 @@ it('saves stable IDs before the possible Core call, and a lost reply or restart 
   await f.bindings.grant({ ...f.grant, operationId: 'revoke-original', expectedRevision: 1, state: 'revoked' }, context)
   expect((await restarted.inspect({ ingressId: received.ingress.ingressId })).inputReceipt!.key).toEqual(first.inputReceipt!.key)
   await expect(f.client.rejoinAgentInputWaiting({ ref: first.inputReceipt!.ref })).rejects.toMatchObject({ code: 'EXTERNAL_AUTHOR_REQUIRED' })
-  await expect(restarted.rejoin(received.ingress.ingressId)).rejects.toMatchObject({ code: 'INGRESS_ACTOR_NOT_AUTHORIZED' })
   expect(submit).toHaveBeenCalledOnce()
 })
 
-it('a crash window before Core persistence stays unknown without retargeting or resubmitting, while later messages use the current Run', async () => {
+it('a firstsave ensure keeps an unqualified old Run unknown while later messages use the accurate current Run', async () => {
   const f = await fixture(), received = await f.receive(), submit = vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValueOnce(new Error('Before original Core save'))
   const first = await f.ingress.dispatch(received.ingress.ingressId), frozen = first.ingress!.input!
   expect(first.inputReceipt).toBeNull()
@@ -111,12 +110,12 @@ it('a crash window before Core persistence stays unknown without retargeting or 
   await f.store.compareAndSwap(originalSession, { ...originalSession, run: { runId: 'replacement-run' } })
   const restarted = new DurableIngressHost(f.options)
   expect((await restarted.dispatch(received.ingress.ingressId)).ingress!.input).toEqual(frozen)
-  expect(submit).toHaveBeenCalledOnce()
+  expect(submit).toHaveBeenCalledTimes(2)
   const later = await f.receive({ eventId: 'later-event', messageId: 'later-message' })
   const next = await restarted.dispatch(later.ingress.ingressId)
   expect(next.ingress!.input!.expectedRun.runId).toBe('replacement-run')
   expect(next.ingress!.input!.operationId).not.toBe(frozen.operationId)
-  expect(submit).toHaveBeenCalledTimes(2)
+  expect(submit).toHaveBeenCalledTimes(3)
 })
 
 it.each(['before', 'after'] as const)('real process crash %s intake commit preserves ACK and original persistence boundaries', async phase => {
@@ -171,8 +170,9 @@ it('a wrong original Core input result stays unavailable and cannot rejoin anoth
   const key = { ...original.inputReceipt!.key, agentSessionId: 'foreign-session' }, ref = { ...original.inputReceipt!.ref, key }
   vi.spyOn(f.client, 'inspectAgentInput').mockResolvedValue({ ...original.inputReceipt!, key, ref, control: { ...original.inputReceipt!.control, ref } })
   const rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
-  expect(await f.ingress.rejoin(accepted.ingress.ingressId)).toEqual({ ingress: original.ingress, inputReceipt: null, observation: 'unavailable' })
-  expect(rejoin).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(await f.ingress.dispatch(accepted.ingress.ingressId)).toMatchObject({ ingress: original.ingress, inputReceipt: null, observation: 'unavailable' })
+  expect(rejoin).toHaveBeenCalledOnce()
+  expect(rejoin.mock.calls.every(([input]) => input.ref.key.agentSessionId === f.session.agentSessionId)).toBe(true); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
 it('bounds machine identities while retaining the complete authenticated body and raw payload', async () => {

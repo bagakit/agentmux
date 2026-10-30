@@ -78,7 +78,7 @@ async function pair() {
     connection: { ...feishuConfig, credentialRef: secret.credentialRef } })
   const result = await hosting.rpc.call('connection.bind', { operationId: 'bind-original', bindingId: 'original-binding', connectionId: feishuConfig.connectionId,
     expectedConnectionRevision: 1, executionHostId: 'outbound-execution', agentSessionId: 'same-agent', externalConversationId: 'original-room',
-    expectedSource: { providerId: 'claude', nativeSessionId: 'same-native' }, scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' } })
+    expectedSource: { providerId: 'claude', nativeSessionId: 'same-native' }, scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' } })
   expect(result).toMatchObject({ state: 'applied', binding: { executionRuntimeId: execution.identity.runtimeId } })
   if (result.state !== 'applied') throw Error('Original remote binding not applied')
   await vi.waitFor(() => expect(transport.sockets).toHaveLength(1))
@@ -123,7 +123,7 @@ it('two actual Hosts authorize a native message through the original hosting dat
   expect(await new core.DurableAgentMuxMessageQueue(f.hosting.client().agentMessageQueuePath()).listAfter()).toEqual([])
   const authority = await f.hosting.rpc.call('connection.ingress.authority', { operationId: input.operationId })
   expect(authority).toMatchObject({ authority: 'current', ingress: { input: { author: original!.envelope.sender } } })
-  const receipt = await f.execution.rpc.call('agent.input.inspect', { key: { agentSessionId: 'same-agent', expectedRun: input.expectedRun, kind: 'message', messageId: input.messageId } })
+  const receipt = { input: await f.execution.reader.inspectAgentInput({ key: { agentSessionId: 'same-agent', expectedRun: input.expectedRun, kind: 'message', messageId: input.messageId } }) }
   expect(receipt.input).toMatchObject({ status: 'terminal-confirmed', originalControlOperationId: input.operationId })
   expect(f.hosting.native.stop).not.toHaveBeenCalled(); expect(f.execution.native.stop).not.toHaveBeenCalled()
   facts.push({ case: 'two-actual-owners-native-message', source: f.source, intake, journal: original, receipt, hostingEffects: 0, executionEffects: 1 })
@@ -249,7 +249,7 @@ it('original waiting rejoin survives execution reopen and hosting loss, then rec
     admissionIntent: { kind: 'manual-actor', expectedRun: before.key.expectedRun }, execution: 'immediate', sourceChannel: 'agent-message' })
   const waitingSentinel = await f.hosting.reader.inspectAgentInput({ key: before.key })
   expect(waitingSentinel).toMatchObject({ status: 'waiting', key: before.key, originalControlOperationId: before.originalControlOperationId })
-  await f.hosting.rpc.call('agent.input.stop', { ref: waitingSentinel!.ref, cancelOperationId: 'stop-foreign-sentinel' })
+  await f.hosting.reader.stopAgentInputWaiting({ ref: waitingSentinel!.ref, cancelOperationId: 'stop-foreign-sentinel' })
   const sentinel = await f.hosting.reader.inspectAgentInput({ key: before.key })
   expect(sentinel).toMatchObject({ status: 'stopped', key: before.key })
   f.hosting.routes([{ hostId: 'outbound-execution', client: f.hosting.reader }])
@@ -267,13 +267,13 @@ it('original waiting rejoin survives execution reopen and hosting loss, then rec
   f.hosting.routes([{ hostId: 'outbound-execution', client: f.execution.reader }]); f.execution.routes([])
   const reopened = await f.execution.reader.inspectAgentInput({ key: before.key })
   expect(reopened?.ref).toEqual(before.ref)
-  await expect(f.execution.rpc.call('agent.input.rejoin', { ref: before.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  await expect(f.execution.reader.rejoinAgentInputWaiting({ ref: before.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   expect(f.execution.native.input).not.toHaveBeenCalled()
   f.execution.routes([{ hostId: 'original-hosting', client: f.execution.reader }])
-  await expect(f.execution.rpc.call('agent.input.rejoin', { ref: before.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  await expect(f.execution.reader.rejoinAgentInputWaiting({ ref: before.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   expect(f.execution.native.input).not.toHaveBeenCalled()
   f.execution.routes([{ hostId: 'original-hosting', client: f.hosting.reader }]); f.execution.available(true)
-  const rejoined = await f.execution.rpc.call('agent.input.rejoin', { ref: before.ref })
+  const rejoined = await f.execution.reader.rejoinAgentInputWaiting({ ref: before.ref })
   expect(rejoined.ref).toEqual(before.ref); expect(rejoined.key).toEqual(before.key)
   try { await vi.waitFor(() => expect(f.execution.native.input).toHaveBeenCalledOnce(), { timeout: 10_000 }) }
   catch (error) { facts.push({ case: 'rejoin-failure-diagnostic', source: f.source,
@@ -287,7 +287,7 @@ it('original waiting rejoin survives execution reopen and hosting loss, then rec
     expect(revoked).toMatchObject({ status: 'waiting' })
   })
   await f.grant(false); f.execution.available(true)
-  const revocation = await f.execution.rpc.call('agent.input.rejoin', { ref: revoked!.ref }).then(value => ({ value }), error => ({ error: error.code }))
+  const revocation = await f.execution.reader.rejoinAgentInputWaiting({ ref: revoked!.ref }).then(value => ({ value }), error => ({ error: error.code }))
   if ('value' in revocation) await vi.waitFor(() => expect(f.execution.native.input).toHaveBeenCalledTimes(2), { timeout: 10_000 })
   facts.push({ case: 'revoked-membership-current-read', source: f.source, ref: revoked!.ref, revocation,
     authority: await f.hosting.rpc.call('connection.ingress.authority', { operationId: revoked!.originalControlOperationId }),

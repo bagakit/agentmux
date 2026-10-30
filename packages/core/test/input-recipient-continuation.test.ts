@@ -67,7 +67,7 @@ async function nativeFixture() {
   const entry = join(root, 'managed-entry.mjs')
   const nativeCommand = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
   {
-    expect(['codex-cli 0.163.0', 'codex-cli 0.165.0']).toContain((await runner.runProcess(nativeCommand, ['--version'], { timeoutMs: 5000 })).stdout.trim())
+    expect(['codex-cli 0.163.0', 'codex-cli 0.165.0', 'codex-cli 0.166.0']).toContain((await runner.runProcess(nativeCommand, ['--version'], { timeoutMs: 5000 })).stdout.trim())
     const helper = join(root, 'native-process-proof')
     expect(await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 }))
       .toMatchObject({ exitCode: 0, stderr: '' })
@@ -117,21 +117,25 @@ async function nativeFixture() {
   }, { timeout: 20_000, interval: 100 })
   issued.mockRestore()
   return { root, inputs, session, initial, store, get capability() { return capability }, storePath, get client() { return client },
-    resume: async (operationId: string) => {
+    resume: async (operationId: string, throughContinuity = false) => {
       const before = await client.readAgentSession('original')
       if (!before) throw Error('Original Session missing before resume')
       await activation.client.stop(await activation.client.prepareStop(before.run.runId))
       await vi.waitFor(async () => expect((await client.statusAgent('original')).run.state).not.toBe('running'))
       const issuing = vi.spyOn(capabilities, 'issueAgentCapability').mockImplementation(() => { capability = issue(); return capability })
       try {
-        const resumed = await client.resumeAgent({ agentSessionId: 'original', operationId, prompt: 'PRIVATE_QUEUE_RESUMED_ORIGINAL',
+        const options = { agentSessionId: 'original', operationId,
           args: ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'private-queue'], commandOverride: nativeCommand,
-          env: { CODEX_HOME: join(root, 'native-home'), HOME: root } })
+          env: { CODEX_HOME: join(root, 'native-home'), HOME: root } }
+        const continuity = throughContinuity ? await client.ensureAgentContinuity({ ...options, expectedRun: before.run, trigger: 'input' }) : undefined
+        if (continuity && continuity.kind !== 'resumed' && continuity.kind !== 'reattachable') throw Error('Original continuity did not resume: ' + JSON.stringify(continuity))
+        const resumed = continuity && (continuity.kind === 'resumed' || continuity.kind === 'reattachable') ? continuity.session
+          : await client.resumeAgent({ ...options, prompt: 'PRIVATE_QUEUE_RESUMED_ORIGINAL' })
         return await vi.waitFor(async () => {
           await client.refreshAgentSession('original', resumed.run)
           const status = await client.statusAgent('original')
           expect(status.session.nativeHandle?.sessionId).toBe(initial.session.nativeHandle!.sessionId)
-          expect(status.session.semanticStatus?.state).toBe('done')
+          if (!throughContinuity) expect(status.session.semanticStatus?.state).toBe('done')
           expect(status.session.continuity).toMatchObject({ kind: 'resumed', previousRun: before.run, newRun: resumed.run })
           return status.session
         }, { timeout: 20_000, interval: 100 })
@@ -237,6 +241,39 @@ it.runIf(process.platform === 'darwin')('original ingress crosses Hosted and rec
   facts.push({ case: 'actual-native-recipient', executableVersion: (await runner.runProcess(process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex', ['--version'])).stdout.trim(),
     key: original.key, ref: waiting.ref, author: original.claim.author, wireBytes: Buffer.byteLength(wire), wireSHA256: createHash('sha256').update(wire).digest('hex'),
     nativeExactInputs: h.inputs.filter(text => text === wire).length, receipt: { transport: admission?.admission?.transport, acknowledged: admission?.admission?.acknowledged, inputDispatch: admission?.admission?.inputDispatch }, reopenedReceiptEqual: true, revokedInput: { ref: held.ref, admission: null }, independentLocalInputs: 1 })
+})
+
+it.runIf(process.platform === 'darwin')('original firstsave after real semantic resume uses its private lifecycle source and keeps the old input key', async () => {
+  const h = await nativeFixture(), c = await channel(h, 'original', true)
+  const lost = vi.spyOn(h.client, 'submitAgentMessage').mockRejectedValueOnce(Error('Before original Core firstsave'))
+  const original = await c.receive('strict-firstsave-source')
+  lost.mockRestore()
+  expect(await original.receipt()).toBeNull()
+  const resumed = await h.resume('strict-firstsave-resume', true)
+  const prior = (await h.store().readMetadata('original'))!
+  expect(prior.continuityExecutors).toHaveProperty('strict-firstsave-resume')
+  const inspection = await c.ingress.inspect({ ingressId: original.record.ingressId })
+  expect(inspection.rejoinSource?.kind).toBe('firstsave')
+  const action = await c.ingress.rejoin({ ingressId: original.record.ingressId, operationId: 'strict-firstsave-action', source: inspection.rejoinSource! }, { actor: { kind: 'user', id: 'original-user' } })
+  expect(action.action.outcome).toBe('handed-off')
+  const delivered = await vi.waitFor(async () => {
+    const value = await original.receipt()
+    expect(value?.status).toBe('terminal-confirmed')
+    return value!
+  }, { timeout: 20000 })
+  expect(delivered.key).toEqual(original.key)
+  expect(delivered.control.deliveryKey?.expectedRun).toEqual(resumed.run)
+  const queue = new DurableAgentMuxMessageQueue(h.client.agentMessageQueuePath()), saved = (await queue.inspectInput({ key: original.key }))!
+  expect(saved.intent.environment).toMatchObject({ providerId: 'codex', executorId: 'codex', nativeHandle: original.claim.contextSource ? {
+    providerId: original.claim.contextSource.providerId, sessionId: original.claim.contextSource.nativeSessionId } : prior.nativeHandle })
+  const wire = saved.intent.source.promptWire!
+  await vi.waitFor(() => expect(h.inputs.filter(input => input === wire)).toHaveLength(1), { timeout: 20000 })
+  const again = await c.ingress.rejoin({ ingressId: original.record.ingressId, operationId: 'strict-firstsave-action', source: inspection.rejoinSource! }, { actor: { kind: 'user', id: 'original-user' } })
+  expect(again.action).toEqual(action.action)
+  expect(h.inputs.filter(input => input === wire)).toHaveLength(1)
+  facts.push({ case: 'strict-firstsave-private-source', originalKey: original.key, deliveryKey: delivered.control.deliveryKey,
+    root: resumed.continuity?.operationId, privateExecutor: prior.continuityExecutors,
+    nativeTarget: resumed.continuity?.nativeTarget, actualInputs: 1, wireSHA256: createHash('sha256').update(wire).digest('hex') })
 })
 
 it.runIf(process.platform === 'darwin')('semantic continuation delivers the original external manual request once after real Core resume through recipient compiled CLI and preserves both keys after reopen', async () => {
