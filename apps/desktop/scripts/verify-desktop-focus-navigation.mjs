@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/dist/spatial-state.js'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
-import { sourceUpdateIdentity } from './update-identity.mjs'
+import { payloadUpdateIdentity } from './update-identity.mjs'
 
 const execFile = promisify(execFileCallback)
 const desktop = path.resolve(import.meta.dirname, '..')
@@ -94,7 +94,7 @@ try {
   receipt.coreArtifact = Object.fromEntries(await Promise.all([path.join(privateCore, 'package.json'), ...await files(path.join(privateCore, 'dist')), ...await files(path.join(privateCore, 'bin')), ...await files(path.join(privateCore, 'vendor'))]
     .map(async file => [path.relative(privateCore, file), hash(await fs.readFile(file))])))
   for (const [file, digest] of Object.entries(receipt.coreArtifact)) assert.equal(digest, receipt.inputs[path.join('packages/core', file)], `Loaded Core candidate: ${file}`)
-  receipt.updateIdentity = await sourceUpdateIdentity(root)
+  receipt.updateIdentity = await payloadUpdateIdentity(root)
   const rendererFiles = Object.fromEntries(Object.entries(receipt.compiled).filter(([file]) => file.startsWith('renderer/')).map(([file, digest]) => [file.slice('renderer/'.length), digest]))
   const rendererId = hash(JSON.stringify({ identity: receipt.updateIdentity, files: Object.entries(rendererFiles).sort() }))
   receipt.rendererRelease = { id: rendererId, identity: receipt.updateIdentity, files: rendererFiles }
@@ -163,7 +163,7 @@ try {
   if (!diagnosticOnly) assert.equal(new Set(receipt.phases.map(one => one.native.pid)).size, 3, 'Independent ordinary App processes are observed')
   receipt.inputsAfter = await hashes()
   assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source or compiled Core input changed during verification')
-  receipt.updateIdentityAfter = await sourceUpdateIdentity(root)
+  receipt.updateIdentityAfter = await payloadUpdateIdentity(root)
   assert.deepEqual(receipt.updateIdentityAfter, receipt.updateIdentity, 'Loaded production shell/ctxmux identity changed during verification')
   if (diagnosticOnly) receipt.diagnosticPassed = true
   else receipt.passed = true

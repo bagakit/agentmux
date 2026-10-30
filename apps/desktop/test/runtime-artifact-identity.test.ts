@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, expect, it, vi } from 'vitest'
-import { sourceUpdateIdentity } from '../scripts/update-identity.mjs'
+import { hashRuntimeArtifact } from '../scripts/update-identity.mjs'
+import { hashRuntimePayload } from '../scripts/runtime-application-payload.mjs'
 
 const boundary = vi.hoisted(() => ({ spawn: vi.fn() }))
 vi.mock('node:child_process', async importOriginal => ({
@@ -25,17 +26,24 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-artifact-identity-')); roots.push(root)
   const source = join(root, 'source'), home = join(root, 'home')
   const current = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/preload', 'apps/desktop/src/shared',
-    'apps/desktop/scripts', 'packages/core/src', 'packages/core/scripts', 'packages/core/bin', 'packages/git/src'])
-    await mkdir(join(source, directory), { recursive: true })
-  for (const name of ['apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
-    'packages/core/package.json', 'packages/git/package.json', 'packages/git/tsconfig.build.json', 'pnpm-lock.yaml']) await file(join(source, name), 'unchanged shell')
+  for (const name of ['apps/desktop/out/main/index.js', 'packages/core/dist/index.js', 'packages/git/dist/index.js']) await file(join(source, name), 'original runtime bytes')
+  const copies = [
+    { source: join(source, 'apps/desktop/out'), target: 'out', clone: true },
+    { source: join(source, 'packages/core/dist'), target: 'node_modules/@agentmux/core/dist', clone: true },
+    { source: join(source, 'packages/core/vendor'), target: 'node_modules/@agentmux/core/vendor', clone: true },
+    { source: join(source, 'packages/git/dist'), target: 'node_modules/@agentmux/git/dist', clone: true }
+  ]
+  const payload = { copies, generated: [], links: [], modes: [],
+    avatar: { destination: 'runtime-dependencies/static-avatar', publication: { packages: [], links: [] } },
+    packageIdentity: { target: 'package-identity.json', compatibility: { schema: 'agentmux.package-identity.v1', appVersion: '0.1.0', platform: process.platform, arch: process.arch } },
+    coreRelease: 'node_modules/@agentmux/core/release.json' }
+  const identity = async () => ({ shell: await hashRuntimePayload(payload), ctxmux: await hashRuntimeArtifact(source, 'packages/core/vendor/ctxmux') })
   for (const directory of [join(source, 'packages/core/vendor/ctxmux'), join(current, runtimeRelative), join(candidate, runtimeRelative)]) {
     await file(join(directory, selected, 'manifest.json'), 'current host manifest')
     await file(join(directory, selected, 'bin/ctxmuxd'), 'current host daemon')
     await file(join(directory, foreign, 'manifest.json'), 'other host manifest')
   }
-  return { root, source, home, current, candidate }
+  return { root, source, home, current, candidate, identity }
 }
 
 function refuseCandidateCopy() {
@@ -46,34 +54,34 @@ function refuseCandidateCopy() {
   })
 }
 
-it('source release Native identity ignores foreign artifacts while retaining actual Core changes', async () => {
-  const f = await fixture(), before = await sourceUpdateIdentity(f.source)
+it('payload Native identity ignores foreign artifacts while retaining actual Core changes', async () => {
+  const f = await fixture(), before = await f.identity()
   await file(join(f.source, 'packages/core/vendor/ctxmux', foreign, 'bin/ctxmuxd'), 'new foreign daemon')
-  expect(await sourceUpdateIdentity(f.source), 'Foreign artifacts must not change the current host release identity').toEqual(before)
-  await file(join(f.source, 'packages/core/src/runtime-client.ts'), 'actual Core change')
-  const after = await sourceUpdateIdentity(f.source)
+  expect(await f.identity(), 'Foreign artifacts must not change the current host release identity').toEqual(before)
+  await file(join(f.source, 'packages/core/dist/runtime-client.js'), 'actual Core change')
+  const after = await f.identity()
   expect(after.ctxmux).toBe(before.ctxmux); expect(after.shell).not.toBe(before.shell)
 })
 
-it('neutral Git source changes alter the shell identity without changing the native runtime', async () => {
-  const f = await fixture(), before = await sourceUpdateIdentity(f.source)
-  await file(join(f.source, 'packages/git/src/git-repository.ts'), 'actual Git capability change')
-  const after = await sourceUpdateIdentity(f.source)
+it('compiled Git changes alter the shell identity without changing the native runtime', async () => {
+  const f = await fixture(), before = await f.identity()
+  await file(join(f.source, 'packages/git/dist/git-repository.js'), 'actual Git capability change')
+  const after = await f.identity()
   expect(after.shell).not.toBe(before.shell)
   expect(after.ctxmux).toBe(before.ctxmux)
 })
 
-it('source release Native identity changes for each current host artifact and rejects missing host facts', async () => {
+it('payload Native identity changes for each current host artifact and rejects missing host facts', async () => {
   const f = await fixture()
-  let before = await sourceUpdateIdentity(f.source)
+  let before = await f.identity()
   for (const name of ['manifest.json', 'bin/ctxmuxd', 'bin/ctxmux', 'ctxmux-sdk.tgz']) {
     await file(join(f.source, 'packages/core/vendor/ctxmux', selected, name), `changed current ${name}`)
-    const after = await sourceUpdateIdentity(f.source)
+    const after = await f.identity()
     expect(after.ctxmux, `The current host ${name} must change its Native identity`).not.toBe(before.ctxmux)
     expect(after.shell).toBe(before.shell); before = after
   }
   await rm(join(f.source, 'packages/core/vendor/ctxmux', selected), { recursive: true })
-  const missing = await sourceUpdateIdentity(f.source).then(() => null, (error: unknown) => error)
+  const missing = await f.identity().then(() => null, (error: unknown) => error)
   expect(missing, 'Missing current host facts must reject with their actual filesystem error').toMatchObject({ code: 'ENOENT' })
 })
 
@@ -88,7 +96,8 @@ it('full installer keeps semantic reload eligible when only another platform art
   await expect(installApplication(f.candidate, { intent: 'full', homeDirectory: f.home, quit, launch }),
     'Foreign artifact changes must reach ordinary full installation without a Native review request').rejects.toThrow('OWNED_CANDIDATE_COPY_BOUNDARY')
   expect(boundary.spawn).toHaveBeenCalledOnce()
-  expect(boundary.spawn.mock.calls[0]?.[0]).toBe('ditto')
+  expect(boundary.spawn.mock.calls[0]?.[0]).toBe('cp')
+  expect(boundary.spawn.mock.calls[0]?.[1]?.slice(0, 2)).toEqual(['-cRp', f.candidate])
   expect(quit).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
 })
 

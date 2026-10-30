@@ -47,8 +47,8 @@ export async function bindCandidate(repository, output) {
   assert.equal(freshness.distIsStale(newestRendererSource, oldestRendererArtifact), false,
     'The current Desktop Renderer source must precede the consumed release')
   const renderer = JSON.parse(await readFile(join(root, 'apps/desktop/out/renderer/release.json'), 'utf8'))
-  const { sourceUpdateIdentity } = await import(pathToFileURL(join(root, 'apps/desktop/scripts/update-identity.mjs')).href)
-  assert.deepEqual(renderer.identity, await sourceUpdateIdentity(root), 'Desktop shell/Core source differs from the built candidate')
+  const { payloadUpdateIdentity } = await import(pathToFileURL(join(root, 'apps/desktop/scripts/update-identity.mjs')).href)
+  assert.deepEqual(renderer.identity, await payloadUpdateIdentity(root), 'Desktop runtime payload differs from the built candidate')
   assert.ok(Object.keys(renderer.files).length > 2)
   const artifacts = ['apps/desktop/out/main/index.js', 'apps/desktop/out/main/agentmux-host.js', 'apps/desktop/out/preload/index.cjs',
     'apps/desktop/out/renderer/release.json', 'apps/mobile/dist/mobile-release.json', 'apps/host/resources/bin/agentmux-workspace-move',

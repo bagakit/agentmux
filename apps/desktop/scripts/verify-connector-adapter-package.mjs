@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,39 +10,27 @@ import { pathToFileURL } from 'node:url'
 const args = process.argv.slice(2)
 assert.ok(args.every(arg => arg === '--mutations'), 'Unsupported connector package proof option')
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
-const connectors = join(repository, 'packages/connectors'), core = join(repository, 'packages/core')
+const connectors = join(repository, 'packages/connectors')
 const require = createRequire(join(desktop, 'package.json'))
 const { resolveConfig } = await import(pathToFileURL(require.resolve('electron-vite')).href)
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
-const ts = require('typescript')
 const sdk = '@larksuiteoapi/node-sdk', discordSdks = ['@discordjs/ws', '@discordjs/rest', 'discord-api-types'], sha = value => createHash('sha256').update(value).digest('hex')
 const evidenceRoot = join(repository, '.local/connector-adapter-package')
 await mkdir(evidenceRoot, { recursive: true }); await rm(join(evidenceRoot, 'receipt.json'), { force: true })
 const configWork = await mkdtemp(join(evidenceRoot, 'config-'))
 const isolated = await mkdtemp(join(tmpdir(), 'agentmux-connector-package-'))
 const configPath = join(desktop, 'electron.vite.config.ts'), configSource = await readFile(configPath, 'utf8')
-const packagePath = join(desktop, 'scripts/package-macos.mjs'), packageSource = await readFile(packagePath, 'utf8')
-const source = ts.createSourceFile(packagePath, packageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
-const copier = source.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === 'copyRuntimeApplication')
-assert.equal(copier.length, 1, 'Consume the one production App copying owner')
-const sdkStatements = copier[0].body.statements.filter(statement => {
-  const call = ts.isExpressionStatement(statement) && ts.isAwaitExpression(statement.expression) && statement.expression.expression
-  return call && ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === 'materializeDependency' &&
-    call.arguments[1] && ts.isStringLiteral(call.arguments[1]) && [sdk, ...discordSdks].includes(call.arguments[1].text)
-})
-for(const name of [sdk,...discordSdks])assert.equal(sdkStatements.filter(statement=>statement.expression.expression.arguments[1].text===name).length,1,'The production SDK copying call is unique and nonempty: '+name)
-const functions = ['pathExists', 'materializeDependencies', 'materializeDependency', 'resolvePackageRoot'].map(name => {
-  const declarations = source.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
-  assert.equal(declarations.length, 1, 'Consume the actual packaging function ' + name)
-  return declarations[0].getText(source)
-})
-function materializer(revoked) {
-  return new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath', 'repositoryRoot', 'connectorsRoot',
-    functions.join('\n') + '\nreturn {materializeDependencies, copySdk: async function(appResources) {\n' +
-    sdkStatements.filter(statement => revoked === 'materialization' ? statement.expression.expression.arguments[1].text !== sdk : revoked === 'discord-materialization' ? statement.expression.expression.arguments[1].text === sdk : true).map(statement=>statement.getText(source)).join('\n') + '\n}}')(
-    readFile, mkdir, cp, readdir, join, dirname, lstat, realpath, repository, connectors)
+const packagePath = join(desktop, 'scripts/runtime-application-payload.mjs')
+const { inspectRuntimeApplicationPayload, copyRuntimePayload } = await import(pathToFileURL(packagePath).href)
+async function copyDependencies(appResources, revoked) {
+  const payload = await inspectRuntimeApplicationPayload(repository)
+  payload.copies = payload.copies.filter(item => item.target.startsWith('node_modules/'))
+  for (const name of [sdk, ...discordSdks]) assert.ok(payload.copies.some(item => item.target.startsWith('node_modules/' + name + '/')), 'The real payload supplies ' + name)
+  const removed = revoked === 'materialization' ? [sdk] : revoked === 'discord-materialization' ? discordSdks : []
+  payload.copies = payload.copies.filter(item => !removed.some(name => item.target.startsWith('node_modules/' + name + '/')))
+  await copyRuntimePayload(payload, appResources, { commit: 'private-proof', tree: 'private-proof' })
 }
-const inputPaths = ['apps/desktop/electron.vite.config.ts', 'apps/desktop/scripts/package-macos.mjs',
+const inputPaths = ['apps/desktop/electron.vite.config.ts', 'apps/desktop/scripts/package-macos.mjs', 'apps/desktop/scripts/runtime-application-payload.mjs',
   'apps/desktop/scripts/verify-connector-adapter-package.mjs', 'packages/connectors/package.json',
   'packages/connectors/src/platform-adapters.ts', 'packages/connectors/src/adapters/feishu/index.ts',
   'packages/connectors/src/adapters/feishu/enrollment.ts', 'packages/connectors/src/adapters/feishu/native-account.ts',
@@ -122,14 +110,7 @@ async function run(label, mutation) {
   const sdkExternal = chunks.some(chunk => chunk.imports.includes(sdk))
   assert.equal(sdkExternal, mutation !== 'external', 'The actual compiled SDK import follows the production dependency choice')
   await writeFile(join(appResources, 'package.json'), JSON.stringify({ type: 'module' }))
-  const copy = materializer(mutation), coreRuntime = join(appResources, 'node_modules/@agentmux/core')
-  await mkdir(coreRuntime, { recursive: true }); await cp(join(core, 'dist'), join(coreRuntime, 'dist'), { recursive: true })
-  const coreManifest = JSON.parse(await readFile(join(core, 'package.json'), 'utf8'))
-  await writeFile(join(coreRuntime, 'package.json'), JSON.stringify(coreManifest))
-  await copy.materializeDependencies(core, coreManifest.dependencies, join(coreRuntime, 'node_modules'))
-  await copy.copySdk(appResources)
-  // Other Main externals are unchanged test setup, resolved by the same production materializer.
-  await copy.materializeDependencies(desktop, { tldts: '', ws: '' }, join(appResources, 'node_modules'))
+  await copyDependencies(appResources, mutation)
   for (let parent = dirname(appResources); ; parent = dirname(parent)) {
     assert.equal(await stat(join(parent, 'node_modules')).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error }), false, 'The isolated application has no ancestor node_modules')
     if (parent === dirname(parent)) break

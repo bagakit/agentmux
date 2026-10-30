@@ -4,6 +4,7 @@ import { cp, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node
 import { appendFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import ts from 'typescript'
 import { afterEach, expect, it } from 'vitest'
@@ -20,8 +21,9 @@ const functions = names.map(name => {
 }).join('\n')
 const execute = promisify(execFile), roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
-const { brandApplication, verifyIdentity } = new Function('run', 'join', 'rename', 'cp', 'rm', 'lstat', 'desktopRoot', 'PRODUCT_NAME', 'BUNDLE_ID', 'manifest', `${functions}; return { brandApplication, verifyIdentity }`)(
-  async (command: string, args: string[]) => execute(command, args), join, rename, cp, rm, lstat, resolve('apps/desktop'), 'AgentMux', 'dev.agentmux.desktop', { version: '0.1.0' }
+const { applicationBranding } = await import(pathToFileURL(resolve(process.env.AGENTMUX_BROWSER_SOURCE_ROOT ?? '.', 'apps/desktop/scripts/macos-application-brand.mjs')).href)
+const { brandApplication, verifyIdentity } = new Function('run', 'join', 'rename', 'cp', 'rm', 'lstat', 'desktopRoot', 'PRODUCT_NAME', 'BUNDLE_ID', 'manifest', 'applicationBranding', `${functions}; return { brandApplication, verifyIdentity }`)(
+  async (command: string, args: string[]) => execute(command, args), join, rename, cp, rm, lstat, resolve('apps/desktop'), 'AgentMux', 'dev.agentmux.desktop', { version: '0.1.0' }, applicationBranding
 ) as { brandApplication(app: string): Promise<void>; verifyIdentity(app: string): Promise<void> }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-browser-plist-')); roots.push(root)

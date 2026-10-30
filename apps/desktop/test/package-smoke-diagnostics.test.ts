@@ -38,7 +38,7 @@ async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false
     process: { argv: [], platform: 'darwin', arch: 'arm64', execPath: join(root, 'bin/node'),
       stderr: { write: (value: string) => { output += value } }, stdout: { write: () => {} } },
     preflightMacosSigning: async () => ({ kind: 'certificate' }), sourceIdentity: async () => ({ commit: 'original-source', tree: 'original-tree', status: '' }),
-    require: { resolve: () => join(root, 'electron/package.json') }, dirname, join, mkdir, mkdtemp,
+    inspectElectronApplication: async () => ({ application: join(root, 'electron/dist/Electron.app') }), dirname, join, mkdir, mkdtemp,
     tmpdir: () => root, run: async () => ({ stdout: '', stderr: '' }), pathExists: async () => true,
     repositoryRoot, desktopRoot: join(repositoryRoot, 'apps/desktop'), releaseRoot: join(root, 'release'),
     PRODUCT_NAME: 'AgentMux', manifest: { version: '0.1.0' }, appOnly, installRequested: false,

@@ -36,7 +36,7 @@ try{
   const desktop=resolve(root,'apps/desktop')
   run('build-workspace-move-helper',[process.execPath,'scripts/build-workspace-move-helper.mjs'],undefined,desktop)
   run('production-electron-vite-build',[process.execPath,'node_modules/electron-vite/bin/electron-vite.js','build'],undefined,desktop)
-  run('production-renderer-release',[process.execPath,'scripts/build-renderer-release.mjs'],undefined,desktop)
+  run('production-renderer-release',[process.execPath,'--input-type=module','--eval',"import { resolve } from 'node:path'; const { writeRendererRelease } = await import('./scripts/build-renderer-release.mjs'); await writeRendererRelease(resolve('../..'))"],undefined,desktop)
   const callers={historySources:['apps/desktop/src/renderer/src/lib/focus-history-sources.ts','api.sessions.historySources()'],historyPage:['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx','api.sessions.historyPage(control,'],timeline:['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx','api.sessions.timeline(control)'],useFocusHistorySources:['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx','useFocusHistorySources(mode']}
   receipt.callers=Object.fromEntries(Object.entries(callers).map(([symbol,[file,needle]])=>{const text=readFileSync(resolve(root,file),'utf8'),index=text.indexOf(needle);assert.ok(index>=0,`${symbol} non-definition product caller`);return[symbol,{file,line:text.slice(0,index).split('\n').length,needle}]}))
   receipt.after=binding();assert.deepEqual(receipt.after,receipt.before,'Owning Source remains exact');receipt.sourcePass=true

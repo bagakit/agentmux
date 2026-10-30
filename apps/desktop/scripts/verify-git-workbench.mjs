@@ -666,8 +666,8 @@ try {
   receipt.environment = { inheritedAgentMuxContextRemoved: true, agentSessionStore: fixtureEnvironment.AGENTMUX_AGENT_SESSION_STORE }
   receipt.identityBefore = await identity()
   const release = JSON.parse(await readFile(join(desktopRoot, 'out/renderer/release.json'), 'utf8'))
-  const { sourceUpdateIdentity } = await import(pathToFileURL(join(desktopRoot, 'scripts/update-identity.mjs')))
-  assert.deepEqual(release.identity, await sourceUpdateIdentity(repositoryRoot), 'Native shell/release inputs match the candidate')
+  const { payloadUpdateIdentity } = await import(pathToFileURL(join(desktopRoot, 'scripts/update-identity.mjs')))
+  assert.deepEqual(release.identity, await payloadUpdateIdentity(repositoryRoot), 'Native shell/release inputs match the candidate')
   assert.ok(Object.keys(release.files).length > 0, 'Renderer release must bind real output files')
   for (const [path, sha256] of Object.entries(release.files)) {
     assert.ok(path && !path.startsWith('/') && !path.split('/').includes('..'), 'Renderer release paths stay inside its output')

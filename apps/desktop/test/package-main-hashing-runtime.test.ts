@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -11,43 +11,22 @@ import { expect, it } from 'vitest'
 
 it('the production Desktop copying block supplies Main hashing, avatars, Host and the native connection owner inside a standalone app', async () => {
   const repositoryRoot = resolve(import.meta.dirname, '../../..')
-  const scriptPath = process.env.AGENTMUX_PACKAGE_HASHING_SOURCE ?? join(repositoryRoot, 'apps/desktop/scripts/package-macos.mjs')
+  const scriptPath = process.env.AGENTMUX_PACKAGE_HASHING_SOURCE ?? join(repositoryRoot, 'apps/desktop/scripts/runtime-application-payload.mjs')
   const packageSource = await readFile(scriptPath, 'utf8')
-  const source = ts.createSourceFile(scriptPath, packageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
-  const copier = source.statements.filter((statement): statement is ts.FunctionDeclaration =>
-    ts.isFunctionDeclaration(statement) && statement.name?.text === 'copyRuntimeApplication')
-  expect(copier, 'Execute the one production App copying owner').toHaveLength(1)
-  const copyingStatements = copier[0]!.body!.statements.filter(statement => {
-    if (!ts.isExpressionStatement(statement) || !ts.isAwaitExpression(statement.expression)) return false
-    const call = statement.expression.expression
-    return ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === 'materializeDependency'
-  })
-  expect(copyingStatements.length, 'An empty production copying block cannot establish runtime closure').toBeGreaterThan(0)
-  const functions = ['pathExists', 'materializeDependencies', 'materializeDependency'].map(name => {
-    const declarations = source.statements.filter((statement): statement is ts.FunctionDeclaration =>
-      ts.isFunctionDeclaration(statement) && statement.name?.text === name)
-    expect(declarations, `Execute the actual packaging function ${name}`).toHaveLength(1)
-    return declarations[0]!.getText(source)
-  })
-  const { resolvePackageRoot } = await import(pathToFileURL(join(repositoryRoot, 'scripts/package-dependencies.mjs')).href)
-  // Execute every direct dependency copying statement unchanged, rather than manually
-  // requesting hashes from the materializer. Removing the production call removes its output.
-  const copying = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath',
-    'repositoryRoot', 'desktopRoot', 'coreRoot', 'connectorsRoot', 'resolvePackageRoot', functions.join('\n') +
-    '\nreturn { materializeDependency, copyDependencies: async function(appResources) {\n' + copyingStatements.map(statement => statement.getText(source)).join('\n') + '\n} }')(
-    readFile, mkdir, cp, readdir, join, dirname, lstat, realpath,
-    repositoryRoot, join(repositoryRoot, 'apps/desktop'), join(repositoryRoot, 'packages/core'), join(repositoryRoot, 'packages/connectors'), resolvePackageRoot) as {
-      copyDependencies(appResources: string): Promise<void>
-      materializeDependency(sourcePackage: string, name: string, destination: string): Promise<void>
-    }
+  const { inspectRuntimeApplicationPayload, copyRuntimePayload } = await import(pathToFileURL(scriptPath).href)
+  const payloadRoot = resolve(dirname(scriptPath), '../../..')
+  const payload = await inspectRuntimeApplicationPayload(payloadRoot)
+  // This consumer checks the existing standalone dependency closure. Selection is
+  // made by production; deleting a production dependency removes its copied bytes.
+  payload.copies = payload.copies.filter((item: { target: string }) => item.target.startsWith('node_modules/'))
+  expect(payload.copies.length, 'A nonempty production dependency closure is required').toBeGreaterThan(0)
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-main-hashing-'))
   const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
   const evidence: Record<string, unknown> = { passed: false, temporary, scriptPath,
-    packageSourceSha256: digest(packageSource), copyingStatementsSha256: digest(copyingStatements.map(statement => statement.getText(source)).join('\n')),
-    recursiveHelpersSha256: digest(functions.join('\n')) }
+    packageSourceSha256: digest(packageSource), copyingFactsSha256: digest(JSON.stringify(payload)) }
   try {
     const appResources = join(temporary, 'AgentMux.app/Contents/Resources/app')
-    await copying.copyDependencies(appResources)
+    await copyRuntimePayload(payload, appResources, { commit: 'private-proof', tree: 'private-proof' })
     const mainDirectory = join(appResources, 'out/main')
     await mkdir(mainDirectory, { recursive: true })
     await writeFile(join(appResources, 'package.json'), JSON.stringify({ type: 'module' }))
@@ -105,11 +84,8 @@ it('the production Desktop copying block supplies Main hashing, avatars, Host an
     expect(avatar.resolutions).toEqual(['react/index.js', 'react/jsx-runtime.js', 'react-dom/server.node.js'].map(file =>
       pathToFileURL(join(canonicalAppResources, 'node_modules', file)).href))
 
-    // Core is an existing package owner. Its real recursive materializer supplies
-    // compiled exports, the artifact contract and nested dependencies; no test
-    // request supplies identity at the App root on behalf of the direct copier.
+    // The same production payload already supplies Core and its nested dependencies.
     const desktopRoot = join(repositoryRoot, 'apps/desktop'), coreRuntime = join(appResources, 'node_modules/@agentmux/core')
-    await copying.materializeDependency(desktopRoot, '@agentmux/core', coreRuntime)
     const nestedIdentity = join(coreRuntime, 'node_modules/@agentmux/identity/dist/index.js')
     expect((await readFile(nestedIdentity)).length).toBeGreaterThan(0)
 

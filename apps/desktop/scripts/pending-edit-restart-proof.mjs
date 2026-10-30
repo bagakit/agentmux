@@ -426,7 +426,7 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     if (demandCollaboration) for (const path of ['apps/host/src/goal-dispatch-input.ts', 'apps/desktop/src/shared/goal-pmo-origin.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/renderer/src/components/RegionCurrentDemand.tsx', 'apps/desktop/src/renderer/src/components/GoalContinuationControl.tsx', 'apps/desktop/src/renderer/src/components/settings/GoalsSettingsPane.tsx', 'apps/desktop/src/renderer/src/components/GoalAgentPicker.tsx', 'apps/desktop/src/renderer/src/lib/primary-mote-executor.ts', 'apps/desktop/src/renderer/src/lib/goal-current-work.ts']) {
       assert.equal(build.desktopSourceClosure[path], build.sources[path], 'Actual new collaboration consumer: ' + path)
     }
-    if (completeHostBuild) await command('private-renderer-release', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-renderer-release.mjs')], privateRoot)
+    if (completeHostBuild) await command('private-renderer-release', process.execPath, ['--input-type=module', '--eval', "const { writeRendererRelease } = await import('./apps/desktop/scripts/build-renderer-release.mjs'); await writeRendererRelease(process.cwd())"], privateRoot)
     await record(join(privateRoot, 'apps/desktop/out'), build.compiled)
     await record(join(privateRoot, 'packages/core/dist'), build.compiled)
     assert.ok(Object.keys(build.compiled).length > 100)

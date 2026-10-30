@@ -37,3 +37,18 @@ test('the installed closure preserves two runtime versions and npm publication f
     assert.equal(await readFile(join(host, 'source-private.txt'), 'utf8'), 'must not enter published runtime')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('publication materialization keeps each target inside its own package', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'amux-publication-boundary-'))
+  try {
+    const source = join(root, 'source.txt'), candidate = join(root, 'candidate')
+    await writeFile(source, 'original bytes')
+    const closure = { packages: [{ id: 0 }], root: 0 }
+    const publication = { packages: [{ id: 0, path: 'node_modules/.packages/0', files: [
+      { path: '../sibling/escaped.txt', source, mode: 0o644 }
+    ] }], links: [], report: [] }
+    await assert.rejects(materializePackageClosure(closure, candidate, publication), /escapes its original package/)
+    await assert.rejects(readFile(join(candidate, 'node_modules/.packages/sibling/escaped.txt')), { code: 'ENOENT' })
+    assert.equal(await readFile(source, 'utf8'), 'original bytes')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
