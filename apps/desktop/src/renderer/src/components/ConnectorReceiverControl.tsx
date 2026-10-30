@@ -25,8 +25,9 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
   const [operation, setOperation] = useState<ConnectionReceiverRecoveryOperation | null>(null)
   const [busy, setBusy] = useState(false), [issue, setIssue] = useState(''), [localIssue, setLocalIssue] = useState(false)
   const receiver = observed?.issue || observed?.retained ? undefined : observed?.value?.receiver
-  const previousFinished = !!operation && (operation.disposition === 'already-ready' || operation.disposition === 'not-current' ||
-    operation.receiverRef !== receiver?.ref && receiver?.state === 'ended')
+  // An unknown reply keeps its original ID. A known joined/read/policy decision
+  // is not a permanent gate once this receiver has actually ended.
+  const previousFinished = !!operation && (operation.disposition !== 'scheduled' || operation.receiverRef !== receiver?.ref)
   const canStart = !!hostingTarget && connection?.capabilities?.receiverRecovery === true && receiver?.state === 'ended' && receiver.nextAttemptAt === undefined &&
     (!retained || previousFinished)
   const accepts = (original: string) => alive.current && current.current === original
