@@ -5,8 +5,9 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { api } from '../lib/api'
 import '../styles/original-input-waiting.css'
+import { originalInputExplanation } from '../lib/original-input-presentation'
 
-type Props = { hostId: string; receipt: AgentInputSubmissionReceipt; onRefresh?: (() => void | Promise<unknown>) | undefined }
+type Props = { hostId: string; receipt: AgentInputSubmissionReceipt; onRefresh?: (() => void | Promise<unknown>) | undefined; showReceipt?: boolean }
 const inputKey = (key: AgentPromptInputKey) => [key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)]
 const referenceKey = (ref: AgentInputWaitRef) => JSON.stringify([...inputKey(ref.key), ref.waitGeneration])
 const stopMessages: Record<AgentInputWaitStopReceipt['outcome'], string> = {
@@ -21,7 +22,7 @@ export function OriginalInputWaitingControl(props: Props) {
   return <OriginalWaiting key={JSON.stringify([props.hostId, ...inputKey(props.receipt.ref.key)])} {...props} />
 }
 
-function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
+function OriginalWaiting({ hostId, receipt, onRefresh, showReceipt = false }: Props) {
   // A newer parent observation cannot retarget an open original action or discard its in-flight ACK.
   const [ref] = useState(() => receipt.ref)
   const [cancelOperationId] = useState(() => `desktop-input-stop-v1:${bytesToHex(sha256(utf8ToBytes(JSON.stringify([hostId, ...inputKey(ref.key), ref.waitGeneration]))))}`)
@@ -79,21 +80,23 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
     }
   }
 
-  if (!enabled && observed.status !== 'launch-carried' && !changed && !ack && !checked && !error && !busy) return null
-  return <section className="original-input-waiting" aria-label="原输入等待操作" data-original-input-waiting>
+  if (!showReceipt && !enabled && observed.status !== 'launch-carried' && !changed && !ack && !checked && !error && !busy) return null
+  const explanation = showReceipt ? originalInputExplanation(observed.status, observed.control.waiting) : null
+  return <section className="original-input-waiting" aria-label="原输入等待操作" data-original-input-waiting data-show-receipt={showReceipt || undefined}>
+    {explanation ? <><strong>{explanation.title}</strong><small>{explanation.detail}</small></> : null}
     <div className="original-input-waiting__actions">
-      {needsRejoin && !ack ? <button className="small-button" type="button" data-input-wait-action="rejoin" disabled={busy !== null || rejoinUnconfirmed} onClick={() => void run('rejoin')}>接回这次等待</button> : null}
-      {enabled && !ack ? <button className="small-button" type="button" data-input-wait-action="stop" disabled={busy !== null} onClick={() => void run('stop')}>停止这次等待</button> : null}
-      <button className="small-button" type="button" data-input-wait-action="check" disabled={busy !== null} onClick={() => void run('check')}>{busy === 'check' ? '正在检查…' : '检查原输入'}</button>
+      {needsRejoin && !ack ? <button className={showReceipt ? 'primary-button' : 'small-button'} type="button" data-input-wait-action="rejoin" disabled={busy !== null || rejoinUnconfirmed} onClick={() => void run('rejoin')}>{showReceipt ? 'Resume saved input' : '接回这次等待'}</button> : null}
+      <button className="small-button" type="button" data-input-wait-action="check" disabled={busy !== null} onClick={() => void run('check')}>{showReceipt ? busy === 'check' ? 'Checking…' : 'Check input result' : busy === 'check' ? '正在检查…' : '检查原输入'}</button>
+      {enabled && !ack ? <button className={showReceipt ? 'original-input-waiting__quiet' : 'small-button'} type="button" data-input-wait-action="stop" disabled={busy !== null} onClick={() => void run('stop')}>{showReceipt ? 'Stop waiting' : '停止这次等待'}</button> : null}
     </div>
     {busy === 'stop' ? <p role="status">正在停止这次等待…</p> : null}
     {busy === 'rejoin' ? <p role="status">正在接回原输入等待…</p> : null}
-    {needsRejoin ? <p>原输入已保存，需要明确接回后才能继续检查输入环境。</p> : null}
+    {needsRejoin && !showReceipt ? <p>原输入已保存，需要明确接回后才能继续检查输入环境。</p> : null}
     {rejoined ? <p role="status" data-input-rejoin-outcome>原输入的接回请求已有回执；这不代表 Agent 已接收。</p> : null}
     {ack ? <p role="status" data-input-stop-outcome={ack.outcome}>{ack.outcome === 'already-settled' && receipt.status === 'waiting'
       ? '上方等待状态是此前观测。原输入已结束等待；请检查原输入结果。' : stopMessages[ack.outcome]}</p> : null}
     {changed && ack?.outcome !== 'stale-generation' ? <p role="status" data-input-wait-generation>等待批次已变化；当前操作仍绑定原批次。重新打开详情可查看新的等待。</p> : null}
-    {(checked || observed.status === 'launch-carried') && !changed ? <p role="status" data-input-wait-observation>{checked?.value === null ? '未读到原输入回执，结果仍未确认。'
+    {(!showReceipt || checked?.value === null) && (checked || observed.status === 'launch-carried') && !changed ? <p role="status" data-input-wait-observation>{checked?.value === null ? '未读到原输入回执，结果仍未确认。'
       : observed?.status === 'waiting' ? '原输入仍在等待。'
       : observed?.status === 'stopped' ? '原输入已停止等待。'
       : observed?.status === 'admitted' ? '原输入已被 Agent 接收。'

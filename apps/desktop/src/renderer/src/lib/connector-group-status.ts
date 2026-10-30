@@ -1,6 +1,8 @@
 import type { GroupDiagnosis } from './group-diagnosis'
 import type { CheckedGroupDiagnosis } from './use-connector-group-diagnosis'
 import type { RoomBinding } from '@agentmux/core/connections'
+import { connectorDeliveryExplanation, connectorGapExplanation, connectorSourceExplanation } from './connector-diagnosis-explanation'
+import { originalInputExplanation } from './original-input-presentation'
 
 /** Display only: these original observations confer no input, delivery or retry authority. */
 export function connectorGroupDiagnostics(snapshot: CheckedGroupDiagnosis | undefined) {
@@ -50,7 +52,9 @@ function incomingStatus(report: GroupDiagnosis): string {
 
 export type ConnectorProblemKind = 'receiver-unconfirmed' | 'receiver-stopped' | 'receiver-recovering' | 'intake-unconfirmed' | 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' | 'access-unconfirmed' |
   'outgoing-unconfirmed' | 'outgoing-not-applied' | 'outgoing-read-unavailable' | 'incoming-read-unavailable' | 'member-access' | 'request-refused' | 'agent-waiting' | 'agent-stopped' | 'agent-not-applied' | 'agent-unconfirmed' | 'recording-unconfirmed'
-export type ConnectorProblemAction = { kind: 'members' | 'content' | 'receipts' | 'incoming' | 'sync' | 'channel-settings' | 'sharing'; label: string }
+export type ConnectorProblemAction = { kind: 'receipts'; label: string; operationId?: string } | { kind: 'incoming'; label: string; ingressId?: string } |
+  { kind: 'earlier-receipts'; label: string; after: string } | { kind: 'members' | 'content' | 'source' | 'sync' | 'channel-settings' | 'sharing'; label: string }
+export type ConnectorProblemActions = Partial<Record<ConnectorProblemAction['kind'], (action: ConnectorProblemAction) => void>>
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted'; action?: ConnectorProblemAction }
 export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; secondary?: string; receiver?: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
 export type ConnectorGroupSummary = { problems: ConnectorProblem[]; outgoing: ConnectorDirectionSummary; incoming: ConnectorDirectionSummary; retained: boolean; note: string | null }
@@ -85,14 +89,21 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   const out = report?.outgoing.value
   const { contentGap, sourceUnconfirmed, accessUnconfirmed, counts, confirmedText } = outgoingFacts(out)
   if (accessUnconfirmed) add('access-unconfirmed', 'Member access check unavailable', 'Application permissions could not be checked. Saved decisions are kept; review member access and check again.', 'muted', { kind: 'members', label: 'Member access' })
-  if (contentGap) add('content-gap',
-    'Some conversation content is not shared yet', 'Some original content is not confirmed for sharing. Other messages can still be delivered.', 'muted', { kind: 'content', label: 'View content details' })
-  if (sourceUnconfirmed) add('source-unconfirmed', 'Source reading unconfirmed', 'New Agent output cannot be confirmed from the conversation source. Existing delivery receipts are kept.', out?.sourceObservation?.state === 'unavailable' ? 'warning' : 'muted', { kind: 'content', label: 'View source details' })
+  const sourceCause = connectorSourceExplanation(out?.sourceObservation)
+  const gaps = out?.coverage?.gaps ?? [], firstGap = gaps[0] ? connectorGapExplanation(gaps[0]) : null
+  if (contentGap) add('content-gap', gaps.length === 1 ? firstGap!.title : (gaps.length + (out?.coverage?.omittedGapCount ?? 0) ? `${gaps.length + (out?.coverage?.omittedGapCount ?? 0)} content gaps need checking` : 'Content coverage needs checking'),
+    firstGap ? (gaps.length === 1 ? '' : firstGap.title + '. ') + firstGap.detail : 'This window did not provide the exact gap. Check the original content records.', 'muted', { kind: 'content', label: 'View content records' })
+  if (sourceUnconfirmed) add('source-unconfirmed', sourceCause.title, sourceCause.detail, out?.sourceObservation?.state === 'unavailable' ? 'warning' : 'muted', { kind: 'source', label: 'Check read result' })
+  const uncertainDelivery = out?.deliveries.find(delivery => delivery.receipt === 'unknown' || delivery.state === 'unknown')
   if (counts.unconfirmed || out?.effectObservation?.state === 'unknown') add('outgoing-unconfirmed',
-    counts.unconfirmed ? `${counts.unconfirmed} delivery result${counts.unconfirmed === 1 ? '' : 's'} not confirmed` : 'Earlier delivery results not confirmed', 'The platform has not confirmed these earlier requests. Recent confirmed deliveries are unaffected.', 'muted', { kind: 'receipts', label: 'View delivery details' })
-  if (counts.notApplied) add('outgoing-not-applied', `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered`, 'The original platform receipts report not applied. Check those exact requests.', 'warning', { kind: 'receipts', label: 'View delivery details' })
+    counts.unconfirmed ? `${counts.unconfirmed} delivery results unconfirmed` : 'Earlier delivery results unconfirmed',
+    uncertainDelivery ? connectorDeliveryExplanation(uncertainDelivery).detail : 'These results are outside the latest receipts. Check earlier receipts; do not resend them.', 'muted',
+    !uncertainDelivery && out?.next ? { kind: 'earlier-receipts', label: 'View earlier receipts', after: out.next } : { kind: 'receipts', label: 'View original delivery', ...(uncertainDelivery ? { operationId: uncertainDelivery.operationId } : {}) })
+  const refusedDelivery = out?.deliveries.find(delivery => delivery.receipt === 'not-applied' || delivery.state === 'not-applied')
+  if (counts.notApplied) add('outgoing-not-applied', counts.notApplied === 1 && refusedDelivery ? connectorDeliveryExplanation(refusedDelivery).title : `${counts.notApplied} original requests did not take effect`,
+    refusedDelivery ? connectorDeliveryExplanation(refusedDelivery).detail : 'Check the exact original request receipt.', 'warning', { kind: 'receipts', label: 'View original delivery', ...(refusedDelivery ? { operationId: refusedDelivery.operationId } : {}) })
   const outgoing: ConnectorDirectionSummary = { direction: 'outgoing', title: 'Conversation → group',
-    value: !out ? report ? 'Could not check recent sends' : 'Not checked' : sourceUnconfirmed ? 'Source reading unconfirmed' : contentGap ? 'Some conversation content is not shared yet' : counts.notApplied ? `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered` :
+    value: !out ? report ? 'Could not check recent sends' : 'Not checked' : sourceUnconfirmed ? sourceCause.title : contentGap ? problems.find(problem => problem.kind === 'content-gap')!.title : counts.notApplied ? problems.find(problem => problem.kind === 'outgoing-not-applied')!.title :
       counts.unconfirmed ? 'Recent send results not confirmed' : counts.pending ? 'Sending recent requests' : confirmedText || (out.deliveries.length ? 'Recent send results not recorded' : 'No recent requests'),
     detail: out ? `Recent receipt window${out.next ? '; more receipts available' : ''}.` : 'Check the original group to read its receipts.',
     ...(confirmedText && (contentGap || counts.notApplied || counts.unconfirmed || sourceUnconfirmed || counts.pending) ? { secondary: confirmedText } : {}),
@@ -117,20 +128,20 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
       if (refusal) { detail = (row.scope === 'group-event' ? 'Latest group event. ' : '') + refusal.detail; incomingProblem = 'request-refused'; add('request-refused', refusal.title, detail, 'warning', refusal.action) }
       tone = row.state === 'refused' ? 'warning' : 'neutral'
     } else if (row.coreObservation === 'unavailable') { value = 'Agent receipt could not be checked'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'The original input remains recorded; its current Agent receipt could not be read.') }
-    else if (row.coreStatus === 'admitted') value = 'Accepted by Agent'
+    else if (row.coreStatus === 'admitted') { const cause = originalInputExplanation(row.coreStatus); value = cause.title; detail = cause.detail }
     else if (row.coreStatus === 'launch-carried') {
       value = 'Message carried by recovery startup'; detail += ' Agent acceptance is unconfirmed. This input will not be sent again.'
       incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, detail)
     }
     else if (row.coreStatus === 'waiting') {
       const explicit = row.waiting?.wake === 'explicit-rejoin'
-      value = explicit ? 'Input recovery needed' : 'Waiting for Agent'; incomingProblem = 'agent-waiting'; tone = explicit ? 'warning' : 'neutral'
-      detail += explicit ? ' This saved input needs an explicit rejoin. Open its original receipt to review and recover the same input.' : ' The original input is waiting for its automatic recovery condition.'
-      add('agent-waiting', value, detail, explicit ? 'warning' : 'muted', { kind: 'incoming', label: explicit ? 'Review original input' : 'View input details' })
+      incomingProblem = 'agent-waiting'; tone = explicit ? 'warning' : 'neutral'
+      const cause = originalInputExplanation(row.coreStatus, row.waiting); value = cause.title; detail = cause.detail
+      add('agent-waiting', value, detail, explicit ? 'warning' : 'muted', { kind: 'incoming', label: 'View original input', ingressId: row.ingressId })
     }
     else if (row.coreStatus === 'stopped') { value = 'Input delivery stopped'; incomingProblem = 'agent-stopped'; add('agent-stopped', value, 'The original saved input remains available.', 'muted') }
     else if (row.coreStatus === 'not-applied') { value = 'Not delivered to Agent'; tone = 'warning'; incomingProblem = 'agent-not-applied'; add('agent-not-applied', value, 'Check the original input receipt.', 'warning') }
-    else { value = row.coreStatus === 'terminal-confirmed' || row.coreStatus === 'bytes-accepted' ? 'Sent to Agent · awaiting confirmation' : 'Agent acceptance not confirmed'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'Input transport or recording is separate from Agent acceptance.') }
+    else { const cause = originalInputExplanation(row.coreStatus, row.waiting); value = cause.title; detail = cause.detail; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, detail, 'muted', { kind: 'incoming', label: 'View original input', ingressId: row.ingressId }) }
   }
   let earlierIncoming = report?.incoming.issue && incoming ? `Earlier check: ${value}` : undefined
   if (report?.incoming.issue) { value = 'Agent inputs could not be checked'; tone = 'warning'; incomingProblem = 'incoming-read-unavailable' }
@@ -150,10 +161,10 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     detail = uncertain ? receiver?.state === 'ready' && !connection?.issue && !connection?.retained ? 'Receiver reports connected; current transport observation is unconfirmed. Check this group again.' : 'Current receiver observation is unavailable.' : receiver?.state === 'ended' && !scheduled ? 'This bot receives messages for its connected groups.' : 'The original Host is reconnecting automatically.'
     add(incomingProblem, value, detail, tone === 'warning' ? 'warning' : 'muted')
     if (row) earlierIncoming = (row.coreStatus === 'waiting' || row.inputOperationId && row.coreObservation === 'unavailable' ? 'Original input: ' : 'Earlier message: ') + earlier
-  } else if (report && receivingEnabled && connection?.value?.intake.reason === 'check-failed') {
-    value = 'Inputs need checking'; detail = 'Receiver connected. Open the original input receipts.'
-    incomingProblem = 'intake-unconfirmed'; tone = 'muted'
-    add(incomingProblem, value, detail, 'muted', { kind: 'incoming', label: 'View input details' })
+  }
+  if (report && receivingEnabled && connection?.value?.intake.reason === 'check-failed') {
+    // This flag belongs to the bot's cross-group intake, not this group's last input.
+    add('intake-unconfirmed', 'Bot receive check incomplete', 'This may concern another group or an earlier event. No finer reason was recorded. This group’s message receipts are kept.', 'muted', { kind: 'incoming', label: 'View this group’s inputs' })
   }
   if (!currentReceiverGap && !incomingProblem && row?.coreStatus === 'admitted' && row.scope === 'current-binding') value = 'Last message: Accepted by Agent'
   const remaining = problems.filter(problem => problem.kind !== outgoing.problem && problem.kind !== incomingProblem).map(problem => problem.title).join(' · ')

@@ -1,3 +1,8 @@
 .original-input-waiting { display: grid; gap: var(--sp-2); min-width: 0; margin-block: var(--sp-3); font-size: var(--fs-meta); }
 .original-input-waiting__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .original-input-waiting p { margin: 0; color: var(--text-3); line-height: 1.5; overflow-wrap: anywhere; }
+.original-input-waiting[data-show-receipt] .primary-button { padding: var(--sp-2) var(--sp-4); }
+.original-input-waiting__quiet { padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; cursor: pointer; }
+.original-input-waiting__quiet:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+.original-input-waiting__quiet:disabled { opacity: .45; cursor: default; }
+.original-input-waiting__quiet:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }

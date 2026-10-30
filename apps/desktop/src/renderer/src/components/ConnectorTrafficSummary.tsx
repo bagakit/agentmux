@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
-import type { ConnectorGroupSummary, ConnectorProblem, ConnectorProblemAction, ConnectorProblemKind } from '../lib/connector-group-status'
+import type { ConnectorGroupSummary, ConnectorProblem, ConnectorProblemActions, ConnectorProblemKind } from '../lib/connector-group-status'
 import '../styles/connector-traffic-summary.css'
 
 const OutgoingIcon = semanticIconComponent('conversation.outgoing'), IncomingIcon = semanticIconComponent('conversation.incoming')
@@ -14,10 +14,10 @@ export function ConnectorProblemIcon({ kind }: { kind: ConnectorProblemKind }) {
 
 /** The same bounded facts in popover and details. It cannot dispatch or authorize an operation. */
 export function ConnectorTrafficSummary({ summary, compact = false, onInspect, actions, incomingControl }: { summary: ConnectorGroupSummary; compact?: boolean; onInspect?(): void; incomingControl?: ReactNode;
-  actions?: Partial<Record<ConnectorProblemAction['kind'], () => void>> }) {
+  actions?: ConnectorProblemActions }) {
   function action(problem: ConnectorProblem | undefined) {
     const request = problem?.action, perform = request && actions?.[request.kind]
-    return request && perform ? <button type="button" className="agent-connector-text-action connector-traffic-summary__action" onClick={perform}>{request.label}</button> : null
+    return request && perform ? <button type="button" className="agent-connector-text-action connector-traffic-summary__action" onClick={() => perform(request)}>{request.label}</button> : null
   }
   const primary = new Set([summary.outgoing.problem, summary.incoming.problem].filter(Boolean))
   const problems = summary.problems.filter(problem => !primary.has(problem.kind))

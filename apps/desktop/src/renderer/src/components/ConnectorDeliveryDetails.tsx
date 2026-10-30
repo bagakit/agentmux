@@ -7,7 +7,8 @@ import { api } from '../lib/api'
 import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, readGroupDiagnosis, retainGroupDiagnosis, type GroupDiagnosis, type GroupWindow } from '../lib/group-diagnosis'
 
 import { connectorDiagnosisKey, useConnectorGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
-import { connectorGroupSummary, type ConnectorProblemAction } from '../lib/connector-group-status'
+import { connectorGroupSummary, type ConnectorProblemAction, type ConnectorProblemActions } from '../lib/connector-group-status'
+import { connectorDeliveryExplanation, connectorGapExplanation, connectorIntakeExplanation, connectorSourceExplanation } from '../lib/connector-diagnosis-explanation'
 import { ConnectorTrafficSummary } from './ConnectorTrafficSummary'
 import { ConnectorReceiverControl } from './ConnectorReceiverControl'
 import { ConnectorDeliveryRetryControl } from './ConnectorDeliveryRetryControl'
@@ -16,7 +17,7 @@ import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 const LoadingIcon = semanticIconComponent('status.loading')
 const receiptTitle = (kind: string) => kind === 'binding-notice' ? 'Connection notice' : kind === 'permission' ? 'Permission request' : kind === 'query-feedback' ? 'Message status update' : 'Conversation message'
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
-export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, onMembers, actions, details, active = true, showConfiguration = true }: { binding: RoomBinding; connection?: ConnectionRecord | undefined; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void; actions?: Partial<Record<ConnectorProblemAction['kind'], () => void>>; active?: boolean; details?: ReactNode; showConfiguration?: boolean }) {
+export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, onMembers, actions, details, active = true, showConfiguration = true }: { binding: RoomBinding; connection?: ConnectionRecord | undefined; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void; actions?: ConnectorProblemActions; active?: boolean; details?: ReactNode; showConfiguration?: boolean }) {
   const latest = useConnectorGroupDiagnosis([binding], 0, active, null, hostingTarget, [binding])
   const checked = latest.entries[connectorDiagnosisKey(binding)]
   const target = groupTarget(binding), key = JSON.stringify([target, hostingTarget]), originalSource = api.connections.call
@@ -45,9 +46,30 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
     if (expanded) focusOriginal(section)
     else { reveal.current = section; setExpanded(true) }
   }
+  function openProblem(action: ConnectorProblemAction) {
+    const report = checked?.report
+    if (action.kind === 'source') { latest.check(); return }
+    if (!report) return
+    // An explicit summary click selects that observed window, never a guessed row.
+    setRead({ key, value: report, checkedAt: checked?.checkedAt ?? Date.now() })
+    if (action.kind === 'earlier-receipts') { showOriginal('receipts'); void inspect({ ...report.window, after: action.after }); return }
+    if (action.kind === 'receipts') {
+      showOriginal('receipts')
+      if (action.operationId && report.outgoing.value?.deliveries.some(row => row.operationId === action.operationId)) void inspectOriginal(action.operationId)
+    } else if (action.kind === 'incoming') {
+      showOriginal('incoming')
+      const row = report.incoming.value?.rows.find(row => row.ingressId === action.ingressId)
+      if (row?.kind === 'message' && row.scope === 'current-binding' && row.inputOperationId) void inspectInput(row)
+    } else if (action.kind === 'content') showOriginal('content')
+  }
   useEffect(() => {
     if (expanded && reveal.current) { focusOriginal(reveal.current); reveal.current = null }
   }, [expanded, key])
+  useEffect(() => {
+    if (input?.key !== key) return
+    const row = [...(originalSections.current.incoming?.querySelectorAll<HTMLElement>('[data-ingress-id]') ?? [])].find(node => node.dataset.ingressId === input.ingressId)
+    row?.scrollIntoView({ block: 'start' }); row?.focus({ preventScroll: true })
+  }, [input?.key, input?.ingressId, key])
   async function inspect(window: GroupWindow = {}) {
     const request = ++epoch.current; setPending(true)
     const result = await readGroupDiagnosis(source, target, window)
@@ -96,25 +118,40 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
   }, [key, source])
   const configuration = checked?.report?.binding.value
   const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value
+  const sourceCause = connectorSourceExplanation(outgoing?.sourceObservation)
   const sectionIssue = (name: string, section: { issue: string | null; retained?: true } | undefined) => section?.issue ? <p className="agent-connector-note" role="status">{name} observation unconfirmed{section.retained ? '; earlier observed facts are kept.' : '.'}</p> : null
   const readFailed = !!visible && [visible.service, visible.adapterService, visible.connection, visible.binding, visible.outgoing, visible.incoming].some(section => section.issue)
+  const summary = connectorGroupSummary(checked?.report ?? null)
+  const hasSourceCheck = summary.problems.some(problem => problem.action?.kind === 'source')
   const originalFacts = original?.value ? deliveryFacts(original.value) : null
+  const originalCause = originalFacts ? connectorDeliveryExplanation(originalFacts) : null
   const originalReceipt = original ? <div key={original.value?.operationId ?? 'unavailable-original'} ref={selectedReceipt} tabIndex={-1} className="agent-connector-receipt" data-selected-delivery={original.value?.operationId}>
         {original.issue && original.value ? <small role="status">Original receipt observation unconfirmed; earlier result retained.</small> : null}
-        <p className="agent-connector-note" role="status">{original.value ? receiptTitle(originalFacts!.kind) + (original.issue ? ' · Earlier queue: ' : ' · Queue: ') + original.value.state + ' · Platform receipt: ' + (originalFacts!.receipt ?? 'Not recorded') : 'Original receipt unavailable; no retry was sent.'}</p>
-        {original.value ? <><code>{original.value.operationId}</code>{originalFacts?.platformMessageId ? <code>{originalFacts.platformMessageId}</code> : null}<ConnectorDeliveryRetryControl key={key + original.value.operationId} delivery={original.value} binding={binding} hostingTarget={hostingTarget} onObserve={value => {
+        <strong role="status">{originalCause?.title ?? 'Original delivery receipt unavailable'}</strong>
+        <small>{originalCause?.detail ?? 'The original operation is kept; no retry was sent.'}</small>
+        {original.value?.wait ? <small>Original rate-limit earliest time: {new Date(original.value.wait.notBefore).toLocaleString()}; this does not confirm a platform effect.</small> : null}
+        {original.value ? <><details className="agent-connector-disclosure"><summary>Original delivery identity</summary><div className="agent-connector-fields"><code>{original.value.operationId}</code>{originalFacts?.platformMessageId ? <code>{originalFacts.platformMessageId}</code> : null}<small>{receiptTitle(originalFacts!.kind)} · {original.value.state} · {originalFacts!.receipt ?? 'Platform receipt not recorded'}</small></div></details><ConnectorDeliveryRetryControl key={key + original.value.operationId} delivery={original.value} binding={binding} hostingTarget={hostingTarget} onObserve={value => {
           if (accepts()) setDetail(previous => previous?.key === key && previous.request === original.request ? { ...previous, value, issue: false } : previous)
         }} /></> : null}
       </div> : null
-  const receiptRows = outgoing?.deliveries.map(delivery => original?.value?.operationId === delivery.operationId ? originalReceipt : <div className="agent-connector-receipt" key={delivery.operationId}><span>{receiptTitle(delivery.kind)} · Queue: {delivery.state} · Platform receipt: {delivery.receipt ?? 'Not recorded'}</span><code>{delivery.operationId}</code>{delivery.platformMessageId ? <code>{delivery.platformMessageId}</code> : null}<button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button></div>) ?? []
-  if (originalReceipt && !outgoing?.deliveries.some(delivery => delivery.operationId === original.value?.operationId)) receiptRows.push(originalReceipt)
+  const receiptRows = outgoing?.deliveries.map(delivery => {
+    if (original?.value?.operationId === delivery.operationId) return originalReceipt
+    const cause = connectorDeliveryExplanation(delivery)
+    return <div className="agent-connector-receipt" key={delivery.operationId} data-delivery-operation={delivery.operationId}>
+      <strong>{receiptTitle(delivery.kind)} · {cause.title}</strong>
+      {delivery.receipt === 'unknown' || delivery.state === 'unknown' || delivery.receipt === 'not-applied' || delivery.state === 'not-applied' ? <small>{cause.detail}</small> : null}
+      <details className="agent-connector-disclosure"><summary>Original delivery identity</summary><div className="agent-connector-fields"><code>{delivery.operationId}</code>{delivery.platformMessageId ? <code>{delivery.platformMessageId}</code> : null}<small>{delivery.state} · {delivery.receipt ?? 'Platform receipt not recorded'}</small></div></details>
+      <button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button>
+    </div>
+  }) ?? []
+  if (originalReceipt && !outgoing?.deliveries.some(delivery => delivery.operationId === original?.value?.operationId)) receiptRows.push(originalReceipt)
   return <section className="agent-connector-fields connector-delivery-details" aria-busy={pending || checked?.checking} aria-label="Group delivery" data-connection-section="activity" tabIndex={-1}>
     {showConfiguration && configuration ? <div className="connector-group-details__configuration"><span>{checked?.report?.binding.issue ? 'Last observed sync' : 'Group sync'} · <strong>{configuration.state === 'paused' ? 'Paused' : configuration.state === 'detached' ? 'Disconnected' : 'Enabled'}</strong></span><span>Sharing · <strong>{configuration.scope.publication === 'future-shared-conversation' ? 'Complete conversation' : 'Agent replies only'}</strong></span></div> : null}
-    <div className="agent-connector-section-title"><div><h3>Message activity</h3>{checked?.checkedAt ? <small className="agent-connector-checked">Checked <time dateTime={new Date(checked.checkedAt).toISOString()}>{new Date(checked.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div><button className="agent-connector-text-action" aria-busy={checked?.checking} disabled={checked?.checking} onClick={latest.check}>{checked?.checking ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button></div>
-    <ConnectorTrafficSummary incomingControl={<ConnectorReceiverControl key={key} binding={binding} connection={connection} observed={checked?.report?.connection} hostingTarget={hostingTarget} onRefresh={latest.check} />} summary={connectorGroupSummary(checked?.report ?? null)} actions={{ ...actions, ...(onMembers ? { members: onMembers } : {}),
-      incoming: () => showOriginal('incoming'), receipts: () => showOriginal('receipts'), content: () => showOriginal('content') }} />
+    <div className="agent-connector-section-title"><div><h3>Message activity</h3>{checked?.checkedAt ? <small className="agent-connector-checked">Checked <time dateTime={new Date(checked.checkedAt).toISOString()}>{new Date(checked.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div>{!hasSourceCheck ? <button className="agent-connector-text-action" aria-busy={checked?.checking} disabled={checked?.checking} onClick={latest.check}>{checked?.checking ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button> : null}</div>
+    <ConnectorTrafficSummary incomingControl={<ConnectorReceiverControl key={key} binding={binding} connection={connection} observed={checked?.report?.connection} hostingTarget={hostingTarget} onRefresh={latest.check} />} summary={summary} actions={{ ...actions, ...(onMembers ? { members: onMembers } : {}),
+      incoming: openProblem, receipts: openProblem, 'earlier-receipts': openProblem, content: openProblem, source: openProblem }} />
 
-    <details className="agent-connector-disclosure connector-delivery-details__originals" open={expanded} onToggle={event => { setExpanded(event.currentTarget.open); if (event.currentTarget.open && read?.key !== key && checked?.report) setRead({ key, value: checked.report, checkedAt: checked.checkedAt ?? Date.now() }) }}><summary>Message records</summary><div className="agent-connector-fields">
+    <details className="agent-connector-disclosure connector-delivery-details__originals" open={expanded} onToggle={event => { setExpanded(event.currentTarget.open); if (event.currentTarget.open && read?.key !== key && checked?.report) setRead({ key, value: checked.report, checkedAt: checked?.checkedAt ?? Date.now() }) }}><summary>Message records</summary><div className="agent-connector-fields">
       <section className="connector-delivery-details__section" aria-label="Connection observation">
       <h4>Connection observation</h4>
       <p className="agent-connector-note">This reading stays in place while the activity summary updates.</p>
@@ -131,32 +168,40 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
       <section ref={node => { originalSections.current.incoming = node }} className="connector-delivery-details__section" data-receipt-section="incoming" tabIndex={-1} aria-label="Incoming message details">
       <h4>Incoming events & Core input</h4>
       <p className="agent-connector-note">Latest 5 records from this application and group, including other receiving connections. Platform acknowledgement is not recorded by this read API.</p>
-      {incoming ? <><p className="agent-connector-note">Group window: {incoming.rows.length} records, newest first · has next: {String(incoming.next !== null)}</p>
+      {incoming ? <><p className="agent-connector-note">{incoming.rows.length} recent records, newest first.{incoming.next ? ' Earlier records are available.' : ''}</p>
         {!incoming.rows.length ? <p className="agent-connector-note">No intake in this exact group window. This is not a complete-history or platform-receipt claim.</p> : null}
-        {incoming.rows.map(row => <div className="agent-connector-receipt" key={row.ingressId}><span>Conversation record: {row.recording?.state ?? 'not confirmed'}{row.recording?.code ? ' · ' + row.recording.code : ''} · Host intake: {row.state}{row.code ? ' · ' + row.code : ''} · Core input: {row.coreStatus ?? (row.inputOperationId ? 'unconfirmed' : 'not started')}{row.scope === 'other-binding' ? ' · another binding revision' : ''}</span><code>{row.ingressId}</code>{row.inputOperationId ? <code>{row.inputOperationId}</code> : null}{row.waiting ? <small>{row.waiting.wake === 'explicit-rejoin' ? 'Input recovery needed. Review the saved input before explicitly rejoining its wait.' : 'The saved input will be checked when its original runtime or session is restored.'}</small> : null}{row.coreObservation === 'unavailable' ? <small>Original Core receipt read unavailable; no input was replayed.</small> : null}
-          {row.kind === 'message' && row.scope === 'current-binding' && row.inputOperationId ? <button className="small-button" disabled={pending} onClick={() => void inspectInput(row)}>Open original input</button> : null}
-          {input?.key === key && input.ingressId === row.ingressId ? <>
-            {input.issue ? <small role="status">Original input receipt could not be confirmed. Saved input and any earlier receipt are kept.</small> : null}
-            {input.receipt ? <OriginalInputWaitingControl hostId={target.executionHostId} receipt={input.receipt} onRefresh={() => inspect(visible?.window)} /> : null}
-            <button className="small-button" onClick={() => setInput(null)}>Close original input</button>
-          </> : null}
-        </div>)}
+        {incoming.rows.map(row => {
+          const cause = connectorIntakeExplanation(row)
+          const selected = input?.key === key && input.ingressId === row.ingressId && input.receipt !== null
+          return <div className="agent-connector-receipt" key={row.ingressId} data-ingress-id={row.ingressId} tabIndex={-1}>
+            <strong>{row.kind === 'action' ? 'Group action' : 'Group message'} · {selected ? 'Original input receipt' : cause.title}</strong>{!selected ? <small>{cause.detail}</small> : null}
+            {row.scope === 'other-binding' ? <small>Earlier binding revision; this does not confirm the current group input.</small> : null}
+            <details className="agent-connector-disclosure"><summary>Original intake identity</summary><div className="agent-connector-fields"><code>{row.ingressId}</code>{row.inputOperationId ? <code>{row.inputOperationId}</code> : null}<small>Recording: {row.recording?.state ?? 'not recorded'} · Intake: {row.state}{row.code ? ' · ' + row.code : ''}{row.recording?.code ? ' · ' + row.recording.code : ''}</small></div></details>
+            {row.kind === 'message' && row.scope === 'current-binding' && row.inputOperationId && !(input?.key === key && input.ingressId === row.ingressId) ? <button className="small-button" disabled={pending} onClick={() => void inspectInput(row)}>Open original input</button> : null}
+            {input?.key === key && input.ingressId === row.ingressId ? <>
+              {input.issue ? <small role="status">Original input receipt could not be confirmed. Saved input and any earlier receipt are kept.</small> : null}
+              {input.receipt ? <OriginalInputWaitingControl hostId={target.executionHostId} receipt={input.receipt} showReceipt onRefresh={() => inspect(visible?.window)} /> : <button className="small-button" disabled={pending} onClick={() => void inspectInput(row)}>Check original input result</button>}
+              <button className="small-button" onClick={() => setInput(null)}>Close original input</button>
+            </> : null}
+          </div>
+        })}
         {incoming.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ beforeIngressId: incoming.next! })}>Earlier intake</button> : null}</> : null}
       {sectionIssue('Incoming', visible?.incoming)}
       </section>
       <section ref={node => { originalSections.current.receipts = node }} className="connector-delivery-details__section" data-receipt-section="receipts" tabIndex={-1} aria-label="Platform delivery details">
       <h4>Platform delivery receipts</h4>
-      <p className="agent-connector-note">Outgoing window: up to 5 receipts · has next: {String(outgoing?.next !== null && outgoing?.next !== undefined)}. These pages are not the complete group history.</p>
-      {receiptRows}
+      <p className="agent-connector-note">Up to 5 receipts from this reading.{outgoing?.next ? ' Earlier receipts are available.' : ''} This is not the complete group history.</p>
+      <div className="connector-delivery-details__receipts">{receiptRows}</div>
       {outgoing?.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ after: outgoing.next! })}>Earlier receipts</button> : null}
       <button className="small-button" disabled={pending} onClick={() => void inspect()}>Latest receipts</button>
       </section>
       <section ref={node => { originalSections.current.content = node }} className="connector-delivery-details__section" data-receipt-section="content" tabIndex={-1} aria-label="Conversation content details">
       <h4>Conversation content</h4>
-      <p className="agent-connector-note">Source reading: {outgoing?.sourceObservation?.state ?? 'not recorded'}{outgoing?.sourceObservation?.reason ? ' · ' + outgoing.sourceObservation.reason : ''}{outgoing?.sourceObservation?.code ? ' · ' + outgoing.sourceObservation.code : ''}</p>
-      <p className="agent-connector-note">These source checks describe what could be shared. They do not change the delivery results of other messages.</p>
-      <p className="agent-connector-note">Content coverage: {outgoing?.coverage?.state ?? 'not recorded'} · content has next: {String(!!outgoing?.coverage?.nextContent)}</p>
-      {outgoing?.coverage?.gaps.map(gap => <p className="agent-connector-note" key={gap.gapKey}>{gap.reason} · <code>{gap.gapKey}</code></p>)}
+      <strong>{sourceCause.title}</strong>
+      <p className="agent-connector-note">{sourceCause.detail}</p>
+      {outgoing?.sourceObservation ? <details className="agent-connector-disclosure"><summary>Reading details</summary><div className="agent-connector-fields"><small>{outgoing.sourceObservation.state}{outgoing.sourceObservation.reason ? ' · ' + outgoing.sourceObservation.reason : ''}</small>{outgoing.sourceObservation.code ? <code>{outgoing.sourceObservation.code}</code> : null}{outgoing.sourceObservation.checkpointKey ? <code>{outgoing.sourceObservation.checkpointKey}</code> : null}</div></details> : null}
+      <p className="agent-connector-note">{outgoing?.coverage?.state === 'incomplete' ? 'Some content in this reading is not confirmed for sharing.' : outgoing?.coverage?.state === 'complete' ? 'No content gaps recorded in this reading.' : 'Content coverage has not been checked.'}{outgoing?.coverage?.nextContent ? ' More content is available.' : ''}</p>
+      {outgoing?.coverage?.gaps.map(gap => { const cause = connectorGapExplanation(gap); return <div className="agent-connector-receipt" key={gap.gapKey}><strong>{cause.title}</strong><small>{cause.detail}</small><details className="agent-connector-disclosure"><summary>Original content gap</summary><div className="agent-connector-fields"><code>{gap.gapKey}</code><small>{gap.reason}{gap.code ? ' · ' + gap.code : ''}</small></div></details></div> })}
       {outgoing?.coverage?.omittedGapCount ? <p className="agent-connector-note">{outgoing.coverage.omittedGapCount} additional gaps in this owner page.</p> : null}
       {outgoing?.coverage?.nextContent ? <button className="small-button" disabled={pending} onClick={() => void inspect({ afterContent: outgoing.coverage!.nextContent! })}>Next content window</button> : null}
       </section>
