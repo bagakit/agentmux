@@ -1,9 +1,8 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+// @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
-import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, truncate } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, truncate } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -13,11 +12,12 @@ import type { AgentMuxPreloadApi, AppConfig, WorkspaceRecord } from '../src/shar
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { RuntimeController } from '../src/main/runtime-controller'
 
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+const bridge = vi.hoisted(() => ({ root: '', api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => _hygiene_fixturePath("private-file-preview-ipc"), getAppPath: () => _hygiene_fixturePath("private-file-preview-ipc"), isPackaged: false },
+  app: { getPath: () => bridge.root, getAppPath: () => bridge.root, isPackaged: false, once: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn(), isRegistered: () => false },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: { openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() }
@@ -27,7 +27,9 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-preview.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { dispose() {} } }))
+vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import('@agentmux/connectors')>(), createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import '../src/preload/index'
 import { registerIpc } from '../src/main/ipc'
@@ -37,13 +39,58 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { BOOKMARK_FILE_MAX_BYTES, emitWebloc } from '../src/shared/bookmark-file'
+import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
+import type { CapsuleOpenResult } from '@agentmux/core/capsule'
 
 const initialState = useAppStore.getState()
-afterEach(() => { vi.restoreAllMocks(); useAppStore.setState(initialState, true) })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); useAppStore.setState(initialState, true) })
+
+it('awaits the original object owner through actual preload IPC and retains its unconfirmed operation diagnosis', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'capsule-object-ipc-'))
+  bridge.root = root
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
+  const config = structuredClone(DEFAULT_CONFIG), links = new SpatialLinkIngress()
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
+  vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  const sender = Object.assign(new EventEmitter(), { id: 712, isDestroyed: () => false, send: vi.fn() })
+  let dispose: (() => Promise<void>) | undefined, finish!: (result: CapsuleOpenResult) => void, operationId = '', result: Promise<string> | undefined
+  const response = (): CapsuleOpenResult => ({ operationId, capsuleId: '23456789ABCD', endpoint: { status: 'available', url: 'http://127.0.0.1:49152/', port: 49152,
+    instanceId: 'original-service', observedAt: Date.now() }, rendering: { status: 'unavailable', reason: 'The original native display is unconfirmed' } })
+  try {
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
+      window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+      configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
+      scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
+      workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()), spatialLinks: links })
+    bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
+      const handler = bridge.handlers.get(channel)
+      expect(handler).toBeTypeOf('function')
+      return structuredClone(await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values))
+    })
+    const open = vi.fn(async (_id: string, original: string) => {
+      operationId = original
+      return await new Promise<CapsuleOpenResult>(resolve => { finish = resolve })
+    })
+    links.ready(async () => { throw new Error('Capsule uses its original owner') }, vi.fn(), open)
+    let settled = false
+    result = bridge.api!.ui.openObjectLink('amux://capsule/23456789ABCD').then(() => 'unexpected-success', error => String(error)).finally(() => { settled = true })
+    await Promise.resolve(); await Promise.resolve()
+    expect(open).toHaveBeenCalledOnce(); expect(operationId).not.toBe(''); expect(settled).toBe(false)
+    finish(response())
+    const issue = await result
+    expect(issue).toContain(operationId); expect(issue).toContain('unconfirmed'); expect(issue).not.toBe('unexpected-success')
+    expect(open).toHaveBeenCalledOnce()
+  } finally {
+    finish?.(response()); links.unavailable(); await result
+    await dispose?.(); await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
+  }
+})
 
 
 it('registered bookmark IPC and Store report a byte-budget rejection without falling through to text or replacing the original workbench', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-bookmark-ipc-'))
+  bridge.root = root
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   const workspace: WorkspaceRecord = { id: 'bookmark-project', name: 'Bookmarks', kind: 'folder', hostId: 'local', path: root }
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), workspaces: [workspace] }
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
@@ -55,9 +102,9 @@ it('registered bookmark IPC and Store report a byte-budget rejection without fal
     await writeFile(join(root, 'Numeric.webloc'), emitWebloc('placeholder').replace('placeholder', 'https://example.invalid/?a=&#38;b=&#x4E2D;&#x1F642;'))
     await writeFile(join(root, 'Large.webloc'), emitWebloc('https://example.invalid/large'))
     await truncate(join(root, 'Large.webloc'), BOOKMARK_FILE_MAX_BYTES + 1)
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
-      configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
-      scratchTopics: {} as never, workspaceFiles: files })
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+      configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
+      scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never, workspaceFiles: files })
     bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
       const handler = bridge.handlers.get(channel)
       expect(handler, `Missing registered handler: ${channel}`).toBeTypeOf('function')
