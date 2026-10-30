@@ -73,6 +73,14 @@ app.whenReady().then(async () => {
     await require('./creation-recovery.cjs')({ read, until, resize, tap, button, capture, result })
     result.passed = true; return
   }
+  if (mode === 'mote-host-boundaries') {
+    await require('./mote-host-boundaries.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'mote-cooperation') {
+    await require('./mote-cooperation.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'polish-followup') {
     await require('./polish-followup.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return

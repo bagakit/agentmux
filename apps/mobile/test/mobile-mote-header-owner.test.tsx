@@ -4,7 +4,7 @@ import { fixturePath } from '../../../test/fixture-values.mjs'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { click, editor, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
 
 const sid = 'session-original', spaceId = 'original-mote', agentName = '原 Agent 会话名称', moteName = '保留完整原对象名称的协作 Mote'
 const connected = { state: 'connected' as const, message: '原 Host' }
@@ -38,7 +38,7 @@ it.each([{ name: moteName, expected: moteName }, { name: undefined, expected: 'M
   expect(title.getAttribute('aria-label')).toBe(`${expected} · 查看身份与状态`)
   expect(title.textContent).not.toContain(agentName)
   await click(title)
-  expect(document.querySelector('[role="dialog"] [data-mote-space-id]')?.getAttribute('data-mote-space-id')).toBe(spaceId)
+  expect((await waitForElement(document, '[role="dialog"] [data-mote-space-id]')).getAttribute('data-mote-space-id')).toBe(spaceId)
   expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe(expected)
   expect(f.client.forwardRpc).toHaveBeenCalledWith('space.ls', { target: { spaceId }, presentation: true })
   await click(document.querySelector('[role="dialog"] [aria-label="关闭面板"]')!)
@@ -52,7 +52,7 @@ it.each(['mote', 'ordinary'] as const)('workspace %s neighbor retains its own Ag
   const title = view.element.querySelector<HTMLButtonElement>('.mobile-header .mobile-mote-heading')
   if (kind === 'mote') {
     expect(title?.getAttribute('aria-label')).toBe(`${agentName} · 查看身份与状态`)
-    await click(title!); expect(document.querySelector('[role="dialog"] [data-mote-space-id]')?.getAttribute('data-mote-space-id')).toBe(spaceId)
+    await click(title!); expect((await waitForElement(document, '[role="dialog"] [data-mote-space-id]')).getAttribute('data-mote-space-id')).toBe(spaceId)
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe(moteName)
     await click(document.querySelector('[role="dialog"] [aria-label="关闭面板"]')!)
   } else expect(title).toBeNull()

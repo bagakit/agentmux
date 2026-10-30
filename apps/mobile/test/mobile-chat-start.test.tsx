@@ -7,7 +7,7 @@ import { mobileChatStart } from '../src/navigation/chat-start'
 import { parsePresentationRoute } from '../src/recovery/presentation-route'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, deferred, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
 
 const connected = { state: 'connected' as const, message: 'Connected' }
 export function chatCatalog(): AgentMuxSpaceCatalog {
@@ -117,7 +117,8 @@ describe('phone chat-first navigation through the actual App', () => {
     const f = original()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
-    await vi.waitFor(() => expect(view.element.querySelectorAll('.mobile-mote-choice')).toHaveLength(2))
+    await waitForElement(view.element, '.mobile-mote-choice')
+    expect(view.element.querySelectorAll('.mobile-mote-choice')).toHaveLength(2)
     await click(view.element.querySelector('[aria-label="选择 Mote · 研究"]')!)
     expect(view.element.querySelector('.mobile-mote-selected')?.getAttribute('data-space-id')).toBe('recent')
     const profile = view.element.querySelector('[aria-label="查看 Mote 资料 · 研究"]')!

@@ -296,6 +296,23 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   Object.assign(window, { mobileProductScene: {
     prepareWebUpdate: () => setWebUpdateScene(true),
+    prepareCooperationHostBoundaries: () => {
+      const original = catalog.regions.find(value => value.regionId === 'region-waiting')!
+      const tab = catalog.tabs.find(value => value.tabId === original.tabId)!
+      const location = catalog.locations.find(value => value.regionId === original.regionId)!
+      tab.regionIds.push('region-waiting-foreign', 'region-waiting-unknown')
+      catalog.regions.push({ ...original, regionId: 'region-waiting-foreign', execution: { hostId: 'foreign-host', cwd: '/foreign-original' } })
+      const unknown = { ...original, regionId: 'region-waiting-unknown' }; delete unknown.execution
+      catalog.regions.push(unknown)
+      catalog.locations.push({ ...location, regionId: 'region-waiting-foreign' }, { ...location, regionId: 'region-waiting-unknown' })
+      waiting.pendingInteraction = undefined
+    },
+    prepareCooperationLongNames: () => {
+      catalog.spaces.find(value => value.spaceId === 'mote-original')!.name = '一个保留完整名称与原团队身份的产品研究协作搭档'
+      catalog.agentPresentation!.find(value => value.agentSessionId === main.agentSessionId)!.name = '协调方案与保留完整工作上下文的主 Agent'
+      catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!.name = '负责资料阅读、证据核对与长名称展示的研究成员'
+      catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!.stateLabel = '等待你的原请求答复'
+    },
     prepareFocusState: () => {
       catalog.agentPresentation![1]!.stateMark = 'unknown'
       catalog.agentPresentation![1]!.stateLabel = 'Activity not confirmed'
