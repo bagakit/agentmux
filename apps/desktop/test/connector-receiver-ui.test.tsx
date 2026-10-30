@@ -73,10 +73,13 @@ it('lost recovery reply is inspected and explicitly continued with the same froz
  f.wire.state.endpointCode=0;f.wire.state.handshakeDelay=2000;f.drop();await dom.click('[data-receiver-action="recover"]');await wait(()=>expect(dom.container.textContent).toContain('Recovery reply unconfirmed'))
  const original=f.calls.find(c=>c.method==='connection.receiver.recover')!;expect(original.target).toEqual(f.target)
  expect(Object.values(useAppStore.getState().connectorRoomIntents)[0]?.input).toEqual(original.params)
- await dom.render(null);await f.mount();await wait(()=>expect(dom.container.textContent).toContain('Reconnect requested'))
- expect(f.calls.filter(c=>c.method==='connection.receiver.recover')).toHaveLength(1)
+ // No new receiver observation yet: an explicit continuation can only repeat
+ // this original request. Once starting/recovering is observed it is redundant.
  await dom.click('[data-receiver-action="continue"]');await wait(()=>expect(f.calls.filter(c=>c.method==='connection.receiver.recover')).toHaveLength(2))
  expect(f.calls.filter(c=>c.method==='connection.receiver.recover').map(c=>({params:c.params,target:c.target}))).toEqual([{params:original.params,target:f.target},{params:original.params,target:f.target}])
+ await dom.render(null);await f.mount();await wait(()=>expect(dom.container.textContent).toContain('Reconnect requested'))
+ expect(f.calls.filter(c=>c.method==='connection.receiver.recover')).toHaveLength(2)
+ await wait(()=>expect(dom.container.querySelector('[data-receiver-action="continue"]')).toBeNull())
  await wait(async()=>expect((await f.record()).receiver?.state).toBe('ready'));expect(f.wire.sockets).toHaveLength(1);f.unchanged()
 })
 it('active SDK recovery is observed without closing it and a changed Runtime refuses only this action',async()=>{
@@ -104,6 +107,8 @@ it('local correlation persistence failure keeps the original in-memory ID and do
 it('healthy transport and one refusal stay separate and retained source failure never certifies current readiness',async()=>{
  const f=await fixture();const report=await readGroupDiagnosis((method,params)=>api.connections.call(method,params,f.target),groupTarget(f.binding));const summary=connectorGroupSummary(report)
  expect(summary.incoming.receiver).toBe('Receiver connected');expect(summary.incoming.value).toBe('No events in this window')
+ const accepted=connectorGroupSummary({...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:[{ingressId:'last-accepted',sourceConnectionId:f.binding.connectionId,kind:'message',state:'claimed',code:null,codeRecorded:false,bindingId:f.binding.bindingId,bindingRevision:f.binding.revision,targetConnectionId:f.binding.connectionId,scope:'current-binding',inputOperationId:'last-input',recording:{state:'recorded'},coreStatus:'admitted',coreObservation:'observed',nativeAdoption:null,waiting:null}]}}})
+ expect(accepted.incoming.value).toBe('Last message: Accepted by Agent');expect(accepted.incoming.receiver).toBe('Receiver connected')
  // This typed single-message refusal is a presentation leaf, not a fake SDK effect.
  const refusal=connectorGroupSummary({...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:[{ingressId:'refused-message',sourceConnectionId:f.binding.connectionId,kind:'message',state:'refused',code:'INGRESS_CONTENT_UNSUPPORTED',codeRecorded:true,bindingId:f.binding.bindingId,bindingRevision:f.binding.revision,targetConnectionId:f.binding.connectionId,scope:'current-binding',inputOperationId:null,recording:{state:'refused',code:'INGRESS_CONTENT_UNSUPPORTED'},coreStatus:null,coreObservation:'not-started',nativeAdoption:null,waiting:null}]}}})
  expect(refusal.incoming.value).toBe('Message type not supported');expect(refusal.incoming.receiver).toBe('Receiver connected');expect(refusal.problems.some(p=>p.kind==='receiver-stopped')).toBe(false)
@@ -137,6 +142,13 @@ it('a known original non-scheduled decision cannot permanently gate an ended rec
   await dom.render(null);await dom.render(<ConnectorReceiverControl binding={f.binding} connection={record} observed={report.connection} hostingTarget={f.target} onRefresh={()=>{}}/>)
   await wait(()=>expect(f.calls.filter(c=>c.method==='connection.receiver.inspect').length).toBeGreaterThan(0))
   await wait(()=>expect(!!dom.container.querySelector('[data-receiver-action="recover"]')).toBe(disposition!==null&&disposition!=='scheduled'))
+  if(disposition===null||disposition==='scheduled')expect(dom.container.querySelector('[data-receiver-action="continue"]')).not.toBeNull()
+ }
+ // Current automatic work needs only its original read action. A future Host
+ // schedule is not ready and should not suggest a redundant manual continuation.
+ for(const receiver of [{...record.receiver!,state:'starting' as const},{...record.receiver!,state:'recovering' as const},{...record.receiver!,nextAttemptAt:Date.now()+60_000}]){
+  await dom.render(<ConnectorReceiverControl binding={f.binding} connection={record} observed={{...report.connection,value:{...report.connection.value!,receiver}}} hostingTarget={f.target} onRefresh={()=>{}}/>)
+  expect(dom.container.querySelector('[data-receiver-action="continue"]')).toBeNull();expect(dom.container.querySelector('[data-receiver-action="inspect"]')).not.toBeNull()
  }
  expect(f.calls.filter(c=>c.method==='connection.receiver.recover')).toHaveLength(0)
  f.source.mockImplementation(async(method,params,target)=>{const result=await actual(method,params,target);return method==='connection.receiver.inspect'?{...result,operation:{operationId:original.operationId,connectionId:original.connectionId,configurationRevision:original.expectedRevision,receiverRef:original.receiverRef,disposition:'unconfirmed'}}:result})

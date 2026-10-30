@@ -2,6 +2,13 @@ const assert=require('node:assert/strict')
 module.exports=async({win,read,until,click,press,settle,layout,open,close,capture,details,dismiss,result})=>{
  const set=values=>read('Object.assign(window.channelEntryProof.receiver,'+JSON.stringify(values)+')')
  const button=name=>'[data-receiver-action="'+name+'"]'
+ if(process.argv.includes('--receiver-review-delta')){
+  await set({state:'ended'});await details('healthy','light',1380);await click(button('recover'));await until('document.querySelector(".connector-traffic-summary").textContent.includes("Reconnect requested")')
+  assert.equal(await read('!!document.querySelector("[data-receiver-action=continue]")'),false);await capture('receiver-scheduled-wide-light');await dismiss()
+  await set({state:'ready'});await details('healthy','light',520);await until('document.querySelector(".connector-traffic-summary").textContent.includes("Last message: Accepted by Agent")');await capture('receiver-restored-narrow-light');await dismiss()
+  result.receiverScope='Only the two Root-requested information hierarchy frames recaptured; four accepted complete frames remain in the prior receipt.'
+  return
+ }
  const editor='[data-workbench-region-id="channel-preview-region"] [data-agent-composer] [role="textbox"][aria-label="Message Agent"]'
  await until('document.querySelector('+JSON.stringify(editor)+')')
  await click(editor);win.webContents.selectAll();await until('getSelection().toString()==="Keep this original research draft."')
