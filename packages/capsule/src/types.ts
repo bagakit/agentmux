@@ -163,7 +163,7 @@ export interface CapsuleInputObservation {
   status: 'unavailable' | 'submitted' | 'unknown'
   inputOperationId: string
   expectedRun: { runId: string }
-  inputStatus?: 'waiting' | 'stopped' | 'terminal-confirmed' | 'admitted' | 'not-applied' | 'unknown'
+  inputStatus?: 'waiting' | 'stopped' | 'terminal-confirmed' | 'launch-carried' | 'admitted' | 'not-applied' | 'unknown'
   reason?: string
   receipt?: CapsuleJson
 }

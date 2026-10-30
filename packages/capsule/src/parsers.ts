@@ -147,7 +147,7 @@ export function parseCapsuleInputObservation(v: unknown): import('./types.js').C
   opt(
     r,
     'inputStatus',
-    (x, at) => en(x, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown'], at),
+    (x, at) => en(x, ['waiting', 'stopped', 'terminal-confirmed', 'launch-carried', 'admitted', 'not-applied', 'unknown'], at),
     p,
   )
   opt(r, 'reason', str, p)
