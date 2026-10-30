@@ -3,6 +3,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceAddress, AgentMuxMoteConversationReference } from '@agentmux/core/control'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import type { MobileObjectIdentity } from './MobileIdentity'
+import type { MoteInputNoticeOwner } from '@agentmux/client-ui/platform'
 
 export type MobileMoteMember = {
   key: string; sessionId: string; hostId: string | null; name: string; places: AgentMuxSpaceAddress[]
@@ -83,4 +84,16 @@ export function mobileMoteMainIdentity(team: MobileMoteTeam): MobileObjectIdenti
   return { name: member?.name ?? '原主对话', project: team.name,
     ...(main.confirmed && places.length === 1 ? { context: places[0] } : {}),
     mote: { spaceId: team.spaceId, name: team.name, facts: team.facts } }
+}
+
+/** Resolve names in the original reader namespace; preserve the independent record provenance. */
+export function mobileMoteMemberName(team: MobileMoteTeam | null, client: AgentMuxHostedClient | null,
+  owner: MoteInputNoticeOwner, memberSessionId: string): string | undefined {
+  if (!team || !client || owner.routeHostId !== 'local') return undefined
+  try {
+    const session = client.agentSession(memberSessionId)
+    if (session.agentSessionId !== memberSessionId) return undefined
+    const matches = team.members.filter(member => member.sessionId === memberSessionId && member.hostId === session.hostId && !member.issue)
+    return matches.length === 1 ? matches[0]!.presentation?.name : undefined
+  } catch { return undefined }
 }

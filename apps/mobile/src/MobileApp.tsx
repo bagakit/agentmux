@@ -17,7 +17,7 @@ import { MobileConversationSurface, type MobileConnection } from './conversation
 import { mobileMoteInputSource } from './conversation/mote-input-source'
 import { MobileMoteTeamPanel, MobileMoteTeamSummary, mobileMoteRecipient } from './navigation/MobileMoteTeam'
 import { useMobileMoteTeam } from './navigation/use-mobile-mote-team'
-import { mobileMoteMainIdentity, type MobileMoteMember } from './navigation/mobile-mote-team'
+import { mobileMoteMainIdentity, mobileMoteMemberName, type MobileMoteMember } from './navigation/mobile-mote-team'
 
 import { useHostAppearance } from './appearance/useHostAppearance'
 import { bindMobileViewport, bindNativeDevice } from './platform/native/device'
@@ -391,6 +391,9 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const teamReading = useMobileMoteTeam(client, teamSpaceId, connected,
     workspaceVisible && showSession && (sheet === null || sheet === 'team'))
   const team = teamReading.team
+  const moteMemberName = useCallback<NonNullable<ClientUiPlatform['moteMemberName']>>((owner, memberSessionId) =>
+    originalConnection.current.client === client && owner.recipientAgentSessionId === workface.selectedSessionId
+      ? mobileMoteMemberName(team, client, owner, memberSessionId) : undefined, [client, team, workface.selectedSessionId])
   const openTeamMember = (id: string, identity: MobileObjectIdentity, member: MobileMoteMember, work = false) => {
     let current
     try { current = client?.agentSession(id) } catch { /* A missing projection cannot erase an original member reference. */ }
@@ -479,7 +482,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartDone.current = false; chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
         </div>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
-          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
+          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} moteMemberName={moteMemberName} moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
             onShowGoals={trigger => { goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true) }} openHttpLink={openBrowserHttpLink} />
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>

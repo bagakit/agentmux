@@ -40,6 +40,11 @@ import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileN
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import { mobileInteractionLabels } from '../presentation/interaction'
 
+const mobileConversationToolLabels: NonNullable<ClientUiPlatform['conversationToolLabels']> = {
+  copy: '复制', copying: '正在复制…', copied: '已复制', retryCopy: '重新复制',
+  formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文'
+}
+
 export type { MobileConnection } from './use-hosted-conversation'
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'> & {
@@ -268,6 +273,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const pageClient = reading.pageOwner?.client, pageSessionId = reading.pageOwner?.agentSessionId
   const readMoteInput = useMemo(() => createMobileMoteInputReader(pageClient ?? null, pageSessionId ?? null), [pageClient, pageSessionId])
   const conversationPlatform = useMemo(() => ({ ...conversationIoPlatform,
+    conversationToolLabels: mobileConversationToolLabels,
     readMoteInput,
     moteMemberName: (...args: Parameters<NonNullable<ClientUiPlatform['moteMemberName']>>) =>
       pageClient === client && pageSessionId === agentSessionId ? moteMemberName?.(...args) : undefined

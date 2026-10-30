@@ -1,5 +1,6 @@
 import { applyEdits, format } from 'jsonc-parser'
 import { useMemo, useState } from 'react'
+import { useConversationToolLabels } from '../platform.js'
 import { ContentCopyButton } from './ContentCopyButton.js'
 import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 
@@ -20,6 +21,7 @@ export function ConversationToolPayload(props: PayloadProps) {
 }
 
 function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, copyLabel }: PayloadProps) {
+  const labels = useConversationToolLabels()
   const [view, setView] = useState({ text, sourceIdentity, formatted: false })
   if (view.text !== text || view.sourceIdentity !== sourceIdentity) setView({ text, sourceIdentity, formatted: false })
   const formatted = view.text === text && view.sourceIdentity === sourceIdentity && view.formatted
@@ -34,9 +36,9 @@ function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, c
   return <>
     <div className="conversation-detail-actions">
       {callId ? <span className="conversation-tool-trace__identity">Call <code>{callId}</code></span> : null}
-      {validJson ? <button type="button" className="conversation-tool-trace__format" aria-label="Format JSON"
-        aria-pressed={formatted} title="Format JSON for reading; copying keeps the original text"
-        onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}>Format JSON</button> : null}
+      {validJson ? <button type="button" className="conversation-tool-trace__format" aria-label={labels.formatJson}
+        aria-pressed={formatted} title={labels.formatJsonHint}
+        onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}>{labels.formatJson}</button> : null}
       {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={copyLabel} /> : null}
     </div>
     <pre>{formatted ? readable : text}</pre>

@@ -8,7 +8,9 @@
 .conversation-mote-notice__original { margin: var(--sp-2) 0 0 38px; min-width: 0; }
 .conversation-mote-notice__original > summary, .conversation-mote-notice__records > summary { width: fit-content; max-width: 100%; cursor: pointer; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.6; }
 .conversation-mote-notice__original > summary:focus-visible, .conversation-mote-notice__records > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
-.conversation-mote-notice__body { display: grid; gap: var(--sp-2); padding-top: var(--sp-2); overflow-wrap: anywhere; }
+.conversation-mote-notice__body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--sp-2); padding-top: var(--sp-2); overflow-wrap: anywhere; }
+.conversation-mote-notice__body > * { min-width: 0; }
+.conversation-mote-notice__records pre { max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .conversation-mote-notice__body p { margin: 0; line-height: 1.5; }
 .conversation-mote-notice__body blockquote { margin: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); white-space: pre-wrap; }
 .conversation-mote-notice__body > button { justify-self: start; }

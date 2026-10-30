@@ -15,10 +15,20 @@ export type NoteImageInput = { resource: NoteResource | null; src: string; alt: 
 /** Accepted conversation provenance and its original client route are independent facts. */
 export type MoteInputNoticeOwner = { routeHostId: string; sourceHostId: string; recipientAgentSessionId: string }
 
+export type ConversationToolLabels = {
+  copy: string; copying: string; copied: string; retryCopy: string; formatJson: string; formatJsonHint: string
+}
+const defaultConversationToolLabels: ConversationToolLabels = {
+  copy: 'Copy', copying: 'Copying…', copied: 'Copied', retryCopy: 'Retry copy',
+  formatJson: 'Format JSON', formatJsonHint: 'Format JSON for reading; copying keeps the original text'
+}
+
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
   /** Current presentation document; moving a retained editor does not replace its state. */
   ownerDocument?: Document
+  /** Host-owned wording for shared conversation copy and payload controls. */
+  conversationToolLabels?: ConversationToolLabels
 
   /** A failed copy must call reportError and return false; success alone returns true. */
   copyText(text: string, reportError: (error: unknown) => void): Promise<boolean>
@@ -56,6 +66,10 @@ export type ClientUiPlatform = {
 }
 
 const PlatformContext = createContext<ClientUiPlatform | null>(null)
+
+export function useConversationToolLabels(): ConversationToolLabels {
+  return useContext(PlatformContext)?.conversationToolLabels ?? defaultConversationToolLabels
+}
 
 export function useMoteInputReader(): ClientUiPlatform['readMoteInput'] { return useContext(PlatformContext)?.readMoteInput }
 
