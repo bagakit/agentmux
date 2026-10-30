@@ -4,7 +4,7 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fi
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
 import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/session-history'
 import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test/fixtures/mote-notice'
@@ -14,7 +14,7 @@ import { MobileApp } from '../../../src/MobileApp'
 import { MobileWebUpdateSafetyProvider } from '../../../src/mobile-web/update-safety'
 import type { MobileWebPageObservation } from '../../../src/mobile-web/use-mobile-web-observation'
 import { createBrowserPlatform } from '../../../src/platform/browser'
-import { getDeviceWorkface } from '../../../src/recovery/device-workface'
+import { DeviceWorkfaceStore, getDeviceWorkface } from '../../../src/recovery/device-workface'
 import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue } from '@agentmux/client-ui/theme'
 import '@agentmux/client-ui/styles.css'
 
@@ -94,6 +94,7 @@ let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let agentMenuScene = false, densityScene = false, copyFails = false
+let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
 const copiedTexts: string[] = []
 const menuAgentName = '讨论布局与原始资料核对的协作 Agent'
 let inspectRelease: (() => void) | null = null, inspectWait: Promise<void> | null = null
@@ -245,6 +246,25 @@ const client = {
       { id: 'another-provider', value: { keyword: 'private', label: '另一 Provider 专用', body: '不展示给原 Agent', providerId: 'claude' } }
     ] }
     if (method === 'settings.executors.ls') return { items: [{ id: 'fixture-original', value: { name: 'Codex' } }], partial: true }
+    if (method === 'agent.open' && creationUpdateScene) {
+      const request = params as unknown as AgentMuxRpcParams<'agent.open'>, destination = request.destination
+      const retained = getDeviceWorkface().snapshot().record.agentCreates?.find(intent => intent.input.operationId === request.operationId)
+      const zone = catalog.zones.find(zone => zone.zoneId === destination.zoneId)
+      if (!retained || retained.phase !== 'sending' || request.content.kind !== 'new-agent' || request.content.executorId !== 'fixture-original' || request.content.prompt ||
+        destination.newTab || destination.spaceId !== 'space-resources' || destination.zoneId !== 'zone-resources' || destination.tabId !== 'resource-tab-0' || destination.regionId !== 'resource-region-0' || !zone?.directoryPath || !zone.hostId) {
+        throw Error('The controlled creation reply requires the original retained empty-instruction Launcher request.')
+      }
+      // Controlled SDK reply only. No Host filesystem, Native Run or Session is
+      // created by this capture. The product owns its actual local confirmation.
+      const reply: AgentMuxRpcResult<'agent.open'> = { operationId: request.operationId!, outcome: 'opened', from: null,
+        to: { spaceId: destination.spaceId, zoneId: destination.zoneId, tabId: destination.tabId, regionId: destination.regionId,
+          workspaceId: zone.workspaceId, displayWorkspaceId: 'display-original', groupId: 'group-resources' }, resource: null,
+        agent: { agentSessionId: 'controlled-created-session', runId: null, providerId: null, executorId: request.content.executorId,
+          hostId: zone.hostId, cwd: zone.directoryPath, createOperationId: request.operationId!, initialPrompt: 'not-requested' },
+        save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }, issues: [] }
+      record('fixture.controlled-creation-reply', reply)
+      return reply
+    }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
     if (method === 'space.ls' || method === 'space.inspect') return { catalog: { ...catalog } }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
@@ -299,7 +319,11 @@ const webUpdateObservation: MobileWebPageObservation = { page: updatePage, conne
       coverage: { lifetime: 'current-host-instance', operationsRetained: 0, operationsEvicted: 0, loadedRetained: 1, loadedRejected: 0 }, observedAt: 300 } },
   reporter: { inFlight: false, queuedCount: 0, queuedBytes: 0, droppedCount: 0, receipt: null, issue: null },
   refresh: async () => { record('fixture.mobile-assets.inspect') }, retryReports: () => {} }
-const verifyWebUpdateConnection = async () => () => connected
+const verifyWebUpdateConnection = async () => {
+  record('fixture.update-connection-preflight')
+  if (creationUpdateScene) await new Promise<never>((_resolve, reject) => { rejectUpdatePreflight = () => reject(new Error('Controlled original connection preflight remains unconfirmed.')) })
+  return () => connected
+}
 function Scene() {
   const [, refresh] = useState(0)
   const [densityMount, remountDensity] = useState(0)
@@ -307,6 +331,12 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   Object.assign(window, { mobileProductScene: {
     prepareWebUpdate: () => setWebUpdateScene(true),
+    prepareCreationUpdate: () => { creationUpdateScene = true; setWebUpdateScene(true) },
+    failCreationUpdatePreflight: () => {
+      if (!rejectUpdatePreflight) throw Error('The original update preflight is not pending')
+      const reject = rejectUpdatePreflight; rejectUpdatePreflight = null; reject()
+    },
+    readSavedWorkface: () => new DeviceWorkfaceStore(() => localStorage).snapshot(),
     prepareCooperationHostBoundaries: () => {
       const original = catalog.regions.find(value => value.regionId === 'region-waiting')!
       const tab = catalog.tabs.find(value => value.tabId === original.tabId)!
