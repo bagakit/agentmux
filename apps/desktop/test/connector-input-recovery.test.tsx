@@ -65,12 +65,13 @@ async function originalWait(automatic = false) {
   const call = vi.spyOn(api.connections, 'call').mockImplementation(async (method, params, target) => unwrapSessionInputOperationResult(structuredClone(await handlers.get('connections:call')!({}, method, params, target)) as any))
   const binding = (await f.bindings.inspect({ bindingId: f.input.bindingId })).binding!
   await dom.render(<ConnectorDeliveryDetails binding={binding} hostingTarget={hostingTarget} />)
-  await wait(() => expect(dom.container.textContent).toContain(automatic ? 'Waiting for Agent' : 'Input recovery needed'))
+  await wait(() => expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'View original input')).toBe(true))
   const diagnosis = call.mock.results.find((_result, index) => call.mock.calls[index]?.[0] === 'connection.diagnose')
   expect(diagnosis).toBeTruthy()
   const report = await diagnosis!.value as any
   const summary = connectorGroupSummary({ ...report.groups.value.items[0], service: report.service })
-  expect(summary.incoming.tone).toBe(automatic ? 'neutral' : 'warning')
+  // Receiver observation is independent; the original waiting input keeps its own tone.
+  expect(summary.problems.find(problem => problem.kind === 'agent-waiting')?.tone).toBe(automatic ? 'muted' : 'warning')
   return { ...f, receipt, original, binding, hostingTarget, inspect, rejoin, stop, call, controller, rpc, hosted, coreRejoin, allowInput }
 }
 
@@ -78,7 +79,7 @@ it('opens the original saved connector input and explicitly rejoins through Main
   const f = await originalWait(), submit = vi.spyOn(f.client, 'submitAgentMessage')
   f.allowInput()
   expect(f.rejoin).not.toHaveBeenCalled(); expect(f.inspect).not.toHaveBeenCalled()
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).not.toBeNull())
   expect(f.call.mock.calls.some(([method]) => method === 'connection.ingress.inspect')).toBe(true)
   await dom.click('[data-input-wait-action="rejoin"]')
@@ -99,7 +100,7 @@ it('opens the original saved connector input and explicitly rejoins through Main
 
 it('keeps explicit recovery available when an acknowledged rejoin still waits on the same original input', async () => {
   const f = await originalWait()
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).not.toBeNull())
   await dom.click('[data-input-wait-action="rejoin"]')
   await settled()
@@ -117,7 +118,7 @@ it('keeps explicit recovery available when an acknowledged rejoin still waits on
 
 it('keeps automatic waiting quiet and preserves original check and stop without offering explicit rejoin', async () => {
   const f = await originalWait(true)
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="stop"]')).not.toBeNull())
   expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).toBeNull()
   await dom.click('[data-input-wait-action="check"]')
@@ -131,7 +132,7 @@ it('keeps automatic waiting quiet and preserves original check and stop without 
 
 it('rechecks the original external grant and preserves the saved input after a refused rejoin', async () => {
   const f = await originalWait()
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).not.toBeNull())
   await f.bindings.grant({ ...f.grant, operationId: 'revoke-original-input', expectedRevision: 1, state: 'revoked' }, context)
   await dom.click('[data-input-wait-action="rejoin"]')
@@ -148,7 +149,7 @@ it('rechecks the original external grant and preserves the saved input after a r
 it('reconciles a lost rejoin ACK by inspecting the original input instead of repeating the action or changing its target', async () => {
   const f = await originalWait(), perform = f.controller.rejoinInputWaiting.bind(f.controller)
   f.rejoin.mockImplementationOnce(async (...args) => { await perform(...args); throw Error('Original rejoin response lost') })
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).not.toBeNull())
   await dom.click('[data-input-wait-action="rejoin"]')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-error]')?.textContent).toContain('接回结果未确认'))
@@ -164,7 +165,7 @@ it('reconciles a lost rejoin ACK by inspecting the original input instead of rep
 
 it('keeps a retained original receipt readable when its current inspection fails and rejects a foreign receipt', async () => {
   const f = await originalWait()
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).not.toBeNull())
   f.inspect.mockRejectedValueOnce(Error('Original owner unavailable'))
   await dom.click('[data-input-wait-action="check"]')
@@ -177,7 +178,7 @@ it('keeps a retained original receipt readable when its current inspection fails
     value.inputReceipt.key.expectedRun = { runId: 'foreign-run' }
     return value
   })
-  await click('Close original input'); await click('Open original input')
+  await click('Close original input'); await click('View original input')
   await wait(() => expect(dom.container.textContent).toContain('Original input receipt could not be confirmed'))
   expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).toBeNull()
   expect(f.rejoin).not.toHaveBeenCalled()
@@ -185,7 +186,7 @@ it('keeps a retained original receipt readable when its current inspection fails
 
 it('keeps the original target after a Session resumes onto a different Run and never substitutes the current Run', async () => {
   const f = await originalWait()
-  await click('Open original input')
+  await click('View original input')
   await wait(() => expect(dom.container.querySelector('[data-input-wait-action="rejoin"]')).not.toBeNull())
   const saved = await f.store.readMetadata(f.receipt.key.agentSessionId)
   if (!saved) throw Error('Original fixture Session required')
