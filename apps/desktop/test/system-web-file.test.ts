@@ -143,3 +143,79 @@ it('file bridge waits the original Browser budget and cancels only that observat
     await vi.advanceTimersByTimeAsync(1); expect(await pending).toMatchObject({ code: 'CONTROL_TIMEOUT' }); expect(sendCancellation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'original-file-wait' }))
   } finally { bridge.dispose(); vi.useRealTimers() }
 })
+
+function rendererReadinessFixture() {
+  const main = source('apps/desktop/src/main/index.ts'), ipc = source('apps/desktop/src/main/ipc.ts')
+  const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false, send: vi.fn() })
+  const window = { webContents: contents, isDestroyed: () => false }
+  const webLinks = new WebUrlIngress(), webFiles = new WebFileIngress(), spatialLinks = new SpatialLinkIngress()
+  const spatialUnavailable = vi.spyOn(spatialLinks, 'unavailable')
+  const listeners = nodes(main, node => ts.isCallExpression(node) && node.expression.getText(main) === 'window.webContents.on' &&
+    node.arguments[0]?.getText(main) === "'render-process-gone'")
+  const selectWindow = evaluate(`${listeners.map(node => node.getText(main) + ';').join('\n')} return next => { workbenchWindow = next }`, {
+    window, workbenchWindow: window, webLinks, webFiles, spatialLinks
+  }) as (next: unknown) => void
+  const sent: DesktopControlRequest[] = [], cancelled = vi.fn()
+  const bridge = new DesktopControlIpcBridge({ isAvailable: () => !contents.isDestroyed(),
+    sendRequest: request => { sent.push(request) }, sendCancellation: cancelled })
+  bridges.push(bridge)
+  // The real IPC owner subscribes after the Main window readiness listeners.
+  contents.on('render-process-gone', () => bridge.dispose())
+  const readyCalls = nodes(ipc, node => ts.isCallExpression(node) && node.expression.getText(ipc) === 'handleWithEvent' &&
+    node.arguments[0]?.getText(ipc) === "'ui:spatialLinksReady'") as ts.CallExpression[]
+  if (readyCalls.length !== 1) throw new Error('Original trusted readiness owner missing')
+  const trusted = vi.fn()
+  const ready = evaluate(`return ${readyCalls[0]!.arguments[1]!.getText(ipc)}`, {
+    args: { webLinks, webFiles }, controlBridge: bridge, contents, requireTrustedSender: trusted
+  }) as (event: object) => void
+  const crash = () => contents.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 7 })
+  const complete = (request: DesktopControlRequest) => bridge.accept({ requestId: request.requestId, ok: true,
+    result: { operation: request.operation, requestId: request.requestId, state: 'opened', browserId: 'exact-browser',
+      reference: { displayWorkspaceId: 'scratch', groupId: 'group', tabId: 'tab', regionId: 'region' } } as never })
+  return { webLinks, webFiles, contents, sent, cancelled, trusted, ready, crash, complete, spatialUnavailable, selectWindow }
+}
+
+it('crashed Renderer keeps new URL and file intents queued until original trusted readiness returns', async () => {
+  const f = rendererReadinessFixture(), path = await webpage()
+  f.ready({}); f.crash()
+  expect(f.contents.isDestroyed()).toBe(false)
+  f.webLinks.receive('https://example.org/after-crash'); f.webFiles.receive(path)
+  await new Promise(resolve => setTimeout(resolve, 30))
+  expect(f.sent).toEqual([])
+  expect(f.spatialUnavailable).toHaveBeenCalledOnce()
+  f.ready({}); await until(() => f.sent.length === 2)
+  expect(f.sent.map(request => request.operation).sort()).toEqual(['browser.openFileFromSystem', 'browser.openFromSystem'])
+  expect(f.sent.map(request => (request as { url: string }).url).sort()).toEqual([pathToFileURL(path).href, 'https://example.org/after-crash'].sort())
+  f.sent.forEach(f.complete); f.ready({})
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(f.sent).toHaveLength(2); expect(f.trusted).toHaveBeenCalledTimes(3)
+})
+
+it('crashed Renderer preserves the next undispatched page and never replays its original in-flight page', async () => {
+  const f = rendererReadinessFixture()
+  f.ready({}); f.webLinks.receive('https://example.org/original-in-flight')
+  await until(() => f.sent.length === 1)
+  const original = f.sent[0]!
+  f.webLinks.receive('https://example.org/original-next'); f.crash()
+  await new Promise(resolve => setTimeout(resolve, 30))
+  expect(f.sent).toHaveLength(1)
+  expect(f.cancelled).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: original.requestId, code: 'CONTROL_UNAVAILABLE' }))
+  f.ready({}); await until(() => f.sent.length === 2)
+  expect((f.sent[1] as { url: string }).url).toBe('https://example.org/original-next')
+  expect(f.sent[1]!.requestId).not.toBe(original.requestId)
+  f.complete(f.sent[1]!); f.ready({})
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(f.sent).toHaveLength(2)
+  expect(f.contents.send.mock.calls.map(call => String(call[1])).join('\n')).toContain(original.requestId)
+})
+
+it('a retired window crash leaves the current window ingress executor available', async () => {
+  const f = rendererReadinessFixture(), received: string[] = []
+  f.selectWindow({ webContents: { isDestroyed: () => false } })
+  f.webLinks.ready(async request => { received.push(request.url); return { operation: request.operation, requestId: request.requestId,
+    state: 'opened', browserId: 'current-browser', reference: { displayWorkspaceId: 'scratch', groupId: 'group', tabId: 'current-tab', regionId: 'current-region' } } }, () => {})
+  f.crash(); f.webLinks.receive('https://example.org/current-window')
+  await until(() => received.length === 1)
+  expect(f.spatialUnavailable).not.toHaveBeenCalled()
+  expect(received).toEqual(['https://example.org/current-window'])
+})
