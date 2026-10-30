@@ -8,6 +8,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { CapsuleInputObservation, CapsuleInteraction, CapsuleMethod, CapsuleParamsMap, CapsulePort, CapsulePreparedReply, CapsuleReplyResult, CapsuleResultMap } from '@agentmux/core/capsule'
 
 const fault = vi.hoisted(() => ({ dispatchSave: false }))
+const pageWire = vi.hoisted(() => ({ sdk: null as any, invoke: vi.fn() }))
+vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (_name: string, value: unknown) => { pageWire.sdk = value } },
+  ipcRenderer: { invoke: pageWire.invoke, on: vi.fn() } }))
 vi.mock('../../../packages/capsule/src/storage', async original => {
   const actual = await original<typeof import('../../../packages/capsule/src/storage')>()
   return { ...actual, writeJson: async (path: string, value: any) => {
@@ -275,4 +278,44 @@ it('reopens saved terminal answers as compact history with a reachable original 
   expect(container.textContent).toContain('input admitted by Provider')
   expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId })
   expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
+})
+
+it('reads a launch-carried original receipt through the page SDK without certifying native acceptance', async () => {
+  coreInputStatus = 'launch-carried'
+  await mount(); await change('Original launch-carried answer'); await click('Confirm answer')
+  expect(container.textContent).toContain('input registered in Core')
+  expect(container.textContent).not.toContain('input submitted')
+  expect(container.textContent).not.toContain('terminal input confirmed')
+  expect(container.textContent).not.toContain('input admitted by Provider')
+  expect(container.querySelector<HTMLDetailsElement>('.capsule-question__history')!.open).toBe(true)
+  const sender = { mainFrame: {}, getURL: () => 'http://127.0.0.1:8123/', isDestroyed: () => false }
+  const record = (await owner.call('capsule.inspect', { capsuleId })).record
+  const binding = { record, browserId: 'original-browser', navigationId: 'original-document', instanceId: 'original-instance' }
+  const { capsuleDocumentIpc } = await import('../src/main/capsule-document-ipc')
+  const { sessionInputOperationResult } = await import('../src/shared/session-input-result')
+  const facade = capsuleDocumentIpc({ browsers: {
+    capsuleDocument: (value: unknown, frame: unknown) => value === sender && frame === sender.mainFrame ? binding : null,
+    capsuleDocumentContents: () => sender
+  } as never, capsules: { call: async (method: any, params: any) => method === 'capsule.inspect'
+    ? { record, endpoint: { status: 'available', instanceId: binding.instanceId, url: sender.getURL() } }
+    : service.call(method, params, caller) } as never, theme: () => ({ mode: 'dark', tokens: {} }) })
+  const event = { sender, senderFrame: sender.mainFrame } as never
+  pageWire.invoke.mockImplementation((channel: string, action: string, params: unknown) => {
+    expect(channel).toBe('capsule:document')
+    return sessionInputOperationResult(() => facade.call(event, action, params))
+  })
+  const previous = Object.getOwnPropertyDescriptor(process, 'isMainFrame')
+  Object.defineProperty(process, 'isMainFrame', { configurable: true, value: true })
+  try {
+    await import('../src/preload/capsule')
+    const read = await pageWire.sdk.read(interaction.interactionId)
+    expect(read.reply.delivery).toMatchObject({ inputStatus: 'launch-carried', expectedRun: { runId: 'original-run' } })
+    expect(read.reply.delivery.inputStatus).not.toBe('terminal-confirmed')
+    expect(read.reply.delivery.inputStatus).not.toBe('admitted')
+    expect(await pageWire.sdk.capabilities()).toMatchObject({ humanReply: false })
+    expect(submissions).toHaveLength(1)
+  } finally {
+    if (previous) Object.defineProperty(process, 'isMainFrame', previous)
+    else Reflect.deleteProperty(process, 'isMainFrame')
+  }
 })
