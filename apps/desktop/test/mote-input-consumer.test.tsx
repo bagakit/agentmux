@@ -1,3 +1,4 @@
+import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { sendConversationQuestionReply } from '../src/renderer/src/lib/conversation-question'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 // @vitest-environment happy-dom
@@ -36,10 +37,12 @@ it('the real member Composer freezes its exact source in the original Store inpu
   expect(button).toBeDefined(); await moteClick(button!)
   await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
   expect(submit.mock.calls[0]![4]).toMatchObject({ moteSource: expected })
-  expect(submit.mock.calls[0]![6]).toContain('amux mote --skill')
+  expect(submit.mock.calls[0]![6]).toBe(MOTE_INPUT_GUIDANCE)
+  expect(submit.mock.calls[0]![6]).toContain('identity consistency and task consistency')
   expect(submit.mock.calls[0]![1]).toBe('Change the threshold to 12, preserve the earlier scope')
   const saved = useAppStore.persist.getOptions().partialize!(useAppStore.getState()).agentSteerQueues![neighborAgent.id]![0]!
   expect(saved.moteSource).toEqual(expected)
+  expect(saved.agentMuxNote).toBe(MOTE_INPUT_GUIDANCE)
   expect(saved.inputReceipt?.moteObservationId).toBe('original-member-observation')
   expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })

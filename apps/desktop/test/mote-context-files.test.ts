@@ -233,7 +233,7 @@ it.each([
       expect(system).toContain('mote playbook pmo')
       expect(system).toContain('original knowledge, reusable methods and short memory index')
       expect(system).toContain('Read current linked methods for later relevant work and revise them from real feedback.')
-      if (!custom) expect(system).toContain('for cooperation, active memory and method improvement, ideas and own-task reminders.')
+      if (!custom) expect(system).toContain('for environment understanding, identity and task consistency, main-Agent/member responsibilities, active memory and method improvement, ideas and own-task reminders.')
       expect(system).not.toContain('"$AGENTMUX_CLI" topic --skill')
     } else {
       expect(system).not.toContain('Knowledge for Mote')
@@ -391,7 +391,7 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
     type Caller = { agentSessionId: string; capability: string }
     async function command(args:string[], input = '', caller?:Caller) {
       return await new Promise<{code:number|null;body:any}>((resolve,reject)=>{
-        const child=spawn(process.execPath,[cli,...args],{env:{...process.env,AGENTMUX_RPC_ENDPOINT:'unix:'+server.path,
+        const child=spawn(process.execPath,['--disable-warning=ExperimentalWarning',cli,...args],{env:{...process.env,AGENTMUX_RPC_ENDPOINT:'unix:'+server.path,
           AGENTMUX_AGENT_SESSION_ID:caller?.agentSessionId,AGENTMUX_AGENT_CAPABILITY:caller?.capability,AGENTMUX_ENV:undefined},stdio:['pipe','pipe','pipe']})
         let output='',errors='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>errors+=bytes);child.on('error',reject)
         child.on('close',code=>{try{resolve({code,body:JSON.parse(output||errors)})}catch{reject(Error(errors||output))}});child.stdin.end(input)
@@ -460,7 +460,7 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
       expect(blank.system).toContain('mote --skill'); expect(blank.system).toContain('mote playbook pmo')
       expect(blank.system).toContain('original knowledge, reusable methods and short memory index')
       expect(blank.system).toContain('Read current linked methods for later relevant work and revise them from real feedback.')
-      expect(blank.system).toContain('for cooperation, active memory and method improvement, ideas and own-task reminders.')
+      expect(blank.system).toContain('for environment understanding, identity and task consistency, main-Agent/member responsibilities, active memory and method improvement, ideas and own-task reminders.')
       expect(blank.system).not.toContain('## Remember at useful moments')
       expect(blank.system).not.toContain('## Agree on the work')
       expect(blank.system).not.toContain(goalRoleGuidanceContract())

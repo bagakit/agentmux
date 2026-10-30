@@ -1,3 +1,4 @@
+import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentInputMoteSource } from '@agentmux/core'
@@ -46,7 +47,9 @@ it('the actual App sends and durably retains the original Mote Region before its
   await click(button(view.element, 'Send'))
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, moteSource: source, admissionIntent: { kind: 'manual-actor' } })
-  expect(durableAtDispatch).toMatchObject({ operationId: f.submit.mock.calls[0]![0].operationId, moteSource: source, inputRequested: true, phase: 'sending' })
+  expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentMuxNote: MOTE_INPUT_GUIDANCE })
+  expect(f.submit.mock.calls[0]![0].prompt).toBe('Original Mote member decision')
+  expect(durableAtDispatch).toMatchObject({ operationId: f.submit.mock.calls[0]![0].operationId, agentMuxNote: MOTE_INPUT_GUIDANCE, moteSource: source, inputRequested: true, phase: 'sending' })
   expect(createLocalDrafts().attempts.get(JSON.stringify(['draft', sid]))?.moteSource).toEqual(source)
 })
 
@@ -63,6 +66,7 @@ it('conditioned prompt retries retain the exact original operation and source ac
   const original = structuredClone(f.submit.mock.calls[0]![0])
   expect(durableAtDispatch).toMatchObject({ operationId: original.operationId, moteSource: source, phase: 'sending' })
   expect(original.moteSource).toEqual(source)
+  expect(original.agentMuxNote).toBe(MOTE_INPUT_GUIDANCE)
   expect(createLocalDrafts().attempts.get(JSON.stringify(['draft', sid]))).toMatchObject({ phase: 'unknown', moteSource: source })
   await view.render(null)
   await view.render(surface(f, otherSource))
@@ -82,6 +86,7 @@ it('a legacy unknown prompt never acquires a new navigation source when explicit
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ operationId: 'legacy-original-operation', prompt: 'Legacy original input' })
   expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('moteSource')
+  expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('agentMuxNote')
 })
 
 it('manual prompt retries keep their original source and operation after navigation', async () => {
@@ -92,10 +97,30 @@ it('manual prompt retries keep their original source and operation after navigat
   expect(f.submit).toHaveBeenCalledOnce()
   const original = structuredClone(f.submit.mock.calls[0]![0])
   expect(original.moteSource).toEqual(source)
+  expect(original.agentMuxNote).toBe(MOTE_INPUT_GUIDANCE)
   await view.render(surface(f, otherSource))
   await click(button(view.element, '重试原请求'))
   expect(f.submit).toHaveBeenCalledTimes(2)
   expect(f.submit.mock.calls[1]![0]).toEqual(original)
+})
+
+
+it.each([undefined, 'Earlier frozen platform note'] as const)('a legacy original Mote source retains its frozen note=%s without adopting the upgraded guide', async savedNote => {
+  const f = fixture(), local = createLocalDrafts()
+  local.attempts.set(JSON.stringify(['draft', sid]), { operationId: 'legacy-mote-original-operation', runId: 'run-original', draft: 'Legacy exact human body',
+    moteSource: source, ...(savedNote === undefined ? {} : { agentMuxNote: savedNote }),
+    phase: 'unknown', message: 'Unknown original receipt', inputRequested: true, originalHostId: 'host-original', originalRuntimeId: 'original-runtime',
+    request: { condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, execution: 'default', explicit: false, runtimeId: 'original-runtime' } })
+  await local.save()
+  const view = await mount(surface(f, otherSource))
+  expect(f.submit).not.toHaveBeenCalled()
+  await click(button(view.element, '重试原请求'))
+  expect(f.submit).toHaveBeenCalledOnce()
+  const input = f.submit.mock.calls[0]![0]
+  expect(input).toMatchObject({ operationId: 'legacy-mote-original-operation', prompt: 'Legacy exact human body', moteSource: source })
+  if (savedNote === undefined) expect(input).not.toHaveProperty('agentMuxNote')
+  else expect(input.agentMuxNote).toBe(savedNote)
+  expect(input.prompt).not.toContain('Mote collaboration:')
 })
 
 const { mote: _mote, ...ordinaryIdentity } = identity
@@ -112,6 +137,7 @@ it.each([
   await paste(view.element, 'Healthy input without confirmed Mote source'); await click(button(view.element, 'Send'))
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('moteSource')
+  expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('agentMuxNote')
 })
 
 it('native question answers persist the exact source before dispatch and retry their original frozen reply after navigation', async () => {
