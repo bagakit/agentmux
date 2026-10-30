@@ -224,6 +224,8 @@ Goal 模块同时面向管理者和执行者，沿[执行责任、停滞告警�
 
 `agent context` 完整读取原 Store 已保留的 history metadata，包括创建来源、fork 祖先与分端工具执行绑定；公开解码复用原领域投影与 parser，严格拒绝未知字段、畸形结构及与本次已确认来源冲突的回包，不通过删除合法元数据绕过校验。创建时的 Run 与祖先身份仅表示原始来源，不能据此推断当前 Run／Session 或输入资格；Hook、能力秘密与生命周期控制不进入该只读投影。
 
+Context 某个来源暂不可读不表示已经读完：保留该来源的原位置、本页其他来源已消费的进度和具名 `unavailable`，调用者可沿返回的 `nextCursor` 明确续读，不隐式重试或重开首窗。只有所有来源均已完成才返回 `nextCursor: null`；续读仍绑定原 Host／Session、路由及来源。
+
 默认 Host 入口的 `agent ls` 消费其已连接 Client 的多 Host 聚合，不能因本地清单非空而遗漏远端。聚合连接不可用时仍返回可用的本地事实，并在 `errors` 明示聚合观察缺失；Client 已明确返回的业务拒绝不改为本地成功。准确 Session 的 `agent inspect` 与 `agent output` 优先读取本 Core 已知 owner；只有本地明确查无目标时，才沿既有 Client 聚合通路继续定位。来源认证与请求校验先于委托，歧义、存储未确认或读取中故障不冒充查无目标。输出委托保持原 opening response、ordered bytes、Gap 与 reader 取消，开始观察后不自动换源或重订阅；已知本地 Session 的读取不以 Client 可用为前提。
 
 ### 传输、业务回执与持续读取
