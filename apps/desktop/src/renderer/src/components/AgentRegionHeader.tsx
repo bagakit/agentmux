@@ -81,7 +81,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     name={name} executorLabel={executorLabel} sessionId={nativeSession?.control.agentSessionId ?? sessionId}
     sessionKind={sessionKind} executionHost={executionHost} readOnly={readOnly}
     links={contextual?.agentLink || entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={[...(contextual?.agentLink ? [{ kind: 'action' as const, action: contextual.agentLink }] : []), ...entries]}
-      Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} /> : null}
+      Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} labelPresentation="tooltip" /> : null}
     onRestart={entries.find(entry => entry.kind === 'restart')?.onSelect}
     onStop={sessionKind === 'agent' && !readOnly ? () => {
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)

@@ -5,6 +5,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
 type Hint = { label: string; row: string; anchor: HTMLElement }
+export type WorkbenchRowLabelPresentation = 'inline' | 'tooltip'
 export type WorkbenchActionRowItemProps = Pick<HTMLAttributes<HTMLElement>,
   'aria-describedby' | 'onFocus' | 'onBlur' | 'onPointerMove'>
 
@@ -28,13 +29,14 @@ export function moveAlongWorkbenchActionRow(event: KeyboardEvent<HTMLDivElement>
 
 /** Shared alignment and descriptions; each consumer keeps its original actions and input semantics. */
 export function WorkbenchActionRows<T extends { label: string }>({ rows, itemKey, renderItem,
-  Group = 'div', Label = 'div'
+  Group = 'div', Label = 'div', labelPresentation = 'inline'
 }: {
   rows: readonly { id: string; label: string; clusters: readonly (readonly T[])[] }[]
   itemKey(item: T, index: number): string
   renderItem(item: T, props: WorkbenchActionRowItemProps, divider: ReactNode): ReactNode
   Group?: 'div' | typeof ContextMenu.Group
   Label?: 'div' | typeof ContextMenu.Label
+  labelPresentation?: WorkbenchRowLabelPresentation | undefined
 }) {
   const id = useId()
   const [hovered, setHovered] = useState<Hint | null>(null)
@@ -44,27 +46,28 @@ export function WorkbenchActionRows<T extends { label: string }>({ rows, itemKey
   useEffect(() => {
     if (!hint || !tooltip.current) return
     const panel = tooltip.current
-    const label = hint.anchor.closest('.workbench-menu-row')?.querySelector('.workbench-menu-row__label-text')
-    if (!label) return
+    const label = labelPresentation === 'inline'
+      ? hint.anchor.closest('.workbench-menu-row')?.querySelector('.workbench-menu-row__label-text') : null
+    if (labelPresentation === 'inline' && !label) return
     let disposed = false
     const update = async () => {
-      if (label.scrollWidth <= label.clientWidth) { panel.style.visibility = 'hidden'; return }
+      if (label && label.scrollWidth <= label.clientWidth) { panel.style.visibility = 'hidden'; return }
       const position = await computePosition(hint.anchor, panel, { strategy: 'fixed', placement: 'bottom-start',
         middleware: [offset(4), flip(), shift({ padding: 8 })] })
       if (!disposed) Object.assign(panel.style, { left: `${position.x}px`, top: `${position.y}px`, visibility: 'visible' })
     }
     const stop = autoUpdate(hint.anchor, panel, () => { void update() })
     return () => { disposed = true; stop() }
-  }, [hint])
-  return <div className="workbench-layout-menu">
+  }, [hint, labelPresentation])
+  return <div className={`workbench-layout-menu${labelPresentation === 'tooltip' ? ' workbench-layout-menu--icons-only' : ''}`}>
     {rows.map(row => {
       const clusters = row.clusters.filter(items => items.length > 0)
       const active = hint?.row === row.id
       return clusters.length > 0 ? <Group key={row.id} className="workbench-menu-row" role="group" aria-label={row.label}
         onPointerLeave={() => setHovered(current => current?.row === row.id ? null : current)}>
-        <Label className="workbench-menu-row__label" aria-hidden="true" data-active={active || undefined}>
+        {labelPresentation === 'inline' ? <Label className="workbench-menu-row__label" aria-hidden="true" data-active={active || undefined}>
           <span className="workbench-menu-row__label-text">{active ? hint.label : row.label}</span>
-        </Label>
+        </Label> : null}
         <div className="workbench-menu-row__actions">
           {clusters.map((items, cluster) => <div key={cluster} className="workbench-menu-row__cluster">
             {items.map((item, index) => <Fragment key={itemKey(item, index)}>{renderItem(item, {

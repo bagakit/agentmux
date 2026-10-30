@@ -42,11 +42,14 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
   return <>
     {extensions.context}
     {extensions.context ? <Menu.Separator className="tab-context-menu__separator" /> : null}
-    <Menu.Label className="agent-region-menu__summary">
-      <strong title={name}>{name}</strong>
-      <span>{executorLabel} · {executionHost.label}{readOnly ? ' · Read-only' : ''}</span>
-    </Menu.Label>
-    {links ? <>{links}<Menu.Separator className="tab-context-menu__separator" /></> : null}
+    <div className="agent-region-menu__identity">
+      <Menu.Label className="agent-region-menu__summary">
+        <strong title={name}>{name}</strong>
+        <span>{executorLabel} · {executionHost.label}{readOnly ? ' · Read-only' : ''}</span>
+      </Menu.Label>
+      {links}
+    </div>
+    {links ? <Menu.Separator className="tab-context-menu__separator" /> : null}
     <Menu.Group aria-label="Conversation">
       {extensions.identityActions}
       {onHistory ? <Menu.Item className="tab-context-menu__item" onSelect={onHistory}><History size={14} /><span>Conversation history</span></Menu.Item> : null}

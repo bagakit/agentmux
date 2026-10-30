@@ -84,7 +84,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
             sessionId={context.control?.agentSessionId}
             executionHost={executionHostProjection(context.control?.hostId ?? context.hostId, context.workspacePath, host)}
             links={<WorkbenchCopyLinkRow actions={actions.map(action => ({ ...action, icon: <AgentIcon size={16} /> }))}
-              Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} />}
+              Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} labelPresentation="tooltip" />}
             nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction}
             onRefreshObservation={session ? refreshObservation : undefined} refreshing={refreshing}
             onRestart={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}

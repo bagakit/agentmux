@@ -148,6 +148,7 @@ export function RegionCopyLinkRow({ entries, ...primitives }: {
   Item: typeof ContextMenu.Item
   Group?: typeof ContextMenu.Group
   Label?: typeof ContextMenu.Label
+  labelPresentation?: 'inline' | 'tooltip'
 }) {
   return <WorkbenchCopyLinkRow {...primitives} actions={entries.flatMap(entry => entry.kind === 'action'
     ? [{ ...entry.action, icon: entry.action.label === 'Copy Agent Link' ? <AgentIcon size={16} /> : <RegionIcon size={16} /> }]
