@@ -154,7 +154,14 @@ async function expectReplacementCanClose(f: Awaited<ReturnType<typeof replacemen
   expect(saved.continuity?.initializationRecovery).toBeUndefined()
   expect(saved.continuity?.frontendReconnect).toBeUndefined()
   expect(saved.continuityOperations![f.original.operationId]).toEqual(saved.continuity)
-  expect(result.continuity).toEqual(saved.continuity)
+  // Frontend supervision remains live after the immutable lifecycle receipt.
+  // A later observation may change its phase/time while this snapshot is read.
+  const { supervision: returnedSupervision, ...returnedReceipt } = result.continuity!
+  const { supervision: savedSupervision, ...savedReceipt } = saved.continuity!
+  expect(returnedReceipt).toEqual(savedReceipt)
+  if (savedSupervision) expect(returnedSupervision).toMatchObject({ activeAttemptOperationId: savedSupervision.activeAttemptOperationId,
+    attemptCount: savedSupervision.attemptCount, attemptLimit: savedSupervision.attemptLimit,
+    ...(savedSupervision.cancellation ? { cancellation: savedSupervision.cancellation } : {}) })
   expect(f.events.filter(event => event.code === 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED')).toEqual([])
   const published = f.events.filter(event => event.type === 'agent-session' && event.session?.run.runId === saved.run.runId)
   expect(published.length).toBeGreaterThan(0)

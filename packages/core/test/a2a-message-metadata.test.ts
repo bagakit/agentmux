@@ -78,6 +78,7 @@ it('records exact notification preparation and outcome times, retaining the capt
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
+// Three serial source CLI calls retain their own 20s deadlines; allow fixture overhead too.
 it('actual source CLI and public client preserve the exact notification selector, original execution and read-only journal facts', async () => {
   const f = await fixture(); await f.append('cli-original')
   const old = (await f.queue.prepareNotification({ notificationId: 'cli-captured', agentSessionId: 'recipient', condition, idle, messageIds: ['cli-original'] }))!
@@ -90,7 +91,7 @@ it('actual source CLI and public client preserve the exact notification selector
   expect((await f.cli(['message', 'read', '--operation-id', 'send-cli-original', '--notification-id', old.notificationId])).message).toEqual(read.message)
   expect((await f.cli(['message', 'events', '--message-id', 'cli-original'])).events.filter((event: any) => event.kind.startsWith('a2a-notification')).every((event: any) => Number.isSafeInteger(event.at))).toBe(true)
   expect(await f.queue.readJournal()).toEqual(before); expect(f.inner.kernel.input).not.toHaveBeenCalled()
-})
+}, 65_000)
 
 it('keeps bodies and names unassociated exact notifications without revealing other MIDs, recipients or wire', async () => {
   const f = await fixture(); await f.append('readable'); await f.append('other-mid'); await f.append('other-recipient', 'sender', 'other')
