@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-discussion-restore'].includes(mode) ? { query: { [['mote-main-setup','mote-discussion-restore'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
+  await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -47,6 +47,7 @@ app.whenReady().then(async () => {
     await tap('[data-capture-control=' + JSON.stringify(selected) + ']', label)
   }
   const capture = async name => {
+    if (mode === 'mote-start' && phase === 'visual-fixes' && !['mote-start-draft-390-short-light','mote-start-history-detail-320-dark','mote-start-unknown-keeps-reader-390-light','mote-start-unknown-details-390-light','mote-start-policy-manual-390-light'].includes(name)) return
     if (mode === 'quiet-run-status' && phase === 'details-only' && name !== 'quiet-run-status-member-details-390-light') return
     if (mode === 'commands-entry' && !name.startsWith('commands-')) return
     if (mode === 'notice-center' && !name.startsWith('notices-')) return
@@ -69,6 +70,9 @@ app.whenReady().then(async () => {
     await button('日常协作', '.mobile-mote-agents')
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
+  }
+  if (mode === 'mote-start') {
+    await require('./mote-start.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
   }
   if (mode === 'quiet-run-status') {
     await require('./quiet-run-status.cjs')({ read, until, resize, tap, button, capture, result })

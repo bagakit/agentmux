@@ -1,6 +1,6 @@
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import type { MoteDialoguePage } from '@agentmux/core/mote-dialogue'
-import { effectiveMoteQuickSave, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { effectiveMoteQuickSave, type MotePresenceReading, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 /** Private observations only. No live Mote, schedule, model or Run is operated. */
 export function createMoteDialogueCapture() {
   const hostId = 'host-original', spaceId = 'mote-original', zoneId = 'zone-mote', workspacePath = fixturePath('mote-original')
@@ -16,7 +16,7 @@ export function createMoteDialogueCapture() {
   let page: MoteDialoguePage = { main: { target, identity, status: 'ready', resource: file, documentRevision: 'sha256:' + 'b'.repeat(64), roleRevision: 'original-role-A', current: main, issue: null },
     links: [work], incarnation: 'original-capture-journal', throughSequence: 2, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null }
   const document = { path: 'MOTE.md', content: '# 我的 Mote\n\n保留目标、依据、已作决定和未完成承诺。', revision: 'sha256:' + 'b'.repeat(64) }
-  let defaults = { executorId: 'fixture-original', conversation: main, conversationRevision: 'original-role-A', presence: { enabled: true, intervalMs: 1800000 } }
+  let defaults: MoteQuickDefaults = { executorId: 'fixture-original', conversation: main, conversationRevision: 'original-role-A', presence: { enabled: true, intervalMs: 1800000 } }
   let maintenance: MotePresenceReading = { status: 'paused', issue: null, schedule: { loopId: 'original-mote-heartbeat', hostId, agentSessionId: main.sessionId, providerId: 'codex', workspacePath,
     everyMs: 1800000, intervalMs: 1000, prompt: 'Original frozen internal check of goals, threads, decisions and unfinished commitments.', nextCheckAt: originalAt + 1800000, status: 'paused', revision: 7,
     creationOperationId: 'original-heartbeat-create', futureIntentId: 'original-heartbeat-intent' } }
@@ -27,12 +27,26 @@ export function createMoteDialogueCapture() {
       body: '比较两个实验方向，保留原资料与需要你决定的问题。', createdAt: originalAt } }, replies: [{ envelope: { messageId: 'original-research-report', threadId: work.origin.threadId,
       senderSessionId: b.sessionId, recipientSessionId: main.sessionId, body: '三份样本已读。方案 A 更容易在一天内得到反馈；方案 B 的原依据也已保留。下一步仍由你决定。', createdAt: originalAt + 60000 } }], identityDiagnostics: [] }
   return {
+    setStartScene(mode: 'empty' | 'new' | 'history' | 'unknown' | 'policy', checkpoint: import('@agentmux/core/conversation').ConversationCheckpoint) {
+      unknown = mode === 'unknown'
+      const periods = [0, 1].map(index => ({ ...prior, sequence: index + 1, operationId: 'capture-history-' + index, roleRevision: 'capture-role-' + index,
+        period: { id: 'capture-period-' + index, roleRevision: 'capture-role-' + index, reference: main,
+          startedAt: originalAt - (2 - index) * 3600000, endedAt: originalAt - (1 - index) * 3600000,
+          start: { kind: 'initial' as const, operationId: 'capture-begin-' + index }, end: { kind: 'manual-takeover' as const, operationId: 'capture-end-' + index },
+          range: { kind: 'bounded' as const, after: checkpoint, through: checkpoint } } }))
+      const empty = mode === 'empty' || mode === 'history'
+      defaults = { executorId: 'fixture-original', presence: { enabled: true, intervalMs: 1800000 },
+        ...(!empty ? { conversation: main, conversationRevision: 'original-role-A' } : {}) }
+      page = { ...page, links: mode === 'history' || mode === 'new' ? periods.reverse() : [work],
+        main: { ...page.main, current: empty ? null : main, roleRevision: empty ? 'legacy:' + document.revision : 'original-role-A' } }
+      return { defaults, current: page.main.current, target, unknown }
+    },
     replaceMain() { page = { ...page, links: [work, prior], main: { ...page.main, current: b, roleRevision: 'original-role-B' } } },
     unconfirm() { unknown = true },
     facts: () => ({ target, page, maintenance }),
     rpc(method: string, input: any) {
       if (method === 'space.state') return { state: { graph: { resources: {} } } }
-      if (method === 'space.mote.dialogue.read') { if (unknown) throw Error('原主对话读取暂不可用；保留上次确认的角色、原工作与草稿。'); return structuredClone(page) }
+      if (method === 'space.mote.dialogue.read') { if (unknown) throw Error('原主对话读取暂不可用；保留上次确认的角色、原工作与草稿。'); return structuredClone({ ...page, links: page.links.filter(link => !input.kind || link.kind === input.kind) }) }
       if (method === 'message.dispatch.read') { if (input.hostId !== hostId || input.sourceMessageId !== work.origin.messageId) throw Error('Wrong original work source'); return structuredClone(dispatch) }
       if (method === 'space.mote.preferences.read') return { kind: 'quick', target, status: 'ready', source: { resource: file, result: { status: 'read', document } }, defaults,
         choices: { executors: [{ id: 'fixture-original', name: 'Codex', providerId: 'codex' }], conversations: [{ reference: main, label: '原承接者' }, { reference: b, label: '当前承接者' }],

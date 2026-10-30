@@ -1,3 +1,4 @@
+import { retainObjectReference } from '../../../src/recovery/presentation-route'
 declare const __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: { kind: string; icon: string | null }
 declare const __AGENTMUX_MOBILE_PROVIDER_CATALOG__: ReturnType<AgentMuxHostedClient['catalog']>
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fixture-values.mjs"
@@ -335,6 +336,18 @@ function Scene() {
   const [unconfirmedClient, setUnconfirmedClient] = useState(false)
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   Object.assign(window, { mobileProductScene: {
+    prepareMoteStart: async (mode: 'empty' | 'new' | 'history' | 'unknown' | 'policy') => {
+      if (!moteDialogueCapture) throw Error('The controlled dialogue scene must be selected explicitly')
+      const checkpoint = (await client.readAgentConversation({ hostId: 'host-original', agentSessionId: main.agentSessionId })).window.checkpoint
+      const source = moteDialogueCapture.setStartScene(mode, checkpoint), fact = catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!
+      Object.assign(fact, { quickMode: mode === 'unknown' ? { status: 'unconfirmed', message: '原主对话配置暂未确认；原对话与草稿保留。' } : { status: 'saved', version: 'sha256:' + 'b'.repeat(64), defaults: source.defaults }, conversation: source.current })
+      const empty = mode === 'empty' || mode === 'history'
+      const identity = { name: '我的 Mote', project: '我的 Mote', mote: { spaceId: 'mote-original', name: '我的 Mote', facts: fact, contentReference: fact.content! } }
+      await getDeviceWorkface().updatePresentation({ selectedSessionId: empty ? null : main.agentSessionId, hostUrl: '', panel: 'conversation' },
+        { primary: 'mote', showSession: true, showGoalWork: false, identity: retainObjectReference(identity), profile: null, recentMoteSpaceId: 'mote-original',
+          moteView: { spaceId: 'mote-original', section: 'discussion', detail: false, directAgent: false } })
+      remountDensity(value => value + 1)
+    },
     replaceMoteMain: () => { waiting.pendingInteraction = undefined; moteDialogueCapture!.replaceMain() },
     unconfirmMoteDialogue: () => moteDialogueCapture!.unconfirm(),
     prepareWebUpdate: () => setWebUpdateScene(true),
