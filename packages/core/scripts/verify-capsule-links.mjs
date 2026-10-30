@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const tests = { core: 'packages/core/test/capsule-links.test.ts', ui: 'packages/client-ui/test/capsule-links.test.tsx' }
+const uiOnly = process.argv.includes('--ui-only')
+const tests = { core: 'packages/core/test/capsule-links.test.ts', ui: 'packages/client-ui/test/capsule-links.test.tsx',
+  desktop: 'apps/desktop/test/conversation-capsule.test.tsx' }
 const mutations = [
   { id: 'canonical-link-check-lost', suite: 'core', file: 'packages/core/src/sharing.ts',
     from: 'if (formatAmuxObjectLink(target) !== raw)', to: 'if (false)',
@@ -22,13 +24,26 @@ const mutations = [
   { id: 'shared-capsule-reader-lost', suite: 'ui', file: 'packages/client-ui/src/lib/object-link-reference.ts',
     from: 'return { uri, target, ...(label ? { label } : {}) }',
     to: "return target.kind === 'capsule' ? null : { uri, target, ...(label ? { label } : {}) }",
-    assertion: 'delivers the same exact Capsule reference through both shared Markdown and plain conversation readers' }
+    assertion: 'delivers the same exact Capsule reference through both shared Markdown and plain conversation readers' },
+  { id: 'ordinary-bare-embedding-lost', suite: 'ui', file: 'packages/client-ui/src/components/AgentMarkdown.tsx',
+    from: "if (node.kind === 'text') for (const [segmentIndex, segment] of splitObjectLinkReferences(node.text).entries()) {",
+    to: "if (false) for (const [segmentIndex, segment] of splitObjectLinkReferences(node.text).entries()) {",
+    assertion: 'embeds ordinary bare Capsule references beside their original prose without repeating the same block page' },
+  { id: 'ordinary-markdown-embedding-lost', suite: 'ui', file: 'packages/client-ui/src/components/AgentMarkdown.tsx',
+    from: "else if (node.kind === 'link') add(node.href, inlineLabel(node.children), position)",
+    to: "else if (node.kind === 'link') return",
+    assertion: 'embeds ordinary Markdown Capsule references while preserving sentence text and the exact original page' },
+  { id: 'first-presentation-identity-lost', suite: 'ui', file: 'packages/client-ui/src/components/AgentMarkdown.tsx',
+    from: '!references.has(uri)', to: 'true',
+    assertion: 'keeps original image presentation positions and deduplicates mixed syntax within one block' }
 ]
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = await mkdtemp(join(tmpdir(), 'amux-capsule-links-proof-'))
 await symlink(join(root, 'node_modules'), join(directory, 'node_modules'), 'dir')
 const receipt = { schema: 'agentmux.capsule-links-proof.v1', passed: false,
-  boundary: 'Strict canonical Core object links, actual public metadata RPC/compiled CLI with original Node Capsule owner, and production shared Markdown/conversation readers. Desktop navigation and Browser visibility are separate owning proofs.',
+  scope: uiOnly ? 'shared-reader-and-desktop-adapter' : 'public-links',
+  boundary: uiOnly ? 'Production shared Markdown/conversation readers and actual Desktop Capsule adapter with scoped Browser/HTTP ports. Native rendering, spatial restoration and public Core discovery are separate owning proofs.'
+    : 'Strict canonical Core object links, actual public metadata RPC/compiled CLI with original Node Capsule owner, and production shared Markdown/conversation readers. Desktop navigation and Browser visibility are separate owning proofs.',
   inputs: {}, baseline: {}, mutations: [] }
 async function run(name, suite, mutation) {
   const report = join(directory, `${name}.json`), config = join(directory, `${name}.config.mts`)
@@ -40,7 +55,8 @@ async function run(name, suite, mutation) {
     receipt.inputs[mutation.file] = sha(source); mutation.loadedSha256 = sha(changed)
     plugin = `,{name:'capsule-links-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, mutation.file))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source unavailable');return {code:code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)}),map:null}}}}`
   }
-  const base = suite === 'ui' ? 'packages/client-ui/test/capsule-links.config.mts' : 'vitest.config.ts'
+  const base = suite === 'ui' ? 'packages/client-ui/test/capsule-links.config.mts'
+    : suite === 'desktop' ? 'apps/desktop/test/conversation-capsule.config.mts' : 'vitest.config.ts'
   await writeFile(config, `import base from ${JSON.stringify(join(root, base))};export default {...base,root:${JSON.stringify(root)},plugins:[...(base.plugins??[])${plugin}],test:{...base.test,include:[${JSON.stringify(tests[suite])}],maxWorkers:1,passWithNoTests:false}};\n`)
   const result = await new Promise((resolveRun, reject) => {
     const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', report]
@@ -63,10 +79,15 @@ async function run(name, suite, mutation) {
     ...(mutation ? { id: mutation.id, source: mutation.file, loadedSha256: mutation.loadedSha256, assertion: mutation.assertion } : {}) }
 }
 try {
-  for (const file of [...Object.values(tests), 'packages/core/src/sharing.ts', 'packages/core/src/search-contract.ts', 'packages/core/src/search-metadata.ts',
-    'packages/core/src/search-observation.ts', 'packages/core/src/search-codec.ts', 'packages/core/src/public-rpc-service.ts', 'packages/client-ui/src/lib/object-link-reference.ts']) receipt.inputs[file] = sha(await readFile(join(root, file)))
-  receipt.baseline.core = await run('core', 'core'); receipt.baseline.ui = await run('shared-reader', 'ui')
-  if (process.argv.includes('--mutations')) for (const mutation of mutations) receipt.mutations.push(await run(mutation.id, mutation.suite, mutation))
+  const files = uiOnly ? [tests.ui, tests.desktop, 'packages/client-ui/src/components/AgentMarkdown.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
+    'packages/client-ui/src/platform.tsx', 'apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx', 'apps/desktop/src/renderer/src/components/ConversationCapsule.tsx']
+    : [tests.core, tests.ui, 'packages/core/src/sharing.ts', 'packages/core/src/search-contract.ts', 'packages/core/src/search-metadata.ts',
+      'packages/core/src/search-observation.ts', 'packages/core/src/search-codec.ts', 'packages/core/src/public-rpc-service.ts', 'packages/client-ui/src/components/AgentMarkdown.tsx']
+  for (const file of [...files, 'packages/client-ui/src/lib/object-link-reference.ts']) receipt.inputs[file] = sha(await readFile(join(root, file)))
+  if (!uiOnly) receipt.baseline.core = await run('core', 'core')
+  receipt.baseline.ui = await run('shared-reader', 'ui')
+  if (uiOnly) receipt.baseline.desktop = await run('desktop-adapter', 'desktop')
+  if (process.argv.includes('--mutations')) for (const mutation of mutations.filter(value => !uiOnly || value.suite === 'ui')) receipt.mutations.push(await run(mutation.id, mutation.suite, mutation))
   receipt.passed = true
 } finally {
   const at = process.argv.indexOf('--output')

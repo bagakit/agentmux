@@ -57,10 +57,10 @@ async function render(content: string, visible = true) {
 }
 const click = async (text: string) => { await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)!.click()) }
 
-it('only explicit block image intent acquires the exact Capsule through the actual conversation and Desktop adapter', async () => {
-  await render(`Read ${first} or [open](${first}).\n\n\`![literal](${first})\`\n\n\`\`\`md\n![example](${first})\n\`\`\``)
+it('ordinary Markdown acquires the exact Capsule through the actual conversation and Desktop adapter while code stays literal', async () => {
+  await render(`\`![literal](${first})\`\n\n\`\`\`md\n[example](${first})\n\`\`\``)
   expect(create).not.toHaveBeenCalled(); expect(inspect).not.toHaveBeenCalled()
-  await render(`![Original page](${first})`)
+  await render(`已重做成[Original page](${first})，可以直接看。`)
   expect(inspect).toHaveBeenCalledWith('capsule.inspect', { capsuleId: '123456789ABC' })
   expect(create).toHaveBeenCalledTimes(1)
   expect(create.mock.calls[0]!.slice(1)).toEqual(['http://127.0.0.1:41823/', null, undefined, 'normal', 'responsive', '123456789ABC'])
@@ -68,6 +68,16 @@ it('only explicit block image intent acquires the exact Capsule through the actu
   expect(register.mock.calls[0]![0].occurrence.location).toEqual({ kind: 'inline' })
   expect(api.browser.activatePresentation).not.toHaveBeenCalled()
   await click('Open in Browser'); expect(open).toHaveBeenCalledWith(first)
+})
+
+it('ordinary bare references retain their prose and share one original page within the same block', async () => {
+  await render(`Read ${first} and ${first}`)
+  expect(container.querySelectorAll('[data-object-link]')).toHaveLength(2)
+  expect(container.querySelectorAll('.conversation-capsule')).toHaveLength(1)
+  expect(inspect).toHaveBeenCalledWith('capsule.inspect', { capsuleId: '123456789ABC' })
+  expect(create).toHaveBeenCalledTimes(1)
+  expect(create.mock.calls[0]![6]).toBe('123456789ABC')
+  expect(api.browser.activatePresentation).not.toHaveBeenCalled()
 })
 
 it('retains original native identity through hide, unknown release and return, without Close or input focus', async () => {
@@ -83,7 +93,7 @@ it('retains original native identity through hide, unknown release and return, w
   await render(`![Original page](${first})`)
   expect(create.mock.calls.at(-1)![0]).toBe(id)
   await render(`![Original page](${first}) ![Another position](${first})`)
-  expect(new Set(create.mock.calls.map(call => call[0])).size).toBe(2)
+  expect(new Set(create.mock.calls.map(call => call[0])).size).toBe(1)
 })
 
 it('keeps same-URI packet occurrences separate and preserves each original identity on remount', async () => {
