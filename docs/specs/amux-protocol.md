@@ -6,7 +6,7 @@
 
 ## 格式与业务归属
 
-当前支持的形式、名称、用途和实际 formatter 生成的完整 wire 示例由 Core 的[可读协议定义](../../packages/core/src/amux-protocol-definition.ts)与[阅读目录](../../packages/core/src/agent-message-render.ts)持有；设置的 **Message Tool → amux Protocols**、搜索与本地发现直接消费该目录，不维护第二份完整名单。下文分别定义格式不变量与业务归属。
+当前支持的形式、名称、用途和实际 formatter 生成的完整 wire 示例由 Core 的[可读协议定义](../../packages/core/src/amux-protocol-definition.ts)与[阅读目录](../../packages/core/src/agent-message-render.ts)持有；GUI 的[独立协议参考](../design/behavior/settings-and-observation.md#amux-协议参考目录)、文档内搜索与本地发现直接消费该目录，不维护第二份完整名单。下文分别定义格式不变量与业务归属。
 
 这些形式共享可发现的名称，各有适用边界。它们不是一个通用 XML namespace、RPC 或可执行指令语言；不能把所有形式交给同一个 XML DOM 或扫描器来推断控制行为。Provider 原生协议、结构化消息记录、操作回执和外部 Skill 声明包保留其原合同。
 
@@ -229,4 +229,4 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 
 Core 已注册命名格式是保留名，先沿其精确合同读取；非法保留格式不进入未知类型分支。reaction 的裸 keyword 只在该原格式解释，不推广成通用 XML 属性。通用展示只声明“文本含此协议”，不认证或采用其来源、业务含义和执行资格。原 wire、原 body、source span 与整条 Copy 保持。
 
-目录是无状态编译期公开阅读能力，不是 Runtime 版本协商、控制派发器或消息账本。实际 producer／reader 复用同源标识和语法基元，目录示例调用原 formatter；已注册格式自动进入设置列表、搜索与原组件预览。格式、分享外框、对象链接按各自原阅读合同展示，不能为了卡片强制 XML 化。新增协议应在同一原定义追加，真实 producer 覆盖与 formatter／reader 验证守住遗漏；不从用户历史猜测支持清单。文档不手抄机器目录，业务行为仍归各原 owner。
+目录是无状态编译期公开阅读能力，不是 Runtime 版本协商、控制派发器或消息账本。实际 producer／reader 复用同源标识和语法基元，目录示例调用原 formatter；已注册格式自动进入参考目录、文档内搜索与原组件预览。格式、分享外框、对象链接按各自原阅读合同展示，不能为了卡片强制 XML 化。新增协议应在同一原定义追加，真实 producer 覆盖与 formatter／reader 验证守住遗漏；不从用户历史猜测支持清单。文档不手抄机器目录，业务行为仍归各原 owner。

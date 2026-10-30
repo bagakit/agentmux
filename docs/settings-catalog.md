@@ -98,9 +98,14 @@ Toolkit Library 的唯一[设置模块](../apps/desktop/src/renderer/src/compone
 | A2A | 后台收件 Agent 的新来信面向用户的系统提醒：跟随全局、静默、提示。提示在全局关闭时使用默认时长；声音始终沿全局 Notifications。不改 Agent 的入箱、空闲引用通知或主动取信，不以提醒代签已读。 | `settings inspect a2a`；inspect / set：`a2a.notifications`（`follow-global`／`silent`／`notify`）。真实来信事实沿同一 Core journal 与 `runtime.events` 观察，投递和通知回执不重复弹窗，初始与断线补读不回放旧信。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/a2a.tsx)、[默认与解析](../apps/desktop/src/shared/a2a-preferences.ts)、[Main](../apps/desktop/src/main/settings/modules/a2a.ts) |
 | Automation | 恢复后续行与 Provider 不支持中断识别时的 active 兜底；持续推进新任务默认周期／Prompt，日历安排默认时区、quiet follow-up 默认策略。保存不创建、启停或改写任务，不改已有草稿／在途操作；当前 Agent 任务操作仍在 Progress。 | 续行复用 `continuity.continuationEnabled`、`continuity.activeInterruptionFallback`；新默认用 `settings inspect automation` 与 inspect / set：`automation.progressIntervalMs`、`.progressPrompt`、`.calendarTimezone`、`.checkInSilenceMs`、`.checkInMinIntervalMs`、`.checkInDailyBudget`、`.checkInQuietStart`、`.checkInQuietEnd`。时长键用毫秒，空时区在新表单打开时解析系统时区。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/automation.tsx)、[默认与校验](../apps/desktop/src/shared/automation-preferences.ts)、[Main](../apps/desktop/src/main/settings/modules/automation.ts)、[Core quiet policy](../packages/core/src/agent-schedule.ts) |
 | Prompts | 名称、正文、关键字、Provider 绑定、状态可用范围与快捷回复图标；引用继续指向同一条保存的 Prompt。 | `settings prompts ls / inspect / create / update / delete`；inspect 可用精确 ID 或 `--keyword`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/prompts.tsx)、[ComposerShortcut 字段](../apps/desktop/src/shared/contracts.ts)、[资源 owner](../apps/desktop/src/main/settings-resources-control.ts)、[Prompt 合同](design/behavior/settings-and-observation.md#设置页的信息架构) |
-| amux Protocols | 本版本可读协议的用途、语法、原始 wire 示例及共享消息卡预览；只读目录、搜索和摘要直接消费同一 Core 定义，展开后才挂载预览，不读取用户历史或执行协议提示。 | 本地 `settings --skill` 提供同源目录；没有新 RPC、配置键或保存动作，不声明远端 Runtime 或旧安装支持。 | [设置模块](../apps/desktop/src/renderer/src/components/settings/modules/amux-protocols.tsx)、[Core 目录](../packages/core/src/agent-message-render.ts)、[格式合同](specs/amux-protocol.md#通用命名协议与阅读目录) |
 
-五项各自独立，Prompts 与 amux Protocols 用途不同，不合并页面。Prompt 仍是同一可复用资源库；Goals、快捷回复及状态动作保留原 ID 引用，分组不建立新库。全局 Keyboard shortcuts 也显示同源 Message Tool 按键；Notifications 保留在 Preferences。
+四项配置各自独立。Prompt 仍是同一可复用资源库；Goals、快捷回复及状态动作保留原 ID 引用，分组不建立新库。全局 Keyboard shortcuts 也显示同源 Message Tool 按键；Notifications 保留在 Preferences。协议参考独立于设置，见下节。
+
+## Documentation
+
+窗口工具栏的 Documentation 与 InApp 的协议参考链接打开同一独立只读阅读面，提供本版本格式的用途、语法、原始 wire 示例、文档内搜索及共享消息卡预览。目录直接消费同一 Core 定义，展开后才挂载原 reader；不读取用户历史、执行协议提示或保存偏好。关闭后返回原工作面、设置草稿和触发点。
+
+本地 `settings --skill` 继续提供同源目录，没有新增 RPC、配置键、CLI 根或保存动作，也不声明远端 Runtime 或旧安装支持。实现来源为[文档入口](../apps/desktop/src/renderer/src/components/documentation/DocumentationNavigation.tsx)、[协议阅读面](../apps/desktop/src/renderer/src/components/documentation/AmuxProtocolReference.tsx)、[Core 目录](../packages/core/src/agent-message-render.ts)和[格式合同](specs/amux-protocol.md#通用命名协议与阅读目录)。
 
 ## Remote
 
