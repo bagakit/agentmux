@@ -11,7 +11,7 @@
 | [shared/contracts.ts](../../apps/desktop/src/shared/contracts.ts) | 可序列化 occurrence、geometry、lease、capture、ACK、activation、receipt、presentation event，以及原 Browser API 类型 |
 | [preload/index.ts](../../apps/desktop/src/preload/index.ts) 的 `browser` | 六项 invoke 与 `onPresentationEvent` 的参数转发、监听及自身退订 |
 | [main/ipc.ts](../../apps/desktop/src/main/ipc.ts) 的 `registerIpc` | 原 `handleWithEvent` 接线；登记时在首次异步准备前，从真实 `event.sender`／`event.senderFrame` 捕获原文档的原生身份快照，交 BVM 校验并返回实际结果 |
-| [ipc-sender-trust.ts](../../apps/desktop/src/main/ipc-sender-trust.ts) 的 `requireTrustedSender` | 原受信 IPC 入口检查；不替代 BVM 的当前 requester 文档与 lease 校验 |
+| [ipc-sender-trust.ts](../../apps/desktop/src/main/ipc-sender-trust.ts) 的 `assertAppDocumentSender`（由 `ipc.ts` 的 App registrar 统一调用） | 原受信 IPC 入口检查；不替代 BVM 的当前 requester 文档与 lease 校验 |
 | [BrowserViewManager](../../apps/desktop/src/main/browser-view-manager.ts) | 运行期校验、lease／capture／input occurrence，以及原 Native 页面资源；不向 Renderer 导出 Electron 对象 |
 | [BrowserPresentationStage](../../apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx) | 原媒体 holder 与 stage 的实际消费者；报告 geometry、媒体 ACK 和输入意图，消费原事件 |
 

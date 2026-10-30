@@ -43,6 +43,10 @@ Main owns `renderer-updates/` beneath Electron userData. Immutable release direc
 
 The publisher atomically replaces `active.json`. Main serializes activation and rollback, validates the complete release, asks the current renderer to flush its checkpoint, and loads the candidate. A nonce-bound ready receipt follows renderer initialization. Only then does Main record success in `status.json`; the CLI waits for that receipt instead of treating staging as delivery. Failed checkpoints leave the current page loaded. Failed candidate startup restores the previous compatible page. Cold startup also validates and recovers staged candidates. Requests arriving during activation are not overwritten by the preceding request's completion.
 
+The original Main loader owns two bounded document sources: the committed App document and its one in-flight load. Main navigation facts promote only a source named by that loader. An update keeps the serving document callable before the next navigation commits; the candidate preload may call before its ready receipt. Native load settlement releases only that attempt's pending source. A ready timeout alone does not revoke an in-flight navigation or the document already serving, including during rollback.
+
+The App IPC registration owner admits the original live main frame against those sources before auditing or invoking any ordinary App handler. It never grants a new source from the frame's current URL. Capsule document IPC keeps its separate Browser/document admission and cleanup; Workbench child portals retain the original root preload path.
+
 ### Checkpoint scope
 
 The frontend uses the existing workbench persistence owner for composer drafts, dirty buffers and layout. Clean file content is re-read from disk. Core Sessions, PTY bytes, attachments, timelines and process state are never copied into this checkpoint. Electron file-origin storage continuity is verified in an isolated native profile.
