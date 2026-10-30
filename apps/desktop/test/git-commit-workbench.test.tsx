@@ -48,9 +48,13 @@ let root: ReturnType<typeof createRoot> | undefined, element: HTMLDivElement
 const initial = useAppStore.getState()
 async function mount(withSidebar = false) {
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
-  await act(async () => root!.render(withSidebar
-    ? <GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
-    : <WorkspaceWorkbench workspaceId="repo" />))
+  await act(async () => {
+    root!.render(withSidebar
+      ? <GitHistoryProvider workspace={workspace}><aside data-sidebar><WorkspaceGitTool workspace={workspace} visible /></aside><WorkspaceWorkbench workspaceId="repo" /></GitHistoryProvider>
+      : <WorkspaceWorkbench workspaceId="repo" />)
+    // Await the real lazy module inside act; cold source transforms are not a UI polling deadline.
+    await import('../src/renderer/src/features/git/GitWorkbenchPane')
+  })
   await vi.waitFor(() => expect(element.querySelector('[data-git-workbench-region]')).not.toBeNull())
   return element
 }

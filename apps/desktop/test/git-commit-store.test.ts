@@ -4,6 +4,7 @@ import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { createJSONStorage } from 'zustand/middleware'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { AppConfig } from '../src/shared/contracts'
 import type { GitCommitSnapshot, GitCommitDiffDescriptor } from '../src/shared/git-contracts'
@@ -61,6 +62,37 @@ it('round-trips the exact Git scope, selected merge parent and immutable diff in
   expect(restored.tabs[opened.tabId]!.regions[opened.regionId]).toMatchObject({ scope: { hostId: 'local', repoPath: _hygiene_fixturePath("repo") }, selection: { commitOid: selected.commitOid, parentOid: selected.parentOid } })
 })
 
+it('keeps the original Store actions and persisted workface through the real hydration envelope', async () => {
+  const opened = useAppStore.getState().openGitWorkbench('repo', snapshot)
+  const source = useAppStore.getState(), options = useAppStore.persist.getOptions()
+  const persisted = JSON.stringify({ state: options.partialize!(source), version: options.version })
+  expect(options.name).toBe('agentmux-workbench-v1')
+  expect(options.skipHydration).toBe(true)
+  expect(JSON.parse(persisted).state.restoredWorkbench).toEqual(projectPersistedWorkbench(source))
+  expect(JSON.parse(persisted).state).not.toHaveProperty('openGitWorkbench')
+  let finishRead!: (value: string) => void
+  const read = vi.fn(() => new Promise<string>(resolve => { finishRead = resolve }))
+  useAppStore.persist.setOptions({ storage: createJSONStorage(() => ({ getItem: read, setItem: vi.fn(), removeItem: vi.fn() })) })
+  try {
+    useAppStore.setState({ tabs: {}, layouts: {}, restoredWorkbench: null })
+    const hydration = useAppStore.persist.rehydrate()
+    expect(read).toHaveBeenCalledExactlyOnceWith(options.name)
+    expect(useAppStore.getState().restoredWorkbench).toBeNull()
+    finishRead(persisted)
+    await hydration
+    const hydrated = useAppStore.getState()
+    expect(hydrated.openGitWorkbench).toBe(source.openGitWorkbench)
+    expect(hydrated.openGitHistory).toBe(source.openGitHistory)
+    expect(hydrated.releaseBranchDiff).toBe(source.releaseBranchDiff)
+    expect(hydrated.restoredWorkbench).toEqual(projectPersistedWorkbench(source))
+    // initialize uses this same presentation decoder after its explicit hydration boundary.
+    const restored = restorePersistedWorkbench({ config, persisted: hydrated.restoredWorkbench, sessions: [], createTabGroupId: () => 'unexpected' })
+    useAppStore.setState({ tabs: restored.tabs, layouts: restored.layouts })
+    expect(useAppStore.getState().openGitWorkbench('repo', snapshot)).toEqual(opened)
+    expect(useAppStore.getState().tabs).toEqual(source.tabs)
+  } finally { useAppStore.persist.setOptions({ storage: options.storage }) }
+})
+
 it('loads a fixed commit diff through the commit bridge without attaching a worktree document', async () => {
   const original = useAppStore.getState().openGitWorkbench('repo', snapshot)
   useAppStore.getState().openBranchDiff('repo', descriptor)
@@ -78,10 +110,24 @@ it('loads a fixed commit diff through the commit bridge without attaching a work
 
 it('keeps an existing scope when a mismatched snapshot arrives and refuses an unrelated Host', () => {
   const opened = useAppStore.getState().openGitWorkbench('repo', snapshot)
-  useAppStore.getState().selectGitCommit(opened.regionId, { ...snapshot, repoPath: _hygiene_fixturePath("other") })
+  useAppStore.getState().selectGitCommit(opened.regionId, { ...snapshot, repoPath: _hygiene_fixturePath("other"), commitOid: 'e'.repeat(40) })
   expect(useAppStore.getState().tabs[opened.tabId]!.regions[opened.regionId]).toMatchObject({ selection: { commitOid: snapshot.commitOid } })
   expect(() => useAppStore.getState().openGitWorkbench('repo', { ...snapshot, hostId: 'other' })).toThrow('original Git workspace')
   expect(Object.keys(useAppStore.getState().tabs)).toEqual([opened.tabId])
+})
+
+it('does not reuse a fixed reading across Workspace, repository, path or merge-parent identity', () => {
+  const original = useAppStore.getState().openGitWorkbench('repo', snapshot)
+  const originalSurface = useAppStore.getState().tabs[original.tabId]!.regions[original.regionId]
+  const otherWorkspace = { ...config.workspaces[0]!, id: 'other-workspace' }
+  useAppStore.setState({ config: { ...config, workspaces: [...config.workspaces, otherWorkspace] } })
+  const elsewhere = useAppStore.getState().openGitWorkbench(otherWorkspace.id, snapshot)
+  const otherRepo = useAppStore.getState().openGitWorkbench('repo', { ...snapshot, repoPath: _hygiene_fixturePath('other-repository') })
+  const otherParent = useAppStore.getState().openGitWorkbench('repo', { ...snapshot, parentOid: 'e'.repeat(40) })
+  useAppStore.setState({ config: { ...config, workspaces: [{ ...config.workspaces[0]!, path: _hygiene_fixturePath('moved-workspace') }] } })
+  const moved = useAppStore.getState().openGitWorkbench('repo', snapshot)
+  expect(new Set([original, elsewhere, otherRepo, otherParent, moved].map(target => target.regionId)).size).toBe(5)
+  expect(useAppStore.getState().tabs[original.tabId]!.regions[original.regionId]).toBe(originalSurface)
 })
 
 const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'exact-git-open', operation: 'open.git' as const,
