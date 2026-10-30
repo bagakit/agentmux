@@ -37,7 +37,7 @@ export class ContinuousProgressLoopStore {
   }
   async save(loops: readonly ContinuousProgressLoop[]): Promise<void> {
     const content = `${JSON.stringify(loops, null, 2)}\n`
-    const write = this.writes.then(() => durableWriteFile(this.path, content))
+    const write = this.writes.then(() => durableWriteFile(this.path, content, { requireDirectorySync: true }))
     this.writes = write.catch(() => {})
     await write
   }
