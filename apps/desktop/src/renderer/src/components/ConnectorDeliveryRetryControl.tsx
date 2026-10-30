@@ -15,9 +15,12 @@ export function ConnectorDeliveryRetryControl({ delivery, binding, hostingTarget
 }) {
   const intents = useAppStore(state => state.connectorRoomIntents)
   const target = { executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
-  const retained = useMemo(() => Object.values(intents).filter((intent): intent is Intent => intent.method === 'connection.delivery.retry' && intent.input.operationId === delivery.operationId &&
-    sameConnectorTarget(intent.target, target) && intent.hostingTarget?.hostId === hostingTarget?.hostId && intent.hostingTarget?.runtimeId === hostingTarget?.runtimeId).at(-1),
+  const history = useMemo(() => Object.values(intents).filter((intent): intent is Intent => intent.method === 'connection.delivery.retry' && intent.input.operationId === delivery.operationId &&
+    sameConnectorTarget(intent.target, target) && intent.hostingTarget?.hostId === hostingTarget?.hostId && intent.hostingTarget?.runtimeId === hostingTarget?.runtimeId),
     [intents, delivery.operationId, binding.executionHostId, binding.agentSessionId, hostingTarget?.hostId, hostingTarget?.runtimeId])
+  const [selected, setSelected] = useState<string | null>(null)
+  const retained = selected ? history.find(intent => connectorRoomIntentKey(intent) === selected) : history.at(-1)
+  useEffect(() => { if (selected === null && retained) setSelected(connectorRoomIntentKey(retained)) }, [selected, retained])
   const key = JSON.stringify([groupTarget(binding), hostingTarget, delivery.operationId])
   const current = useRef(key); current.current = key
   const live = useRef(true), flight = useRef(false), saving = useRef('')
@@ -42,6 +45,7 @@ export function ConnectorDeliveryRetryControl({ delivery, binding, hostingTarget
         // Memory is recorded synchronously by the existing owner. Its disk ACK
         // cannot become a permission or progress prerequisite for this action.
         const inputKey = connectorRoomIntentKey(intent); saving.current = inputKey
+        setSelected(inputKey)
         setLocalIssue(true)
         void retainConnectorRoomIntent(intent).then(saved => { if (accepts(originalKey) && saving.current === inputKey) setLocalIssue(!saved.localStorageWritten) }, () => { if (accepts(originalKey) && saving.current === inputKey) setLocalIssue(true) })
       }
@@ -74,7 +78,10 @@ export function ConnectorDeliveryRetryControl({ delivery, binding, hostingTarget
     </div>
     {issue ? <small role="status">{issue}</small> : null}
     {localIssue ? <small role="status">Local request copy unconfirmed; its original input is kept here.</small> : null}
-    {retained ? <details className="agent-connector-disclosure"><summary>Original retry</summary><code>{retained.input.source.kind} · attempt {retained.input.source.attempt}</code>
+    {retained ? <details className="agent-connector-disclosure"><summary>Original retry</summary>
+      {history.length > 1 ? <label>Submitted source<select aria-label="Submitted retry source" value={connectorRoomIntentKey(retained)} onChange={event => { setSelected(event.target.value); setIssue('') }}>
+        {history.map(intent => <option key={connectorRoomIntentKey(intent)} value={connectorRoomIntentKey(intent)}>{intent.input.source.kind} · attempt {intent.input.source.attempt}</option>)}
+      </select></label> : <code>{retained.input.source.kind} · attempt {retained.input.source.attempt}</code>}
       <button className="agent-connector-text-action" onClick={() => void api.ui.writeClipboardText(JSON.stringify({ hostingTarget: retained.hostingTarget, ...retained.input }, null, 2))}>Copy original request</button>
       {!accepted && newSource ? <><small>A later failure is available. Choosing it starts a separate continuation.</small>{retryButton}</> : null}
     </details> : null}
