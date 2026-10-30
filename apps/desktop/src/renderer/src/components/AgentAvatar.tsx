@@ -29,6 +29,10 @@ export const ExecutorIdentityContext = createContext<{
   config: AppConfig | null
 }>({ config: null })
 
+export function executorAvatarAppearance(config: AppConfig | null, executorId: string | undefined) {
+  return executorId ? config?.executors[executorId]?.avatar ?? config?.appearance.agentAvatars?.[executorId] : undefined
+}
+
 /** The same face for an already resolved, read-only identity; no Store reader or disclosure. */
 export function ResolvedAgentAvatar({ label, providerId, state, appearance, executorId, size = 18 }: {
   label: string; providerId: AgentProviderId; state?: AgentDisplayState | undefined
@@ -97,9 +101,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const provider = providerId ?? executor?.providerId ?? session?.providerId
   // Keep the persisted appearance while a user has not yet opened the Executor
   // template. New edits win immediately; the old entry is read-only until then.
-  const avatar = appearance ?? (resolvedExecutorId
-    ? executor?.avatar ?? identity.config?.appearance.agentAvatars?.[resolvedExecutorId]
-    : undefined)
+  const avatar = appearance ?? executorAvatarAppearance(identity.config, resolvedExecutorId)
   const displayState = state ?? session?.state
   const name = label ?? session?.label ?? executor?.label ?? agentProviderLabel(provider ?? '')
   const statusDetail = detail ?? session?.detail

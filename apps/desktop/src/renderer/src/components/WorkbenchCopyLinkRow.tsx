@@ -2,7 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import type { ReactNode } from 'react'
 import { moveAlongWorkbenchActionRow, WorkbenchActionRows, type WorkbenchRowLabelPresentation } from './WorkbenchActionRows'
 
-type CopyLinkAction = { label: string; icon: ReactNode; onSelect(): void | Promise<void> }
+export type CopyLinkAction = { label: string; icon: ReactNode; onSelect(): void | Promise<void> }
 
 /** Compact object-link shortcuts; callers retain the exact formatter and clipboard operation. */
 export function WorkbenchCopyLinkRow({ actions, Item, Group = ContextMenu.Group, Label = ContextMenu.Label, labelPresentation }: {

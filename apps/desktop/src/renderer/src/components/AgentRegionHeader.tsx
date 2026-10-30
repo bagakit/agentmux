@@ -6,8 +6,9 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { RegionCopyLinkRow, RegionMenuEntryView, useRegionMenuEntries, useRegionMenuObservation, type RegionContextContribution } from './RegionContextMenu'
+import { RegionCopyLinkRow, regionCopyLinkActions, RegionMenuEntryView, useRegionMenuEntries, useRegionMenuObservation, type RegionContextContribution } from './RegionContextMenu'
 import { AgentMenuContent } from './AgentMenuContent'
+import { AgentMenuIdentityActions } from './AgentMenuIdentityActions'
 import { useSessionStop } from './SessionStop'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { WorkbenchMenuScope } from './WorkbenchMenuScope'
@@ -40,7 +41,10 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   currentConversationActions?: ReactNode
   nativeSession?: AgentNativeSourceReference | undefined
 }) {
-  const connectorSession = useAppStore(state => sessionKind === 'agent' ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
+  const connectorSession = useAppStore(state => {
+    const session = sessionKind === 'agent' ? sessionPresentationById(state.sessions).get(sessionId) : undefined
+    return session?.kind === 'agent' ? session : undefined
+  })
   const entries = useRegionMenuEntries()
   const active = useWorkbenchPresentationActive()
   const stop = useSessionStop(active)
@@ -80,8 +84,12 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   const content = (Menu: typeof ContextMenu | typeof DropdownMenu, contextual?: RegionContextContribution | null) => <AgentMenuContent
     name={name} executorLabel={executorLabel} sessionId={nativeSession?.control.agentSessionId ?? sessionId}
     sessionKind={sessionKind} executionHost={executionHost} readOnly={readOnly}
-    links={contextual?.agentLink || entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={[...(contextual?.agentLink ? [{ kind: 'action' as const, action: contextual.agentLink }] : []), ...entries]}
-      Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} labelPresentation="tooltip" /> : null}
+    links={sessionKind === 'agent' ? <AgentMenuIdentityActions
+      links={regionCopyLinkActions([...(contextual?.agentLink ? [{ kind: 'action' as const, action: contextual.agentLink }] : []), ...entries])}
+      session={nativeSession ?? null} providerId={connectorSession?.providerId} executorId={connectorSession?.executorId}
+      executorLabel={executorLabel} Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} />
+      : entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={entries}
+        Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} labelPresentation="tooltip" /> : null}
     onRestart={entries.find(entry => entry.kind === 'restart')?.onSelect}
     onStop={sessionKind === 'agent' && !readOnly ? () => {
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)

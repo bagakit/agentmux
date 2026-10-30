@@ -143,6 +143,12 @@ export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
 }
 export const useRegionMenuObservation = () => useContext(RegionMenuContext)
 
+export function regionCopyLinkActions(entries: readonly RegionMenuEntry[]) {
+  return entries.flatMap(entry => entry.kind === 'action'
+    ? [{ ...entry.action, icon: entry.action.label === 'Copy Agent Link' ? <AgentIcon size={16} /> : <RegionIcon size={16} /> }]
+    : [])
+}
+
 export function RegionCopyLinkRow({ entries, ...primitives }: {
   entries: readonly RegionMenuEntry[]
   Item: typeof ContextMenu.Item
@@ -150,9 +156,7 @@ export function RegionCopyLinkRow({ entries, ...primitives }: {
   Label?: typeof ContextMenu.Label
   labelPresentation?: 'inline' | 'tooltip'
 }) {
-  return <WorkbenchCopyLinkRow {...primitives} actions={entries.flatMap(entry => entry.kind === 'action'
-    ? [{ ...entry.action, icon: entry.action.label === 'Copy Agent Link' ? <AgentIcon size={16} /> : <RegionIcon size={16} /> }]
-    : [])} />
+  return <WorkbenchCopyLinkRow {...primitives} actions={regionCopyLinkActions(entries)} />
 }
 
 export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label, nested = false,

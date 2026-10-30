@@ -6,7 +6,7 @@ import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
-import { WorkbenchCopyLinkRow } from './WorkbenchCopyLinkRow'
+import { AgentMenuIdentityActions } from './AgentMenuIdentityActions'
 import { AgentMenuContent } from './AgentMenuContent'
 import { WorkbenchMenuScope } from './WorkbenchMenuScope'
 import { useAgentNativeSourceControls } from './AgentNativeSourceControls'
@@ -83,8 +83,9 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
           <AgentMenuContent name={context.name} executorLabel={executor?.label ?? context.providerId ?? 'Executor unknown'}
             sessionId={context.control?.agentSessionId}
             executionHost={executionHostProjection(context.control?.hostId ?? context.hostId, context.workspacePath, host)}
-            links={<WorkbenchCopyLinkRow actions={actions.map(action => ({ ...action, icon: <AgentIcon size={16} /> }))}
-              Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} labelPresentation="tooltip" />}
+            links={<AgentMenuIdentityActions links={actions.map(action => ({ ...action, icon: <AgentIcon size={16} /> }))}
+              session={session ?? null} providerId={session?.providerId ?? context.providerId ?? undefined} executorId={context.executorId}
+              executorLabel={executor?.label ?? context.providerId ?? 'Executor unknown'} Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} />}
             nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction}
             onRefreshObservation={session ? refreshObservation : undefined} refreshing={refreshing}
             onRestart={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}

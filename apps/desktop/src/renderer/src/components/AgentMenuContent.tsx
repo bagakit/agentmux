@@ -45,7 +45,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
     <div className="agent-region-menu__identity">
       <Menu.Label className="agent-region-menu__summary">
         <strong title={name}>{name}</strong>
-        <span>{executorLabel} · {executionHost.label}{readOnly ? ' · Read-only' : ''}</span>
+        <span>{executionHost.label}{readOnly ? ' · Read-only' : ''}</span>
       </Menu.Label>
       {links}
     </div>
