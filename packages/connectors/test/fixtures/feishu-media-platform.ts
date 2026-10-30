@@ -2,13 +2,16 @@ import { createServer } from 'node:http'
 import { vi } from 'vitest'
 import { defaultHttpInstance, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import { feishuConfig } from './feishu.js'
+export type FeishuMessageAttempt = { method: string; path: string; body: Record<string, unknown>; application: string; room: string; at: number; elapsed: number }
+export type FeishuMessageResponse = { code: number; status: number; reset?: string }
 
 /** Real SDK serialization and loopback HTTP; only the platform transport is controlled. */
 export async function feishuMediaPlatform() {
-  const controls: { applicationForRoom?: Record<string, string>; missingUploadKey?: boolean; imageMessageFailures?: number[]; unknownImageMessage?: boolean; rejectImageMessage?: boolean; beforeUpload?: ((bytes: Buffer, index: number) => Promise<void>) | undefined;
+  const controls: { applicationForRoom?: Record<string, string>; missingUploadKey?: boolean; imageMessageFailures?: number[]; messageResponse?: (attempt: Readonly<FeishuMessageAttempt>) => FeishuMessageResponse | undefined; unknownImageMessage?: boolean; rejectImageMessage?: boolean; beforeUpload?: ((bytes: Buffer, index: number) => Promise<void>) | undefined;
     beforeMessageRead?: () => Promise<void>; rejectCardCreate?: boolean; unknownCardCreate?: boolean; beforeCardCreate?: () => Promise<void>;
     beforeCardUpdate?: (sequence: number, element: boolean) => Promise<void>; unknownPortrait?: boolean; unknownCardBody?: boolean; deferCardBody?: Promise<void> } = {}
   const uploads: Buffer[] = [], calls: Array<{ method: string; path: string; body: unknown }> = [], messages = new Map<string, Record<string, unknown>>()
+  const attempts: FeishuMessageAttempt[] = [], tokenApplications = new Map<string, string>()
   const cards = new Map<string, { content: Record<string, unknown>; sequence: number }>(), messageCards = new Map<string, string>()
   const pendingCardBodies: Promise<void>[] = []
   const replaceElement = (value: unknown, id: string, next: Record<string, unknown>): boolean => {
@@ -23,8 +26,11 @@ export async function feishuMediaPlatform() {
     try {
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk))
       const bytes = Buffer.concat(chunks), path = new URL(request.url!, 'http://loopback').pathname
-      let result: unknown
-      if (path.includes('/auth/v3/')) result = { code: 0, tenant_access_token: 'fixture-image-access', expire: 3600 }
+      let result: unknown, status = 200, reset: string | undefined
+      if (path.includes('/auth/v3/')) {
+        const app = String(JSON.parse(bytes.toString('utf8')).app_id), token = 'fixture-image-access-' + tokenApplications.size
+        tokenApplications.set(token, app); result = { code: 0, tenant_access_token: token, expire: 3600 }
+      }
       else if (path.endsWith('/callback/ws/endpoint')) result = { code: 0, data: { URL: 'wss://msg-frontier.feishu.cn/ws/v2?device_id=original&service_id=1', ClientConfig: { PingInterval: 30, ReconnectCount: 0, ReconnectInterval: 1, ReconnectNonce: 0 } } }
       else if (path.endsWith('/bot/v3/info')) result = { code: 0, bot: { open_id: 'original-bot-open-id' } }
       else if (path === '/open-apis/im/v1/images') {
@@ -66,16 +72,25 @@ export async function feishuMediaPlatform() {
         else if (request.method === 'DELETE') { if (original) original.deleted = true; result = { code: 0, data: {} } }
         else {
           const messageId = request.method === 'POST' ? 'original-message-' + (messages.size + 1) : id
-          const failureCode = body.content.includes('img_key') ? controls.imageMessageFailures?.shift() : undefined
+          const application = tokenApplications.get(String(request.headers.authorization).replace(/^Bearer\s+/iu, '')) ?? feishuConfig.application.appId
+          const attempted = { method: request.method!, path, body: body as Record<string, unknown>, application,
+            room: String(body.receive_id ?? original?.chat_id), at: Date.now(), elapsed: performance.now() }
+          attempts.push(attempted)
+          const controlled = controls.messageResponse?.(attempted)
+          const failureCode = controlled?.code ?? (body.content.includes('img_key') ? controls.imageMessageFailures?.shift() : undefined)
+          if (controlled) { status = controlled.status; reset = controlled.reset }
           const content = JSON.parse(body.content), entity = content.type === 'card' ? content.data.card_id : undefined
-          if (entity) { if (!cards.has(entity) || [...messageCards.values()].includes(entity)) throw Error('A native entity must exist and be sent only once'); messageCards.set(messageId, entity) }
+          if (entity && (!cards.has(entity) || [...messageCards.values()].includes(entity))) throw Error('A native entity must exist and be sent only once')
           const message = { message_id: messageId, chat_id: body.receive_id ?? original?.chat_id, msg_type: body.msg_type ?? original?.msg_type,
-            sender: { sender_type: 'app', id_type: 'app_id', id: controls.applicationForRoom?.[String(body.receive_id ?? original?.chat_id)] ?? feishuConfig.application.appId }, deleted: false, body: { content: JSON.stringify(entity ? cards.get(entity)!.content : body.msg_type === 'interactive' || original?.msg_type === 'interactive' ? content : content.zh_cn) } }
-          if (!failureCode && (!controls.rejectImageMessage || !body.content.includes('img_key'))) messages.set(messageId, message)
+            sender: { sender_type: 'app', id_type: 'app_id', id: controls.applicationForRoom?.[String(body.receive_id ?? original?.chat_id)] ?? application }, deleted: false, body: { content: JSON.stringify(entity ? cards.get(entity)!.content : body.msg_type === 'interactive' || original?.msg_type === 'interactive' ? content : content.zh_cn) } }
+          if (!failureCode && (!controls.rejectImageMessage || !body.content.includes('img_key'))) {
+            messages.set(messageId, message)
+            if (entity) messageCards.set(messageId, entity)
+          }
           result = failureCode ? { code: failureCode } : body.content.includes('img_key') && controls.rejectImageMessage ? { code: 230025 } : controls.unknownImageMessage && body.content.includes('img_key') ? { code: 230049 } : { code: 0, data: message }
         }
       }
-      response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
+      response.writeHead(status, { 'Content-Type': 'application/json', ...(reset === undefined ? {} : { 'x-ogw-ratelimit-reset': reset }) }); response.end(JSON.stringify(result))
     } catch { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ code: 230001 })) }
   })
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
@@ -89,6 +104,6 @@ export async function feishuMediaPlatform() {
     const forwarded = { ...original, ...(params === undefined ? {} : { params }), url: `http://127.0.0.1:${port}${url.pathname}${url.search}`, proxy: false, adapter: 'http' }
     return request(forwarded)
   })
-  return { uploads, calls, messages, cards, pendingCardBodies, controls, close }
+  return { uploads, calls, messages, cards, pendingCardBodies, attempts, controls, close }
 }
 
