@@ -30,7 +30,7 @@ const payload = (id: string, content: unknown = post, mentions: unknown = [{ key
   event.header.event_id = 'event-' + id
   return event
 }
-async function fixture() {
+async function fixture(inputScope: 'all-messages' | 'mentions-and-replies' = 'mentions-and-replies') {
   const h = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'claude', executorId: 'claude',
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'post-native', transcriptPath: join(root, 'native.jsonl') } }))
   cleanup.push(h.close)
@@ -65,7 +65,7 @@ async function fixture() {
   const bound = await services.connections.bindings!.bind({ operationId: 'post-bind', bindingId: 'post-binding', connectionId: feishuConfig.connectionId,
     expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: session.agentSessionId, regionAnchor: { regionId: 'original-region' },
     externalConversationId: 'original-room', expectedSource: { providerId: 'claude', nativeSessionId: 'post-native' },
-    scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' } }, { actor: { kind: 'user', id: 'original-user' } })
+    scope: { input: inputScope, publication: 'future-shared-conversation' } }, { actor: { kind: 'user', id: 'original-user' } })
   expect(bound.state).toBe('applied'); if (bound.state !== 'applied') throw new Error('Original sharing Binding did not apply')
   const actor = { application: feishuConfig.application, idType: 'open_id' as const, userId: 'original-external-user' }
   await services.connections.bindings!.grant({ operationId: 'post-grant', bindingId: bound.binding.bindingId, expectedBindingRevision: bound.binding.revision,
@@ -170,12 +170,48 @@ it('each explicit single locale and the existing text shape keep complete body a
   expect(f.sdk.ack()).toEqual([{ code: 200 }, { code: 200 }, { code: 200 }, { code: 200 }])
 }, 25_000)
 
+it('mixed image post retains readable text and each unread original image through SDK Core and compiled CLI once', async () => {
+  const f = await fixture('all-messages')
+  const image = { tag: 'img', image_key: 'original-image', width: 1280, height: 720 }
+  const marker = '[Image 1 not read; original Feishu resource "original-image"]'
+  const contents = [
+    { title: '', content: [[{ tag: 'text', text: 'First paragraph' }], [{ tag: 'text', text: 'Read ' }, { tag: 'a', text: 'document', href: 'https://example.com/original', style: [] }, { tag: 'text', text: ' next' }], [image], [{ tag: 'text', text: 'Last paragraph' }]] },
+    { title: 'Original title', content: [[image, { tag: 'text', text: ' text after image ' }], [{ ...image, image_key: 'another-image', width: 'unavailable' }], [{ tag: 'text', text: 'Final text' }]] }
+  ]
+  const expected = [
+    'First paragraph\nRead [document](https://example.com/original) next\n' + marker + '\nLast paragraph',
+    'Original title\n' + marker + ' text after image \n[Image 2 not read; original Feishu resource "another-image"]\nFinal text'
+  ]
+  for (const [index, content] of contents.entries()) {
+    const original = payload('mixed-image-' + index, { ...content, content_v2: content.content }, [])
+    await f.sdk.receive(original)
+    await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(index + 1))
+    const incoming = await f.received('mixed-image-' + index)
+    expect(incoming).toMatchObject({ state: 'claimed', body: expected[index], actor: { idType: 'open_id', userId: 'original-external-user' } })
+    const queued = await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).readByOperationId(incoming.input!.operationId)
+    expect(queued!.envelope.body).toBe(expected[index])
+    expect(queued!.envelope.sender).toEqual(incoming.input!.author)
+    expect((await f.cli(['ingress', 'inspect', '--ingress', incoming.ingressId])).ingress).toMatchObject({ body: expected[index], input: { messageId: incoming.input!.messageId } })
+    const persisted = f.services.database!.prepare('SELECT raw_payload FROM connection_ingress_event WHERE event_id=?').get(original.header.event_id)!
+    expect(JSON.parse(String(persisted.raw_payload))).toEqual(original)
+    await f.sdk.receive(original)
+    expect(f.inner.kernel.input).toHaveBeenCalledTimes(index + 1)
+  }
+  const unauthorized = payload('mixed-image-unauthorized', contents[0], [])
+  unauthorized.event.sender.sender_id.open_id = 'ungranted-external-person'
+  await f.sdk.receive(unauthorized)
+  await vi.waitFor(async () => expect(await f.received('mixed-image-unauthorized')).toMatchObject({ state: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' }))
+  expect(f.inner.kernel.input).toHaveBeenCalledTimes(2)
+  expect(f.sdk.ack()).toHaveLength(5)
+  expect(f.client.agentSession(f.session.agentSessionId).run).toEqual(f.session.run)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
+}, 25_000)
+
 it('unsupported and ambiguous post content is durably acknowledged whole; untrusted mention names, keys and namespaces cannot authorize input', async () => {
   const f = await fixture()
   const at = { title: '', content: [[{ tag: 'at', user_id: '@_user_1', user_name: '原Bot' }]] }
   const unsupported = [
     payload('unknown-node', { ...post, content: [...post.content, [{ tag: 'future-text', text: 'Must not silently disappear' }]] }),
-    payload('media-node', { ...post, content: [...post.content, [{ tag: 'img', image_key: 'original-image' }]] }),
     payload('ambiguous-locales', { zh_cn: post, en_us: { ...post, title: 'Different original title' } }),
     payload('unknown-locale', { future_locale: post }),
     payload('unknown-field', { ...post, future_body: 'Must not silently disappear' }),
@@ -205,7 +241,7 @@ it('unsupported and ambiguous post content is durably acknowledged whole; untrus
   expect(f.sdk.ack().every(ack => ack.code === 200)).toBe(true)
   const first = await f.received('unknown-node')
   expect((await f.cli(['ingress', 'inspect', '--ingress', first.ingressId])).ingress).toMatchObject({ state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED', body: '' })
-  expect(f.remote.messageCalls()).toEqual([])
+  expect(f.services.publication!.store.list(f.binding).filter(operation => operation.payload.kind !== 'binding-lifecycle')).toEqual([])
   await f.sdk.receive(payload('healthy-after-refusals'))
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect(await f.received('healthy-after-refusals')).toMatchObject({ state: 'claimed', body })
