@@ -123,6 +123,15 @@ or administration access. The general list retains its receiver-Connection/froze
 and cursor contract. Typed actionRef/answers describe the received action fields; inspect questionReceipt for the
 original submission outcome. Absent fields do not identify whether a person selected an option
 or submitted a form, and raw callbacks are not exposed.
+If an authorized user/device must continue an intake with no Core receipt, retain the exact
+rejoinSource from inspection and use connection ingress rejoin --input FILE|- with
+{ingressId,operationId,source}. Keep that action operationId and source across a lost reply;
+it is separate from the original message operation. This ensures the same retained request
+and reports the original handoff pointer alongside the current Core observation. A stale
+source never selects a newer observer. This entry does not grant managed administration or
+retry/re-enable a Core input. Once a Core ref exists, inspect or explicitly control that
+original ref with agent input commands under their own authority. Missing current authority
+can block advancement while saved original receipts remain readable under existing scope.
 Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
 changes; original intake authors and receipts retain their own configuration revision. For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
