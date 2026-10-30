@@ -16,6 +16,8 @@ export function createRendererSessionEvents(
     const core = event.event
     const registrations = core.type === 'terminal-output' || core.type === 'terminal-resized' || core.type === 'terminal-snapshot' || core.type === 'attachment-state'
       ? hosts.get(event.hostId)?.get(core.run.runId)
+      : core.type === 'connection-state'
+        ? [...semantic, ...[...(hosts.get(event.hostId)?.values() ?? [])].flatMap(readers => [...readers])]
       : semantic
     if (!registrations) return
     // A callback can subscribe or dispose synchronously. This event belongs to its original snapshot.
