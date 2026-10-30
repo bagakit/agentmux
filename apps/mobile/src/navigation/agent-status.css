@@ -1,0 +1,9 @@
+.mobile-agent-status-details { min-width: 0; max-width: 100%; color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-agent-status-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.mobile-agent-status-details > summary::before { content: '›'; display: inline-block; margin-right: 5px; }
+.mobile-agent-status-details[open] > summary::before { transform: rotate(90deg); }
+.mobile-agent-status-details[open] { flex-basis: 100%; width: 100%; }
+.mobile-agent-status-details__body { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.mobile-agent-status-details__body p { margin: 0 0 8px; }
+.mobile-agent-status-details__reason { white-space: pre-wrap; }
+.mobile-agent-status-details__body > button { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; }

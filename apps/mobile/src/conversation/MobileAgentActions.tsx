@@ -7,11 +7,14 @@ import type { ClientUiPlatform } from '@agentmux/client-ui'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { recoverMobileAgent, pendingMobileAgentRecovery, mobileAgentRecoveryBusy, subscribeMobileAgentRecovery } from './mobile-agent-recovery'
 import { MobileAgentUsage } from './MobileAgentUsage'
+import type { MobileAgentMenuTarget } from '../navigation/MobileAgentRow'
+import { MobileAgentStatusDetails } from '../navigation/MobileAgentStatusDetails'
 
 /** Explicit actions on the persistent Agent. Reading or reconnecting never submits a recovery. */
-export function MobileAgentActions({ client, agentSessionId, connected, copyText, visible = true, beforeAction }: {
+export function MobileAgentActions({ client, agentSessionId, connected, copyText, visible = true, beforeAction, statusSource }: {
   client: AgentMuxHostedClient | null; agentSessionId: string; connected: boolean
   copyText: ClientUiPlatform['copyText']; visible?: boolean; beforeAction?(): boolean
+  statusSource?: Pick<MobileAgentMenuTarget, 'presentation' | 'refreshStatus'> | undefined
 }) {
   const [notice, setNotice] = useState(''), [showLink, setShowLink] = useState(false)
   const busy = useSyncExternalStore(useCallback(notify => subscribeMobileAgentRecovery(client, agentSessionId, notify), [client, agentSessionId]),
@@ -41,6 +44,11 @@ export function MobileAgentActions({ client, agentSessionId, connected, copyText
 
   return <div className="mobile-agent-actions">
     <MobileAgentUsage client={client} agentSessionId={agentSessionId} connected={connected} beforeRead={beforeAction} />
+    <MobileAgentStatusDetails presentation={statusSource?.presentation?.agentSessionId === agentSessionId ? statusSource.presentation : undefined}
+      onRefresh={statusSource?.refreshStatus ? () => {
+        if (beforeAction && !beforeAction() || !current.current.visible || !current.current.connected || current.current.client !== client || current.current.agentSessionId !== agentSessionId) return false
+        return statusSource.refreshStatus!()
+      } : undefined} />
     <div className="mobile-agent-actions__shortcuts">
     <button className="mobile-menu-row" aria-label="复制 Agent 身份链接" onClick={() => void copy()}><SemanticIcon name="action.copy" size={16} /><span>复制身份链接</span></button>
     <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover(pending ? 'inspect' : 'new')}><SemanticIcon name="action.refresh" size={16} /><span>{busy ? '正在核对原会话…' : pending ? '核对原恢复操作' : '恢复原 Agent'}</span></button>

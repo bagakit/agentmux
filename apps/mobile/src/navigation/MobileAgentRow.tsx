@@ -2,23 +2,25 @@ import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { MobileObjectIdentity } from './MobileIdentity'
+import type { MobileAgentPresentation } from './mobile-agent-status'
 
-export type MobileAgentMenuTarget = { agentSessionId: string; identity: MobileObjectIdentity; beforeAction?: () => boolean }
+export type MobileAgentMenuTarget = { agentSessionId: string; identity: MobileObjectIdentity; beforeAction?: () => boolean
+  presentation?: MobileAgentPresentation | undefined; refreshStatus?: (() => boolean | void) | undefined }
 /** Presentation only. The App owns disclosure; a row never selects or inspects an Agent. */
 export const MobileAgentMenuContext = createContext<((target: MobileAgentMenuTarget) => void) | null>(null)
 
-export function MobileAgentRow({ agentSessionId, identity, onOpen, beforeMenu, children, className = '' }: MobileAgentMenuTarget & {
+export function MobileAgentRow({ agentSessionId, identity, presentation, refreshStatus, onOpen, beforeMenu, children, className = '' }: MobileAgentMenuTarget & {
   onOpen(): void; beforeMenu?(): boolean; children: ReactNode; className?: string
 }) {
   const showMenu = useContext(MobileAgentMenuContext)
-  const current = useRef({ agentSessionId, identity, showMenu, beforeMenu })
-  current.current = { agentSessionId, identity, showMenu, beforeMenu }
+  const current = useRef({ agentSessionId, identity, presentation, refreshStatus, showMenu, beforeMenu })
+  current.current = { agentSessionId, identity, presentation, refreshStatus, showMenu, beforeMenu }
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const press = useRef<{ id: number; x: number; y: number; type: string } | null>(null)
   const suppressClick = useRef(false)
   const release = useRef<(() => void) | null>(null)
   function cancel() { clearTimeout(timer.current); press.current = null; release.current?.(); release.current = null }
-  function openMenu() { const target = current.current; if (target.beforeMenu && !target.beforeMenu()) return; target.showMenu?.({ agentSessionId: target.agentSessionId, identity: target.identity, ...(target.beforeMenu ? { beforeAction: target.beforeMenu } : {}) }) }
+  function openMenu() { const target = current.current; if (target.beforeMenu && !target.beforeMenu()) return; target.showMenu?.({ agentSessionId: target.agentSessionId, identity: target.identity, ...(target.presentation ? { presentation: target.presentation } : {}), ...(target.refreshStatus ? { refreshStatus: target.refreshStatus } : {}), ...(target.beforeMenu ? { beforeAction: target.beforeMenu } : {}) }) }
   useEffect(() => {
     suppressClick.current = false
     return cancel
