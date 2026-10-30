@@ -15,6 +15,9 @@ import { recoverMobileAgent } from './conversation/mobile-agent-recovery'
 import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { mobileMoteInputSource } from './conversation/mote-input-source'
+import { MobileMoteTeamPanel, MobileMoteTeamSummary, mobileMoteRecipient } from './navigation/MobileMoteTeam'
+import { useMobileMoteTeam } from './navigation/use-mobile-mote-team'
+import { mobileMoteMainIdentity, type MobileMoteMember } from './navigation/mobile-mote-team'
 
 import { useHostAppearance } from './appearance/useHostAppearance'
 import { bindMobileViewport, bindNativeDevice } from './platform/native/device'
@@ -218,7 +221,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
+  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | 'team' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
   const setSheet = useCallback((value: typeof sheet) => {
     if (value !== null) navigationRevision.current += 1
     updateSheet(value)
@@ -384,6 +387,28 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
   const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'
   const moteTitle = objectIdentity?.mote?.name ?? 'Mote 名称未确认'
+  const teamSpaceId = identityRecipient === workface.selectedSessionId ? objectIdentity?.mote?.spaceId ?? null : null
+  const teamReading = useMobileMoteTeam(client, teamSpaceId, connected,
+    workspaceVisible && showSession && (sheet === null || sheet === 'team'))
+  const team = teamReading.team
+  const openTeamMember = (id: string, identity: MobileObjectIdentity, member: MobileMoteMember, work = false) => {
+    let current
+    try { current = client?.agentSession(id) } catch { /* A missing projection cannot erase an original member reference. */ }
+    if (!member.hostId || !current || current.agentSessionId !== id || current.hostId !== member.hostId) {
+      setNotice(!member.hostId
+        ? '这个成员的执行端尚未确认；本次未打开，已有讨论和工作面引用保留。可刷新团队或从原工作面继续。'
+        : '当前连接尚未匹配这个成员；本次未打开，已有引用和当前讨论保留。请刷新团队或接回对应的工作环境。'); return
+    }
+    openSession(id, identity); setShowGoalWork(work); setSheet(null)
+  }
+  const returnToMoteMain = () => {
+    const identity = team && mobileMoteMainIdentity(team), main = team?.main?.reference
+    if (!identity || !main) { setNotice('原主对话引用尚未确认；原成员和草稿保留，可在团队中刷新或核对主 Agent。'); return }
+    let current
+    try { current = client?.agentSession(main.sessionId) } catch { /* Keep the saved original target, rather than selecting another Agent. */ }
+    if (!current || current.agentSessionId !== main.sessionId || current.hostId !== main.hostId) { setNotice('当前连接尚未匹配原主对话；已有引用和当前讨论保留，请刷新或接回对应的工作环境。'); return }
+    openSession(main.sessionId, identity); setSheet(null)
+  }
   composeScope.current = { client, sessionId: workface.selectedSessionId, visible: conversationVisible, focusComposer }
   // The visible conversation owns its connection feedback. Storage and projection
   // failures remain separate facts even when the connection is also unavailable.
@@ -406,6 +431,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         {showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible} />{terminalToggle}<IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
+    {workspaceVisible && showSession && teamSpaceId && <MobileMoteTeamSummary team={team} recipient={sessionTitle ?? '收件人名称未确认'}
+      role={mobileMoteRecipient(team, workface.selectedSessionId, selected?.hostId)} issue={teamReading.issue}
+      onOpen={() => setSheet('team')} onMain={returnToMoteMain}
+      showMain={Boolean(team?.main && (team.main.reference.sessionId !== workface.selectedSessionId || team.main.reference.hostId !== selected?.hostId))} />}
     <main className="mobile-main" tabIndex={-1}>
       {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
@@ -480,8 +509,14 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         }
         if (!current.focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。')
       }}>
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
-        {sheet === 'settings' ? <>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
+        {sheet === 'team' ? <>
+          <Dialog.Description id="mobile-sheet-description">原团队的当前工作与请求</Dialog.Description>
+          <MobileMoteTeamPanel team={team} issue={teamReading.issue} currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId}
+            onRefresh={teamReading.refresh} onOpen={openTeamMember} onMain={returnToMoteMain}
+            onWork={(id, identity, member) => openTeamMember(id, identity, member, true)}
+            onConfigure={() => { if (objectIdentity) openProfile(objectIdentity) }} />
+        </> : sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
 
           <nav className="mobile-drawer-workfaces" aria-label="其他工作面">
