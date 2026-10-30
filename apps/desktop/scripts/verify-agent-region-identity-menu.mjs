@@ -33,7 +33,7 @@ assert.ok(!messageFeedbackOwning||visualOnly,'Message feedback owning uses only 
 assert.ok(!mailboxMotionOwning||visualOnly,'Mailbox motion owning uses only the private visual fixture')
 const result={schema:'agentmux.region-identity-menu-delivery.v1',passed:false,sourceBefore:{},sourceAfter:{},mutations:[],callers:[],cleanup:{},userRunTouched:false,
   ...(visualOnly?{captureOnly:true,aestheticReview:'not-performed'}:{})}
-const menuOwnerFiles=[...['AgentMenuContent','AgentRegionHeader','FocusContextMenu','RegionContextMenu','TerminalContextMenu','TerminalMenuTools','AgentNativeSourceControls','SessionStop','SessionRestart','WorkbenchMenuSubmenu','WorkbenchCopyLinkRow','WorkbenchActionRows'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
+const menuOwnerFiles=[...['AgentMenuContent','AgentMenuIdentityActions','AgentAvatar','AgentRegionHeader','FocusContextMenu','RegionContextMenu','TerminalContextMenu','TerminalMenuTools','AgentNativeSourceControls','SessionStop','SessionRestart','WorkbenchMenuSubmenu','WorkbenchCopyLinkRow','WorkbenchActionRows'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
   ...['agent-region-header','focus','terminal','chrome'].map(name=>`apps/desktop/src/renderer/src/styles/${name}.css`)]
 async function menuOwnerHashes(){return Object.fromEntries(await Promise.all(menuOwnerFiles.map(async path=>[path,hash(await readFile(join(repository,path)))])))}
 async function positioningBinding(){

@@ -341,8 +341,10 @@ const probe = {
   focusNeighbor() { flushSync(() => useAppStore.getState().focusRegion(workspaceId, tabId, rightId, 'pointer')) },
   facts() {
     const state = useAppStore.getState()
+    const source = state.sessions.find(session => session.id === first.id)
     return { ...original.facts(), active: state.tabs[tabId]?.layout.activeRegionId, tabs: state.tabs,
       drafts: state.agentComposerDrafts, queues: state.agentSteerQueues, names: state.agentNames,
+      adoptedNativeSessionId: source?.kind === 'agent' ? source.nativeHandle?.sessionId : undefined,
       regionAddress: formatRegionAddress(leftId), clipboard: [...clipboard], resizes: [...resizes], selections: [...selections], menuInputs: [...menuInputs] }
   },
   async terminalContext() {

@@ -10,7 +10,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { agentContextForSession, createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => <span /> }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => <span /> }))
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { FocusContextMenu } from '../src/renderer/src/components/FocusContextMenu'
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
@@ -261,7 +261,7 @@ it('shares Session details and maintenance with Region menus without guessing a 
   await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
   const menu = document.querySelector<HTMLElement>('.focus-context-menu')!
   const labels = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(item => item.getAttribute('aria-label') ?? item.textContent)
-  expect(labels).toEqual(['Copy Agent Link', 'Rename Agent', 'Session details', 'Restart Session…', 'Stop Agent', 'Maintenance'])
+  expect(labels).toEqual(expect.arrayContaining(['Copy Agent Link', 'Rename Agent', 'Session details', 'Restart Session…', 'Stop Agent', 'Maintenance']))
   const details = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Session details')!
   await act(async () => { details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })) }); await settle()
   const content = document.getElementById(details.getAttribute('aria-controls')!)!

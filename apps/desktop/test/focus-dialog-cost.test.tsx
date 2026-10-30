@@ -12,7 +12,7 @@ import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 
 // Avatar resource work is outside this dialog owner; card/menu/hooks/Store and
 // the actual ConfirmationDialog/Modal/Portal consumer remain mounted.
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => <span /> }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => <span /> }))
 declare global {
   var __focusDialogCalls: Array<{ open: boolean; title: string; subject?: string }>
   var __focusDialogProbeLoaded: boolean
