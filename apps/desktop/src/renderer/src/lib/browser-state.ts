@@ -73,11 +73,11 @@ export function reduceBrowserEvent(
       for (const surface of Object.values(tab.regions)) {
         if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
         if (expectedNavigationId !== undefined && surface.navigationId !== expectedNavigationId) continue
-        if (!surface.nativeOwnerUnavailable && !surface.nativeOwnerDeferred && !surface.nativeOwnerReleased && Object.entries(event.browser).every(([key, value]) => key === 'viewport'
+        if (!surface.nativeOwnerUnavailable && !surface.nativeOwnerDeferred && !surface.nativeOwnerReleased && surface.objectLink === event.browser.objectLink && Object.entries(event.browser).every(([key, value]) => key === 'viewport'
           ? browserViewportsEqual(surface.viewport, event.browser.viewport)
           : Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
         if (regions === tab.regions) regions = { ...regions }
-        const { nativeOwnerUnavailable: _unavailable, nativeOwnerDeferred: _deferred, nativeOwnerReleased: _released, restoredViewportUnknown: _unknownViewport, privateSessionEnded, ...availableSurface } = surface
+        const { nativeOwnerUnavailable: _unavailable, nativeOwnerDeferred: _deferred, nativeOwnerReleased: _released, restoredViewportUnknown: _unknownViewport, objectLink: _objectLink, privateSessionEnded, ...availableSurface } = surface
         regions[surface.regionId] = { ...availableSurface, ...event.browser, regionId: surface.regionId,
           ...(privateSessionEnded && event.browser.mode === 'private' && event.browser.url === 'about:blank' ? { privateSessionEnded } : {}) }
       }

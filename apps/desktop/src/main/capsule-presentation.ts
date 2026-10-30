@@ -1,5 +1,5 @@
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxError, parseAgentMuxControlRequest,
-  type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxRpcCallContext, type AgentMuxRpcServiceOptions } from '@agentmux/core'
+  parseAmuxObjectLink, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxRpcCallContext, type AgentMuxRpcServiceOptions } from '@agentmux/core'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { CapsuleCallContext, CapsuleInspection, CapsuleOpenResult, CapsuleParamsMap } from '@agentmux/core/capsule'
 import { browserColdDescriptor } from './browser-cold-descriptor.js'
@@ -14,7 +14,13 @@ export async function createCapsuleBrowserDocument(ports: { inspect(capsuleId: s
   if (input.mode === 'private' || input.rememberedProfileId !== undefined) throw new Error('Capsule storage belongs to its original page, independently of Browser user Profiles.')
   const capsule = await ports.inspect(input.capsuleId)
   if (capsule.endpoint.status !== 'available') throw new Error(capsule.endpoint.issue.message)
-  const address = new URL(input.url), endpoint = new URL(capsule.endpoint.url)
+  const endpoint = new URL(capsule.endpoint.url)
+  let address: URL
+  if (/^amux:/iu.test(input.url)) {
+    const target = parseAmuxObjectLink(input.url)
+    if (target.kind !== 'capsule' || target.capsuleId !== input.capsuleId) throw new Error('The requested object is not the original Capsule. Its page and container are kept.')
+    address = endpoint
+  } else address = new URL(input.url)
   if (address.origin !== endpoint.origin) throw new Error('The requested address is not the original Capsule endpoint.')
   return await ports.browsers.create(input.id, address.href, input.workspaceId, undefined, 'normal', input.viewport, {
     capsule, capsuleOrigin: endpoint.origin, ...(input.operationId ? { capsuleOpenOperationIds: [input.operationId] } : {}) })

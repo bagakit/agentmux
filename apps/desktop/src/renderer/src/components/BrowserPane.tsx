@@ -104,13 +104,13 @@ const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const NO_BROWSER_ANNOTATIONS: readonly BrowserAnnotation[] = []
 
 type BrowserIdentity = Pick<BrowserSnapshot, 'id' | 'navigationId'>
-type BookmarkSource = Pick<BrowserWorkbenchSurface, 'browserId' | 'navigationId' | 'workspaceId' | 'url' | 'title'>
+type BookmarkSource = Pick<BrowserWorkbenchSurface, 'browserId' | 'navigationId' | 'workspaceId' | 'url' | 'title' | 'objectLink'>
 type BookmarkSave = BookmarkSource & ({ status: 'saving' } | { status: 'saved'; path: string } | { status: 'error'; message: string })
 type UnconfirmedBookmark = BookmarkSource & { path: string | null; message: string }
 
 function sameBookmarkSource(source: BookmarkSource, current: BookmarkSource): boolean {
   return source.browserId === current.browserId && source.navigationId === current.navigationId &&
-    source.workspaceId === current.workspaceId && source.url === current.url
+    source.workspaceId === current.workspaceId && source.url === current.url && source.objectLink === current.objectLink
 }
 
 export function browserCaptureMatchesIdentity(
@@ -211,11 +211,12 @@ function useBrowserOwnerConnection({ tab, visible, presentations = [], released 
 
 function BrowserPaneOwner(props: BrowserPaneProps) {
   const connection = useBrowserOwnerConnection(props)
+  const pageAddress = props.tab.objectLink ?? props.tab.url
   const addressDraft = useRef<BrowserWorkfaceAddressDraft>({ browserId: props.tab.browserId,
-    value: props.tab.url === 'about:blank' ? '' : props.tab.url, edited: false })
+    value: pageAddress === 'about:blank' ? '' : pageAddress, edited: false })
   if (addressDraft.current.browserId !== props.tab.browserId) addressDraft.current = { browserId: props.tab.browserId,
-    value: props.tab.url === 'about:blank' ? '' : props.tab.url, edited: false }
-  else if (!addressDraft.current.edited) addressDraft.current.value = props.tab.url === 'about:blank' ? '' : props.tab.url
+    value: pageAddress === 'about:blank' ? '' : pageAddress, edited: false }
+  else if (!addressDraft.current.edited) addressDraft.current.value = pageAddress === 'about:blank' ? '' : pageAddress
   return <BrowserWorkfaceBoundary key={props.tab.browserId} tab={props.tab} addressDraft={addressDraft}
     presentations={props.presentations} presentationTargetId={props.presentationTargetId} onRegionClose={props.onRegionClose}>
     <BrowserPaneContent {...props} released={connection.nativeReleased} addressDraft={addressDraft} connection={connection} />
@@ -306,6 +307,8 @@ function BrowserPaneContent({
     selectionToken.current += 1
   }
   const [address, setAddress] = useState(addressDraft.current.value)
+  const observedPageAddress = useRef(tab.objectLink ?? tab.url)
+  observedPageAddress.current = tab.objectLink ?? tab.url
   const [addressError, setAddressError] = useState<string | null>(null)
   const addressInputs = useRef(new Map<string, ReturnType<typeof createRef<BrowserAddressInputHandle>>>())
   const addressDraftEdited = useRef(addressDraft.current.edited)
@@ -483,10 +486,11 @@ function BrowserPaneContent({
     if (addressBrowser.current !== tab.browserId || !addressDraftEdited.current) {
       addressBrowser.current = tab.browserId
       addressDraftEdited.current = false
-      setAddress(tab.url === 'about:blank' ? '' : tab.url)
+      const pageAddress = tab.objectLink ?? tab.url
+      setAddress(pageAddress === 'about:blank' ? '' : pageAddress)
       setAddressError(null)
     }
-  }, [tab.url, tab.browserId])
+  }, [tab.url, tab.objectLink, tab.browserId])
 
   // History and replay belong to the Browser identity. A Region can reuse this pane while switching
   // tabs, so never leave a previous Browser's selected operation or replay plan attached to the new page.
@@ -639,26 +643,44 @@ function BrowserPaneContent({
   }
 
   function navigateAddress(submittedAddress: string): void {
-    if (!submittedAddress.trim()) return
+    const target = submittedAddress.trim()
+    if (!target) return
+    const failed = (cause: unknown) => setAddressError(`Page could not open: ${presentError(cause)}. Your input and page are kept; retry here.`)
+    const settled = (pageAddress: string) => {
+      if (addressDraft.current.value !== submittedAddress) return
+      addressDraftEdited.current = false
+      addressDraft.current.edited = false
+      setAddress(pageAddress === 'about:blank' ? '' : pageAddress)
+      setAddressError(null)
+    }
+    // Object navigation belongs to its original owner, independently of this page's connection.
+    if (/^amux:/iu.test(target)) {
+      void runCommand(async () => {
+        await api.ui.openObjectLink(target)
+        settled(observedPageAddress.current)
+      }, failed)
+      return
+    }
     if (released || restoring || restoreError !== null) {
       setAddressError('The original page connection is not confirmed. Your input is kept; retry the connection or open the address in your external browser.')
       return
     }
-    addressDraftEdited.current = false
-    addressDraft.current.edited = false
     setAddressError(null)
-    void run(() => api.browser.navigate(tab.browserId, submittedAddress), cause => {
-      setAddressError(`Page could not open: ${presentError(cause)}. Your input and page are kept; retry here.`)
-    })
+    void run(async () => {
+      const browser = await api.browser.navigate(tab.browserId, submittedAddress)
+      settled(browser.objectLink ?? browser.url)
+      return browser
+    }, failed)
   }
 
-  async function runCommand(action: () => Promise<void>): Promise<void> {
+  async function runCommand(action: () => Promise<void>, onFailure?: (cause: unknown) => void): Promise<void> {
     if (busy) return
     setBusy(true)
     try {
       await action()
     } catch (error) {
-      reportError(error)
+      if (onFailure) onFailure(error)
+      else reportError(error)
     } finally {
       setBusy(false)
     }
@@ -938,11 +960,11 @@ function BrowserPaneContent({
     // Only this original page's duplicate save waits. File I/O never owns navigation or page tools.
     if (busy || bookmarkRequest.current && sameBookmarkSource(bookmarkRequest.current, tab)) return
     const source: BookmarkSource = { browserId: tab.browserId, navigationId: tab.navigationId,
-      workspaceId: tab.workspaceId, url: tab.url, title: tab.title }
+      workspaceId: tab.workspaceId, url: tab.url, title: tab.title, ...(tab.objectLink ? { objectLink: tab.objectLink } : {}) }
     bookmarkRequest.current = source
     setBookmarkSave({ ...source, status: 'saving' })
     try {
-      const path = await saveBrowserBookmark(source.workspaceId, source.url, source.title)
+      const path = await saveBrowserBookmark(source.workspaceId, source.objectLink ?? source.url, source.title)
       if (bookmarkRequest.current === source) setBookmarkSave({ ...source, status: 'saved', path })
     } catch (cause) {
       const failure = cause !== null && typeof cause === 'object' ? cause as { status?: unknown; path?: unknown } : null
@@ -1065,7 +1087,7 @@ function BrowserPaneContent({
             onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}
             onError={reportError}
           /> ) : connectionUnavailable ? <BrowserRecoverySurface
-          url={tab.url} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+          url={tab.url} objectLink={tab.objectLink} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
           preview={currentRecoveryPreview}
           heading={restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}
           description={restoring ? 'Reconnecting the original page. Your tab, address and other work are kept.'
@@ -1137,7 +1159,7 @@ function BrowserPaneContent({
             </div>
           </div>
         ) : tab.error ? (
-          <BrowserRecoverySurface url={tab.url} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+          <BrowserRecoverySurface url={tab.url} objectLink={tab.objectLink} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
             preview={currentRecoveryPreview}
             heading="Page needs attention"
             description="Your tab and address are kept. Retry, or check the address to continue."

@@ -11,9 +11,10 @@ const LoadingIcon = semanticIconComponent('status.loading')
 const ChevronIcon = semanticIconComponent('navigation.submenu')
 
 /** Presentation only. The caller retains the original page and recovery operation. */
-export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, description, error, busy, restoring,
+export function BrowserRecoverySurface({ url, objectLink, title, faviconDataUrl, heading, description, error, busy, restoring,
   preview, retryLabel = 'Retry', onRetry, onEditAddress, onCopy }: {
   url: string
+  objectLink?: string | undefined
   title: string
   faviconDataUrl?: string | undefined
   heading: string
@@ -31,16 +32,17 @@ export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, de
   const [failedFavicon, setFailedFavicon] = useState<string | null>(null)
   const [failedPreview, setFailedPreview] = useState<string | null>(null)
   const previous = preview?.status === 'available' ? preview.preview : null
+  const address = objectLink ?? url
   const previousImage = previous?.image.dataUrl
-  const currentCopy = copyResult?.url === url ? copyResult : null
+  const currentCopy = copyResult?.url === address ? copyResult : null
   let origin = ''
   try { origin = new URL(url).host } catch { /* The exact address remains readable and copyable. */ }
   const pageTitle = previous && previous.url !== url ? origin || 'Browser page'
     : previous?.title.trim() || title.trim() || origin || 'Browser page'
 
   async function copyAddress(): Promise<void> {
-    const successful = await onCopy(url)
-    setCopyResult({ url, successful })
+    const successful = await onCopy(address)
+    setCopyResult({ url: address, successful })
   }
 
   return <section className="browser-recovery" aria-label="Browser recovery">
@@ -57,7 +59,7 @@ export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, de
         </div>
       </header>
       <div className="browser-recovery__address">
-        <code title={url}>{url}</code>
+        <code title={address}>{address}</code>
         <button type="button" className="icon-button" aria-label="Copy page address"
           title={currentCopy?.successful ? 'Address copied' : 'Copy page address'} onClick={() => void copyAddress()}>
           {currentCopy?.successful ? <SavedIcon size={14} /> : <CopyIcon size={14} />}

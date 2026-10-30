@@ -1331,9 +1331,10 @@ export async function registerIpc(args: {
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
     args.onRendererUpdateReady?.(token)
   })
-  handleWithEvent('ui:openObjectLink', (event, rawUrl: string) => {
+  handleWithEvent('ui:openObjectLink', async (event, rawUrl: string) => {
     if (!args.spatialLinks) throw new Error('Object link navigation is unavailable in this window. The original workface and Agents are kept; retry the exact link in the main Desktop window.')
-    args.spatialLinks.receive(rawUrl)
+    const issue = await args.spatialLinks.receive(rawUrl)
+    if (issue) throw new Error(issue)
   })
   handleWithEvent('ui:inspectDefaultBrowser', event => { return inspectDefaultBrowser() })
   handleWithEvent('ui:openDefaultBrowserSettings', event => { return openDefaultBrowserSettings() })

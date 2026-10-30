@@ -1,4 +1,5 @@
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
+import { parseAmuxObjectLink } from '@agentmux/core/sharing'
 import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
 import { initialNativeComposerBinding } from './lib/initial-native-composer-binding'
@@ -1522,7 +1523,8 @@ export type AppState = GitReadingActions & {
     bookmarkOrigin?: { path: string; binary: boolean },
     requestedWorkspaceId?: string,
     requestedDisplayWorkspaceId?: string,
-    mode?: import('@agentmux/core').AgentMuxBrowserMode
+    mode?: import('@agentmux/core').AgentMuxBrowserMode,
+    capsuleId?: string
   ): Promise<void>
   openHttpLink(origin: OpenHttpLinkOrigin, url: string, destination: OpenDestination, presentation?: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'>): Promise<void>
   /**
@@ -8292,6 +8294,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const bookmark = await api.files.readBookmark(workspaceId, path)
         if (bookmark?.url) {
           if (!mayReveal()) return false
+          const object = /^amux:/iu.test(bookmark.url) ? parseAmuxObjectLink(bookmark.url) : undefined
+          const capsuleId = object?.kind === 'capsule' ? object.capsuleId : undefined
           // A bookmark creates a Browser beside the exact source or in a new
           // Browser Tab. It never consumes the canonical (possibly dirty) File.
           set(current => {
@@ -8325,7 +8329,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               }) } } }
           })
           await get().createBrowser(tabGroupId ?? layout.activeGroupId,
-            { tabId: destinationTabId!, regionId: exactRegionId! }, bookmark.url, { path, binary: bookmark.binary }, workspaceId)
+            { tabId: destinationTabId!, regionId: exactRegionId! }, bookmark.url, { path, binary: bookmark.binary }, workspaceId,
+            undefined, undefined, capsuleId)
           expectedSurface = get().tabs[destinationTabId!]?.regions[exactRegionId!]
           bookmarkOpened = expectedSurface?.kind === 'browser' && expectedSurface.workspaceId === workspaceId && expectedSurface.bookmarkOrigin?.path === path
           result.data = { kind: 'not-file', reason: bookmarkOpened ? null : 'The original bookmark Browser is unconfirmed.' }
@@ -10326,7 +10331,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void open().then(() => { release(); resolveOpening() }, error => { release(); rejectOpening(error) })
     return flight.promise
   },
-  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId, mode) {
+  async createBrowser(tabGroupId, launcher, url = 'about:blank', bookmarkOrigin, requestedWorkspaceId, requestedDisplayWorkspaceId, mode, capsuleId) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -10364,7 +10369,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().selectMainRegion({ displayWorkspaceId: displayWorkspaceId!, groupId: tabGroupId, tabId, regionId }, state.workbenchSpaceSelection)
     }
     try {
-      const browser = await api.browser.create(regionId, url, workspaceId, undefined, mode)
+      const browser = capsuleId
+        ? await api.browser.create(regionId, url, workspaceId, undefined, mode, undefined, capsuleId)
+        : await api.browser.create(regionId, url, workspaceId, undefined, mode)
       const surface: BrowserWorkbenchSurface = {
         ...browser,
         regionId,

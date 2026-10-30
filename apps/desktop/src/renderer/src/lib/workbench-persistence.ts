@@ -1,5 +1,6 @@
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { cloneBrowserViewport, isBrowserViewport } from '../../../shared/browser-viewport'
+import { browserObjectLink } from '../../../shared/browser-object-link'
 import {
   createWorkspaceLayout,
   groupIds,
@@ -81,6 +82,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
   // The write projection also passes live surfaces through this function before reduction.
   const control = (surface as BrowserWorkbenchSurface).control
   const agent = control ? control.agent : surface.agent
+  const objectLink = privateMode ? undefined : browserObjectLink(surface)
   return {
     regionId: surface.regionId,
     kind: 'browser',
@@ -92,6 +94,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     id: surface.browserId,
     mode: privateMode ? 'private' : 'normal',
     url: privateMode ? 'about:blank' : surface.url,
+    ...(objectLink ? { objectLink } : {}),
     title: privateMode ? 'Private page' : surface.title,
     ...(privateMode ? { privateSessionEnded: true as const } : surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {}),
     // Only a real Main snapshot clears the deferred description.
