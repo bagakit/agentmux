@@ -210,6 +210,9 @@ function startPrimaryInstance(): void {
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
     window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); webLinks.unavailable(); webFiles.unavailable(); workbenchWindow = null; recoverInterface = null } })
     window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) { spatialLinks.unavailable(); webLinks.unavailable(); webFiles.unavailable() } })
+    window.webContents.on('render-process-gone', () => {
+      if (workbenchWindow === window) { spatialLinks.unavailable(); webLinks.unavailable(); webFiles.unavailable() }
+    })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
