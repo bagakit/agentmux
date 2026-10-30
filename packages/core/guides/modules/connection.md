@@ -63,6 +63,33 @@ while keeping other authorized work available. Never copy Host credentials into 
 
 ## Inspect the original connection
 
+The original authenticated user/device can inspect native receiver lifecycle with
+connection inspect --connection ID. When receiverRecovery is declared, use
+connection receiver recover --input FILE|- --runtime ORIGINAL_RUNTIME with
+{operationId,connectionId,expectedRevision,receiverRef}. Retain the hosting endpoint,
+original Runtime, full input and operation ID after an unknown reply; use
+connection receiver inspect --operation-id ID --runtime ORIGINAL_RUNTIME to read
+that original action and its separate current connection observation. Initially
+discover the hosting Runtime through runtime owner identity; keep that runtimeId
+across calls. The CLI confirms that original Runtime and fences its current owner
+instance, including after Host process restart. A same-alias replacement is refused.
+First confirm local ownership with connection owner inspect on that exact endpoint.
+An execution-only forwarded entry does not identify the connector hosting Runtime;
+select its original hosting endpoint instead. The CLI refuses that unresolved
+route without affecting current receivers or Agent input.
+These management operations are unavailable to managed Agents, including Agents
+that can read their original input or delivery receipts.
+
+A healthy receiver returns already-ready; an active native recovery is joined.
+Only an ended exact receiver can be scheduled for a new native consumer. An older
+ref/revision cannot close a later receiver, and disabled traffic is not enabled.
+When startup has no observable receiverRef, null only joins or records an
+unconfirmed original observation; it never authorizes replacement. Inspection does
+not perform network checks or retry the action. A new explicit operation may
+recheck the same configuration after platform-side permission repair; an old
+rejected attempt is not a permanent gate. Recovery does not replay a message or
+restart an Agent, and accepted scheduling does not certify native readiness.
+
 Use connection owner inspect on the exact hosting endpoint to distinguish registered ownership:
 local means this endpoint has a Connection port, forwarded means it has only a forwarding entry,
 and unavailable means neither is registered. Local does not mean the user's machine. This read
