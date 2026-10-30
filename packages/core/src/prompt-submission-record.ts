@@ -308,15 +308,9 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
 }
 
 /** Decode the exact frozen input before journal admission or durable storage. */
-export function normalizePromptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>['intent']> {
-  const source = record(value, 'promptCompletionAdmission.intent')
-  const originalRun = runRef(source.run)
-  const admissionIntent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
-  if (admissionIntent && (admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun.runId
-    : admissionIntent.expectedRun.runId) !== originalRun.runId || admissionIntent !== undefined && admissionIntent.kind !== 'exact-condition' && source.execution !== 'immediate') {
-    throw new AgentMuxError('Frozen admission intent changed its original Run or execution.', 'INVALID_AGENT_SESSION_STORE')
-  }
-  const plan = record(source.plan, 'promptCompletionAdmission.intent.plan')
+/** Decode the same frozen carrier plan before journal gating and after a claim. */
+export function normalizePromptInputPlan(value: unknown): import('./types.js').AgentPromptInputPlan | import('./types.js').AgentNativePromptInputPlan | import('./types.js').AgentLaunchPromptInputPlan {
+  const plan = record(value, 'promptCompletionAdmission.intent.plan')
   const bytes = (value: unknown): string => {
     if (typeof value !== 'string' || !value.length || !utf8WithinBytes(value, MAX_STORED_TEXT_BYTES)) {
       throw new AgentMuxError('Frozen prompt input is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -336,6 +330,24 @@ export function normalizePromptInputIntent(value: unknown): NonNullable<NonNulla
   else if (plan.kind === 'native-rpc') input = nativePromptPlan(plan)
   else if (plan.kind === 'runtime-launch') input = validateAgentLaunchPromptInputPlan(plan)
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  return input
+}
+
+export function normalizePromptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>['intent']> {
+  const source = record(value, 'promptCompletionAdmission.intent')
+  const originalRun = runRef(source.run)
+  const admissionIntent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
+  if (admissionIntent && (admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun.runId
+    : admissionIntent.expectedRun.runId) !== originalRun.runId || admissionIntent !== undefined && admissionIntent.kind !== 'exact-condition' && source.execution !== 'immediate') {
+    throw new AgentMuxError('Frozen admission intent changed its original Run or execution.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const bytes = (value: unknown): string => {
+    if (typeof value !== 'string' || !value.length || !utf8WithinBytes(value, MAX_STORED_TEXT_BYTES)) {
+      throw new AgentMuxError('Frozen prompt input is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    return value
+  }
+  const input = normalizePromptInputPlan(source.plan)
   return { run: originalRun, ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
     prompt: bytes(source.prompt), plan: input,
     ...(admissionIntent === undefined ? {} : { admissionIntent }),

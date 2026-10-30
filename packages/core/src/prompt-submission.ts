@@ -1,3 +1,5 @@
+import { withAgentInputClaimLease, type AgentInputClaimLease } from './agent-input-claim-lease.js'
+import type { AgentInputCarrier, AgentInputHandoff } from './agent-input-handoff.js'
 import type { InputPerformanceHandle, InputPerformanceStage } from './performance-diagnostics.js'
 import { readAgentPromptPreparationWait, type AgentPromptPreparationWait, type AgentPromptPreparationRetryFence } from './prompt-preparation.js'
 import { createHash } from 'node:crypto'
@@ -215,6 +217,7 @@ function terminalPromptInputPhase(runId: string, ownerInstanceId: string, operat
 
 type PromptSubmissionDeps = {
   store: AgentMuxAgentSessionStore
+  inputJournalId?: string
   kernel: CtxmuxRunAdapter
   providers: AgentProviderRegistry
   registry: AgentMuxAgentSessionRegistry
@@ -254,7 +257,9 @@ export type AgentPromptInputAuthority = Readonly<{
 /** Private producer restrictions, never a public prompt option or reusable grant. */
 export type AgentPromptInputControl = {
   authority?: AgentPromptInputAuthority
-  authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>
+  authorizeDispatch?: (lease: AgentInputClaimLease, carrier: AgentInputCarrier) => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>
+  handoff?: AgentInputHandoff
+  claimLease?: AgentInputClaimLease
   onlyIfUnclaimed?: boolean
   requiredNativeSource?: { providerId: string; nativeSessionId: string }
   idleOnly?: AgentMuxMessageIdleBoundary
@@ -337,7 +342,7 @@ export class AgentPromptSubmissionCoordinator {
     run: CtxmuxAdapterRun,
     submissionId: string,
     prompt: string,
-    plan: AgentPromptInputPlan,
+    plan: AgentPromptInputPlan | AgentNativePromptInputPlan,
     binding: AgentPromptCondition | Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>,
     expectedCompletionId?: string,
     signal?: AbortSignal,
@@ -379,7 +384,8 @@ export class AgentPromptSubmissionCoordinator {
     try {
       const boundary = transportQualification?.protocolInput
       beginPromptPreparationPhase(boundary, 'submission-store')
-      return await observeInput(diagnostic, 'submission-store', () => this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
+      return await observeInput(diagnostic, 'submission-store', () => withAgentInputClaimLease(this.deps.store, this.deps.inputJournalId ?? 'unbound-coordinator', originalInputKey, async lease => {
+        const lockedControl = control ? { ...control, claimLease: lease } : undefined
         try {
           if (!control?.authorizeDispatch) await this.deps.assertUncontrolledInput?.(originalInputKey)
           completePromptPreparationPhase(boundary)
@@ -474,7 +480,7 @@ export class AgentPromptSubmissionCoordinator {
                 if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
                 await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
                   previous.intent.prompt, previous.intent.plan, previous.inputKey, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession,
-                  undefined, previous.intent.admissionIntent, previous.submissionId === submissionId ? control : undefined, diagnostic)
+                  undefined, previous.intent.admissionIntent, previous.submissionId === submissionId ? lockedControl : undefined, diagnostic)
               } catch (error) {
                 const settled = await observeInput(diagnostic, 'session-state', () => this.deps.registry.refresh(session.agentSessionId, session.run))
                 const refreshOnlySettled = settled.promptCompletionAdmission?.submissionId === previous.submissionId &&
@@ -493,7 +499,7 @@ export class AgentPromptSubmissionCoordinator {
               this.deps.assertAgentRun(current, currentRun)
             }
             await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-              originalInputKey, expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification, admissionIntent, control, diagnostic)
+              originalInputKey, expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification, admissionIntent, lockedControl, diagnostic)
             return structuredClone(message)
           } catch (error) {
             if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
@@ -528,7 +534,7 @@ export class AgentPromptSubmissionCoordinator {
     run: CtxmuxAdapterRun,
     submissionId: string,
     prompt: string,
-    plan: AgentPromptInputPlan,
+    plan: AgentPromptInputPlan | AgentNativePromptInputPlan,
     inputKey: AgentPromptInputKey,
     expectedCompletionId?: string,
     signal?: AbortSignal,
@@ -559,6 +565,11 @@ export class AgentPromptSubmissionCoordinator {
       provider.catalog.capabilities.promptExecution?.immediate === 'terminal-submit' && !frozenPreparation
     if (currentTerminal && plan.kind === 'render-then-submit' && plan.prepare) throw new AgentMuxError(
       'Current-terminal input cannot prepare, interrupt or refresh the original TUI.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const carrier = control?.handoff?.carrier
+    if (carrier?.kind === 'pty' || carrier?.kind === 'native') plan = carrier.plan
+    let selectedCarrier: AgentInputCarrier = { kind: 'pty', plan: plan as AgentPromptInputPlan,
+      ...(transportQualification ? { qualification: { nativeSourceId: transportQualification.transport.nativeSourceId,
+        processId: transportQualification.processId, inputByte: preparedInputByte(transportQualification) } } : {}) }
     let inputDispatch = session.promptCompletionAdmission?.submissionId === submissionId ? session.promptCompletionAdmission.inputDispatch : undefined
     if (inputDispatch) signal = undefined
     let newClaim: { admission: NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>;
@@ -583,7 +594,7 @@ export class AgentPromptSubmissionCoordinator {
       await observeInput(diagnostic, 'input-authority', async () => { await control?.authority?.assertCurrent() })
       if (signal?.aborted) throw agentMuxCancellationError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED', signal.reason)
       if (control?.authorizeDispatch && !inputDispatch) {
-        const link = await control.authorizeDispatch()
+        const link = await control.authorizeDispatch(control.claimLease!, selectedCarrier)
         if (!link) throw new AgentMuxError('The original waiting generation stopped before dispatch.', 'AGENT_INPUT_WAIT_STOPPED')
         inputDispatch = link
         // The original gate won. A later observer cancellation cannot recall it.
@@ -731,7 +742,7 @@ export class AgentPromptSubmissionCoordinator {
       if (control?.requiredNativeSource && !isDeepStrictEqual(source, control.requiredNativeSource)) return undefined
       return source
     }
-    const nativeOriginal = admissionIntent?.kind === 'native-conversation' || defaultSemanticInput
+    const nativeOriginal = carrier?.kind === 'native' || admissionIntent?.kind === 'native-conversation' || defaultSemanticInput
       ? await refreshSession(session.agentSessionId, session.run) : undefined
     const assertNativeIdle = async (): Promise<void> => {
       const expected = control?.idleOnly?.nativeEvidence
@@ -750,7 +761,8 @@ export class AgentPromptSubmissionCoordinator {
           evidence.sourceId !== expected.sourceId || evidence.id !== expected.id) throw new AgentMuxError(
         'The original Provider initial idle opportunity changed or is unconfirmed. The Inbox and manual input remain available.', 'AGENT_TURN_END_UNCONFIRMED')
     }
-    const source = nativeOriginal && defaultNativeSource(nativeOriginal)
+    const source = carrier?.kind === 'native' && admissionIntent?.kind !== 'native-conversation' ? { providerId: session.providerId, nativeSessionId: carrier.plan.threadId }
+      : carrier?.kind === 'pty' ? undefined : nativeOriginal && defaultNativeSource(nativeOriginal)
     // Selecting a target does not prove transport availability or the TUI's current
     // conversation. Its semantic message must keep that target even when unavailable.
     if ((control?.requiredNativeSource || control?.idleOnly || defaultSemanticInput && nativeOriginal &&
@@ -778,7 +790,12 @@ export class AgentPromptSubmissionCoordinator {
         // The exact Provider queue arbitrates idle dispatch atomically; a screen cannot renew a consumed boundary.
         nativeFutureAdmissionReady = nativeIdleOnly && prepared.plan.operation === 'queue-idle'
         await observeInput(diagnostic, 'provider-verify', () => assertNativeIdle())
-        const frozenPlan = { ...prepared.plan, clientCorrelation: createNativeInputCorrelation(inputKey) }
+        const correlation = carrier?.kind === 'native' ? carrier.plan.clientCorrelation : createNativeInputCorrelation(inputKey)
+        const freshPlan = { ...prepared.plan, ...(correlation ? { clientCorrelation: correlation } : {}) }
+        if (carrier?.kind === 'native' && !isDeepStrictEqual(carrier.plan, freshPlan)) throw new AgentMuxError(
+          'The original native carrier preparation changed. Keep its original gate and plan.', 'AGENT_PROMPT_SOURCE_CHANGED')
+        const frozenPlan = carrier?.kind === 'native' ? carrier.plan : freshPlan
+        selectedCarrier = { kind: 'native', plan: frozenPlan }
         const intent = freezeIntent(frozenPlan)
         const claimed = await claimSession(session.agentSessionId, session.run, stored => {
           assertAdmission(stored)
@@ -851,6 +868,8 @@ export class AgentPromptSubmissionCoordinator {
         }
       }
     }
+    if (plan.kind === 'native-rpc' || carrier?.kind === 'launch') throw new AgentMuxError(
+      'The original carrier is unavailable; its input cannot use another transport.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     const intent = freezeIntent(plan)
     const assertTurnBoundary = (current: AgentMuxAgentSession, hasPreviousPrompt: boolean): boolean => {
       // Native cancellation ends a turn without completing it successfully. Both input

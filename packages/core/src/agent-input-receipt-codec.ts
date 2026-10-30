@@ -1,3 +1,4 @@
+import { parseAgentInputHandoff } from './agent-input-handoff.js'
 import { AgentMuxError } from './errors.js'
 import { dequal } from 'dequal'
 import { parseDeliveryFailure } from './delivery-attempt.js'
@@ -17,11 +18,15 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   if (!dequal(key, ref.key) || p.persistence !== 'confirmed') wireFail()
   wireMember(p.observation, ['owned', 'rejoin-needed', 'closed'])
   if (p.originalControlOperationId !== undefined) wireString(p.originalControlOperationId)
-  const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId', 'deliveryKey', 'retry'])
+  const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId', 'deliveryKey', 'retry', 'handoff'])
   if (!dequal(validateAgentInputWaitRef(control.ref), ref)) wireFail()
   wireMember(control.state, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized']); wireTimestamp(control.at)
   if (control.state === 'dispatch-authorized') wireString(control.gateId)
   else if (control.gateId !== undefined) wireFail()
+  if (control.handoff !== undefined) {
+    if (control.state !== 'dispatch-authorized') wireFail()
+    parseAgentInputHandoff(control.handoff)
+  }
   if (control.deliveryKey !== undefined) {
     if (control.state !== 'dispatch-authorized') wireFail()
     const delivery = validateAgentInputDeliveryKey(key, control.deliveryKey)

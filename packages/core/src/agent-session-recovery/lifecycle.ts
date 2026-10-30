@@ -1025,6 +1025,32 @@ export class AgentSessionRunLifecycle {
       reservation.operationId, undefined, dispatch.runtime)
   }
 
+  /** An original gate without any carrier claim can first enter only this retained Start. */
+  async continuePreparedMessageInput(ref: import('../agent-input-wait.js').AgentInputWaitRef,
+    carrier: Extract<import('../agent-input-handoff.js').AgentInputCarrier, { kind: 'launch' }>): Promise<void> {
+    const reservation = await this.ports.sessions.store.loadResumeCorrelation(ref.key.agentSessionId, carrier.lifecycleOperationId)
+    const prepared = reservation?.preparedSession, dispatch = reservation?.preparedDispatch
+    const recipe = prepared?.continuity?.messageInput
+    if (!reservation || reservation.reservationId !== carrier.reservationId || !prepared || !dispatch || !recipe?.plan ||
+        !isDeepStrictEqual(recipe.ref, ref) || recipe.lifecycleOperationId !== carrier.lifecycleOperationId ||
+        recipe.plan.lifecycleOperationId !== reservation.operationId) throw new AgentMuxError(
+      'The original message prepared Start changed. Its gate and request are retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
+    // Null is not permission. The input owner proves all claim absence under its live S lease below.
+    const observed = await this.inspectPreparedResume(reservation)
+    if (observed) throw new AgentMuxError('A Start witness has no matching original input claim. Retain and inspect the original operation.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    await this.ports.input.claimContinuityMessage(recipe, recipe.plan)
+    let run: CtxmuxAdapterRun
+    try {
+      run = await this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, reservation.operationId, dispatch.runtime)
+    } catch (error) {
+      const notApplied = error instanceof AgentMuxError && error.creationFailure?.operationId === reservation.operationId && error.creationFailure.disposition === 'not_applied'
+      await this.settleContinuityMessageInput(prepared.continuity!, { outcome: notApplied ? 'not-applied' : 'unknown' })
+      throw error
+    }
+    const complete = await this.completeObservedPreparedResume(reservation, run)
+    if (!complete) throw new AgentMuxError('The original resumed Session commit is unconfirmed. Inspect its original Start.', 'AGENT_RESUME_UNCONFIRMED')
+  }
+
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     const run = await this.inspectPreparedResume(reservation)
     return run ? await this.completeObservedPreparedResume(reservation, run) : null

@@ -1,3 +1,5 @@
+import { assertAgentInputClaimLease, type AgentInputClaimLease } from './agent-input-claim-lease.js'
+import { parseAgentInputHandoff, type AgentInputCarrier } from './agent-input-handoff.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { validateBroadcastIntent, parseBroadcastReceipt, type AgentMuxMessageBroadcastIntent, type AgentMuxMessageBroadcastReceipt, type AgentMuxBroadcastIssue, type AgentMuxBroadcastTargetResult } from './agent-message-broadcast.js'
 import { parseMessageEventsPage, parseMessageEventsQuery, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
@@ -734,6 +736,10 @@ export class DurableAgentMuxMessageQueue {
         !isDeepStrictEqual(next.retry, prior.retry) || !['enabled', 'stopped-before-dispatch', 'dispatch-authorized'].includes(next.state)) {
       throw new AgentMuxError('Original input control generation or state changed.', 'AGENT_INPUT_WAIT_GENERATION_STALE')
     }
+    if (next.handoff !== undefined) {
+      if (next.state !== 'dispatch-authorized') throw new AgentMuxError('Only an original gate can own carrier preparation.', 'INVALID_AGENT_INPUT_CONTROL')
+      parseAgentInputHandoff(next.handoff)
+    }
     if (next.state === 'dispatch-authorized') validateAgentInputControlId(next.gateId)
     else if (next.gateId !== undefined) throw new AgentMuxError('Unclaimed input cannot invent a dispatch gate.', 'INVALID_AGENT_INPUT_CONTROL')
     if (next.deliveryKey !== undefined) {
@@ -948,13 +954,22 @@ export class DurableAgentMuxMessageQueue {
 
   /** Stop and this short gate share one original journal transaction; no Native await. */
   async authorizeInputDispatch(refValue: AgentInputWaitRef, signal?: AbortSignal,
-    delivery?: { key: AgentPromptInputKey; claimsAbsent: () => Promise<boolean>; assertTarget: () => Promise<void> }): Promise<AgentInputDispatchLink | null> {
+    delivery?: { key: AgentPromptInputKey; claimsAbsent: () => Promise<boolean>; assertTarget: () => Promise<void> },
+    owner?: { lease: AgentInputClaimLease; carrier: AgentInputCarrier; continueOriginalGate?: true }): Promise<AgentInputDispatchLink | null> {
     const ref = validateAgentInputWaitRef(refValue)
+    const physicalKey = delivery?.key ?? ref.key
+    const scope = owner && assertAgentInputClaimLease(owner.lease, this, this.queueId, physicalKey)
     return this.withLock(async () => {
       signal?.throwIfAborted()
       const current = this.input(ref.key)
-      if (!current || !isDeepStrictEqual(current.control.ref, ref) || current.control.state !== 'enabled') return null
-      const deliveryKey = delivery && !isDeepStrictEqual(delivery.key, ref.key) ? validateAgentInputDeliveryKey(ref.key, delivery.key) : undefined
+      if (!current || !isDeepStrictEqual(current.control.ref, ref)) return null
+      const continuing = current.control.state === 'dispatch-authorized' && owner?.continueOriginalGate === true && current.control.handoff !== undefined
+      if (current.control.state !== 'enabled' && !continuing) return null
+      if (owner) assertAgentInputClaimLease(owner.lease, this, this.queueId, physicalKey, continuing ? current.control.handoff!.storeScope : undefined)
+      if (continuing && (!isDeepStrictEqual(physicalKey, agentInputDeliveryKey(current.control)) ||
+          !isDeepStrictEqual(current.control.handoff!.carrier, owner!.carrier))) throw new AgentMuxError(
+        'The original gate carrier or delivery target changed. Its input is retained.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      const deliveryKey = continuing ? current.control.deliveryKey : delivery && !isDeepStrictEqual(delivery.key, ref.key) ? validateAgentInputDeliveryKey(ref.key, delivery.key) : undefined
       if (deliveryKey && (deliveryKey.attemptId !== current.control.retry?.attemptId ||
           deliveryKey.expectedRun.runId !== ref.key.expectedRun.runId && !this.canBindResumedInput(current.intent))) throw new AgentMuxError(
         'Only the original human or external directed input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
@@ -965,12 +980,15 @@ export class DurableAgentMuxMessageQueue {
           'The original input or resumed delivery already has an admission. Retain its exact result.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
         signal?.throwIfAborted()
       }
+      if (owner) assertAgentInputClaimLease(owner.lease, this, this.queueId, physicalKey, scope)
+      if (continuing) return { ref, gateId: current.control.gateId!, ...(deliveryKey ? { deliveryKey } : {}) }
       if (deliveryKey && (!isDeepStrictEqual(this.inputOwnerKey(deliveryKey), deliveryKey) ||
           this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(deliveryKey)))) throw new AgentMuxError(
         'This resumed delivery already belongs to another original input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const gateId = mintObjectId()
       await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence,
-        control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), ...(current.control.retry ? { retry: current.control.retry } : {}), at: Date.now() } })
+        control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), ...(current.control.retry ? { retry: current.control.retry } : {}),
+          ...(owner ? { handoff: parseAgentInputHandoff({ version: 1, storeScope: scope, carrier: owner.carrier }) } : {}), at: Date.now() } })
       return { ref, gateId, ...(deliveryKey ? { deliveryKey } : {}) }
     }, true)
   }

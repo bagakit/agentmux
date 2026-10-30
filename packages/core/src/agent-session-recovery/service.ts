@@ -290,6 +290,11 @@ export class AgentSessionRecoveryService {
     return this.lifecycle.completePreparedReopen(reservation, run)
   }
 
+  async continuePreparedMessageInput(ref: import('../agent-input-wait.js').AgentInputWaitRef,
+    carrier: Extract<import('../agent-input-handoff.js').AgentInputCarrier, { kind: 'launch' }>): Promise<void> {
+    await this.continuitySupervisor.serialize(ref.key.agentSessionId, () => this.lifecycle.continuePreparedMessageInput(ref, carrier))
+  }
+
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     return this.continuitySupervisor.serialize(reservation.agentSessionId, async () => {
       const restored = await this.lifecycle.completePreparedResume(reservation)

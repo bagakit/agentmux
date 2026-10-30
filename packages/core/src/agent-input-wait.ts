@@ -70,6 +70,8 @@ export type AgentInputWaitControl = {
   at: number
   waiting?: AgentInputWaitReason
   gateId?: string
+  /** Original carrier and live-writer boundary, frozen in the same gate transaction. */
+  handoff?: import('./agent-input-handoff.js').AgentInputHandoff
   /** Frozen only by the original dispatch gate after confirmed same-Session recovery. */
   deliveryKey?: AgentPromptInputKey
   retry?: AgentInputRetry
