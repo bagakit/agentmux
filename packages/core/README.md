@@ -297,7 +297,8 @@ configure 沿 transport-approved user/device 权限与原 operationId/CAS 回执
 ```sh
 amux connection delivery inspect --operation-id original-delivery
 amux connection delivery ls --connection original-connection --binding original-binding --binding-revision 3 --limit 30
-amux connection delivery retry --operation-id original-delivery
+amux connection delivery retry --input original-retry-source.json
+amux connection delivery source recover --connection original-connection --binding original-binding --binding-revision 3
 ```
 
 查询只读原 operation、受众、来源引用、fragment、队列状态和安全平台回执，
@@ -306,6 +307,12 @@ amux connection delivery retry --operation-id original-delivery
 queue 的 superseded／cancelled 与原平台 receipt 分开，不能把未知当未执行。
 列表可附当前 Binding 范围的 worker `observation`，没有 delivery 时也可查 source Gap；
 它是当前进程服务窗，不代表平台 ACK、送达、原生采用或 Agent 健康结论。
+
+`source recover` 唤醒或加入原 Publication lane/work，保当前 Binding 所指的原
+publicationBoundary 与 durable cut，并重核当前授权。`requested`／`joined` 只确认请求，
+`disabled` 表达原范围已停用或不再授权；都不表示来源 ready 或平台已送达。重复同范围无需
+另造 operationId，不重建 receiver，也不重放未知消息。普通 inspect／list／diagnose 仍只读；
+托管调用须是准确本人 Host／Session 的绑定并保当前 Runtime，不另要求机器人创建者身份。
 
 `queryFeedback` 保留原 query 的阶段事实；`effect: upsert` 是添加阶段标记，
 `effect: withdraw` 是撤掉 `predecessorOperationId` 指向的旧标记，沿原准确 `reactionId` 映射执行。

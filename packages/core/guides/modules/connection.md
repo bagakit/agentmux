@@ -148,7 +148,17 @@ Use connection ingress inspect separately for the current Core receipt. Repeatin
 cannot cancel a later observation, regenerate a frozen quote or create another input. A received
 source joins or ensures its original preparation revision and never cancels a later read.
 Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
-changes; original intake authors and receipts retain their own configuration revision. For explicit
+changes; original intake authors and receipts retain their own configuration revision.
+To wake or join the original publication source reader, use connection delivery source recover
+--connection ID --binding ID --binding-revision N with the accurate current Binding revision.
+The Host resolves its original publicationBoundary and durable cut under current authorization;
+an input-trigger-only revision does not select a new lane. requested means a wake was accepted,
+joined means the same work is already running, and disabled means current scope/policy does not
+authorize it. These are not source-ready or delivery receipts. A lost reply can repeat this same
+scope without an operationId, recut, receiver rebuild or replay of an unknown platform effect.
+Managed callers need their exact original Host/Session binding and current Runtime, without bot
+enrollment ownership. Ordinary diagnose/list checks do not wake the source reader.
+For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
 the same requested order, while --after-content independently pages unresolved content. Managed callers
 can list and inspect body-free receipts on their exact original Host/Session binding and audience,
