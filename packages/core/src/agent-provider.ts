@@ -190,6 +190,9 @@ export type AgentProvider = {
   prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
   /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
+  /** Qualify this exact operation, independently of healthy terminal input.
+   * @see ../../../docs/design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界
+   */
   prepareNativeInput?(context: AgentProviderNativeInputPreparationContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
   reconnectTerminalFrontend?(context: AgentProviderNativeInputContext & {
