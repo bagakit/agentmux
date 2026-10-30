@@ -13,7 +13,7 @@ import type { ChannelActorProfileObservation, ChannelProfileReason, ConnectionAc
 import type { ChannelMetadataChange, ChannelMetadataPort } from '@agentmux/core/connections'
 import { createChannelMetadata } from './channel-metadata.js'
 import { credentialLookupFailure } from './credential-observation.js'
-import { parseConnectionReceiverParams, parseConnectionReceiverOperation, type ConnectionReceiverPort, type ConnectionReceiverRecoverInput,
+import { parseConnectionReceiverParams, parseConnectionReceiverResult, type ConnectionReceiverPort, type ConnectionReceiverRecoverInput,
   type ConnectionReceiverRecoveryOperation, type ConnectionReceiverCallContext } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation, type ConnectionServiceSelector } from '@agentmux/core/connections'
@@ -211,7 +211,7 @@ export class ConnectionHost implements ConnectionPort {
     if (Object.hasOwn(raw, 'receiverRecovery')) {
       const input = parseConnectionReceiverParams('connection.receiver.recover', raw.receiverRecovery)
       if (!raw.actor || !['user', 'device'].includes(raw.actor.kind) || typeof raw.actor.id !== 'string' || !raw.actor.id) throw new AgentMuxError('Original receiver actor could not be confirmed.', 'CONNECTION_STORAGE_UNCONFIRMED')
-      return { kind: 'receiver', input, operation: parseConnectionReceiverOperation(result), actor: { kind: raw.actor.kind, id: raw.actor.id } }
+      return { kind: 'receiver', input, operation: parseConnectionReceiverResult('connection.receiver.recover', { operation: result, connection: null }, input).operation, actor: { kind: raw.actor.kind, id: raw.actor.id } }
     }
     if (Object.hasOwn(raw, 'deletion')) {
       const input = parseConnectionDeletionParams('connection.delete', raw.deletion)
