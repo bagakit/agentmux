@@ -3,7 +3,7 @@ import { readConnectionHostingTarget } from '../../../shared/connection-hosting-
 import { parseConnectionParams, parseRecordedRoomBindingInput, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingRecordedBindInput, type RoomBindingRecordedRelinkInput, type RoomBindingTarget } from '@agentmux/core/connections'
 import { restoredConnectorMemberDrafts, type ConnectorMemberDrafts } from './connector-member-draft'
 
-type Effect = 'connection.receiver.recover' | 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant' | 'connection.binding.member.inherit'
+type Effect = 'connection.delivery.retry' | 'connection.receiver.recover' | 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant' | 'connection.binding.member.inherit'
 /** Unsaved UI intent only. Restoring a member draft never grants or dispatches access. */
 export type ConnectorRoomDraft = {
   connectionId: string; bindingId: string | null; bindingRevision: number | null
@@ -31,7 +31,10 @@ export function restoredConnectorRoomDrafts(value: unknown): Record<string, Conn
 export type ConnectorRoomIntent = { [M in Effect]: {
   target: RoomBindingTarget; hostingTarget?: ConnectionHostingTarget; method: M; input: M extends 'connection.bind' ? RoomBindingRecordedBindInput : M extends 'connection.binding.relink' ? RoomBindingRecordedRelinkInput : ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
 } & (M extends 'connection.room.link.create' ? { replacesOperationId?: string } : {}) }[Effect]
-const effects: readonly string[] = ['connection.receiver.recover', 'connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant', 'connection.binding.member.inherit']
+const effects: readonly string[] = ['connection.delivery.retry', 'connection.receiver.recover', 'connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant', 'connection.binding.member.inherit']
+/** One delivery operation can have several explicitly selected original sources. */
+export const connectorRoomIntentKey = (intent: ConnectorRoomIntent) => intent.method === 'connection.delivery.retry'
+  ? JSON.stringify([intent.method, intent.input.operationId, intent.input.source.kind, intent.input.source.attempt]) : intent.input.operationId
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
 const intentTargets = new WeakMap<Readonly<Record<string, ConnectorRoomIntent>>, ReadonlySet<string>>()
 const targetKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => JSON.stringify([target.executionHostId, target.agentSessionId])
@@ -54,7 +57,7 @@ export function restoredConnectorRoomIntents(value: unknown): Record<string, Con
       const input = entry.method === 'connection.bind' || entry.method === 'connection.binding.relink'
         ? parseRecordedRoomBindingInput(entry.method, entry.input) : parseConnectionParams(entry.method, entry.input)
       const target = parseRoomBindingTarget(entry.target)
-      if (key !== input.operationId || 'executionHostId' in input && (!sameConnectorTarget(input, target) || input.regionAnchor?.regionId !== target.regionAnchor?.regionId)) continue
+      if (key !== connectorRoomIntentKey({ ...entry, input } as ConnectorRoomIntent) || 'executionHostId' in input && (!sameConnectorTarget(input, target) || input.regionAnchor?.regionId !== target.regionAnchor?.regionId)) continue
       let lineage: { replacesOperationId?: string } = {}
       if (entry.method === 'connection.room.link.create' && entry.replacesOperationId !== undefined) {
         try {

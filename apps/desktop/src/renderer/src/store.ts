@@ -31,7 +31,7 @@ import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import type { NoteFileAttempt, NoteFileInput, NoteWrittenReceipt, NoteHistorySelection } from '../../shared/note-file-editing'
 import { afterNoteComposition, hasNoteComposition, mergeLiveNote, setNoteComposition } from './lib/note-live-merge'
 import { confirmNoteHistoryTarget, confirmDeletedNoteHistoryTarget, noteHistoryReadParams, noteResourceReadParams, type NoteHistoryRead, type NoteHistoryInspection, type NoteHistoryTarget } from './lib/note-history-target'
-import { restoredConnectorRoomDrafts, restoredConnectorRoomIntents, type ConnectorRoomDraft, type ConnectorRoomIntent } from './lib/connector-room-intent'
+import { connectorRoomIntentKey, restoredConnectorRoomDrafts, restoredConnectorRoomIntents, type ConnectorRoomDraft, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
 import { mailboxNotificationIntentKey, mailboxNotificationSubject, restoredMailboxNotificationIntents, type MailboxNotificationIntent, type MailboxNotificationIntents, type MailboxNotificationFeedbackBySubject, type MailboxNotificationHistoryBySubject } from './lib/mailbox-notification-intent'
 import type { ConnectorServiceObservations } from './lib/connector-service-observation'
@@ -4518,11 +4518,12 @@ export async function clearConversationLandmarkIntent(input: ConversationLandmar
 }
 /** Preserve the exact submitted connector operation before its original public effect. */
 export async function retainConnectorRoomIntent(intent: ConnectorRoomIntent): Promise<AgentMuxSpatialSave> {
-  const parsed = restoredConnectorRoomIntents({ [intent.input.operationId]: intent })[intent.input.operationId]
+  const key = connectorRoomIntentKey(intent)
+  const parsed = restoredConnectorRoomIntents({ [key]: intent })[key]
   if (!parsed) throw new Error('The exact original connector intent is required.')
-  const previous = useAppStore.getState().connectorRoomIntents[intent.input.operationId]
+  const previous = useAppStore.getState().connectorRoomIntents[key]
   if (previous && JSON.stringify({ ...previous, phase: parsed.phase }) !== JSON.stringify(parsed)) throw new Error('Inspect the original connector operation without replacing its target or input.')
-  useAppStore.setState(state => ({ connectorRoomIntents: { ...state.connectorRoomIntents, [parsed.input.operationId]: parsed } }))
+  useAppStore.setState(state => ({ connectorRoomIntents: { ...state.connectorRoomIntents, [key]: parsed } }))
   return await saveWorkbenchSelection(false)
 }
 export async function clearConnectorRoomIntent(operationId: string): Promise<void> {

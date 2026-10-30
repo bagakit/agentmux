@@ -1,7 +1,7 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { ConnectionRecord, RoomBinding } from '@agentmux/core/connections'
+import type { ConnectionDelivery, ConnectionRecord, RoomBinding } from '@agentmux/core/connections'
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { api } from '../lib/api'
 import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, readGroupDiagnosis, retainGroupDiagnosis, type GroupDiagnosis, type GroupWindow } from '../lib/group-diagnosis'
@@ -10,6 +10,7 @@ import { connectorDiagnosisKey, useConnectorGroupDiagnosis } from '../lib/use-co
 import { connectorGroupSummary, type ConnectorProblemAction } from '../lib/connector-group-status'
 import { ConnectorTrafficSummary } from './ConnectorTrafficSummary'
 import { ConnectorReceiverControl } from './ConnectorReceiverControl'
+import { ConnectorDeliveryRetryControl } from './ConnectorDeliveryRetryControl'
 import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 
 const LoadingIcon = semanticIconComponent('status.loading')
@@ -25,13 +26,15 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
   const current = useRef({ key, source }), live = useRef(false), epoch = useRef(0), exportRead = useRef(0)
   current.current = { key, source }
   const [read, setRead] = useState<{ key: string; value: GroupDiagnosis; checkedAt: number } | null>(null), [pending, setPending] = useState(false), [expanded, setExpanded] = useState(false)
-  const [detail, setDetail] = useState<{ key: string; value: ReturnType<typeof deliveryFacts> | null; issue: boolean } | null>(null)
+  const [detail, setDetail] = useState<{ key: string; request: number; value: ConnectionDelivery | null; issue: boolean } | null>(null)
   const [input, setInput] = useState<{ key: string; ingressId: string; receipt: AgentInputSubmissionReceipt | null; issue: boolean } | null>(null)
   const [copying, setCopying] = useState(false), [feedback, setFeedback] = useState('')
   const originalSections = useRef<Record<'incoming' | 'receipts' | 'content', HTMLElement | null>>({ incoming: null, receipts: null, content: null })
   const reveal = useRef<'incoming' | 'receipts' | 'content' | null>(null)
   const visible = read?.key === key ? read.value : checked?.report ?? null
   const original = detail?.key === key ? detail : null
+  const selectedReceipt = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { if (original?.value) { selectedReceipt.current?.scrollIntoView({ block: 'nearest' }); selectedReceipt.current?.focus({ preventScroll: true }) } }, [original?.request])
   const accepts = () => live.current && current.current.key === key && current.current.source === source && api.connections.call === originalSource
   function focusOriginal(section: 'incoming' | 'receipts' | 'content') {
     const node = originalSections.current[section]
@@ -56,8 +59,8 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
       const result = await source('connection.delivery.inspect', { operationId })
       if (!accepts() || request !== epoch.current) return
       const matched = result.delivery?.operationId === operationId && deliveryMatches(result.delivery, target)
-      setDetail({ key, value: matched ? deliveryFacts(result.delivery!) : null, issue: !matched })
-    } catch { if (accepts() && request === epoch.current) setDetail({ key, value: null, issue: true }) }
+      setDetail(previous => ({ key, request, value: matched ? result.delivery! : previous?.key === key && previous.value?.operationId === operationId ? previous.value : null, issue: !matched }))
+    } catch { if (accepts() && request === epoch.current) setDetail(previous => ({ key, request, value: previous?.key === key && previous.value?.operationId === operationId ? previous.value : null, issue: true })) }
     finally { if (accepts() && request === epoch.current) setPending(false) }
   }
   async function inspectInput(row: NonNullable<GroupDiagnosis['incoming']['value']>['rows'][number]) {
@@ -135,7 +138,13 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
       <p className="agent-connector-note">Outgoing window: up to 5 receipts · has next: {String(outgoing?.next !== null && outgoing?.next !== undefined)}. These pages are not the complete group history.</p>
       {outgoing?.deliveries.map(delivery => <div className="agent-connector-receipt" key={delivery.operationId}><span>{delivery.kind === 'binding-notice' ? 'Connection notice' : delivery.kind === 'permission' ? 'Permission request' : delivery.kind === 'query-feedback' ? 'Message status update' : 'Conversation message'} · Queue: {delivery.state} · Platform receipt: {delivery.receipt ?? 'Not recorded'}</span><code>{delivery.operationId}</code>{delivery.platformMessageId ? <code>{delivery.platformMessageId}</code> : null}<button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button></div>)}
       {outgoing?.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ after: outgoing.next! })}>Earlier receipts</button> : null}
-      {original ? <p className="agent-connector-note" role="status">{original.value ? 'Original queue: ' + original.value.state + ' · Platform receipt: ' + (original.value.receipt ?? 'Not recorded') + ' · ' + original.value.operationId : 'Original receipt unavailable; no retry was sent.'}</p> : null}
+      {original ? <div ref={selectedReceipt} tabIndex={-1} className="agent-connector-receipt" data-selected-delivery={original.value?.operationId}>
+        {original.issue && original.value ? <small role="status">Original receipt observation unconfirmed; earlier result retained.</small> : null}
+        <p className="agent-connector-note" role="status">{original.value ? (original.issue ? 'Earlier original queue: ' : 'Original queue: ') + original.value.state + ' · Platform receipt: ' + (deliveryFacts(original.value).receipt ?? 'Not recorded') : 'Original receipt unavailable; no retry was sent.'}</p>
+        {original.value ? <><code>{original.value.operationId}</code><ConnectorDeliveryRetryControl key={key + original.value.operationId} delivery={original.value} binding={binding} hostingTarget={hostingTarget} onObserve={value => {
+          if (accepts()) setDetail(previous => previous?.key === key && previous.request === original.request ? { ...previous, value, issue: false } : previous)
+        }} /></> : null}
+      </div> : null}
       <button className="small-button" disabled={pending} onClick={() => void inspect()}>Latest receipts</button>
       </section>
       <section ref={node => { originalSections.current.content = node }} className="connector-delivery-details__section" data-receipt-section="content" tabIndex={-1} aria-label="Conversation content details">

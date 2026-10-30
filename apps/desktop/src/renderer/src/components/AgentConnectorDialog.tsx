@@ -32,8 +32,8 @@ import { linkedMoteUses } from './settings/ConnectionIdentityFacts'
 import { ConnectorMemberAccess } from './ConnectorMemberAccess'
 import { acknowledgeConnectorMemberDraft, connectorMemberKey, reviewConnectorMemberDraft, type ConnectorMemberDrafts } from '../lib/connector-member-draft'
 
-type ConnectorRoomIntent = Exclude<StoredConnectorIntent, { method: 'connection.receiver.recover' }>
-const groupIntent = (intent: StoredConnectorIntent): intent is ConnectorRoomIntent => intent.method !== 'connection.receiver.recover'
+type ConnectorRoomIntent = Exclude<StoredConnectorIntent, { method: 'connection.receiver.recover' | 'connection.delivery.retry' }>
+const groupIntent = (intent: StoredConnectorIntent): intent is ConnectorRoomIntent => intent.method !== 'connection.receiver.recover' && intent.method !== 'connection.delivery.retry'
 
 const CloseIcon = semanticIconComponent('action.close')
 const LoadingIcon = semanticIconComponent('status.loading')
