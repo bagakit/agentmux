@@ -156,6 +156,7 @@ export async function brandApplication(appPath) {
   await plistReplace(plist, 'CFBundleName', 'string', PRODUCT_NAME)
   await plistReplace(plist, 'CFBundleIdentifier', 'string', BUNDLE_ID)
   await plistReplace(plist, 'CFBundleURLTypes', 'json', JSON.stringify([{ CFBundleURLName: BUNDLE_ID, CFBundleURLSchemes: ['amux'], CFBundleTypeRole: 'Viewer' }, { CFBundleURLName: `${BUNDLE_ID}.web`, CFBundleURLSchemes: ['http', 'https'], CFBundleTypeRole: 'Viewer' }]))
+  await plistReplace(plist, 'CFBundleDocumentTypes', 'json', JSON.stringify(['public.html', 'public.xhtml'].map(type => ({ CFBundleTypeRole: 'Viewer', LSItemContentTypes: [type] }))))
   await plistReplace(plist, 'CFBundleExecutable', 'string', PRODUCT_NAME)
   await plistReplace(plist, 'CFBundleIconFile', 'string', 'agentmux.icns')
   await plistReplace(plist, 'CFBundleShortVersionString', 'string', manifest.version)
@@ -371,6 +372,9 @@ async function verifyIdentity(appPath) {
   assert(await plistValue(plist, 'CFBundleIdentifier') === BUNDLE_ID, 'Packaged bundle id is wrong.')
   assert(await plistValue(plist, 'CFBundleURLTypes.0.CFBundleURLSchemes.0') === 'amux', 'Packaged spatial link scheme is wrong.')
   assert(await plistValue(plist, 'CFBundleURLTypes.1.CFBundleURLSchemes.0') === 'http' && await plistValue(plist, 'CFBundleURLTypes.1.CFBundleURLSchemes.1') === 'https' && await plistValue(plist, 'CFBundleURLTypes.1.CFBundleTypeRole') === 'Viewer', 'Packaged web link schemes are wrong.')
+  for (const [index, type] of ['public.html', 'public.xhtml'].entries()) {
+    assert(await plistValue(plist, `CFBundleDocumentTypes.${index}.CFBundleTypeRole`) === 'Viewer' && await plistValue(plist, `CFBundleDocumentTypes.${index}.LSItemContentTypes.0`) === type, 'Packaged local webpage Viewer declarations are wrong.')
+  }
   assert(await plistValue(plist, 'CFBundleIconFile') === 'agentmux.icns', 'Packaged icon is wrong.')
   assert((await plistValue(plist, 'NSScreenCaptureUsageDescription')).length > 0, 'Packaged screen capture purpose is missing.')
   assert(!await pathExists(join(contents, 'Resources', 'default_app.asar')), 'Electron default app entered the package.')

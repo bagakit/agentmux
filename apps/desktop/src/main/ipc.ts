@@ -82,6 +82,7 @@ import { FileDiagramRenderer } from './file-diagram-renderer.js'
 import { FileBuilds } from './file-builds.js'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
+import type { WebFileIngress } from './web-file-ingress.js'
 import type { WebUrlIngress } from './web-url-ingress.js'
 import { executeBrowserDefaultControl, inspectDefaultBrowser, openDefaultBrowserSettings } from './browser-default.js'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
@@ -298,6 +299,7 @@ export async function registerIpc(args: {
   onRendererUpdateReady?: (token: string) => void
   onRendererStartupFailure?: (input: unknown) => boolean
   webLinks?: WebUrlIngress
+  webFiles?: WebFileIngress
   spatialLinks?: SpatialLinkIngress
   performanceScene?: PerformanceSceneOwner
   appMemory?: import('./app-memory-evidence.js').AppMemoryEvidenceOwner
@@ -1430,6 +1432,7 @@ export async function registerIpc(args: {
       async (capsuleId, operationId, signal) => await args.runtime.callOriginalCore('local', 'capsule.open', { capsuleId, operationId },
         { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
+    args.webFiles?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance)
   const reportScreenshotIssue = (error: unknown) => {
@@ -2468,6 +2471,7 @@ export async function registerIpc(args: {
       { owner: 'toolkit', dispose: () => toolkit.dispose() },
       { owner: 'spatial-links', dispose: () => args.spatialLinks?.unavailable() },
       { owner: 'web-links', dispose: () => args.webLinks?.unavailable() },
+      { owner: 'web-files', dispose: () => args.webFiles?.unavailable() },
       { owner: 'metrics-listener', dispose: () => { contents.off('destroyed', closeMetrics) } },
       { owner: 'metrics', dispose: () => metrics.dispose() },
       { owner: 'theme-bootstrap', dispose: disposeThemeBootstrap },

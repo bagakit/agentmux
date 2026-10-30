@@ -86,6 +86,7 @@ import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResu
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { openSystemUrlInSurvey } from './lib/survey-system-url'
+import { openSystemFileInSurvey } from './lib/survey-system-file'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
@@ -5355,6 +5356,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return { operation: request.operation, requestId: request.requestId, diskDurability: 'confirmed' as const }
         })()
       : request.operation === 'browser.openFromSystem' ? openSystemUrlInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal)
+      : request.operation === 'browser.openFileFromSystem' ? openSystemFileInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal)
       : request.operation === 'metrics.cache.inspect' || request.operation === 'metrics.cache.reclaim'
         ? (() => { signal?.throwIfAborted(); return { operation: request.operation, observation: api.executeRendererCache({ target: request.target }, request.operation === 'metrics.cache.inspect' ? 'inspect' : 'reclaim') } })()
       : request.operation === 'metrics.renderer'

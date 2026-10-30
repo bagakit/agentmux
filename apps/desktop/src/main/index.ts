@@ -44,6 +44,7 @@ import { singleFlight } from './single-flight.js'
 import { runOwnerDisposals } from './owner-disposal.js'
 import { reportQuitDisposalFailure } from './quit-disposal-failure.js'
 import { SpatialLinkIngress } from './spatial-link-ingress.js'
+import { WebFileIngress, registerSystemWebFileEvents } from './web-file-ingress.js'
 import { WebUrlIngress, receiveDesktopUrl, receiveDesktopUrlArguments } from './web-url-ingress.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowSecurityWebPreferences } from './window-security.js'
@@ -91,7 +92,12 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock()).role === 'secondary') 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
-  const spatialLinks = new SpatialLinkIngress(), webLinks = new WebUrlIngress()
+  const spatialLinks = new SpatialLinkIngress(), webLinks = new WebUrlIngress(), webFiles = new WebFileIngress()
+  registerSystemWebFileEvents(app, webFiles, () => { void app.whenReady().then(async () => {
+    const window = workbenchWindow
+    if (!window) await createWindow()
+    else { if (window.isMinimized()) window.restore(); window.focus() }
+  }) })
   // macOS declares its scheme in the packaged Info.plist; development never takes the user's handler.
   if (app.isPackaged && process.platform !== 'darwin') app.setAsDefaultProtocolClient('amux')
   const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
@@ -202,8 +208,8 @@ function startPrimaryInstance(): void {
     workbenchWindows = windows
     recoverInterface = registerRendererCrashRecovery(window, dialog, () => app.quit(), () => ownerDisposal !== null)
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
-    window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); webLinks.unavailable(); workbenchWindow = null; recoverInterface = null } })
-    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) { spatialLinks.unavailable(); webLinks.unavailable() } })
+    window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); webLinks.unavailable(); webFiles.unavailable(); workbenchWindow = null; recoverInterface = null } })
+    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => { if (mainFrame) { spatialLinks.unavailable(); webLinks.unavailable(); webFiles.unavailable() } })
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
@@ -270,7 +276,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks,
+    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })

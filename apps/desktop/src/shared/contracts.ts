@@ -1201,9 +1201,9 @@ export type ExecutorDetection = { input: ExecutorDetectionInput } & (
 export type HostExecutorInventory = import('@agentmux/core').AgentMuxHostExecutorInventory & { routeHostId: string }
 export type HostExecutorConfiguration = import('@agentmux/core').AgentMuxHostExecutorConfiguration & { routeHostId: string }
 
-export type DesktopControlRequest = AgentMuxControlRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest
+export type DesktopControlRequest = AgentMuxControlRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest | import('./system-web-file').SystemWebFileRequest
   | { operation: 'worktree.closeout.prepare'; requestId: string }
-export type DesktopControlResult = AgentMuxControlResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult
+export type DesktopControlResult = AgentMuxControlResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult | import('./system-web-file').SystemWebFileResult
   | { operation: 'worktree.closeout.prepare'; requestId: string; diskDurability: 'confirmed' }
 
 export type DesktopControlResponse =

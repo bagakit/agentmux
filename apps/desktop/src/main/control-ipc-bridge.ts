@@ -12,6 +12,7 @@ import type {
   DesktopControlResponse
 } from '../shared/contracts.js'
 import type { SystemWebUrlRequest, SystemWebUrlResult } from '../shared/system-web-url.js'
+import type { SystemWebFileRequest, SystemWebFileResult } from '../shared/system-web-file.js'
 import { nameChangeRequests } from './name-change-audit.js'
 
 type PendingControl = {
@@ -60,6 +61,7 @@ export class DesktopControlIpcBridge {
   execute(request: AgentMuxControlRequest, signal?: AbortSignal): Promise<AgentMuxControlResult>
   execute(request: MetricsRendererRequest, signal?: AbortSignal): Promise<MetricsRendererResult>
   execute(request: SystemWebUrlRequest, signal?: AbortSignal): Promise<SystemWebUrlResult>
+  execute(request: SystemWebFileRequest, signal?: AbortSignal): Promise<SystemWebFileResult>
   execute(request: Extract<DesktopControlRequest, { operation: 'worktree.closeout.prepare' }>, signal?: AbortSignal): Promise<Extract<DesktopControlResult, { operation: 'worktree.closeout.prepare' }>>
   async execute(request: DesktopControlRequest, signal?: AbortSignal): Promise<DesktopControlResult> {
     if (!this.transport.isAvailable()) {
@@ -82,7 +84,7 @@ export class DesktopControlIpcBridge {
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
-      }, agentMuxControlTimeoutMs(request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' ? 'open.browser' : request.operation))
+      }, agentMuxControlTimeoutMs(request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' || request.operation === 'browser.openFileFromSystem' ? 'open.browser' : request.operation))
       this.pending.set(request.requestId, { request: structuredClone(request),
         nameRequest: nameChangeRequests.getStore(), resolve, reject, timeout })
       signal?.addEventListener('abort', abort, { once: true })
