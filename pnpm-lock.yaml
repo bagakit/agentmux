@@ -704,6 +704,9 @@ importers:
       '@agentmux/identity':
         specifier: workspace:*
         version: link:../identity
+      fs-native-extensions:
+        specifier: 1.5.1
+        version: 1.5.1
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

@@ -60,6 +60,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
-    "@agentmux/identity": "workspace:*"
+    "@agentmux/identity": "workspace:*",
+    "fs-native-extensions": "1.5.1"
   }
 }

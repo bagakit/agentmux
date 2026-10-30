@@ -11,6 +11,8 @@ import { demandExecutionReferences, demandExecutionKey, demandHandoffDestination
 import { mintObjectId } from '@agentmux/identity'
 import { promises as fs, type BigIntStats } from 'node:fs'
 import path from 'node:path'
+import { createRequire } from 'node:module'
+import type { FileHandle } from 'node:fs/promises'
 import {
   DEMAND_RECEIPT_SCHEMA,
   DEMAND_STORE_SCHEMA,
@@ -37,6 +39,8 @@ import { DemandStoreError } from './errors.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
+const requireNative = createRequire(import.meta.url)
+const WRITER_LOCK_MARKER = 'agentmux.demand-writer-lock.v1\n'
 const INITIAL_REVISION = 0
 const queues = new Map<string, Promise<void>>()
 
@@ -44,7 +48,7 @@ const queues = new Map<string, Promise<void>>()
 export class DemandNameChangeError extends DemandStoreError {
   constructor(error: DemandStoreError, readonly nameChange: DemandNameChangeRecord, readonly commitStatus: 'confirmed' | 'not_applied' | 'unknown') {
     super(error.code, error.phase, error.path,
-      `${error.message} ${commitStatus === 'not_applied' ? 'Title change was not applied; its record was not committed.' : commitStatus === 'unknown' ? 'Title snapshot was replaced, but its durable commit is unconfirmed. The operation was not resent.' : 'The failed title attempt was recorded; the previous title is retained.'}`, error)
+      `${error.message} ${commitStatus === 'not_applied' ? 'Title change was not applied; its record was not committed.' : commitStatus === 'unknown' ? 'Title snapshot was replaced, but its durable commit is unconfirmed. The operation was not resent.' : nameChange.status === 'failed' ? 'The failed title attempt was recorded; the previous title is retained.' : 'The title change was durably recorded; inspect the original operation.'}`, error)
   }
 }
 
@@ -636,12 +640,11 @@ export class DemandStore {
   async inspectDispatch(id: string, operationId: string): Promise<DemandDispatch | null> {
     nonEmptyString(operationId, 'dispatch.operationId')
     return enqueue(this.root, async () => {
-      const release = await this.acquireLock()
-      try {
+      return this.withWriterLock(async () => {
         const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
         await this.confirmSnapshot()
         return clone(demand.dispatches?.find(dispatch => dispatch.operationId === operationId) ?? null)
-      } finally { await release() }
+      })
     })
   }
 
@@ -726,12 +729,11 @@ export class DemandStore {
   async inspectDelegation(id: string, operationId: string): Promise<DemandDelegation | null> {
     nonEmptyString(operationId, 'delegation.operationId')
     return enqueue(this.root, async () => {
-      const release = await this.acquireLock()
-      try {
+      return this.withWriterLock(async () => {
         const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
         await this.confirmSnapshot()
         return clone(demand.delegations?.find(entry => entry.operationId === operationId) ?? null)
-      } finally { await release() }
+      })
     })
   }
 
@@ -1109,25 +1111,23 @@ export class DemandStore {
   async inspectActivity(id: string, operationId: string): Promise<DemandActivityInspection> {
     nonEmptyString(operationId, 'activity.operationId')
     return enqueue(this.root, async () => {
-      const release = await this.acquireLock()
-      try {
+      return this.withWriterLock(async () => {
         const snapshot = await this.readSnapshot()
         const demand = findDemand(snapshot, id, this.storePath)
         await this.confirmSnapshot()
         return { demandId: id, operationId, activity: clone(demand.activities.find(activity => activity.operationId === operationId) ?? null), diskDurability: 'confirmed' }
-      } finally { await release() }
+      })
     })
   }
 
   async readActivities(id: string): Promise<DemandActivityRead> {
     return enqueue(this.root, async () => {
-      const release = await this.acquireLock()
-      try {
+      return this.withWriterLock(async () => {
         const snapshot = await this.readSnapshot()
         const demand = findDemand(snapshot, id, this.storePath)
         await this.confirmSnapshot()
         return { demandId: id, activities: clone(demand.activities), diskDurability: 'confirmed' }
-      } finally { await release() }
+      })
     })
   }
 
@@ -1177,8 +1177,8 @@ export class DemandStore {
     }
     return enqueue(this.root, async () => {
       await fs.mkdir(this.root, { recursive: true })
-      const release = await this.acquireLock()
-      try {
+      let confirmedTitle: DemandNameChangeRecord | undefined
+      try { return await this.withWriterLock(async () => {
         let snapshot = await this.readSnapshot()
         const operationId = titleAttempt?.operationId ?? requestedOperationId ?? mintObjectId()
         if (activityAttempt) {
@@ -1205,6 +1205,7 @@ export class DemandStore {
               ownerRevision: null, reason: failure.message }, 'unknown')
           }
           if (previous.status === 'failed') throw new DemandNameChangeError(new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, previous.reason ?? 'The original title attempt failed.'), clone(previous), 'confirmed')
+          confirmedTitle = clone(previous)
           return { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: previous.ownerRevision!, demand: clone(original!), nameChange: clone(previous), replayed: true }
         }
         const startedAt = Date.now()
@@ -1249,6 +1250,7 @@ export class DemandStore {
           const applied = error.replacementApplied
           throw new DemandNameChangeError(error, { ...nameChange, ownerRevision: null, status: applied ? 'unknown' : 'failed', actual: applied ? demand.title : original!.title, reason: error.message }, applied ? 'unknown' : 'not_applied')
         }
+        confirmedTitle = nameChange ? clone(nameChange) : undefined
         const published = projectNameHistory(snapshot)
         const result: DemandReceipt = { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: snapshot.revision,
           demand: { ...clone(demand), activities: projectActivities(demand.activities, new Map(snapshot.nameHistory.map(change => [change.id, change]))) }, ...(nameChange ? { nameChange: clone(nameChange) } : {}) }
@@ -1260,32 +1262,94 @@ export class DemandStore {
         }
         if (failure) throw new DemandNameChangeError(failure, clone(nameChange!), 'confirmed')
         return result
-      } finally {
-        await release()
+      }) } catch (error) {
+        // The name owner already confirmed this exact business record. A later
+        // physical close error cannot turn an applied title into not_applied.
+        if (confirmedTitle && error instanceof DemandStoreError && error.phase === 'lock')
+          throw new DemandNameChangeError(error, confirmedTitle, 'confirmed')
+        throw error
       }
     })
   }
 
+  /** Keep original business receipts when closing the physical owner also fails. */
+  private async withWriterLock<T>(operation: () => Promise<T>): Promise<T> {
+    const release = await this.acquireLock()
+    let failure: unknown
+    try { return await operation() } catch (error) { failure = error; throw error } finally {
+      try { await release() } catch (closeError) {
+        if (failure instanceof Error) {
+          Object.defineProperty(failure, 'cleanup', { configurable: true, value: [closeError] })
+          failure.message += ' Closing the Demand writer lock also failed; the original operation receipt is retained.'
+        } else { throw closeError }
+      }
+    }
+  }
+
   private async acquireLock(): Promise<() => Promise<void>> {
     const startedAt = Date.now()
-    while (true) {
-      try {
-        const handle = await fs.open(this.lockPath, 'wx', 0o600)
-        await handle.writeFile(`${process.pid}\n${Date.now()}\n`, 'utf8')
-        await handle.sync()
-        await handle.close()
-        return async () => {
-          await fs.rm(this.lockPath, { force: true })
+    let handle: FileHandle | undefined
+    let temporary: string | undefined
+    let locked = false
+    try {
+      const native: { tryLock(fd: number): boolean } = requireNative('fs-native-extensions')
+      while (!handle) {
+        try { handle = await fs.open(this.lockPath, 'r+') } catch (error) {
+          if (!isNodeError(error, 'ENOENT')) throw error
+          const candidate = `${this.lockPath}.tmp-${process.pid}-${mintObjectId()}`
+          handle = await fs.open(candidate, 'wx+', 0o600)
+          temporary = candidate
+          // Publish only a complete, already locked inode. A crash before link
+          // leaves no authoritative path; after link, the kernel releases it.
+          await handle.writeFile(WRITER_LOCK_MARKER, 'utf8')
+          await handle.sync()
+          if (!native.tryLock(handle.fd)) throw new Error('Could not lock the private Demand writer inode')
+          locked = true
+          try { await fs.link(temporary, this.lockPath) } catch (error) {
+            if (!isNodeError(error, 'EEXIST')) throw error
+            await handle.close()
+            handle = undefined
+            locked = false
+            await fs.rm(temporary)
+            temporary = undefined
+            continue
+          }
+          const directory = await fs.open(this.root, 'r')
+          try { await directory.sync() } finally { await directory.close() }
+          await fs.rm(temporary)
+          temporary = undefined
         }
-      } catch (error) {
-        if (!isNodeError(error, 'EEXIST')) {
-          throw new DemandStoreError('WRITE_FAILED', 'lock', this.lockPath, `Could not acquire Demand lock at ${this.lockPath}`, error)
+        // The marker is immutable. No protocol owner replaces or unlinks its
+        // path; old writers never publish it and may still hold an unknown lock.
+        const marker = Buffer.alloc(Buffer.byteLength(WRITER_LOCK_MARKER) + 1)
+        const { bytesRead } = await handle.read(marker, 0, marker.length, 0)
+        if (marker.subarray(0, bytesRead).toString('utf8') !== WRITER_LOCK_MARKER) {
+          throw new DemandStoreError('WRITE_FAILED', 'lock', this.lockPath,
+            'Demand writer ownership is unknown: the lock has an old, incomplete or unrecognized format. Lock and data are retained; ordinary reads remain available. Retry after the original writer releases its lock.')
         }
+      }
+      while (!locked && !native.tryLock(handle.fd)) {
         if (Date.now() - startedAt >= this.lockTimeoutMs) {
-          throw new DemandStoreError('LOCK_TIMEOUT', 'lock', this.lockPath, `Timed out waiting for Demand lock at ${this.lockPath}`)
+          throw new DemandStoreError('LOCK_TIMEOUT', 'lock', this.lockPath, `Timed out waiting for Demand lock at ${this.lockPath}; retry the original operation.`)
         }
         await delay(this.lockRetryMs)
       }
+      const acquired = handle
+      return async () => {
+        // Stable pathname: close (including process death) releases ownership.
+        // Unlink would split waiters on this inode from the next opener.
+        try { await acquired.close() } catch (error) {
+          throw new DemandStoreError('WRITE_FAILED', 'lock', this.lockPath,
+            'Could not close the Demand writer lock. A completed write is not undone; inspect the original operation before retrying.', error)
+        }
+      }
+    } catch (error) {
+      const failures: unknown[] = [error]
+      try { await handle?.close() } catch (cleanup) { failures.push(cleanup) }
+      try { if (temporary) await fs.rm(temporary, { force: true }) } catch (cleanup) { failures.push(cleanup) }
+      if (failures.length === 1 && error instanceof DemandStoreError) throw error
+      throw new DemandStoreError('WRITE_FAILED', 'lock', this.lockPath, `Could not acquire Demand lock at ${this.lockPath}`,
+        failures.length === 1 ? error : new AggregateError(failures, 'Demand lock acquisition and cleanup failed'))
     }
   }
 
