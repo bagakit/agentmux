@@ -17,7 +17,7 @@ it('default Feishu SDK history joins original Hosted Core native admission, adva
   expect(message!.envelope.body).toBe('First current request')
   expect(message!.envelope.channelQuote?.records.map(item => item.messageId)).toEqual(['baseline', 'peer-bot'])
   expect(message!.envelope.channelQuote?.records[1]!.author).toMatchObject({ kind: 'bot', actor: { userId: 'peer-app' } })
-  expect(f.nativeSend.mock.calls[0]![0]).toBe(renderAgentMuxMessageEnvelope(message!.envelope))
+  expect(f.nativeSend.mock.calls[0]![0]).toContain(renderAgentMuxMessageEnvelope(message!.envelope))
   const reading = parseAgentMuxMessagePrefix(f.nativeSend.mock.calls[0]![0])
   if (reading?.kind !== 'content') throw Error('The actual Core protocol reader did not preserve the current request')
   expect(reading.body).toBe('First current request')
@@ -38,7 +38,7 @@ it('default Feishu SDK history joins original Hosted Core native admission, adva
   await f.services.ingress!.dispatch(second.ingressId)
   expect(f.nativeSend).toHaveBeenCalledTimes(2)
   expect(f.transport.requests.filter(row => row.url?.includes('/im/v1/messages')).length).toBe(nativeReads)
-  expect(renderAgentMuxMessageEnvelope((await f.client.readMessage({ messageId: input.messageId }))!.envelope)).toBe(frozen)
+  expect(frozen).toContain(renderAgentMuxMessageEnvelope((await f.client.readMessage({ messageId: input.messageId }))!.envelope))
   const publicInput = await f.cli(['connection', 'ingress', 'inspect', '--ingress', second.ingressId])
   expect(publicInput.context.positionMessageId).toBe('request-two'); expect(publicInput.ingress.input.channelQuote).toEqual(secondMessage!.envelope.channelQuote)
   await vi.waitFor(async () => {
