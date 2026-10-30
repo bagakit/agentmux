@@ -41,6 +41,16 @@ not an additional full-suite or release gate.
 
 ## Connection ownership
 
+The locked Feishu SDK's native pong watchdog keeps the first outstanding ping
+window through the [pnpm dependency patch](../../patches/@larksuiteoapi__node-sdk@1.76.0.patch).
+Upstream 1.76.0 reset that same timer on every outbound ping, so a native
+`PingInterval` shorter than the configured response budget could postpone recovery
+forever without any inbound frame. Both published CJS/ESM entries retain the SDK's
+single timer: any inbound clears it; later outbound pings do not extend it.
+The [real socket cases](test/sdk-short-ping-consumer.test.ts) protect no-close loss
+and slow, healthy inbound. This adapter-local observation policy does not prove
+message custody or Agent health and adds no Host recovery scheduler.
+
 `ConnectionHost` owns connection configuration and its original configuration
 operations in SQLite. Configuration and operation receipt commit together. A
 connection's application domain, App ID and adapter identity cannot be reassigned;
