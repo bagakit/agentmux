@@ -35,17 +35,18 @@ function originalPromptRequest(session: AgentMuxAgentSession | null | undefined,
       ...(saved.explicit ? { allowUncertainTurn: true as const } : {}) }
   }
   const admission = session?.promptCompletionAdmission, intent = admission?.intent, message = intent?.message
+  // The frozen wire is owned by Core; compare the original producer facts separately.
   if (!session || session.agentSessionId !== agentSessionId || !attempt || attempt.phase !== 'unknown'
     || !attempt.operationId || !attempt.runId || session.run.runId !== attempt.runId
     || admission?.submissionId !== attempt.operationId || admission.notApplied === true
     || intent?.run.runId !== attempt.runId || !attempt.draft.trim()
-    || intent.prompt !== expandSemanticReferences(attempt.draft) || message?.userContent !== intent.prompt
-    || message.authorHuman !== true || message.authorAgentSessionId !== undefined || intent.agentMuxNote !== attempt.agentMuxNote
+    || message?.userContent !== expandSemanticReferences(attempt.draft)
+    || message.authorHuman !== true || message.authorAgentSessionId !== undefined
     || message.systemContext !== (attempt.agentMuxNote?.trim() ? attempt.agentMuxNote : undefined)
     || (intent.execution !== 'default' && intent.execution !== 'immediate')) return undefined
   // The Host supplies this call's authenticated device; Core checks it against the original message.
   return { agentSessionId: session.agentSessionId, operationId: attempt.operationId, expectedRun: { ...intent.run },
-    afterSubmissionId: attempt.operationId, prompt: intent.prompt, authorHuman: true as const, execution: intent.execution,
+    afterSubmissionId: attempt.operationId, prompt: message.userContent, authorHuman: true as const, execution: intent.execution,
     ...(attempt.moteSource ? { moteSource: structuredClone(attempt.moteSource) } : {}),
     ...(attempt.agentMuxNote === undefined ? {} : { agentMuxNote: attempt.agentMuxNote }),
     ...(intent.execution === 'immediate' ? { allowUncertainTurn: true } : {}) }
