@@ -1,14 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { basename, dirname, join, relative, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { AgentMuxRpcService, observeAgent, type ContinuousProgressObservation } from '@agentmux/core'
 import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
 import { createHostGoals } from '../src/goals.js'
+import { bundleGoalOwnerStoreReader } from './goal-owner-recovery-mutations.mjs'
 
 const context = { principal: { kind: 'user' as const, id: 'original-user' } }
 const cleanup: Array<() => Promise<unknown>> = []
@@ -67,11 +68,18 @@ it('public create retries the original paused record until its real file write i
   expect(saves).toHaveBeenCalledTimes(3)
   // Reopen before owner disposal: its final flush cannot manufacture the ACK under test.
   expect(await ContinuousProgressLoopStore.forUserData(f.root).load()).toEqual([result.loop])
-  const loader = resolve('apps/host/test/goal-owner-recovery-node-loader.mjs')
-  const store = pathToFileURL(resolve('apps/host/src/continuous-progress-loop-store.ts')).href
-  const { stdout } = await promisify(execFile)(process.execPath, ['--experimental-transform-types', '--import', loader, '--input-type=module', '--eval',
-    `const { ContinuousProgressLoopStore } = await import(${JSON.stringify(store)}); console.log(JSON.stringify(await ContinuousProgressLoopStore.forUserData(process.argv[1]).load()))`, f.root], { env: process.env, timeout: 20_000 })
-  expect(JSON.parse(stdout)).toEqual([result.loop])
+  const repository = resolve(import.meta.dirname, '../../..'), facts = process.env.AGENTMUX_GOAL_OWNER_RECOVERY_FACTS
+  const base = resolve(repository, '.local/state/mobile-independent-host/review-remediation/goal-owner-recovery')
+  await mkdir(base, { recursive: true })
+  const directory = facts ? resolve(dirname(facts), basename(facts, '-facts.jsonl') + '-reader') : await mkdtemp(join(base, 'reader-'))
+  const reader = await bundleGoalOwnerStoreReader(repository, directory)
+  const { stdout } = await promisify(execFile)(process.execPath, [reader.file, f.root], { env: process.env, timeout: 20_000 })
+  const reopened = JSON.parse(stdout)
+  expect(reopened.pid).not.toBe(process.pid)
+  expect(reopened.loops).toEqual([result.loop])
+  if (facts) await appendFile(facts, JSON.stringify({ phase: 'independent-store-reader', pid: reopened.pid, parentPid: process.pid,
+    provenance: relative(repository, reader.provenance), provenanceSHA256: createHash('sha256').update(await readFile(reader.provenance)).digest('hex'),
+    file: reader.record.file, bundleSHA256: reader.record.bundleSHA256 }) + '\n')
   expect(f.statusAgent).toHaveBeenCalledTimes(1)
   expect(f.submitAgentPrompt).not.toHaveBeenCalled()
 }, 30_000)

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtime-bundle.mjs'
+import { workspaceSourceExport } from '../../../packages/core/test/helpers/workspace-source-export.mjs'
+import { bundlePrivateNodeSource } from '../../../packages/core/test/helpers/private-node-source-bundle.mjs'
 
 export const goalOwnerIdentitySource = '.local/state/mobile-independent-host/review-remediation/goal-owner-recovery/source-runtime/identity-runtime-source.mjs'
 export async function prepareGoalOwnerIdentity(root) {
@@ -13,24 +14,17 @@ export async function prepareGoalOwnerIdentity(root) {
 /** Resolve only declared workspace exports to their source, never local dist. */
 export function goalOwnerRecoverySource(root, specifier) {
   if (specifier === '@agentmux/identity/runtime-source') return resolve(root, goalOwnerIdentitySource)
-  const matched = /^@agentmux\/([^/]+)(.*)$/u.exec(specifier)
-  if (!matched) return
-  const directory = resolve(root, matched[1] === 'host' ? 'apps/host' : 'packages/' + matched[1])
-  const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')), key = matched[2] ? '.' + matched[2] : '.'
-  let value = manifest.exports?.[key], substitution
-  if (!value) for (const [pattern, item] of Object.entries(manifest.exports ?? {}).sort(([a], [b]) => b.length - a.length)) {
-    const [prefix, suffix] = pattern.split('*')
-    if (pattern.includes('*') && key.startsWith(prefix) && key.endsWith(suffix)) {
-      value = item; substitution = key.slice(prefix.length, suffix ? -suffix.length : undefined); break
-    }
-  }
-  let entry = typeof value === 'string' ? value : value?.types ?? value?.import
-  if (substitution !== undefined) entry = entry?.replace('*', substitution)
-  if (typeof entry !== 'string') throw Error('The declared Goal proof workspace export is unavailable: ' + specifier)
-  const file = resolve(directory, entry.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.d\.ts$/u, '.ts').replace(/\.js$/u, '.ts'))
-  if (existsSync(file)) return file
-  if (existsSync(file.replace(/\.ts$/u, '.tsx'))) return file.replace(/\.ts$/u, '.tsx')
-  throw Error('The declared Goal proof workspace source is unavailable: ' + specifier)
+  return workspaceSourceExport(root, specifier)
+}
+
+/** Compile the original Store and its declared source dependencies once; the
+ * independent process executes that Store, without cold-loading the Core barrel. */
+export async function bundleGoalOwnerStoreReader(root, directory) {
+  await mkdir(directory, { recursive: true })
+  const entry = resolve(directory, 'entry.mjs'), file = resolve(directory, 'reader.mjs')
+  await writeFile(entry, "import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store';\nconsole.log(JSON.stringify({ pid: process.pid, loops: await ContinuousProgressLoopStore.forUserData(process.argv[2]).load() }));\n")
+  return bundlePrivateNodeSource({ root, entry, file, sourceExport: id => goalOwnerRecoverySource(root, id),
+    instrument: (original, path) => instrumentGoalOwnerRecovery(original, path, 'node-process') })
 }
 
 const manager = 'apps/host/src/continuous-progress-loop-manager.ts'
