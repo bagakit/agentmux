@@ -4,6 +4,7 @@ import { speakerOfUserMessage, type ConversationSpeaker } from '@agentmux/client
 import { speakerOf } from './conversation-speaker'
 import { createRulerScale } from './activity-ruler'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
+import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import type { ConversationAxisItem, RulerAxisItem } from './conversation-axis'
 
 export type RulerRecord = {
@@ -88,7 +89,8 @@ export function rulerRecordQuote(item: RulerAxisItem): string | null {
   if ('contentParts' in record && Array.isArray(record.contentParts)) {
     let quote = ''
     for (const part of record.contentParts) if (part.kind === 'text' || part.kind === 'reasoning') {
-      quote += (quote ? '\n' : '') + part.text.slice(0, 280 - quote.length)
+      const text = part.kind === 'text' ? sessionHistoryTextForReading(part) : part.text
+      quote += (quote ? '\n' : '') + text.slice(0, 280 - quote.length)
       if (quote.length >= 280) break
     }
     return quote.trim() || ('title' in record ? record.title ?? null : null)

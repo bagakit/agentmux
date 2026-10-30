@@ -9,7 +9,7 @@
  * 绝不再从 `source=user` 或原生角色盲目猜测 Human。
  */
 
-import type { AgentProviderId, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentProviderId, AgentSessionUserMessage, AgentSessionHistoryCollaboration } from '@agentmux/core'
 import { channelActorKey, type ChannelActorProfileObservation, type ChannelConversationProfileObservation } from '@agentmux/core/connections'
 import { parseAgentMuxMessagePrefix, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ReactNode } from 'react'
@@ -34,6 +34,8 @@ export type ConversationSpeaker = {
   /** 这个说话人的稳定标识。agent 为其 agentSessionId，unknown 为 UNKNOWN_SPEAKER_ID。 */
   id: string
   external?: Extract<AgentSessionUserMessage['author'], { kind: 'external' }>
+  /** Original Provider reading facts, never an AgentMux Session identity or input grant. */
+  nativeCollaboration?: Extract<AgentSessionHistoryCollaboration, { kind: 'message' }>
 }
 
 /**
@@ -51,7 +53,7 @@ export const AGENTMUX_SYSTEM_SPEAKER_ID = 'agentmux'
 
 /** User-requested display default; recorded authorship remains unchanged. */
 export function speakerForDisplay(speaker: ConversationSpeaker): ConversationSpeaker {
-  return speaker.role === 'unknown' ? { role: 'human', id: HUMAN_SPEAKER_ID } : speaker
+  return speaker.role === 'unknown' && !speaker.nativeCollaboration ? { role: 'human', id: HUMAN_SPEAKER_ID } : speaker
 }
 
 /** Current metadata, never a snapshot of the sender at delivery time. */
@@ -95,6 +97,8 @@ export function createSpeakerResolver(options?: {
   currentSession?: { id: string; label?: string; providerId?: AgentProviderId } | undefined
 }): DescribeSpeaker {
   return (recordedSpeaker: ConversationSpeaker) => {
+    if (recordedSpeaker.nativeCollaboration) return { name: recordedSpeaker.nativeCollaboration.sender ?? 'Native sender not recorded',
+      providerId: recordedSpeaker.nativeCollaboration.source.providerId }
     const speaker = speakerForDisplay(recordedSpeaker)
     if (speaker.role === 'human') return { name: 'You' }
     if (speaker.role === 'external') {

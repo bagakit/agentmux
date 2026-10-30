@@ -23,6 +23,7 @@ import { useSidebarResize } from '../hooks/useSidebarResize'
 import { AgentAvatar } from './AgentAvatar'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
+import { useChannelActorProfiles, channelProfileKey } from '../lib/use-channel-actor-profiles'
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { currentConversationSenderDetails, currentConversationSpeakerMetadata, type FocusDescribeSpeaker } from '../lib/conversation-sender-details'
 import { agentDisplayName } from '../lib/workbench-tabs'
@@ -68,7 +69,14 @@ const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 
 // Subscribe only to the canonical authors in this mounted input surface. Session
 // output/status and other senders cannot re-render it or start avatar reads.
-function useFocusSpeakerResolver(messages: readonly ConversationRecord[]): FocusDescribeSpeaker {
+function useFocusSpeakerResolver(messages: readonly ConversationRecord[], visible: boolean): FocusDescribeSpeaker {
+  const external = useMemo(() => messages.flatMap(message => message.author?.kind === 'external' ? [message.author] : []), [messages])
+  const owner = useMemo(() => {
+    const records = messages.filter(message => message.author?.kind === 'external'), first = records[0]
+    return first?.executionHostId && first.sourceHostId && records.every(record => record.executionHostId === first.executionHostId && record.sourceHostId === first.sourceHostId)
+      ? { hostId: first.executionHostId, sourceHostId: first.sourceHostId } : undefined
+  }, [messages])
+  const profiles = useChannelActorProfiles(external, owner, visible)
   const ids = useMemo(() => [...new Set(messages.flatMap(message => message.speaker?.role === 'agent' ? [message.speaker.id] : []))], [messages])
   const selectFacts = useMemo(() => {
     let previous: unknown[] = [], result: unknown[] = []
@@ -95,7 +103,7 @@ function useFocusSpeakerResolver(messages: readonly ConversationRecord[]): Focus
   return useMemo(() => {
     const state = useAppStore.getState()
     const metadataById = new Map(ids.map(id => [id, currentConversationSpeakerMetadata(id, { sessions: state.sessions, config: state.config, workspaces: state.config?.workspaces ?? [], agentNames: state.agentNames, timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, spaceObjectIcons: state.spaceObjectIcons })]))
-    const original = createSpeakerResolver({ lookupAgent: id => {
+    const original = createSpeakerResolver({ lookupExternal: author => profiles.get(channelProfileKey(author)), lookupAgent: id => {
       const metadata = metadataById.get(id)
       return metadata ? { ...metadata, readDetails: () => {
         const current = useAppStore.getState()
@@ -104,13 +112,13 @@ function useFocusSpeakerResolver(messages: readonly ConversationRecord[]): Focus
     } })
     // Shared ConversationMessage already accepts an avatar ReactNode; Space facts stay Desktop-owned.
     return speaker => {
-      if (speaker.role === 'unknown') return { name: 'Author unknown' }
+      if (speaker.role === 'unknown' && !speaker.nativeCollaboration) return { name: 'Author unknown' }
       const described = original(speaker)
       const mote = speaker.role === 'agent' ? metadataById.get(speaker.id)?.mote : undefined
       return mote ? { ...described, mote, avatar: <ConversationMessageAvatar speaker={speaker} name={described.name} mote={mote}
         providerId={described.providerId} project={described.project} /> } : described
     }
-  }, [ids, facts])
+  }, [ids, facts, profiles])
 }
 
 type LatestInputs = { messages: readonly ConversationRecord[]; loading: boolean; error: Error | null; observationError: Error | null; windowFrozen: boolean; windowIncomplete: boolean; refresh(): Promise<void> }
@@ -261,7 +269,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
     (!recordedMessageTracks?.has(item.id) || recordedMessageTracks.get(item.id) === track.key) && item.recordedAt !== undefined && Number.isFinite(item.recordedAt)
     && item.recordedAt >= window.start && item.recordedAt <= window.end && item.recordedAt <= observedNow) }, [captured, nativeMessages, recordedMessageTracks, track.key, window, now])
   const messageGroups = useMemo(() => focusMessageMarkers(messages, window, scaleWidth), [messages, window, scaleWidth])
-  const describeMessageSpeaker = useFocusSpeakerResolver(messages)
+  const describeMessageSpeaker = useFocusSpeakerResolver(messages, observing)
   const position = focusTimePosition(now, window)
   const liveNow = context?.processState === 'running' && position >= 0 && position <= 100
   const activitySemantic = session?.kind === 'agent' ? observeAgentSession(session, now).semantic : context?.activitySemantic
@@ -392,11 +400,11 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         const described = describeMessageSpeaker(speaker)
         const anchorOffset = (anchorFraction - fraction) * scaleWidth
         return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-conversation-item-refs={JSON.stringify(records.map(conversationItemRef))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={startAt} data-message-through={endAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
-          style={{ left: `${fraction * 100}%` }} data-anchor-fraction={anchorFraction} data-display-fraction={fraction} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${recordCounts}. Open recorded messages.` : message.role === 'interaction' ? `Recorded interaction in ${name} at ${clock(message.recordedAt!)}` : message.role === 'observation' ? `${COLLECTED_REPLY_TITLE} · ${name} at ${clock(message.recordedAt!)}, author ${speaker.role === 'unknown' ? 'not recorded' : speaker.id}` : speaker.role === 'system' ? `System message in ${name} at ${clock(message.recordedAt!)}, from ${speaker.id}` : speaker.role === 'agent' ? `${message.input ? 'Agent input' : 'Agent reply'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
+          style={{ left: `${fraction * 100}%` }} data-anchor-fraction={anchorFraction} data-display-fraction={fraction} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${recordCounts}. Open recorded messages.` : speaker.nativeCollaboration ? `Native collaboration in ${name} at ${clock(message.recordedAt!)}, from ${described.name}` : speaker.role === 'external' ? `External message in ${name} at ${clock(message.recordedAt!)}, from ${described.name}, channel ${speaker.external?.actor.application.domain ?? 'not recorded'}, conversation ${speaker.external?.externalConversationId ?? 'not recorded'}` : message.role === 'interaction' ? `Recorded interaction in ${name} at ${clock(message.recordedAt!)}` : message.role === 'observation' ? `${COLLECTED_REPLY_TITLE} · ${name} at ${clock(message.recordedAt!)}, author ${speaker.role === 'unknown' ? 'not recorded' : speaker.id}` : speaker.role === 'system' ? `System message in ${name} at ${clock(message.recordedAt!)}, from ${speaker.id}` : speaker.role === 'agent' ? `${message.input ? 'Agent input' : 'Agent reply'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
 
           onMouseEnter={event => { if (!multiple) onPreview(message, event.currentTarget, false) }} onMouseLeave={() => onDismiss(message.id)}
           onFocus={event => { if (!multiple && !(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false, true) }} onBlur={() => onDismiss(message.id)}
-          onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{Math.abs(anchorOffset) > .1 ? <span className="timeline-marker-stem" data-anchor-side={anchorOffset < 0 ? 'left' : 'right'} style={{ left: `calc(50% + ${Math.min(0, anchorOffset)}px)`, width: `${Math.abs(anchorOffset)}px` }} aria-hidden="true" /> : null}{multiple ? <><span className="recent-focus__message-count">{records.length > 99 ? '99+' : records.length}</span>{recordKind !== 'system-message' && recordKind !== 'observation' && recordKind !== 'interaction' ? <span className="recent-focus__message-direction" aria-hidden="true">{recordKind === 'mixed' ? <ThemeConversationMixedIcon size={7} /> : observations ? <ThemeObjectHistoryIcon size={12} /> : replies ? <ThemeConversationOutgoingIcon size={7} /> : <ThemeConversationIncomingIcon size={7} />}</span> : null}</> : <><span className="recent-focus__message-avatar"><ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={16} /></span>{recordKind !== 'system-message' && recordKind !== 'observation' && recordKind !== 'interaction' ? <span className="recent-focus__message-direction" aria-hidden="true">{replies ? <ThemeConversationOutgoingIcon size={7} /> : <ThemeConversationIncomingIcon size={7} />}</span> : null}</>}</button>
+          onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{Math.abs(anchorOffset) > .1 ? <span className="timeline-marker-stem" data-anchor-side={anchorOffset < 0 ? 'left' : 'right'} style={{ left: `calc(50% + ${Math.min(0, anchorOffset)}px)`, width: `${Math.abs(anchorOffset)}px` }} aria-hidden="true" /> : null}{multiple ? <><span className="recent-focus__message-count">{records.length > 99 ? '99+' : records.length}</span>{recordKind !== 'system-message' && recordKind !== 'observation' && recordKind !== 'interaction' ? <span className="recent-focus__message-direction" aria-hidden="true">{recordKind === 'mixed' ? <ThemeConversationMixedIcon size={7} /> : observations ? <ThemeObjectHistoryIcon size={12} /> : replies ? <ThemeConversationOutgoingIcon size={7} /> : <ThemeConversationIncomingIcon size={7} />}</span> : null}</> : <><span className="recent-focus__message-avatar"><ConversationSpeakerAvatar speaker={speaker} name={described.name} channelProfile={described.channelProfile} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={16} /></span>{recordKind !== 'system-message' && recordKind !== 'observation' && recordKind !== 'interaction' ? <span className="recent-focus__message-direction" aria-hidden="true">{replies ? <ThemeConversationOutgoingIcon size={7} /> : <ThemeConversationIncomingIcon size={7} />}</span> : null}</>}</button>
       })}
     </div>
   </div>
@@ -967,7 +975,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
   const previewMessages = useMemo(() => preview?.message ? [...inputMessages, preview.message] : inputMessages, [inputMessages, preview?.message])
-  const describePreviewSpeaker = useFocusSpeakerResolver(previewMessages)
+  const describePreviewSpeaker = useFocusSpeakerResolver(previewMessages, documentVisible && Boolean(preview && !preview.event))
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null); setDateDraft(null); setDateError(null); setDateChoice(null) }
   const inspectDate = (value: string) => {
     setDateDraft(value); setDateChoice(null)

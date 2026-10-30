@@ -3,6 +3,7 @@ import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-ma
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { conversationAxis, clusterConversationAxis, type ConversationAxisCluster, type RulerAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
+import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { rulerRecordQuote } from '../lib/conversation-ruler'
 import * as Menu from './HoverDropdownMenu'
 
@@ -269,7 +270,7 @@ export function ClusterEntries({ members, describe, onSelect, conversationSessio
             </span>
             {keyframes?.has(mark.item.id) ? <img className="conversation-axis__entry-keyframe" src={keyframes.get(mark.item.id)} alt="" aria-hidden="true" /> : null}
             <span className="conversation-axis__entry-text">
-              <span className="conversation-axis__entry-name">{name}<small>{speaker?.role === 'agent' ? speaker.id === conversationSessionId ? 'This agent · ' : 'Sender · ' : ''}Record {mark.index + 1}</small></span>
+              <span className="conversation-axis__entry-name">{name}<small>{speaker?.nativeCollaboration ? 'Native collaboration · ' : speaker?.role === 'agent' ? speaker.id === conversationSessionId ? 'This agent · ' : 'Sender · ' : ''}Record {mark.index + 1}</small></span>
               {quote ? <span className="conversation-axis__entry-quote">{quote}</span> : null}
             </span>
           </Menu.Item>
@@ -283,7 +284,9 @@ function AxisAvatar({ speaker, identity, size }: {
   speaker: ConversationSpeaker; identity: ReturnType<DescribeSpeaker>; size: number
 }) {
   return <span className="conversation-axis__avatar">
-    {identity.avatar ?? <ConversationMessageAvatar speaker={speaker} name={identity.name} size={size}
-      providerId={identity.providerId} project={identity.project} />}
+    <ChannelProfileAvatar url={identity.channelProfile?.profile?.avatarUrl} size={size}>
+      {identity.avatar ?? <ConversationMessageAvatar speaker={speaker} name={identity.name} size={size}
+        providerId={identity.providerId} project={identity.project} />}
+    </ChannelProfileAvatar>
   </span>
 }

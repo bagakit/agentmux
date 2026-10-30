@@ -31,7 +31,11 @@ export function describeConversationWindow(reading: ReturnType<typeof projectCor
 function describeReading(reading: ReturnType<typeof projectCoreReading>) {
   const presentSources = conversationSourcePresenter(reading.timeline)
   const describe = (record: AgentConversationRecord): ConversationRecord => {
-    const speaker = record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
+    const collaboration = record.original.kind === 'native' && record.original.item.collaboration?.kind === 'message'
+      ? record.original.item.collaboration : undefined
+    const speaker = collaboration ? { role: 'unknown' as const,
+      id: JSON.stringify(['native-collaboration', collaboration.source.providerId, collaboration.source.nativeSessionId, collaboration.sender ?? null]), nativeCollaboration: collaboration }
+      : record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
       : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
     return { ...record, ...(record.original.kind === 'deferred' ? {} : { sources: presentSources(record) }), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
   }

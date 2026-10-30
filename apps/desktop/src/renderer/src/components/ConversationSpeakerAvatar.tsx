@@ -6,6 +6,8 @@ import { speakerColorHue } from '../lib/conversation-avatar-color'
 import { AgentProviderIcon } from './AgentProviderIcon'
 import type { MoteConversationIdentity } from '../lib/mote-conversation-identity'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
+import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
+import type { ChannelActorProfileObservation } from '@agentmux/core/connections'
 
 const ThemeObjectUserIcon = semanticIconComponent('object.user')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
@@ -66,6 +68,7 @@ export function ConversationSpeakerAvatar({
   providerId,
   mote,
   humanAvatar,
+  channelProfile,
   size = 16
 }: {
   /** 身份：唯一的身份输入，来自 `speakerOf(item)`。role 选画法，id 派生颜色。 */
@@ -77,12 +80,14 @@ export function ConversationSpeakerAvatar({
   mote?: MoteConversationIdentity | undefined
   /** Local human presentation only; it never changes the recorded speaker identity. */
   humanAvatar?: string | undefined
+  channelProfile?: ChannelActorProfileObservation | undefined
   /** 边长。轴上取 16、对话正文取 20，两者都有生产调用者，所以两条尺寸路径都要可用。 */
   size?: number
 }) {
   // glyph 比圆片内缩，留出圆片的边距；下限钳到 8px，避免极小尺寸下 glyph 归零。
   const glyphSize = Math.max(8, size - 4)
   const isAgent = speaker.role === 'agent'
+  const native = speaker.nativeCollaboration
   // 圆片外框尺寸随 size 走（验收 4 的可观测信号之一）；agent 再挂上 id 派生的色相自定义属性，
   // CSS 据此在固定饱和/明度带内取色（见 conversation-avatar.css）。
   const style = {
@@ -92,9 +97,9 @@ export function ConversationSpeakerAvatar({
   } as CSSProperties
 
   return (
-    <span
+    <ChannelProfileAvatar url={speaker.role === 'external' ? channelProfile?.profile?.avatarUrl : undefined} size={size}><span
       className={`conversation-avatar conversation-avatar--${speaker.role}${isAgent && mote ? ' conversation-avatar--mote' : ''}`}
-      data-speaker-avatar={isAgent && mote ? 'mote' : undefined}
+      data-speaker-avatar={native ? 'native-collaboration' : isAgent && mote ? 'mote' : undefined}
       data-speaker-id={speaker.id}
       role="img"
       aria-label={name}
@@ -107,6 +112,8 @@ export function ConversationSpeakerAvatar({
         // 兜底），所以这里不需要把「查不到」编码成一个假值。`exactOptionalPropertyTypes` 下显式
         // `undefined` 不能喂给 optional 属性，故按缺席传，而不是退回 `?? ''` 那种假值。
         <AgentProviderIcon {...(providerId === undefined ? {} : { providerId })} size={glyphSize} />
+      ) : native ? (
+        <AgentProviderIcon providerId={native.source.providerId} size={glyphSize} />
       ) : speaker.role === 'human' ? (
         humanAvatar ? <img src={humanAvatar} alt="" aria-hidden="true" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
           : <ThemeObjectUserIcon size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
@@ -115,6 +122,6 @@ export function ConversationSpeakerAvatar({
       ) : (
         <ThemeStatusNeutralIcon size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       )}
-    </span>
+    </span></ChannelProfileAvatar>
   )
 }
