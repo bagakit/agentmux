@@ -719,12 +719,13 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     source: 'user',
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
-    ...(source.history === undefined ? {} : { history: normalizeHistoryMetadata(source.history) }),
+    ...(source.history === undefined ? {} : { history: normalizeSessionHistoryMetadata(source.history) }),
     ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) })
   }
 }
 
-function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
+/** The single reading projection shared by durable history and strict public decoding. */
+export function normalizeSessionHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
   const source = record(value, 'Session history metadata')
   const providerId = string(source.providerId, 'history.providerId')
   const handle = source.nativeHandle === undefined ? undefined : nativeHandle(source.nativeHandle)
@@ -751,7 +752,7 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
 
 /** Project only reading identity, never Hook secrets, permissions or lifecycle controls. */
 export function sessionHistoryMetadata(session: AgentMuxStoredAgentSession): AgentSessionHistoryMetadata {
-  return normalizeHistoryMetadata({ ...session,
+  return normalizeSessionHistoryMetadata({ ...session,
     ...(session.nativeConfirmation ? { previousNativeHandle: session.nativeConfirmation.previousNativeHandle } : {}) })
 }
 
@@ -782,7 +783,7 @@ function activeSessionHistorySource(value: unknown, id: string): AgentSessionHis
     throw new AgentMuxError('Native/activity facts do not match this Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   return { agentSessionId, hostId: string(source.hostId, 'hostId'), state: 'active',
-    history: normalizeHistoryMetadata({ ...source,
+    history: normalizeSessionHistoryMetadata({ ...source,
       // The preceding source comes only from its original confirmation receipt.
       previousNativeHandle: confirmation?.previousNativeHandle }) }
 }
@@ -1542,15 +1543,15 @@ export function parseAgentCreationSpatialIntent(value: unknown): import('./types
 
 export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgentSession['creation']> {
   const creation = record(value, 'creation'), initialPrompt = creation.initialPrompt
-  if (!['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(String(initialPrompt)) ||
-    creation.agentMuxContext !== undefined && !['confirmed', 'unconfirmed', 'unknown'].includes(String(creation.agentMuxContext)) ||
+  if (typeof initialPrompt !== 'string' || !['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(initialPrompt) ||
+    creation.agentMuxContext !== undefined && (typeof creation.agentMuxContext !== 'string' || !['confirmed', 'unconfirmed', 'unknown'].includes(creation.agentMuxContext)) ||
     creation.intentDigest !== undefined && (typeof creation.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.intentDigest)) ||
     creation.executorRevision !== undefined && (typeof creation.executorRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.executorRevision)) ||
     creation.persistence !== undefined && creation.persistence !== 'unconfirmed') throw new AgentMuxError('Invalid creation receipt.', 'INVALID_AGENT_SESSION_STORE')
   let failure: NonNullable<AgentMuxAgentSession['creation']>['failure']
   if (creation.failure !== undefined) {
     const p = record(creation.failure, 'creation.failure')
-    if (Object.keys(p).some(key => !['step', 'code', 'message'].includes(key)) || !['session-commit', 'hook-bind', 'handshake'].includes(String(p.step))) throw new AgentMuxError('Invalid creation failure step.', 'INVALID_AGENT_SESSION_STORE')
+    if (Object.keys(p).some(key => !['step', 'code', 'message'].includes(key)) || typeof p.step !== 'string' || !['session-commit', 'hook-bind', 'handshake'].includes(p.step)) throw new AgentMuxError('Invalid creation failure step.', 'INVALID_AGENT_SESSION_STORE')
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],

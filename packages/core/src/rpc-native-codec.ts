@@ -85,7 +85,7 @@ import { AgentMuxError, parseAgentMuxStorageFailure } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
-import { normalizeInteractionOperationReceipt, normalizeAgentSession, parseAgentCreationFact } from './agent-session-store.js'
+import { normalizeInteractionOperationReceipt, normalizeAgentSession, normalizeSessionHistoryMetadata, parseAgentCreationFact } from './agent-session-store.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -482,17 +482,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (descriptor.state === 'retired') count(descriptor.retiredAt)
         else if (descriptor.retiredAt !== undefined) fail()
         if (descriptor.pendingReopen !== undefined) { const pending = record(descriptor.pendingReopen, ['operationId']); if (pending.operationId !== undefined) string(pending.operationId) }
-        if (descriptor.history !== undefined) {
-          const h = record(descriptor.history, ['providerId', 'executorId', 'workspacePath', 'createdAt', 'nativeHandle', 'observedNativeHandle', 'previousNativeHandle'])
-          for (const key of ['providerId', 'executorId', 'workspacePath']) string(h[key]); count(h.createdAt)
-          for (const key of ['nativeHandle', 'observedNativeHandle', 'previousNativeHandle'] as const) if (h[key] !== undefined) {
-            const handle = record(h[key], ['kind', 'providerId', 'adapterId', 'sessionId', 'transcriptPath'])
-            member(handle.kind, ['provider', 'acp']); string(handle.sessionId)
-            if (handle.kind === 'provider') { string(handle.providerId); if (handle.providerId !== h.providerId || handle.adapterId !== undefined) fail() }
-            else { string(handle.adapterId); if (handle.providerId !== undefined) fail() }
-            if (handle.transcriptPath !== undefined) string(handle.transcriptPath)
-          }
-        }
+        if (descriptor.history !== undefined && !isDeepStrictEqual(
+          normalizeSessionHistoryMetadata(descriptor.history), descriptor.history)) fail()
         const contextSession = (value: unknown) => {
           const session = parseRpcAgentSession(value)
           if (session.hostId !== p.sourceHostId || session.agentSessionId !== expected.agentSessionId || descriptor.state !== 'active') fail()
