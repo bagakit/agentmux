@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
-import type { AgentProviderId, DurableAgentMuxMessage } from '@agentmux/core'
+import type { AgentProviderId, DurableAgentMuxMessage, MoteInputInspection } from '@agentmux/core'
 import type { ConversationRef } from '@agentmux/core/conversation'
 import type { AmuxObjectLinkTarget } from '@agentmux/core/sharing'
 import type { BrowserInputImageReference } from '@agentmux/core/browser-input-context'
@@ -12,6 +12,8 @@ export type CapsuleEmbedInput = { uri: string; capsuleId: string; title: string;
 export type MarkdownDiagramInput = { code: string; language: 'mermaid' | 'dot' | 'gv' | 'drawio' | 'plantuml'; visible: boolean }
 export type BrowserSelectionImageInput = { reference: BrowserInputImageReference; visible: boolean; interactive: boolean }
 export type NoteImageInput = { resource: NoteResource | null; src: string; alt: string; title?: string }
+/** Accepted conversation provenance and its original client route are independent facts. */
+export type MoteInputNoticeOwner = { routeHostId: string; sourceHostId: string; recipientAgentSessionId: string }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
@@ -34,6 +36,10 @@ export type ClientUiPlatform = {
   renderIcon(name: ClientUiIconName, size: number): ReactNode
   /** Read one original Inbox message at its recorded Host/participant. Never sends or acknowledges input. */
   readA2AMessage?(reference: ConversationRef, messageId: string, notificationId?: string): Promise<DurableAgentMuxMessage | null>
+  /** Read an original member observation at the qualified notification's Host. Never submits input. */
+  readMoteInput?(owner: MoteInputNoticeOwner, memberAgentSessionId: string, observationId: string): Promise<MoteInputInspection | null>
+  /** Current exact member metadata, independent of a Mote's aggregated conversation identity. No IO. */
+  moteMemberName?(owner: MoteInputNoticeOwner, memberAgentSessionId: string): string | undefined
   /** Optional inline presentation of an exact Core object URI. The host owns facts and navigation. */
   renderObjectLink?(reference: ObjectLinkReference): ReactNode
   /** Explicit block-level Capsule embedding; the host owns native document isolation and lifecycle. */
@@ -50,6 +56,8 @@ export type ClientUiPlatform = {
 }
 
 const PlatformContext = createContext<ClientUiPlatform | null>(null)
+
+export function useMoteInputReader(): ClientUiPlatform['readMoteInput'] { return useContext(PlatformContext)?.readMoteInput }
 
 export function useA2AMessageReader(): ClientUiPlatform['readA2AMessage'] {
   return useContext(PlatformContext)?.readA2AMessage

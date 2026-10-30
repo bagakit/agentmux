@@ -18,6 +18,8 @@ import { ConversationResourceImage, type ConversationHistoryResourceReader, type
 import { ConversationResourceText } from './ConversationResourceText.js'
 import { ConversationA2AReferences } from './ConversationA2AReferences.js'
 import { ConversationNotificationDetails } from './ConversationNotificationDetails.js'
+import { ConversationMoteNotice } from './ConversationMoteNotice.js'
+import { parseMoteInputNotice } from '@agentmux/core/mote-input-notice'
 import { ConversationInputText } from './ConversationInputText.js'
 import { ConversationResourceFile } from './ConversationResourceFile.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
@@ -238,6 +240,8 @@ export function ConversationMessage({
     const parsed = parseAgentMuxMessagePrefix(firstText)
     return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
   }, [contentBoundary, hasQuestionAnswers, a2aNotificationId, firstText])
+  const moteNotice = useMemo(() => isSystemContext && a2aNotificationId && contentBoundary === 'wire' && firstText !== undefined
+    ? parseMoteInputNotice(firstText) : null, [isSystemContext, a2aNotificationId, contentBoundary, firstText])
   const a2aReferenceScope = a2aNotificationId ? itemRef : undefined
   const primaryNotice = isSystemContext && a2aNotificationId && prefix?.kind === 'references' ? prefix : null
   const systemSummary = prefix?.kind === 'references' ? `${prefix.references.length} A2A Inbox reference${prefix.references.length === 1 ? '' : 's'}`
@@ -385,7 +389,7 @@ export function ConversationMessage({
 
   return (
     <ContentCopyIntentContext.Provider value={messageCopy.cancelPreparation}><div
-      className={primaryNotice ? "conversation-a2a-notice" : "log-turn"}
+      className={primaryNotice || moteNotice ? "conversation-a2a-notice" : "log-turn"}
       data-compact={compact || undefined}
       data-process-content={processContent || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
@@ -410,7 +414,10 @@ export function ConversationMessage({
       data-trace-only={isTraceOnly ? 'true' : undefined}
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
     >
-      {primaryNotice ? <>
+      {moteNotice ? <>
+        <ConversationMoteNotice identity={readingIdentity} notice={moteNotice} scope={a2aReferenceScope} routeHostId={executionHostId} active={active} time={card.time} />
+        {parts.length > 1 ? renderBody() : null}
+      </> : primaryNotice ? <>
         <div ref={bodyRef} className="conversation-a2a-notice__messages" onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
         <ConversationA2AReferences references={primaryNotice.references} scope={a2aReferenceScope} active={active} notificationId={a2aNotificationId}
           {...(describeSpeaker ? { describeSpeaker } : {})} workspaceRoot={workspaceRoot} homeDir={homeDir}
@@ -429,7 +436,7 @@ export function ConversationMessage({
         </>} />}
       {a2aNotificationId ? <ConversationNotificationDetails key={JSON.stringify([recordSourceKey, a2aNotificationId])} notificationId={a2aNotificationId} protocol={firstText}
         records={notificationRecords} locatedSourceKey={locatedSourceKey}>
-        {primaryNotice ? <>{createdAt === undefined ? null : <p>通知记录时间 · {renderClock(createdAt)}</p>}{metadata}{messageDetails}{card.actions}{card.feedback}</> : null}
+        {primaryNotice || moteNotice ? <>{createdAt === undefined ? null : <p>通知记录时间 · {renderClock(createdAt)}</p>}{metadata}{messageDetails}{card.actions}{card.feedback}</> : null}
       </ConversationNotificationDetails> : null}
       {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
@@ -437,13 +444,13 @@ export function ConversationMessage({
   )
   function renderBody(contentId?: string): ReactNode {
     return hasContent ? discloseBody(
-        <div ref={primaryNotice ? undefined : bodyRef} id={contentId} className="log-turn__body"
+        <div ref={primaryNotice || moteNotice ? undefined : bodyRef} id={contentId} className="log-turn__body"
           onMouseUp={canAnnotate && !primaryNotice ? captureSelection : undefined} onKeyUp={canAnnotate && !primaryNotice ? captureSelection : undefined}>
           {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} reveal={located} answers={questionAnswers!}
             inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> : null}
           {parts.map((part, index) => {
-            if (primaryNotice && index === 0) return null
+            if ((primaryNotice || moteNotice) && index === 0) return null
             const key = partKeys[index]!
             return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply visible={active} reveal={located} key={key}
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}

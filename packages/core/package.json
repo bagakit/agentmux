@@ -35,6 +35,10 @@
       "types": "./dist/mote-input-source.d.ts",
       "import": "./dist/mote-input-source.js"
     },
+    "./mote-input-notice": {
+      "types": "./dist/mote-input-notice.d.ts",
+      "import": "./dist/mote-input-notice.js"
+    },
     "./browser-page-capability": {
       "types": "./dist/browser-page-capability.d.ts",
       "import": "./dist/browser-page-capability.js"

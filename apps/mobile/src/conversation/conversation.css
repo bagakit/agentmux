@@ -7,6 +7,10 @@
 .mobile-conversation__composer .composer { min-width: 0; }
 .mobile-conversation button { touch-action: manipulation; }
 .mobile-conversation .message-disclosure > summary { min-height: 44px; }
+/* Only the new Mote notice consumer uses these touch targets; native summary markers stay intact. */
+.mobile-conversation .conversation-a2a-notice:has(> .conversation-mote-notice) :is(button, summary) { min-width: 44px; min-height: 44px; }
+.mobile-conversation .conversation-a2a-notice:has(> .conversation-mote-notice) summary { box-sizing: border-box; padding-block: 12px; }
+.mobile-conversation .conversation-a2a-notice:has(> .conversation-mote-notice) .conversation-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .mobile-conversation .conversation-submission-record:has(> .message-disclosure[open]) { width: calc(100% - var(--sp-4)); }
 .mobile-conversation :is(.log-turn__action, .log-turn__id-copy, .conversation-input-details__toggle) > svg { width: 14px; height: 14px; }
 .mobile-conversation .log-turn__sender-id code { align-self: center; }

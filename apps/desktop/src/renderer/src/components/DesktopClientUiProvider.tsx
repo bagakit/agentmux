@@ -16,6 +16,7 @@ import { NoteImageResource } from './NoteImageResource'
 import { BrowserSelectionImage } from './BrowserSelectionImage'
 import { ConversationCapsule } from './ConversationCapsule'
 import { api } from '../lib/api'
+import { createDesktopMoteInputReader, desktopMoteMemberName } from '../lib/mote-input-reader'
 
 const DiagramFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DiagramFilePreview })))
 const DotFilePreview = lazy(() => import('./file-preview/DotFilePreview').then(module => ({ default: module.DotFilePreview })))
@@ -76,6 +77,11 @@ const desktopPlatform: ClientUiPlatform = {
     const result = await api.sessions.readMessage(reference, messageId, notificationId)
     if (result.hostId !== reference.hostId) throw new Error('The original message Host could not be confirmed. The reference is retained.')
     return result.message
+  },
+  readMoteInput: createDesktopMoteInputReader((reference, observationId) => api.sessions.inspectMoteInput(reference, observationId)),
+  moteMemberName: (owner, memberAgentSessionId) => {
+    const state = useAppStore.getState()
+    return desktopMoteMemberName(owner, memberAgentSessionId, state.sessions, state.agentNames)
   },
   renderObjectLink: reference => <InlineObjectLink {...reference} />,
   renderCapsuleEmbed: input => <ConversationCapsule key={input.uri} {...input} />,

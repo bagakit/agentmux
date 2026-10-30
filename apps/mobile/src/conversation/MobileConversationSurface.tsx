@@ -11,6 +11,7 @@ import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDe
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { currentAgentSemanticStatus, nativeTargetSourceUnconfirmed } from '@agentmux/core/agent-status'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createMobileMoteInputReader } from './mote-input-reader'
 import { createPortal } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentInputMoteSource, AgentSessionUserMessage } from '@agentmux/core'
@@ -53,11 +54,12 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   toolbarTarget?: HTMLElement | null
   visible?: boolean
   displayName?: string
+  moteMemberName?: ClientUiPlatform['moteMemberName'] | undefined
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
-  const conversationPlatform = useMemo(() => ({ ...platform,
+  const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
       // The selected hosted client owns the local namespace; it cannot route another Host or participant.
       if (!client) throw new Error('The selected Host is unavailable. The original message reference is retained.')
@@ -264,6 +266,12 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     return client.sessionHistoryResource(agentSessionId, input)
   }, [client, agentSessionId])
   const pageClient = reading.pageOwner?.client, pageSessionId = reading.pageOwner?.agentSessionId
+  const readMoteInput = useMemo(() => createMobileMoteInputReader(pageClient ?? null, pageSessionId ?? null), [pageClient, pageSessionId])
+  const conversationPlatform = useMemo(() => ({ ...conversationIoPlatform,
+    readMoteInput,
+    moteMemberName: (...args: Parameters<NonNullable<ClientUiPlatform['moteMemberName']>>) =>
+      pageClient === client && pageSessionId === agentSessionId ? moteMemberName?.(...args) : undefined
+  }), [conversationIoPlatform, readMoteInput, moteMemberName, pageClient, pageSessionId, client, agentSessionId])
   const readNativeResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
     if (!pageClient || !pageSessionId) throw new Error('原阅读来源尚未确认，原资源引用和草稿保留。')
     return pageClient.sessionHistoryResource(pageSessionId, input)

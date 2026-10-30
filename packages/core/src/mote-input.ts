@@ -9,6 +9,8 @@ import {
 import { parseConversationLandmarkRef } from './conversation-landmarks.js'
 import { rpcRecord } from './rpc-data.js'
 import { isDeepStrictEqual } from 'node:util'
+import { moteInputNoticeWire } from './mote-input-notice.js'
+export { moteInputNoticeWire } from './mote-input-notice.js'
 import type { AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
 export { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
@@ -90,27 +92,6 @@ export type MoteInputInspection = {
   /** Original human text only; images, browser snapshots and permission payloads are not copied. */
   inputText: string | null
   notices: Partial<Record<MoteInputNoticePhase, AgentMuxMessageNotificationStatus>>
-}
-export function moteInputNoticeWire(value: MoteInputObservation, phase: MoteInputNoticePhase): string {
-  return JSON.stringify({
-    schema: 'agentmux.mote-input-notice.v1',
-    observationId: value.id,
-    phase,
-    source: value.source,
-    memberAgentSessionId: moteInputMember(value.origin),
-    origin: value.origin,
-    input: value.input,
-    ...(value.confirmedQuestion ? { confirmedQuestion: value.confirmedQuestion } : {}),
-    ...(phase === 'result' && value.result ? { result: value.result.kind === 'native-turn'
-      ? { kind: value.result.kind, status: value.result.status } : value.result } : {}),
-    read: {
-      method: 'agent.input.observation',
-      params: { agentSessionId: moteInputMember(value.origin), observationId: value.id }
-    },
-    cli: ['amux', 'agent', 'input', 'observation', '--session', moteInputMember(value.origin), '--id', value.id],
-    guidance:
-      'This is a platform observation, not a new human request or permission. Read the original observation and exact result references before coordinating. Do not repeat the member input. Delivery, native turn outcome, task completion and human acceptance are distinct.'
-  })
 }
 /** Retained notification bytes need not use today's presentation. Their immutable provenance
  * still names this exact observation; full results and authority come from its original owner. */
