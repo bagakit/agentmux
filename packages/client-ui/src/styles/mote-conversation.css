@@ -39,3 +39,30 @@
 .mote-conversation__reading-tools[open] { padding-block-end: 8px; }
 
 .mote-work-event__summary > .mote-work-event__time { font-size: var(--fs-meta, 12px); font-weight: 400; color: var(--text-3); flex-shrink: 0; }
+
+.mote-threads__search { display: flex; align-items: center; gap: 8px; min-height: var(--mote-thread-control-height, 32px); margin-block: 4px 8px; padding-inline: 10px; border-radius: var(--radius-sm, 6px); background: var(--surface-2); color: var(--text-3); }
+.mote-threads__search > svg { flex-shrink: 0; }
+.mote-threads__search input { flex: 1; min-width: 0; min-height: var(--mote-thread-control-height, 32px); border: 0; background: transparent; padding: 4px 0; font-size: var(--mote-thread-input-font, var(--fs-body, 14px)); }
+.mote-threads__filters { display: flex; gap: 4px; overflow-x: auto; margin-block: 0 8px; padding-block: 2px; }
+.mote-threads__filters button { appearance: none; flex-shrink: 0; min-height: var(--mote-thread-control-height, 30px); border: 1px solid transparent; border-radius: var(--radius-sm, 6px); padding: 4px 10px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }
+.mote-threads__filters button[aria-pressed="true"] { background: var(--surface-3); border-color: var(--line-soft); color: var(--text); }
+.mote-threads__filters button:focus-visible, .mote-threads__search:focus-within, .mote-conversation__related > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mote-threads__scope { margin: 4px 0 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.5; }
+.mote-threads__list { margin: 0; padding: 0; list-style: none; }
+.mote-threads__list > li[hidden] { display: none; }
+.mote-threads__list--history > li { padding-inline-start: 10px; border-inline-start: 1px solid var(--line-soft); }
+.mote-threads__day { margin: 16px 0 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); font-weight: 500; }
+.mote-conversation__navigation button, .mote-work-event button, .mote-conversation__link, .mote-work-event summary { min-width: var(--mote-thread-control-height, 30px); min-height: var(--mote-thread-control-height, 30px); }
+.mote-work-event summary { display: flex; align-items: center; cursor: pointer; width: fit-content; }
+.mote-work-event__disclosure { width: 14px; text-align: center; }
+.mote-conversation__related { margin-block: 14px 4px; border-block-start: 1px solid var(--line-soft); }
+.mote-conversation__related > summary { display: flex; align-items: center; gap: 8px; min-height: var(--mote-thread-control-height, 34px); padding: 6px 4px; color: var(--text-2); font-size: var(--fs-meta, 12px); cursor: pointer; list-style: none; }
+.mote-conversation__related > summary::-webkit-details-marker { display: none; }
+.mote-conversation__related-count { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.mote-conversation__related-chevron { margin-inline-start: auto; flex-shrink: 0; }
+.mote-conversation__related[open] > summary .mote-conversation__related-chevron { transform: rotate(90deg); }
+.mote-conversation__related-body[hidden] { display: none; }
+.mote-conversation__source { margin-block: 4px 12px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-conversation__source > summary { cursor: pointer; padding: 8px 0; }
+.mote-conversation__source > summary span { font-size: var(--fs-micro, 11px); margin-inline-start: 8px; }
+.mote-conversation__source > .mote-conversation__muted { margin-top: 0; }
