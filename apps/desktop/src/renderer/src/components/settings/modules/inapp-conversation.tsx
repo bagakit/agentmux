@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useContext, useMemo } from 'react'
 import { ClientUiProvider, useClientUiPlatform } from '@agentmux/client-ui/platform'
 import { semanticIconComponent, SemanticIcon } from '@agentmux/client-ui/icons'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
@@ -6,6 +6,7 @@ import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-c
 import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import { APP_APPEARANCE_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../../../shared/contracts'
 import type { SettingsModule } from '../settings-catalog'
+import { DocumentationNavigation } from '../../documentation/DocumentationNavigation'
 import '../inapp-conversation-settings.css'
 
 export const inappConversationSettingsModule = {
@@ -23,6 +24,7 @@ export const inappConversationSettingsModule = {
   ],
   savedSummary: () => 'Conversation view and shared preferences',
   Pane({ config, onNavigate }) {
+    const documentation = useContext(DocumentationNavigation)!
     const host = useClientUiPlatform()
     const platform = useMemo(() => ({ ...host, renderMessageAvatar: () => <SemanticIcon name="object.conversations" size={13} aria-hidden="true" /> }), [host])
     const completion = resolveComposerInputConfig(config.messageToolCompletion)
@@ -67,7 +69,7 @@ export const inappConversationSettingsModule = {
         <p className="settings-group-note">Read the existing keyboard bindings and supported message formats.</p>
         <div className="settings-workflows__inline-action">
           <button type="button" className="small-button" onClick={() => onNavigate('keyboard-shortcuts')}>Open Keyboard shortcuts</button>
-          <button type="button" className="small-button" onClick={() => onNavigate('amux-protocols')}>Open amux Protocols</button>
+          <button type="button" className="small-button" onClick={() => documentation.open()}>Open amux Protocols</button>
         </div>
       </section>
     </div>

@@ -22,6 +22,8 @@ import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
 import { ToolkitStatusBar } from './components/toolkit/ToolkitStatusBar'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
+import { DocumentationNavigation, useDocumentationOwner } from './components/documentation/DocumentationNavigation'
+import { DocumentationOverlay } from './components/documentation/DocumentationOverlay'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { AgentInformationPreviewHost } from './components/AgentInformationPreview'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -106,6 +108,7 @@ export function App() {
 }
 
 function DesktopApp() {
+  const documentation = useDocumentationOwner()
   const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const navigateSettings = useCallback((request: SettingsNavigationRequest): void => {
@@ -666,6 +669,7 @@ function DesktopApp() {
   return (
     <GitHistoryProvider workspace={gitWorkspace}><WorkbenchWindowNotices />
     <SettingsNavigation.Provider value={settingsNavigation}>
+    <DocumentationNavigation.Provider value={documentation.navigation}>
     <SpaceContentPresentationContext.Provider value={spaceContent}>
     <WindowSidebarLayoutContext.Provider value={contentSidebars}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
@@ -790,6 +794,7 @@ function DesktopApp() {
           onClose={closeSettings}
         />
       ) : null}
+      {documentation.opening ? <DocumentationOverlay opener={documentation.opening.opener} onClose={documentation.close} /> : null}
       <footer className="window-status-bar">
         <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={settingsOpen} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
@@ -813,6 +818,7 @@ function DesktopApp() {
     </ExecutorIdentityContext.Provider>
     </WindowSidebarLayoutContext.Provider>
     </SpaceContentPresentationContext.Provider>
+    </DocumentationNavigation.Provider>
     </SettingsNavigation.Provider>
     </GitHistoryProvider>
   )

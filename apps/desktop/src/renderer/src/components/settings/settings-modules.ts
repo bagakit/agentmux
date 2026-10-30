@@ -13,7 +13,6 @@ import { promptsSettingsModule } from './modules/prompts'
 import { messageToolSettingsModule } from './modules/message-tool'
 import { a2aSettingsModule } from './modules/a2a'
 import { automationSettingsModule } from './modules/automation'
-import { amuxProtocolsSettingsModule } from './modules/amux-protocols'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
@@ -45,7 +44,6 @@ export const settingsModules = [
   a2aSettingsModule,
   automationSettingsModule,
   promptsSettingsModule,
-  amuxProtocolsSettingsModule,
   moteSettingsModule,
   motePromotionSettingsModule,
   spaceSettingsModule,

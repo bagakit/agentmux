@@ -1,0 +1,13 @@
+.documentation-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; width: min(1120px, calc(100vw - 48px)); height: min(860px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); padding: 0; overflow: hidden; }
+.documentation-dialog__header { display: flex; align-items: flex-start; gap: var(--sp-4); flex: none; padding: var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.documentation-dialog__header > div { min-width: 0; flex: 1; }
+.documentation-dialog__symbol { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border: 1px solid var(--green-line); border-radius: var(--radius); color: var(--green); background: var(--green-bg); }
+.documentation-dialog__eyebrow { display: block; margin-bottom: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.documentation-dialog__header h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.4; }
+.documentation-dialog__header p { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; }
+.documentation-dialog__header > button { flex: none; }
+@media (max-width: 620px) {
+  .documentation-dialog { width: calc(100vw - 24px); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); }
+  .documentation-dialog__header { padding: var(--sp-4); gap: var(--sp-3); }
+  .documentation-dialog__symbol { width: 36px; height: 36px; }
+}
