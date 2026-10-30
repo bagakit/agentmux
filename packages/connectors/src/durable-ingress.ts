@@ -913,10 +913,10 @@ export class DurableIngressHost implements ConnectionIngressPort {
       if (input.source.kind === 'context-observation') {
         action = this.endContextObservation(input, selected.record)
       }
-      const inspection = input.source.kind === 'context-observation' ? await this.inspect({ ingressId: input.ingressId })
+      const inspection = input.source.kind === 'context-observation' ? undefined
         : input.source.kind === 'firstsave' ? await this.ensureOriginalInput(selected.record)
-        : input.source.kind === 'received' ? await this.dispatchOriginal(input.ingressId, undefined, true, selected.preparationRevision ?? input.source.preparationRevision + 1) : await this.inspect({ ingressId: input.ingressId })
-      if (inspection.inputReceipt && input.source.kind !== 'context-observation') {
+        : await this.dispatchOriginal(input.ingressId, undefined, true, selected.preparationRevision ?? input.source.preparationRevision + 1)
+      if (inspection?.inputReceipt) {
         action = this.transaction(() => {
           const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
           const actions = JSON.parse(String(row.rejoin_json)) as Record<string, IngressRejoinRecord>
@@ -937,16 +937,24 @@ export class DurableIngressHost implements ConnectionIngressPort {
       const preparation = this.readPreparation(input.ingressId)
       if (record?.state === 'received' && input.source.kind === 'context-observation' &&
         preparation?.observationId === input.source.observationId && preparation.quote) {
-        try { await this.dispatchOriginal(input.ingressId, undefined, true) }
-        catch (error) {
+        void this.dispatchOriginal(input.ingressId, undefined, true).catch(error => {
           // Preserve the completed local action when a distinct strong body/target step remains unavailable.
           const code = error instanceof AgentMuxError ? error.code : 'INGRESS_PREPARATION_UNAVAILABLE'
-          this.transaction(() => { const current = this.read(input.ingressId); if (current?.kind !== 'action' && current?.state === 'received') this.write({ ...current, code }) })
-        }
+          try { this.transaction(() => { const current = this.read(input.ingressId); if (current?.kind !== 'action' && current?.state === 'received') this.write({ ...current, code }) }) }
+          catch { /* The completed local action remains durable even if this later observation cannot be saved. */ }
+        })
       }
     }
-    return parseIngressResult('connection.ingress.rejoin', { action, inspection: await this.inspect({ ingressId: input.ingressId },
-      context.authorize ? { authorize: context.authorize } : undefined) }, input)
+    return parseIngressResult('connection.ingress.rejoin', { action, inspection: input.source.kind === 'context-observation' ? this.inspectLocal(input.ingressId)
+      : await this.inspect({ ingressId: input.ingressId }, context.authorize ? { authorize: context.authorize } : undefined) }, input)
+  }
+  /** Local action receipts never wait for a distinct Core observation or body step. */
+  private inspectLocal(ingressId: string): ConnectionIngressInspection {
+    const ingress = this.read(ingressId)
+    if (!ingress || ingress.kind === 'action') fail('INGRESS_REJOIN_SOURCE_UNAVAILABLE')
+    const preparation = this.preparationObservation(ingress), source = this.rejoinSource(ingress), context = this.inspectContext(ingress, null)
+    return parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt: null, observation: ingress.input ? 'unavailable' : 'not-started',
+      ...(preparation ? { preparation } : {}), ...(source ? { rejoinSource: source } : {}), ...(context ? { context } : {}) }, { ingressId })
   }
   private endContextObservation(input: ConnectionIngressRejoinInput, record: ConnectionIngressMessage): ConnectionIngressRejoinAction {
     if (input.source.kind !== 'context-observation') fail('INGRESS_REJOIN_SOURCE_UNAVAILABLE')
