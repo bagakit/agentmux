@@ -23,6 +23,7 @@ const button = (root: ParentNode, label: string) => {
   expect(found, label).toBeDefined(); return found!
 }
 const header = () => app.container.querySelector<HTMLElement>('.mote-space-frame__header [data-mote-cooperation]')!
+const team = () => document.querySelector<HTMLElement>('.mote-cooperation__popover')!
 beforeEach(() => {
   app = createMoteApp()
   const topics = moteTopics.map(topic => topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic,
@@ -41,15 +42,14 @@ afterEach(async () => { await app.dispose() })
 it('the real Space header reveals only this Mote team and its original request without sending input', async () => {
   await app.mount()
   expect(header()).not.toBeNull()
-  expect(header().textContent).toContain('Main Agent')
-  expect(header().textContent).toContain('Ship the target goal')
+  expect(header().querySelector('.mote-cooperation__identity')).toBeNull()
   expect(header().querySelector('[data-mote-team]')).toBeNull()
   expect(button(header(), 'Team work').textContent).toContain('1 needs you')
   await moteClick(button(header(), 'Team work'))
-  const team = header().querySelector('[data-mote-team]')!
-  expect([...team.querySelectorAll('[data-mote-member]')].map(row => row.getAttribute('data-mote-member'))).toEqual([neighborAgent.id, defaultAgent.id])
-  expect(team.textContent).toContain(request.title)
-  expect(team.textContent).not.toContain(customAgent.id)
+  const members = team().querySelector('[data-mote-team]')!
+  expect([...members.querySelectorAll('[data-mote-member]')].map(row => row.getAttribute('data-mote-member'))).toEqual([neighborAgent.id, defaultAgent.id])
+  expect(members.textContent).toContain(request.title)
+  expect(members.textContent).not.toContain(customAgent.id)
   expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
 
@@ -57,11 +57,12 @@ it('the real Space team opens the original member and returns to main without lo
   await app.mount()
   const before = useAppStore.getState()
   await moteClick(button(header(), 'Team work'))
-  await moteClick(button(header(), 'Open Other goal'))
+  await moteClick(button(team(), 'Open Other goal'))
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
-  expect(header().textContent).toContain('Team member')
-  expect(header().textContent).toContain('Other goal')
-  await moteClick(button(header(), 'Return to main Agent'))
+  await moteClick(button(header(), 'Team work'))
+  expect(team().textContent).toContain('Member')
+  expect(team().textContent).toContain('Other goal')
+  await moteClick(button(team(), 'Return to main Agent'))
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: main.tabId, regionId: main.regionId })
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
@@ -87,11 +88,11 @@ it('a stale Run request is not promoted into a current human task and unrelated 
   await app.mount()
   expect(button(header(), 'Team work').textContent).not.toContain('needs you')
   await moteClick(button(header(), 'Team work'))
-  const row = header().querySelector('[data-mote-member="default-agent"]')
+  const row = team().querySelector('[data-mote-member="default-agent"]')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === customAgent.id
     ? { ...session, status: { ...session.status, state: 'error' as const } } : session) })))
-  expect(header().querySelector('[data-mote-member="default-agent"]')).toBe(row)
-  expect(header().querySelectorAll('[data-mote-member]')).toHaveLength(2)
+  expect(team().querySelector('[data-mote-member="default-agent"]')).toBe(row)
+  expect(team().querySelectorAll('[data-mote-member]')).toHaveLength(2)
 })
 
 it('unknown metadata retains the original member and healthy conversation with a local explanation', async () => {
@@ -102,8 +103,9 @@ it('unknown metadata retains the original member and healthy conversation with a
       topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic, readError: 'Original metadata unavailable' } : topic) }
   } }))
   await settleMoteApp()
-  expect(header().querySelectorAll('[data-mote-member]')).toHaveLength(2)
-  expect(header().textContent).toContain('Original metadata unavailable')
+  expect(team().querySelectorAll('[data-mote-member]')).toHaveLength(2)
+  expect(app.container.textContent).toContain('Original metadata unavailable')
+  expect(team().textContent).not.toContain('Original metadata unavailable')
   expect(useAppStore.getState().tabs[defaultTab.id]).toBeDefined()
   expect(app.stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
 })
@@ -139,9 +141,9 @@ it('the Mote team reserves human review for its original Goal owner and keeps fo
   await act(async () => useAppStore.setState({ demands: Object.fromEntries([goal('Human decision', 'human'), goal('Coordinator follow-up', 'manager'),
     goal('Foreign Host decision', 'human', 'different-original-host'), mixed].map(item => [item.id, item])) }))
   await moteClick(button(header(), 'Team work'))
-  expect(header().querySelectorAll('.mote-cooperation__goal')).toHaveLength(1)
-  expect(header().querySelector('.mote-cooperation__goal')?.textContent).toContain('Human decision')
-  expect(header().textContent).not.toContain('Foreign Host decision')
+  expect(team().querySelectorAll('.mote-cooperation__goal')).toHaveLength(1)
+  expect(team().querySelector('.mote-cooperation__goal')?.textContent).toContain('Human decision')
+  expect(team().textContent).not.toContain('Foreign Host decision')
   expect(header().querySelector('.mote-cooperation__team')?.textContent).toContain('2 needs you')
   expect(app.send).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
 })
