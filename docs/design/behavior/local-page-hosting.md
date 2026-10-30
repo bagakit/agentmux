@@ -155,6 +155,8 @@ HITL 让托管页面展示 Agent 需要人查看、选择、填写或确认的�
 
 Capsule 沿既有 [`amux://` 对象链接体系](../../specs/amux-protocol.md#对象链接)，通过 `amux://capsule/<ID>` 按原页面 ID 被引用。打开时由原托管 owner 解析页面、内容和当前服务，再由原展示 owner 选择或恢复合法工作面；复制引用、定位对象、请求服务与获得展示确认分别成立。链接不携带或授予读取、发布、修改、输入或执行权限；名称、内容路径、端口及 Browser ID 都不是页面 ID 的别名。
 
+Browser 中的 Capsule 对象地址与实际文档加载地址分别表达：面向页面对象的引用和复制入口使用原 `amux://capsule/<ID>`，当前 HTTP 端点只说明准确执行 Host 上的访问路径，不能代替可再次解析的页面身份。当前页面路由仍属于原 Browser 导航，不能为携带路径、查询或 fragment 私自扩展对象 URI；对象引用不冒称恢复了某个具体路由。Browser 离开原 Capsule 页面后，保留的容器关联不把新文档冒称为该 Capsule；显示或复制的地址不授予文档注入、输入或执行资格。
+
 对象链接格式、[`AmuxObjectLinkTarget`](../../../packages/core/src/sharing.ts) 及公共 formatter／parser 由原协议 owner 在同一能力交付中扩展并验证，不能让 GUI 或 Toolkit 私自识别另一种 Capsule URI。此处定义目标链接，实际支持仍以源码、运行时发现和真实消费验证为准，不以 PRD 中出现链接代签已安装能力。
 
 公共接入按[统一公共业务服务](public-control.md#对象优先-cli-与统一公共业务服务)与[公共能力贡献约定](../../guides/public-capability-contributions.md)提供同源合同，目标覆盖以下能力：
