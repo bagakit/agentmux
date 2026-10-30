@@ -243,12 +243,12 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     </header>
     <div className="mote-calendar__meta"><span className="mote-calendar__zone">{timezone}</span><span>{source.observed ? source.records.length + ' saved arrangements' : 'Arrangements unconfirmed'}</span></div>
     {mode !== 'upcoming' && occurrences.some(item => item.omittedRepeat) ? <p className="mote-calendar__legend">Minute-based repetitions are not shown individually throughout this view. Open the arrangement to inspect its rule and next due time.</p> : null}
-    {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue ?? scope.topic.readError ?? 'Mote directory scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}</div> : null}
+    {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}</div> : null}
     {navigationIssue ? <p role="status" className="calendar-schedules__notice">{navigationIssue}</p> : null}
-    {mode !== 'upcoming' && source.observed && !source.records.length ? <div className="mote-calendar__empty"><strong>No arrangements yet</strong><p>Choose a date and prepare a reminder for an original discussion.</p></div> : null}
+    {mode !== 'upcoming' && queries.length > 0 && !source.error && source.observed && !source.records.length ? <div className="mote-calendar__empty"><strong>No arrangements yet</strong><p>Choose a date and prepare a reminder for an original discussion.</p></div> : null}
     {mode === 'upcoming' ? <section aria-label="Upcoming arrangements">
       {ordered.length ? <ol className="calendar-schedules__list" aria-label="Upcoming arrangements">{ordered.map(record => row(record))}</ol>
-        : source.observed ? <div className="mote-calendar__empty"><strong>{ended ? 'No upcoming arrangements' : 'Time for a first arrangement'}</strong><p>{ended ? 'Ended arrangements are available below.' : 'Save a reminder or countdown for a Mote discussion. It will appear here.'}</p></div>
+        : queries.length > 0 && !source.error && source.observed ? <div className="mote-calendar__empty"><strong>{ended ? 'No upcoming arrangements' : 'Time for a first arrangement'}</strong><p>{ended ? 'Ended arrangements are available below.' : 'Save a reminder or countdown for a Mote discussion. It will appear here.'}</p></div>
           : <p className="continuous-progress-control__help">{source.error || !queries.length ? 'Arrangements have not been confirmed.' : 'Reading arrangements…'}</p>}
     </section> : <div className="mote-calendar__workspace">
       <div className="mote-calendar__canvas" ref={grid}>

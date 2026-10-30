@@ -10,15 +10,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
-import type { SessionSnapshot } from '../../../shared/contracts'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
-import { sessionPresentationById } from '../lib/session-presentation'
-import { confirmedMoteReference } from '../lib/mote-materials-actions'
 import { documentKey } from '../lib/workbench-tabs'
 import { readMoteMaterial, readMoteBehavior, type SavedMoteBehavior } from '../lib/mote-cooperation'
 import { MOTE_BEHAVIOR_AXES, MOTE_BEHAVIOR_PATH, moteBehaviorIntroduction } from '../lib/mote-behavior'
@@ -28,7 +25,6 @@ import { useWorkspaceFileTree } from './file-tree/useWorkspaceFileTree'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { MoteRenameDialog } from './MoteRenameDialog'
-import { StatusDot } from './StatusDot'
 import { MoteIdeaControls, MoteIdeaFeedbackControl } from './MoteIdeaControls'
 import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { MoteCurrentWork } from './MoteCurrentWork'
@@ -79,32 +75,6 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const iconTarget = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic, bindings), [scope.workspace, scope.topic, bindings])
   const icon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
-  const location = useAppStore(useShallow(state => {
-    const choice = reference === undefined ? state.workbenchSpaceSelection : null
-    const display = reference?.displayWorkspaceId ?? choice?.workspaceId ?? state.activeWorkspaceId
-    const layout = display ? state.layouts[display] : undefined
-    const group = layout?.groups.find(item => item.id === layout.activeGroupId)
-    return { tab: state.tabs[reference?.tabId ?? choice?.tabId ?? group?.activeTabId ?? ''], layout, choice,
-      workspace: state.config?.workspaces.find(item => item.id === scope.workspace.id),
-      topics: state.scratchTopicSnapshots[scope.workspace.id], bindings: state.spaceZoneBindings }
-  }))
-  const sessionId = useMemo(() => {
-    const state = useAppStore.getState(), confirmed = confirmedMoteReference(state, scope, { reference })
-    const region = confirmed ? state.tabs[confirmed.tabId]?.regions[confirmed.regionId] : undefined
-    return region?.kind === 'agent' ? region.sessionId : undefined
-  }, [scope, reference, location])
-  const heldStatus = useRef<{ sessionId: string | undefined; status: Pick<SessionSnapshot['status'], 'state' | 'source'> | undefined } | null>(null)
-  const observedStatus = useAppStore(useShallow(state => {
-    if (!active) return null
-    const session = sessionId ? sessionPresentationById(state.sessions).get(sessionId) : undefined
-    return session ? { state: session.status.state, source: session.status.source } : undefined
-  }))
-  if (observedStatus !== null) heldStatus.current = { sessionId, status: observedStatus }
-  if (!heldStatus.current || heldStatus.current.sessionId !== sessionId) {
-    const session = sessionId ? sessionPresentationById(useAppStore.getState().sessions).get(sessionId) : undefined
-    heldStatus.current = { sessionId, status: session ? { state: session.status.state, source: session.status.source } : undefined }
-  }
-  const status = heldStatus.current.status
   const returnFocus = (invoker: { node: HTMLButtonElement; key: string } | null) =>
     iconTarget && invoker?.key === iconTarget.key && invoker.node.isConnected ? invoker.node : null
   const identity = <>
@@ -115,20 +85,20 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
             setAvatar({ ...iconTarget, name: scope.topic.title })
           }}>
             <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
-              avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} moteSessionId={sessionId}
-              visible={active} moteHostId={scope.workspace.hostId} moteAvailability={sessionId ? 'restoring' : reference === null ? 'restoring' : 'no-agent'} />
+              avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id}
+              visible={active} />
           </button>
           <div><div className="mote-details__name"><button type="button" className="mote-details__full-name" title={scope.topic.title} aria-label={scope.topic.title} aria-expanded={nameOpen} onClick={() => setNameOpen(value => !value)}><strong>{scope.topic.title}</strong></button><button type="button" className="icon-button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
             renameInvoker.current = { node: event.currentTarget, key: scope.topic.id }
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
-          }}><ThemeActionEditIcon size={12} /></button></div><span className="mote-details__status">{status ? <><StatusDot status={status} />{status.state}</> : sessionId || reference === null ? 'Status not confirmed' : 'No Agent selected'}</span></div>
+          }}><ThemeActionEditIcon size={12} /></button></div></div>
         </div>
   </>
   return <section className="mote-details" data-mote-details={scope.topic.id} data-section={discussion ? 'discussion' : section} data-shared-navigation={space ? 'true' : undefined}>
-    {!space ? <div className="mote-details__navigation-bar"><SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
+    {!space ? <div className="mote-details__navigation-bar">{section !== 'profile' ? <strong className="mote-space-frame__name" title={scope.topic.title}>{scope.topic.title}</strong> : null}<SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
       options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
     </div> : null}
-    <header className="mote-details__profile" aria-label="Mote identity">
+    <header className="mote-details__profile" aria-label="Mote identity" hidden={section !== 'profile' || discussion}>
       <div className="mote-details__cover" aria-hidden="true" />{identity}
       {scope.topic.summary ? <div className="mote-details__introduction" data-expanded={introductionOpen || scope.topic.summary.length <= 160}>
         <p>{scope.topic.summary}</p>
@@ -262,9 +232,9 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
       {!sharedQuestion ? <section className="mote-profile__start" aria-label="Work together">
         <MoteFirstCooperation scope={scope} reference={reference} disclosure />
       </section> : null}
-      <MotePrivateChat scope={scope} active={profileActive} reference={reference} onOpenPath={onOpenPath} />
       <details className="mote-profile__preferences" onToggle={event => setPreferencesOpen(event.currentTarget.open)}>
-        <summary>Connection &amp; preferences<ThemeNavigationDownIcon size={14} /></summary>
+        <summary>Connections &amp; cooperation<ThemeNavigationDownIcon size={14} /></summary>
+        <MotePrivateChat scope={scope} active={profileActive && preferencesOpen} reference={reference} onOpenPath={onOpenPath} />
         <MoteQuickMode scope={scope} reference={reference} onOpenPath={onOpenPath} active={profileActive && preferencesOpen} />
         <MoteConnectionIdentity key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.topic.id])} scope={scope} active={profileActive && preferencesOpen} />
       </details>
@@ -280,7 +250,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         {knowledgeOpen ? <TopicKnowledgePanel workspace={scope.workspace} topic={scope.topic} active={ideasActive && knowledgeOpen} /> : null}
       </details>
       <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} active={ideasActive} />
-      <div className="mote-ideas__browser">
+      <div className="mote-ideas__browser" data-empty={emptyIdeas && !selected ? 'true' : undefined}>
       <aside className="mote-ideas__library" aria-label="Saved notes">
       <label className="mote-ideas__search"><ThemeSearchIcon size={14} /><TextInput type="search" aria-label="Find a note" placeholder="Find a note…" value={filter} onChange={event => setFilter(event.target.value)} /></label>
       <div className="mote-ideas__count"><span>Notes in this folder</span><span>{filter ? filteredNotes.length + ' / ' : ''}{notes.length}</span></div>
@@ -309,7 +279,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
           <button type="button" className="small-button" onClick={() => void onOpenPath(selected)}>Correct or remove a detail in editor</button>
           <p className="mote-details__hint">Edit only what should change, then Save. File changes keep the original conversations and existing Session context.</p>
         </details>
-      </section> : <div className="mote-ideas__welcome"><ThemeIdeaIcon size={28} /><h4>Give a thought some room.</h4><p>Choose a note to read, build on it, or take it into your next discussion.</p></div>}
+      </section> : !emptyIdeas ? <div className="mote-ideas__welcome"><ThemeIdeaIcon size={28} /><h4>Give a thought some room.</h4><p>Choose a note to read, build on it, or take it into your next discussion.</p></div> : null}
       </div>
     </div>
   </div>

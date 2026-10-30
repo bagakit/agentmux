@@ -11,11 +11,15 @@
 .workspace-files-scope { flex-shrink: 0; padding: 3px 6px; color: var(--text-3); background: transparent; border: 1px solid var(--line-soft); text-align: left; font-size: 11px; white-space: nowrap; border-radius: var(--radius-sm); }
 .workspace-files-scope:hover { color: var(--text); background: var(--surface-3); }
 
-.mote-space-frame { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.mote-space-frame { display: flex; flex-direction: column; min-width: 0; min-height: 0; container: mote-space / inline-size; }
 .mote-space-frame > .workbench-shell { flex: 1; }
-.mote-space-frame__header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 16px; flex-shrink: 0; border-bottom: 1px solid var(--line-soft); background: var(--surface-1); padding: 7px 16px; }
+.mote-space-frame__header { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-shrink: 0; border-bottom: 1px solid var(--line-soft); background: var(--surface-1); padding: 7px 16px; }
 .mote-space-frame__header[hidden] { display: none; }
-.mote-space-frame__navigation { display: flex; align-items: center; min-width: 0; min-height: 38px; max-width: 100%; gap: 8px; }
+.mote-space-frame__navigation { display: flex; flex: 1; align-items: center; min-width: 0; min-height: 38px; gap: 16px; }
+.mote-space-frame__name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 600; }
+.mote-space-frame__navigation > .mote-space-frame__name { flex: 0 1 180px; }
+.mote-space-frame__navigation > .surface-mode-switch { min-width: 0; flex: 0 1 auto; }
+.mote-details__profile[hidden] { display: none; }
 .mote-space-frame__navigation > .sidebar-toggle-chrome { flex: 0 0 auto; width: auto; height: auto; padding: 0; background: transparent; box-shadow: none; }
 .mote-space-frame__navigation > .surface-mode-switch { width: max-content; max-width: 100%; margin: 0; padding: 2px; gap: 2px; overflow-x: auto; background: transparent; }
 .mote-space-frame__navigation > .surface-mode-switch button { flex: 0 0 auto; min-height: 30px; padding-inline: 13px; white-space: nowrap; }
@@ -149,11 +153,6 @@
 .mote-details__introduction p { margin: 0; overflow-wrap: anywhere; }
 .mote-details__introduction[data-expanded="false"] p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .mote-details__introduction > button { border: 0; padding: 4px 0; background: transparent; color: var(--text-3); font: inherit; cursor: pointer; }
-.mote-details:not([data-section="profile"]) :is(.mote-details__introduction, .mote-details__profile-facts) { display: none; }
-.mote-details:not([data-section="profile"]) .mote-details__profile { padding-block: 10px; flex-direction: row; align-items: center; flex-wrap: wrap; }
-.mote-details:not([data-section="profile"]) .mote-details__identity { flex: 1; }
-.mote-details:not([data-section="profile"]) .mote-details__avatar { width: 32px; height: 32px; }
-.mote-details:not([data-section="profile"]) .mote-details__identity strong { font-size: var(--fs-title); }
 @container mote-details (min-width: 720px) {
   .mote-details[data-section="profile"] > .mote-details__profile { position: absolute; inset: 16px auto auto 16px; width: 240px; max-height: calc(100% - 32px); box-sizing: border-box; padding: 0 18px 18px; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); gap: 14px; }
   .mote-details[data-section="profile"] > .mote-details__main { margin-inline-start: 272px; }
@@ -363,3 +362,15 @@
 /* A retained service notice uses real space without pushing the original Composer below its workface. */
 .workbench-context-frame { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
 .workbench-context-frame > .workspace-workbench { flex: 1; height: auto; }
+
+@container mote-space (max-width: 760px) {
+  .mote-space-frame__header { align-items: flex-start; gap: 4px 8px; }
+  .mote-space-frame__navigation { flex-wrap: wrap; gap: 4px 12px; }
+  .mote-space-frame__navigation > .mote-space-frame__name { flex: 1 1 120px; max-width: none; }
+  .mote-space-frame__navigation > .surface-mode-switch { flex: 1 0 100%; }
+  .mote-space-frame__navigation > .surface-mode-switch button { padding-inline: 10px; }
+  .mote-cooperation--navigation { padding-top: 4px; }
+}
+
+.mote-ideas__browser[data-empty="true"] { grid-template-columns: minmax(0, 1fr); }
+.mote-ideas__browser[data-empty="true"] > .mote-ideas__library { max-width: 640px; border: 0; }

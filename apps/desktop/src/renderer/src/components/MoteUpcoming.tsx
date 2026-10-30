@@ -29,7 +29,7 @@ export function MoteUpcoming({ scope, active, onOpenCalendar }: {
       </button>
     </div>
     {!queries.length || source.error ? <div className="mote-details__issue" role="status">
-      <span>{!queries.length ? scope.issue ?? scope.topic.readError ?? 'Mote directory scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</span>
+      <span>{!queries.length ? 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</span>
       {queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}
     </div> : null}
     {upcoming.length ? <ol className="mote-upcoming__list">{upcoming.map(record => {
@@ -41,7 +41,7 @@ export function MoteUpcoming({ scope, active, onOpenCalendar }: {
           <small>{date.toFormat('ccc · HH:mm')}<span> · {scheduleStateLabel(record, now)}</span></small></span>
         <Forward size={13} />
       </button></li>
-    })}</ol> : <p className="mote-details__hint">{source.observed ? 'Room for the next thing. Add an arrangement in Calendar.'
+    })}</ol> : <p className="mote-details__hint">{queries.length > 0 && !source.error && source.observed ? 'Room for the next thing. Add an arrangement in Calendar.'
       : source.error || !queries.length ? 'Arrangements are not confirmed.' : 'Reading arrangements…'}</p>}
   </section>
 }

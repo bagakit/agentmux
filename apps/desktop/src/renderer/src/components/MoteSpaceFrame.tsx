@@ -40,6 +40,7 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
       {scope && presentation ? <header className="mote-space-frame__header" hidden={!visible}>
         <div className="mote-space-frame__navigation">
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
+        <span className="mote-space-frame__name" title={scope.topic.title}>{scope.topic.title}</span>
         <SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" onChange={select}
           options={[{ value: 'profile', label: 'Profile' }, { value: 'discussion', label: 'Discussion' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} />
         </div>
@@ -58,7 +59,7 @@ function MoteSpaceActions({ scope, active, section, onDiscussion }: {
   const selected = useAppStore(state => active ? state.workbenchSpaceSelection : null)
   const selectedReference = selected?.groupId && selected.tabId && selected.regionId
     ? { displayWorkspaceId: selected.workspaceId, groupId: selected.groupId, tabId: selected.tabId, regionId: selected.regionId } : null
-  return <MoteCooperation scope={scope} active={active} reference={section === 'discussion' ? selectedReference : null}
+  return <MoteCooperation scope={scope} active={active} presentation="navigation" reference={section === 'discussion' ? selectedReference : null}
     onSelect={reference => {
       const state = useAppStore.getState()
       if (!state.selectMainRegion(reference, state.workbenchSpaceSelection)) return false
