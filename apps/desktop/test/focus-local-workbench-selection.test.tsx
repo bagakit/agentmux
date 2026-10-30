@@ -279,7 +279,7 @@ it('original durable reference restores a non-Agent content occurrence independe
     await act(async () => useAppStore.setState({ agentFocus: restored }))
     expect(mainRegionReference(useAppStore.getState().workbenchSpaceSelection)).toEqual(f.file)
     expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(f.exact.id)
-    const unknown = sanitizeAgentFocus(restoreAgentFocus(saved), [], () => 'execution', new Set([f.session.id]))
+    const unknown = sanitizeAgentFocus(restoreAgentFocus(saved), [], () => 'execution')
     expect(unknown.execution.reference).toEqual(before.agentFocus.execution.reference)
     await act(async () => useAppStore.setState({ agentFocus: unknown, sessions: [] }))
     expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(f.exact.id)

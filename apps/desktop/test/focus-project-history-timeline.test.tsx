@@ -66,7 +66,7 @@ it('records actual Store focus identity, closes keepSession display, and retains
   expect(await useAppStore.getState().closeTab('checkout', 'group', tab.id, { keepAgentSessions: true })).toBe(true)
   expect(useAppStore.getState().tabs).toEqual({}); expect(useAppStore.getState().sessions.map(item => item.id)).toEqual(['a', 'b'])
   const retained = sanitizeAgentFocus(restoreAgentFocus(saved), [], () => 'execution')
-  expect(retained.execution.sessionId).toBeNull(); expect(retained.execution.history).toEqual(restoreAgentFocus(saved).execution.history)
+  expect(retained.execution.sessionId).toBe(saved?.execution.sessionId); expect(retained.execution.history).toEqual(restoreAgentFocus(saved).execution.history)
   useAppStore.setState({ sessions: [], agentFocus: retained, config: { ...config(), workspaces: [] } })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
   expect(visibleProjects().map(node => node.querySelector('strong')!.textContent)).toEqual(['Alpha project', 'Beta project'])
@@ -76,7 +76,7 @@ it('records actual Store focus identity, closes keepSession display, and retains
   await act(async () => button.click())
   const dialog = document.querySelector('[role="dialog"]')!
   expect(dialog.textContent).toContain('Observed worker'); expect(dialog.textContent).toContain('feature/history'); expect(dialog.textContent).toContain('Alpha project')
-  expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
+  expect(useAppStore.getState().agentFocus).toEqual(retained)
   expect(stop.mock.calls).toEqual([]); expect(recover.mock.calls).toEqual([]); expect(create.mock.calls).toEqual([])
 })
 

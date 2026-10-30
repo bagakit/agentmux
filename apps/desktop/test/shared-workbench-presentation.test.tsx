@@ -348,7 +348,7 @@ it('the original durable focus owner restores the exact occurrence and retains i
     await act(async () => useAppStore.setState({ agentFocus: restored }))
     expect(useAppStore.getState().agentFocus.execution.reference).toEqual(fixture.reference)
     expect(fixture.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(fixture.exact.id)
-    const unknown = sanitizeAgentFocus(restoreAgentFocus(saved), [], () => 'execution', new Set([fixture.session.id]))
+    const unknown = sanitizeAgentFocus(restoreAgentFocus(saved), [], () => 'execution')
     expect(unknown.execution.reference).toEqual(fixture.reference)
     await act(async () => useAppStore.setState({ agentFocus: unknown, sessions: [] }))
     expect(fixture.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(fixture.exact.id)
