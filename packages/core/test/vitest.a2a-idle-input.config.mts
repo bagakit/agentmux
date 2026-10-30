@@ -13,6 +13,7 @@ const identityArtifact = await import(pathToFileURL(identitySourcePath).href)
 if (identityArtifact.identityRuntimeSource !== (await bundleIdentityRuntime()).source)
   throw new Error('The identity runtime source artifact does not match its original build recipe')
 const mutations: Record<string, [string, string, string]> = {
+  'manual-input-requires-native-qualification': ['prompt-submission.ts', "const sessionConversation = admissionIntent?.kind === 'session-conversation'", "const sessionConversation = admissionIntent?.kind === 'session-conversation' || admissionIntent?.kind === 'manual-actor'"],
   'native-queue-becomes-steer': ['providers/codex-native-input.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
   'native-idle-target-is-omitted': ['prompt-submission.ts', '...(control?.idleOnly ? { idleOnly: true } : {})', '...{}'],
   'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {', '} else if (false) {'],
@@ -47,4 +48,4 @@ export default defineConfig({ root, plugins: [{ name: 'original-workspace-source
   if (process.env.AGENTMUX_IDLE_INPUT_LOADED) appendFileSync(process.env.AGENTMUX_IDLE_INPUT_LOADED,
     JSON.stringify({ file, originalSHA256: hash(before), sha256: hash(code), ...(before === code ? {} : { mutation }) }) + '\n')
   if (before !== code) return { code, map: null }
-} }], test: { include: ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/a2a-reference-budget.test.ts', 'packages/core/test/codex-idle-queue.test.ts', 'packages/core/test/current-terminal-prompt.test.ts', 'packages/core/test/native-prompt-authority-store.test.ts'], maxWorkers: 1, globalSetup: [], testTimeout: 20_000 } })
+} }], test: { include: ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/a2a-reference-budget.test.ts', 'packages/core/test/codex-idle-queue.test.ts', 'packages/core/test/current-terminal-prompt.test.ts', 'packages/core/test/native-prompt-authority-store.test.ts', 'packages/core/test/provider-input-isolation.test.ts'], maxWorkers: 1, globalSetup: [], testTimeout: 20_000 } })
