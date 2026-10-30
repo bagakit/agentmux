@@ -85,14 +85,14 @@ function registeredReply(trusted: object) {
     config = {
       test: 'unchanged config'
     };
-  new Function('handleWithEvent', 'args', 'config', 'assertManualPromptSenderTrusted', 'pauseUserProgress', compiled)((_channel: string, fn: typeof handler) => {
+  new Function('handleWithEvent', 'args', 'config', 'assertManualPromptSenderTrusted', 'pauseUserProgress', 'contents', compiled)((_channel: string, fn: typeof handler) => {
     handler = fn;
   }, {
     window: {
       webContents: trusted
     },
     runtime
-  }, config, assertManualPromptSenderTrusted, pause);
+  }, config, assertManualPromptSenderTrusted, pause, trusted);
   expect(handler).toBeDefined();
   return {
     handler: handler!,

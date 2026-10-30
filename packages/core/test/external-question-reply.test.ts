@@ -33,5 +33,5 @@ it('revoked answer authority during native preparation prevents only this origin
   await expect(f.client.replySessionQuestion(f.input, { externalQuestion: { identity: author, assertCurrent } })).rejects.toBeDefined()
   expect(f.send).not.toHaveBeenCalled(); expect(await f.client.inspectAgentPromptSubmission(f.key)).toBeNull()
   await f.client.writeAgent({ agentSessionId: f.input.agentSessionId, expectedRun: f.input.expectedRun, source: 'user', data: 'Ordinary local input' })
-  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.rawInput).toHaveBeenCalledWith(f.input.expectedRun.runId, 'Ordinary local input'); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })

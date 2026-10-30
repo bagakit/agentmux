@@ -9,14 +9,15 @@ import type { AgentMuxSessionQuestionReplyInput } from '../../src/client.js'
 import { prepareCodexNativeInput } from '../../src/providers/codex-native-input.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
+import type { AgentMuxClient } from '../../src/client.js'
 import { AgentMuxError } from '../../src/errors.js'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 import { savedQuestionSource as source, savedQuestionTurn, savedQuestionId,
   savedQuestionEvent, savedQuestionJsonl } from './codex-saved-question.js'
 
 /** Real Provider exact-record reader and codec; only Runtime process status is a port. */
-export async function questionReplyOwner(options: { nativeProtocol?: boolean; outcome?: 'admitted' | 'unknown' | 'not-applied'; ownerModule?: Parameters<typeof rpcOwnerFixture>[1] } = {}) {
-  const f = await rpcOwnerFixture(['question-session'], options.ownerModule, root => ({
+export async function questionReplyOwner(options: { nativeProtocol?: boolean; outcome?: 'admitted' | 'unknown' | 'not-applied'; ownerModule?: Parameters<typeof rpcOwnerFixture<AgentMuxClient, AgentMuxFileAgentSessionStore>>[1] } = {}) {
+  const f = await rpcOwnerFixture<AgentMuxClient, AgentMuxFileAgentSessionStore>(['question-session'], options.ownerModule, root => ({
     nativeHandle: { kind: 'provider', providerId: source.providerId, sessionId: source.nativeSessionId, transcriptPath: join(root, 'native.jsonl') } }))
   const header = savedQuestionJsonl([{ type: 'session_meta', payload: { id: source.nativeSessionId, cwd: f.root } }])
   await writeFile(join(f.root, 'native.jsonl'), header + savedQuestionJsonl([savedQuestionEvent()]))
@@ -35,7 +36,9 @@ export async function questionReplyOwner(options: { nativeProtocol?: boolean; ou
     expect(persisted?.admission?.intent?.admissionIntent).toEqual({ kind: 'exact-condition', condition: { expectedRun: input.expectedRun, afterSubmissionId: input.afterSubmissionId } })
     if (options.outcome === 'unknown') throw new Error('Native acknowledgement unavailable after dispatch')
     if (options.outcome === 'not-applied') return { outcome: 'not-applied', errorCode: -32602 }
-    return { outcome: 'admitted', turnId: 'reply-native-turn' }
+    return plan.operation === 'queue-idle'
+      ? { outcome: 'admitted', queuedSubmissionId: 'reply-native-queue-item' }
+      : { outcome: 'admitted', turnId: 'reply-native-turn' }
   })
   let pid = 1234, stop = async () => {}
   const requests = async (): Promise<Array<{ method: string; params?: Record<string, any> }>> => options.nativeProtocol
@@ -52,18 +55,19 @@ ws.on('message',bytes=>{const request=JSON.parse(String(bytes));appendFileSync(l
 if(!Object.hasOwn(request,'id'))return;
 let result={};if(request.method==='thread/read')result={thread:{id:source.nativeSessionId,canAcceptDirectInput:true,status:{type:'idle'}}};
 if(request.method==='turn/start')result={turn:{id:'reply-native-turn'}};
+if(request.method==='thread/queue/add')result={queuedSubmission:{id:'reply-native-queue-item',input:request.params.input,clientUserMessageId:request.params.clientUserMessageId}};
 ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));});});`)
     const child = spawn(process.execPath, [script, createRequire(import.meta.url).resolve('ws'), JSON.stringify(source), join(f.root, 'requests.ndjson'), actor.token], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     await once(child.stdout, 'data'); pid = child.pid!
     stop = async () => { if (child.exitCode === null && child.signalCode === null) { const exited = once(child, 'close'); child.kill('SIGTERM'); await exited } }
   } else {
     const provider = f.client.providers.get('codex') as AgentProvider
-    provider.prepareNativeInput = vi.fn(async (context, selected) => {
+    provider.prepareNativeInput = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (context, selected) => {
       if (!context.nativeActor) throw new AgentMuxError('The original native actor is unavailable', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
       expect(context.nativeActor).toEqual(actor)
-      expect(selected).toEqual(source)
+      expect(selected).toEqual({ ...source, idleOnly: true })
       return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]),
-        actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
+        actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'queue-idle' }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
     })
   }
   f.inner.kernel.status = vi.fn(async (runId: string) => ({ ...f.run(runId), pid }))

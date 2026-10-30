@@ -17,6 +17,8 @@ import { NativeJsonlHistoryReader } from '../src/native-jsonl-history-reader.js'
 import { confirmNativeInputAdoption } from '../src/native-input-adoption.js'
 import type { AgentSessionHistoryItem } from '../src/types.js'
 import { codexQuestionAnswers } from '../src/providers/codex-question.js'
+import { createNativeInputCorrelation, nativeInputSourceId } from '../src/native-input-correlation.js'
+import type { AgentNativePromptInputPlan } from '../src/types.js'
 
 const close: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const cleanup of close.splice(0).reverse()) await cleanup(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -30,7 +32,7 @@ it.each(['source', 'compiled'] as const)('%s Core sends original question protoc
   expect(f.send).toHaveBeenCalledTimes(1)
   expect(codexQuestionAnswers([{ type: 'text', text: f.send.mock.calls[0]![0] }])).toEqual([
     { questionId: savedQuestionId, prompt: savedQuestionPrompt, answer: 'Keep the original work' } ])
-  expect(f.send.mock.calls[0]![1]).toMatchObject({ actorId: f.actor.actorId, threadId: f.input.source.nativeSessionId, clientCorrelation: expect.stringMatching(/^amux-input-v1\./u) })
+  expect(f.send.mock.calls[0]![1]).toMatchObject({ actorId: f.actor.actorId, threadId: f.input.source.nativeSessionId, operation: 'queue-idle', clientCorrelation: expect.stringMatching(/^amux-input-v1\./u) })
   expect(await f.client.replySessionQuestion(f.input)).toEqual(receipt)
   expect(f.send).toHaveBeenCalledTimes(1)
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
@@ -49,7 +51,7 @@ it.each(['run', 'source', 'provider', 'turn', 'record', 'question', 'duplicate',
   await expect(f.client.replySessionQuestion(input)).rejects.toBeDefined()
   expect(f.send).not.toHaveBeenCalled(); expect(await f.client.inspectAgentPromptSubmission(f.key)).toBeNull()
   await f.client.writeAgent({ agentSessionId: input.agentSessionId, expectedRun: f.input.expectedRun, source: 'user', data: 'ordinary input' })
-  expect(f.inner.kernel.input).toHaveBeenCalledTimes(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.rawInput).toHaveBeenCalledWith(f.input.expectedRun.runId, 'ordinary input'); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it.each(['unknown', 'not-applied'] as const)('preserves original %s claim, condition and body without redispatch', async outcome => {
@@ -61,6 +63,34 @@ it.each(['unknown', 'not-applied'] as const)('preserves original %s claim, condi
   await expect(f.client.replySessionQuestion({ ...f.input, answers: [{ questionId: savedQuestionId, answer: 'Changed answer' }] })).rejects.toHaveProperty('code', 'AGENT_PROMPT_OPERATION_CONFLICT')
   expect(await f.client.inspectAgentPromptSubmission(f.key)).toEqual(before)
   expect(f.send).toHaveBeenCalledTimes(1); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it.each(['unknown', 'admitted'] as const)('retains a saved direct %s answer without selecting the new queue route', async outcome => {
+  const f = await fixture(), provider = f.client.providers.get('codex')
+  const record = (await f.client.sessionHistoryPage(f.input.agentSessionId)).items.find(item => item.id === f.input.recordId)!
+  expect(record.questionRequest?.questions.map(question => question.id)).toEqual([savedQuestionId])
+  const prompt = provider.planQuestionReply!(record, f.input.answers)
+  const plan: AgentNativePromptInputPlan = { kind: 'native-rpc', protocolId: f.actor.protocolId,
+    sourceId: nativeInputSourceId(f.input.source), actorId: f.actor.actorId, threadId: f.input.source.nativeSessionId,
+    operation: 'start-or-steer', clientCorrelation: createNativeInputCorrelation(f.key) }
+  const stored = (await f.store.readMetadata(f.input.agentSessionId))!
+  // This is a saved pre-queue-version claim, including its original producer facts.
+  await f.store.compareAndSwap(stored, { ...stored, promptCompletionAdmission: {
+    submissionId: f.input.operationId, operationId: f.input.operationId, inputKey: f.key,
+    intent: { run: f.input.expectedRun, ownerInstanceId: 'fixture-runtime', prompt, plan, execution: 'default',
+      admissionIntent: { kind: 'exact-condition', condition: { expectedRun: f.input.expectedRun, afterSubmissionId: f.input.afterSubmissionId } },
+      message: { userContent: prompt, sourceChannel: 'question-reply', questionReply: { source: f.input.source,
+        recordId: f.input.recordId, turnId: f.input.turnId, questionIds: [savedQuestionId] } } },
+    transport: 'native', acknowledged: outcome === 'admitted',
+    native: { plan, outcome, ...(outcome === 'admitted' ? { turnId: 'original-direct-turn' } : {}) }
+  } })
+  await f.inner.registry.load('local')
+  const before = await f.client.inspectAgentPromptSubmission(f.key)
+  if (outcome === 'unknown') await expect(f.client.replySessionQuestion(f.input)).rejects.toHaveProperty('code', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+  else expect((await f.client.replySessionQuestion(f.input)).outcome).toBe('submitted')
+  expect(await f.client.inspectAgentPromptSubmission(f.key)).toEqual(before)
+  expect(provider.prepareNativeInput).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('refuses an unavailable original actor without replacing a healthy Run or falling back to PTY', async () => {
@@ -98,6 +128,7 @@ it('public service, Unix RPC, Hosted, compiled CLI and discovery consume the ori
   expect(cli.code, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).result).toEqual(receipt)
   const help = await runCompiledObjectCli(['agent', 'question', 'reply', '--help'], objectCliEnvironment(f.root))
   expect(help.code).toBe(0); expect(help.stdout).toContain('asyncQuestionReply=native-input')
+  expect(help.stdout).toContain('Submitted confirms queue admission, not adoption')
   const catalogue = { hostId: 'local', executorId: 'codex', providerId: 'codex', capabilities: f.client.providers.get('codex').catalog.capabilities, availability: 'unsupported', sessions: [], issues: [] }
   expect(parseRpcNativeResult('agent.native.ls', catalogue, { hostId: 'local', executorId: 'codex' })).toEqual(catalogue)
   expect(() => parseRpcNativeResult('agent.native.ls', { ...catalogue, capabilities: { ...catalogue.capabilities, asyncQuestionReply: 'invented-route' } }, { hostId: 'local', executorId: 'codex' })).toThrow()
@@ -112,11 +143,12 @@ it.runIf(process.platform === 'darwin')('actual Provider transport delivers SDK 
   const run = () => runCompiledObjectCli(['agent', 'question', 'reply', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(cliInput))
   const cli = await run(); expect(cli.code, cli.stderr).toBe(0)
   const repeated = await run(); expect(repeated.code, repeated.stderr).toBe(0)
-  const requests = await f.requests(), sent = requests.filter(request => request.method === 'turn/start')
+  const requests = await f.requests(), sent = requests.filter(request => request.method === 'thread/queue/add')
   expect(sent).toHaveLength(2)
   expect(sent.every(request => request.params?.threadId === f.input.source.nativeSessionId)).toBe(true)
   expect(codexQuestionAnswers([{ type: 'text', text: sent[0]!.params!.input[0].text }])).toEqual([{ questionId: savedQuestionId, prompt: savedQuestionPrompt, answer: 'Keep the original work' }])
   expect(sent[0]!.params!.clientUserMessageId).not.toEqual(sent[1]!.params!.clientUserMessageId)
+  expect(requests.filter(request => request.method === 'turn/start' || request.method === 'turn/steer')).toHaveLength(0)
   expect(receipt.outcome).toBe('submitted'); expect(f.client.agentSession(f.input.agentSessionId).run).toEqual(f.input.expectedRun)
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30_000)
@@ -145,7 +177,7 @@ it('refuses a conflicting observed native source while retaining the original ac
   await expect(f.client.replySessionQuestion(f.input)).rejects.toHaveProperty('code', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
   expect(f.send).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   await f.client.writeAgent({ agentSessionId: f.input.agentSessionId, expectedRun: f.input.expectedRun, source: 'user', data: 'ordinary input' })
-  expect(f.inner.kernel.input).toHaveBeenCalledTimes(1)
+  expect(f.rawInput).toHaveBeenCalledWith(f.input.expectedRun.runId, 'ordinary input')
 })
 
 it('binds an original operation to its exact record and turn even when another record repeats the same native question', async () => {
@@ -166,7 +198,7 @@ it('keeps an unknown reply while an independent ordinary semantic input remains 
   vi.spyOn(f.client.providers.get('codex'), 'planPromptInput').mockImplementation(prompt => ({ kind: 'single-phase', data: prompt + '\r' }))
   await f.client.submitAgentPrompt({ agentSessionId: f.input.agentSessionId, expectedRun: f.input.expectedRun,
     admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Independent ordinary input', operationId: 'independent-semantic-input' })
-  await expect.poll(() => vi.mocked(f.inner.kernel.input).mock.calls.length).toBe(1)
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(1))
   expect(await f.client.inspectAgentPromptSubmission(f.key)).toEqual(original)
   expect(f.send).toHaveBeenCalledTimes(1)
 })
@@ -176,18 +208,19 @@ it('joins native question reply adoption only to its original exact-condition pr
   await f.client.replySessionQuestion(f.input)
   const original = (await f.client.inspectAgentPromptSubmission(f.key))!, claim = original.admission!
   if (claim.transport !== 'native') throw Error('Expected original native claim')
-  const item: AgentSessionHistoryItem = { id: 'native-answer-record', kind: 'user-message', turnId: 'reply-native-turn', contentParts: [],
+  const item: AgentSessionHistoryItem = { id: 'native-answer-record', kind: 'user-message', turnId: 'reply-native-turn', contentParts: [{ kind: 'text', text: claim.intent!.prompt }],
     conversation: { nativeInput: { source: f.input.source, semanticItemId: 'original-native-answer', turnId: 'reply-native-turn', clientCorrelation: claim.native.plan.clientCorrelation! } } }
   const ref = { hostId: 'local', agentSessionId: f.input.agentSessionId }
   const adopted = await confirmNativeInputAdoption(item, ref, f.input.source, key => f.client.inspectAgentPromptSubmission(key))
   expect(adopted.conversation?.adoptedInput).toEqual({ key: f.key })
-  for (const mode of ['missing-question', 'foreign-question-source']) {
+  for (const mode of ['missing-question', 'foreign-question-source', 'edited-queued-answer']) {
     const other = structuredClone(original), message = other.admission!.intent!.message!
     if (mode === 'missing-question') delete message.questionReply
-    else message.questionReply!.source.nativeSessionId = 'foreign-question-source'
-    const unconfirmed = await confirmNativeInputAdoption(item, ref, f.input.source, async () => other)
+    else if (mode === 'foreign-question-source') message.questionReply!.source.nativeSessionId = 'foreign-question-source'
+    const candidate = mode === 'edited-queued-answer' ? { ...item, contentParts: [{ kind: 'text' as const, text: 'Edited native queue answer' }] } : item
+    const unconfirmed = await confirmNativeInputAdoption(candidate, ref, f.input.source, async () => other)
     expect(unconfirmed.conversation?.adoptedInput).toBeUndefined()
     expect(unconfirmed.conversationDiagnostic?.code).toBe('CONVERSATION_INPUT_ADOPTION_UNCONFIRMED')
-    expect(unconfirmed.contentParts).toEqual(item.contentParts)
+    expect(unconfirmed.contentParts).toEqual(candidate.contentParts)
   }
 })
