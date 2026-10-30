@@ -42,8 +42,8 @@ export function sessionStopTimeoutError(timeoutMs: number): Error & { code: stri
   return Object.assign(
     new Error(
       `Closing this session had no response from the Runtime within ${Math.round(timeoutMs / 1000)}s. ` +
-      'Your Agent is unaffected and may still be running — this step of our handshake did not complete. ' +
-      'The View was kept so you can close it again.'
+      'The original Stop may already have applied; its result is unconfirmed. ' +
+      'The original Session and View are kept. Continue the same Stop to check and finish its result.'
     ),
     { code: SESSION_STOP_TIMEOUT_CODE }
   )

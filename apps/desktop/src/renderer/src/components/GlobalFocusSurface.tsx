@@ -548,7 +548,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
               step: 'Focus work surface', mode: directoryIssue ?? presentation!.issue!,
               restore: placeless
-                ? `Its Run is ${placeless.processState}. Open it in a new Tab to continue here; its Session, Run and drafts are unchanged.`
+                ? `${placeless.runUnobserved ? 'The current Run state is unknown.' : `Its Run is ${placeless.processState}.`} Open the original conversation in a new Tab to read its history and review recovery. This only opens a view; its Session, Run and drafts are unchanged.`
                 : 'Choose a confirmed location. The original Session and work surfaces are retained.'
             } }} actions={placeless ? <button type="button" className="small-button" data-focus-open-placeless=""
               onClick={() => openPlaceless(placeless.id)}>Open in a new Tab</button> : null} />
