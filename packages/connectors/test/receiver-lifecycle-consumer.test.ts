@@ -72,6 +72,7 @@ it('native no-close loss recovers within the same SDK consumer and public Hosted
   f.wire.sockets[0]!.once('close', () => { f.wire.state.pong = true })
   await wait(() => expect(f.wire.sockets).toHaveLength(2), 36000)
   await wait(async () => expect((await f.current()).receiver).toMatchObject({ ref, state: 'ready' }))
+  expect((await f.current()).receiver!.nextAttemptAt).toBeUndefined()
   f.wire.message('receiver-original')
   await wait(() => expect(f.wire.acknowledgements).toEqual([{ code: 200 }, { code: 200 }]))
   expect((await f.services.ingress!.list({ connectionId: feishuConfig.connectionId })).ingresses).toHaveLength(1)
