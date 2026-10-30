@@ -191,7 +191,7 @@ AgentMux Session 持有一个已确认的原生语义目标；原生前台正在
 
 ## 共享 Agent 菜单
 
-Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共享 Agent 菜单组件。通用 Agent 资料、动作及其资格消费原 Session 事实与控制器；各入口通过扩展位提供自己的上下文与特定动作，不复制一套通用菜单，也不另建动作注册表、状态 Store 或 Provider 检测器。菜单打开、关闭或所处页面不改变已确认的 Agent 能力；只读、原身份、操作确认及回执继续由原动作 owner 裁决。
+Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共享 Agent 菜单组件。通用 Agent 资料、动作及其资格消费原 Session 事实与控制器；Focus 同样接齐已满足资格的通用 Session 能力，不能因入口位于泳道而仅装配简化的停止／重启菜单。各入口通过扩展位提供自己的上下文与特定动作，不复制一套通用菜单，也不另建动作注册表、状态 Store 或 Provider 检测器。菜单打开、关闭或所处页面不改变已确认的 Agent 能力；只读、原身份、操作确认及回执继续由原动作 owner 裁决。
 
 菜单明确区分准确 Host／Session／Run 的会话动作与需要准确空间 occurrence 的动作。Focus 按 Agent 聚合，无确认位置或有多个位置时不借当前焦点、同名对象或首位置构造 Tab／Region 目标；已有准确 Session 控制不因缺少位置而消失。原卡片导航和改名编辑、终端正文的复制／粘贴／路径／输出上下文、Region 布局动作各由调用入口提供，仍遵循[Focus 卡片](focus-context.md#卡片内容预览与-agent-操作)和[Agent Region](spaces-and-layout.md#agent-region-关闭与身份入口)的原对象与焦点边界。
 
