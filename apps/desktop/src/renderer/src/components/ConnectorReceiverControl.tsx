@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { ConnectionRecord, ConnectionReceiverRecoveryOperation, GroupDiagnosis, RoomBinding } from '@agentmux/core/connections'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
@@ -15,9 +15,10 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
 }) {
   const intents = useAppStore(state => state.connectorRoomIntents)
   const target = { executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
-  const retained = Object.values(intents).filter((intent): intent is Intent => intent.method === 'connection.receiver.recover' &&
+  const retained = useMemo(() => Object.values(intents).filter((intent): intent is Intent => intent.method === 'connection.receiver.recover' &&
     intent.input.connectionId === binding.connectionId && sameConnectorTarget(intent.target, target) &&
-    intent.hostingTarget?.hostId === hostingTarget?.hostId && intent.hostingTarget?.runtimeId === hostingTarget?.runtimeId).at(-1)
+    intent.hostingTarget?.hostId === hostingTarget?.hostId && intent.hostingTarget?.runtimeId === hostingTarget?.runtimeId).at(-1),
+    [intents, binding.connectionId, binding.executionHostId, binding.agentSessionId, hostingTarget?.hostId, hostingTarget?.runtimeId])
   const key = JSON.stringify([hostingTarget, binding.connectionId, target])
   const current = useRef(key); current.current = key
   const flight = useRef(false), alive = useRef(true)

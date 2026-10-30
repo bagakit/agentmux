@@ -143,13 +143,13 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   const receivingEnabled = report?.service.value?.enabled !== false && report?.adapterService.value?.enabled !== false && connection?.value?.enabled !== false
   if (report && receivingEnabled && currentReceiverGap) {
     const earlier = value
-    const uncertain = !!connection?.issue || connection?.retained || !receiver
+    const uncertain = !!connection?.issue || connection?.retained || !receiver || receiver.state === 'ready' && transportUnknown
     value = uncertain ? 'Connection unconfirmed' : receiverText
     incomingProblem = uncertain ? 'receiver-unconfirmed' : receiver?.state === 'ended' && !scheduled ? 'receiver-stopped' : 'receiver-recovering'
     tone = receiver?.state === 'ended' && !uncertain && !scheduled ? 'warning' : 'muted'
-    detail = uncertain ? 'Current receiver observation is unavailable.' : receiver?.state === 'ended' && !scheduled ? 'This bot receives messages for its connected groups.' : 'The original Host is reconnecting automatically.'
+    detail = uncertain ? receiver?.state === 'ready' && !connection?.issue && !connection?.retained ? 'Receiver reports connected; current transport observation is unconfirmed. Check this group again.' : 'Current receiver observation is unavailable.' : receiver?.state === 'ended' && !scheduled ? 'This bot receives messages for its connected groups.' : 'The original Host is reconnecting automatically.'
     add(incomingProblem, value, detail, tone === 'warning' ? 'warning' : 'muted')
-    if (row) earlierIncoming = 'Earlier message: ' + earlier
+    if (row) earlierIncoming = (row.coreStatus === 'waiting' || row.inputOperationId && row.coreObservation === 'unavailable' ? 'Original input: ' : 'Earlier message: ') + earlier
   } else if (report && receivingEnabled && connection?.value?.intake.reason === 'check-failed') {
     value = 'Inputs need checking'; detail = 'Receiver connected. Open the original input receipts.'
     incomingProblem = 'intake-unconfirmed'; tone = 'muted'
