@@ -831,7 +831,7 @@ function projectInputReceipt(state: AppState, sessionId: string, receipt: AgentI
     if (projected === entry.inputReceipt) return entry
     const { preparationWait: _wait, awaitingExplicitSend: _paused, error: _error, errorCode: _code, ...original } = entry
     return { ...original, inputReceipt: receipt, status: 'deferred' as const,
-      ...((receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') ? { archived: true as const } : {}) }
+      ...((receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried') ? { archived: true as const } : {}) }
   }) } }
 }
 
@@ -856,7 +856,7 @@ function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, ph
     // its confirmed input is not an in-flight Pending dispatch.
     phase: !entry.archived && entry.operationId === inFlightId ? phase ?? 'preparing' : null,
     editable: !confirmed && agentSteerCanEdit(entry, inFlightId),
-    delivery: entry.resumeInputReceipt?.state === 'not-applied' ? 'not-submitted' : entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state) ? 'confirmed' : entry.inputReceipt ? (entry.inputReceipt.status === 'admitted' || entry.inputReceipt.status === 'terminal-confirmed') ? 'confirmed' : entry.inputReceipt.status === 'waiting' || entry.inputReceipt.status === 'stopped' ? 'not-submitted' : 'unconfirmed'
+    delivery: entry.resumeInputReceipt?.state === 'not-applied' ? 'not-submitted' : entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state) ? 'confirmed' : entry.inputReceipt ? (entry.inputReceipt.status === 'admitted' || entry.inputReceipt.status === 'terminal-confirmed' || entry.inputReceipt.status === 'launch-carried') ? 'confirmed' : entry.inputReceipt.status === 'waiting' || entry.inputReceipt.status === 'stopped' ? 'not-submitted' : 'unconfirmed'
       : entry.inputIntakeStarted ? 'unconfirmed' : confirmed ? 'confirmed' : entry.promptCondition === null || entry.preparationInputNotApplied ? 'not-submitted' : 'unconfirmed',
     ...(entry.inputReceipt ? { inputWait: { ref: entry.inputReceipt.ref, status: entry.inputReceipt.status, observation: entry.inputReceipt.observation,
       controlState: entry.inputReceipt.control.state, ...(entry.inputStopReceipt ? { stop: entry.inputStopReceipt } : {}) } } : {}),
@@ -10875,7 +10875,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw controlFailure('STALE_AGENT_SESSION', 'The original Session or Run binding changed. Its message and current draft are kept.')
       }
       if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is still active. Its message and draft are kept.')
-      if ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], session.control, operationId)) {
+      if ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], session.control, operationId)) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Read its History before composing another message.')
       }
       const draft = state.agentComposerDrafts[sessionId] ?? ''
@@ -10911,7 +10911,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is no longer available. No replacement was created.')
       if (entry.text !== expectedText) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message changed. Read its current text before archiving or restoring it.')
       if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is preparing or submitting. Archiving cannot recall Provider input; its original facts are kept.')
-      if (!archived && ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], state.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.id === sessionId)?.control, operationId))) {
+      if (!archived && ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], state.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.id === sessionId)?.control, operationId))) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record is kept; read the confirmed History instead of restoring it to Pending.')
       }
       if (!archived && entry.archived && queue!.filter(item => !item.archived).length >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
@@ -11091,7 +11091,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Core owns accepted waiting after its typed receipt. It is not a failed
       // submission, and another caller must not dispatch it through a second route.
       const receipt = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)?.inputReceipt
-      if (receipt) return (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') ? 'submitted' : 'unconfirmed'
+      if (receipt) return (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried') ? 'submitted' : 'unconfirmed'
       if (originalDrain?.waitingForInteraction.has(operationId)) return 'unconfirmed'
       throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original selection left the ordered consumer without a confirmed submission. No new operation was created; inspect the original queue and retry this message.')
     } catch (error) {
@@ -11311,7 +11311,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     { execution: 'immediate', ...(entry.moteSource ? { moteSource: entry.moteSource } : {}) }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel, undefined, undefined, undefined, entry.browserInput?.capture.reference, entry.inputImages)
               if (!receipt || 'inputKey' in receipt) throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original manual input has no typed receipt. Its text and identity are retained.')
               consumeInputReceipt(sessionId, receipt)
-              if (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') drain.submitted.add(entry.operationId)
+              if (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried') drain.submitted.add(entry.operationId)
               if (!get().agentSteerQueues[sessionId]?.some(item => drain.explicitSteers.has(item.operationId))) return
               continue
             }

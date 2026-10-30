@@ -32,6 +32,8 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   const receipt = input.inputReceipt
   const status = receipt?.status ?? input.inputSubmission?.status
   // A terminal original-owner receipt resolves prior uncertainty. The old error remains in the report.
+  if (status === 'launch-carried') return { kind: 'launch-carried', title: '恢复启动已携带消息',
+    state: '恢复启动已携带原消息；Agent 是否接收尚未确认。', action: '可检查原输入与 Agent 回复；不会重新发送这条消息。' }
   if (status === 'terminal-confirmed') return { kind: 'terminal-confirmed', title: '终端输入已确认',
     state: '原终端已确认输入；Agent 是否接收尚未确认。', action: '请在原对话或终端查看 Agent 后续处理。' }
   if (status === 'admitted') return { kind: 'admitted', title: '输入已确认',

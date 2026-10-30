@@ -7,7 +7,7 @@ import type { AgentInputSubmissionObservation } from '@agentmux/core'
 
 const inputStatus: Record<AgentInputSubmissionObservation['status'], string> = {
   waiting: '已保存 · 等待 Agent', stopped: '已保存 · 已停止送达', 'terminal-confirmed': '已送入终端 · Agent 接收未确认',
-  admitted: 'Agent 已接收', 'not-applied': '未送达 Agent', unknown: '已保存 · 送达 Agent 未确认'
+  admitted: 'Agent 已接收', 'launch-carried': '恢复启动已携带消息 · Agent 接收未确认', 'not-applied': '未送达 Agent', unknown: '已保存 · 送达 Agent 未确认'
 }
 
 /** Bound work to the preview; the original reader retains the complete content. */

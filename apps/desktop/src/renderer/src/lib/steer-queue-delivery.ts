@@ -11,7 +11,7 @@ export function pendingSteerInput(entry: {
   promptCondition?: AgentPromptCondition | null
 }): boolean {
   if (!entry.archived) return true
-  if (entry.inputReceipt) return entry.inputReceipt.status !== 'admitted' && entry.inputReceipt.status !== 'terminal-confirmed' && entry.inputReceipt.status !== 'not-applied' &&
+  if (entry.inputReceipt) return entry.inputReceipt.status !== 'admitted' && entry.inputReceipt.status !== 'terminal-confirmed' && entry.inputReceipt.status !== 'launch-carried' && entry.inputReceipt.status !== 'not-applied' &&
     entry.inputReceipt.control.state !== 'stopped-before-dispatch'
   if (entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state)) return false
   if (entry.inputIntakeStarted) return true

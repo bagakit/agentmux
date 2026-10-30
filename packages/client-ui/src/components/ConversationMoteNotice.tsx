@@ -9,6 +9,7 @@ import { ConversationToolPayload } from './ConversationToolPayload.js'
 function inputSummary(input: MoteInputObservation['input']): string {
   switch (input) {
     case 'admitted': return '成员已接收新输入'
+    case 'launch-carried': return '恢复启动已携带消息，Agent 是否接收未确认'
     case 'terminal-confirmed': return '新输入已送入终端，是否采用待确认'
     case 'interaction-confirmed': return '原请求答复已记录'
     case 'waiting': return '原输入仍在等待'

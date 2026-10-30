@@ -55,6 +55,8 @@ export type ComposerQueuedMessage = {
 
 /** Labels describe the queue owner's facts, not native CLI rendering or model progress. */
 export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteraction = false) {
+  if (entry.inputReceipt?.status === 'launch-carried') return { label: entry.archived ? '已归档 · 恢复启动已携带消息' : '恢复启动已携带消息',
+    detail: '恢复启动已携带原消息；Agent 是否接收尚未确认。归档不会撤回输入，不能恢复为待发重投。', busy: false }
   if (entry.resumeInputReceipt?.state === 'launch-carried') return { label: entry.archived ? '已归档 · 随恢复启动提交' : '随恢复启动提交',
     detail: 'Runtime 已确认恢复启动携带这条原消息；CLI 是否采用、Agent 是否完成另行核对。不会再通过终端重发；归档不会撤回启动输入。', busy: false }
   if (entry.resumeInputReceipt?.state === 'not-applied') return { label: '原恢复输入未应用',
@@ -107,6 +109,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
 
 /** A retained queue record is not a submission receipt or a conversation position. */
 export function queuedMessageLocation(entry: ComposerQueuedMessage) {
+  if (entry.inputReceipt?.status === 'launch-carried') return '恢复启动已携带消息；Agent 是否接收与回复位置尚未确认'
   if (entry.resumeInputReceipt?.state === 'launch-carried') return '恢复启动参数已携带原消息；Native 采用与回复位置另行核对'
   if (entry.resumeInputReceipt?.state === 'not-applied') return 'Core 已确认原恢复输入未应用'
   if (entry.inputReceipt?.status === 'terminal-confirmed') return '原终端输入字节已确认；Native 采用与回复位置尚未确认'
@@ -186,14 +189,16 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
         if (query && !entry.text.includes(query)) return null
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
         const conditionChanged = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
-        const canSend = !conditionChanged && !entry.archived && !state.busy && editingId !== entry.id
+        const launchCarried = entry.inputReceipt?.status === 'launch-carried'
+        const confirmed = entry.confirmed || launchCarried
+        const canSend = !conditionChanged && !launchCarried && !entry.archived && !state.busy && editingId !== entry.id
         const ownFailure = failure?.id === entry.id && failure.text === entry.text ? failure.message : null
         return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}>
           <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
             avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
             text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
             onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} actions={<>
-            {!conditionChanged && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
+            {!conditionChanged && !launchCarried && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
               aria-label={(entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message'} title={canSend ? '只发送这条原消息' : state.detail}
               onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
             {onFill ? <MailboxDraftAction key={`fill:${entry.id}`} value={entry.text} onFill={() => onFill(entry.text)} /> : null}
@@ -210,12 +215,12 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
               <button key="down" type="button" className="composer-tool" disabled={Boolean(editingId) || state.busy || index===queued.length-1 || queued[index+1]?.sending || queued[index+1]?.preparing} onClick={() => onMove(entry.id,'down')} title={query ? "Move down in the unfiltered queue" : "Move down"} aria-label="Move down"><ThemeActionMoveDownIcon size={14} /></button>
             </> : null}
             {onArchive ? <button key="archive" type="button" className="composer-tool" aria-label={entry.archived ? '恢复为待发' : '归档这条待发消息'}
-              title={entry.archived ? entry.confirmed ? '原输入已确认，可读取原记录；不能重新投递' : '恢复原条目，等待明确发送' : '归档原条目，保留原文和投递记录；不会撤回已经输入的内容'}
-              disabled={state.busy || Boolean(editingId) || Boolean(entry.archived && entry.confirmed)} onClick={async () => {
+              title={entry.archived ? confirmed ? '原输入已有投递回执，可读取原记录；不能重新投递' : '恢复原条目，等待明确发送' : '归档原条目，保留原文和投递记录；不会撤回已经输入的内容'}
+              disabled={state.busy || Boolean(editingId) || Boolean(entry.archived && confirmed)} onClick={async () => {
                 setFailure(null)
                 try { await onArchive(entry.id,entry.text,!entry.archived) } catch(error) { setFailure({id:entry.id,text:entry.text,message:presentError(error)}) }
               }}>{entry.archived ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}</button> : null}
-            {entry.archived && entry.confirmed && onHistory ? <button key="history" type="button" className="composer-tool" aria-label="读取原记录" title="读取原记录" onClick={() => onHistory(entry.id)}><ReadIcon size={14} aria-hidden="true" /></button> : null}
+            {entry.archived && confirmed && onHistory ? <button key="history" type="button" className="composer-tool" aria-label="读取原记录" title="读取原记录" onClick={() => onHistory(entry.id)}><ReadIcon size={14} aria-hidden="true" /></button> : null}
           </>} />
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>

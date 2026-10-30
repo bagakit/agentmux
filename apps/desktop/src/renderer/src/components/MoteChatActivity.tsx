@@ -13,6 +13,7 @@ function intakeLabel(row: MoteChatDiagnosisIntake): { title: string; detail: str
   const input = row.input
   if (row.preparation === 'other-route') return { title: 'Another private-chat route', detail: 'This message belongs to a different saved Mote route.' }
   if (input.status === 'admitted') return { title: 'Agent received the message', detail: 'Input accepted. A reply is a separate result.' }
+  if (input.status === 'launch-carried') return { title: 'Message carried by recovery startup', detail: 'The Agent has not yet confirmed receiving it. This message will not be sent again.' }
   if (input.status === 'terminal-confirmed') return { title: 'Sent to the terminal', detail: 'The Agent has not yet confirmed receiving this input.' }
   if (input.status === 'stopped') return { title: 'Waiting stopped', detail: 'The original message is kept.' }
   if (input.status === 'not-applied') return { title: 'Message was not accepted', detail: 'The original input receipt confirms it was not applied.' }

@@ -79,7 +79,7 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
     }
   }
 
-  if (!enabled && !changed && !ack && !checked && !error && !busy) return null
+  if (!enabled && observed.status !== 'launch-carried' && !changed && !ack && !checked && !error && !busy) return null
   return <section className="original-input-waiting" aria-label="原输入等待操作" data-original-input-waiting>
     <div className="original-input-waiting__actions">
       {needsRejoin && !ack ? <button className="small-button" type="button" data-input-wait-action="rejoin" disabled={busy !== null || rejoinUnconfirmed} onClick={() => void run('rejoin')}>接回这次等待</button> : null}
@@ -93,10 +93,11 @@ function OriginalWaiting({ hostId, receipt, onRefresh }: Props) {
     {ack ? <p role="status" data-input-stop-outcome={ack.outcome}>{ack.outcome === 'already-settled' && receipt.status === 'waiting'
       ? '上方等待状态是此前观测。原输入已结束等待；请检查原输入结果。' : stopMessages[ack.outcome]}</p> : null}
     {changed && ack?.outcome !== 'stale-generation' ? <p role="status" data-input-wait-generation>等待批次已变化；当前操作仍绑定原批次。重新打开详情可查看新的等待。</p> : null}
-    {checked && !changed ? <p role="status" data-input-wait-observation>{checked.value === null ? '未读到原输入回执，结果仍未确认。'
+    {(checked || observed.status === 'launch-carried') && !changed ? <p role="status" data-input-wait-observation>{checked?.value === null ? '未读到原输入回执，结果仍未确认。'
       : observed?.status === 'waiting' ? '原输入仍在等待。'
       : observed?.status === 'stopped' ? '原输入已停止等待。'
       : observed?.status === 'admitted' ? '原输入已被 Agent 接收。'
+      : observed?.status === 'launch-carried' ? '恢复启动已携带消息，Agent 是否接收未确认。不会重新发送这条消息。'
       : observed?.status === 'terminal-confirmed' ? '原输入已写入终端；Agent 是否接收仍未确认。'
       : observed?.status === 'not-applied' ? '原输入未应用。' : '原输入结果未确认。'}</p> : null}
     {error ? <p role="status" data-input-wait-error>{error}</p> : null}

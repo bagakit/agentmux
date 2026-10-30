@@ -259,7 +259,7 @@ export function AgentSessionComposer({
           text: entry.text,
           ...(entry.archived ? { archived: true as const } : {}),
           inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
-          confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
+          confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
           ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
           ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
           ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),

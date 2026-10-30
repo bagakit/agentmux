@@ -152,7 +152,7 @@ function MessageHistory({ hostId, mailboxOrigin, items, selectedKey, onOpen, onC
     {!selected.message.content && !(isUserMessage(selected.original) && selected.message.contentParts.length) ? <MailboxEmpty title="No text recorded" /> : null}
     {moteObservationId && moteMemberId ? <MoteInputReceipt reference={{ hostId, agentSessionId: moteMemberId }} observationId={moteObservationId} /> : null}
     {receipt ? <MessageDeliveryFailure compact error={selectedInput?.failure ?? null} inputReceipt={receipt} copyText={onCopy ?? (text => platform.copyText(text, () => {}))} />
-      : observation ? <p className={['saved-waiting', 'stopped', 'admitted', 'terminal-confirmed'].includes(observation.kind) ? undefined : 'composer-mailbox__risk'} data-input-observation={observation.kind}>{observation.title} · {observation.state}</p>
+      : observation ? <p className={['saved-waiting', 'stopped', 'admitted', 'terminal-confirmed', 'launch-carried'].includes(observation.kind) ? undefined : 'composer-mailbox__risk'} data-input-observation={observation.kind}>{observation.title} · {observation.state}</p>
       : (inputFailure || state(selected) !== 'complete') && selected.message.source.kind !== 'native'
         ? <p className="composer-mailbox__risk">Original delivery receipt is unavailable. The message is retained.</p> : null}
   </article>}</MailboxLocationContext>

@@ -43,7 +43,7 @@ function incomingStatus(report: GroupDiagnosis): string {
   if (!row.inputOperationId) return recorded + (row.state === 'refused' ? ' · ' + incomingRefusal(row.code).title : ' · no Agent submission recorded')
   if (row.coreObservation === 'unavailable') return recorded + ' · Agent submission observation unavailable'
   const status = row.coreStatus
-  const input = status === 'admitted' ? 'Accepted by Agent' : status === 'waiting' ? row.waiting?.wake === 'explicit-rejoin' ? 'Input recovery needed' : 'Waiting for Agent' : status === 'stopped' ? 'Input delivery stopped' :
+  const input = status === 'admitted' ? 'Accepted by Agent' : status === 'launch-carried' ? 'Recovery startup carried the message; Agent acceptance unconfirmed' : status === 'waiting' ? row.waiting?.wake === 'explicit-rejoin' ? 'Input recovery needed' : 'Waiting for Agent' : status === 'stopped' ? 'Input delivery stopped' :
     status === 'not-applied' ? 'Not delivered to Agent' : status === 'terminal-confirmed' || status === 'bytes-accepted' ? 'Input sent; Agent acceptance unconfirmed' : 'Input outcome unconfirmed'
   return `${recorded} · ${input}`
 }
@@ -118,6 +118,10 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
       tone = row.state === 'refused' ? 'warning' : 'neutral'
     } else if (row.coreObservation === 'unavailable') { value = 'Agent receipt could not be checked'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'The original input remains recorded; its current Agent receipt could not be read.') }
     else if (row.coreStatus === 'admitted') value = 'Accepted by Agent'
+    else if (row.coreStatus === 'launch-carried') {
+      value = 'Message carried by recovery startup'; detail += ' Agent acceptance is unconfirmed. This input will not be sent again.'
+      incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, detail)
+    }
     else if (row.coreStatus === 'waiting') {
       const explicit = row.waiting?.wake === 'explicit-rejoin'
       value = explicit ? 'Input recovery needed' : 'Waiting for Agent'; incomingProblem = 'agent-waiting'; tone = explicit ? 'warning' : 'neutral'

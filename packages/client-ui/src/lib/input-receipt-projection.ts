@@ -20,13 +20,20 @@ function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admiss
       native.threadId, native.expectedTurnId, native.clientCorrelation, input?.kind, input?.operation, input?.protocolId, input?.sourceId,
       input?.actorId, input?.threadId, input?.expectedTurnId, input?.clientCorrelation])
   }
+  if (claim.transport === 'launch') {
+    const launch = claim.launch.plan, input = plan?.kind === 'runtime-launch' ? plan : undefined
+    return JSON.stringify([...common, 'launch', launch.kind, launch.lifecycleOperationId, launch.program, launch.argsDigest,
+      launch.nativeTarget.providerId, launch.nativeTarget.sessionId, launch.nativeTarget.transcriptPath,
+      input?.kind, input?.lifecycleOperationId, input?.program, input?.argsDigest,
+      input?.nativeTarget.providerId, input?.nativeTarget.sessionId, input?.nativeTarget.transcriptPath])
+  }
   return JSON.stringify([...common, 'pty', claim.startByte, claim.endByte, plan?.kind,
     plan?.kind === 'single-phase' ? plan.data : plan?.kind === 'render-then-submit'
       ? [plan.payload, plan.renderedText, plan.submit, plan.prepare?.interrupt, plan.prepare?.endEvent, plan.prepare?.refresh] : undefined])
 }
 
 const settled = (receipt: AgentInputSubmissionReceipt) =>
-  receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'not-applied'
+  receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried' || receipt.status === 'not-applied'
 
 /** Retain observations of one Core-owned input. This never interprets transport ACKs,
  * grants admission or creates a new input; Core's typed status is the source of truth. */
@@ -44,6 +51,8 @@ export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefin
     return next
   }
   const oldNative = prior.admission?.admission, newNative = next.admission?.admission
+  const oldLaunch = oldNative?.transport === 'launch' ? oldNative.launch.receipt : undefined
+  const newLaunch = newNative?.transport === 'launch' ? newNative.launch.receipt : undefined
   const oldPhases = prior.admission?.terminalPromptSubmission, newPhases = next.admission?.terminalPromptSubmission
   const phasesIdentity = (phases: NonNullable<typeof oldPhases>) => JSON.stringify([phases.run.runId, phases.submissionId, phases.promptDigest,
     phases.payload.operationId, phases.payload.inputByteRange.startByte, phases.payload.inputByteRange.endByte,
@@ -52,6 +61,7 @@ export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefin
       prior.control.state === 'dispatch-authorized' && next.control.state === 'dispatch-authorized' && prior.control.gateId !== next.control.gateId ||
       prior.admission && next.admission && receiptIdentity(prior.admission) !== receiptIdentity(next.admission) ||
       oldPhases && newPhases && phasesIdentity(oldPhases) !== phasesIdentity(newPhases) ||
+      oldLaunch && newLaunch && (oldLaunch.operationId !== newLaunch.operationId || oldLaunch.run.runId !== newLaunch.run.runId || oldLaunch.observedAt !== newLaunch.observedAt) ||
       oldNative?.transport === 'native' && newNative?.transport === 'native' && (
         oldNative.native.turnId !== undefined && newNative.native.turnId !== undefined && oldNative.native.turnId !== newNative.native.turnId ||
         ['admitted', 'not-applied'].includes(oldNative.native.outcome) && ['admitted', 'not-applied'].includes(newNative.native.outcome) && oldNative.native.outcome !== newNative.native.outcome)) {
