@@ -8,6 +8,7 @@ const popoverClarity = process.argv.includes('--popover-clarity')
 const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
+const receiverRecovery = process.argv.includes('--receiver-recovery')
 const groupClarity = process.argv.includes('--group-clarity')
 const sharingCraft = process.argv.includes('--sharing-craft')
 const groupDetails = process.argv.includes('--group-details')
@@ -101,7 +102,9 @@ app.whenReady().then(async () => {
         assert.ok(await read('document.querySelector(".agent-connector-dialog__body").scrollTop < 20'), 'Default entry keeps group identity at the top')
       }
       const dismiss = async () => { await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')'); assert.equal(await read('document.activeElement?.dataset.channelEntry'), 'feishu') }
-      if (sharingCraft) {
+      if (receiverRecovery) {
+        await require('./receiver-scene.cjs')({ read, until, click, capture, details, dismiss, result })
+      } else if (sharingCraft) {
         await require('./sharing-craft-scene.cjs')({ win, read, until, click, settle, capture, details, dismiss, tab, result })
       } else if (groupClarity) {
         await require('./clarity-scene.cjs')({ win, read, until, click, settle, capture, details, dismiss, tab, member, result })
