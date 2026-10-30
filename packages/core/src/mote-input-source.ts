@@ -25,3 +25,6 @@ export function parseAgentInputMoteSource(value: unknown): AgentInputMoteSource 
     throw new AgentMuxError('The original Mote input source is invalid.', 'INVALID_CONTROL_REQUEST')
   return Object.fromEntries(fields.map((key) => [key, (value as AgentInputMoteSource)[key]])) as AgentInputMoteSource
 }
+
+/** Discovery on an original human Mote prompt, frozen with that input; never role or permission authority. */
+export const MOTE_INPUT_GUIDANCE = 'Mote collaboration: identity consistency and task consistency are base operating principles. Use the current Mote guide (amux mote --skill; reuse it if already read) for environment understanding and continuity across main-Agent handover, tasks/threads, context changes and actually arranged heartbeats. Preserve goals, constraints, confirmed decisions, unfinished commitments and original input/permission, evidence and handoff sources. Inspect the original MOTE.md binding and your whoami identity to distinguish the current main Agent from a member. This workface source does not assign a role, grant permission, prove an online Agent or arrange a heartbeat. Preserve the original human request and existing work.'

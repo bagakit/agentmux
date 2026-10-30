@@ -9,6 +9,8 @@ export type PromptAttempt = {
   draft: string
   /** Frozen at explicit input; absence on an old operation remains unknown on retry. */
   moteSource?: AgentInputMoteSource
+  /** Platform discovery frozen before first intake; old absent values remain absent. */
+  agentMuxNote?: string
   phase: 'sending' | 'unknown' | 'rejected' | 'confirmed'
   message: string
   request?: { condition: AgentPromptCondition; execution: 'default' | 'immediate'; explicit: boolean; runtimeId: string | null }
@@ -117,6 +119,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.request ? { request: structuredClone(intent.request) } : {}), ...(intent.logId ? { logId: intent.logId } : {}),
           ...(intent.manualInput ? { manualInput: structuredClone(intent.manualInput) } : {}),
           ...(intent.moteSource ? { moteSource: structuredClone(intent.moteSource) } : {}),
+          ...(intent.agentMuxNote === undefined ? {} : { agentMuxNote: intent.agentMuxNote }),
           ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),

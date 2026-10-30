@@ -18,5 +18,5 @@ export function moteInputSource(sessionId: string, origin: OpenHttpLinkOrigin | 
   return { spaceId: spaces[0]!.spaceId, zoneId: member.zoneId, tabId: tab.id, regionId: origin.regionId }
 }
 
-/** Discovery only: exact MOTE.md and original identity determine primary/member roles. */
-export const MOTE_INPUT_GUIDANCE = 'Mote collaboration: use the Mote guide (amux mote --skill; reuse it if already read). Inspect the original MOTE.md binding and your whoami identity to distinguish the main Agent from a member. This workface source does not assign a role or grant permission. Preserve the original human request and existing work.'
+/** Shared discovery text is frozen by the original Store input, never composed again on retry. */
+export { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
