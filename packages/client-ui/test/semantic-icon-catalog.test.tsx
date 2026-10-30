@@ -15,7 +15,7 @@ it('every declared product meaning has actual default geometry and a collision-f
 })
 
 it('discovers Automation as an object and applies its theme glyph to the retained sprite identity', () => {
-  expect(getSemanticIconCatalog().icons.find(icon => icon.id === 'object.automation')).toMatchObject({ label: 'Automation', groupId: 'object', defaultGlyph: 'zap' })
+  expect(getSemanticIconCatalog().icons.find(icon => icon.id === 'object.automation')).toMatchObject({ label: 'Automation', groupId: 'object', defaultGlyph: 'automation-route' })
   const id = semanticIconHref('object.automation').slice(1)
   try {
     updateIconSprite(document, GRAPHITE_THEME, '#ffffff')

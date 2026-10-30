@@ -10,7 +10,7 @@ const meanings = {
   'object.session-recovery': 'session-resume',
   'object.capsule': 'capsule-page',
   'object.user-input': 'user-input-field',
-  'object.agent-messaging': 'git-compare-arrows',
+  'object.agent-messaging': 'agent-message-relay',
   'object.amux-protocols': 'protocol-frame',
 } as const
 const ids = Object.keys(meanings) as Array<keyof typeof meanings>
@@ -36,7 +36,7 @@ it('discovers all five module meanings with their independent defaults and stati
   }
   expect(iconShapes('object.session-recovery')).toBe(iconShapes('action.resume-session'))
   expect(semanticIconHref('object.session-recovery')).not.toBe(semanticIconHref('action.resume-session'))
-  expect(iconShapes('object.agent-messaging')).toBe(iconShapes('git.compare'))
+  expect(iconShapes('object.agent-messaging')).not.toBe(iconShapes('git.compare'))
   expect(semanticIconHref('object.agent-messaging')).not.toBe(semanticIconHref('git.compare'))
 })
 
