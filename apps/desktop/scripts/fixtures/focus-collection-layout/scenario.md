@@ -1,0 +1,14 @@
+# Focus Collection and Topic presentation
+
+Behavior: [Focus contexts](../../../../../../docs/design/behavior/focus-context.md).
+Presentation: [Focus contexts](../../../../../../docs/design/presentation/focus-context.md).
+
+Run `node apps/desktop/scripts/capture-focus-collection-layout.mjs --evidence <private-directory>` from the repository root. The scene compiles the original GlobalFocusSurface, Store, cards, Collection projection, Settings Pane and shared live example. It loads the original stylesheet and menu dependencies. The receipt binds the loaded source, drivers, compiled output and complete screenshots.
+
+The private typed transport supplies nine example Agents, ordinary Projects, several Topics, exact Category relations, multiple memberships, confirmed unclassified membership and an unknown relationship. Adjacent Timeline and unselected terminal/editor paint are isolated explicitly in the receipt. These images prove Renderer behavior; they do not prove a real Provider, durable settings, Runtime recovery or the user installation.
+
+The driver switches cards and sections at wide and narrow widths in both themes. It captures the original Collection headers, state groups, long Topic provenance and lower source groups. A real pointer hover opens the existing full explanation for a Category metadata failure while retaining membership. The original Settings controls change the shared draft example, narrow View preview actions reach and focus the full example, and the original Save action publishes the authored choice through the private transport. The resulting board is captured. Original Session, Tab, layout and draft references remain intact; no Agent control is dispatched.
+
+The capture receipt is not aesthetic approval. An independent Agent must open every complete final screenshot, assess hierarchy, density, alignment, readability and controls, and bind its conclusion to the exact receipt and image hashes. Keep failed attempts and superseded reviews in private evidence. Source changes require a fresh capture; unchanged accepted receipts may be strictly reused with `AGENTMUX_FOCUS_COLLECTION_SCENE_RECEIPT`.
+
+The final product verifier joins these images and the independent review with the original source-mutation verifiers, separate ConfigOwner process proof and `verify-focus-timeline-name-width-restart.mjs --collection-layout-join`. That separate restart producer uses ordinary production Main/preload/Renderer and a real private Core Provider/PTY. It saves the preference through the public CLI, quits normally, reopens without reseeding and verifies the original workface, Run and input acknowledgement. It builds and installs nothing.
