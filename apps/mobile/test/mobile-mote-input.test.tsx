@@ -1,4 +1,5 @@
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
+import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentInputMoteSource } from '@agentmux/core'
@@ -121,6 +122,32 @@ it.each([undefined, 'Earlier frozen platform note'] as const)('a legacy original
   if (savedNote === undefined) expect(input).not.toHaveProperty('agentMuxNote')
   else expect(input.agentMuxNote).toBe(savedNote)
   expect(input.prompt).not.toContain('Mote collaboration:')
+})
+
+it.each([true, false])('an original admission only resumes when its frozen human message and platform note match: %s', async matches => {
+  const f = fixture(), local = createLocalDrafts()
+  const operationId = 'admission-original-operation', body = 'Original human message'
+  const note = matches ? MOTE_INPUT_GUIDANCE : 'A different original platform note'
+  const wire = composeAgentPrompt(body, note).text
+  f.sessions.set(sid, { ...session(), promptCompletionAdmission: { submissionId: operationId, operationId, startByte: 0,
+    endByte: new TextEncoder().encode(wire).length, acknowledged: false,
+    intent: { run: { runId: 'run-original' }, ownerInstanceId: 'original-owner', prompt: wire, execution: 'default',
+      plan: { kind: 'single-phase', data: wire }, message: { userContent: body, systemContext: note, authorHuman: true } } } })
+  local.attempts.set(JSON.stringify(['draft', sid]), { operationId, runId: 'run-original', draft: body,
+    moteSource: source, agentMuxNote: MOTE_INPUT_GUIDANCE, phase: 'unknown', message: 'Unknown original receipt',
+    inputRequested: true, originalHostId: 'host-original', originalRuntimeId: 'original-runtime' })
+  await local.save()
+  const view = await mount(surface(f, otherSource))
+  expect(f.submit).not.toHaveBeenCalled()
+  await click(button(view.element, '重试原请求'))
+  if (!matches) {
+    expect(f.submit).not.toHaveBeenCalled()
+    expect(createLocalDrafts().attempts.get(JSON.stringify(['draft', sid]))).toMatchObject({ operationId, phase: 'unknown' })
+  } else {
+    expect(f.submit).toHaveBeenCalledOnce()
+    expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, operationId, expectedRun: { runId: 'run-original' },
+      afterSubmissionId: operationId, prompt: body, authorHuman: true, execution: 'default', moteSource: source, agentMuxNote: MOTE_INPUT_GUIDANCE })
+  }
 })
 
 const { mote: _mote, ...ordinaryIdentity } = identity
