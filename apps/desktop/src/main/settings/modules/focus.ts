@@ -1,4 +1,4 @@
-import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs, FOCUS_MAP_MOTION, resolveFocusMapMotion } from '../../../shared/focus-preferences.js'
+import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_TOPIC_PRESENTATIONS, resolveFocusTopicPresentation, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs, FOCUS_MAP_MOTION, resolveFocusMapMotion } from '../../../shared/focus-preferences.js'
 import type { AppConfig } from '../../../shared/contracts.js'
 import { enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
 
@@ -15,6 +15,9 @@ export const focusSettings = [
       return { ...config, focus: { ...config.focus, recentActivityHours: resolveFocusRecentActivityHours(next) } }
     }
   },
+  enumSetting('focus.topicPresentation', FOCUS_TOPIC_PRESENTATIONS, 'cards',
+    config => resolveFocusTopicPresentation(config.focus?.topicPresentation),
+    (config, topicPresentation) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, topicPresentation } })),
   enumSetting('focus.linkDestination', FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION,
     config => resolveFocusLinkDestination(config.focus?.linkDestination),
     (config, linkDestination) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours),

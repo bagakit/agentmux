@@ -6,7 +6,7 @@ import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './noti
 import { DEFAULT_A2A_NOTIFICATION, resolveA2ANotifications } from './a2a-preferences'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from './user-profile'
-import { resolveFocusRecentActivityHours, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
+import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
 import { resolveFocusMapPreferences, DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from './focus-map-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
@@ -40,6 +40,7 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
   if (path === 'focus') return value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }
   if (path === 'focus.recentActivityHours') return resolveFocusRecentActivityHours(value)
+  if (path === 'focus.topicPresentation') return resolveFocusTopicPresentation(value)
   if (path === 'focus.linkDestination') return resolveFocusLinkDestination(value)
   if (path === 'focus.replyLines') return resolveFocusReplyLines(value)
   if (path === 'focus.previewTrigger') return resolveFocusPreviewTrigger(value)

@@ -2,9 +2,15 @@ import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-ma
 
 import { resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
 export { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
-export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences }
+export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; topicPresentation?: FocusTopicPresentation; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences }
 /** Minimum project visibility guarantee, independent of a shorter sorting preference. */
 export const FOCUS_RECENT_PROJECT_HOURS = 48
+
+export const FOCUS_TOPIC_PRESENTATIONS = ['cards', 'sections'] as const
+export type FocusTopicPresentation = typeof FOCUS_TOPIC_PRESENTATIONS[number]
+export function resolveFocusTopicPresentation(value: unknown): FocusTopicPresentation {
+  return value === 'sections' ? 'sections' : 'cards'
+}
 
 export const FOCUS_LINK_DESTINATIONS = ['region', 'tab'] as const
 export type FocusLinkDestination = typeof FOCUS_LINK_DESTINATIONS[number]
@@ -38,6 +44,6 @@ export function resolveFocusMapMotion(value: unknown): FocusMapMotion {
   return FOCUS_MAP_MOTION.includes(value as FocusMapMotion) ? value as FocusMapMotion : 'system'
 }
 export function resolveFocusPreferences(value: FocusPreferences | undefined): Required<FocusPreferences> {
-  return { recentActivityHours: resolveFocusRecentActivityHours(value?.recentActivityHours), linkDestination: resolveFocusLinkDestination(value?.linkDestination),
+  return { recentActivityHours: resolveFocusRecentActivityHours(value?.recentActivityHours), topicPresentation: resolveFocusTopicPresentation(value?.topicPresentation), linkDestination: resolveFocusLinkDestination(value?.linkDestination),
     replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion), map: resolveFocusMapPreferences(value?.map) }
 }
