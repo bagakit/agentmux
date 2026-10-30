@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROMPT_REACTION_ICONS, PROMPT_REACTION_STARTERS, isPromptReactionCode, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
 import { PromptReactionIconView } from '@agentmux/client-ui/components/ConversationReactionActions'
+import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
@@ -63,6 +64,12 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   const descriptionId = useId()
   const saveState = useSettingsSave()
   const prompt = selectedId !== null && Object.hasOwn(resource.value, selectedId) ? resource.value[selectedId] : undefined
+  const { command, keywords } = resolveComposerInputConfig(config.messageToolCompletion)
+  const keyword = prompt?.keyword.trim() || 'keyword'
+  const usageExamples = [command !== null ? `${command}${keyword}` : null, keywords ? keyword : null].filter(value => value !== null)
+  const usageDescription = usageExamples.length
+    ? `Type ${usageExamples.join(' or ')} to add your instruction to a draft instead of sending.`
+    : 'Choose this prompt from the input toolbar to add your instruction to a draft instead of sending.'
   const normalizedQuery = query.trim().toLowerCase()
   const providerScopes = [...new Set([...drafts.flatMap(candidate => candidate.providerId === undefined ? [] : [candidate.providerId]),
     ...(scope.kind === 'provider' ? [scope.providerId] : [])])]
@@ -212,7 +219,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
               <button type="button" className="prompt-library__item" key={candidate.id} data-prompt-id={candidate.id} aria-pressed={selectedId === candidate.id} onClick={() => open(candidate.id)}>
                 <span className="prompt-library__name">{candidate.reactionIcon ? <PromptReactionIconView icon={candidate.reactionIcon} size={13} /> : null}<strong>{promptName(candidate)}</strong>{status ? <span className="prompt-library__status" data-prompt-list-status={status} aria-label={status === 'invalid' ? 'Needs attention' : 'Unsaved changes'} title={status === 'invalid' ? 'Needs attention' : 'Unsaved changes'}><SemanticIcon name={`status.prompt-${status}`} size={4} /></span> : null}{selectedId === candidate.id ? <ThemeStatusSelectedIcon size={13} aria-label="Selected prompt" /> : null}</span>
                 <span className="prompt-library__scope" title={`${providerName(candidate)} · ${candidate.states?.map(stateName).join(', ') || 'Draft shortcut'}${candidate.reactionIcon ? ' · Reply card' : ''}`}>
-                  <code>{candidate.keyword.trim() ? `/${candidate.keyword.trim()}` : 'No keyword yet'}</code>
+                  <code>{candidate.keyword.trim() ? command !== null ? `${command}${candidate.keyword.trim()}` : keywords ? candidate.keyword.trim() : 'Input toolbar' : 'No keyword yet'}</code>
                   <span>{providerName(candidate)}{candidate.states?.length ? ` · ${candidate.states.map(stateName).join(', ')}` : ''}{candidate.reactionIcon ? ' · Reply card' : ''}</span>
                 </span>
               </button>
@@ -228,7 +235,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
             <label className="prompt-editor__instruction"><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
             <div className="prompt-editor__reach">
-              <label><span>Keyword</span><TextInput aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? 'Use /keyword or the bare word to expand your draft.'}</small></label>
+              <label><span>Keyword</span><TextInput aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? usageDescription}</small></label>
               <label><span>Provider scope</span><select aria-label="Prompt Provider scope" value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Shared, or available to one Provider.</small></label>
             </div>
             <details className="prompt-editor__usage" open={Object.hasOwn(usageOpen, prompt.id) ? usageOpen[prompt.id] : false} onToggle={event => {
@@ -253,7 +260,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
                 return <div key={state}><dt>{meaning.label} <code>{state}</code></dt><dd id={`${descriptionId}-state-${state}`}>{meaning.description}</dd></div>
               })}</dl></details>
             </fieldset>
-            <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>/{prompt.keyword.trim() || 'keyword'}</code><span>Type / or its bare keyword to add your instruction to a draft instead of sending.</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
+            <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>{usageExamples.length ? usageExamples.join(' · ') : 'Input toolbar'}</code><span>{usageDescription}</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
               </div>
             </details>
             <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionCancelIcon size={13} /> Cancel new prompt</>}</button></div>
