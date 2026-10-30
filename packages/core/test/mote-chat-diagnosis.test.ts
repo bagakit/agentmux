@@ -59,6 +59,15 @@ it('keeps readiness, original preparation and Core receipt observations separate
   expect(parseMoteChatResult(method, value, input).incoming).toBeNull()
 })
 
+it('reads launch-carried as an original dispatch receipt without claiming native adoption', () => {
+  const value = diagnosis()
+  value.incoming!.rows[0]!.input = inputObservation({ status: 'launch-carried', observation: 'observed',
+    controlState: 'dispatch-authorized', receiptObservation: 'closed', runtime: { target: 'original', state: 'exited', exitCode: 0 } })
+  expect(parseMoteChatResult(method, value, input)).toEqual(value)
+  value.incoming!.rows[0]!.input.controlState = 'enabled'
+  expect(() => parseMoteChatResult(method, value, input)).toThrow()
+})
+
 it('rejects private fields, foreign targets, arbitrary causes and inconsistent or unbounded observations', () => {
   const v = diagnosis(), row = v.incoming!.rows[0]!
   const malformed: unknown[] = [
