@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { stripVTControlCharacters } from 'node:util'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
-import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
+import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, joinCodexNativeFrontend, openCodexFrontendControl } from './codex-managed-frontend.js'
 import type { AgentTerminalFrontendObservation, AgentTerminalInitialization } from '../agent-terminal-frontend.js'
 import { resolve } from 'node:path'
 import { nativeProcessTcpListeners } from '../agent-native-process.js'
@@ -41,6 +41,8 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   let initialization: AgentTerminalInitialization = { lifecycleOperationId, phase: 'preparing',
     native: { state: plan.resume ? 'unknown' : 'not-created' } }
   let initializationPending: Promise<void> | undefined, nativeRequested = false, nativeSessionId: string | undefined
+  let nativeRuntimeSessionId: string | undefined, initialFrontendPending: Promise<void> | undefined
+  let initialFrontendDispatched = false, initialFrontendWake = false
   let initializationStep: NonNullable<AgentTerminalInitialization['failure']>['step'] = 'connection'
   // Preserve the complete preparation diagnostic stream on this original Run, with backpressure.
   // Exact known credentials are masked even when the native process splits their bytes.
@@ -125,17 +127,65 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       }
       throw new ManagedNativeLaunchError('The original managed native actor did not publish its exact listener.')
     }
-    const initializedFrontend = (): Promise<AgentTerminalFrontendObservation> => spawnTui(endpoint!, ['resume', nativeSessionId!, ...plan.frontendArgs], frontend.frontendId)
+    const continueInitialFrontend = (): Promise<void> => {
+      if (!live() || initialFrontendDispatched || !nativeSessionId || !nativeRuntimeSessionId) return Promise.resolve()
+      if (initialFrontendPending) { initialFrontendWake = true; return initialFrontendPending }
+      const target = { sessionId: nativeSessionId, runtimeSessionId: nativeRuntimeSessionId }, frontendId = frontend.frontendId
+      const assertCurrent = (): void => {
+        if (!live() || initialFrontendDispatched || nativeSessionId !== target.sessionId ||
+            nativeRuntimeSessionId !== target.runtimeSessionId || frontend.frontendId !== frontendId) throw new ManagedNativeLaunchError(
+          'The original startup frontend or native object changed. No frontend was dispatched.')
+      }
+      const pending = (async () => {
+        try {
+          publish({ ...frontend, state: 'starting', observedAt: Date.now(),
+            message: 'The original native conversation is ready for input. Its terminal join is still being confirmed.' })
+          // Retain one original join across observation deadlines. Native input stays
+          // independent and may create the source this exact frontend needs.
+          if (!nativeConnection?.isConnected()) {
+            nativeConnection?.dispose()
+            nativeConnection = await connectCodexNativeActor(await locateEndpoint(), token, lifetime.signal, 'agentmux_managed_initialization',
+              { retainPendingInitialization: true, onNotification: observeNativeProgress })
+          }
+          const connection = nativeConnection
+          await joinCodexNativeFrontend({ request: (method, params) => connection.request(method, params, { retainPending: true }) }, target, assertCurrent)
+          assertCurrent()
+          setInitialization({ lifecycleOperationId, phase: 'ready', native: { state: 'confirmed', sessionId: target.sessionId } })
+          initialFrontendDispatched = true
+          await spawnTui(endpoint!, ['resume', target.sessionId, ...plan.frontendArgs], frontendId)
+        } catch (error) {
+          if (!live() || initialFrontendDispatched) return
+          initializationStep = 'frontend'
+          setInitialization({ lifecycleOperationId, phase: 'ready', native: { state: 'confirmed', sessionId: target.sessionId }, failure: failure(error) })
+          publish({ ...frontend, observedAt: Date.now(), message: 'The original terminal join is unconfirmed. Native input remains available; native turn progress or Check startup continues this same setup.' })
+        }
+      })()
+      initialFrontendPending = pending
+      void pending.finally(() => {
+        if (initialFrontendPending !== pending) return
+        initialFrontendPending = undefined
+        if (initialFrontendWake) { initialFrontendWake = false; void continueInitialFrontend() }
+      })
+      return pending
+    }
+    const observeNativeProgress = (method: string, params: Record<string, unknown>): void => {
+      // Native turn notifications only wake the original join. They never attest
+      // that a record exists or that a TUI attached, and join's own notifications
+      // cannot feed a polling loop.
+      if (params.threadId === nativeSessionId && ['turn/started', 'turn/completed'].includes(method)) void continueInitialFrontend()
+    }
     const beginInitialization = (): Promise<void> => {
       if (initializationPending) return initializationPending
-      if (nativeRequested || nativeSessionId || !live()) return Promise.resolve()
+      if (nativeSessionId) return continueInitialFrontend()
+      if (nativeRequested || !live()) return Promise.resolve()
       const pending = (async () => {
         try {
           initializationStep = 'connection'
           setInitialization({ lifecycleOperationId, phase: 'preparing', native: { state: plan.resume ? 'unknown' : 'not-created' } })
           const address = await locateEndpoint()
           nativeConnection?.dispose()
-          nativeConnection = await connectCodexNativeActor(address, token, lifetime.signal, 'agentmux_managed_initialization', { retainPendingInitialization: true })
+          nativeConnection = await connectCodexNativeActor(address, token, lifetime.signal, 'agentmux_managed_initialization',
+            { retainPendingInitialization: true, onNotification: observeNativeProgress })
           // Read-only preflight may be retried before any native creation request exists.
           initializationStep = 'preflight'
           const account = await nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })
@@ -170,11 +220,12 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
             throw new ManagedNativeLaunchError('The original native bootstrap did not confirm its exact object and effective configuration.')
           }
           nativeSessionId = id
+          nativeRuntimeSessionId = prepared.thread.sessionId
           setInitialization({ lifecycleOperationId, phase: 'ready', native: { state: 'confirmed', sessionId: id } })
           // Keep the original native connection alive and never let the TUI carry input.
           server.stderr?.unpipe(preparationDiagnostics); preparationDiagnostics.end(); server.stderr?.resume()
           initializationStep = 'frontend'
-          await initializedFrontend()
+          await continueInitialFrontend()
         } catch (error) {
           if (!live()) return
           if (!nativeRequested) { nativeConnection?.dispose(); nativeConnection = undefined }

@@ -4,7 +4,7 @@ import { JSONRPCClient } from 'json-rpc-2.0'
 /** A connection to the already authenticated actor, not another native server or thread owner. */
 export async function connectCodexNativeActor(endpoint: string, token: string, signal: AbortSignal,
   name: 'agentmux_native_input' | 'agentmux_managed_resume' | 'agentmux_frontend_reconnect' | 'agentmux_resumed_turn_read' | 'agentmux_managed_initialization',
-  options?: { retainPendingInitialization?: true }) {
+  options?: { retainPendingInitialization?: true; onNotification?: (method: string, params: Record<string, unknown>) => void }) {
   signal.throwIfAborted()
   const ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${token}` }, maxPayload: 4 * 1024 * 1024, handshakeTimeout: 2_000 })
   const client = new JSONRPCClient(request => new Promise<void>((resolve, reject) => {
@@ -20,6 +20,8 @@ export async function connectCodexNativeActor(endpoint: string, token: string, s
         const value = JSON.parse(line) as Record<string, unknown>
         // Server requests remain with the original TUI; neither lifecycle nor input impersonates it.
         if (!value.method && Object.hasOwn(value, 'id')) client.receive(value as never)
+        else if (typeof value.method === 'string' && !Object.hasOwn(value, 'id') && value.params &&
+            typeof value.params === 'object' && !Array.isArray(value.params)) options?.onNotification?.(value.method, value.params as Record<string, unknown>)
       }
     } catch { dispose() }
   })
@@ -35,6 +37,6 @@ export async function connectCodexNativeActor(endpoint: string, token: string, s
     await request('initialize', { clientInfo: { name, version: '1' }, capabilities: { experimentalApi: true } },
       options?.retainPendingInitialization ? { retainPending: true } : undefined)
     client.notify('initialized', {}, undefined)
-    return { request, dispose }
+    return { request, dispose, isConnected: () => ws.readyState === WebSocket.OPEN }
   } catch (error) { dispose(); throw error }
 }

@@ -100,6 +100,20 @@ async function connect(context: Parameters<NonNullable<AgentProvider['observeTer
 }
 export const observeCodexTerminalFrontend: NonNullable<AgentProvider['observeTerminalFrontend']> = async context =>
   await connect(context, 'observe', {}, context.onFrontend, context.onUnavailable)
+
+/** Loaded membership and a same-object resume receipt are separate native facts. */
+export async function joinCodexNativeFrontend(connection: Pick<Awaited<ReturnType<typeof connectCodexNativeActor>>, 'request'>,
+  target: { sessionId: string; runtimeSessionId?: string }, assertCurrent: () => void | Promise<void>): Promise<void> {
+  const loaded = await connection.request('thread/read', { threadId: target.sessionId, includeTurns: false })
+  if (loaded?.thread?.id !== target.sessionId || loaded.thread.canAcceptDirectInput !== true ||
+      typeof loaded.thread.sessionId !== 'string' || !loaded.thread.sessionId ||
+      target.runtimeSessionId !== undefined && loaded.thread.sessionId !== target.runtimeSessionId) throw unavailable()
+  await assertCurrent()
+  const joined = await connection.request('thread/resume', { threadId: target.sessionId, excludeTurns: true })
+  if (joined?.thread?.id !== target.sessionId || joined.thread.sessionId !== loaded.thread.sessionId ||
+      joined.thread.canAcceptDirectInput !== true) throw unavailable()
+}
+
 export const reconnectCodexTerminalFrontend: NonNullable<AgentProvider['reconnectTerminalFrontend']> = async (context, request) => {
   if (request.target.kind === 'initialization' && !context.nativeActor.initializationControl) throw unavailable('The original Run did not declare native initialization control. Its Session and existing channels are kept.')
   if (request.target.kind === 'native-session') {
@@ -113,17 +127,11 @@ export const reconnectCodexTerminalFrontend: NonNullable<AgentProvider['reconnec
     const listener = listeners[0]!, listenerBirth = await nativeProcessBirth(listener.processId, signal)
     const connection = await connectCodexNativeActor(listener.endpoint, nativeActor.token, signal, 'agentmux_frontend_reconnect')
     try {
-      const loaded = await connection.request('thread/read', { threadId: target.sessionId, includeTurns: false })
-      if (loaded?.thread?.id !== target.sessionId || loaded.thread.canAcceptDirectInput !== true ||
-          typeof loaded.thread.sessionId !== 'string' || !loaded.thread.sessionId) throw unavailable()
-      await context.assertCurrent()
       // Loaded membership does not prove that the original TUI can resume. Join
       // the same Native object before dispatch; do not alter its configuration.
       // A missing source leaves this operation pending, without spawning a doomed
       // frontend or consuming the actor's original reconnect operation.
-      const joined = await connection.request('thread/resume', { threadId: target.sessionId, excludeTurns: false })
-      if (joined?.thread?.id !== target.sessionId || joined.thread.sessionId !== loaded.thread.sessionId ||
-          joined.thread.canAcceptDirectInput !== true) throw unavailable()
+      await joinCodexNativeFrontend(connection, target, context.assertCurrent)
       const after = await nativeProcessTcpListeners(processId, signal)
       if (await nativeProcessBirth(processId, signal) !== birth || await nativeProcessBirth(listener.processId, signal) !== listenerBirth ||
           after.length !== 1 || after[0]!.processId !== listener.processId || after[0]!.endpoint !== listener.endpoint) throw unavailable()
