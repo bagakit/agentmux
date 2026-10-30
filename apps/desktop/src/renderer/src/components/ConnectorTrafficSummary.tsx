@@ -13,7 +13,7 @@ export function ConnectorProblemIcon({ kind }: { kind: ConnectorProblemKind }) {
 }
 
 /** The same bounded facts in popover and details. It cannot dispatch or authorize an operation. */
-export function ConnectorTrafficSummary({ summary, compact = false, onInspect, actions, incomingControl }: { summary: ConnectorGroupSummary; compact?: boolean; onInspect?(): void; incomingControl?: ReactNode;
+export function ConnectorTrafficSummary({ summary, compact = false, onInspect, actions, incomingControl, outgoingControl }: { summary: ConnectorGroupSummary; compact?: boolean; onInspect?(): void; incomingControl?: ReactNode; outgoingControl?: ReactNode;
   actions?: ConnectorProblemActions }) {
   function action(problem: ConnectorProblem | undefined) {
     const request = problem?.action, perform = request && actions?.[request.kind]
@@ -31,7 +31,7 @@ export function ConnectorTrafficSummary({ summary, compact = false, onInspect, a
         return <section className="connector-traffic-summary__tile" key={direction.direction} data-direction={direction.direction} data-tone={direction.tone} aria-label={direction.title}>
           {compact ? <><span className="connector-traffic-summary__direction">{direction.direction === 'outgoing' ? <OutgoingIcon size={14} /> : <IncomingIcon size={14} />}{direction.direction === 'outgoing' ? 'To group' : 'To Agent'}</span><div className="connector-traffic-summary__copy"><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}</div></>
             : <><span className="connector-traffic-summary__leading" aria-hidden="true">{direction.direction === 'outgoing' ? <OutgoingIcon size={16} /> : <IncomingIcon size={16} />}</span>
-              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span>{direction.receiver ? <small>{direction.receiver}</small> : null}<strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small className="connector-traffic-summary__context">{problem?.detail ?? direction.detail}</small></div>{action(problem)}{direction.direction === 'incoming' ? incomingControl : null}</>}
+              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span>{direction.receiver ? <small>{direction.receiver}</small> : null}<strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small className="connector-traffic-summary__context">{problem?.detail ?? direction.detail}</small></div>{direction.direction === 'outgoing' && problem?.action?.kind === 'source' && outgoingControl !== undefined ? <div className="connector-traffic-summary__receiver">{outgoingControl}</div> : action(problem)}{direction.direction === 'incoming' ? incomingControl : null}</>}
         </section>
       })}
     </div>
