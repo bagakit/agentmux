@@ -1,0 +1,49 @@
+.mote-cooperation { flex: 0 0 auto; min-width: 0; color: var(--text); background: var(--surface-1); border-bottom: 1px solid var(--line-soft); }
+.mote-cooperation__bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-width: 0; }
+.mote-cooperation__identity { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mote-cooperation__identity > .space-object-icon, .mote-cooperation__identity > .project-rail-row__icon { width: 32px; height: 32px; flex-shrink: 0; }
+.mote-cooperation__copy { min-width: 0; display: grid; gap: 3px; }
+.mote-cooperation__copy > strong { font-size: var(--fs-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mote-cooperation__copy > span { display: block; font-size: var(--fs-meta); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mote-cooperation__copy b { color: var(--text-2); font-weight: 450; }
+.mote-cooperation__actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.mote-cooperation button { font-family: inherit; cursor: pointer; }
+.mote-cooperation button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.mote-cooperation__team, .mote-cooperation__return { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 5px 9px; color: var(--text-2); background: transparent; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); font-size: var(--fs-meta); white-space: nowrap; }
+.mote-cooperation__team[aria-expanded="true"] { background: var(--surface-3); color: var(--text); border-color: var(--line); }
+.mote-cooperation__team[data-needs-you="true"] { color: var(--text); background: var(--surface-2); }
+.mote-cooperation__team > small { font-size: var(--fs-meta); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.mote-cooperation__team[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.mote-cooperation__work { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 16px 10px; border: 0; background: transparent; text-align: start; color: var(--text-2); font-size: var(--fs-meta); }
+.mote-cooperation__work > span { color: var(--text-3); flex-shrink: 0; }
+.mote-cooperation__work > strong { flex: 1; font-weight: 450; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mote-cooperation__team-body { max-height: min(320px, 42vh); overflow: auto; border-top: 1px solid var(--line-soft); padding: 8px 16px; }
+.mote-cooperation__team-heading { display: flex; align-items: center; justify-content: space-between; padding: 2px 0 8px; font-size: var(--fs-meta); }
+.mote-cooperation__team-heading > span { color: var(--text-3); }
+.mote-cooperation__member { display: flex; align-items: center; gap: 10px; padding: 10px 0; min-width: 0; }
+.mote-cooperation__member + .mote-cooperation__member { border-top: 1px solid var(--line-soft); }
+.mote-cooperation__member-info { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mote-cooperation__member-info > svg { flex-shrink: 0; color: var(--text-3); }
+.mote-cooperation__member-info > div { min-width: 0; display: grid; gap: 4px; }
+.mote-cooperation__member-info strong { font-size: var(--fs-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-cooperation__member-info span { font-size: var(--fs-meta); color: var(--text-3); overflow-wrap: anywhere; }
+.mote-cooperation__member[data-attention="true"] .mote-cooperation__member-info > div > span { color: var(--text-2); }
+.mote-cooperation__locations { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 40%; }
+.mote-cooperation__locations > button { display: inline-flex; align-items: center; gap: 3px; background: transparent; color: var(--text-2); border: 0; border-radius: var(--radius-sm); padding: 6px; font-size: var(--fs-meta); }
+.mote-cooperation__locations > button:hover, .mote-cooperation__locations > button[aria-current="page"] { color: var(--text); background: var(--surface-3); }
+.mote-cooperation__locations > span { font-size: var(--fs-meta); color: var(--text-3); }
+.mote-cooperation__empty, .mote-cooperation__issue { font-size: var(--fs-meta); line-height: 1.5; color: var(--text-3); margin: 6px 0; }
+.mote-cooperation > .mote-cooperation__issue { margin: 0; padding: 4px 16px 10px; }
+.mote-cooperation__goal { display: flex; width: 100%; align-items: center; gap: 8px; padding: 10px 0; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--text-2); text-align: start; }
+.mote-cooperation__goal > span { flex-shrink: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.mote-cooperation__goal > strong { flex: 1; font-size: var(--fs-body); font-weight: 500; overflow-wrap: anywhere; }
+.mote-space-frame__header:has(> .mote-cooperation) { display: block; padding: 0; }
+.mote-space-frame__header:has(> .mote-cooperation) > .mote-space-frame__navigation { padding: 6px 12px; border-bottom: 1px solid var(--line-soft); }
+.mote-space-frame__header > .mote-cooperation { border-bottom: 0; }
+@container (max-width: 460px) {
+  .mote-cooperation__bar { padding: 10px; gap: 8px; flex-wrap: wrap; }
+  .mote-cooperation__identity { flex-basis: 180px; }
+  .mote-cooperation__actions { margin-inline-start: auto; gap: 4px; }
+  .mote-cooperation__team-body { padding-inline: 10px; }
+  .mote-cooperation__work { padding-inline: 10px; }
+}

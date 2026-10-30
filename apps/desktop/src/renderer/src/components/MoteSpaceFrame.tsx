@@ -1,16 +1,12 @@
-import { createContext, useContext, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, type ReactNode } from 'react'
 import { type MoteWorkfaceScope, useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import { MoteFirstCooperation } from './MoteFirstCooperation'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 import { useAppStore } from '../store'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { MoteQuickModeDialog } from './MoteQuickMode'
-import { moteConversationReference, moteDefaultConversation, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
-import { openMoteMaterial } from '../lib/mote-materials-actions'
-import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { showMoteConversation } from '../lib/mote-conversation-mode'
-import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
+import { MoteCooperation } from './MoteCooperation'
 
 export type MoteContentSection = 'profile' | 'ideas' | 'calendar'
 export type MoteSpaceSection = MoteContentSection | 'discussion'
@@ -59,39 +55,13 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
 function MoteSpaceActions({ scope, active, section, onDiscussion }: {
   scope: MoteWorkfaceScope; active: boolean; section: MoteSpaceSection; onDiscussion(): void
 }) {
-  const primary = useMoteDefaultConversation(scope.topic, scope.workspace.id, active)
   const selected = useAppStore(state => active ? state.workbenchSpaceSelection : null)
-  const [editing, setEditing] = useState(false), [issue, setIssue] = useState('')
-  const invoker = useRef<HTMLElement | null>(null)
   const selectedReference = selected?.groupId && selected.tabId && selected.regionId
     ? { displayWorkspaceId: selected.workspaceId, groupId: selected.groupId, tabId: selected.tabId, regionId: selected.regionId } : null
-  const atPrimary = section === 'discussion' && primary.conversation && selectedReference &&
-    sameWorkbenchProjectionSelection(selectedReference, primary.conversation)
-  const edit = (node: HTMLElement) => { invoker.current = node; setEditing(true) }
-  const returnToPrimary = () => {
-    const state = useAppStore.getState()
-    const latest = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scope.workspace)?.find(item => item.id === scope.topic.id)
-    const topic = latest && !latest.readError ? latest : scope.topic
-    const current = moteDefaultConversation(state, topic, scope.workspace.id)
-    if (!current.conversation) {
-      setIssue(current.issue ?? 'The main Agent’s original location is not confirmed. Your current work is kept; review its saved reference.')
-      return
-    }
-    const reference = moteConversationReference(current.conversation)
-    if (!state.selectMainRegion(reference, state.workbenchSpaceSelection)) {
-      setIssue('The main Agent’s original location could not be opened. Your current work is kept; review its saved reference.')
-      return
-    }
-    setIssue(''); onDiscussion(); showMoteConversation(scope, { reference })
-  }
-  return <div className="mote-space-frame__actions">
-    {primary.conversation ? !atPrimary ? <button type="button" className="mote-space-frame__primary" onClick={returnToPrimary}>Return to main Agent</button> : null
-      : <button type="button" className="mote-space-frame__primary" onClick={event => edit(event.currentTarget)}>{primary.issue ? 'Review main Agent' : 'Choose main Agent'}</button>}
-    <MoteFirstCooperation scope={scope} disclosure />
-    {issue ? <p className="mote-details__issue mote-space-frame__issue" role="status">{issue}
-      {primary.conversation ? <button type="button" className="small-button" onClick={event => edit(event.currentTarget)}>Review main Agent</button> : null}
-    </p> : null}
-    {editing ? <MoteQuickModeDialog scope={scope} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setEditing(false)}
-      returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
-  </div>
+  return <MoteCooperation scope={scope} active={active} reference={section === 'discussion' ? selectedReference : null}
+    onSelect={reference => {
+      const state = useAppStore.getState()
+      if (!state.selectMainRegion(reference, state.workbenchSpaceSelection)) return false
+      onDiscussion(); showMoteConversation(scope, { reference }); return true
+    }} actions={<MoteFirstCooperation scope={scope} disclosure />} />
 }
