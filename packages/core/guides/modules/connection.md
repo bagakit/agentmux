@@ -136,6 +136,15 @@ does not grant managed administration or
 retry/re-enable a Core input. Once a Core ref exists, inspect or explicitly control that
 original ref with agent input commands under their own authority. Missing current authority
 can block advancement while saved original receipts remain readable under existing scope.
+While an optional context read is pending, inspection exposes preparation with its original
+observationId, revision, phase, native source, range and gaps. A context-observation source ends
+only that exact weak read: it durably freezes the confirmed prefix and an explicit cancellation
+gap, then lets the same original body continue through current input authorization. This is an
+action, not a read or permission grant. The authenticated frozen recipient can use it without
+bot administration; an unassigned audience association cannot. context-ended reports this local
+action separately from the current Core receipt. Repeating the same action or an older source
+cannot cancel a later observation, regenerate a frozen quote or create another input. A received
+source joins or ensures its original preparation revision and never cancels a later read.
 Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
 changes; original intake authors and receipts retain their own configuration revision. For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
