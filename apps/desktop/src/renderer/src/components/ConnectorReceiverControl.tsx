@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { ConnectionRecord, ConnectionReceiverRecoveryOperation, GroupDiagnosis, RoomBinding } from '@agentmux/core/connections'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
@@ -9,9 +9,10 @@ import { sameConnectorTarget } from '../lib/connector-room-intent'
 
 type Intent = Extract<ConnectorRoomIntent, { method: 'connection.receiver.recover' }>
 /** Local action presentation over the original submitted correlation and Host journal. */
-export function ConnectorReceiverControl({ binding, connection, observed, hostingTarget, onRefresh }: {
+export function ConnectorReceiverControl({ binding, connection, observed, hostingTarget, onRefresh, render }: {
   binding: RoomBinding; connection?: ConnectionRecord | undefined; observed?: GroupDiagnosis['connection'] | undefined
   hostingTarget?: ConnectionHostingTarget | null | undefined; onRefresh(): void
+  render?(view: { primary: ReactNode; diagnostics: ReactNode; feedback?: ReactNode }): ReactNode
 }) {
   const intents = useAppStore(state => state.connectorRoomIntents)
   const target = { executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
@@ -57,13 +58,30 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
     finally { flight.current = false; if (accepts(originalKey)) setBusy(false) }
   }
   useEffect(() => { if (retained) void run('inspect') }, [key, retained?.input.operationId])
-  if (!canStart && !retained) return null
   const complete = !!operation && receiver?.state === 'ready'
   const automatic = receiver?.state === 'starting' || receiver?.state === 'recovering' ||
     receiver?.state === 'ended' && receiver.nextAttemptAt !== undefined && receiver.nextAttemptAt > Date.now()
   const status = complete ? 'Recovery recorded' : operation?.disposition === 'scheduled' ? 'Reconnect requested' : operation?.disposition === 'joined' ? 'Joining original recovery' :
     operation?.disposition === 'already-ready' ? 'No reconnect was needed' : operation?.disposition === 'not-current' ? 'Original receiver changed' :
     operation?.disposition === 'disabled' ? 'Automatic receiving is off' : operation ? 'Connection unconfirmed' : ''
+  if (render) {
+    const online = receiver?.state === 'ready' && observed?.value?.transport.state === 'ready'
+    const primaryAction = canStart ? 'new' : retained && !complete && !online ? 'inspect' : null
+    const primary = primaryAction ? <button type="button" className="primary-button" disabled={busy} data-receiver-action={primaryAction === 'new' ? 'recover' : 'inspect'} onClick={() => void run(primaryAction)}>{primaryAction === 'new' ? 'Reconnect bot' : automatic || receiver?.nextAttemptAt !== undefined ? 'Check progress' : 'Check recovery'}</button> : null
+    const diagnostics = canStart || retained ? <div data-receiver-control>
+      {status ? <small role="status">{status}</small> : null}
+      {busy ? <small role="status">Checking the saved receiver…</small> : null}
+      {issue ? <small role="status">{issue}</small> : null}
+      {localIssue ? <small role="status">This request is kept here; its local copy is not durable.</small> : null}
+      {retained ? <div className="agent-connector-fields"><code>{retained.input.operationId}</code><div className="agent-connector-row">
+        {primaryAction !== 'inspect' && !complete ? <button type="button" className="small-button" disabled={busy} data-receiver-action="inspect" onClick={() => void run('inspect')}>Check recovery</button> : null}
+        {!canStart && !automatic && !complete ? <button type="button" className="agent-connector-text-action" disabled={busy} data-receiver-action="continue" onClick={() => void run('continue')}>Continue this request</button> : null}
+      </div></div> : null}
+    </div> : null
+    const feedback = !online && (status || issue || busy) ? <small role="status">{busy ? 'Checking this receiver…' : issue || status}</small> : null
+    return render({ primary, diagnostics, feedback })
+  }
+  if (!canStart && !retained) return null
   return <div className="connector-traffic-summary__receiver" data-receiver-control>
     {status ? <small role="status">{status}</small> : null}
     <div className="agent-connector-row">

@@ -6,7 +6,7 @@ import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { api } from '../lib/api'
 import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, readGroupDiagnosis, retainGroupDiagnosis, type GroupDiagnosis, type GroupWindow } from '../lib/group-diagnosis'
 
-import { connectorDiagnosisKey, useConnectorGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
+import { connectorDiagnosisKey, useConnectorGroupDiagnosis, type CheckedGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
 import { connectorGroupSummary, type ConnectorProblemAction, type ConnectorProblemActions } from '../lib/connector-group-status'
 import { connectorDeliveryExplanation, connectorGapExplanation, connectorIntakeExplanation, connectorSourceExplanation } from '../lib/connector-diagnosis-explanation'
 import { ConnectorTrafficSummary } from './ConnectorTrafficSummary'
@@ -17,9 +17,11 @@ import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 const LoadingIcon = semanticIconComponent('status.loading')
 const receiptTitle = (kind: string) => kind === 'binding-notice' ? 'Connection notice' : kind === 'permission' ? 'Permission request' : kind === 'query-feedback' ? 'Message status update' : 'Conversation message'
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
-export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, onMembers, actions, details, active = true, showConfiguration = true }: { binding: RoomBinding; connection?: ConnectionRecord | undefined; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void; actions?: ConnectorProblemActions; active?: boolean; details?: ReactNode; showConfiguration?: boolean }) {
-  const latest = useConnectorGroupDiagnosis([binding], 0, active, null, hostingTarget, [binding])
-  const checked = latest.entries[connectorDiagnosisKey(binding)]
+export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, onMembers, actions, details, active = true, showConfiguration = true, observation, incomingControl, selectedProblem }: { binding: RoomBinding; connection?: ConnectionRecord | undefined; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void; actions?: ConnectorProblemActions; active?: boolean; details?: ReactNode; showConfiguration?: boolean
+  observation?: { snapshot: CheckedGroupDiagnosis | undefined; check(): void }; incomingControl?: ReactNode; selectedProblem?: { target: string; action: ConnectorProblemAction } | null }) {
+  const own = useConnectorGroupDiagnosis([binding], 0, active && !observation, null, hostingTarget, [binding])
+  const checked = observation ? observation.snapshot : own.entries[connectorDiagnosisKey(binding)]
+  const latest = { check: observation?.check ?? own.check }
   const target = groupTarget(binding), key = JSON.stringify([target, hostingTarget]), originalSource = api.connections.call
   const source: typeof api.connections.call = useMemo(() => (method, params) => {
     if (hostingTarget === null) return Promise.reject(new Error('The original bot hosting owner is unconfirmed.'))
@@ -36,9 +38,10 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
   const visible = read?.key === key ? read.value : checked?.report ?? null
   const original = detail?.key === key ? detail : null
   const selectedReceipt = useRef<HTMLDivElement | null>(null)
-  useEffect(() => { if (original?.value) { selectedReceipt.current?.scrollIntoView({ block: 'start' }); selectedReceipt.current?.focus({ preventScroll: true }) } }, [original?.request])
+  useEffect(() => { if (active && original?.value) { selectedReceipt.current?.scrollIntoView({ block: 'start' }); selectedReceipt.current?.focus({ preventScroll: true }) } }, [original?.request])
   const accepts = () => live.current && current.current.key === key && current.current.source === source && api.connections.call === originalSource
   function focusOriginal(section: 'incoming' | 'receipts' | 'content') {
+    if (!active) return
     const node = originalSections.current[section]
     node?.scrollIntoView({ block: 'nearest' }); node?.focus({ preventScroll: true })
   }
@@ -62,11 +65,12 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
       if (row?.kind === 'message' && row.scope === 'current-binding' && row.inputOperationId) void inspectInput(row)
     } else if (action.kind === 'content') showOriginal('content')
   }
+  useEffect(() => { if (selectedProblem?.target === key) openProblem(selectedProblem.action) }, [selectedProblem, key])
   useEffect(() => {
     if (expanded && reveal.current) { focusOriginal(reveal.current); reveal.current = null }
   }, [expanded, key])
   useEffect(() => {
-    if (input?.key !== key) return
+    if (!active || input?.key !== key) return
     const row = [...(originalSections.current.incoming?.querySelectorAll<HTMLElement>('[data-ingress-id]') ?? [])].find(node => node.dataset.ingressId === input.ingressId)
     row?.scrollIntoView({ block: 'start' }); row?.focus({ preventScroll: true })
   }, [input?.key, input?.ingressId, key])
@@ -148,7 +152,7 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
   return <section className="agent-connector-fields connector-delivery-details" aria-busy={pending || checked?.checking} aria-label="Group delivery" data-connection-section="activity" tabIndex={-1}>
     {showConfiguration && configuration ? <div className="connector-group-details__configuration"><span>{checked?.report?.binding.issue ? 'Last observed sync' : 'Group sync'} · <strong>{configuration.state === 'paused' ? 'Paused' : configuration.state === 'detached' ? 'Disconnected' : 'Enabled'}</strong></span><span>Sharing · <strong>{configuration.scope.publication === 'future-shared-conversation' ? 'Complete conversation' : 'Agent replies only'}</strong></span></div> : null}
     <div className="agent-connector-section-title"><div><h3>Message activity</h3>{checked?.checkedAt ? <small className="agent-connector-checked">Checked <time dateTime={new Date(checked.checkedAt).toISOString()}>{new Date(checked.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div>{!hasSourceCheck ? <button className="agent-connector-text-action" aria-busy={checked?.checking} disabled={checked?.checking} onClick={latest.check}>{checked?.checking ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button> : null}</div>
-    <ConnectorTrafficSummary incomingControl={<ConnectorReceiverControl key={key} binding={binding} connection={connection} observed={checked?.report?.connection} hostingTarget={hostingTarget} onRefresh={latest.check} />} summary={summary} actions={{ ...actions, ...(onMembers ? { members: onMembers } : {}),
+    <ConnectorTrafficSummary incomingControl={incomingControl === undefined ? <ConnectorReceiverControl key={key} binding={binding} connection={connection} observed={checked?.report?.connection} hostingTarget={hostingTarget} onRefresh={latest.check} /> : incomingControl} summary={summary} actions={{ ...actions, ...(onMembers ? { members: onMembers } : {}),
       incoming: openProblem, receipts: openProblem, 'earlier-receipts': openProblem, content: openProblem, source: openProblem }} />
 
     <details className="agent-connector-disclosure connector-delivery-details__originals" open={expanded} onToggle={event => { setExpanded(event.currentTarget.open); if (event.currentTarget.open && read?.key !== key && checked?.report) setRead({ key, value: checked.report, checkedAt: checked?.checkedAt ?? Date.now() }) }}><summary>Message records</summary><div className="agent-connector-fields">

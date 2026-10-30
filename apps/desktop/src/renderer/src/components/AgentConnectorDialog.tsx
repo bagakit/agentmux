@@ -16,13 +16,16 @@ import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { SettingsNavigation } from './SettingsNavigation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ResolvedAgentAvatar } from './AgentAvatar'
+import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { ConnectorRoomOverview, ConnectorRoomIdentity, ConnectorRoomDetails, ConnectorRoomPeople, ConnectorRoomSelection, useConnectorRoomFacts } from './ConnectorRoomSelection'
 import { ConnectorRoomJoinLink, ConnectorRoomJoinReceipt } from './ConnectorRoomJoinLink'
 import { ConnectorCreatorInvitation, useConnectorCreatorInvitation } from './ConnectorCreatorInvitation'
 import { ConnectorSharingMap, ConnectorReplyMode } from './ConnectorSharing'
 import { ConnectorBindingRecovery } from './ConnectorBindingRecovery'
 import { ConnectorGroupDetails, ConnectorGroupDetailsHeader, type ConnectorGroupSection } from './ConnectorGroupDetails'
-import { ConnectorDeliveryDetails } from './ConnectorDeliveryDetails'
+import { ConnectorGroupActivity } from './ConnectorGroupActivity'
+import { connectorDiagnosisKey, useConnectorGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
+import { connectorConnectionPresentation } from '../lib/connector-connection-presentation'
 import { ConnectorBindingNotices } from './ConnectorBindingNotices'
 import { ConnectorServiceControl } from './settings/ConnectorServiceControl'
 import { parseMotePreferencesReadResult, type MoteConnectionRef } from '@agentmux/core/mote-preferences'
@@ -44,6 +47,7 @@ const SharingIcon = semanticIconComponent('conversation.mixed')
 const LinkIcon = semanticIconComponent('object.link')
 const ConversationIcon = semanticIconComponent('object.conversation')
 const SettingsIcon = semanticIconComponent('object.settings')
+const ApplicationIcon = semanticIconComponent('object.component')
 
 const availableForNewGroup = (record: ConnectionRecord) => record.config.enabled && !connectionNeedsInitialSetup(record)
 const recordedRepliesOnly = (intent: ConnectorRoomIntent) => (intent.method === 'connection.bind' || intent.method === 'connection.binding.relink') && intent.input.scope.publication !== 'future-shared-conversation'
@@ -57,7 +61,7 @@ type Fact = RoomProvisioningOperation | RoomBindingOperation | RoomLinkOperation
 export type AgentConnectorTarget = { channel?: string; hostingTarget?: ConnectionHostingTarget | null; target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string; bindingId?: string; mote?: AgentMoteConnectionSource
   identity?: Pick<ComponentProps<typeof ResolvedAgentAvatar>, 'providerId' | 'appearance' | 'executorId'> }
 type AgentConnectorDialogProps = {
-  original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; initialSection?: 'joining' | 'members' | 'sharing' | 'sync' | 'activity' | undefined; resumeBinding?: Pick<RoomBinding, 'bindingId' | 'revision'> | undefined; onClose(): void; returnFocus(): HTMLElement | null
+  original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; initialSection?: 'joining' | 'members' | 'sharing' | 'sync' | 'activity' | 'diagnostics' | undefined; resumeBinding?: Pick<RoomBinding, 'bindingId' | 'revision'> | undefined; onClose(): void; returnFocus(): HTMLElement | null
 }
 const sameHosting = (a: ConnectionHostingTarget | undefined, b: ConnectionHostingTarget) => a?.hostId === b.hostId && a.runtimeId === b.runtimeId
 /** Discover only a new entry. Retained operations always name their original hosting owner. */
@@ -131,7 +135,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const intents = useAppStore(state => state.connectorRoomIntents)
   const flight = useRef(false), epoch = useRef({}), content = useRef<HTMLDivElement>(null), initialFocus = useRef(true)
   const connection = connections.find(item => item.config.connectionId === connectionId)
-  const channel = settings?.channelEntries.find(entry => entry.adapterId === original.channel)
+  const channel = settings?.channelEntries.find(entry => entry.adapterId === (connection?.config.adapterId ?? original.channel))
+  const ChannelIcon = channel?.icon ?? ApplicationIcon
   const inChannel = (record: ConnectionRecord) => !original.channel || record.config.adapterId === original.channel
   const defaultRef = moteDefault.ref && (!original.channel || channel?.domains.includes(moteDefault.ref.application.domain)) ? moteDefault.ref : null
   const defaultChoice = defaultRef ? moteConnectionChoice(defaultRef, connections) : null
@@ -163,6 +168,9 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const bindingReview = !!bindingIntent
   const bindingPending = bindingReview && !bindingRefused
   const showingCurrentBinding = !!binding && !changingGroup && !bindingReview
+  const groupRead = useConnectorGroupDiagnosis(binding ? [binding] : [], 0, showingCurrentBinding && (section === 'overview' || section === 'diagnostics'), null, hostingTarget, binding ? [binding] : [])
+  const groupSnapshot = binding ? groupRead.entries[connectorDiagnosisKey(binding)] : undefined
+  const groupStatus = connectorConnectionPresentation(groupSnapshot?.report ?? null)
   const links = relevant.filter((intent): intent is Extract<ConnectorRoomIntent, { method: 'connection.room.link.create' }> => intent.method === 'connection.room.link.create')
   // Explicit submitted replacement references choose the head; presentation order is not authority.
   const replacedLinks = new Set(links.filter(next => links.some(previous => previous.input.operationId === next.replacesOperationId && previous.input.externalConversationId === next.input.externalConversationId)).map(next => next.replacesOperationId))
@@ -464,9 +472,9 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     if (id && group) { mote.selectTab(id, group.id); onClose() }
     else setIssue('The original Mote discussion entry is unavailable. Your Agent and draft are kept.')
   }
-  function showSection(destination: 'members' | 'sharing' | 'joining' | 'sync' | 'activity') {
+  function showSection(destination: 'members' | 'sharing' | 'joining' | 'sync' | 'activity' | 'diagnostics') {
     sectionToFocus.current = destination
-    setSection(destination === 'sync' || destination === 'activity' ? 'overview' : destination)
+    setSection(destination === 'sync' || destination === 'activity' ? 'diagnostics' : destination)
     // Also schedules a render when the destination is already selected.
     setSectionRequest(value => value + 1)
   }
@@ -594,19 +602,20 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const sharingStatus = binding ? <section className="agent-connector-status" aria-label="Group connection status"><div className="agent-connector-saved"><SharingIcon size={14} /><span>{binding.state === 'paused' ? 'Sync paused' : binding.scope.publication === 'future-shared-conversation' ? 'Two-way sync enabled' : 'Agent replies only'}</span></div>{binding.scope.publication === 'future-native-user-facing' ? <div role="status" className="agent-connector-fields" data-partial-sharing><strong>App and group are not fully synced</strong><p className="agent-connector-note">{binding.state === 'paused' ? 'Sync is paused. Resume two-way sync' : 'This group receives only Agent replies. Enable two-way sync'} to include new App and group messages. Earlier private history stays local; saved access and original requests are kept.</p><p className="agent-connector-note">This Agent may use its existing private context in replies to these audiences.</p><button type="button" className="primary-button" disabled={busy || bindingPending || !connection?.config.enabled || session.nativeHandle?.kind !== 'provider'} onClick={() => bind(true)}>{binding.state === 'paused' ? 'Resume two-way sync' : 'Enable two-way sync'}</button></div> : null}<div className="agent-connector-link-actions">{binding.state !== 'paused' || binding.scope.publication === 'future-shared-conversation' ? <button className="small-button" disabled={busy} onClick={() => lifecycle(binding.state === 'paused' ? 'connection.binding.resume' : 'connection.binding.pause')}>{binding.state === 'paused' ? 'Resume sync' : 'Pause sync'}</button> : null}<button className="agent-connector-text-action" disabled={busy} onClick={() => setDisconnecting(true)}>Disconnect group</button></div>
             {disconnecting ? <div className="agent-connector-disconnect" role="group" aria-label="Confirm group disconnection"><strong>Disconnect this group?</strong><p className="agent-connector-note">New messages will stop in both directions. This Agent keeps running and its conversation stays here. An end card is sent to this group; a card failure does not prevent disconnection.</p><div className="agent-connector-link-actions"><button className="small-button" disabled={busy} onClick={() => setDisconnecting(false)}>Keep connected</button><button className="small-button" disabled={busy} onClick={() => lifecycle('connection.binding.detach')}>Confirm disconnect</button></div></div> : null}
           </section> : null
-  const groupOverview = binding ? <>
-    <ConnectorDeliveryDetails connection={connection} active={section === 'overview'} showConfiguration={false} details={technicalDetails} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} actions={{ sync: () => showSection('sync'), sharing: () => showSection('sharing'), ...(openChannelSettings ? { 'channel-settings': openChannelSettings } : {}) }} />
+  const groupConfiguration = binding ? <>
     <section className="connector-group-details__section" aria-label="Group information"><h3><GroupIcon size={16} aria-hidden="true" />Group information</h3><ConnectorRoomDetails facts={roomFacts} groupId={audience} requestedName={created === audience ? frozenRoom?.name : undefined} /></section>
-    <section className="connector-group-details__section agent-connector-host-sync" data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active={section === 'overview'} hostingTarget={hostingTarget} /></section>
+    <section className="connector-group-details__section agent-connector-host-sync" data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active={section === 'diagnostics'} hostingTarget={hostingTarget} /></section>
   </> : null
   const groupId = fieldId + '-group'
-  const groupHeader = showingCurrentBinding && binding ? <ConnectorGroupDetailsHeader id={groupId} section={section} onSection={next => { const body = content.current?.querySelector('.agent-connector-dialog__body'); if (body) body.scrollTop = 0; setSection(next) }}
+  const groupProfile = roomFacts.profiles.get(channelMetadataSubjectKey({ kind: 'conversation', externalConversationId: audience }))?.observation?.profile
+  const groupHeader = showingCurrentBinding && binding ? <ConnectorGroupDetailsHeader id={groupId} section={section} attention={groupStatus.attention ? { diagnostics: groupStatus.attention } : undefined} onSection={next => { const body = content.current?.querySelector('.agent-connector-dialog__body'); if (body) body.scrollTop = 0; setSection(next) }}
     identity={<ConnectorRoomIdentity facts={roomFacts} groupId={audience} />}
-    relationship={<><Dialog.Description className="connector-group-details__conversation">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={20} /> : <AgentIcon size={18} aria-hidden="true" />}<span><strong>{original.name}</strong><small> · This conversation</small></span></Dialog.Description><span className="connector-group-details__via"><LinkIcon size={15} aria-hidden="true" /><span>via Bot · <strong>{connection?.config.label ?? 'Saved bot'}</strong></span>{openChannelSettings ? <button type="button" className="icon-button" aria-label="Open this bot’s settings" title="Open this bot’s settings" onClick={openChannelSettings}><SettingsIcon size={14} /></button> : null}</span></>}
+    relationship={<><Dialog.Description className="connector-group-details__relation-node"><span className="connector-group-details__relation-avatar">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={36} /> : <AgentIcon size={22} aria-hidden="true" />}</span><span>{original.name}</span><small>Agent</small></Dialog.Description><span className="connector-group-details__relation-line" aria-hidden="true" /><span className="connector-group-details__relation-node"><span className="connector-group-details__relation-avatar"><ChannelIcon size={24} aria-hidden="true" /></span><span>{connection?.config.label ?? 'Saved bot'}</span><small>Bot</small></span><span className="connector-group-details__relation-line" aria-hidden="true" /><span className="connector-group-details__relation-node"><span className="connector-group-details__relation-avatar"><ChannelProfileAvatar url={groupProfile?.avatarUrl} size={36}><GroupIcon size={22} aria-hidden="true" /></ChannelProfileAvatar></span><span>This group</span><small>Group</small></span></>}
     configuration={<span>Configured · <strong>{binding.state === 'paused' ? 'Paused' : 'Group linked'}</strong> · {binding.scope.publication === 'future-shared-conversation' ? 'Complete conversation' : 'Agent replies only'}</span>}
   /> : null
   const groupDetails = showingCurrentBinding && binding ? <ConnectorGroupDetails id={groupId} section={section}
-    overview={groupOverview}
+    activity={<ConnectorGroupActivity id={groupId} section={section} binding={binding} connection={connection} hostingTarget={hostingTarget} snapshot={groupSnapshot} onCheck={groupRead.check} onSection={setSection} details={technicalDetails} configuration={groupConfiguration}
+      actions={{ sync: () => showSection('sync'), sharing: () => showSection('sharing'), members: () => showSection('members'), ...(openChannelSettings ? { 'channel-settings': openChannelSettings } : {}) }} />}
     members={memberAccess} sharing={<>{sharing}{sharingStatus}</>} joining={<div className="agent-connector-section" data-connection-section="joining" tabIndex={-1}>{joiningAccess}</div>}
     /> : null
 
@@ -616,7 +625,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
         onOpenAutoFocus={event => { event.preventDefault(); (content.current?.querySelector<HTMLElement>('[aria-label="Group name"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Close group setup"]'))?.focus({ preventScroll: true }) }}
         onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement; if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
         onEscapeKeyDown={event => { if (event.target instanceof ownerDocument.defaultView!.Element && event.target.closest('[role="menu"]')) event.preventDefault() }}>
-        <header className="agent-connector-dialog__header" data-group-details={showingCurrentBinding}><div><Dialog.Title>{channel ? channel.title + ' · ' : ''}{joining ? 'Join this group' : binding || detached ? 'Group connection' : 'Connect a group'}</Dialog.Title>
+        <header className="agent-connector-dialog__header" data-group-details={showingCurrentBinding}><div><Dialog.Title className="agent-connector-platform-title"><ChannelIcon size={14} /><span>{channel ? channel.title + ' · ' : ''}{joining ? 'Join this group' : binding || detached ? 'Group connection' : 'Connect a group'}</span></Dialog.Title>
           {!showingCurrentBinding ? <Dialog.Description className="agent-connector-identity">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={22} /> : <AgentIcon size={20} aria-hidden="true" />}<span>{original.name}</span></Dialog.Description> : null}</div>
           <button type="button" className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
         {groupHeader}

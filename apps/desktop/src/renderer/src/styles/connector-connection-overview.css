@@ -1,0 +1,16 @@
+.connector-connection-overview { display: grid; justify-items: center; gap: var(--sp-3); min-width: 0; padding-block: var(--sp-6); text-align: center; }
+.connector-connection-overview__caption { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-connection-overview h3 { display: flex; align-items: center; gap: var(--sp-3); margin: 0; color: var(--text); font-size: var(--fs-display); font-weight: 600; line-height: 1.3; }
+.connector-connection-overview h3 svg { flex: none; color: var(--text-3); }
+.connector-connection-overview[data-receiving-state=online] h3 svg { color: var(--green); }
+.connector-connection-overview__symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius); background: var(--surface-2); }
+.connector-connection-overview[data-receiving-state=online] .connector-connection-overview__symbol { background: var(--green-bg); }
+.connector-connection-overview p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.connector-connection-overview small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.connector-connection-overview .connector-connection-overview__hint { color: var(--text-2); }
+.connector-connection-overview__action { margin-top: var(--sp-2); }
+.connector-connection-overview__action .primary-button { min-height: 32px; padding: var(--sp-2) var(--sp-4); }
+.connector-connection-overview--compact { justify-items: start; padding: var(--sp-1) var(--sp-4) var(--sp-3); gap: var(--sp-2); text-align: left; }
+.connector-connection-overview--compact h3 { font-size: var(--fs-title); }
+.connector-connection-overview--compact .connector-connection-overview__symbol { width: auto; height: auto; background: transparent; }
+.connector-connection-overview :is(h3, small, p) { white-space: normal; overflow-wrap: anywhere; }

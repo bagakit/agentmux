@@ -58,7 +58,7 @@ export type ConnectorProblemActions = Partial<Record<ConnectorProblemAction['kin
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted'; action?: ConnectorProblemAction }
 export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; secondary?: string; receiver?: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
 export type ConnectorGroupSummary = { problems: ConnectorProblem[]; outgoing: ConnectorDirectionSummary; incoming: ConnectorDirectionSummary; retained: boolean; note: string | null }
-export type ConnectorGroupAction = 'overview' | 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'channel-settings'
+export type ConnectorGroupAction = 'overview' | 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'diagnostics' | 'channel-settings'
 
 /** Choose a destination from original facts, never from its displayed label. Execution stays with the original owner. */
 export function connectorGroupAction(summary: ConnectorGroupSummary, bindingState: RoomBinding['state']): { kind: ConnectorGroupAction; label: string } {

@@ -32,7 +32,7 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
   const { hasRetainedSetup, syncEnabled } = useSyncExternalStore(subscribe, snapshot, snapshot)
   const [dialog, setDialog] = useState<AgentConnectorTarget | null>(null), returned = useRef<HTMLElement | null>(null)
   const setupWasOpen = useRef(false)
-  const [entry, setEntry] = useState<{ section?: 'members' | 'sharing' | 'sync' | 'activity'; resume?: Pick<RoomBinding, 'bindingId' | 'revision'> }>({})
+  const [entry, setEntry] = useState<{ section?: 'members' | 'sharing' | 'sync' | 'activity' | 'diagnostics'; resume?: Pick<RoomBinding, 'bindingId' | 'revision'> }>({})
   useEffect(() => { if (!observing) setDialog(null) }, [observing])
   useEffect(() => {
     if (setupWasOpen.current && !connector.dialogOpen) invalidateConnectorTarget(target)
@@ -45,7 +45,7 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
       return
     }
     const anchor = regionId
-    setEntry(action === 'resume' ? { resume: { bindingId: binding.bindingId, revision: binding.revision } } : action === 'members' || action === 'sharing' || action === 'sync' || action === 'activity' ? { section: action } : {})
+    setEntry(action === 'resume' ? { resume: { bindingId: binding.bindingId, revision: binding.revision } } : action === 'members' || action === 'sharing' || action === 'sync' || action === 'activity' || action === 'diagnostics' ? { section: action } : {})
     const store = useAppStore.getState(), executorId = session.executorId ?? undefined
     const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
     returned.current = trigger; setDialog({ ...(channel ? { channel } : {}), name: store.agentNames[session.id] ?? session.label, session, hostingTarget: current?.hostingTarget ?? null, connectionId: binding.connectionId, bindingId: binding.bindingId,
