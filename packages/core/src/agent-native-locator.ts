@@ -1,4 +1,3 @@
-import { isAbsolute } from 'node:path'
 import type { AgentNativeSessionHandle } from './types.js'
 
 /**
@@ -29,8 +28,8 @@ function boundedText(value: unknown, maxBytes: number): string | undefined {
   if (hasUnsafeControlCharacters(value)) return undefined
   const normalized = value.trim()
   if (
-    !normalized ||
-    Buffer.byteLength(normalized) > maxBytes
+    !normalized || normalized.length > maxBytes ||
+    new TextEncoder().encode(normalized).byteLength > maxBytes
   ) return undefined
   return normalized
 }
@@ -52,7 +51,13 @@ export function normalizeNativeSessionId(value: unknown): string | undefined {
  */
 export function normalizeNativeTranscriptPath(value: unknown): string | undefined {
   const normalized = boundedText(value, MAX_NATIVE_TRANSCRIPT_PATH_BYTES)
-  return normalized && isAbsolute(normalized) ? normalized : undefined
+  if (!normalized) return undefined
+  // A Host retains node:path's platform decision. A browser decodes either
+  // supported Host path shape; it does not select the execution Host.
+  const node = typeof process !== 'undefined' && typeof process.versions?.node === 'string'
+  const windowsPath = (!node || process.platform === 'win32') &&
+    (normalized.startsWith('\\') || /^[A-Za-z]:[\\/]/u.test(normalized))
+  return normalized.startsWith('/') || windowsPath ? normalized : undefined
 }
 
 
