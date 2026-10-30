@@ -2888,10 +2888,34 @@ export class AgentMuxRpcService {
     const retainIssue = (cause: unknown) => { result.issue=[result.issue,cause instanceof Error?cause.message:String(cause)].filter(Boolean).join('\n') }
     if(intent.handover&&intent.baseline.defaults.conversation) {
       try {
-        const old=intent.baseline.defaults.conversation,owners=(await this.clients()).filter(scope=>scope.hostId===old.hostId)
-        const original=owners.length===1?await owners[0]!.client.readAgentSession(old.sessionId).catch(()=>null):null
-        const prompt=agentTakeoverPrompt({hostId:old.hostId,agentSessionId:old.sessionId,cwd:original?.workspacePath,executorId:original?.executorId,label:old.sessionId,diagnostic:original?'Original source identity retained.':'Original source observation is unconfirmed; retain this exact reference.'},undefined,old.hostId)
-        result.handoverInput=await stage('handoverInputKey',{operationId:moteMainHandoverInputId(record.requestId),prompt})
+        const operationId=moteMainHandoverInputId(record.requestId)
+        const retained=await this.moteMainInput('space.mote.dialogue.input.inspect',{target:intent.target,operationId},context)
+        if(retained.route||!advance||result.binding!=='confirmed') result.handoverInput=retained
+        else {
+          const old=intent.baseline.defaults.conversation,scopes=await this.clients()
+          const oldOwners=scopes.filter(scope=>scope.hostId===old.hostId),newOwners=scopes.filter(scope=>scope.hostId===record.execution.hostId)
+          const oldOwner=oldOwners.length===1?oldOwners[0]:undefined,newOwner=newOwners.length===1?newOwners[0]:undefined
+          let page:import('./agent-context.js').AgentContextPage|null=null
+          let sourceIssue:string|null=null
+          try {
+            if(!oldOwner||this.endpointUnverified(oldOwner.client))throw new AgentMuxError('The original context Host is unavailable or ambiguous.','CONTROL_UNAVAILABLE')
+            const request={hostId:old.hostId,agentSessionId:old.sessionId}
+            page=parseRpcNativeResult('agent.context',await this.call('agent.context',request,context),request) as unknown as import('./agent-context.js').AgentContextPage
+          } catch(error) {
+            sourceIssue='The original handover context read is unconfirmed: '+String(error)
+            retainIssue(sourceIssue)
+          }
+          const oldRuntime=oldOwner?.client.runtimeOwnerIdentity?.(),newRuntime=newOwner?.client.runtimeOwnerIdentity?.()
+          const sameCore=!!oldOwner&&!!newOwner&&!this.endpointUnverified(oldOwner.client)&&!this.endpointUnverified(newOwner.client)&&(
+            oldOwner.client===newOwner.client||oldRuntime?.availability==='connected'&&newRuntime?.availability==='connected'&&
+            !!oldRuntime.runtimeId&&!!oldRuntime.ownerInstanceId&&oldRuntime.runtimeId===newRuntime.runtimeId&&oldRuntime.ownerInstanceId===newRuntime.ownerInstanceId)
+          const original=page?.session
+          const prompt=[agentTakeoverPrompt({hostId:old.hostId,agentSessionId:old.sessionId,cwd:original?.workspacePath,executorId:original?.executorId,label:old.sessionId,
+            diagnostic:sourceIssue??'Original owner context page retained with its exact availability and continuation.'},undefined,sameCore?'local':null),
+            ...(page?['Original admission-owner agent.context response: this is one bounded historical page, not complete history. Preserve its source Host, unavailable sources and nextCursor. A cursor must be continued at its original owner or a verified route; its route alias is not a grant in this new Agent’s namespace.',
+              '<amux-original-context-page>',JSON.stringify(page),'</amux-original-context-page>']:[])].join('\n\n')
+          result.handoverInput=await stage('handoverInputKey',{operationId,prompt})
+        }
         if(!['admitted','terminal-confirmed'].includes(agentPromptSubmissionOutcome(result.handoverInput.record)))result.issue=[result.issue,'The original handover input is unconfirmed; inspect its exact key. The separate Query retains its own Core input qualification.'].filter(Boolean).join('\n')
       } catch(cause) { retainIssue(cause) }
     }
