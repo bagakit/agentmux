@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createServer, type ServerResponse } from 'node:http'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSONRPCClient } from 'json-rpc-2.0'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -10,6 +10,7 @@ import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { codexQuestionAnswers } from '../src/providers/codex-question.js'
 import type { AgentMuxSessionQuestionReplyInput } from '../src/client.js'
 import * as runner from '../src/process-runner.js'
+import * as nativeProcess from '../src/agent-native-process.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
@@ -48,6 +49,14 @@ it.runIf(process.platform === 'darwin')('ordinary Codex queues SDK and CLI quest
   const run = runner.runProcess
   vi.spyOn(runner, 'runProcess').mockImplementation((command, args, options) =>
     run(command.endsWith('/native-socket-peer-darwin') ? helper : command, args, options))
+  // Fault-inject missing metadata observations, without closing native descriptors.
+  const observeFiles = nativeProcess.nativeProcessFiles
+  let omittedMetadata = 0
+  vi.spyOn(nativeProcess, 'nativeProcessFiles').mockImplementation(async (...args) => {
+    const files = await observeFiles(...args)
+    omittedMetadata += files.filter(file => basename(file.path) === 'state_5.sqlite').length
+    return files.filter(file => basename(file.path) !== 'state_5.sqlite')
+  })
 
   const question = { title: 'PRIVATE_QUEUE choose how the original work should continue.', options: ['Keep the work', 'Review first'] }
   const callId = 'private-native-question-call', questionId = JSON.stringify(['request_user_input_async', callId, 0])
@@ -177,6 +186,7 @@ it.runIf(process.platform === 'darwin')('ordinary Codex queues SDK and CLI quest
     queuedSubmissionId: expect.any(String), plan: { operation: 'queue-idle', threadId: nativeId } } })
   const queued = await call('thread/queue/list', { threadId: nativeId })
   expect(queued.data).toHaveLength(2)
+  expect(omittedMetadata).toBeGreaterThan(0)
   expect(queued.data.map((item: any) => item.clientUserMessageId)).toEqual([
     sdkClaim!.admission!.native!.plan.clientCorrelation, cliClaim!.admission!.native!.plan.clientCorrelation ])
   expect(requests).toHaveLength(2)

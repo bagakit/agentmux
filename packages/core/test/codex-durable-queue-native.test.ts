@@ -1,7 +1,7 @@
 import { offlineEndpoint } from './helpers/codex-offline-endpoint.js'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { activateRuntime } from '../node_modules/@ctxmux/sdk/dist/index.js'
@@ -14,6 +14,7 @@ import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import * as runner from '../src/process-runner.js'
+import * as nativeProcess from '../src/agent-native-process.js'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { consumeConversationWindowPage, type ConversationWindowAssembly } from '../src/conversation-changes.js'
@@ -28,24 +29,35 @@ vi.mock('node:child_process', async original => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 
-/** Real Codex/CodexL, kernel identity, native writer and durable queue. Core's
+/** Real Codex, kernel identity, native writer and durable queue. Core's
  * Runtime status/byte port is the explicit fixture boundary; no real model or
  * user Run participates. A native protocol receipt is not model task adoption. */
-it.runIf(process.platform === 'darwin')('public A2A reference reaches an existing wrapper native thread, then original MID and Outbox remain queryable', async () => {
+it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('public A2A reference reaches the original %s native thread and MID remains queryable', async carrier => {
   const h = await rpcOwnerFixture(['sender', 'recipient']), root = h.root, home = join(root, 'native-home'), helper = join(root, 'native-process-proof')
-  const nativeVersion = await runner.runProcess('codex', ['--version'], { timeoutMs: 3000 })
-  expect(nativeVersion.stdout.trim()).toBe('codex-cli 0.163.0')
+  const command = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
+  const nativeVersion = await runner.runProcess(command, ['--version'], { timeoutMs: 3000 })
+  expect(nativeVersion.stdout.trim()).toBe('codex-cli 0.166.0')
   const compiled = await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 })
   expect(compiled).toMatchObject({ exitCode: 0, stderr: '' })
   const originalRunProcess = runner.runProcess
   vi.spyOn(runner, 'runProcess').mockImplementation((command, args, options) =>
     originalRunProcess(command.endsWith('/native-socket-peer-darwin') ? helper : command, args, options))
+  // Inject only an observation gap. Native files and descriptors remain untouched.
+  const observeFiles = nativeProcess.nativeProcessFiles
+  let omittedMetadata = 0
+  if (carrier === 'direct') vi.spyOn(nativeProcess, 'nativeProcessFiles').mockImplementation(async (...args) => {
+    const files = await observeFiles(...args)
+    omittedMetadata += files.filter(file => basename(file.path) === 'state_5.sqlite').length
+    return files.filter(file => basename(file.path) !== 'state_5.sqlite')
+  })
   // Exercise the original standalone listener worker through Node's native TS
   // loader. Source qualification does not generate or borrow a dist artifact.
   await mkdir(home)
   const inputs: string[] = []
   const { endpoint, sockets } = await offlineEndpoint(home, inputs)
-  const child = spawn('codexL', ['as-ops', '--mode=global', '--', 'app-server', '--stdio'], {
+  const nativeCommand = carrier === 'wrapper' ? 'codexL' : command
+  const nativeArgs = carrier === 'wrapper' ? ['as-ops', '--mode=global', '--', 'app-server', '--stdio'] : ['app-server', '--stdio']
+  const child = spawn(nativeCommand, nativeArgs, {
     cwd: root, env: { ...process.env, CODEX_HOME: home, HOME: root }, detached: true, stdio: ['pipe', 'pipe', 'pipe']
   })
   const nativeEvents: any[] = [], coreEvents: any[] = [], calls: string[] = []
@@ -75,7 +87,7 @@ it.runIf(process.platform === 'darwin')('public A2A reference reaches an existin
     await h.store.compareAndSwapMetadata(saved, { ...saved, workspacePath: root,
       nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: nativeId, transcriptPath: path }, updatedAt: Date.now() })
     await h.inner.registry.load('local')
-    h.inner.kernel.status = vi.fn(async (runId: string) => ({ ...h.run(runId), ...(runId === saved.run.runId ? { pid: child.pid!, program: 'codexL', args: ['as-ops', '--mode=global', '--', 'app-server', '--stdio'] } : {}) }))
+    h.inner.kernel.status = vi.fn(async (runId: string) => ({ ...h.run(runId), ...(runId === saved.run.runId ? { pid: child.pid!, program: nativeCommand, args: nativeArgs } : {}) }))
     h.client.onEvent(event => coreEvents.push(event))
     await vi.waitFor(async () => expect((await h.client.statusAgent('recipient')).session.semanticStatus?.state).toBe('done'), { timeout: 10_000, interval: 50 })
     server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: h.coreClients }); await server.start()
@@ -90,6 +102,7 @@ it.runIf(process.platform === 'darwin')('public A2A reference reaches an existin
     }, { timeout: 15_000, interval: 100 })
     const message = (await h.client.readMessage({ messageId: mid }))!, key = message.notification!.key!
     const claim = await h.client.inspectAgentPromptSubmission(key)
+    if (carrier === 'direct') expect(omittedMetadata).toBeGreaterThan(0)
     expect(claim?.admission).toMatchObject({ acknowledged: true, transport: 'native', native: { outcome: 'admitted', queuedSubmissionId: expect.any(String), plan: { protocolId: 'codex-durable-queue-0.163', operation: 'queue-idle' } } })
     const wire = claim!.admission!.intent!.prompt
     expect(wire).toContain(`msg-id="${mid}"`); expect(wire).toContain('read-via="message --skill"'); expect(wire).not.toContain(body)
@@ -99,6 +112,10 @@ it.runIf(process.platform === 'darwin')('public A2A reference reaches an existin
     expect(opened.message?.envelope.body).toBe(body)
     const outbox = await sender.call('message.events', { messageId: mid })
     expect(outbox.events.some(event => event.kind === 'a2a-notification-result')).toBe(true)
+    const cli = await runSourceObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'read', '--message-id', mid],
+      objectCliEnvironment(root, { AGENTMUX_AGENT_SESSION_ID: 'recipient', AGENTMUX_AGENT_CAPABILITY: h.credentials.capability }))
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result.message.envelope.body).toBe(body)
     expect((await h.client.statusAgent('recipient')).run).toMatchObject({ runId: saved.run.runId, pid: child.pid!, state: 'running' })
     expect((await h.store.readMetadata('recipient'))?.nativeActor).toBeUndefined()
     expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()

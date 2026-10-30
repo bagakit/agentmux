@@ -1,4 +1,4 @@
-import { copyFile, chmod, mkdtemp, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, chmod, mkdir, mkdtemp, open, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -10,6 +10,8 @@ import type { NativeProcessFile } from '../src/agent-native-process.js'
 import { runProcess } from '../src/process-runner.js'
 
 const os = vi.hoisted(() => ({ original: undefined as any, binary: undefined as any, stores: [] as NativeProcessFile[],
+  ownerStateAbsent: false, helperStateAbsent: false, stateReadOnly: false,
+  helperStateAfterReadMarker: undefined as string | undefined,
   sourceChanged: false, multi: false, queueChanged: false, helperChanged: false, helperStateChanged: false, birthChanged: false }))
 vi.mock('../src/providers/app-server-native-session.js', () => ({ locateAppServerNativeSession: async (_context: unknown, _role: unknown, _scope: unknown, target?: { id: string; path?: string }) => {
   if (os.multi && (!target || target.id !== os.original.id || target.path !== undefined && target.path !== os.original.file.path)) throw new Error('Multiple roots require the exact frozen target')
@@ -18,9 +20,14 @@ vi.mock('../src/providers/app-server-native-session.js', () => ({ locateAppServe
 vi.mock('../src/agent-native-process.js', () => ({
   nativeProcessExecutable: async () => os.binary,
   nativeProcessBirth: async (pid: number) => `kernel-generation-${pid}-${os.birthChanged ? 'changed' : 'original'}`,
-  nativeProcessFiles: async (pid: number) => os.stores.map(file => ({ ...file, processId: pid,
+  nativeProcessFiles: async (pid: number) => {
+    const readCompleted = os.helperStateAfterReadMarker && await readFile(os.helperStateAfterReadMarker).then(() => true, () => false)
+    return os.stores.filter(file => basename(file.path) !== 'state_5.sqlite' ||
+    !(pid === 700002 ? os.ownerStateAbsent : os.helperStateAbsent)).map(file => ({ ...file, processId: pid,
+    access: os.stateReadOnly && basename(file.path) === 'state_5.sqlite' ? 'r' : file.access,
     inode: file.inode + (os.queueChanged && pid === 700002 || pid !== 700002 &&
-      (os.helperChanged && basename(file.path) === 'queue_1.sqlite' || os.helperStateChanged && basename(file.path) === 'state_5.sqlite') ? 1n : 0n) })),
+      (os.helperChanged && basename(file.path) === 'queue_1.sqlite' || (os.helperStateChanged || readCompleted) && basename(file.path) === 'state_5.sqlite') ? 1n : 0n) }))
+  },
   nativeProcessTcpListeners: async () => { throw new Error('The durable QueueStore does not require a managed WS actor') }
 }))
 const closes: Array<() => Promise<void>> = []
@@ -30,6 +37,8 @@ const correlation = createNativeInputCorrelation({ kind: 'prompt', agentSessionI
 
 async function fixture() {
   os.multi = os.sourceChanged = os.queueChanged = os.helperChanged = os.helperStateChanged = os.birthChanged = false
+  os.ownerStateAbsent = os.helperStateAbsent = os.stateReadOnly = false
+  os.helperStateAfterReadMarker = undefined
   const root = await mkdtemp(join(tmpdir(), 'amux-queue-contract-'))
   closes.push(async () => await rm(root, { recursive: true }))
   const executable = join(root, 'native executable'), path = join(root, 'rollout-original.jsonl'), trace = join(root, 'rpc.jsonl'), control = join(root, 'control.json')
@@ -83,6 +92,59 @@ it('uses the OS-bound original writer for an id-only saved native handle', async
   const prepared = await prepareCodexNativeInput({ ...f.context, nativeHandle }, { ...source, idleOnly: true })
   closes.push(async () => { await prepared.dispose() })
   await expect(prepared.send('Original reference', { ...prepared.plan, clientCorrelation: correlation })).resolves.toEqual({ outcome: 'admitted', queuedSubmissionId: 'original-native-queue-item' })
+})
+
+it.each(['ownerStateAbsent', 'helperStateAbsent', 'stateReadOnly'] as const)('keeps the same frozen queue identity when %s changes', async field => {
+  const f = await fixture(), original = await f.prepare(), frozen = { ...original.plan, clientCorrelation: correlation }
+  os[field] = true
+  const result = await f.prepare().then(prepared => ({ prepared }), error => ({ error }))
+  expect(result, 'Metadata descriptor residency must not revoke the original queue').toHaveProperty('prepared')
+  if (!('prepared' in result)) throw new Error('Missing original queue preparation')
+  expect(result.prepared.plan).toEqual(original.plan)
+  await expect(original.send('Original queued reference', frozen)).resolves.toEqual({ outcome: 'admitted', queuedSubmissionId: 'original-native-queue-item' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
+})
+
+it.each(['replace', 'missing', 'symlink', 'directory'] as const)('refuses %s metadata even without resident descriptors', async change => {
+  const f = await fixture(), prepared = await f.prepare(), path = join(f.root, 'state_5.sqlite')
+  os.ownerStateAbsent = os.helperStateAbsent = true
+  await rename(path, path + '.original')
+  if (change === 'replace') await writeFile(path, 'foreign metadata object')
+  if (change === 'symlink') await symlink(path + '.original', path)
+  if (change === 'directory') await mkdir(path)
+  await expect(prepared.send('Original reference', { ...prepared.plan, clientCorrelation: correlation })).rejects.toBeDefined()
+  if (change !== 'replace') await expect(f.prepare()).rejects.toBeDefined()
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
+})
+
+it('rejects a contradictory read-only metadata descriptor before admission', async () => {
+  const f = await fixture(), prepared = await f.prepare()
+  os.stateReadOnly = os.helperStateChanged = true
+  await expect(prepared.send('Original reference', { ...prepared.plan, clientCorrelation: correlation })).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
+})
+
+it('ignores an unrelated read-only metadata file outside the selected queue root', async () => {
+  const f = await fixture(), prepared = await f.prepare(), state = os.stores.find(file => basename(file.path) === 'state_5.sqlite')!
+  os.stores.push({ ...state, path: join(f.root, 'unrelated', 'state_5.sqlite'), access: 'r' })
+  await expect(prepared.send('Original reference', { ...prepared.plan, clientCorrelation: correlation })).resolves.toMatchObject({ outcome: 'admitted' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
+})
+
+it('rejects metadata replaced during the native thread read before sending', async () => {
+  const f = await fixture(), prepared = await f.prepare()
+  os.ownerStateAbsent = os.helperStateAbsent = true
+  await f.update({ replaceState: join(f.root, 'state_5.sqlite') })
+  await expect(prepared.send('Original reference', { ...prepared.plan, clientCorrelation: correlation })).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
+})
+
+it('rejects a helper metadata connection changed during native read even when the path still matches', async () => {
+  const f = await fixture(), prepared = await f.prepare()
+  os.helperStateAfterReadMarker = join(f.root, 'metadata-read-complete')
+  await f.update({ metadataReadMarker: os.helperStateAfterReadMarker })
+  await expect(prepared.send('Original reference', { ...prepared.plan, clientCorrelation: correlation })).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
 })
 
 it.each(['sourceChanged', 'queueChanged', 'helperChanged', 'helperStateChanged', 'birthChanged'] as const)('refuses changed %s before admission without changing the message or touching the original terminal', async field => {
