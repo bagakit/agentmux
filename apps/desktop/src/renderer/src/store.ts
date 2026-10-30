@@ -228,7 +228,7 @@ import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentat
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
 import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
-import { agentContinuityDetail } from './lib/continuity-presentation'
+import { agentContinuityDetail, currentUnconfirmedResumeOperation } from './lib/continuity-presentation'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
 import { reseatActiveWorkspaceId, adoptedConfig } from './lib/active-workspace-reseat'
 import { gitBridge, ghBridge, type GitBridge } from './lib/git-bridge'
@@ -11899,7 +11899,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // view owner. Existing durable Regions keep their layout/focus during background resync.
     if (!options?.preserveView && !hasAttachedSessionView(get().tabs, sessionId)) get().selectSession(sessionId)
     const priorFailure = current.kind === 'agent' ? lifecycleNotification(before.notificationEvents, { subject: current.control }) : undefined
-    const recoveryOperationId = operationId ?? mintObjectId()
+    const resolution = currentUnconfirmedResumeOperation(current)?.resolution
+    const retryResolution = !options?.input && !options?.timingOverride && (options?.trigger ?? 'manual') === 'manual' &&
+      current.kind === 'agent' && current.continuity?.agentSessionId === current.control.agentSessionId &&
+      current.continuity.previousRun.runId === current.control.run.runId && resolution?.outcome === 'pending'
+      ? resolution.operationId : undefined
+    const recoveryOperationId = operationId ?? retryResolution ?? mintObjectId()
     const request = { trigger: options?.trigger ?? 'manual' as const, ...(options?.timingOverride ? { timingOverride: options.timingOverride } : {}),
       ...(options?.input ? { input: structuredClone(options.input) } : {}) }
     const recoverOriginal = () => api.sessions.recover(structuredClone(recoveryControl), current.workspacePath,

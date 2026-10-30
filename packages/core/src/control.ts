@@ -1,3 +1,4 @@
+import type { AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
 import type { RendererSceneCaptureInput, RendererSceneCaptureResult, RendererSceneInspectInput, RendererSceneInspection } from './renderer-performance-scene.js'
 import type { DemandContentReference } from '@agentmux/demand'
@@ -815,7 +816,7 @@ export type AgentMuxControlResult =
   | AgentMuxControlSettingsExecutorRefreshResult
   | AgentMuxControlCrashLogResult
   | { operation: 'interrupt'; agentSessionId: string }
-  | { operation: 'resume'; agentSessionId: string; runId: string }
+  | { operation: 'resume'; agentSessionId: string; runId: string; resolution?: AgentMuxResumeResolution }
   | { operation: 'stop'; agentSessionId: string }
   | { operation: 'demand.list'; demands: AgentMuxDemand[] }
   | ({ operation: 'demand.patrol-all' } & import('./space-control.js').AgentMuxSpaceMutationReport)

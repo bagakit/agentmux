@@ -1,3 +1,5 @@
+import { parseResumeResolution, type AgentMuxResumeResolution } from './resume-resolution.js'
+export { parseResumeResolution, type AgentMuxResumeResolution } from './resume-resolution.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import { agentInputContextCaptureProofFields, parseAgentInputContextCaptureReference } from '../agent-input-context-capture.js'
 import { AMUX_CONTINUE_MARKER } from '../amux-protocol-definition.js'
@@ -219,6 +221,8 @@ export type AgentMuxContinuityOperation = {
   error?: string
   /** Immutable explicit resume request; independent of its resolved Provider launch plan. */
   requestDigest?: string
+  /** Exact manual reconciliation of one original prepared Start; contains no launch environment. */
+  resolution?: AgentMuxResumeResolution
   /** Explicit restart owns stopping only its original Run; ordinary continuity never does. */
   action?: 'restart'
   /** Exact no-input restart launch, frozen before the original Start. */
@@ -262,6 +266,10 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
   if (!value || typeof value !== 'object') throw new TypeError('Invalid continuity operation.')
   const op = value as AgentMuxContinuityOperation
   const trigger = parseAgentContinuityTrigger(op.trigger)
+  if (op.resolution !== undefined) {
+    const resolution = parseResumeResolution(op.resolution)
+    if (![resolution.operationId, resolution.originalOperationId].includes(op.operationId)) throw new TypeError('Resume resolution belongs to another operation.')
+  }
   if (typeof op.operationId !== 'string' || !op.operationId || typeof op.agentSessionId !== 'string' || !op.agentSessionId ||
     !['pending', 'starting', 'resumed', 'reattachable', 'unavailable', 'conflict', 'retired'].includes(op.kind) ||
     !op.previousRun || typeof op.previousRun.runId !== 'string' || typeof op.reason !== 'string' ||

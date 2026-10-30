@@ -1,3 +1,4 @@
+import { resumeResolutionRequest, resumeResolutionDigest } from '../agent-prepared-resume.js'
 import type { AgentSessionRunLifecycle } from './lifecycle.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { parseTerminalFrontendObservation } from '../agent-terminal-frontend.js'
@@ -26,7 +27,7 @@ import type { AgentSessionRecoveryPorts } from './ports.js'
 type AgentContinuityAttemptContext = {
   ports: AgentSessionRecoveryPorts
   supervisor: Pick<AgentSessionContinuitySupervisor, 'retainedAutomaticIntent' | 'completedRuntimeRestartIntent' | 'observe' | 'schedule'>
-  lifecycle: Pick<AgentSessionRunLifecycle, 'buildResumePlan' | 'resumeAgentRun' | 'completePreparedResume'>
+  lifecycle: Pick<AgentSessionRunLifecycle, 'buildResumePlan' | 'resumeAgentRun' | 'completePreparedResume' | 'resolvePreparedResume'>
   reconciler: AgentSessionRecoveryReconciler
   signal: AbortSignal
 }
@@ -67,6 +68,13 @@ export async function performAgentContinuity(
   // generic observer may report it, but must never reconstruct its executor,
   // schedule it as automatic recovery or replace its original receipt.
   const requested = current?.continuityOperations?.[input.operationId]
+  if (requested?.resolution && requested.kind === 'unavailable' && requested.errorCode === AGENT_TERMINAL_HANDSHAKE_FAILED && requested.newRun) {
+    throw new AgentMuxError(requested.error ?? 'The original retained resume Run exited during startup.', requested.errorCode)
+  }
+  if (requested?.resolution?.operationId === input.operationId && input.trigger === 'manual' &&
+      ['args', 'env', 'commandOverride', 'cols', 'rows'].some(key => Object.hasOwn(input, key)) &&
+      resumeResolutionDigest(resumeResolutionRequest(input)) !== requested.resolution.requestDigest) throw new AgentMuxError(
+    'The original manual resolution request changed. Keep its exact operation and execution intent.', 'AGENT_RESUME_RESOLUTION_CONFLICT')
   if (requested?.action === 'restart') {
     if (input.input) throw new AgentMuxError('An explicit restart has no authored input. Keep its original operation and submit new input separately.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (!sameRun(requested.previousRun, input.expectedRun)) throw new AgentMuxError('A restart observation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
@@ -84,6 +92,11 @@ export async function performAgentContinuity(
         message: `The original lifecycle could not be observed: ${error instanceof Error ? error.message : String(error)}. The original Session and existing capabilities are retained; check this exact Run and retry the original lifecycle observation.`,
         evidence: { source: 'agentmux', run: input.expectedRun, observedAt: Date.now() } })
     }
+  }
+  if (reservation?.kind === 'resume' && reservation.preparedSession && !reservation.restart &&
+      (reservation.resolution || input.trigger === 'manual' && !input.input &&
+        input.operationId !== reservation.preparedSession.continuity?.operationId)) {
+    return await lifecycle.resolvePreparedResume(input, reservation)
   }
   if (reservation?.kind === 'resume' && reservation.restart?.request.operationId === input.operationId && requested?.action !== 'restart') {
     throw new AgentMuxError('This operation belongs to the original restart. Inspect that operation; its Session and all original receipts are retained.',

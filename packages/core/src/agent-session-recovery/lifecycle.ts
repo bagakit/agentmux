@@ -1,4 +1,5 @@
-import { assertPreparedResumeBinding } from '../agent-prepared-resume.js'
+import type { AgentMuxCreationRuntime } from '../terminal-creation-retirement.js'
+import { assertPreparedResumeBinding, resumeResolutionRequest, resumeResolutionDigest } from '../agent-prepared-resume.js'
 import { decodePreparedRun } from '../prepared-run.js'
 import { hasSelectedNativeTarget } from '../agent-native-source.js'
 import { lifecycleObserved } from '../lifecycle-diagnostic.js'
@@ -19,7 +20,7 @@ import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
 import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js'
-import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityRunEvidence } from './continuity-contract.js'
+import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityRunEvidence, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
 import type { AgentCapabilitySnapshot, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
 import { agentCreationIntentDigest } from '../agent-creation-authority.js'
@@ -365,7 +366,8 @@ export class AgentSessionRunLifecycle {
     knownCapability?: { snapshot: AgentCapabilitySnapshot; context: { workspacePath: string; env: Record<string, string> } },
     reopening?: AgentMuxAgentReopenInput,
     directRequestDigest?: string,
-    restartReservation?: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
+    restartReservation?: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
+    resolutionHandoff?: { reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>; runtime: AgentMuxCreationRuntime }
   ): Promise<AgentMuxAgentSession> {
     this.ports.connection.requireConnected()
     const previous = reopening ? undefined : this.ports.sessions.requireAgentSession(input.agentSessionId)
@@ -374,6 +376,7 @@ export class AgentSessionRunLifecycle {
     if (expectedRun && previous && !sameRun(previous.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before native resume.', 'STALE_AGENT_SESSION')
     }
+    if (resolutionHandoff && continuity) continuity = { ...continuity, kind: 'starting', reason: 'explicit-request' }
     const frozenInput = continuity?.launchInput
     const composed = frozenInput ? { text: frozenInput.prompt, systemContext: frozenInput.message.systemContext }
       : composeAgentResumePrompt(input.prompt, input.agentMuxNote)
@@ -387,7 +390,7 @@ export class AgentSessionRunLifecycle {
       safeId(input.operationId, 'Agent resume operation id')
     )
     if (!knownCapability) await this.ports.runtime.prepareExecutionEnvironment?.()
-    let reservation = restartReservation ?? (reopening
+    let reservation = resolutionHandoff?.reservation ?? restartReservation ?? (reopening
       ? await this.ports.sessions.registry.reserveReopen(input.agentSessionId, reopening.expectedRetiredAt, lifecycleOperationId, input.operationId)
       : await this.ports.sessions.registry.reserveExisting('resume', previous!.agentSessionId, previous!.run, lifecycleOperationId))
     let hookBinding: AgentHookBinding | null = null
@@ -577,11 +580,15 @@ export class AgentSessionRunLifecycle {
         }
         if (continuity.launchInput) continuity.launchInput.launchPlan = identity
         continuity.evidence = ended
-        reservation = await this.ports.sessions.registry.prepareResume(reservation, { ...nativeSession, continuity,
+        const prepared = { ...nativeSession, continuity,
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
-          capabilityHash: hashAgentCapability(invocationCapability) }, dispatch)
-        if (!isDeepStrictEqual(reservation.preparedDispatch, dispatch)) throw new AgentMuxError(
+          capabilityHash: hashAgentCapability(invocationCapability) }
+        reservation = resolutionHandoff
+          ? await this.ports.sessions.registry.handoffResumeResolution(resolutionHandoff.reservation, prepared, dispatch, resolutionHandoff.runtime)
+          : await this.ports.sessions.registry.prepareResume(reservation, prepared, dispatch)
+        if (resolutionHandoff) continuity = structuredClone(reservation.preparedSession!.continuity!)
+        if (reservation.kind !== 'resume' || !isDeepStrictEqual(reservation.preparedDispatch, dispatch)) throw new AgentMuxError(
           'The complete original resume dispatch was not durably retained. No Start was dispatched.', 'AGENT_RESUME_UNCONFIRMED')
         this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
@@ -641,11 +648,11 @@ export class AgentSessionRunLifecycle {
         delete next.continuity.initializationRecovery
         delete next.continuity.frontendReconnect
         if (run.acceptedInputBytes !== null) next.continuity.resumedInputBoundary = { initialInputByte: run.acceptedInputBytes }
-        if (restartReservation) { delete next.continuity.errorCode; delete next.continuity.error }
+        if (restartReservation || resolutionHandoff) { delete next.continuity.errorCode; delete next.continuity.error }
         bindContinuityLaunchInput(next.continuity, next.run)
         const recoveryDelivery = createContinuityInputDelivery(next.continuity, run.acceptedInputBytes ?? undefined)
         if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery
-        next.continuityOperations = { ...previous?.continuityOperations, [input.operationId]: next.continuity }
+        next.continuityOperations = { ...(reservation.kind === 'resume' ? reservation.preparedSession?.continuityOperations : previous?.continuityOperations), [input.operationId]: next.continuity }
       }
       delete next.observedNativeHandle
       delete next.nativeSourceObservation
@@ -755,7 +762,7 @@ export class AgentSessionRunLifecycle {
           if (!persisted) {
             try {
               const canonical = (await this.ports.sessions.store.readMetadata(current.agentSessionId))
-              if (canonical?.run.runId === run.runId && (reopening ? canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
+              if (canonical && canonical.run.runId === run.runId && (reopening ? canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
                 canonical.reopenedFrom.run.runId === retirement!.run.runId : canonical.continuity?.operationId === input.operationId && canonical.continuity.newRun?.runId === run.runId)) {
                 await this.ports.sessions.registry.load('local')
                 persisted = this.ports.sessions.registry.get(current.agentSessionId)
@@ -852,7 +859,7 @@ export class AgentSessionRunLifecycle {
       }
       try {
         if (restartReservation && !preserveUnconfirmedRun && !persisted) this.ports.hooks.forgetPendingBinding(lifecycleOperationId)
-        if (!preserveUnconfirmedRun && !restartReservation) {
+        if (!preserveUnconfirmedRun && !restartReservation && (!resolutionHandoff || reservation.reservationId !== resolutionHandoff.reservation.reservationId)) {
           if (!persisted || hookBound) this.ports.hooks.forgetPendingBinding(lifecycleOperationId)
           await this.ports.sessions.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
         }
@@ -865,6 +872,89 @@ export class AgentSessionRunLifecycle {
           'Resume lifecycle cleanup failed.'
         )
       }
+    }
+  }
+
+  /** Explicit manual recovery owns only retirement of this exact frozen Start; all observers stay read-only. */
+  async resolvePreparedResume(input: AgentMuxAgentContinuityInput,
+    original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxAgentContinuityResult> {
+    const { ports } = this
+    let reservation = original
+    let ownsResolution = false
+    const result = (session: AgentMuxStoredAgentSession): AgentMuxAgentContinuityResult => {
+      const continuity = session.continuityOperations?.[input.operationId] ?? session.continuity!
+      if (continuity.kind === 'resumed' && continuity.newRun && sameRun(continuity.newRun, session.run) && session.nativeHandle?.kind === 'provider') return {
+        kind: 'resumed', session: ports.events.projectSession(session), previousRun: { ...input.expectedRun }, run: { ...session.run },
+        evidence: { kind: 'provider-native', providerId: session.providerId, nativeSessionId: session.nativeHandle.sessionId,
+          previousRun: continuity.evidence as AgentMuxAgentContinuityRunEvidence }, continuity: structuredClone(continuity) }
+      return { kind: 'pending', agentSessionId: session.agentSessionId, previousRun: { ...input.expectedRun },
+        reason: 'operation-unconfirmed', evidence: { kind: 'run-unknown', observedAt: Date.now(),
+          message: continuity.error ?? 'The original prepared Start and explicit resolution are retained. Retry the same manual operation.' }, continuity: structuredClone(continuity) }
+    }
+    if (input.input !== undefined || input.timingOverride !== undefined) throw new AgentMuxError(
+      'An unknown Start resolution cannot consume a new prompt or timing override. Preserve that input for its own operation.', 'AGENT_RESUME_RESOLUTION_REQUIRED')
+    try {
+      // A retained Run needs no fence. A new manual request still retains its safe relation to that exact original Start.
+      const retained = await this.inspectPreparedResume(reservation)
+      if (retained) {
+        if (!reservation.resolution && reservation.preparedDispatch && input.trigger === 'manual' &&
+            input.operationId !== reservation.preparedSession?.continuity?.operationId) {
+          reservation = await ports.sessions.registry.admitResumeResolution(reservation, resumeResolutionRequest(input))
+          ownsResolution = true
+        }
+        const completed = await this.completeObservedPreparedResume(reservation, retained)
+        if (completed) return result(completed)
+      }
+      if (reservation.resolution && (input.trigger !== 'manual' || input.operationId !== reservation.resolution.receipt.operationId)) {
+        return result(await ports.sessions.registry.refresh(input.agentSessionId, input.expectedRun))
+      }
+      if (input.trigger !== 'manual' || input.operationId === reservation.preparedSession?.continuity?.operationId) {
+        return result(await ports.sessions.registry.refresh(input.agentSessionId, input.expectedRun))
+      }
+      if (!reservation.preparedDispatch || !retainedRunEnd(reservation.preparedSession)) throw new AgentMuxError(
+        'The original dispatch source or exact original Run end is unconfirmed. Preserve the original operation and obtain its authoritative source.',
+        'AGENT_RESUME_SOURCE_UNCONFIRMED')
+      let request = resumeResolutionRequest(input)
+      if (reservation.resolution) {
+        const identityOnly = !['args', 'env', 'commandOverride', 'cols', 'rows'].some(key => Object.hasOwn(input, key))
+        if (identityOnly) request = structuredClone(reservation.resolution.request)
+        if (resumeResolutionDigest(request) !== reservation.resolution.receipt.requestDigest) throw new AgentMuxError(
+          'The admitted manual resolution has a different frozen request. Retry its unchanged original operation.', 'AGENT_RESUME_RESOLUTION_CONFLICT')
+      }
+      reservation = await ports.sessions.registry.admitResumeResolution(reservation, request)
+      ownsResolution = true
+      ports.events.publishSession(ports.sessions.registry.get(input.agentSessionId))
+      if (this.signal.aborted) return result(ports.sessions.registry.get(input.agentSessionId))
+      const dispatch = reservation.preparedDispatch!
+      const observed = await ports.runtime.kernel.observePreparedStartRetirement(reservation.operationId, dispatch.runtime)
+      // Durable admission is authorization to redrive this same idempotent fence after a pre-send crash.
+      const retirement = observed.outcome === 'retired' ? observed : await ports.runtime.kernel.retirePreparedStart(
+        decodePreparedRun(dispatch.prepared).request, reservation.operationId, dispatch.runtime)
+      if (retirement.outcome === 'retained') {
+        const retained = await this.completeObservedPreparedResume(reservation, retirement.run)
+        if (!retained) throw new AgentMuxError('The retained original Run could not be confirmed again. Its operation was kept.', 'AGENT_RESUME_UNCONFIRMED')
+        return result(retained)
+      }
+      await this.resumeAgentRun({ ...request, prompt: '' }, request.expectedRun, undefined, undefined, undefined, undefined,
+        { reservation, runtime: retirement.runtime })
+      return result(ports.sessions.registry.get(input.agentSessionId))
+    } catch (error) {
+      const canonical = await ports.sessions.store.readMetadata(input.agentSessionId)
+      if (!canonical || error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) throw error
+      // The Store checks the exact pending owner and Run atomically. A late failure cannot demote a completed successor.
+      if (ownsResolution && reservation.resolution) {
+        const updated = await ports.sessions.store.recordResumeResolutionFailure(reservation, {
+          code: error instanceof AgentMuxError ? error.code : 'AGENT_RESUME_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) })
+        await ports.sessions.registry.refresh(input.agentSessionId, updated.run)
+        ports.events.publishSession(updated)
+        return result(updated)
+      }
+      if (canonical.continuity?.resolution && (canonical.continuity.operationId === input.operationId ||
+          error instanceof AgentMuxError && ['AGENT_SESSION_BUSY', 'AGENT_RESUME_RESOLUTION_CONFLICT'].includes(error.code))) return result(canonical)
+      throw error
+    } finally {
+      // A healthy Core is not proof that this invocation is still executing. Release only its exact resolution owner.
+      if (ownsResolution) await ports.sessions.store.releaseResumeResolutionOwner(reservation)
     }
   }
 
@@ -889,6 +979,11 @@ export class AgentSessionRunLifecycle {
 
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     const run = await this.inspectPreparedResume(reservation)
+    return run ? await this.completeObservedPreparedResume(reservation, run) : null
+  }
+
+  /** Only this owner calls this with a complete-spec witness from inspectPreparedResume or retirePreparedStart. */
+  private async completeObservedPreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, run: CtxmuxAdapterRun): Promise<AgentMuxStoredAgentSession | null> {
     const prepared = reservation.preparedSession
     if (!prepared || !run || run.lifecycleOperationId !== reservation.operationId) return null
     if (reservation.restart && (!prepared.continuity?.restartLaunch || prepared.continuity.restartLaunch.program !== run.program ||
@@ -909,6 +1004,9 @@ export class AgentSessionRunLifecycle {
       next.continuity = { ...structuredClone(prepared.continuity), kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
       delete next.continuity.initializationRecovery
       delete next.continuity.frontendReconnect
+      if (!reservation.resolution && next.continuity.resolution?.operationId === next.continuity.operationId) {
+        delete next.continuity.errorCode; delete next.continuity.error
+      }
       const launched = next.continuity.launchInput
       if (launched && (!launched.launchPlan || launched.launchPlan.program !== run.program ||
           launched.launchPlan.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url'))) {
@@ -920,10 +1018,21 @@ export class AgentSessionRunLifecycle {
       delete next.continuity.nextActionAt
       next.continuityOperations = { ...prepared.continuityOperations, [prepared.continuity.operationId]: next.continuity }
     }
+    if (reservation.resolution && next.continuity) {
+      const originalReceipt = next.continuity
+      const canonical = await this.ports.sessions.store.readMetadata(next.agentSessionId)
+      const manual = canonical?.continuityOperations?.[reservation.resolution.receipt.operationId]
+      if (!manual) throw new AgentMuxError('The original resolution admission is unavailable.', 'AGENT_RESUME_RESOLUTION_CONFLICT')
+      const resolution = { ...reservation.resolution.receipt, outcome: 'retained' as const, retainedRun: { ...next.run } }
+      next.continuity = { ...manual, kind: 'resumed', newRun: { ...next.run }, observedAt, resolution }
+      delete next.continuity.error; delete next.continuity.errorCode
+      next.continuityOperations = { ...next.continuityOperations, [originalReceipt.operationId]: { ...originalReceipt, resolution },
+        [manual.operationId]: next.continuity }
+    }
     try { await this.ports.sessions.registry.commitLifecycle(reservation, next) }
     catch (error) {
       const canonical = await this.ports.sessions.store.readMetadata(prepared.agentSessionId)
-      if (canonical?.run.runId !== run.runId || canonical.continuity?.operationId !== prepared.continuity?.operationId) throw error
+      if (canonical?.run.runId !== run.runId || canonical.continuity?.operationId !== next.continuity?.operationId) throw error
       await this.ports.sessions.registry.load('local')
     }
     await this.restoreReopenObservation(this.ports.sessions.registry.get(next.agentSessionId), run, reservation.operationId)

@@ -243,6 +243,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.displayWorkspaceId !== request.displayWorkspaceId) fail()
       break
     case 'interrupt': case 'resume': case 'stop':
+      if (request.operation === 'resume' && result.operation === 'resume' && result.resolution && ![result.resolution.operationId, result.resolution.originalOperationId].includes(request.requestId)) fail()
       if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail()
       break
     case 'file.build':

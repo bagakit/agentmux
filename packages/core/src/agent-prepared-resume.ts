@@ -1,3 +1,6 @@
+import { rpcRecord } from './rpc-data.js'
+import { agentCreationIntentDigest } from './agent-creation-authority.js'
+import type { AgentMuxAgentContinuityInput } from './agent-session-recovery/continuity-contract.js'
 import { createHash } from 'node:crypto'
 import { hookBindingIdentity, hashAgentCapability } from './agent-capability.js'
 import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
@@ -19,4 +22,31 @@ export function assertPreparedResumeBinding(prepared: PreparedRun, session: Agen
       (launch && (launch.program !== request.program || launch.argsDigest !== createHash('sha256').update(JSON.stringify(request.args)).digest('base64url')))) {
     throw new AgentMuxError('The original Start does not match its prepared Agent binding. Its Run and original operation were preserved.', code)
   }
+}
+
+/** Private explicit request; never project execution environment through the safe receipt. */
+export type ResumeResolutionRequest = Pick<AgentMuxAgentContinuityInput,
+  'agentSessionId' | 'expectedRun' | 'operationId' | 'args' | 'env' | 'commandOverride' | 'cols' | 'rows'> & { trigger: 'manual' }
+export function resumeResolutionRequest(input: AgentMuxAgentContinuityInput): ResumeResolutionRequest {
+  if (input.trigger !== 'manual' || input.input !== undefined || input.timingOverride !== undefined) throw new AgentMuxError(
+    'Continuing an unknown Start needs a new explicit manual request without input. The original request and inputs were kept.', 'AGENT_RESUME_RESOLUTION_REQUIRED')
+  const value: Record<string, unknown> = { agentSessionId: input.agentSessionId, expectedRun: { ...input.expectedRun }, operationId: input.operationId, trigger: 'manual' }
+  for (const field of ['args', 'env', 'commandOverride', 'cols', 'rows'] as const) if (input[field] !== undefined) value[field] = structuredClone(input[field])
+  return parseResumeResolutionRequest(value)
+}
+export function parseResumeResolutionRequest(value: unknown): ResumeResolutionRequest {
+  const code = 'INVALID_RESUME_RESOLUTION', r = rpcRecord(value, ['agentSessionId', 'expectedRun', 'operationId', 'trigger', 'args', 'env', 'commandOverride', 'cols', 'rows'], code)
+  const run = rpcRecord(r.expectedRun, ['runId'], code), id = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(value)
+  const env = r.env === undefined ? undefined : rpcRecord(r.env, undefined, code)
+  if (!id(r.agentSessionId) || !id(r.operationId) || !id(run.runId) || r.trigger !== 'manual' ||
+      r.args !== undefined && (!Array.isArray(r.args) || r.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) ||
+      env && Object.entries(env).some(([key, value]) => !key || /[=\0]/u.test(key) || typeof value !== 'string' || value.includes('\0')) ||
+      r.commandOverride !== undefined && (typeof r.commandOverride !== 'string' || !r.commandOverride || r.commandOverride.includes('\0')) ||
+      [r.cols, r.rows].some(size => size !== undefined && (!Number.isSafeInteger(size) || Number(size) < 1))) {
+    throw new AgentMuxError('The manual resume resolution requires its exact Session, Run and unchanged execution intent.', code)
+  }
+  return structuredClone(r) as ResumeResolutionRequest
+}
+export function resumeResolutionDigest(request: ResumeResolutionRequest): string {
+  return agentCreationIntentDigest({ ...request, action: 'resolve-prepared-resume' })
 }

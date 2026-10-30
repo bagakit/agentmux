@@ -1,3 +1,5 @@
+import type { ResumeResolutionRequest } from './agent-prepared-resume.js'
+import type { AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import { observeRead } from './observation-read.js'
@@ -345,6 +347,23 @@ export class AgentMuxAgentSessionRegistry {
 
   async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch) {
     return await this.store.prepareResume(reservation, session, dispatch)
+  }
+
+  async admitResumeResolution(original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, request: ResumeResolutionRequest) {
+    const reservation = await this.store.admitResumeResolution(original, request, { reservationId: mintObjectId(),
+      ownerId: this.lifecycleOwnerId, ownerPid: process.pid, now: Date.now(), expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs })
+    await this.refresh(original.agentSessionId, original.expectedRun)
+    return reservation
+  }
+
+  async handoffResumeResolution(original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession,
+    dispatch: AgentMuxPreparedResumeDispatch, retirement: AgentMuxCreationRuntime) {
+    const successor: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> = { kind: 'resume', reservationId: mintObjectId(),
+      ownerId: this.lifecycleOwnerId, ownerPid: process.pid, expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
+      agentSessionId: original.agentSessionId, expectedRun: { ...original.expectedRun }, operationId: dispatch.prepared.createOperationId }
+    const reservation = await this.store.handoffResumeResolution(original, successor, session, dispatch, retirement)
+    await this.refresh(original.agentSessionId, original.expectedRun)
+    return reservation
   }
 
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession) {

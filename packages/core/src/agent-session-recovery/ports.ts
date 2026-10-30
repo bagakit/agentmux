@@ -17,8 +17,8 @@ import type { AgentMuxHostExecutorOwner } from '../executor-owner.js'
 /** Explicit original Core resources; no client or recovery-decision callback crosses this port. */
 export type AgentSessionRecoveryPorts = {
   sessions: {
-    readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readContinuityControlReceipt" | "recordRestartAdmission" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession">;
-    readonly registry: Pick<AgentMuxAgentSessionRegistry, "get" | "resolveMetadata" | "refresh" | "claimRestart" | "reserveRestart" | "load" | "claimReopen" | "commitLifecycle" | "reserveReopen" | "reserveExisting" | "prepareReopen" | "prepareResume" | "recordRestartStartNotApplied" | "update" | "rememberStartedResume" | "releaseLifecycle">;
+    readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readContinuityControlReceipt" | "recordRestartAdmission" | "recordResumeResolutionFailure" | "releaseResumeResolutionOwner" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession">;
+    readonly registry: Pick<AgentMuxAgentSessionRegistry, "get" | "resolveMetadata" | "refresh" | "claimRestart" | "reserveRestart" | "load" | "claimReopen" | "commitLifecycle" | "reserveReopen" | "reserveExisting" | "prepareReopen" | "admitResumeResolution" | "handoffResumeResolution" | "prepareResume" | "recordRestartStartNotApplied" | "update" | "rememberStartedResume" | "releaseLifecycle">;
     resolveRawAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
     currentStoredAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
     updateExactAgentSession(
@@ -33,7 +33,7 @@ export type AgentSessionRecoveryPorts = {
   };
   runtime: {
     prepareExecutionEnvironment?(): Promise<void>;
-    readonly kernel: Pick<CtxmuxRunAdapter, "prepareStart" | "startPrepared" | "creationRuntimeIdentity" | "inspectPreparedStart" | "inspectRetainedStart" | "inspectCreation" | "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
+    readonly kernel: Pick<CtxmuxRunAdapter, "prepareStart" | "startPrepared" | "creationRuntimeIdentity" | "inspectPreparedStart" | "inspectRetainedStart" | "retirePreparedStart" | "observePreparedStartRetirement" | "inspectCreation" | "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
     assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, durableSessions?: readonly AgentMuxAgentSession[]): void;
     requireCurrentAgentRun(session: AgentMuxAgentSession, durableSessions?: readonly AgentMuxAgentSession[]): Promise<CtxmuxAdapterRun>;
     retireUncommittedRun(runId: string): Promise<void>;

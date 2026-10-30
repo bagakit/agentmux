@@ -606,7 +606,8 @@ export class AgentMuxRpcService {
       if (restored.kind !== 'resumed' && restored.kind !== 'reattachable') throw new AgentMuxError(
         restored.continuity?.error ?? `The original Resume is ${restored.kind}. Inspect this Session and retry the same operation.`,
         restored.continuity?.errorCode ?? 'AGENT_CONTINUITY_PENDING', JSON.stringify(restored))
-      return { operation: 'resume', agentSessionId: original.agentSessionId, runId: restored.session.run.runId }
+      return { operation: 'resume', agentSessionId: original.agentSessionId, runId: restored.session.run.runId,
+        ...(restored.continuity?.resolution ? { resolution: structuredClone(restored.continuity.resolution) } : {}) }
     }
     if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation) &&
         !(this.ports.spatialAgentControl && request.operation === 'space.inspect' && 'requestId' in request.target)) {

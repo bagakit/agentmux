@@ -12,6 +12,15 @@ export function currentRunRecoveryOperation(session: {
     ? operation : undefined
 }
 
+/** An explicit request remains reachable; Core still decides the exact Runtime/fence qualification. */
+export function currentUnconfirmedResumeOperation(session: SessionSnapshot): AgentMuxContinuityOperation | undefined {
+  if (session.kind !== 'agent') return
+  const operation = session.continuity
+  return operation && !operation.action && operation.agentSessionId === session.control.agentSessionId &&
+    operation.previousRun.runId === session.control.run.runId && ['pending', 'starting'].includes(operation.kind) &&
+    operation.reason === 'operation-unconfirmed' ? operation : undefined
+}
+
 /** A current Core operation supplies copy only; it never changes recovery eligibility. */
 export function agentContinuityPresentation(session: Extract<SessionSnapshot, { kind: 'agent' }>): {
   kind: 'restoring' | 'unconfirmed' | 'pending'
