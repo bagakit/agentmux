@@ -5,6 +5,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runProbeProcess } from '../../../../desktop/scripts/probe-process.mjs'
+import { workspaceSourceExport } from '../../../../../packages/core/test/helpers/workspace-source-export.mjs'
+import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/runtime-bundle.mjs'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
@@ -16,6 +18,20 @@ const receipt = { passed: false, captureOnly: true, captureSubset: 'mobile-produ
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const loadedSource = {}
 try {
+  const identitySource = (await bundleIdentityRuntime()).source
+  const identityModule = `export const identityRuntimeSource = ${JSON.stringify(identitySource)};\n`
+  receipt.generated = { identityRuntimeSource: { sourceSHA256: sha(identitySource), moduleSHA256: sha(identityModule), loads: 0 } }
+  const workspaceSources = { name: 'original-declared-workspace-source', setup(plugin) {
+    plugin.onResolve({ filter: /^@agentmux\// }, args => {
+      if (args.path === '@agentmux/identity/runtime-source') return { path: args.path, namespace: 'original-identity-source' }
+      const source = workspaceSourceExport(root, args.path)
+      return source ? { path: source } : undefined
+    })
+    plugin.onLoad({ filter: /.*/, namespace: 'original-identity-source' }, () => {
+      receipt.generated.identityRuntimeSource.loads++
+      return { loader: 'js', contents: identityModule }
+    })
+  } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
     'floating-background': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-conversation__floating-tools { display: flex;', after: '.mobile-conversation__floating-tools { background: var(--surface-1); display: flex;' },
@@ -120,7 +136,7 @@ try {
     })
     plugin.onResolve({ filter: /\?worker$/ }, args => ({ path: require.resolve(args.path.replace(/\?worker$/, '')), namespace: 'original-worker' }))
     plugin.onLoad({ filter: /.*/, namespace: 'original-worker' }, async args => {
-      const output = await build({ absWorkingDir: root, entryPoints: [args.path], bundle: true, write: false, platform: 'browser', format: 'iife', target: 'esnext', metafile: true, logLevel: 'error' })
+      const output = await build({ absWorkingDir: root, entryPoints: [args.path], bundle: true, write: false, platform: 'browser', format: 'iife', target: 'esnext', metafile: true, logLevel: 'error', plugins: [clientSources, workspaceSources] })
       Object.assign(workerInputs, output.metafile.inputs)
       return { loader: 'js', contents: `export default class OriginalMonacoWorker extends Worker {constructor(){super(URL.createObjectURL(new Blob([${JSON.stringify(output.outputFiles[0].text)}],{type:'text/javascript'})))}}` }
     })
@@ -137,18 +153,23 @@ try {
   await fs.mkdir(iconProject)
   await fs.copyFile(path.join(root, 'apps/desktop/resources/icon-128.png'), path.join(iconProject, 'logo.png'))
   const iconOwner = path.join(compiled, 'project-appearance-owner.mjs')
-  await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/main/project-appearance.ts'], outfile: iconOwner, bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
+  const iconBuild = await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/main/project-appearance.ts'], outfile: iconOwner, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', metafile: true, plugins: [workspaceSources] })
   const projectAppearance = await (await import(pathToFileURL(iconOwner).href)).projectAppearance(iconProject)
   const providerOwner = path.join(compiled, 'provider-catalog-owner.cjs')
-  await build({ absWorkingDir: root, entryPoints: ['packages/core/src/agent-provider.ts'], outfile: providerOwner, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error' })
+  const providerBuild = await build({ absWorkingDir: root, entryPoints: ['packages/core/src/agent-provider.ts'], outfile: providerOwner, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error', metafile: true, plugins: [workspaceSources] })
   const providerCatalog = new (require(providerOwner)).AgentProviderRegistry().catalog()
   assert.ok(providerCatalog.find(value => value.id === 'codex')?.composer?.commands?.length, 'Original Provider owner declares the captured Commands')
   assert.ok(projectAppearance.icon?.startsWith('data:image/'), 'The original App filesystem owner returns the real bounded project image')
   receipt.projectAppearance = { owner: 'apps/desktop/src/main/project-appearance.ts', kind: projectAppearance.kind, source: 'apps/desktop/resources/icon-128.png', imageSha256: sha(projectAppearance.icon) }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workers, sourceProof],
+    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workspaceSources, workers, sourceProof],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
-  for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('(disabled):') && !file.startsWith('<define:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
+  const inputs = { ...iconBuild.metafile.inputs, ...providerBuild.metafile.inputs, ...built.metafile.inputs, ...workerInputs }
+  for (const file of Object.keys(inputs).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-identity-source:') && !file.startsWith('(disabled):') && !file.startsWith('<define:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
+  for (const file of ['packages/core/test/helpers/workspace-source-export.mjs', 'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts']) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
+  for (const directory of new Set(Object.keys(receipt.source).flatMap(file => /^packages\/[^/]+\/src\//.test(file) ? [file.split('/').slice(0, 2).join('/')] : file.startsWith('apps/host/src/') ? ['apps/host'] : []))) {
+    const file = directory + '/package.json'; receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
+  }
   if (receipt.sourceOverride) {
     assert.equal(receipt.source[receipt.sourceOverride.file], receipt.sourceOverride.originalSha256, 'Mutation targets an actual nonempty production input')
     receipt.source[receipt.sourceOverride.file] = receipt.sourceOverride.sha256
@@ -158,7 +179,7 @@ try {
     receipt.source[receipt.fixtureOverride.file] = receipt.fixtureOverride.sha256
   }
   receipt.loadedSource = loadedSource
-  receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):') || name.startsWith('<define:')))
+  receipt.virtualInputs = Object.fromEntries(Object.entries(inputs).filter(([name]) => name.startsWith('original-identity-source:') || name.startsWith('(disabled):') || name.startsWith('<define:')))
   for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--creation-recovery') ? ['creation-recovery.cjs'] : []), ...(process.argv.includes('--polish-followup') ? ['polish-followup.cjs'] : []), ...(process.argv.includes('--floating-tools') ? ['floating-tools.cjs'] : []), ...(process.argv.includes('--attachment-upload-exit') ? ['attachment-upload-exit.cjs'] : []), ...(process.argv.includes('--attachment-selection') ? ['attachment-selection.cjs'] : []), ...(process.argv.includes('--focus-state') ? ['focus-state.cjs'] : []), ...(process.argv.includes('--conversation-spacing') ? ['conversation-spacing.cjs'] : []), ...(process.argv.includes('--web-update') ? ['web-update.cjs'] : []), ...(process.argv.includes('--goal-recovery') ? ['goal-recovery.cjs'] : []), ...(process.argv.includes('--goal-exit') ? ['goal-exit.cjs'] : []), ...(process.argv.includes('--chat-start') ? ['chat-start.cjs'] : []), ...(process.argv.includes('--conversation-controls') ? ['conversation-controls.cjs'] : []), ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
