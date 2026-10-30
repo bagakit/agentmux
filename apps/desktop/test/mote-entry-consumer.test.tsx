@@ -44,7 +44,7 @@ it.each([false,true])('actual entry consumer restores the same main after its at
  const channels=new Map<string,(event:import('electron').IpcMainInvokeEvent,input:unknown)=>Promise<unknown>>(),humanEvent={} as import('electron').IpcMainInvokeEvent
  const trust=vi.fn((_channel:string,event:import('electron').IpcMainInvokeEvent)=>{if(event!==humanEvent)throw Error('Foreign renderer sender')})
  const bridge=vi.fn(async(hostId:string,method:import('@agentmux/core').AgentMuxRpcMethod,input:unknown)=>{expect(hostId).toBe(target.expectedResource.hostId);return await rpc.call(method,input as never)})
- registerMoteDialogueIpc({handleWithEvent:(channel,handler)=>{channels.set(channel,handler)},assertTrusted:trust,runtime:{callOriginalCore:bridge as import('../src/main/runtime-controller').RuntimeController['callOriginalCore']}})
+ registerMoteDialogueIpc({handleWithEvent:(channel,handler)=>{channels.set(channel,async(event,input)=>{trust(channel,event);return await handler(event,input)})},runtime:{callOriginalCore:bridge as import('../src/main/runtime-controller').RuntimeController['callOriginalCore']}})
  vi.spyOn(api.moteDialogue,'read').mockImplementation(async input=>parseMoteDialogueResult('space.mote.dialogue.read',await channels.get('moteDialogue:read')!(humanEvent,input),input))
  const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockImplementation(async input=>parseMoteDialogueResult('space.mote.dialogue.recovery.inspect',await channels.get('moteDialogue:recovery:inspect')!(humanEvent,input),input))
  const ensure=vi.spyOn(api.moteDialogue,'ensureRecovery').mockImplementation(async input=>parseMoteDialogueResult('space.mote.dialogue.recovery.ensure',await channels.get('moteDialogue:recovery:ensure')!(humanEvent,input),input))
