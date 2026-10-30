@@ -14,6 +14,17 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   const [minutes, setMinutes] = useState(String(presence.intervalMs / 60000))
   const [intervalIssue, setIntervalIssue] = useState('')
   useEffect(() => { setMinutes(String(presence.intervalMs / 60000)); setIntervalIssue('') }, [presence.intervalMs])
+  const rollover = draft.values.conversationRollover
+  const rolloverKind = draft.conversationRolloverEditor?.kind ?? rollover?.kind ?? 'keep-current'
+  const rolloverMinutes = draft.conversationRolloverEditor?.minutes ?? (rollover?.kind === 'idle' ? String(rollover.idleMs / 60000) : '')
+  const [rolloverIssue, setRolloverIssue] = useState('')
+  const validRolloverMinutes = (value: string) => value.trim() !== '' && Number(value) > 0 && Number.isSafeInteger(Number(value) * 60000)
+  function editRollover(kind: 'keep-current' | 'idle', value: string) {
+    setRolloverIssue('')
+    const values = kind === 'keep-current' ? { ...draft.values, conversationRollover: { kind } }
+      : validRolloverMinutes(value) ? { ...draft.values, conversationRollover: { kind, idleMs: Number(value) * 60000 } } : draft.values
+    model.edit(values, { kind, minutes: value })
+  }
   const maintenance = read?.maintenance
   const maintenanceLabel = maintenance?.schedule?.status === 'stopped' ? '原安排已停止' : maintenance ? {
     active: '已安排自动心跳', paused: '原心跳安排已暂停', disabled: '自动维持未启用', unbound: '主对话尚未绑定', unconfirmed: '实际安排尚未确认'
@@ -25,10 +36,11 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   const blocked = draft.attempts.find(a => a.input.operationId === draft.blockedAttemptId)
   return <section className="mobile-mote-quick-editor" aria-label="Mote 快捷配置编辑">
     <button type="button" className="mobile-text-button" onClick={onClose}>返回 Profile</button><h3>快捷配置</h3>
-    <p>设置承接主对话的 Agent 与自动心跳。配置保存、原会话接回和心跳投递分别确认。</p>
+    <p>设置主对话、自动流转策略与心跳。配置保存、原会话接回和心跳投递分别确认。</p>
     <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存原配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '原保存未确认；选择和请求保留。' : model.notice || '正在核对原配置…'}</MobileNotice>
     <form onSubmit={event => { event.preventDefault()
       if (!minutes.trim() || !Number.isSafeInteger(Number(minutes)) || !Number.isSafeInteger(Number(minutes) * 60000) || Number(minutes) < 1) { setIntervalIssue('心跳间隔请填至少 1 分钟的整数；原设置与选择保留。'); return }
+      if (rolloverKind === 'idle' && !validRolloverMinutes(rolloverMinutes)) { setRolloverIssue('请填写大于 0 且能精确换算为毫秒的空闲分钟数；原设置与草稿保留。'); return }
       void model.save()
     }}>
       <label>新对话使用的 Agent<select aria-label="新对话使用的 Agent" value={executor} onChange={event => {
@@ -40,6 +52,16 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         model.edit(choice ? { ...values, conversation: choice.reference } : values)
       }}><option value="">未选择</option>{conversation && !conversations.some(c => JSON.stringify(c.reference) === conversation) && <option value={conversation}>保留原主对话引用（尚未确认）</option>}
         {conversations.map(c => <option key={JSON.stringify(c.reference)} value={JSON.stringify(c.reference)}>{c.label}</option>)}</select></label>
+      <fieldset className="mobile-mote-presence"><legend>主对话自动流转</legend>
+        <label>自动流转策略<select aria-label="自动流转策略" value={rolloverKind} onChange={event => editRollover(event.target.value as 'keep-current' | 'idle', rolloverMinutes)}>
+          <option value="keep-current">保持当前对话</option><option value="idle">空闲后新一轮</option>
+        </select></label>
+        {rolloverKind === 'idle' && <label>对话空闲时长（分钟）<input type="number" inputMode="decimal" min="0" step="any" aria-label="对话空闲时长（分钟）" value={rolloverMinutes}
+          onChange={event => editRollover('idle', event.target.value)} /></label>}
+        <p>保存后才生效。达到空闲时长后，下次新问题再开启新一轮；旧对话保留。保存不会立即切换主对话，也不会发送消息。</p>
+        {!read || read.status !== 'ready' ? <p>已保存的流转策略尚未确认；当前选择保留。</p> : !read.defaults?.conversationRollover && <p>原配置未设置流转策略；未编辑策略时保持原承接方式。</p>}
+        {rolloverIssue && <p role="status">{rolloverIssue}</p>}
+      </fieldset>
       <fieldset className="mobile-mote-presence"><legend>主 Agent 驻留与心跳</legend>
         <label><input type="checkbox" aria-label="启用 Mote 自动维持" checked={presence.enabled} onChange={event => model.edit({ ...draft.values, presence: { ...presence, enabled: event.target.checked } })} />启用自动维持</label>
         <label>心跳间隔（分钟）<input type="number" inputMode="numeric" min="1" step="1" required aria-label="心跳间隔（分钟）" value={minutes} onChange={event => {

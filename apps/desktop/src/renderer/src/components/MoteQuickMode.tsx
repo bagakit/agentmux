@@ -34,7 +34,7 @@ const ThemeFileTextIcon = semanticIconComponent('file.text')
 
 type ResumeRequest = { ownerHostId: string; scheduleId: string; expectedRevision: number; operationId: string }
 // User drafts only: no current-role, delivery or schedule facts are authored here.
-const retainedQuickDrafts = new Map<string, { draft: MoteQuickDefaults; minutes: string; saved: SavedMoteQuickMode | null; resume: ResumeRequest | null }>()
+const retainedQuickDrafts = new Map<string, { draft: MoteQuickDefaults; minutes: string; rolloverKind: 'keep-current' | 'idle'; rolloverMinutes: string; saved: SavedMoteQuickMode | null; resume: ResumeRequest | null }>()
 
 export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
@@ -55,6 +55,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Main Agent</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved main Agent' : 'Choose main Agent')}</strong>{defaults.conversation ? <ThemeActionPinIcon size={12} aria-label="Kept open" /> : null}</button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><HeartbeatIcon size={14} /><span>Automatic heartbeat</span><strong>{presence.enabled ? `Every ${presence.intervalMs / 60000} min` : 'Disabled'}</strong></button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Conversation rollover</span><strong>{saved?.status !== 'saved' ? 'Unconfirmed' : defaults.conversationRollover?.kind === 'idle' ? `After ${defaults.conversationRollover.idleMs / 60000} min idle` : defaults.conversationRollover ? 'Keep current conversation' : 'Not configured'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
       onClose={() => setEditing(false)} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
@@ -71,6 +72,9 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const [saved, setSaved] = useState<SavedMoteQuickMode | null>(restored.current?.saved ?? null), [draft, setDraft] = useState<MoteQuickDefaults>(() => restored.current?.draft ?? (scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults : {}))
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null), [attempt, setAttempt] = useState(0)
   const [minutes, setMinutes] = useState(restored.current?.minutes ?? String((draft.presence ?? DEFAULT_MOTE_PRESENCE).intervalMs / 60000))
+  const [rolloverKind, setRolloverKind] = useState<'keep-current' | 'idle'>(restored.current?.rolloverKind ?? draft.conversationRollover?.kind ?? 'keep-current')
+  const [rolloverMinutes, setRolloverMinutes] = useState(restored.current?.rolloverMinutes ?? (draft.conversationRollover?.kind === 'idle' ? String(draft.conversationRollover.idleMs / 60000) : ''))
+  const validRolloverMinutes = (value: string) => value.trim() !== '' && Number(value) > 0 && Number.isSafeInteger(Number(value) * 60000)
   const presence = draft.presence ?? DEFAULT_MOTE_PRESENCE
   const maintenance = saved?.maintenance
   const resumeRequest = useRef<ResumeRequest | null>(restored.current?.resume ?? null)
@@ -78,10 +82,10 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const maintenanceLabel = maintenance?.schedule?.status === 'stopped' ? 'Original heartbeat stopped' : maintenance ? { active: 'Automatic heartbeat scheduled', paused: 'Original heartbeat paused', disabled: 'Automatic maintenance disabled', unbound: 'Choose a main Agent to maintain', unconfirmed: 'Actual schedule unconfirmed' }[maintenance.status] : 'Actual schedule not yet read'
   const form = useRef(draft); form.current = draft
   const edited = useRef(Boolean(restored.current)), lifetime = useRef<object>({}), content = useRef<HTMLDivElement>(null), id = useId()
-  const latestDraft = useRef({ draft, minutes, saved, accepted: false })
-  latestDraft.current = { ...latestDraft.current, draft, minutes, saved }
+  const latestDraft = useRef({ draft, minutes, rolloverKind, rolloverMinutes, saved, accepted: false })
+  latestDraft.current = { ...latestDraft.current, draft, minutes, rolloverKind, rolloverMinutes, saved }
   useLayoutEffect(() => () => { const current = latestDraft.current
-    if (!current.accepted && (edited.current || current.saved?.pending || resumeRequest.current)) retainedQuickDrafts.set(draftKey, { draft: current.draft, minutes: current.minutes, saved: current.saved, resume: resumeRequest.current })
+    if (!current.accepted && (edited.current || current.saved?.pending || resumeRequest.current)) retainedQuickDrafts.set(draftKey, { draft: current.draft, minutes: current.minutes, rolloverKind: current.rolloverKind, rolloverMinutes: current.rolloverMinutes, saved: current.saved, resume: resumeRequest.current })
   }, [draftKey])
   const facts = useAppStore(useShallow(state => ({ tabs: state.tabs, layouts: state.layouts, config: state.config, snapshots: state.scratchTopicSnapshots,
     bindings: state.spaceZoneBindings, categories: state.topicCategories, detections: state.executorDetections, inventory: state.hostExecutorInventories[scope.workspace.hostId] })))
@@ -106,12 +110,22 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       setSaved(previous => previous?.pending ? { ...source, pending: previous.pending } : source)
       if (moved) throw new Error('Your selection changed during the read. Your choices are kept; reread the settings.')
       if (source.issue) setIssue(source.issue)
-      else if (!edited.current) { form.current = source.defaults; setDraft(source.defaults); setMinutes(String((source.defaults.presence ?? DEFAULT_MOTE_PRESENCE).intervalMs / 60000)) }
+      else if (!edited.current) {
+        form.current = source.defaults; setDraft(source.defaults); setMinutes(String((source.defaults.presence ?? DEFAULT_MOTE_PRESENCE).intervalMs / 60000))
+        setRolloverKind(source.defaults.conversationRollover?.kind ?? 'keep-current')
+        setRolloverMinutes(source.defaults.conversationRollover?.kind === 'idle' ? String(source.defaults.conversationRollover.idleMs / 60000) : '')
+      }
     }).catch(cause => { if (lifetime.current === epoch) { setSaved(previous => previous?.pending ? previous : null); setIssue(presentError(cause)) } })
       .finally(() => { unsubscribe(); if (lifetime.current === epoch) setLoading(false) })
     return () => { lifetime.current = {}; unsubscribe() }
   }, [attempt])
   const update = (next: MoteQuickDefaults) => { edited.current = true; form.current = next; setDraft(next) }
+  function editRollover(kind: 'keep-current' | 'idle', value: string) {
+    edited.current = true; setRolloverKind(kind); setRolloverMinutes(value); setIssue(null)
+    if (kind === 'keep-current') update({ ...form.current, conversationRollover: { kind } })
+    else if (validRolloverMinutes(value)) update({ ...form.current, conversationRollover: { kind, idleMs: Number(value) * 60000 } })
+    else update({ ...form.current }) // Raw edits also fence a late save from closing this later draft.
+  }
   const selected = draft.conversation ? JSON.stringify(draft.conversation) : ''
   const hasSelected = choices.some(choice => JSON.stringify(choice) === selected)
   async function resumeHeartbeat() {
@@ -138,6 +152,9 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     if (!minutes.trim() || !Number.isSafeInteger(Number(minutes)) || Number(minutes) < 1 || !Number.isSafeInteger(Number(minutes) * 60000)) {
       setIssue('Enter a whole number of minutes, at least 1. Your choices and original settings are kept.'); return
     }
+    if (rolloverKind === 'idle' && !validRolloverMinutes(rolloverMinutes)) {
+      setIssue('Enter a positive idle duration that converts exactly to milliseconds. Your draft and original settings are kept.'); return
+    }
     const submitted = form.current, epoch = lifetime.current
     const current = () => lifetime.current === epoch && form.current === submitted
     setBusy(true); setIssue(null)
@@ -162,6 +179,17 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
           options={[{ value: '', label: 'No main Agent yet' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
             ...choices.map(choice => ({ value: JSON.stringify(choice), label: facts.tabs[choice.tabId]?.name?.trim() || conversationLabels[choice.sessionId] || choice.sessionId, description: `${conversationLabels[choice.sessionId]} · ${choice.hostId} / ${choice.sessionId} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
+        <fieldset className="mote-quick-mode__presence"><legend>Conversation rollover</legend>
+          <label htmlFor={id + '-rollover'}>Automatic rollover policy</label>
+          <SelectionField id={id + '-rollover'} label="Automatic rollover policy" value={rolloverKind}
+            onValueChange={value => editRollover(value as 'keep-current' | 'idle', rolloverMinutes)}
+            options={[{ value: 'keep-current', label: 'Keep current conversation' }, { value: 'idle', label: 'After conversation inactivity' }]} />
+          {rolloverKind === 'idle' ? <><label htmlFor={id + '-rollover-duration'}>Conversation inactivity <small>Minutes</small></label>
+            <input id={id + '-rollover-duration'} aria-label="Conversation inactivity (minutes)" type="number" inputMode="decimal" min="0" step="any" value={rolloverMinutes}
+              onChange={event => editRollover('idle', event.target.value)} /></> : null}
+          <p className="mote-details__hint">Changes take effect only after Save. Once the conversation has been idle long enough, your next new question starts a new round. Previous conversations stay available. Saving sends no message and does not switch the main Agent now.</p>
+          {loading || !saved || saved.issue ? <p className="mote-details__hint">The saved rollover policy is unconfirmed. Your choices are kept.</p> : !saved.defaults.conversationRollover ? <p className="mote-details__hint">No rollover policy is configured. Editing other settings keeps the existing handoff behavior.</p> : null}
+        </fieldset>
         <fieldset className="mote-quick-mode__presence"><legend>Main Agent & heartbeat</legend>
           <label><input type="checkbox" aria-label="Enable automatic Mote maintenance" checked={presence.enabled}
             onChange={event => update({ ...form.current, presence: { ...presence, enabled: event.target.checked } })} />Keep the main Agent available</label>

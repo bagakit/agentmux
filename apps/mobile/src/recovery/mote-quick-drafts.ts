@@ -7,8 +7,9 @@ import { parseScheduleRpcParams, validateScheduleRpcResult, type ScheduleMutatio
 export type MoteQuickScope = { origin: string; runtimeId: string; deviceHostId: string | null; target: MotePreferencesTarget }
 export type MoteQuickAttempt = { input: MoteQuickPreferencesSaveParams; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'saved' | 'failed'; result: MoteQuickPreferencesSaveResult | null; issue: string | null }
 export type MoteMaintenanceAttempt = { input: ScheduleMutation; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'confirmed' | 'observed' | 'not-sent'; result: ScheduleReceipt | ScheduleResultMap['schedule.inspect'] | null; issue: string | null }
+export type MoteRolloverEditor = { kind: 'keep-current' | 'idle'; minutes: string }
 export type MoteQuickDraft = { scope: MoteQuickScope; values: MoteQuickDefaults; baseline: MoteQuickBaseline | null;
-  attempts: MoteQuickAttempt[]; blockedAttemptId: string | null; maintenanceAttempts?: MoteMaintenanceAttempt[] }
+  attempts: MoteQuickAttempt[]; blockedAttemptId: string | null; maintenanceAttempts?: MoteMaintenanceAttempt[]; conversationRolloverEditor?: MoteRolloverEditor }
 export type MoteQuickDraftCommit = { recordId: string | null; applied: boolean; draft: MoteQuickDraft | null; conflict: MoteQuickDraft | null }
 export class MoteQuickDraftInvalidError extends Error {}
 export class MoteQuickDraftCapacityError extends MoteQuickDraftInvalidError {}
@@ -34,8 +35,12 @@ export function moteQuickDraftKey(scope: MoteQuickScope): string {
   return JSON.stringify([scope.origin, scope.runtimeId, scope.deviceHostId, t.spaceId, t.zoneId, r.hostId, r.workspaceId, r.workspacePath])
 }
 export function parseMoteQuickDraft(value: unknown): MoteQuickDraft {
-  const v = object(value, ['scope', 'values', 'baseline', 'attempts', 'blockedAttemptId', ...(Object.hasOwn(value ?? {}, 'maintenanceAttempts') ? ['maintenanceAttempts'] : [])]), scope = parseMoteQuickScope(v.scope)
+  const v = object(value, ['scope', 'values', 'baseline', 'attempts', 'blockedAttemptId', ...(Object.hasOwn(value ?? {}, 'maintenanceAttempts') ? ['maintenanceAttempts'] : []), ...(Object.hasOwn(value ?? {}, 'conversationRolloverEditor') ? ['conversationRolloverEditor'] : [])]), scope = parseMoteQuickScope(v.scope)
   try {
+    if (v.conversationRolloverEditor !== undefined) {
+      const editor = object(v.conversationRolloverEditor, ['kind', 'minutes'])
+      if (!['keep-current', 'idle'].includes(String(editor.kind)) || typeof editor.minutes !== 'string' || editor.minutes.length > 64) invalid()
+    }
     parseMoteQuickDefaults(v.values)
     if (v.baseline !== null) parseMoteQuickBaseline(v.baseline, scope.target)
     if (!Array.isArray(v.attempts)) invalid()

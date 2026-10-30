@@ -6,7 +6,7 @@ import { moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferences
   sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
 import { getDeviceWorkface, DeviceWorkfaceRecordChangedError, type DeviceWorkfaceStore } from '../recovery/device-workface'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickScope, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError,
-  type MoteQuickDraft, type MoteQuickScope, type MoteQuickAttempt, type MoteMaintenanceAttempt } from '../recovery/mote-quick-drafts'
+  type MoteQuickDraft, type MoteRolloverEditor, type MoteQuickScope, type MoteQuickAttempt, type MoteMaintenanceAttempt } from '../recovery/mote-quick-drafts'
 import { parseScheduleRpcParams, validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 
 type Editable = Omit<MoteQuickDraft, 'scope'> & { scope: MoteQuickScope | null }
@@ -73,7 +73,10 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     void work.then(result => { if (revision === reloadRevision.current && result.committed) reloadDirty.current = false })
     return work
   }
-  function edit(values: MoteQuickDefaults) { changed.current = true; void retain({ ...current.current, values }) }
+  function edit(values: MoteQuickDefaults, conversationRolloverEditor?: MoteRolloverEditor) {
+    changed.current = true
+    void retain({ ...current.current, values, ...(conversationRolloverEditor ? { conversationRolloverEditor } : {}) })
+  }
   async function inspect() {
     const source = connection(latest.current.client, owner, target), epoch = ++readEpoch.current, original = latest.current.client
     if (!source || !original?.forwardRpc || !latest.current.visible) { setNotice('原 Host 暂不可核对；选择和原请求保留。'); return }
