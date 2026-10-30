@@ -18,6 +18,7 @@
 - [同一 Run 内的原生会话切换](#同一-run-内的原生会话切换)
 - [注意力处理与结果审查闭环](#注意力处理与结果审查闭环)
 - [Agents 入口与 Activity 详情归一](#agents-入口与-activity-详情归一)
+- [共享 Agent 菜单](#共享-agent-菜单)
 - [Agents、队列与 Message Tools](#agents队列与-message-tools)
 - [Provider 与人机交互的分层收敛](#provider-与人机交互的分层收敛)
 - [Agent 全局状态：唯一事实与投影](#agent-全局状态唯一事实与投影)
@@ -187,6 +188,14 @@ AgentMux Session 持有一个已确认的原生语义目标；原生前台正在
 
 - Activity 工作线展开的每个 Agent 必须显示所属 Project/Workspace、Provider、执行状态、最近活动与等待/停止时长；统计至少区分总数、running、needs you、error，缺失事实显示 unknown。
 - Agents 列表只有一个主入口。左侧 Projects/Agents 工具作为统一入口，右侧重复的 Agents roster 不再单独占位；原有定位、筛选和状态统计能力并入统一入口。
+
+## 共享 Agent 菜单
+
+Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共享 Agent 菜单组件。通用 Agent 资料、动作及其资格消费原 Session 事实与控制器；各入口通过扩展位提供自己的上下文与特定动作，不复制一套通用菜单，也不另建动作注册表、状态 Store 或 Provider 检测器。菜单打开、关闭或所处页面不改变已确认的 Agent 能力；只读、原身份、操作确认及回执继续由原动作 owner 裁决。
+
+菜单明确区分准确 Host／Session／Run 的会话动作与需要准确空间 occurrence 的动作。Focus 按 Agent 聚合，无确认位置或有多个位置时不借当前焦点、同名对象或首位置构造 Tab／Region 目标；已有准确 Session 控制不因缺少位置而消失。原卡片导航和改名编辑、终端正文的复制／粘贴／路径／输出上下文、Region 布局动作各由调用入口提供，仍遵循[Focus 卡片](focus-context.md#卡片内容预览与-agent-操作)和[Agent Region](spaces-and-layout.md#agent-region-关闭与身份入口)的原对象与焦点边界。
+
+通用复制和已有一级布局动作保持直接可达；长说明、连接设置与维护等低频内容按需进入，不把所有资料和系统扩展平铺成整页长菜单。按需收纳不删除能力、隐藏必要服务问题或改写权限：失败步骤、当前运行状态与可达恢复入口仍沿原服务窗可发现，准确目标不成立只拒绝该次操作。复用与扩展不增加逐卡历史扫描、后台轮询或无关 Session 订阅；原确认取消、菜单关闭和返回仍保较晚主动焦点、草稿、原工作面与健康 Run。具体密度只定义在[Agent 菜单的动作层级](../presentation/spaces-and-layout.md#agent-more-的动作层级)。
 
 ## Agents、队列与 Message Tools
 

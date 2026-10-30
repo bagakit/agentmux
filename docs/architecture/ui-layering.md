@@ -14,6 +14,12 @@ Portal 使用稳定的 DOM host。工作面跨 document 移动时，host 随原�
 
 [`overlays.css`](../../packages/client-ui/src/styles/overlays.css) 定义全局层级 token 和 modal 内部局部次序，Desktop 与 Mobile 引入同一文件。业务组件只消费角色，不计算“当前在弹窗里所以再加一层”。Desktop 的 [`WindowOverlayHost`](../../apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx) 将已有 Portal 接到共享作用域和实际 `WorkbenchDocument`；内容与焦点使用同一个 document，不能从主窗口全局变量猜测目标。
 
+## 共享菜单
+
+Desktop 的 Focus 卡片与 Agent Region 通过 [`AgentMenuContent`](../../apps/desktop/src/renderer/src/components/AgentMenuContent.tsx) 共享菜单正文。入口保留触发、返回焦点与原动作控制器，并用显式扩展位提供终端正文工具、行内改名、布局和连接；正文不解析 Session、推断权限或持有另一份业务状态。
+
+[`WorkbenchMenuSubmenu`](../../apps/desktop/src/renderer/src/components/WorkbenchMenuSubmenu.tsx) 继续使用 Radix 的级联、键盘与指针机制。现有 [Popper 补丁](../../patches/@radix-ui__react-popper@1.3.3.patch) 仅在该入口显式启用 `shiftCrossAxis`：先保留原平移与左右翻转，再由 Floating UI 在必要时跨轴避让，允许父子菜单重叠并保可读宽度；尺寸仍由同一 Popper owner 计算。其他 Popper 消费者保持默认行为，客户端不另建定位器或几何 Store。依赖与补丁身份沿 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 和 lockfile 核对。
+
 ## Desktop 的原生 Browser 投影
 
 原生 Browser 覆盖 Renderer 的 DOM，单独增加 CSS z-index 无法跨越这条边界。
