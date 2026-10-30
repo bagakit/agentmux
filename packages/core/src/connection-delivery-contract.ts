@@ -91,15 +91,24 @@ export type ConnectionDeliveryObservation = {
 }
 export type ConnectionDeliveryOperationInput = { operationId: string }
 export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number; order?: 'oldest' | 'newest' }
+/** Wake the original publication reader; no new input, source cut or platform retry. */
+export type ConnectionDeliverySourceRecoverInput = { connectionId: string; bindingId: string; bindingRevision: number }
+export type ConnectionDeliverySourceRecoverResult = {
+  disposition: 'requested' | 'joined' | 'disabled'
+  observation: ConnectionDeliveryObservation
+  sourceObservation?: ConnectionDeliverySourceObservation
+}
 export type ConnectionDeliveryParamsMap = {
   'connection.delivery.inspect': ConnectionDeliveryOperationInput
   'connection.delivery.ls': ConnectionDeliveryListInput
   'connection.delivery.retry': ConnectionDeliveryRetryInput
+  'connection.delivery.source.recover': ConnectionDeliverySourceRecoverInput
 }
 export type ConnectionDeliveryResultMap = {
   'connection.delivery.inspect': { delivery: ConnectionDelivery | null }
   'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; sourceObservation?: ConnectionDeliverySourceObservation; effectObservation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
   'connection.delivery.retry': { delivery: ConnectionDelivery; continuation: ConnectionDeliveryContinuation }
+  'connection.delivery.source.recover': ConnectionDeliverySourceRecoverResult
 }
 export type ConnectionDeliveryMethod = keyof ConnectionDeliveryParamsMap
 /** Borrow the exact Host owner. Retry keeps the same message identity: known non-application, or an upload whose message was never attempted. */
@@ -107,4 +116,5 @@ export interface ConnectionDeliveryPort {
   inspect(input: ConnectionDeliveryOperationInput): Promise<ConnectionDeliveryResultMap['connection.delivery.inspect']>
   list(input: ConnectionDeliveryListInput): Promise<ConnectionDeliveryResultMap['connection.delivery.ls']>
   retry(input: ConnectionDeliveryRetryInput, context: RoomBindingCallContext): Promise<ConnectionDeliveryResultMap['connection.delivery.retry']>
+  recoverSource(input: ConnectionDeliverySourceRecoverInput, context: RoomBindingCallContext): Promise<ConnectionDeliverySourceRecoverResult>
 }

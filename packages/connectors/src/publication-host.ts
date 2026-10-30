@@ -74,18 +74,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!this.authorized(binding)) continue
       let lane = this.lanes.get(binding.bindingId)
       if (!lane) {
-        lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
-        this.lanes.set(binding.bindingId, lane)
-        if (this.options.queryInput && this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback) {
-          const current = lane
-          lane.queryInput = new PublicationQueryInputObserver(this.store, binding, this.options.queryInput, lane.abort.signal,
-            () => this.authorized(binding), () => this.wake(current))
-          lane.queryInput.wake()
-        }
-        try {
-          const current = lane, adapter = this.options.connections.publicationAdapter(binding.connectionId)
-          lane.permissionStop = adapter?.permissionActions === true || adapter?.questionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined
-        } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
+        lane = this.ensureLane(binding)
         this.wake(lane)
       } else {
         if (recoveryOnly) this.recoverRateLimits(lane)
@@ -93,6 +82,28 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted) this.wake(lane)
       }
     }
+  }
+  private ensureLane(binding: RoomBinding): Lane {
+    const previous = this.lanes.get(binding.bindingId)
+    if (previous?.binding.revision === binding.revision) return previous
+    if (previous) {
+      previous.abort.abort(); previous.permissionStop?.()
+      try { previous.watch?.handle?.dispose() } catch { /* Release only this obsolete original reader. */ }
+      this.lanes.delete(binding.bindingId)
+    }
+    const lane: Lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
+    this.lanes.set(binding.bindingId, lane)
+    if (this.options.queryInput && this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback) {
+      const current = lane
+      lane.queryInput = new PublicationQueryInputObserver(this.store, binding, this.options.queryInput, lane.abort.signal,
+        () => this.authorized(binding), () => this.wake(current))
+      lane.queryInput.wake()
+    }
+    try {
+      const current = lane, adapter = this.options.connections.publicationAdapter(binding.connectionId)
+      lane.permissionStop = adapter?.permissionActions === true || adapter?.questionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined
+    } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
+    return lane
   }
   /** Only the existing recovery tick considers no-effect sources. Normal source reads stay notification-driven. */
   private recoverRateLimits(lane: Lane): void {
@@ -881,6 +892,23 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (this.closed) return { state: 'unknown', reason: 'not-started' }
     const authority = this.authority({ bindingId, revision })
     return authority === null ? { state: 'unavailable', reason: 'storage-unconfirmed' } : authority.authorized ? { state: 'unknown', reason: 'not-started' } : { state: 'disabled' }
+  }
+  async recoverSource(value: import('@agentmux/core/connections').ConnectionDeliverySourceRecoverInput, context: RoomBindingCallContext) {
+    if (this.closed) throw new AgentMuxError('The original publication owner is closed.', 'PUBLICATION_OWNER_UNAVAILABLE')
+    const input = parseConnectionDeliveryParams('connection.delivery.source.recover', value)
+    parseRoomBindingAuthority(context.actor); await context.assertCurrent?.()
+    if (this.closed) throw new AgentMuxError('The original publication owner closed during authorization.', 'PUBLICATION_OWNER_UNAVAILABLE')
+    const requested = this.options.bindings.readExact(input.bindingId, input.bindingRevision)
+    if (!requested || requested.connectionId !== input.connectionId) throw new AgentMuxError('Source recovery requires the exact original Binding and Connection.', 'PUBLICATION_SOURCE_CONFLICT')
+    const binding = readRoomPublicationBinding(this.options.bindings, requested)
+    if (!binding) throw new AgentMuxError('The original publication scope is unconfirmed. Its cut and effects are retained.', 'PUBLICATION_SOURCE_CONFLICT')
+    const authority = this.authority(binding)
+    if (authority === null) throw new AgentMuxError('The original publication authority could not be read. Existing work is retained.', 'PUBLICATION_STORAGE_UNCONFIRMED')
+    if (!authority.authorized) return { disposition: 'disabled' as const, observation: { state: 'disabled' as const } }
+    const lane = this.ensureLane(binding), disposition = lane.work ? 'joined' as const : 'requested' as const
+    if (!lane.work) this.wake(lane)
+    return { disposition, observation: this.observation(binding.bindingId, binding.revision),
+      ...(lane.sourceObservation ? { sourceObservation: { ...lane.sourceObservation } } : {}) }
   }
   async inspect(value: ConnectionDeliveryOperationInput) {
     const input = parseConnectionDeliveryParams('connection.delivery.inspect', value), original = this.store.inspect(input.operationId)

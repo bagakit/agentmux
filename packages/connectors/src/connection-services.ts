@@ -253,7 +253,8 @@ export async function createConnectionServices(options: { directory: string | un
       ...(options.publication && options.bindings ? { delivery: {
         inspect: async input => (await ensure()).publication!.inspect(input),
         list: async input => (await ensure()).publication!.list(input),
-        retry: async (input, context) => (await ensure()).publication!.retry(input, context)
+        retry: async (input, context) => (await ensure()).publication!.retry(input, context),
+        recoverSource: async (input, context) => (await ensure()).publication!.recoverSource(input, context)
       } satisfies import('@agentmux/core/connections').ConnectionDeliveryPort } : {}),
       ...(options.ingress && options.bindings ? { ingress: {
         listAudience: async input => (await ensure()).ingress!.listAudience(input),

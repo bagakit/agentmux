@@ -910,6 +910,19 @@ export class AgentMuxRpcService {
         await current()
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
+      if (caller && method === 'connection.delivery.source.recover') {
+        const request = parseConnectionDeliveryParams(method, input)
+        if (!owner.bindings || !owner.delivery?.recoverSource) throw new AgentMuxError('Original source recovery is unavailable on this Host.', 'CONTROL_UNAVAILABLE')
+        const binding = (await owner.bindings.inspect({ bindingId: request.bindingId, revision: request.bindingRevision })).binding
+        if (!binding || binding.bindingId !== request.bindingId || binding.revision !== request.bindingRevision || binding.connectionId !== request.connectionId ||
+          binding.executionHostId !== caller.hostId || binding.agentSessionId !== caller.agentSessionId) throw new AgentMuxError(
+          'Source recovery requires this authenticated Host and Session on its exact original Binding.', 'CONTROL_PERMISSION_DENIED')
+        const current = async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) }
+        await current()
+        const result = await owner.delivery.recoverSource(request, { ...administration, assertCurrent: current })
+        await current()
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (caller && method === 'connection.delivery.retry') {
         const request = parseConnectionDeliveryParams(method, input)
         const selector = { operationId: request.operationId }
@@ -1011,6 +1024,10 @@ export class AgentMuxRpcService {
         if (!delivery) throw new AgentMuxError('Delivery inspection is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
         const result = method === 'connection.delivery.inspect' ? await delivery.inspect(parseConnectionDeliveryParams(method, params))
           : method === 'connection.delivery.ls' ? await delivery.list(parseConnectionDeliveryParams(method, params))
+          : method === 'connection.delivery.source.recover' ? delivery.recoverSource
+            ? await delivery.recoverSource(parseConnectionDeliveryParams(method, params), { ...administration,
+              assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
+            : (() => { throw new AgentMuxError('Original source recovery is unavailable on this Host.', 'CONTROL_UNAVAILABLE') })()
           : await delivery.retry(parseConnectionDeliveryParams(method, params), { ...administration,
             assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>

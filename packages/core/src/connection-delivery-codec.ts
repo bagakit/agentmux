@@ -8,7 +8,7 @@ import { conversationRecordId } from './conversation-stream.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import type { ConnectionDelivery, ConnectionDeliveryContinuation, ConnectionDeliveryRetrySource, ConnectionDeliveryCoverage, ConnectionDeliveryEvent, ConnectionDeliveryGap, ConnectionOriginRepresentation, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
 
-export const CONNECTION_DELIVERY_RPC_METHODS = { 'connection.delivery.inspect': 'long', 'connection.delivery.ls': 'long', 'connection.delivery.retry': 'long' } as const
+export const CONNECTION_DELIVERY_RPC_METHODS = { 'connection.delivery.inspect': 'long', 'connection.delivery.ls': 'long', 'connection.delivery.retry': 'long', 'connection.delivery.source.recover': 'long' } as const
 export const isConnectionDeliveryMethod = (value: unknown): value is ConnectionDeliveryMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_DELIVERY_RPC_METHODS, value)
 export const CONNECTION_DELIVERY_RECEIPT_REASONS = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format'] as const
 export const CONNECTION_DELIVERY_STATES = ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const
@@ -198,6 +198,10 @@ export function parseConnectionDeliverySourceObservation(value: unknown): Connec
     code: p.code as ConnectionDeliverySourceObservation['code'], codeRecorded: p.codeRecorded as boolean, checkpointKey: p.checkpointKey === null ? null : version(p.checkpointKey) }
 }
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {
+  if (method === 'connection.delivery.source.recover') {
+    const p = object(value, ['connectionId', 'bindingId', 'bindingRevision'])
+    return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1) } as ConnectionDeliveryParamsMap[M]
+  }
   if (method === 'connection.delivery.retry') { const p = object(value, ['operationId', 'source']); return { operationId: text(p.operationId), source: parseConnectionDeliveryRetrySource(p.source) } as ConnectionDeliveryParamsMap[M] }
   if (method === 'connection.delivery.inspect') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
   const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit', 'order'])
@@ -206,6 +210,12 @@ export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod
   return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(p.afterContent === undefined ? {} : { afterContent: text(p.afterContent) }), ...(limit === undefined ? {} : { limit }), ...(p.order === undefined ? {} : { order: p.order }) } as ConnectionDeliveryParamsMap[M]
 }
 export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod>(method: M, value: unknown, input: ConnectionDeliveryParamsMap[M]): ConnectionDeliveryResultMap[M] {
+  if (method === 'connection.delivery.source.recover') {
+    const p = object(value, ['disposition', 'observation', 'sourceObservation'])
+    if (!['requested', 'joined', 'disabled'].includes(p.disposition as string)) fail()
+    return { disposition: p.disposition as 'requested' | 'joined' | 'disabled', observation: parseConnectionDeliveryObservation(p.observation),
+      ...(p.sourceObservation === undefined ? {} : { sourceObservation: parseConnectionDeliverySourceObservation(p.sourceObservation) }) } as ConnectionDeliveryResultMap[M]
+  }
   if (method === 'connection.delivery.ls') {
     const p = object(value, ['deliveries', 'next', 'observation', 'sourceObservation', 'effectObservation', 'coverage']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
     if (!Array.isArray(p.deliveries) || p.deliveries.length > (expected.limit ?? 30)) fail()
