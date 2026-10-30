@@ -56,7 +56,7 @@ for (const label of ['baseline', ...Object.keys(goalOwnerRecoveryMutations), 're
   if (mutation) {
     assert.notEqual(run.code, 0, 'The implementation mutation must fail: ' + label)
     assert.ok(failures.length > 0 && failures.every(test => new RegExp(mutation.pattern).test(test.fullName)), 'Only the selected real consumers may fail')
-    assert.ok(failures.some(test => test.failureMessages.some(message => /AssertionError|__VITEST_RESOLVES__/u.test(message))), 'A consumer assertion must detect the mutation; setup or timeout is not proof')
+    assert.ok(failures.some(test => test.failureMessages.some(message => /AssertionError|__VITEST_(?:REJECTS|RESOLVES)__/u.test(message))), 'A consumer assertion must detect the mutation; setup or timeout is not proof')
     for (const [path] of mutation.edits) assert.ok(evaluations.some(row => row.path === path && row.mutant === label && row.originalSHA256 !== row.loadedSHA256), 'The actual consumer did not evaluate the changed owner: ' + path)
   } else {
     assert.equal(run.code, 0, run.output); assert.equal(cases.length, 21); assert.equal(failures.length, 0)
