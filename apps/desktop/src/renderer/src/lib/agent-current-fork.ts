@@ -3,13 +3,15 @@ import type { AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest } from '@agentmu
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { SpatialRequestBinding } from '../../../shared/space-addresses'
 import { OPEN_DESTINATIONS, type OpenDestination, type OpenHttpLinkOrigin } from './open-destination'
+import type { AgentNewTabDestination } from './agent-new-tab-destination'
 
 export type CurrentForkSession = Extract<SessionSnapshot, { kind: 'agent' }>
 export type CurrentForkReview = {
   operationId: string
   hostId: string
   source: AgentMuxAgentForkSource
-  origin: OpenHttpLinkOrigin & { tabId: string; regionId: string; tabGroupId: string }
+  origin: Partial<OpenHttpLinkOrigin> & { sessionId: string }
+  placement: 'region' | 'session'
 }
 export const CURRENT_FORK_DESTINATIONS = OPEN_DESTINATIONS.filter(destination => destination !== 'system')
 
@@ -30,24 +32,25 @@ export function retainedCurrentForkOperation(session: CurrentForkSession | null,
 }
 
 /** Eligibility describes only this action; it never changes terminal availability. */
-export function currentForkUnavailableReason(session: CurrentForkSession | null, origin: OpenHttpLinkOrigin, readOnly: boolean): string | null {
+export function currentForkUnavailableReason(session: CurrentForkSession | null, origin: Partial<OpenHttpLinkOrigin>, readOnly: boolean, sessionSource = false): string | null {
   if (readOnly) return 'Fork is unavailable in this read-only view.'
   if (!session) return 'The source Agent Session has not been observed.'
   if (!session.capabilities.providerFork?.current) return 'This Provider does not support forking its current conversation.'
   if (session.nativeSourceObservation) return 'The current native conversation is unconfirmed. Check its source before forking.'
   if (session.nativeHandle?.kind !== 'provider') return 'The current native conversation identity has not been observed.'
-  if (!origin.tabId || !origin.regionId || !origin.tabGroupId || origin.sessionId && origin.sessionId !== session.id) {
+  if (origin.sessionId && origin.sessionId !== session.id) return 'The source Agent identity changed.'
+  if (!sessionSource && (!origin.tabId || !origin.regionId || !origin.tabGroupId)) {
     return 'Fork requires the exact original Tab, Group and Region.'
   }
   return null
 }
 
-export function reviewCurrentFork(session: CurrentForkSession, origin: OpenHttpLinkOrigin, operationId: string): CurrentForkReview {
-  const reason = currentForkUnavailableReason(session, origin, false)
+export function reviewCurrentFork(session: CurrentForkSession, origin: Partial<OpenHttpLinkOrigin>, operationId: string, sessionSource = false): CurrentForkReview {
+  const reason = currentForkUnavailableReason(session, origin, false, sessionSource)
   if (reason) throw new Error(reason)
   return { operationId, hostId: session.control.hostId,
     source: { agentSessionId: session.control.agentSessionId, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(session.nativeHandle!) as AgentMuxAgentForkSource['expectedNativeHandle'] },
-    origin: { ...origin, sessionId: session.id, tabId: origin.tabId!, regionId: origin.regionId!, tabGroupId: origin.tabGroupId! } }
+    origin: { ...origin, sessionId: session.id }, placement: sessionSource ? 'session' : 'region' }
 }
 
 export function currentForkSourceMatches(review: CurrentForkReview, session: CurrentForkSession | null): boolean {
@@ -60,10 +63,16 @@ export function currentForkSourceMatches(review: CurrentForkReview, session: Cur
 
 /** Both new Tabs and splits retain the exact original display occurrence and resource Zone. */
 export function currentForkRequest(review: CurrentForkReview, session: CurrentForkSession | null,
-  catalog: AgentMuxSpaceCatalog, destination: OpenDestination, focus: boolean): Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }> {
+  catalog: AgentMuxSpaceCatalog, destination: OpenDestination, focus: boolean, newTab?: AgentNewTabDestination): Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }> {
   if (!currentForkSourceMatches(review, session)) throw new Error('The reviewed source conversation changed. Review its current identity before this fork.')
   if (destination === 'system') throw new Error('Fork requires a new Tab or a split destination.')
+  if (review.placement === 'session') {
+    if (destination !== 'tab' || !newTab) throw new Error('Choose an exact existing Space, Zone and Group for the new Tab. Splits require an original Region.')
+    return { schemaVersion: 5, requestId: review.operationId, operation: 'agent.open',
+      content: { kind: 'fork-agent', source: structuredClone(review.source) }, destination: { ...newTab }, focus: false }
+  }
   const origin = review.origin
+  if (!origin.tabId || !origin.regionId || !origin.tabGroupId || !origin.workspaceId) throw new Error('The original fork Region address is incomplete. Its Agent is kept.')
   const region = catalog.regions.find(value => value.regionId === origin.regionId && value.tabId === origin.tabId)
   if (!region || region.kind !== 'agent' || region.agentSessionId !== review.source.agentSessionId || region.runId !== review.source.expectedRun.runId) {
     throw new Error('The original Region no longer contains the reviewed Agent Session and Run.')

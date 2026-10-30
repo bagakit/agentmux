@@ -1,11 +1,12 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
-import type { AgentNativeResumeSource, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import type { AgentNativeResumeSource, AgentSessionHistoryDescriptor, AgentMuxRunRef } from '@agentmux/core'
 import type { OpenHttpLinkOrigin } from './open-destination'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { spatialCatalog } from './space-agent-control'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { api } from './api'
+import { requireAgentNewTabDestination, type AgentNewTabDestination } from './agent-new-tab-destination'
 
 type TakeoverSourceDetails = {
   hostId: string | undefined
@@ -13,10 +14,11 @@ type TakeoverSourceDetails = {
   label: string
   executorId: string | undefined
   diagnostic: string
-  origin: OpenHttpLinkOrigin
+  origin: Partial<OpenHttpLinkOrigin>
 }
 
 export type TakeoverSource = TakeoverSourceDetails & (
+  { kind: 'session'; agentSessionId: string; presentationSessionId: string; expectedRun: AgentMuxRunRef; destination?: AgentNewTabDestination; nativeSource?: never } |
   { kind?: 'region'; agentSessionId: string; nativeSource?: never } |
   { kind: 'saved'; agentSessionId: string; nativeSource?: AgentNativeResumeSource } |
   { kind: 'saved'; agentSessionId?: undefined; nativeSource: AgentNativeResumeSource }
@@ -40,7 +42,7 @@ export function takeoverExecution(agentSessionId: string, histories: readonly Ag
 
 /** A source and its explicit predecessor identify one durable intent, including repeated clicks. */
 export async function takeoverRequestId(source: TakeoverSource, previousRequestId?: string): Promise<string> {
-  const identity = source.kind === 'saved' ? ['saved', source.agentSessionId ?? null, source.nativeSource?.nativeHandle.providerId ?? null, source.nativeSource?.nativeHandle.sessionId ?? null] : source.agentSessionId
+  const identity = source.kind === 'session' ? ['session', source.agentSessionId, source.expectedRun.runId] : source.kind === 'saved' ? ['saved', source.agentSessionId ?? null, source.nativeSource?.nativeHandle.providerId ?? null, source.nativeSource?.nativeHandle.sessionId ?? null] : source.agentSessionId
   const parts: unknown[] = [source.hostId, identity, source.origin.tabId, source.origin.regionId]
   if (previousRequestId !== undefined) parts.push(previousRequestId)
   const key = JSON.stringify(parts)
@@ -69,11 +71,18 @@ async function latestTakeoverRequestId(source: TakeoverSource): Promise<string> 
 }
 
 function ownsTakeoverRegion(source: TakeoverSource): boolean {
+  if (source.kind === 'session') return ownsTakeoverSource(source)
   const state = useAppStore.getState(), tab = source.origin.tabId ? state.tabs[source.origin.tabId] : undefined
   const region = source.origin.regionId ? tab?.regions[source.origin.regionId] : undefined
   return source.kind === 'saved' ? region?.kind === 'launcher' : region?.kind === 'agent' && region.sessionId === source.agentSessionId
 }
 export function ownsTakeoverSource(source: TakeoverSource): boolean {
+  if (source.kind === 'session') {
+    const matches = useAppStore.getState().sessions.filter(item => item.kind === 'agent' && item.id === source.presentationSessionId &&
+      item.control.hostId === source.hostId && item.control.agentSessionId === source.agentSessionId)
+    const current = matches.length === 1 ? matches[0] : undefined
+    return current?.kind === 'agent' && current.control.run.runId === source.expectedRun.runId && current.workspacePath === source.cwd
+  }
   if (!ownsTakeoverRegion(source)) return false
   const state = useAppStore.getState()
   if (source.kind === 'saved') {
@@ -89,6 +98,7 @@ export function ownsTakeoverSource(source: TakeoverSource): boolean {
 
 async function exactTakeoverSource(source: TakeoverSource): Promise<TakeoverSource> {
   if (!ownsTakeoverRegion(source)) throw new Error('The original Region or Session changed. Its work is kept.')
+  if (source.kind === 'session') return source
   const state = useAppStore.getState()
   if (source.kind === 'saved') {
     // The picker passes the exact Core discovery candidate. A failed preview is
@@ -190,7 +200,9 @@ async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutatio
 }
 
 export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxSpaceMutationReport | null> {
-  source = await exactTakeoverSource(source)
+  // Reading an already-admitted Session intent does not require that its old
+  // source Run still be current. Creation below retains the full source fence.
+  if (source.kind !== 'session') source = await exactTakeoverSource(source)
   const requestId = await latestTakeoverRequestId(source), state = useAppStore.getState()
   if (!state.spatialRequests[requestId]) return null
   const result = await state.executeControl({ schemaVersion: 5, requestId: `inspect:${mintObjectId()}`,
@@ -240,6 +252,15 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
   const currentState = useAppStore.getState()
   const topics = Object.values(currentState.scratchTopicSnapshots).flatMap(snapshot => snapshot.topics ?? [])
   const catalog = spatialCatalog(currentState, topics)
+  if (source.kind === 'session') {
+    if (!source.destination) throw new Error('Choose an exact existing Space, Zone and Group for the takeover Tab. The original Agent is kept.')
+    const destination = requireAgentNewTabDestination(source.destination, catalog, currentState.layouts, { hostId: source.hostId, cwd: source.cwd })
+    assertSource()
+    const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
+      destination, content: { kind: 'new-agent', executorId, prompt: takeoverPrompt(source) } })
+    if (result.operation !== 'agent.open') throw new Error('The takeover creation returned another operation. Its original result is unconfirmed; do not repeat creation.')
+    return nameTakeover(source, result)
+  }
   const location = catalog.locations.find(item => item.tabId === source.origin.tabId && item.regionId === source.origin.regionId &&
     item.displayWorkspaceId === source.origin.workspaceId && item.groupId === source.origin.tabGroupId)
   const zones = catalog.zones.filter(zone => zone.hostId === source.hostId && zone.directoryPath === source.cwd)

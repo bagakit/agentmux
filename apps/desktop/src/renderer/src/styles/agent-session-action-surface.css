@@ -1,0 +1,6 @@
+.agent-session-action-surface { position: fixed; inset: 50% auto auto 50%; transform: translate(-50%, -50%); width: min(820px, calc(100vw - 32px)); height: min(760px, calc(100vh - 40px)); display: flex; flex-direction: column; overflow: hidden; }
+.agent-session-action-surface__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex: none; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+.agent-session-action-surface__heading h2 { margin: 0; font-size: var(--fs-title); }
+.agent-session-action-surface__heading p { margin: 5px 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+.agent-session-action-surface__body { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.agent-session-action-surface__body > .activity-feed { flex: 1; min-height: 0; }

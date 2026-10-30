@@ -7,6 +7,10 @@ import { focusTakeoverResult, inspectTakeover, takeOverSession, type TakeoverSou
 import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { AgentAvatar } from './AgentAvatar'
+import { SelectionField } from './SelectionField'
+import { agentNewTabDestinations } from '../lib/agent-new-tab-destination'
+import { spatialCatalog } from '../lib/space-agent-control'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
@@ -44,6 +48,13 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
   const [closedRequest, setClosedRequest] = useState<string | null>(null)
   const [previousRequest, setPreviousRequest] = useState<string | undefined>()
   const [closing, setClosing] = useState(false)
+  const [destinationKey, setDestinationKey] = useState('')
+  const destinations = useMemo(() => {
+    if (source.kind !== 'session' || !source.hostId || !source.cwd) return []
+    const state = useAppStore.getState()
+    return agentNewTabDestinations(spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), state.layouts, { hostId: source.hostId, cwd: source.cwd })
+  }, [source, config])
+  const destination = destinations.find(item => item.value === destinationKey)?.destination
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   activeRef.current = active && !closing
@@ -124,7 +135,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
     // inside the workface rather than letting Chromium drop focus to BODY.
     surface.current?.querySelector<HTMLButtonElement>('[aria-label="Cancel takeover"]')?.focus({ preventScroll: true })
     setSelected(id); setBusy(true); setIssue(null)
-    try { await accept(await takeOverSession(source, id, () => mounted.current && activeRef.current, previousRequest)) }
+    try { await accept(await takeOverSession(source.kind === 'session' && destination ? { ...source, destination } : source, id, () => mounted.current && activeRef.current, previousRequest)) }
     catch (error) {
       if (mounted.current) {
         setIssue(presentError(error))
@@ -169,7 +180,12 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
         <div><h2>Keep the work moving.</h2><p>{previousRequest ? 'Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
         <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
       </header>
-      <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed || closedRequest !== null}
+      {source.kind === 'session' ? <>
+        <SelectionField label="Takeover destination" value={destinationKey} onValueChange={setDestinationKey} disabled={busy || unconfirmed || closedRequest !== null}
+          options={[{ value: '', label: 'Choose an existing destination' }, ...destinations]} />
+        {!destinations.length ? <p>No existing Zone for this original execution Host and directory is confirmed. Keep the Agent and open its existing Project before taking over.</p> : null}
+      </> : null}
+      <AgentExecutorPicker executors={executors} selected={selected} active={active && !closing} disabled={busy || unconfirmed || closedRequest !== null || source.kind === 'session' && !destination}
         onSelect={id => { void choose(id) }} />
       <div className="session-takeover__footer" aria-live="polite">
         {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed || closedRequest ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>

@@ -9,6 +9,10 @@ import { CURRENT_FORK_DESTINATIONS, currentForkRequest, currentForkSourceMatches
   retainedCurrentForkOperation, reviewCurrentFork, type CurrentForkReview, type CurrentForkSession } from '../lib/agent-current-fork'
 import { OpenDestinationBar } from './OpenDestinationBar'
 import { WorkbenchMenuScope } from './WorkbenchMenuScope'
+import { SelectionField } from './SelectionField'
+import { agentNewTabDestinations, requireAgentNewTabDestination, type AgentNewTabDestination } from '../lib/agent-new-tab-destination'
+import { spatialCatalog } from '../lib/space-agent-control'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import '../styles/agent-current-fork.css'
 
 const ConversationForkIcon = semanticIconComponent('action.fork-conversation')
@@ -17,15 +21,15 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
 
 type ForkState = { review: CurrentForkReview | null; operationId: string | null; busy: boolean; dispatching: boolean;
-  report: AgentMuxSpaceMutationReport | null; notice: string | null }
+  report: AgentMuxSpaceMutationReport | null; notice: string | null; destinations?: ReturnType<typeof agentNewTabDestinations> }
 const emptyState = (): ForkState => ({ review: null, operationId: null, busy: false, dispatching: false, report: null, notice: null })
 type Controls = { reason: string | null; readOnly: boolean; state: ForkState; begin(): void; cancel(): void;
-  select(destination: OpenDestination): void; inspect(): void }
+  select(destination: OpenDestination, newTab?: AgentNewTabDestination): void; inspect(): void }
 
 /** Lives with SessionPane, outside the dismissible menu, so an unknown operation is retained. */
-export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
-  session: CurrentForkSession | null; linkOrigin: OpenHttpLinkOrigin; readOnly: boolean
-}): (origin?: OpenHttpLinkOrigin) => ReactNode {
+export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, sessionSource = false }: {
+  session: CurrentForkSession | null; linkOrigin: Partial<OpenHttpLinkOrigin>; readOnly: boolean; sessionSource?: boolean
+}): (origin?: Partial<OpenHttpLinkOrigin>) => ReactNode {
   function restoredState(): ForkState {
     const current = useAppStore.getState()
     const operationId = retainedCurrentForkOperation(session, current.spatialRequests ?? {})
@@ -48,8 +52,8 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     return matches.length === 1 ? matches[0]! : null
   }
   function requireOriginalRegion(review: CurrentForkReview) {
-    const surface = useAppStore.getState().tabs[review.origin.tabId]?.regions[review.origin.regionId]
-    if (surface?.kind !== 'agent' || surface.sessionId !== review.origin.sessionId) {
+    const surface = review.origin.tabId && review.origin.regionId ? useAppStore.getState().tabs[review.origin.tabId]?.regions[review.origin.regionId] : undefined
+    if (review.placement === 'region' && (surface?.kind !== 'agent' || surface.sessionId !== review.origin.sessionId)) {
       throw new Error('The original Region no longer contains the reviewed Agent Session.')
     }
     if (!currentForkSourceMatches(review, currentSession(review))) throw new Error('The reviewed source conversation changed. Review its current identity before this fork.')
@@ -60,7 +64,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
       update({ ...stateRef.current, ...patch })
     }
   }
-  async function select(destination: OpenDestination) {
+  async function select(destination: OpenDestination, newTab?: AgentNewTabDestination) {
     const review = stateRef.current.review
     if (!review || stateRef.current.busy || stateRef.current.dispatching || readOnly) return
     // Lock this operation synchronously, before the first await or another click.
@@ -68,17 +72,21 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     let dispatched = false
     try {
       requireOriginalRegion(review)
+      const target = review.placement === 'session'
+        ? newTab ? { zoneId: newTab.zoneId, ...(newTab.spaceId ? { spaceId: newTab.spaceId } : {}), displayWorkspaceId: newTab.displayWorkspaceId, groupId: newTab.groupId } : null
+        : { tabId: review.origin.tabId!, regionId: review.origin.regionId!, displayWorkspaceId: review.origin.workspaceId!, groupId: review.origin.tabGroupId! }
+      if (!target) throw new Error('Choose an existing destination for this new Tab.')
       const inspected = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `fork-location:${mintObjectId()}`,
-        operation: 'space.inspect', target: { tabId: review.origin.tabId, regionId: review.origin.regionId,
-          displayWorkspaceId: review.origin.workspaceId, groupId: review.origin.tabGroupId } })
+        operation: 'space.inspect', target })
       if (inspected.operation !== 'space.inspect') throw new Error('The original location inspection returned an unrelated result.')
       requireOriginalRegion(review)
-      const current = useAppStore.getState(), layout = current.layouts[review.origin.workspaceId]
+      const current = useAppStore.getState(), layout = review.origin.workspaceId ? current.layouts[review.origin.workspaceId] : undefined
       const group = layout?.groups.find(value => value.id === review.origin.tabGroupId)
       const focus = current.mainSurface === 'workbench' && current.activeWorkspaceId === review.origin.workspaceId &&
         layout?.activeGroupId === review.origin.tabGroupId && group?.activeTabId === review.origin.tabId &&
-        current.tabs[review.origin.tabId]?.layout.activeRegionId === review.origin.regionId
-      const request = currentForkRequest(review, currentSession(review), inspected.catalog, destination, focus)
+        Boolean(review.origin.tabId && current.tabs[review.origin.tabId]?.layout.activeRegionId === review.origin.regionId)
+      const confirmedDestination = review.placement === 'session' && newTab ? requireAgentNewTabDestination(newTab, inspected.catalog, current.layouts, { hostId: review.hostId }) : undefined
+      const request = currentForkRequest(review, currentSession(review), inspected.catalog, destination, focus, confirmedDestination)
       dispatched = true
       // Keep the admitted operation locked while permitting read-only reconciliation.
       publish(review.operationId, { review: null, busy: false, dispatching: true })
@@ -112,13 +120,14 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
   }
   return (origin = linkOrigin) => {
     if (!session) return null
-    const reason = currentForkUnavailableReason(session, origin, readOnly)
+    const reason = currentForkUnavailableReason(session, origin, readOnly, sessionSource)
     return <AgentCurrentForkControls reason={reason} readOnly={readOnly} state={state} begin={() => {
       if (reason || stateRef.current.busy || stateRef.current.dispatching || stateRef.current.operationId && stateRef.current.report?.outcome !== 'opened') return
-      const review = reviewCurrentFork(session, origin, mintObjectId())
-      update({ ...emptyState(), operationId: review.operationId, review })
+      const review = reviewCurrentFork(session, origin, mintObjectId(), sessionSource)
+      const current = useAppStore.getState()
+      update({ ...emptyState(), operationId: review.operationId, review, ...(sessionSource ? { destinations: agentNewTabDestinations(spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? []), current.layouts, { hostId: session.control.hostId }) } : {}) })
     }} cancel={() => { if (!stateRef.current.busy && stateRef.current.review) update(emptyState()) }}
-      select={destination => { void select(destination) }} inspect={() => { void inspect() }} />
+      select={(destination, newTab) => { void select(destination, newTab) }} inspect={() => { void inspect() }} />
   }
 }
 
@@ -126,6 +135,8 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
 export function AgentCurrentForkControls({ reason, readOnly, state, begin, cancel, select, inspect }: Controls) {
   const DropdownMenu = useContext(WorkbenchMenuScope)
   const reviewRef = useRef<HTMLDivElement>(null)
+  const [destinationKey, setDestinationKey] = useState('')
+  const selectedDestination = state.destinations?.find(item => item.value === destinationKey)?.destination
   useEffect(() => {
     // Radix owns menu focus; enter the existing toolbar when it becomes the reviewed action.
     if (state.review) reviewRef.current?.querySelector<HTMLButtonElement>('button[data-destination]:not([disabled])')?.focus()
@@ -156,9 +167,13 @@ export function AgentCurrentForkControls({ reason, readOnly, state, begin, cance
       <strong>Fork current conversation</strong>
       <span>Source: {state.review.source.expectedNativeHandle.sessionId}</span>
       <span>Run: {state.review.source.expectedRun.runId}</span>
-      <span>Choose a new Tab or split. The original Agent stays here.</span>
+      <span>{state.review.placement === 'session' ? 'Choose an existing Space, Zone and Group for a new Tab. The original Agent stays here.' : 'Choose a new Tab or split. The original Agent stays here.'}</span>
       {state.busy || readOnly ? <span>{state.busy ? 'Checking the exact source and location…' : 'This view is read-only.'}</span>
-        : <OpenDestinationBar canSplit allowedDestinations={CURRENT_FORK_DESTINATIONS}
+        : state.review.placement === 'session' ? <>
+          <SelectionField label="Fork destination" value={destinationKey} onValueChange={setDestinationKey} options={[{ value: '', label: 'Choose an existing destination' }, ...state.destinations ?? []]} />
+          {!state.destinations?.length ? <span>No existing destination is confirmed. Keep this Agent and choose an available Space first.</span> : null}
+          <button type="button" className="small-button" disabled={!selectedDestination} onClick={() => select('tab', selectedDestination)}>Fork in new Tab</button>
+        </> : <OpenDestinationBar canSplit allowedDestinations={CURRENT_FORK_DESTINATIONS}
           accessibleContext="Choose where to fork the current conversation" onSelect={select} />}
       <button type="button" className="agent-current-fork__cancel" disabled={state.busy} onClick={cancelReview}><ThemeActionCancelIcon size={13} />Cancel fork</button>
     </div> : null}
