@@ -99,6 +99,16 @@ it('original journal inspection survives actual management-process death and a n
   f.unchanged()
 })
 
+it('an unconfirmed stored receipt cannot retarget its original frozen recovery input', async () => {
+  const f = await receiverRecoveryFixture(cleanup); await f.ready()
+  const input = await f.target('frozen-receipt'), saved = await f.recover(input), database = f.services.database!
+  database.prepare('UPDATE connection_configuration_operation SET result_json=? WHERE operation_id=?').run(JSON.stringify({ ...saved.operation, connectionId: 'foreign-connection' }), input.operationId)
+  const reads = f.wire.requests.length
+  await expect(f.recover(input)).rejects.toMatchObject({ code: 'INVALID_CONNECTION_DATA' })
+  expect(f.wire.requests).toHaveLength(reads); expect(f.wire.sockets).toHaveLength(1)
+  expect((await f.current()).receiver!.ref).toBe(input.receiverRef); f.unchanged()
+})
+
 it('a lost commit acknowledgement can only continue the durably admitted original ref once', async () => {
   const f = await receiverRecoveryFixture(cleanup, { endpointCode: 514 })
   await waitReceiver(async () => expect((await f.current()).receiver?.state).toBe('ended'))
