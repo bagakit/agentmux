@@ -447,7 +447,8 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   composeScope.current = { client, sessionId: workface.selectedSessionId, visible: conversationVisible, focusComposer }
   // The visible conversation owns its connection feedback. Storage and projection
   // failures remain separate facts even when the connection is also unavailable.
-  const serviceNotices = [...new Set([notice, projectionError, hostAppearance.issue,
+  const visibleProjectionError = workspaceVisible && showSession ? projectionError : null
+  const serviceNotices = [...new Set([notice, visibleProjectionError, hostAppearance.issue,
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
   return <MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
@@ -531,7 +532,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         identity={[webObservation.inspection.result?.hostInstanceId, webObservation.inspection.result?.active?.digest]} className="mobile-web-update-notice" kind="feedback">
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
       </MobileNotice>}
-      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,projectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></MobileNotice>}
+      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></MobileNotice>}
     </div>
     <footer className="mobile-navigation-bar">{menuButton}{workspaceVisible && <MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} />}</footer>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
@@ -574,6 +575,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         </> : sheet === 'notices' ? <>
           <Dialog.Description id="mobile-sheet-description">本设备的提醒呈现</Dialog.Description>
           {webObservation && <MobileWebDiagnostics observation={webObservation} copyText={platform.copyText} />}
+          {projectionError && workface.selectedSessionId && <section className="mobile-session-diagnostic">
+            <h3>对话信息未确认</h3><p>{projectionError}</p>
+            <button type="button" className="mobile-text-button" onClick={() => setSheet('connection')}>查看 Mac 连接</button>
+            <button type="button" className="mobile-text-button" onClick={returnToConversation}>返回这段对话</button>
+            <details><summary>对话身份</summary><code>{workface.selectedSessionId}</code></details>
+          </section>}
           <MobileGoalOperationRecovery copyText={platform.copyText} />
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>

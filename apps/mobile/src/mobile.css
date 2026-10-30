@@ -432,15 +432,25 @@ button:disabled { opacity: .5; cursor: default; }
 /* Eager shell surfaces (chat start, connection recovery, Agent creation, directory notices,
    space icons) render before the optional directory module arrives; their rules live here. */
 .mobile-spatial-empty, .mobile-spatial-notice { color: var(--text-3); font-size: 12px; line-height: 1.5; margin: 8px 0; }
-.mobile-directory-notice { color: var(--amber-text); font-size: 11px; margin-block: 0 2px; }
-.mobile-directory-notice > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px; cursor: pointer; list-style: none; }
-.mobile-directory-notice > summary::-webkit-details-marker { display: none; }
-.mobile-directory-notice > summary > small { margin-left: auto; color: var(--text-3); }
-.mobile-directory-notice > div { padding: 4px 8px 8px; color: var(--text-2); overflow-wrap: anywhere; }
-.mobile-directory-notice p { margin: 6px 0; line-height: 1.5; }
-.mobile-directory-notice p > strong, .mobile-directory-notice p > span { display: block; }
-.mobile-directory-notice button { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px 0; background: transparent; color: var(--green); font-size: 11px; }
-.mobile-directory-notice :focus-visible, .mobile-space-directory summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+/* A directory issue occupies one header action; its explanation uses the existing sheet. */
+.mobile-directory-notice { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1); flex: none; min-width: 44px; min-height: 44px; padding: 0 var(--sp-2); background: transparent; color: var(--amber-text); font-size: var(--fs-meta); border-radius: var(--radius-sm); cursor: pointer; }
+.mobile-directory-notice:active { background: var(--surface-2); }
+.mobile-directory-notice:focus-visible, .mobile-space-directory summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.mobile-directory-issues .mobile-directory-retry { min-height: 44px; gap: var(--sp-3); margin-block: var(--sp-3); }
+.mobile-directory-issue-list { display: grid; gap: var(--sp-5); padding-bottom: var(--sp-4); }
+.mobile-directory-issue-list > section { padding: var(--sp-5); background: var(--surface-2); border-radius: var(--radius); overflow-wrap: anywhere; }
+.mobile-directory-issue-list h3 { margin: 0; color: var(--text-1); font-size: var(--fs-body); font-weight: 600; }
+.mobile-directory-issue-list p, .mobile-session-diagnostic p { margin: var(--sp-3) 0 0; font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mobile-directory-technical > summary { display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; }
+.mobile-directory-technical > summary::before { content: '›'; font-size: var(--fs-body); }
+.mobile-directory-technical[open] > summary::before { rotate: 90deg; }
+.mobile-directory-technical > summary::-webkit-details-marker { display: none; }
+.mobile-directory-technical > p { margin: 0; padding-block: var(--sp-3); color: var(--text-3); }
+.mobile-session-diagnostic { padding-block: var(--sp-3); }
+.mobile-session-diagnostic h3 { margin: 0; font-size: var(--fs-body); }
+.mobile-session-diagnostic .mobile-text-button { min-height: 44px; }
+.mobile-session-diagnostic code { display: block; padding-block: var(--sp-3); overflow-wrap: anywhere; }
+
 .mobile-chat-start { display: grid; place-items: center; gap: 10px; padding: 28px 18px; margin: auto; text-align: center; color: var(--text-2); }
 .mobile-chat-start > svg { color: var(--text-3); }
 .mobile-chat-start h1 { margin: 0; font-size: 18px; font-weight: 550; }
