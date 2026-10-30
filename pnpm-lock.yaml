@@ -8,6 +8,7 @@ overrides:
   '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
 
 patchedDependencies:
+  '@larksuiteoapi/node-sdk@1.76.0': cfd5047ae249ab02400b3e0e081cde147e74f361fac2ffba4807488a47d1ae30
   '@radix-ui/react-dismissable-layer@1.1.19': 64bab6ea14515676c9233cc8160d4b9a928b71ee1810d040d46c0f48c46c1203
   '@radix-ui/react-focus-scope@1.1.16': e0267ec927a56db8a9d1340ad85cd3d87f24611bd244067deb5e2bedd8254cab
   '@radix-ui/react-menu@2.1.20': b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3
@@ -548,7 +549,7 @@ importers:
         version: 2.0.4
       '@larksuiteoapi/node-sdk':
         specifier: 1.76.0
-        version: 1.76.0
+        version: 1.76.0(patch_hash=cfd5047ae249ab02400b3e0e081cde147e74f361fac2ffba4807488a47d1ae30)
       acorn:
         specifier: 8.19.0
         version: 8.19.0
@@ -5778,7 +5779,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@larksuiteoapi/node-sdk@1.76.0':
+  '@larksuiteoapi/node-sdk@1.76.0(patch_hash=cfd5047ae249ab02400b3e0e081cde147e74f361fac2ffba4807488a47d1ae30)':
     dependencies:
       axios: 1.20.0
       lodash.identity: 3.0.0

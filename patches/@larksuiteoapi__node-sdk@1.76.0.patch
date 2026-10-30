@@ -1,0 +1,44 @@
+diff --git a/es/index.js b/es/index.js
+index 671ce1d017218a54aac64525f31a24282deda1c2..8cc7ea7052b33a61bd01d5f5547c68258cfa3db2 100644
+--- a/es/index.js
++++ b/es/index.js
+@@ -102447,14 +102447,13 @@ class WSClient {
+      * connection is fine).
+      */
+     armLiveness() {
+-        if (!this.pingTimeoutSec)
++        // Keep the first unanswered ping window; later outbound pings are not proof of life.
++        if (!this.pingTimeoutSec || this.livenessTimer)
+             return;
+-        if (this.livenessTimer)
+-            clearTimeout(this.livenessTimer);
+         this.livenessTimer = setTimeout(() => {
+             var _a;
+             this.livenessTimer = undefined;
+-            this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of last ping, terminating to trigger reconnect`);
++            this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of first unanswered ping, terminating to trigger reconnect`);
+             try {
+                 (_a = this.wsConfig.getWSInstance()) === null || _a === void 0 ? void 0 : _a.terminate();
+             }
+diff --git a/lib/index.js b/lib/index.js
+index 389eb63ce18b65713e2aabf594fca81e72c47b7f..a08a13294ab3f456a8f0e57333f2658a8877ca38 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -102465,14 +102465,13 @@ class WSClient {
+      * connection is fine).
+      */
+     armLiveness() {
+-        if (!this.pingTimeoutSec)
++        // Keep the first unanswered ping window; later outbound pings are not proof of life.
++        if (!this.pingTimeoutSec || this.livenessTimer)
+             return;
+-        if (this.livenessTimer)
+-            clearTimeout(this.livenessTimer);
+         this.livenessTimer = setTimeout(() => {
+             var _a;
+             this.livenessTimer = undefined;
+-            this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of last ping, terminating to trigger reconnect`);
++            this.logger.warn('[ws]', `no pong/inbound within ${this.pingTimeoutSec}s of first unanswered ping, terminating to trigger reconnect`);
+             try {
+                 (_a = this.wsConfig.getWSInstance()) === null || _a === void 0 ? void 0 : _a.terminate();
+             }
