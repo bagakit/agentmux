@@ -29,7 +29,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   const restoreWorkface = useRef(false)
   const [connectionRetry, retryConnection] = useState(0)
   const [returnIssue, setReturnIssue] = useState('')
-  const binding = useRef<{ client: AgentMuxHostedClient; offer: string; hostId: string; key: KeyPair; connected: boolean } | null>(null)
+  const binding = useRef<{ client: AgentMuxHostedClient; offer: string; hostId: string; key: KeyPair; state: MobileConnection['state'] } | null>(null)
   const verifyConnection = useCallback(async () => {
     const original = binding.current
     if (!original) throw new Error('Original connection unavailable')
@@ -39,7 +39,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     const check = () => {
       try {
         const saved = localStorage.getItem(OFFER_KEY), host = getDeviceWorkface().snapshotIdentity().host
-        return binding.current === original && original.connected && !!saved && reloadOfferIdentity(parseConnectionOffer(JSON.parse(saved))) === original.offer
+        return binding.current === original && original.state === 'connected' && !!saved && reloadOfferIdentity(parseConnectionOffer(JSON.parse(saved))) === original.offer
           && host?.origin === location.origin && host.hostId === parseConnectionOffer(JSON.parse(saved)).serverId
       } catch { return false }
     }
@@ -48,7 +48,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   }, [])
   const prepareReload = useCallback(() => {
     const original = binding.current
-    if (!original?.connected) throw new Error('原连接暂不可用')
+    if (original?.state !== 'connected') throw new Error('原连接暂不可用')
     return prepareReloadIdentity(original.key, original.offer, reloadRecordIdentity(original.hostId))
   }, [])
   const mobileWeb = useMobileWebObservation(client, !native)
@@ -74,7 +74,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     } catch (error) { setConnection({ state: 'unavailable', message: error instanceof Error ? error.message : String(error) }); return }
     const connect = async () => {
       if (controller.signal.aborted || working) return
-      if (owned) { void owned.connect().catch(() => {}); return }
+      if (owned) { if (binding.current?.state !== 'unavailable') void owned.connect().catch(() => {}); return }
       working = true
       try {
         const updating = !native && location.hash === mobileUpdateFragment
@@ -108,19 +108,26 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
           }
           catch { /* Keep the handoff for the next original connection attempt. */ }
         }
-        binding.current = { client: value, offer: reloadOfferIdentity(selected!), hostId: selected!.serverId, key: keyPair, connected: true }
+        binding.current = { client: value, offer: reloadOfferIdentity(selected!), hostId: selected!.serverId, key: keyPair, state: 'connected' }
         owned = value; setClient(value); attempt = 0
+        let observation: MobileConnection = { state: 'connected', message: '已连接 Mac' }
+        const publish = () => {
+          if (controller.signal.aborted || binding.current?.client !== value) return
+          binding.current.state = observation.state
+          const issue = [observation.issue, bindingNotice].filter(Boolean).join('\n')
+          setConnection({ ...observation, ...(issue ? { issue } : {}) })
+        }
         release = value.onEvent(event => {
           if (event.type !== 'connection-state' || event.observationOrigin?.boundary !== 'consumer-core') return
-          const state = (event as { state: string }).state
-          if (binding.current?.client === value) binding.current.connected = state === 'restored'
-          setConnection({ state: state === 'restored' ? 'connected' : 'disconnected', message: state === 'restored' ? '已连接 Mac' : '连接中断，自动重连中；原会话与草稿保留。', ...(bindingNotice ? { issue: bindingNotice } : {}) })
+          observation = event.state === 'restored' ? { state: 'connected', message: '已连接 Mac' }
+            : event.state === 'unrecoverable' ? { state: 'unavailable', message: '连接需要处理，自动重连已暂停；原会话与草稿保留。',
+              ...(event.diagnostic ? { issue: `${event.diagnostic.code}: ${event.diagnostic.message}` } : {}) }
+              : { state: 'disconnected', message: '连接中断，自动重连中；原会话与草稿保留。' }
+          publish()
         })
         try { await getDeviceWorkface().confirmHost({ origin: location.origin, hostId: selected!.serverId }) }
         catch { bindingNotice = '设备工作面保存尚未确认，当前连接可继续使用；请保全工作面或恢复设备存储。' }
-        if (controller.signal.aborted || binding.current?.client !== value) return
-        const active = binding.current.connected
-        setConnection({ state: active ? 'connected' : 'disconnected', message: active ? '已连接 Mac' : '连接中断，自动重连中；原会话与草稿保留。', ...(bindingNotice ? { issue: bindingNotice } : {}) })
+        publish()
       } catch (error) {
         if (controller.signal.aborted) return
         if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '此设备的授权未通过确认；原会话和草稿保留。请重新确认设备授权后连接。' }); return }
@@ -144,6 +151,8 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
     <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
-      {...(focusComposer ? { focusComposer } : {})} connectionPanel={<p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
+      {...(focusComposer ? { focusComposer } : {})} connectionPanel={connection.state === 'unavailable'
+        ? <><p>请核对原 Mac 的连接与授权。修复后可重新检查，原会话和草稿不会重发。</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查原连接</button></>
+        : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
   </MobileWebCatalogObservation.Provider></MobileWebUpdateSafetyProvider>
 }
