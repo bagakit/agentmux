@@ -499,3 +499,21 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-compact-notice p { margin: 0; }
 .mobile-compact-notice summary { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; cursor: pointer; color: var(--amber-text); }
 .mobile-compact-notice__detail { margin: 0 0 var(--sp-4); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-3); user-select: text; }
+
+.mobile-conversation-slot[hidden], .mobile-session-tool-slot[hidden] { display: none; }
+/* Mobile chrome around the shared welcome and the original bounded period reader. */
+.mobile-mote-start-details { color: var(--text-3); font-size: var(--fs-meta, 12px); overflow-wrap: anywhere; }
+.mobile-mote-start-details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.mobile-mote-start-details button, .mobile-mote-period-view > button { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.mobile-mote-start-details > div { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 6px; }
+.mobile-mote-start-details pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mobile-mote-period-view { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px; }
+.mobile-mote-period-view > button { margin-block-end: 12px; }
+
+.mobile-mote-navigation button { white-space: nowrap; }
+.mobile-mote-source-status { flex: none; margin-block: 2px 6px; padding-inline: 8px; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
+.mobile-mote-source-status > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.mobile-mote-source-status dl { margin: 6px 0; }
+.mobile-mote-source-status dt { color: var(--text-2); font-weight: 550; }
+.mobile-mote-source-status dd { margin: 3px 0 10px; white-space: pre-wrap; line-height: 1.6; }
+.mobile-mote-source-status button { min-height: 44px; padding: 8px 10px; margin: 2px 6px 4px 0; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }

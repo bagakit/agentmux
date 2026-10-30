@@ -14,8 +14,9 @@ import type { MobileConnection } from './use-hosted-conversation'
 import type { ConfirmedAttachmentPrompt } from './attachments'
 import { useMobileWebDispatchedOperations, useMobileWebUpdatePendingAction } from '../mobile-web/update-safety'
 import { getDeviceWorkface } from '../recovery/device-workface'
+import { sameMotePreferencesTarget, sameMoteQuickDefaults } from '@agentmux/core/mote-preferences'
 import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
-import { inspectMobileMoteMain, submitMobileMoteMain, type MobileMoteMainInput } from './mote-main-input'
+import { inspectMobileMoteMain, submitMobileMoteMain, type MobileMoteMainInput, type MobileMoteRolloverQuery } from './mote-main-input'
 
 class MainPromptNotApplied extends Error {}
 
@@ -92,6 +93,7 @@ type MobilePromptControllerOptions = {
   moteMain?: MobileMoteMainInput | undefined
   moteMainIssue?: string | undefined
   moteDirectAgent?: boolean | undefined
+  onRolloverRequired?: ((query: MobileMoteRolloverQuery) => void) | undefined
   session: AgentMuxAgentSession | null
   timeline: AgentTimelineSnapshot | null
   connection: MobileConnection
@@ -110,7 +112,7 @@ export type MobilePromptPreparation = {
 type PendingInputAction = { cancelled: boolean; dispatched: boolean; saving: boolean; allowUpdate: () => void }
 
 /** Coordinates original device intents with Core; local-drafts remains the durable owner. */
-export function useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, session, timeline, connection,
+export function useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired, session, timeline, connection,
   disconnected, visible, refresh }: MobilePromptControllerOptions) {
   const draftKey = JSON.stringify(['draft', agentSessionId])
   const drafts = useRef(local.drafts), attempts = useRef(local.attempts)
@@ -123,8 +125,9 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
   const [preparationIssue, setPreparationIssue] = useState<{ client: AgentMuxHostedClient | null; sessionId: string | null; message: string; detail?: string } | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  const current = useRef({ client, agentSessionId })
-  current.current = { client, agentSessionId }
+  const current = useRef({ client, agentSessionId, visible, onRolloverRequired })
+  current.current = { client, agentSessionId, visible, onRolloverRequired }
+  const draftEdits = useRef(0), producers = useRef(new WeakMap<PromptAttempt, { key: string; revision: number }>())
   const draft = drafts.current.get(draftKey) ?? ''
   const attempt = attempts.current.get(draftKey)
   const available = Boolean(client && agentSessionId && session && connection.state === 'connected' && !disconnected)
@@ -149,6 +152,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       detail: `为避免和你的输入冲突，手机请求 Mac 暂停这个 Agent 的自动任务，但没有收到确认；不会自动重试。\n操作 ${target.operationId} · Mac 实例 ${target.ownerInstanceId || '未记录'}\n核对：agent automation inspect\n${errorMessage(error)}` }) })
   }
   const setDraft = (value: string, key = draftKey) => {
+    if (key === draftKey && value !== drafts.current.get(key)) draftEdits.current++
     const occupied = Boolean(drafts.current.get(key)?.trim())
     drafts.current.set(key, value)
     if (key === draftKey && value.trim() && !occupied) pauseForExplicitInput()
@@ -255,6 +259,27 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
   async function sendOriginalPrompt(source: AgentMuxHostedClient, original: PromptAttempt, input: Parameters<AgentMuxHostedClient['submitAgentPrompt']>[0]) {
     if (!original.moteMain) return source.submitAgentPrompt(input)
     const result = await submitMobileMoteMain(source, original.moteMain, input)
+    if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision) {
+      original.inputRequested = false
+      await local.save()
+      const producer = producers.current.get(original), decision = result.rollover.decision
+      if (producer && draftEdits.current === producer.revision && drafts.current.get(producer.key) === original.draft && mounted.current && current.current.visible && current.current.client === source && current.current.agentSessionId === input.agentSessionId) {
+        current.current.onRolloverRequired?.({ decision, prompt: input.prompt, draft: original.draft, confirm: async setup => {
+          const linked = setup.record?.moteMain?.rollover, deferred = setup.record?.moteMain?.deferredInput, status = agentPromptSubmissionOutcome(setup.deferredInput?.record ?? null)
+          if (!linked || !original.moteMain || setup.record?.requestId !== decision.creationOperationId || linked.creationOperationId !== decision.creationOperationId ||
+            linked.queryOperationId !== original.operationId || deferred?.operationId !== original.operationId || deferred.prompt !== input.prompt ||
+            linked.expectedRoleRevision !== original.moteMain.expectedRoleRevision || !sameMotePreferencesTarget(linked.target, original.moteMain.target) ||
+            !sameMoteQuickDefaults({ conversation: linked.reference }, { conversation: original.moteMain.reference }) ||
+            (status !== 'admitted' && status !== 'terminal-confirmed') || current.current.client !== source || current.current.agentSessionId !== input.agentSessionId ||
+            source.runtimeOwnerIdentity?.()?.runtimeId !== original.originalRuntimeId || attempts.current.get(producer.key) !== original) return
+          attempts.current.set(retainedPromptKey(input.agentSessionId, original.operationId), { ...original, phase: 'confirmed', message: 'Core 已确认新一轮的这条原 Query；旧 Agent 没有重复投递。' })
+          attempts.current.delete(producer.key)
+          if (draftEdits.current === producer.revision && drafts.current.get(producer.key) === original.draft) drafts.current.set(producer.key, '')
+          await local.save(); if (mounted.current) redraw(value => value + 1)
+        } })
+      }
+      throw new MainPromptNotApplied('原策略已要求新一轮；这条原 Query 没有投递给旧 Main，原正文与操作保留。')
+    }
     if (original.manualInput) {
       if (!result.input) throw Object.assign(new Error('原主对话输入回执尚未确认；原操作与正文保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
       return result.input
@@ -525,6 +550,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
           ? JSON.stringify(['refused-prompt', originalId, existing.operationId])
           : retainedPromptKey(originalId, existing.operationId), existing)
       }
+      producers.current.set(original, { key: originalKey, revision: draftEdits.current })
       attempts.current.set(originalKey, original)
       let stage = 'client-validation'
       let rpcRequested = false

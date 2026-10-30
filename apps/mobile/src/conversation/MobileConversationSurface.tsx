@@ -35,9 +35,10 @@ import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentCom
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
 import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
+import { MobileMoteSourceNotice } from './MobileMoteSourceNotice'
 import { MobileMoteConversation, type MobileMoteWork, type MobileMoteDialogue } from './MobileMoteConversation'
 import type { MoteDefaultConversation, MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { mobileMoteMainInputIssue, retainMobileMoteMain, type MobileMoteMainInput } from './mote-main-input'
+import { mobileMoteMainInputIssue, retainMobileMoteMain, type MobileMoteMainInput, type MobileMoteRolloverQuery } from './mote-main-input'
 import { MobileMoteSpeakerAvatar } from './MobileMoteSpeakerAvatar'
 import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
 import type { DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
@@ -73,11 +74,14 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   moteName?: string | undefined
   moteWorkMemberName?(source: MobileMoteWork): string
   onOpenMoteWork?(source: MobileMoteWork): void
+  moteConfigurationIssue?: string | null | undefined
+  onRefreshMoteConfiguration?: (() => void) | undefined
   onShowMoteThreads?(): void
+  onMoteRolloverRequired?: ((query: MobileMoteRolloverQuery) => void) | undefined
   onReturnMoteMain?(reference?: MoteDefaultConversation): void
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, onReturnMoteMain,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -130,7 +134,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const moteMainIssue = moteDirectAgent ? undefined : mobileMoteMainInputIssue(moteDialogue?.page?.main, moteTarget, agentSessionId, Boolean(moteDialogue?.unavailable))
     ?? (moteTarget && !moteMain ? '主对话角色尚未核对。原正文和草稿保留；可重新核对，或从 Threads 明确打开原 Agent。' : undefined)
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
@@ -453,12 +457,10 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
-        {moteMainIssue ? <div className="mobile-mote-main-handoff" role="status"><span>{moteMainIssue}</span>
-          {moteDialogue ? <button type="button" onClick={() => moteDialogue.refresh()}>重新核对主对话</button> : null}
-          {onReturnMoteMain ? <button type="button" onClick={() => onReturnMoteMain()}>返回当前主对话</button> : null}
-        </div> : null}
+        {!moteDirectAgent && moteTarget && <MobileMoteSourceNotice roleIssue={moteMainIssue} readingIssue={moteDialogue?.issue} configurationIssue={moteConfigurationIssue}
+          refresh={() => { moteDialogue?.refresh(); onRefreshMoteConfiguration?.() }} onMain={onReturnMoteMain} />}
         {agentSessionId ? <MobileMoteConversation client={pageClient ?? null} agentSessionId={pageSessionId ?? agentSessionId} hostId={reading.pageOwner?.hostId}
-          target={!moteDirectAgent && pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined} dialogue={moteDialogue} name={moteName ?? 'Mote'}
+          issuePresented={!moteDirectAgent && Boolean(moteTarget)} target={!moteDirectAgent && pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined} dialogue={moteDialogue} name={moteName ?? 'Mote'}
           visible={visible} describeSpeaker={describeSpeaker}
           mainAvatar={mainAvatar}
           {...(moteWorkMemberName ? { memberName: moteWorkMemberName } : {})} {...(onOpenMoteWork ? { onOpenWork: onOpenMoteWork } : {})}

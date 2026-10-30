@@ -5,6 +5,8 @@ import { parseMoteDefaultConversation, parseMotePreferencesTarget, sameMotePrefe
   type MoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { AgentInputSubmit } from '@agentmux/core'
 
+export type MobileMoteRolloverQuery = { decision: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision; prompt: string; draft: string; confirm(result: import('@agentmux/core/mote-dialogue').MoteMainSetupResult): Promise<void> }
+
 /** Original user navigation and observed role facts, never client-owned main authority. */
 export type MobileMoteMainInput = { target: MotePreferencesTarget; identity: MoteDialogueIdentity; expectedRoleRevision: string; reference: MoteDefaultConversation }
 function failure(message: string): never { throw Object.assign(new Error(message), { code: 'MOTE_MAIN_INPUT_UNCONFIRMED' }) }
