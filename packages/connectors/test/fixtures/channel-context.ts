@@ -64,7 +64,11 @@ export async function channelContextFixture(cleanup: Array<() => void | Promise<
   const host = new core.AgentMuxControlServer({ socketPath: join(f.root, 'host.sock'), coreClients: f.coreClients, hostedRuntime: () => runtime })
   await host.start(); cleanup.push(() => host.stop())
   const hostRpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: host.path } }); cleanup.push(() => hostRpc.dispose())
-  const hosted = await connectHostedAgentMux({ rpc: hostRpc }); cleanup.push(() => hosted.dispose())
+  const forwarded: Array<{ method: string; signal?: AbortSignal; params: unknown }> = []
+  const hosted = await connectHostedAgentMux({ rpc: hostRpc, forwardRpc: (method, params, context = {}) => {
+    forwarded.push({ method, params, ...(context.signal ? { signal: context.signal } : {}) })
+    return hostRpc.call(method, params, { ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}), ...(context.signal ? { signal: context.signal } : {}) })
+  } }); cleanup.push(() => hosted.dispose())
   const clients = () => [{ hostId: 'local', client: hosted }]
   const nativeRows: ReturnType<typeof feishuHistoryMessage>[] = [], transport = feishuHistoryTransport(nativeRows)
   const discord = channel === 'discord' ? await discordTransport() : undefined
@@ -129,6 +133,6 @@ export async function channelContextFixture(cleanup: Array<() => void | Promise<
   }
   const cli = async (args: string[]) => { const result = await runSourceObjectCli(['--endpoint', 'unix:' + desktopPath, ...args], objectCliEnvironment(f.root,
     process.env.INPUT_CONTEXT_CONTINUITY_CLI_LOADED ? { AGENTMUX_RESUMED_INBOX_CLI_LOADED: process.env.INPUT_CONTEXT_CONTINUITY_CLI_LOADED } : {}), '', 20_000, pathToFileURL(resolve('packages/core/test/fixtures/a2a-resumed-inbox/source-loader.mjs'))); expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result }
-  return { ...f, hosted, source, config, binding, actor, nativeSend, transport, discord, remote, nativeRows, addNative, addHistory, receive, inspect, wait, cli, outcome: (value: typeof outcome) => { outcome = value },
+  return { ...f, hosted, forwarded, desktopPath, source, config, binding, actor, nativeSend, transport, discord, remote, nativeRows, addNative, addHistory, receive, inspect, wait, cli, outcome: (value: typeof outcome) => { outcome = value },
     get services() { return services }, get rpc() { return rpc }, reopen: async () => { await close(); await open(); await vi.waitFor(() => expect(discord ? discord.sessions.length : transport.sockets.length).toBeGreaterThan(1)) } }
 }
