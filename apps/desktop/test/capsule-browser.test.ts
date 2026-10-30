@@ -1,14 +1,22 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
+import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import { NodeCapsuleOwner } from '../../../packages/capsule/src/node'
 import type { CapsuleInspection, CapsuleMode } from '@agentmux/core/capsule'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { hydratePersistedTab, reducePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
-import { browserColdDescriptor } from '../src/main/browser-cold-descriptor'
+import { browserColdDescriptor, coldBrowserTargets } from '../src/main/browser-cold-descriptor'
+import { parseBrowserTargetsResult } from '../../../packages/core/src/control-browser-targets'
+import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
+import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
+import { createCapsuleBrowserDocument } from '../src/main/capsule-presentation'
 
 // Native ownership and event ordering are controlled here. Actual Electron navigation, pixels
 // and OS restart are verified by the integrated Browser gate, not by these ports.
@@ -116,6 +124,118 @@ it('keeps Capsule storage independent from user Profiles and installs SDK only f
   expect(manager.capsuleDocumentIds()).toEqual([second.id])
   await expect(manager.switchProfile(second.id, 'user-profile')).rejects.toThrow('own persistent container')
   expect(await (await fetch((injected.endpoint as { url: string }).url + 'route', { headers: { Accept: 'text/html' } })).text()).toContain('Real static content')
+})
+
+it('derives stable object addresses from the original container while keeping real routes and healthy pages after missing handshake observations', async () => {
+  const { root, manager, page, create, views } = await fixture()
+  const capsule = await page('injected'), opened = await create('browser', capsule)
+  const objectLink = `amux://capsule/${capsule.record.capsuleId}`
+  expect(opened.objectLink).toBe(objectLink)
+  expect(opened.url).toBe((capsule.endpoint as { url: string }).url)
+  const route = new URL('review/shape?q=kept#preview', opened.url).href
+  await manager.navigate(opened.id, route); await views[0]!.lastLoad
+  const snapshot = await manager.create(opened.id, opened.url, 'workspace')
+  expect(snapshot).toMatchObject({ objectLink, url: route, capsuleActive: true })
+  expect(manager.target(opened.id)).toMatchObject({ objectLink, url: route })
+  views[0]!.responseOverride = details => views[0]!.response?.({ ...details, responseHeaders: {} })
+  await manager.reload(opened.id); await views[0]!.lastLoad
+  const unconfirmed = await manager.create(opened.id, opened.url, 'workspace')
+  expect(unconfirmed).toMatchObject({ objectLink, url: route, capsuleActive: false })
+  expect(manager.target(opened.id)).toMatchObject({ objectLink, url: route })
+  expect(views[0]!.webContents.isDestroyed()).toBe(false)
+  const ordinary = await manager.create('ordinary', route, 'workspace')
+  await views[1]!.lastLoad
+  expect(ordinary).not.toHaveProperty('objectLink')
+  expect(manager.target('ordinary')).not.toHaveProperty('objectLink')
+
+  const tab = createWorkbenchTab('tab', { ...snapshot, regionId: 'region', kind: 'browser', workspaceId: 'workspace', browserId: opened.id })
+  const persisted = JSON.parse(JSON.stringify(reducePersistedTab(tab)))
+  expect(persisted.regions.region).toMatchObject({ url: route, capsuleId: capsule.record.capsuleId, capsuleOrigin: new URL(opened.url).origin })
+  expect(persisted.regions.region).not.toHaveProperty('objectLink')
+  const graph = { regions: [{ kind: 'browser', browserId: opened.id, regionId: 'region', tabId: tab.id }],
+    tabs: [{ tabId: tab.id, regionIds: ['region'] }], resources: { 'region:region': persisted.regions.region } } as unknown as AgentMuxSpatialGraph
+  expect(coldBrowserTargets(graph, [])).toEqual([expect.objectContaining({ id: opened.id, objectLink, url: route, status: 'unavailable', capabilities: [] })])
+  const savedPath = join(root, 'original-graph.json'), coldModule = join(root, 'cold-descriptor.mjs')
+  await writeFile(savedPath, JSON.stringify(graph))
+  await symlink(fileURLToPath(new URL('../../../packages/core/node_modules', import.meta.url)), join(root, 'node_modules'), 'dir')
+  const coreSource = fileURLToPath(new URL('../../../packages/core/src/', import.meta.url))
+  const { build } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('esbuild')
+  await build({ entryPoints: [fileURLToPath(new URL('../src/main/browser-cold-descriptor.ts', import.meta.url))], outfile: coldModule,
+    bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external',
+    plugins: [{ name: 'original-source-public-exports', setup(plugin: { onResolve(options: { filter: RegExp }, callback: () => { path: string }): void }) {
+      plugin.onResolve({ filter: /^@agentmux\/core$/ }, () => ({ path: join(coreSource, 'control-browser-targets.ts') }))
+      plugin.onResolve({ filter: /^@agentmux\/core\/sharing$/ }, () => ({ path: join(coreSource, 'sharing.ts') }))
+    } }] })
+  // A separate process reads the first real saved projection; it receives no re-created page or graph.
+  const childResult = await new Promise<string>((yes, no) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e',
+      `import {readFile} from 'node:fs/promises';import {coldBrowserTargets} from ${JSON.stringify(pathToFileURL(coldModule).href)};
+const graph=JSON.parse(await readFile(${JSON.stringify(savedPath)},'utf8'));process.stdout.write(JSON.stringify({pid:process.pid,targets:coldBrowserTargets(graph,[])}));`], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = '', stderr = ''; child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
+    child.once('error', no); child.once('close', code => code === 0 ? yes(stdout) : no(new Error(stderr)))
+  })
+  const cold = JSON.parse(childResult)
+  expect(cold.pid).not.toBe(process.pid)
+  expect(cold.targets).toEqual([expect.objectContaining({ id: opened.id, objectLink, url: route, status: 'unavailable', capabilities: [] })])
+  expect((await manager.release(opened.id, unconfirmed.navigationId)).status).toBe('released')
+  expect(manager.resourceTargets(new Map()).find(target => target.id === opened.id)).toMatchObject({ objectLink, url: route })
+  await manager.restore(opened.id)
+  await views.at(-1)!.lastLoad
+  const restored = await manager.create(opened.id, opened.url, 'workspace')
+  expect(restored).toMatchObject({ id: opened.id, objectLink, url: route })
+  await manager.navigate(opened.id, 'https://outside.invalid/article?q=kept')
+  const outside = await manager.create(opened.id, opened.url, 'workspace')
+  expect(outside.url).toBe('https://outside.invalid/article?q=kept')
+  expect(outside).not.toHaveProperty('objectLink')
+  expect(manager.target(opened.id)).not.toHaveProperty('objectLink')
+})
+
+it('retains the original stable object address through actual Browser target RPC and the source-compiled CLI', async () => {
+  const { root, manager, page, create } = await fixture()
+  const capsule = await page('isolated'), opened = await create('browser', capsule)
+  const objectLink = `amux://capsule/${capsule.record.capsuleId}`
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [], execute: async request => {
+    expect(request.operation).toBe('browser.targets')
+    return { operation: 'browser.targets', targets: manager.targets(), coverage: 'complete' }
+  } })
+  await server.start(); cleanups.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
+  const original = await rpc.call('browser.targets', {})
+  expect(original.targets).toEqual([expect.objectContaining({ id: opened.id, objectLink, url: opened.url })])
+  const cli = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'browser', 'targets'], objectCliEnvironment(root))
+  expect(cli.code, cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result.targets).toEqual(original.targets)
+  expect(original.targets[0]!.control).toEqual(manager.target(opened.id)!.control)
+  for (const value of ['http://127.0.0.1:12345/', 'amux://capsule/ID?execute=1', 'amux://capsule/%49D', '', null, 12]) {
+    expect(() => parseBrowserTargetsResult({ ...original, targets: [{ ...original.targets[0], objectLink: value }] })).toThrow()
+  }
+})
+
+it('resolves a canonical Capsule address through its original acquisition owner before loading HTTP into the exact requested Browser', async () => {
+  const { manager, owner, page, views } = await fixture()
+  const capsule = await page('isolated'), capsuleId = capsule.record.capsuleId
+  const endpoint = (capsule.endpoint as { url: string }).url, uri = `amux://capsule/${capsuleId}`
+  const create = vi.spyOn(manager, 'create')
+  const acquire = (id: string, url: string) => createCapsuleBrowserDocument({
+    inspect: capsuleId => owner.call('capsule.inspect', { capsuleId }), browsers: manager
+  }, { id, url, capsuleId, workspaceId: 'workspace', viewport: 'responsive', operationId: 'original-bookmark-open' })
+  await expect(acquire('stable-browser', uri)).resolves.toMatchObject({ id: 'stable-browser' }); await views[0]!.lastLoad
+  expect(create).toHaveBeenCalledExactlyOnceWith('stable-browser', endpoint, 'workspace', undefined, 'normal', 'responsive', {
+    capsule: expect.objectContaining({ record: expect.objectContaining({ capsuleId }) }), capsuleOrigin: new URL(endpoint).origin,
+    capsuleOpenOperationIds: ['original-bookmark-open']
+  })
+  expect(manager.target('stable-browser')).toMatchObject({ objectLink: uri, url: endpoint })
+  const route = new URL('original/route?q=kept#selection', endpoint).href
+  await acquire('route-browser', route); await views[1]!.lastLoad
+  expect(manager.target('route-browser')).toMatchObject({ objectLink: uri, url: route })
+  const count = create.mock.calls.length
+  for (const url of ['amux://capsule/not-original', uri + '?open=1', uri + '#selection', endpoint.replace('127.0.0.1', 'localhost')]) {
+    const outcome = await acquire('wrong-browser', url).then(value => ({ value, error: null }), error => ({ value: null, error }))
+    expect(outcome.error).toBeInstanceOf(Error)
+    expect(outcome.value).toBeNull()
+  }
+  expect(create).toHaveBeenCalledTimes(count)
+  expect(manager.targets().map(target => target.id)).toEqual(['stable-browser', 'route-browser'])
 })
 
 it('admits only the exact live committed nonloading Capsule main document and rejects frames, popups and stale documents', async () => {
