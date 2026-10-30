@@ -90,6 +90,17 @@ async function close() {
   if (menu()) await act(async () => menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   await vi.waitFor(() => expect(menu()).toBeNull())
 }
+async function terminalInfo(root: HTMLElement) {
+  const trigger = item('Terminal info', root)
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  let details: HTMLElement | null = null
+  await vi.waitFor(() => { details = document.getElementById(trigger.getAttribute('aria-controls')!); expect(details).not.toBeNull() })
+  return { details: details!, trigger, async back() {
+    await act(async () => details!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })))
+    await vi.waitFor(() => expect(details!.isConnected).toBe(false))
+    expect(document.activeElement).toBe(trigger)
+  } }
+}
 async function openMore() {
   const trigger = container.querySelector<HTMLElement>('.agent-region-header__more')!
   expect(trigger).not.toBeNull()
@@ -180,7 +191,10 @@ it('reads mouse reporting and selection from the opened real terminal and retain
   await write(terminal, '\u001b[?1000h')
   let opened = await openBody()
   expect(item('Copy', opened).hasAttribute('data-disabled')).toBe(true)
-  expect(opened.querySelector('[role="note"]')?.textContent).toMatch(/drag/i)
+  expect(opened.querySelector('[role="note"]')).toBeNull()
+  const info = await terminalInfo(opened)
+  expect(info.details.querySelector('[role="note"]')?.textContent).toMatch(/drag/i)
+  await info.back()
   await act(async () => item('Copy visible output', opened).click())
   expect(copy).toHaveBeenCalledOnce(); expect(copy.mock.calls[0]![0]).toContain('Original retained output')
   await act(async () => terminal.select(0, 0, 'src/original.txt'.length))
@@ -254,7 +268,10 @@ it('modal isolation and live output keep the original open terminal tools availa
   await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('Live menu output'))
   expect(menu(), 'normal output preserves the same popup').toBe(opened)
   expect(opened.querySelector('[data-terminal-menu-tools]')).not.toBeNull()
-  expect(opened.textContent).toContain('The full-screen buffer has no terminal scrollback.')
+  expect(opened.textContent).not.toContain('The full-screen buffer has no terminal scrollback.')
+  const info = await terminalInfo(opened)
+  expect(info.details.textContent).toContain('The full-screen buffer has no terminal scrollback.')
+  await info.back()
   await act(async () => item('Copy visible output', opened).click())
   expect(copy).toHaveBeenCalledOnce(); expect(copy.mock.calls[0]![0]).toContain('Live menu output')
   expect(fixture.terminals).toHaveLength(1)

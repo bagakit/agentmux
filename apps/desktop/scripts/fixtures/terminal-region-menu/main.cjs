@@ -83,8 +83,16 @@ app.whenReady().then(async()=>{
     }
     await seed(320);await evaluate('terminalMenu.mouseReporting(true)');await openBody(true)
     assert.equal(await evaluate(`${item('Copy')}.hasAttribute('data-disabled')`),true,'No selection keeps Copy disabled')
-    assert.equal(await evaluate(`${menu}.querySelector('[role="note"]').textContent.toLowerCase().includes('drag')`),true,'Actual mouse reporting keeps its selection escape hint')
-    await frame('320-dark-mouse-reporting');await close()
+    assert.equal(await evaluate(`Boolean(${menu}.querySelector('[role="note"]'))`),false,'Long terminal explanations do not occupy the root menu')
+    const information=item('Terminal info')
+    await evaluate(`${information}.focus()`);await key('ArrowRight','ArrowRight',39)
+    const details=`document.getElementById(${information}.getAttribute('aria-controls'))`
+    await waitFor(`Boolean(${details})`)
+    assert.equal(await evaluate(`${details}.querySelector('[role="note"]').textContent.toLowerCase().includes('drag')`),true,'Actual mouse reporting keeps its complete selection escape hint on demand')
+    await painted();await frame('320-dark-mouse-reporting')
+    await key('ArrowLeft','ArrowLeft',37);await waitFor(`!${details}`)
+    assert.equal(await evaluate(`document.activeElement===${information}`),true,'Terminal information returns to its original menu entry')
+    await close()
     await evaluate('(async()=>{await terminalMenu.mouseReporting(false);terminalMenu.select()})()');await painted();await openBody()
     assert.equal(await evaluate(`${item('Copy')}.hasAttribute('data-disabled')`),false,'The actual original selection remains copyable')
     await frame('320-dark-selection');await click(item('Copy'));await waitFor(`!${menu}`)
