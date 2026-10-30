@@ -187,6 +187,8 @@ amux space rename --tab '<tab-id>' --name-revision M --name '评审'
 | 人工待发消息与准备退避 | `message pending ls/edit/send/stop/archive/restore` |
 | Session 消息、输出、生命周期 | `agent send/output/interrupt/resume/stop`、`message inbox/dispatch` |
 
+原 `agent resume` 的 operation 用于核对同一次恢复；重查不重投未知的启动或输入。新的 prepared resume 在 Core 私有 reservation 中冻结完整请求与原 Runtime，丢回执后只接回原 key 对应的准确 retained Run。旧准备没有派发来源时，当前 Runtime 查不到 key 仍是 unknown，不能据此退休、重发或补造来源；准确 retained 正见证须通过原 prepared Session 秘密绑定等核验后才能接回。完整环境不会进入公开 Session、inspect 或 CLI 回执。缺来源时保留原身份与能力，服务窗说明需要原派发来源或匹配的 retained Run。
+
 表中入口的能力边界与接线见[公共能力来源导航](../specs/public-capabilities.md#cli-与服务的当前来源)及[公共控制合同](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。源码、构建、安装与实际运行分别核对；入口清单不代签具体 UI 控件的可操作性，不在当前执行版本 help 中的能力不要猜命令。
 
 共享实体与展示关系由 Core 的同一持久空间 owner 提供；Desktop Store 消费并投影这些事实，CLI 接入同一公共服务，不另建一套空间模型。
