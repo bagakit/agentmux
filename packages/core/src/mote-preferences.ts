@@ -15,9 +15,11 @@ export function isPrimaryMoteSpace(space: Pick<AgentMuxSpaceFact, 'kind' | 'topi
 
 /** Values are serialized only by the original MOTE.md owner. No YAML lives here. */
 export type MoteDefaultConversation = { hostId: string; sessionId: string; displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
+export type MoteMainRolloverPolicy = { kind: 'keep-current' } | { kind: 'idle'; idleMs: number }
+export type MoteMainTransitionMarker = { operationId: string; intentDigest: string; effectiveAt: number }
 export type MotePresencePreferences = { enabled: boolean; intervalMs: number }
 export const DEFAULT_MOTE_PRESENCE: Readonly<MotePresencePreferences> = Object.freeze({ enabled: true, intervalMs: 1_800_000 })
-export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences }
+export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences; conversationRollover?: MoteMainRolloverPolicy; conversationTransition?: MoteMainTransitionMarker }
 export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('./continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null }
 export interface MoteQuickPreferencesPort {
   read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
@@ -29,11 +31,11 @@ export function moteChangedMainRoleRevision(spaceId: string, operationId: string
 }
 /** Metadata is authored by the original CAS writer, never by a display or a new read. */
 export function effectiveMoteQuickSave(input: MoteQuickPreferencesSaveParams): MoteQuickDefaults {
-  const { conversationRevision: _requested, recovery: _historical, ...values } = input.values
+  const { conversationRevision: _requested, conversationTransition: _marker, recovery: _historical, ...values } = input.values
   const before = input.baseline.defaults
   const same = JSON.stringify(before.conversation ?? null) === JSON.stringify(values.conversation ?? null) ||
     !!before.conversation && !!values.conversation && Object.keys(before.conversation).every(key => before.conversation![key as keyof MoteDefaultConversation] === values.conversation![key as keyof MoteDefaultConversation])
-  return { ...values, ...(before.recovery === undefined ? {} : { recovery: before.recovery }), conversationRevision: same ? before.conversationRevision ?? `legacy:${input.baseline.document?.revision ?? 'missing'}` : moteChangedMainRoleRevision(input.target.spaceId, input.operationId, input.baseline.document?.revision ?? null) }
+  return { ...values, ...(same && before.conversationTransition ? { conversationTransition: before.conversationTransition } : {}), ...(before.recovery === undefined ? {} : { recovery: before.recovery }), conversationRevision: same ? before.conversationRevision ?? `legacy:${input.baseline.document?.revision ?? 'missing'}` : moteChangedMainRoleRevision(input.target.spaceId, input.operationId, input.baseline.document?.revision ?? null) }
 }
 export type MotePreferencesTarget = { spaceId: string; zoneId: string; expectedResource: FileResource }
 export type MotePreferencesDestination =
@@ -109,7 +111,7 @@ export function parseMoteDefaultConversation(value: unknown, code: Code = 'INVAL
 }
 export function sameMoteQuickDefaults(a: MoteQuickDefaults, b: MoteQuickDefaults): boolean {
   return a.executorId === b.executorId && a.recovery === b.recovery && a.conversationRevision === b.conversationRevision &&
-    a.presence?.enabled === b.presence?.enabled && a.presence?.intervalMs === b.presence?.intervalMs && (a.conversation === b.conversation || !!a.conversation && !!b.conversation &&
+    JSON.stringify(a.conversationRollover ?? {kind:'keep-current'}) === JSON.stringify(b.conversationRollover ?? {kind:'keep-current'}) && a.presence?.enabled === b.presence?.enabled && a.presence?.intervalMs === b.presence?.intervalMs && (a.conversation === b.conversation || !!a.conversation && !!b.conversation &&
     tupleFields.every(key => a.conversation![key] === b.conversation![key]))
 }
 export function sameMotePreferencesTarget(a: MotePreferencesTarget, b: MotePreferencesTarget): boolean {
@@ -130,7 +132,18 @@ export function sameMoteConnectionValues(a: MoteConnectionValues, b: MoteConnect
     a.connection.application.domain === b.connection.application.domain && a.connection.application.appId === b.connection.application.appId
 }
 export function parseMoteQuickDefaults(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MoteQuickDefaults {
-  const p = fields(value, ['executorId', 'conversation', 'conversationRevision', 'recovery', 'presence'], [], code), result: MoteQuickDefaults = {}
+  const p = fields(value, ['executorId', 'conversation', 'conversationRevision', 'recovery', 'presence', 'conversationRollover', 'conversationTransition'], [], code), result: MoteQuickDefaults = {}
+  if (Object.hasOwn(p, 'conversationRollover')) {
+    const r = fields(p.conversationRollover, ['kind','idleMs'], ['kind'], code)
+    if (r.kind === 'keep-current' && r.idleMs === undefined) result.conversationRollover = {kind:'keep-current'}
+    else if (r.kind === 'idle' && Number.isSafeInteger(r.idleMs) && Number(r.idleMs) > 0) result.conversationRollover = {kind:'idle',idleMs:Number(r.idleMs)}
+    else fail('Main rollover requires keep-current or idle with a positive finite duration.', code)
+  }
+  if (Object.hasOwn(p, 'conversationTransition')) {
+    const m = fields(p.conversationTransition, ['operationId','intentDigest','effectiveAt'], ['operationId','intentDigest','effectiveAt'], code)
+    if (!Number.isSafeInteger(m.effectiveAt) || Number(m.effectiveAt) < 0) fail('The original role transition time is invalid.', code)
+    result.conversationTransition = {operationId:id(m.operationId,code),intentDigest:id(m.intentDigest,code),effectiveAt:Number(m.effectiveAt)}
+  }
   if (Object.hasOwn(p, 'conversationRevision')) result.conversationRevision = id(p.conversationRevision, code)
   if (Object.hasOwn(p, 'presence')) {
     const value = fields(p.presence, ['enabled','intervalMs'], ['enabled','intervalMs'], code)

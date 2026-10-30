@@ -92,6 +92,12 @@ export function parseMoteQuickMode(content: string): { status: 'valid'; defaults
       if (!isScalar(value) || typeof value.value !== 'string') return { status: 'unconfirmed', message: ISSUE }
       defaults.conversationRevision = value.value
     }
+    for (const field of ['conversationRollover','conversationTransition'] as const) {
+      if (node.has(field)) {
+        try { const raw = node.get(field, true); if (!isMap(raw)) throw new Error(ISSUE); Object.assign(defaults, parseMoteQuickDefaults({[field]:raw.toJSON()})) }
+        catch { return { status:'unconfirmed', message:ISSUE } }
+      }
+    }
     if (node.has('presence')) {
       const value = node.get('presence', true)
       if (!isMap(value)) return { status: 'unconfirmed', message: ISSUE }
@@ -111,10 +117,10 @@ export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefau
   const original = content ? frontmatter(content) : null
   const parsed = content ? parseMoteQuickMode(content) : null
   if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)
-  if (parsed?.status === 'valid' && parsed.defaults.conversationRevision === defaults.conversationRevision && JSON.stringify(parsed.defaults.presence) === JSON.stringify(defaults.presence) && parsed.defaults.recovery === defaults.recovery && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
+  if (parsed?.status === 'valid' && parsed.defaults.conversationRevision === defaults.conversationRevision && JSON.stringify(parsed.defaults.conversationRollover) === JSON.stringify(defaults.conversationRollover) && JSON.stringify(parsed.defaults.conversationTransition) === JSON.stringify(defaults.conversationTransition) && JSON.stringify(parsed.defaults.presence) === JSON.stringify(defaults.presence) && parsed.defaults.recovery === defaults.recovery && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
   const document = original?.document ?? new Document({ version: 1, defaults: {} })
   if (!document.has('defaults')) document.set('defaults', {})
-  for (const field of ['conversationRevision','presence'] as const) {
+  for (const field of ['conversationRevision','presence','conversationRollover','conversationTransition'] as const) {
     if (defaults[field] === undefined) document.deleteIn(['defaults', field])
     else document.setIn(['defaults', field], defaults[field])
   }

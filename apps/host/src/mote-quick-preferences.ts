@@ -15,6 +15,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
     executors(): Promise<MoteQuickPreferencesReadResult['choices']['executors']>
     maintenance?(target: MoteQuickPreferencesReadInput['target']): MotePresenceReading
     changed?(target: MoteQuickPreferencesReadInput['target']): void
+    prepareMainSource?(before:MoteMainSnapshot, roleRevision:string, reference:import('@agentmux/core/mote-preferences').MoteDefaultConversation|null, operationId:string):Promise<import('@agentmux/core/mote-preferences').MoteMainTransitionMarker>
     recordMainSource?(before: MoteMainSnapshot, after: MoteMainSnapshot, operationId: string): Promise<void>
   }) {}
   async read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult> {
@@ -39,6 +40,9 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
     } catch (error) { return parseMotePreferencesReadResult({ ...input, status: 'unconfirmed', source, defaults: null, choices: empty, main: null, issue: String(error) }, input) }
   }
   async save(raw: MoteQuickPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult> {
+    return this.ports.main.withRole?await this.ports.main.withRole(raw.target,()=>this.saveInRole(raw,context)):await this.saveInRole(raw,context)
+  }
+  private async saveInRole(raw: MoteQuickPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult> {
     const input = parseMotePreferencesSaveParams(raw), values = effectiveMoteQuickSave(input)
     let dispatched = false
     const result = (status: MoteQuickPreferencesSaveResult['status'], source: MoteQuickPreferencesSaveResult['source'], message: string | null) => parseMotePreferencesSaveResult({ kind: 'quick', target: input.target, operationId: input.operationId, status, source, message }, input)
@@ -54,6 +58,8 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       if (values.executorId !== read.defaults.executorId && values.executorId && !read.choices.executors.some(value => value.id === values.executorId)) throw new Error('The selected original Executor is unconfirmed.')
       if (roleChanged && values.conversation && !read.choices.conversations.some(value => sameMoteDefaultConversation(value.reference, values.conversation))) throw new Error('The selected original Agent and its Host/location are unconfirmed.')
       const before = await this.ports.main.readCurrentMoteMain(input.target, context?.signal)
+      let preparationIssue:string|null=null
+      if(roleChanged&&this.ports.prepareMainSource) {try{values.conversationTransition=await this.ports.prepareMainSource(before,values.conversationRevision!,values.conversation??null,input.operationId)}catch(error){preparationIssue='The original role boundary preparation is unconfirmed: '+String(error)}}
       const content = serializeMoteQuickMode(document?.content ?? '', values)
       if (document?.content === content) return result('unchanged', { resource: read.source.resource, document, defaults: values }, null)
       context?.signal?.throwIfAborted(); await context?.assertCurrent?.()
@@ -65,9 +71,9 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       if (!saved.resource || parsed.status !== 'valid' || !sameMoteQuickDefaults(parsed.defaults, values)) throw new Error('The original writer result is unconfirmed. Inspect this same save; do not overwrite or replay it.')
       const source = { resource: saved.resource, document: { path: saved.resource.path, content: actual, revision: saved.result.revision }, defaults: parsed.defaults }
       this.ports.changed?.(input.target)
-      let issue: string | null = null
+      let issue: string | null = preparationIssue
       if (roleChanged && this.ports.recordMainSource) {
-        try { await this.ports.recordMainSource(before, { target: input.target, identity: before.identity, status: 'ready', resource: source.resource, documentRevision: source.document.revision, roleRevision: parsed.defaults.conversationRevision!, current: parsed.defaults.conversation ?? null, issue: null }, input.operationId) }
+        try { await this.ports.recordMainSource(before, { target: input.target, identity: before.identity, status: 'ready', resource: source.resource, documentRevision: source.document.revision, roleRevision: parsed.defaults.conversationRevision!, current: parsed.defaults.conversation ?? null, issue: null, ...(parsed.defaults.conversationTransition?{transition:parsed.defaults.conversationTransition}:{}) }, input.operationId) }
         catch (error) { issue = 'Settings were saved; recording the original dialogue association is unconfirmed. ' + String(error) }
       }
       return result('saved', source, issue)

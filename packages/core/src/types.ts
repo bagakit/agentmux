@@ -1330,8 +1330,32 @@ export type AgentMuxAgentSession = {
   turnUsage?: AgentTurnUsage
 }
 
+/** Exact original-input idle source, independent of the current display status. */
+export type AgentPromptSemanticIdle = {
+  state: 'idle'
+  run: AgentMuxRunRef
+  observedAt: number
+  sourceId: string
+  sequence: number
+  nativeSessionId: string
+  nativeTurnId: string
+  promptSubmissionId: string
+} & ({ source: 'native-hook'; hookReceiptId: string } | { source: 'native-status'; recordId: string })
+
+/** Read-only current activity on the original input's exact Session and Run. */
+export type AgentInputActivity = {
+  key: import('./agent-prompt-condition.js').AgentPromptInputKey
+  state: 'idle' | 'active' | 'unconfirmed'
+  source: 'native-hook' | 'native-provider' | 'interaction' | 'unconfirmed'
+  sourceId: string | null
+  sourceNow: number
+  issue: string | null
+}
+
 /** Original Session-owner record; legacy missing identity/source remains missing. */
 export type AgentPromptSubmissionRecord = {
+  /** Original ordered native idle on this exact admitted input; not live activity or task completion. */
+  semanticIdle?: AgentPromptSemanticIdle
   /** Original Runtime launch carrier; never a PTY or Provider acceptance ACK. */
   launch?: import('./agent-session-recovery/continuity-contract.js').AgentMuxContinuityLaunchInput
   agentSessionId: string
@@ -1553,7 +1577,7 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
     run: AgentMuxRunRef
     providerId: AgentProviderId
     nativeHandle: AgentNativeSessionHandle
-    turns: Record<string, { recordId: string; observedAt: number; nativeObservedAt?: number }>
+    turns: Record<string, { recordId: string; observedAt: number; nativeObservedAt?: number; sequence?: number }>
   }
   /** Exact native interaction completions; delayed Hook reports cannot reopen the same call. Private to Core. */
   nativeInteractionEnds?: {

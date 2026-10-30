@@ -1,3 +1,4 @@
+import { agentNativeTurnEnd } from './agent-session-identity.js'
 import { parseResumeResolution, type AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { assertPreparedResumeBinding, parseResumeResolutionRequest, resumeResolutionDigest, type ResumeResolutionRequest } from './agent-prepared-resume.js'
 import { parseAutomaticInputSource } from './automatic-input-source.js'
@@ -323,6 +324,25 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
   const initial = session.initialInput
   if (initial?.state === 'launch-carried' && initial.key) originals.push({ agentSessionId: session.agentSessionId,
     run: initial.key.expectedRun, launch: initial })
+  const idle = session.recoveryActivity
+  for (const original of originals) {
+    const inputId = original.admission?.submissionId ?? original.launch?.key?.submissionId
+    if (inputId && idle?.state === 'idle' && idle.nativeTurnId && idle.promptSubmissionId === inputId &&
+        original.run.runId === idle.run.runId) {
+      original.semanticIdle = { ...structuredClone(idle), state: 'idle', source: 'native-hook',
+        nativeTurnId: idle.nativeTurnId, promptSubmissionId: inputId }
+      continue
+    }
+    const claim = original.admission
+    if (!inputId || claim?.transport !== 'native' || claim.native.outcome !== 'admitted' ||
+        !claim.native.turnId || original.run.runId !== session.run.runId || session.nativeHandle?.kind !== 'provider') continue
+    const end = agentNativeTurnEnd(session, claim.native.turnId)
+    if (end?.sequence === undefined || end.sequence < 1) continue
+    original.semanticIdle = { source: 'native-status', state: 'idle', run: structuredClone(original.run),
+      observedAt: end.observedAt, recordId: end.recordId,
+      sourceId: JSON.stringify([session.providerId, session.nativeHandle]), sequence: end.sequence,
+      nativeSessionId: session.nativeHandle.sessionId, nativeTurnId: claim.native.turnId, promptSubmissionId: inputId }
+  }
   return structuredClone(originals)
 }
 function promptAdmissionRecord(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord | null {
@@ -357,6 +377,13 @@ function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: Age
 
 /** Routine Session writes cannot rebind or settle an already claimed native or launch input. */
 function assertPromptRecordWrite(original: AgentPromptSubmissionRecord | undefined, next: AgentPromptSubmissionRecord, receipt = false): void {
+  // The original input's first exact native idle is immutable. Later platform turns cannot renew its clock.
+  if(original?.semanticIdle)next.semanticIdle=structuredClone(original.semanticIdle)
+  if(original&&next.semanticIdle) {
+    parsePromptSubmissionRecord(next)
+    const {semanticIdle:_previous,...before}=original,{semanticIdle:_next,...after}=next
+    if(isDeepStrictEqual(before,after)&&(!original.semanticIdle||isDeepStrictEqual(original.semanticIdle,next.semanticIdle)))return
+  }
   if (!original || isDeepStrictEqual(original, next)) return
   if (original.launch || next.launch) throw new AgentMuxError('An original Runtime launch input cannot be replaced by another carrier or body.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   if (!['native', 'launch'].includes(original.admission?.transport ?? 'pty') && !['native', 'launch'].includes(next.admission?.transport ?? 'pty')) return
@@ -1901,10 +1928,11 @@ function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession[
     turns: Object.fromEntries(Object.entries(record(source.turns, 'nativeTurnEnds.turns')).map(([turnId, value]) => {
       string(turnId, 'nativeTurnEnds native turn ID')
       const end = record(value, 'nativeTurnEnds end')
-      if (Object.keys(end).some(key => !['recordId', 'observedAt', 'nativeObservedAt'].includes(key))) {
+      if (Object.keys(end).some(key => !['recordId', 'observedAt', 'nativeObservedAt', 'sequence'].includes(key))) {
         throw new AgentMuxError('Native turn end contains an unknown field.', 'INVALID_AGENT_SESSION_STORE')
       }
       return [turnId, { recordId: string(end.recordId, 'nativeTurnEnds.recordId'),
+        ...(end.sequence === undefined ? {} : { sequence: positiveInteger(end.sequence, 'nativeTurnEnds.sequence') }),
         observedAt: timestamp(end.observedAt, 'nativeTurnEnds.observedAt'),
         ...(end.nativeObservedAt === undefined ? {} : { nativeObservedAt: timestamp(end.nativeObservedAt, 'nativeTurnEnds.nativeObservedAt') }) }]
     })) }

@@ -2692,7 +2692,8 @@ export class AgentMuxClient {
       const owner = await this.conversationReader(input, options)
       parseConversationCheckpoint(input.checkpoint, input)
       parseConversationFrontier(input.checkpoint.frontier, owner.reference)
-      const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference } }, owner.port)
+      if(input.through){parseConversationCheckpoint(input.through,input);parseConversationFrontier(input.through.frontier,owner.reference)}
+      const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference }, ...(input.through ? {through:{...input.through,...owner.reference}} : {}) }, owner.port)
       return page
     })
   }
@@ -2744,7 +2745,7 @@ export class AgentMuxClient {
       nativePage: (cursor, limit) => this.readSessionHistoryPage(input.agentSessionId, { ...sourceOptions, limit, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }, source),
       nativeCheckpoint: async position => (await this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions,
         ...(position === 'beginning' ? { head: true as const } : { tail: true as const }), ...(options.signal ? { signal: options.signal } : {}) }, source)).checkpoint,
-      nativeChanges: (checkpoint, limit) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(options.signal ? { signal: options.signal } : {}) }, source),
+      nativeChanges: (checkpoint, limit, through) => this.nativeHistoryChangesPage(input.agentSessionId, { ...sourceOptions, checkpoint, limit, ...(through ? {through} : {}), ...(options.signal ? { signal: options.signal } : {}) }, source),
       nativeRecord: (source, id) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal) } }
   }
 
@@ -3545,7 +3546,7 @@ export class AgentMuxClient {
     return this.nativeHistoryChangesPage(agentSessionId, { ...options, checkpoint })
   }
 
-  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; tail?: true; head?: true },
+  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit' | 'nativeSource'> & { checkpoint?: NativeConversationCheckpoint; through?: NativeConversationCheckpoint; tail?: true; head?: true },
     originalSource?: AgentSessionHistorySource): Promise<NativeConversationChangesPage> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     const limit = options.limit ?? 30
@@ -3565,7 +3566,7 @@ export class AgentMuxClient {
       const page = await read(provider.readConversationChanges({ agentSessionId, source, limit, signal: controller.signal,
         command: resolveAgentExecutable(executor.commandOverride, provider.executable), args: executor.args ?? [], env: executor.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }),
-        ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}) }))
+        ...(options.through ? {through:options.through.cursor} : {}), ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}), ...(options.head ? { head: true as const } : {}) }))
       await read(binding.assertCurrent())
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
       const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
@@ -6154,6 +6155,34 @@ export class AgentMuxClient {
     const original = await this.store.readPromptAdmission(key.agentSessionId, key.expectedRun, agentPromptInputId(key))
     if (original?.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) throw new AgentMuxError('The input key names another original producer.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     return original
+  }
+
+  /** Read current native activity without preparing, admitting or dispatching input. */
+  async readAgentInputActivity(value: AgentPromptInputKey): Promise<import('./types.js').AgentInputActivity> {
+    const key = validateAgentPromptInputKey(value)
+    const unknown = (issue: string): import('./types.js').AgentInputActivity => ({
+      key, state: 'unconfirmed', source: 'unconfirmed', sourceId: null, sourceNow: Date.now(), issue })
+    try {
+      this.requireConnected()
+      await this.resolveRawAgentSession(key.agentSessionId)
+      const stored = await this.registry.refresh(key.agentSessionId, key.expectedRun)
+      if (!sameRun(stored.run, key.expectedRun)) return unknown('The original input Run is no longer current.')
+      const run = await this.requireCurrentAgentRun(stored)
+      if (run.state.type !== 'running') return unknown('The original Runtime Run is not currently running.')
+      const session = this.projectSession(stored)
+      if (session.pendingInteraction) return { key, state: 'active', source: 'interaction',
+        sourceId: null, sourceNow: Date.now(), issue: null }
+      const activity = session.currentActivity
+      if (activity && sameRun(activity.run, key.expectedRun)) return { key,
+        state: activity.state === 'idle' ? 'idle' : 'active', source: 'native-hook',
+        sourceId: activity.sourceId, sourceNow: Date.now(), issue: null }
+      if (nativeTargetSourceUnconfirmed(stored)) return unknown('The original native source is unconfirmed.')
+      const provider = this.providers.get(session.providerId)
+      const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
+      if (!evidence) return unknown('The Provider has not confirmed current native activity.')
+      return { key, state: evidence.state === 'working' ? 'active' : 'idle', source: 'native-provider',
+        sourceId: evidence.id, sourceNow: Date.now(), issue: null }
+    } catch (error) { return unknown('Reading the original native activity failed: ' + String(error)) }
   }
 
   private validateControlledPrompt(input: AgentMuxAgentPromptInput): void {
@@ -9293,6 +9322,7 @@ export class AgentMuxClient {
                 const previous = nativeTurnEndScopeMatches(saved) ? saved.nativeTurnEnds!.turns : {}
                 const end = Object.hasOwn(previous, observation.nativeTurnId) ? previous[observation.nativeTurnId]! : {
                   recordId: observation.recordId, observedAt: Date.now(),
+                  ...(observation.sequence === undefined || observation.sequence < 1 ? {} : { sequence: observation.sequence }),
                   ...(observation.nativeObservedAt === undefined ? {} : { nativeObservedAt: observation.nativeObservedAt }) }
                 saved = { ...saved, nativeTurnEnds: { run: { ...saved.run }, providerId: saved.providerId,
                   nativeHandle: structuredClone(saved.nativeHandle!), turns: { ...previous, [observation.nativeTurnId]: end } } }

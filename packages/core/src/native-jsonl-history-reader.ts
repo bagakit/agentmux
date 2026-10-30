@@ -438,6 +438,17 @@ export class NativeJsonlHistoryReader {
     await this.verifyUnchanged()
   }
 
+  /** Apply a second opaque cut at this same original physical owner. */
+  async limitChanges(through: string): Promise<void> {
+    const lower = this.forwardPosition
+    await this.seekChanges(through)
+    const upper = this.forwardPosition
+    if (lower > upper) return failure('INVALID_CURSOR', 'The original upper cut precedes the lower cut.')
+    this.cut = upper; this.position = Math.min(this.position, upper); this.forwardPosition = lower
+    this.head = ''; this.tail = ''; this.cache = Buffer.alloc(0); this.forwardCache = Buffer.alloc(0)
+    await this.verifyUnchanged()
+  }
+
   repeatNext(): void {
     if (this.lastForwardStart === undefined) return failure('INVALID_CURSOR', 'Read an original record before repeating it.')
     this.forwardPosition = this.lastForwardStart
@@ -517,6 +528,7 @@ export async function readNativeConversationChanges(reader: NativeJsonlHistoryRe
   convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>): Promise<ProviderConversationChangesPage> {
   if (context.head && (context.after !== undefined || context.tail)) return failure('INVALID_CURSOR', 'A beginning checkpoint cannot include another source position.')
   await reader.seekChanges(context.after, context.tail === true)
+  if (context.through !== undefined) await reader.limitChanges(context.through)
   const items: AgentSessionHistoryItem[] = []
   let bytes = 0
   if (!context.tail && !context.head) for (let scanned = 0; scanned < context.limit; scanned++) {

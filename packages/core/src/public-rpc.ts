@@ -270,7 +270,7 @@ type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule
   'agent.automation.inspect': import('./agent-automation.js').AgentAutomationTarget
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureReference
   'agent.input.resource': import('./agent-input-resource.js').AgentInputResourceRead
-  'agent.input.inspect': import('./agent-input-wait.js').AgentInputSelector
+  'agent.input.inspect': import('./agent-input-wait.js').AgentInputSelector & { activity?: true }
   'agent.input.observation': {agentSessionId:string;observationId:string}
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
@@ -372,7 +372,7 @@ type NativeResult = MoteDialogueResultMap & { 'capsule.input': import('./capsule
   'agent.automation.inspect': import('./agent-automation.js').AgentAutomationPauseInspection
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureRead
   'agent.input.resource': import('./agent-input-resource.js').AgentInputResourceResult
-  'agent.input.inspect': { moteObservationId?:string; record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
+  'agent.input.inspect': { activity?: import('./types.js').AgentInputActivity; sourceNow?:number; moteObservationId?:string; record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
   'agent.input.observation': {inspection:import('./mote-input.js').MoteInputInspection|null}
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
   'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt

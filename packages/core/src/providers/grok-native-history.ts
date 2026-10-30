@@ -523,6 +523,7 @@ export async function readGrokConversationChanges(context: ProviderConversationC
   try {
     if (context.head && (context.after !== undefined || context.tail)) throw new AgentMuxError('A beginning checkpoint cannot include another source position.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     await reader.seekChanges(context.after, context.tail === true)
+    if (context.through !== undefined) await reader.limitChanges(context.through)
     const initialCursor = await reader.changesCursor(), projection = new GrokMessageProjection(reader, context.source.nativeSessionId)
     const steps: { change: GrokProjectionChange; cursor: string }[] = [], ids = new Set<string>()
     if (!context.tail && !context.head) while (ids.size < context.limit) {

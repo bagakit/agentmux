@@ -1373,6 +1373,12 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** The same ingress journal freezes the role before any original input RPC; it stores no prompt or dispatch state. */
+  async latestMoteMainInputRoute(identity:MoteDialogueIdentity,roleRevision:string):Promise<MoteDialogueInputRoute|null> {
+    return this.withLock(async()=>{
+      const row=this.db.prepare("SELECT r.json FROM mote_main_input_routes i JOIN records r ON r.sequence=i.sequence WHERE i.scope=? AND json_extract(r.json,'$.route.roleRevision')=? ORDER BY r.sequence DESC LIMIT 1").get(moteDialogueInputScope(identity),roleRevision)
+      return row?parseMoteDialogueInputRoute((JSON.parse(String(row.json)) as Extract<JournalRecord,{kind:'mote-main-input-route'}>).route):null
+    })
+  }
   async readMoteMainInputRoute(identity: MoteDialogueIdentity, operationId: string): Promise<MoteDialogueInputRoute | null> {
     return this.withLock(async () => this.mainInputRoute(identity,operationId), true)
   }

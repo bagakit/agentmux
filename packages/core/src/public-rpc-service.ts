@@ -1,3 +1,6 @@
+import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
+import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
+import { agentTakeoverPrompt } from './agent-takeover-context.js'
 import { reconcileMoteMainSetup } from './mote-main-setup.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote-dialogue.js'
@@ -146,7 +149,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
-  'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
+  'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
@@ -355,7 +358,7 @@ const NATIVE_FIELDS = {
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
   'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition'],
-  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'],
+  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent'],
@@ -375,7 +378,7 @@ const NATIVE_FIELDS = {
   'agent.automation.inspect': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'browser.input.inspect': ['hostId', 'operationId'],
   'agent.input.resource': ['key', 'index', 'revision', 'maxBytes', 'purpose'],
-  'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
+  'agent.input.inspect': ['key', 'kind', 'originalControlOperationId', 'activity'],
   'agent.input.observation': ['agentSessionId','observationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
@@ -1249,6 +1252,16 @@ export class AgentMuxRpcService {
           throw new AgentMuxError('Main creation setup requires a transport-approved user or device without a managed Agent caller. Read the original creation with space inspect.', 'CONTROL_PERMISSION_DENIED')
         }
         context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        const intent=request.moteMain
+        if(intent.rollover) {
+          const existing=(await this.spatial.read())?.graph
+          if(!existing||!spatialAgentOpenRecord(existing,request.requestId)) {
+            const main=await this.ports.moteDialogue?.mainInput?.readCurrentMoteMain(intent.target,context.signal)
+            const decision=main&&await this.evaluateMoteRollover(main,intent.rollover.queryOperationId,await this.messageRouteJournal(),context)
+            const frozen=(value:import('./mote-main-period.js').MoteMainRolloverDecision)=>{const {evaluatedAt:_now,...original}=value;return original}
+            if(decision?.status!=='due'||!decision.decision||request.requestId!==intent.rollover.creationOperationId||intent.deferredInput?.operationId!==intent.rollover.queryOperationId||!isDeepStrictEqual(frozen(decision.decision),frozen(intent.rollover)))throw new AgentMuxError('The original rollover policy, role or activity changed. Keep this Query and inspect its original source.','MOTE_MAIN_CHANGED')
+          }
+        }
       }
       if (request.operation === 'agent.open' && request.content.kind === 'new-agent' && request.content.toolWorkspaceId !== undefined) {
         // Check before forwarding to a presentation owner: this mode carries the same resource authority as execution.create.
@@ -2604,7 +2617,8 @@ export class AgentMuxRpcService {
             caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
           result = { record: input?.admission ?? null, input }; break
         }
-        rpcRecord(p, ['key'])
+        rpcRecord(p, ['key', 'activity'])
+        if (p.activity !== undefined && p.activity !== true) throw new AgentMuxError('Activity inspection must be explicitly enabled.', 'INVALID_CONTROL_REQUEST')
         const key = validateAgentPromptInputKey(p.key)
         const { client } = await (async () => {
           try { return await this.originalInputOwner(key.agentSessionId, caller) }
@@ -2622,7 +2636,7 @@ export class AgentMuxRpcService {
           }
         })()
         if (caller && caller.client !== client) throw new AgentMuxError('Input inspection cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
-        if (client.forwardRpc) return await client.forwardRpc('agent.input.inspect', { key }, context) as AgentMuxRpcResult<M>
+        if (client.forwardRpc) return await client.forwardRpc('agent.input.inspect', { key, ...(p.activity === true ? { activity: true } : {}) }, context) as AgentMuxRpcResult<M>
         const observed = await client.inspectAgentInput({ key }, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
         // A physical predecessor remains independently readable after its logical
         // input advances. Do not pair that immutable claim with today's receipt.
@@ -2631,7 +2645,7 @@ export class AgentMuxRpcService {
         if (!input && caller && caller.agentSessionId !== key.agentSessionId && original?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError('Only an original input participant can inspect its claim.', 'CONTROL_PERMISSION_DENIED')
         // A supplementary pointer must not revoke the original authorized input read.
         const observation=await client.inspectMoteInput({agentSessionId:key.agentSessionId,observationId:moteInputObservationId({kind:'prompt',key}),...(caller ? {caller:{agentSessionId:caller.agentSessionId,capability:caller.capability}} : {})}).catch(()=>null)
-        result = { record: original, ...(input ? { input } : {}), ...(observation ? {moteObservationId:observation.observation.id} : {}) }; break
+        result = { ...(p.activity === true ? { activity: await client.readAgentInputActivity(key) } : {}), sourceNow:Date.now(), record: original, ...(input ? { input } : {}), ...(observation ? {moteObservationId:observation.observation.id} : {}) }; break
       }
       case 'agent.input.stop': case 'agent.input.rejoin': {
         const ref = validateAgentInputWaitRef(p.ref)
@@ -2836,7 +2850,7 @@ export class AgentMuxRpcService {
       // Frozen resource and Session Host fields are opaque facts, never route aliases to rewrite.
       return await routes[0]!.client.forwardRpc!(leaf,request,await this.inputForwardContext(context))
     }
-    return await reconcileMoteMainSetup(input,method === 'space.mote.dialogue.setup.advance',{
+    const result = await reconcileMoteMainSetup(input,method === 'space.mote.dialogue.setup.advance',{
       spatial:this.spatial, assertCurrent,
       creation:async (hostId,sessionId) => {
         const routes = (await this.ports.coreClients?.() ?? []).filter(scope => scope.hostId === hostId)
@@ -2848,6 +2862,49 @@ export class AgentMuxRpcService {
       sources:async request => parseMoteDialogueResult('space.mote.dialogue.read',await resourceCall('space.mote.dialogue.read',request),request),
       link:async request => parseMoteDialogueResult('space.mote.dialogue.link',await resourceCall('space.mote.dialogue.link',request),request)
     })
+    const record=result.record,intent=record?.moteMain
+    if(record&&intent&&result.creation==='confirmed'&&result.binding==='confirmed') {
+      try {
+        const sources=await resourceCall('space.mote.dialogue.read',{target:intent.target,operationId:intent.bindOperationId})
+        const missing = !sources.links.some(link=>link.kind==='main'&&link.roleRevision===moteMainBindingDefaults(record).conversationRevision)
+        if (missing && method==='space.mote.dialogue.setup.advance') {
+          await resourceCall('space.mote.dialogue.link',{target:intent.target,operationId:intent.bindOperationId,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,source:{kind:'main'}})
+          result.issue = null
+        } else if(sources.sourceStatus==='read') result.issue=null
+      }catch(error){result.issue=[result.issue,'The original saved role source remains unconfirmed: '+String(error)].filter(Boolean).join('\n')}
+    }
+    if(!record||!intent||!intent.deferredInput&&!intent.handover) return result
+    const advance=method==='space.mote.dialogue.setup.advance'
+    const stage=async (field:'deferredInputKey'|'handoverInputKey',body:{operationId:string;prompt:string;sourceChannel?:import('./types.js').AgentMessageChannel;inputImages?:import('./agent-input-resource.js').AgentInputImageReference[]}) => {
+      const prior=await this.moteMainInput('space.mote.dialogue.input.inspect',{target:intent.target,operationId:body.operationId},context)
+      if(prior.route||!advance||result.binding!=='confirmed') return prior
+      const owners=(await this.clients()).filter(scope=>scope.hostId===record.execution.hostId)
+      if(owners.length!==1||this.endpointUnverified(owners[0]!.client)) throw new AgentMuxError('The original created Main input Host is unavailable. Keep the frozen Query.','CONTROL_UNAVAILABLE')
+      const created=await owners[0]!.client.inspectAgentCreation(record.agentSessionId)
+      if(created.kind!=='agent'||created.creation?.createOperationId!==record.requestId)throw new AgentMuxError('The original created Main is unconfirmed. Its Query is retained.','CONTROL_UNAVAILABLE')
+      const key=await this.spatial.claimMoteMainInput(record.requestId,field,{kind:'prompt',agentSessionId:record.agentSessionId,expectedRun:created.run,submissionId:body.operationId})
+      return await this.moteMainInput('space.mote.dialogue.input.submit',{target:intent.target,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,input:{...body,agentSessionId:key.agentSessionId,expectedRun:key.expectedRun,admissionIntent:{kind:'manual-actor'},execution:'immediate'}},context)
+    }
+    const retainIssue = (cause: unknown) => { result.issue=[result.issue,cause instanceof Error?cause.message:String(cause)].filter(Boolean).join('\n') }
+    if(intent.handover&&intent.baseline.defaults.conversation) {
+      try {
+        const old=intent.baseline.defaults.conversation,owners=(await this.clients()).filter(scope=>scope.hostId===old.hostId)
+        const original=owners.length===1?await owners[0]!.client.readAgentSession(old.sessionId).catch(()=>null):null
+        const prompt=agentTakeoverPrompt({hostId:old.hostId,agentSessionId:old.sessionId,cwd:original?.workspacePath,executorId:original?.executorId,label:old.sessionId,diagnostic:original?'Original source identity retained.':'Original source observation is unconfirmed; retain this exact reference.'},undefined,old.hostId)
+        result.handoverInput=await stage('handoverInputKey',{operationId:moteMainHandoverInputId(record.requestId),prompt})
+        if(!['admitted','terminal-confirmed'].includes(agentPromptSubmissionOutcome(result.handoverInput.record)))result.issue=[result.issue,'The original handover input is unconfirmed; inspect its exact key. The separate Query retains its own Core input qualification.'].filter(Boolean).join('\n')
+      } catch(cause) { retainIssue(cause) }
+    }
+    if(intent.deferredInput) {
+      try {
+        result.deferredInput=await stage('deferredInputKey',intent.deferredInput)
+        const outcome=result.deferredInput.input?.status==='not-applied'?'not-applied':agentPromptSubmissionOutcome(result.deferredInput.record)
+        if(advance&&(outcome==='admitted'||outcome==='terminal-confirmed'||outcome==='not-applied'))await this.spatial.observeMoteMainInput(record.requestId,outcome)
+      } catch(cause) { retainIssue(cause) }
+    }
+    result.record=spatialAgentOpenRecord((await this.spatial.read())!.graph,record.requestId)
+    return result
+
   }
 
   /** Explicit entry admits the exact current role into the original Session continuity owner, without an input journal. */
@@ -2902,6 +2959,10 @@ export class AgentMuxRpcService {
 
   /** Logical intake adds only an immutable route to the original journal. Original Core remains the sole input owner. */
   private async moteMainInput(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote-dialogue.js').MoteDialogueInputSubmit | import('./mote-dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteDialogueInputInspection> {
+    const owner=this.ports.moteDialogue?.mainInput
+    return method==='space.mote.dialogue.input.submit'&&owner?.withRole?await owner.withRole(input.target,()=>this.moteMainInputInRole(method,input,context)):await this.moteMainInputInRole(method,input,context)
+  }
+  private async moteMainInputInRole(method: 'space.mote.dialogue.input.submit' | 'space.mote.dialogue.input.inspect', input: import('./mote-dialogue.js').MoteDialogueInputSubmit | import('./mote-dialogue.js').MoteDialogueInputRead, context: AgentMuxRpcCallContext): Promise<import('./mote-dialogue.js').MoteDialogueInputInspection> {
     const mainOwner = this.ports.moteDialogue?.mainInput
     if (!mainOwner) throw new AgentMuxError('The original Mote main input owner is unavailable. Keep the draft and original operation; no input was sent.', 'CONTROL_UNAVAILABLE')
     await this.inputCallContext(context).assertCurrent?.(); context.signal?.throwIfAborted()
@@ -2914,6 +2975,7 @@ export class AgentMuxRpcService {
     const operationId = submit?.operationId ?? (input as import('./mote-dialogue.js').MoteDialogueInputRead).operationId
     let route = await journal.readMoteMainInputRoute(main.identity,operationId)
     let firstIntake = false
+    let rollover: import('./mote-main-period.js').MoteMainRolloverReading | undefined
     if (submit) {
       const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
         ? Object.fromEntries(Object.entries(value).filter(([,v]) => v !== undefined).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0).map(([k,v]) => [k,canonical(v)])) : value
@@ -2926,6 +2988,8 @@ export class AgentMuxRpcService {
       } else {
         if (main.status !== 'ready' || !main.current || !main.roleRevision || main.roleRevision !== expectedRoleRevision || main.current.sessionId !== submit.agentSessionId)
           throw new AgentMuxError('The main Agent changed before accepting this logical input. The original draft was retained; no later Agent received it.', 'MOTE_MAIN_CHANGED')
+        rollover=await this.evaluateMoteRollover(main,operationId,journal,context)
+        if(rollover.status==='due')return {route:null,record:null,input:null,disposition:'rollover-required',rollover}
         const owners = (await this.clients()).filter(scope => scope.hostId === main.current!.hostId)
         if (owners.length !== 1 || this.endpointUnverified(owners[0]!.client)) throw new AgentMuxError('The exact current main Host is unavailable or ambiguous. Keep the original draft.', 'CONTROL_UNAVAILABLE')
         const prior = await this.inspectMainInputAt(owners[0]!, key, context)
@@ -2943,7 +3007,7 @@ export class AgentMuxRpcService {
             async () => undefined,this.ports.inputContextCaptures,context.signal)
           await mainOwner.assertCurrent(main,context.signal)
           const claimed = await journal.claimMoteMainInputRoute({identity:main.identity,operationId,roleRevision:main.roleRevision,reference:main.current,key,
-            runtimeId:owners[0]!.client.runtimeOwnerIdentity?.()?.runtimeId ?? null,intentDigest:digest,admittedAt:Date.now(),
+            runtimeId:owners[0]!.client.runtimeOwnerIdentity?.()?.runtimeId ?? null,intentDigest:digest,admittedAt:Date.now(),...(rollover?{rollover}:{}),
             ...(recovery ? {recoveryOperationId:recovery.operationId} : {})})
           route = claimed.route; firstIntake = claimed.created
         }
@@ -2968,7 +3032,7 @@ export class AgentMuxRpcService {
       const retained = (await scope.client.readAgentSession(route.key.agentSessionId))?.continuityOperations?.[route.recoveryOperationId] ?? null
       const key = retained?.launchInput?.key
       const original = key ? await this.inspectMainInputAt(scope,key,context) : {record:null,input:null}
-      return {route,record:original.record,input:original.input ?? null,recovery:retained}
+      return {...(route.rollover?{rollover:route.rollover}:{}),route,record:original.record,input:original.input ?? null,recovery:retained}
     }
     const observed = await this.inspectMainInputAt(scope,route.key,context)
     // Accepted, waiting and unknown original inputs are reads, never another submit or a later role.
@@ -2976,16 +3040,51 @@ export class AgentMuxRpcService {
       ...(observed.record.admission ? {promptCompletionAdmission:observed.record.admission} : {}),
       ...(observed.record.terminalPromptSubmission ? {terminalPromptSubmission:observed.record.terminalPromptSubmission} : {})})
     const explicitPreparationRetry = submit?.preparationRetry && notApplied
-    if (!submit || !firstIntake && !explicitPreparationRetry || (observed.input || observed.record) && !explicitPreparationRetry) return {route,record:observed.record,input:observed.input ?? null}
+    if (!submit || !firstIntake && !explicitPreparationRetry || (observed.input || observed.record) && !explicitPreparationRetry) return {...(route.rollover?{rollover:route.rollover}:{}),route,record:observed.record,input:observed.input ?? null}
     const result = await this.submitInputAt(scope,submit,context)
-    return {route,record:result.record,input:result.input ?? null}
+    return {...(route.rollover?{rollover:route.rollover}:{}),route,record:result.record,input:result.input ?? null,...(rollover?{rollover}:{})}
   }
 
-  private async inspectMainInputAt(scope: AgentMuxRpcCoreClient, key: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>, context: AgentMuxRpcCallContext) {
-    if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.inspect',{key},context)
-    if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local','agent.input.inspect',{key},context)
+  private async evaluateMoteRollover(main: import('./mote-dialogue.js').MoteMainSnapshot, operationId:string, journal:DurableAgentMuxMessageQueue, context:AgentMuxRpcCallContext):Promise<import('./mote-main-period.js').MoteMainRolloverReading> {
+    let rollover:import('./mote-main-period.js').MoteMainRolloverReading={status:'unconfirmed',decision:null,issue:'The original Main dialogue activity is unconfirmed. Existing input remains available.'}
+    if(main.status!=='ready'||!main.identity||!main.current||!main.roleRevision)return rollover
+    try {
+        const preference=this.ports.moteQuickPreferences&&await this.ports.moteQuickPreferences.read({kind:'quick',target:main.target})
+        const policy=preference?.status==='ready'?preference.defaults?.conversationRollover:undefined
+        if(policy?.kind==='idle') {
+          rollover={status:'unconfirmed',decision:null,issue:'The original Main dialogue idle source is unconfirmed. Its existing input remains available.'}
+          const latest=await journal.latestMoteMainInputRoute(main.identity,main.roleRevision)
+          if(latest&&!latest.recoveryOperationId) {
+            const scopes=(await this.clients()).filter(scope=>scope.hostId===latest.reference.hostId),scope=scopes.length===1?scopes[0]:undefined
+            if(scope&&!this.endpointUnverified(scope.client)) {
+              const observed=await this.inspectMainInputAt(scope,latest.key,context,true),idle=observed.record?.semanticIdle
+              const session=await scope.client.readAgentSession(latest.key.agentSessionId)
+              const sourceNow=observed.sourceNow
+              if(idle&&session&&idle.run.runId===session.run.runId&&idle.promptSubmissionId===latest.operationId&&
+                !session.pendingInteraction&&observed.activity?.state==='idle'&&
+                typeof sourceNow==='number'&&sourceNow>=idle.observedAt) {
+                const elapsed=sourceNow-idle.observedAt
+                if(elapsed>=policy.idleMs) {
+                  const policyRevision=createHash('sha256').update(JSON.stringify([main.identity,policy])).digest('hex')
+                  const creationOperationId='mote-rollover:'+createHash('sha256').update(JSON.stringify([main.identity,main.roleRevision,policyRevision,operationId])).digest('hex')
+                  const decision={target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current,policyRevision,policy,
+                    activity:{inputKey:latest.key,run:idle.run,sourceId:idle.sourceId,sequence:idle.sequence,idleSince:idle.observedAt},evaluatedAt:sourceNow,queryOperationId:operationId,creationOperationId}
+                  return {status:'due',decision,issue:null}
+                }
+                rollover={status:'not-due',decision:null,issue:null}
+              }
+            }
+          } else if(!latest) rollover={status:'not-due',decision:null,issue:null}
+        } else if(preference?.status==='ready') rollover={status:'keep-current',decision:null,issue:null}
+    } catch(error){return {status:'unconfirmed',decision:null,issue:'Inspecting the original rollover source failed: '+String(error)}}
+    return rollover
+  }
+
+  private async inspectMainInputAt(scope: AgentMuxRpcCoreClient, key: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>, context: AgentMuxRpcCallContext, activity = false) {
+    if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.inspect',{key,...(activity ? {activity:true} : {})},context)
+    if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local','agent.input.inspect',{key,...(activity ? {activity:true} : {})},context)
     const input = await scope.client.inspectAgentInput({key})
-    return {input,record:input ? input.admission : await scope.client.inspectAgentPromptSubmission(key)}
+    return {...(activity ? {activity:await scope.client.readAgentInputActivity(key)} : {}),sourceNow:scope.hostId==='local'?Date.now():undefined,input,record:input ? input.admission : await scope.client.inspectAgentPromptSubmission(key)}
   }
 
   /** The existing ingress Core journal retains only routing facts, never another envelope/body. */

@@ -24,7 +24,7 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
   }
   const digest = spatialAgentOpenDigest(input.request), previous = spatialAgentOpenRecord(graph, input.request.requestId)
   const mainIntent = input.request.moteMain
-  const pending = mainIntent && !mainIntent.baseline.defaults.conversation ? pendingMoteMainCreation(graph, mainIntent.target) : null
+  const pending = mainIntent ? pendingMoteMainCreation(graph, mainIntent.target, mainIntent.expectedRoleRevision) : null
   if (pending && pending.requestId !== input.request.requestId) throw new AgentMuxError(
     'This Mote already has an original unfinished Main creation. Inspect that operation without starting another Agent.',
     'MOTE_MAIN_CREATION_PENDING', JSON.stringify({ operationId: pending.requestId, target: pending.moteMain!.target }))

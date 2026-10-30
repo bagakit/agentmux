@@ -765,7 +765,18 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.input.inspect': {
-        record(p, ['record', 'input','moteObservationId'])
+        record(p, ['record', 'input','moteObservationId','sourceNow','activity'])
+        if (p.activity !== undefined) {
+          const activity = record(p.activity, ['key', 'state', 'source', 'sourceId', 'sourceNow', 'issue'])
+          if (input.kind === 'message-control' || input.activity !== true ||
+              !isDeepStrictEqual(validateAgentPromptInputKey(activity.key), validateAgentPromptInputKey(input.key)) ||
+              !['idle', 'active', 'unconfirmed'].includes(String(activity.state)) ||
+              !['native-hook', 'native-provider', 'interaction', 'unconfirmed'].includes(String(activity.source)) ||
+              activity.sourceId !== null && typeof activity.sourceId !== 'string' ||
+              activity.issue !== null && typeof activity.issue !== 'string') fail()
+          count(activity.sourceNow)
+        }
+        if(p.sourceNow!==undefined)count(p.sourceNow)
         if(p.moteObservationId!==undefined)string(p.moteObservationId)
         const observed = p.input === null || p.input === undefined ? null : inputReceipt(p.input)
         if (input.kind === 'message-control') {

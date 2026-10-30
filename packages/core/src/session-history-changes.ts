@@ -19,6 +19,7 @@ export type NativeConversationChangesPage = ConversationRef & {
   more: boolean
 }
 export type ProviderConversationChangesContext = Omit<AgentProviderSessionHistoryContext, 'cursor'> & {
+  through?: string
   after?: string
   tail?: true
   /** Cut-only at the original source beginning, without consuming its first record. Not combined with after/tail. */

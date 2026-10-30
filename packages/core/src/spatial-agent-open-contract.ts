@@ -1,3 +1,8 @@
+import { safeId } from './agent-identifiers.js'
+import { deriveObjectId } from './object-id.js'
+import { parseMoteMainRolloverDecision, type MoteMainRolloverDecision } from './mote-main-period.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { parseAgentInputSubmit } from './agent-input-submit.js'
 import type { AgentMuxAgentSession } from './types.js'
 import type { AgentMuxSpaceAgentFact, AgentMuxSpaceAddress, AgentMuxSpaceControlRequest } from './space-control.js'
 import type { AgentMuxSpatialGraph } from './spatial-graph.js'
@@ -26,10 +31,11 @@ export type MoteMainBindingObservation = {kind:'preferences';source:MoteMainBase
   {kind:'source';operationId:string;file:{resource:FileReadResource;revision:string};reference:MoteDefaultConversation;roleRevision:string}
 export type MoteMainBindingReceipt = { operationId: string; status: MoteQuickPreferencesSaveResult['status']; source: MoteMainBaseline | null; message: string | null }
 export type MoteMainFollowUpInput = { requestId: string; step: 'source' | 'binding'; receipt?: MoteQuickPreferencesSaveResult; baselineChanged?: MoteMainBaseline }
+export type MoteMainDeferredInput = Pick<import('./agent-input-submit.js').AgentInputSubmit,'operationId'|'prompt'|'sourceChannel'|'inputImages'>
 export type MoteMainCreationIntent = { target: MotePreferencesTarget; baseline: MoteMainBaseline;
-  expectedRoleRevision: string | null; sourceOperationId: string; bindOperationId: string }
+  expectedRoleRevision: string | null; sourceOperationId: string; bindOperationId: string; deferredInput?: MoteMainDeferredInput; handover?: true; rollover?:MoteMainRolloverDecision }
 export function parseMoteMainCreationIntent(value: unknown, code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR' | 'INVALID_CLI_ARGUMENT' = 'INVALID_CONTROL_REQUEST'): MoteMainCreationIntent {
-  const p = rpcRecord(value, ['target','baseline','expectedRoleRevision','sourceOperationId','bindOperationId'], code)
+  const p = rpcRecord(value, ['target','baseline','expectedRoleRevision','sourceOperationId','bindOperationId','deferredInput','handover','rollover'], code)
   const target = parseMotePreferencesTarget(p.target, code), baseline = parseMoteMainBaseline(p.baseline, target, code)
   for (const key of ['sourceOperationId','bindOperationId','expectedRoleRevision']) {
     if (key === 'expectedRoleRevision' && p[key] === null) continue
@@ -37,7 +43,18 @@ export function parseMoteMainCreationIntent(value: unknown, code: 'INVALID_CONTR
   }
   if (baseline.defaults.conversation && !p.expectedRoleRevision || !baseline.defaults.executorId || p.sourceOperationId === p.bindOperationId)
     throw new AgentMuxError('Main creation requires the original configured default and role generation.', code)
-  return { target, baseline, expectedRoleRevision: p.expectedRoleRevision as string | null,
+  let deferredInput: MoteMainDeferredInput | undefined
+  if (p.deferredInput !== undefined) {
+    const d=rpcRecord(p.deferredInput,['operationId','prompt','sourceChannel','inputImages'],code)
+    const parsed=parseAgentInputSubmit({...d,agentSessionId:'deferred-main',expectedRun:{runId:'deferred-main'},afterSubmissionId:null})
+    safeId(parsed.operationId,'Agent prompt operation id')
+    deferredInput={operationId:parsed.operationId,prompt:parsed.prompt,...(parsed.sourceChannel ? {sourceChannel:parsed.sourceChannel} : {}),...(parsed.inputImages ? {inputImages:parsed.inputImages} : {})}
+    if ([p.sourceOperationId,p.bindOperationId].includes(deferredInput.operationId)) throw new AgentMuxError('The deferred input keeps a distinct original operation.',code)
+  }
+  if(p.handover !== undefined && (p.handover !== true || !baseline.defaults.conversation)) throw new AgentMuxError('Main handover requires the original predecessor role.',code)
+  const rollover=p.rollover===undefined?undefined:parseMoteMainRolloverDecision(p.rollover,code)
+  if(rollover&&(!sameMotePreferencesTarget(rollover.target,target)||rollover.expectedRoleRevision!==p.expectedRoleRevision||!deferredInput||deferredInput.operationId!==rollover.queryOperationId))throw new AgentMuxError('The rollover belongs to another original Query or Mote.',code)
+  return { ...(rollover?{rollover}:{}), ...(deferredInput ? {deferredInput} : {}), ...(p.handover ? {handover:true as const} : {}), target, baseline, expectedRoleRevision: p.expectedRoleRevision as string | null,
     sourceOperationId: p.sourceOperationId as string, bindOperationId: p.bindOperationId as string }
 }
 
@@ -63,7 +80,7 @@ export type AgentMuxSpatialAgentOpenRecord = {
   execution: { hostId: string; workspacePath: string; workspaceId: string }
   moteMain?: MoteMainCreationIntent
   /** Dispatch markers only. Actual outcomes are read from the original source and Files owners. */
-  moteMainFollowUps?: { sourceStarted?: true; bindStarted?: true; bindingReceipt?: MoteMainBindingReceipt; refusedBeforeBinding?: MoteMainBaseline; bindingObserved?: MoteMainBindingObservation }
+  moteMainFollowUps?: { sourceStarted?: true; bindStarted?: true; bindingReceipt?: MoteMainBindingReceipt; refusedBeforeBinding?: MoteMainBaseline; bindingObserved?: MoteMainBindingObservation; deferredInputObserved?:'admitted'|'terminal-confirmed'|'not-applied'; deferredInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>; handoverInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}> }
 }
 /** Original creation reference, never current-role authority. */
 export function moteMainCreatedReference(record: AgentMuxSpatialAgentOpenRecord) {
@@ -99,10 +116,10 @@ export function validateMoteMainBindingReceipt(record: AgentMuxSpatialAgentOpenR
     throw new AgentMuxError('The original Main binding receipt references are invalid.', 'CONTROL_PROTOCOL_ERROR')
 }
 /** Original unfinished first creation, independent of unrelated MOTE edits or client-local pointers. */
-export function pendingMoteMainCreation(graph: AgentMuxSpatialGraph, target: MotePreferencesTarget): AgentMuxSpatialAgentOpenRecord | null {
+export function pendingMoteMainCreation(graph: AgentMuxSpatialGraph, target: MotePreferencesTarget, expectedRoleRevision?:string|null): AgentMuxSpatialAgentOpenRecord | null {
   const matches = Object.keys(spatialAgentOpenDocument(graph).requests).flatMap(id => {
     const record = spatialAgentOpenRecord(graph, id)!, intent = record.moteMain, receipt = record.moteMainFollowUps?.bindingReceipt
-    if (!intent || intent.baseline.defaults.conversation || record.moteMainFollowUps?.refusedBeforeBinding || receipt && receipt.status !== 'unconfirmed' || record.moteMainFollowUps?.bindingObserved) return []
+    if (!intent || expectedRoleRevision!==undefined&&intent.expectedRoleRevision!==expectedRoleRevision || record.moteMainFollowUps?.refusedBeforeBinding || receipt && receipt.status !== 'unconfirmed' || record.moteMainFollowUps?.bindingObserved) return []
     const original = intent.target
     return original.spaceId === target.spaceId && original.zoneId === target.zoneId &&
       original.expectedResource.hostId === target.expectedResource.hostId && original.expectedResource.workspaceId === target.expectedResource.workspaceId &&
@@ -145,8 +162,14 @@ export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: s
       !original.address || !original.execution || typeof original.execution.hostId !== 'string' || typeof original.execution.workspacePath !== 'string') throw new AgentMuxError(
     'The exact spatial creation association is unconfirmed. Keep its Session and original request.', 'SPATIAL_CREATION_UNCONFIRMED')
   if (original.moteMain) parseMoteMainCreationIntent(original.moteMain, 'CONTROL_PROTOCOL_ERROR')
-  if (original.moteMainFollowUps && Object.entries(original.moteMainFollowUps).some(([key,value]) => !['sourceStarted','bindStarted','bindingReceipt','refusedBeforeBinding','bindingObserved'].includes(key) || !['bindingReceipt','refusedBeforeBinding','bindingObserved'].includes(key) && value !== true))
+  if (original.moteMainFollowUps && Object.entries(original.moteMainFollowUps).some(([key,value]) => !['sourceStarted','bindStarted','bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) || !['bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) && value !== true))
     throw new AgentMuxError('The original Main follow-up admission is unreadable.', 'SPATIAL_CREATION_UNCONFIRMED')
+  if(original.moteMainFollowUps?.deferredInputObserved&&!original.moteMainFollowUps.deferredInputKey)throw new AgentMuxError('An input observation needs its exact original input key.','SPATIAL_CREATION_UNCONFIRMED')
+  if(original.moteMainFollowUps?.deferredInputObserved&&!['admitted','terminal-confirmed','not-applied'].includes(original.moteMainFollowUps.deferredInputObserved))throw new AgentMuxError('The original Main input observation is invalid.','SPATIAL_CREATION_UNCONFIRMED')
+  for (const field of ['deferredInputKey','handoverInputKey'] as const) {
+    const value=original.moteMainFollowUps?.[field]
+    if(value) {const key=validateAgentPromptInputKey(value);if(key.kind!=='prompt'||key.agentSessionId!==original.agentSessionId||key.submissionId!==(field==='deferredInputKey'?original.moteMain?.deferredInput?.operationId:moteMainHandoverInputId(original.requestId)))throw new AgentMuxError('The original Main input key belongs to another admission.','SPATIAL_CREATION_UNCONFIRMED')}
+  }
   if (original.moteMainFollowUps?.bindingReceipt) validateMoteMainBindingReceipt(original, original.moteMainFollowUps.bindingReceipt)
   if (original.moteMainFollowUps?.bindingObserved) validateMoteMainBindingObservation(original, original.moteMainFollowUps.bindingObserved)
   if (original.moteMainFollowUps?.refusedBeforeBinding) {
@@ -179,3 +202,16 @@ export function validateMoteMainBindingObservation(record: AgentMuxSpatialAgentO
   }
   throw new AgentMuxError('The observed Main writer role belongs to another original operation.', code)
 }
+
+/** Original started first Query, including a bound role whose input is not yet inspected. */
+export function retainedMoteMainStarts(graph: AgentMuxSpatialGraph, target: MotePreferencesTarget): AgentMuxSpatialAgentOpenRecord[] {
+  const matches=Object.keys(spatialAgentOpenDocument(graph).requests).map(id=>spatialAgentOpenRecord(graph,id)!).filter(record=>record.moteMain?.deferredInput&&sameMotePreferencesTarget(record.moteMain.target,target))
+  return matches
+}
+
+/** Related original starts still awaiting an accepted input observation; never choose by array position. */
+export function pendingMoteMainStarts(graph:AgentMuxSpatialGraph,target:MotePreferencesTarget):AgentMuxSpatialAgentOpenRecord[] {
+ return retainedMoteMainStarts(graph,target).filter(record=>!record.moteMainFollowUps?.deferredInputObserved&&!record.moteMainFollowUps?.refusedBeforeBinding&&record.moteMainFollowUps?.bindingReceipt?.status!=='refused-before-write')
+}
+
+export function moteMainHandoverInputId(requestId:string):string {return 'mote-main-handover-'+deriveObjectId('mote-main-handover',requestId)}

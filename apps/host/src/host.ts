@@ -154,7 +154,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   if (configurationPath && content?.files && moteMain && goals) motePresence = createHostMotePresence({ configurationPath, spatial: spatialState, files: content.files, main: moteMain, schedules: goals.schedules, ...(options.connections?.subscribeClients ? { subscribeClients: options.connections.subscribeClients } : {}),
     clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] })
   const moteQuickPreferences = content?.files && moteMain ? new HostMoteQuickPreferences({ files: content.files, main: moteMain,
-    ...(moteDialogue ? { recordMainSource: moteDialogue.recordMainSource } : {}),
+    ...(moteDialogue ? { recordMainSource: moteDialogue.recordMainSource, prepareMainSource:moteDialogue.prepareMainSource } : {}),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
     executors: async () => (await originalRuntime().client.listHostExecutors()).executors.map(value => ({ id: value.executorId, name: value.label, providerId: value.providerId })),
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined

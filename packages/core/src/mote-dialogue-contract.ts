@@ -1,3 +1,4 @@
+import { parseMoteMainPeriod, parseMoteMainRolloverDecision, type MoteMainPeriod, type MoteMainRolloverReading } from './mote-main-period.js'
 import { dequal } from 'dequal'
 import { parseAgentInputSubmit, type AgentInputSubmit } from './agent-input-submit.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
@@ -7,14 +8,14 @@ import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
 import type { AgentPromptSubmissionRecord } from './types.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseMotePreferencesReadInput, parseMoteDefaultConversation, sameMotePreferencesTarget, type MotePreferencesTarget } from './mote-preferences.js'
+import { parseMotePreferencesReadInput, parseMoteQuickDefaults, parseMoteDefaultConversation, sameMotePreferencesTarget, type MotePreferencesTarget } from './mote-preferences.js'
 import type { FileReadResource } from './public-rpc-files.js'
 import type { MoteDialogueIdentity, MoteMainSnapshot } from './mote-dialogue.js'
 import { normalizeAgentContinuityOperation, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
 import { parseMoteMainEntrySource, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteMainEntrySource } from './mote-main-entry-source.js'
 export { sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation } from './mote-main-entry-source.js'
 import type { AgentMuxRunRef } from './types.js'
-import { validateMoteMainBindingObservation, validateMoteMainBindingReceipt, spatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRecord, type MoteMainBindingObservation, type MoteMainBindingReceipt } from './spatial-agent-open-contract.js'
+import { moteMainHandoverInputId, moteMainBindingDefaults, validateMoteMainBindingObservation, validateMoteMainBindingReceipt, spatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRecord, type MoteMainBindingObservation, type MoteMainBindingReceipt } from './spatial-agent-open-contract.js'
 
 export type MoteDialogueLink = {
   sequence: number
@@ -23,7 +24,7 @@ export type MoteDialogueLink = {
   associatedAt: number
 } & ({ kind: 'main'; roleRevision: string; reference: import('./mote-preferences.js').MoteDefaultConversation;
   /** No inferred message cut: this source is the complete original Session, with original coverage. */
-  range: 'whole-session'; file: { resource: FileReadResource; revision: string } }
+  range: 'whole-session'; period?: MoteMainPeriod; file: { resource: FileReadResource; revision: string } }
   | { kind: 'work'; eventId: string; mainRoleRevision: string; main: { hostId: string; agentSessionId: string };
     origin: { hostId: string; messageId: string; threadId: string; senderSessionId: string; recipientSessionId: string; createdAt: number | null } })
 export type MoteDialogueCursor = { identity: MoteDialogueIdentity; incarnation: string; selection: string; throughSequence: number; beforeSequence: number }
@@ -38,7 +39,7 @@ export type MoteDialogueInputRoute = {
   identity: MoteDialogueIdentity; operationId: string; roleRevision: string
   reference: import('./mote-preferences.js').MoteDefaultConversation
   key: Extract<AgentPromptInputKey, { kind: 'prompt' }>
-  runtimeId: string | null; intentDigest: string; admittedAt: number
+  runtimeId: string | null; intentDigest: string; admittedAt: number; rollover?:MoteMainRolloverReading
   /** Original native recovery operation; its actual launch input key remains with that lifecycle owner. */
   recoveryOperationId?: string
 }
@@ -51,7 +52,7 @@ export type MoteDialogueRecoveryRequest = MoteMainEntrySource & { expectedRun: A
 export type MoteDialogueRecoveryInspection = { operation: AgentMuxContinuityOperation | null }
 export type MoteDialogueInputInspection = { route: MoteDialogueInputRoute | null; record: AgentPromptSubmissionRecord | null; input: AgentInputSubmissionReceipt | null;
   /** The exact original retained operation, not a reconstructed recovery result or acceptance. */
-  recovery?: AgentMuxContinuityOperation | null }
+  recovery?: AgentMuxContinuityOperation | null; rollover?: MoteMainRolloverReading; disposition?: 'rollover-required' }
 /** Exact-condition receipt reference for clients; it grants no controlled waiting or replay contract. */
 export type MoteDialogueInputReference = { inputKey: Extract<AgentPromptInputKey,{kind:'prompt'}>; record: AgentPromptSubmissionRecord;
   outcome: 'admitted' | 'terminal-confirmed'; moteObservationId?: string }
@@ -64,6 +65,7 @@ export type MoteMainSetupResult = {
   binding: 'confirmed' | 'refused' | 'unconfirmed'; issue: string | null
   /** Original File receipt references; an observed writer role is deliberately separate. */
   bindingReceipt: MoteMainBindingReceipt | null; bindingObserved: MoteMainBindingObservation | null
+  deferredInput?: MoteDialogueInputInspection | null; handoverInput?: MoteDialogueInputInspection | null
 }
 export type MoteDialogueParamsMap = { 'space.mote.dialogue.read': MoteDialogueRead; 'space.mote.dialogue.link': MoteDialogueWrite; 'space.mote.dialogue.input.submit': MoteDialogueInputSubmit; 'space.mote.dialogue.input.inspect': MoteDialogueInputRead;
   'space.mote.dialogue.recovery.ensure': MoteDialogueRecoveryRequest; 'space.mote.dialogue.recovery.inspect': MoteDialogueRecoveryRequest;
@@ -92,10 +94,10 @@ export function parseMoteDialogueIdentity(value: unknown, code = 'CONTROL_PROTOC
 export function sameMoteDialogue(a: MoteDialogueIdentity, b: MoteDialogueIdentity): boolean { return a.hostId === b.hostId && a.moteId === b.moteId }
 export function parseMoteDialogueLink(value: unknown, code: 'CONTROL_PROTOCOL_ERROR' | 'INVALID_CONTROL_REQUEST' = 'CONTROL_PROTOCOL_ERROR'): MoteDialogueLink {
   const p = rpcRecord(value, undefined, code)
-  rpcRecord(p, ['sequence','identity','operationId','associatedAt', ...(p.kind === 'main' ? ['kind','roleRevision','reference','range','file'] : ['kind','eventId','mainRoleRevision','main','origin'])], code)
+  rpcRecord(p, ['sequence','identity','operationId','associatedAt', ...(p.kind === 'main' ? ['kind','roleRevision','reference','range','file','period'] : ['kind','eventId','mainRoleRevision','main','origin'])], code)
   count(p.sequence, code, 1); count(p.associatedAt, code); parseMoteDialogueIdentity(p.identity, code); text(p.operationId, code)
   if (p.kind === 'main') {
-    text(p.roleRevision, code); parseMoteDefaultConversation(p.reference, code)
+    text(p.roleRevision, code); parseMoteDefaultConversation(p.reference, code); if(p.period!==undefined){const period=parseMoteMainPeriod(p.period);if(period.roleRevision!==p.roleRevision||!dequal(period.reference,p.reference))return fail(code)}
     if (p.range !== 'whole-session') return fail(code)
     const file = rpcRecord(p.file, ['resource','revision'], code), resource = rpcRecord(file.resource, ['hostId','workspaceId','workspacePath','zoneId','zonePath','path','logicalDirectory'], code)
     for (const key of ['hostId','workspaceId','workspacePath','zoneId','zonePath','path']) text(resource[key],code)
@@ -167,7 +169,7 @@ export function parseMoteDialogueParams<M extends MoteDialogueMethod>(method:M,v
 }
 export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,value:unknown,input:MoteDialogueParamsMap[M]):MoteDialogueResultMap[M]{
   if (method === 'space.mote.dialogue.setup.inspect' || method === 'space.mote.dialogue.setup.advance') {
-    const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId','ownerHostId','record','reference','creation','source','binding','issue','bindingReceipt','bindingObserved'], code), query = input as MoteMainSetupRequest
+    const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId','ownerHostId','record','reference','creation','source','binding','issue','bindingReceipt','bindingObserved','deferredInput','handoverInput'], code), query = input as MoteMainSetupRequest
     if (p.operationId !== query.creation.operationId || p.ownerHostId !== query.creation.hostId || !['confirmed','unconfirmed'].includes(String(p.creation)) ||
       !['confirmed','not-needed','unconfirmed'].includes(String(p.source)) || !['confirmed','refused','unconfirmed'].includes(String(p.binding)) || p.issue !== null && typeof p.issue !== 'string') return fail(code)
     if (p.reference !== null) parseMoteDefaultConversation(p.reference,code)
@@ -183,6 +185,11 @@ export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,v
       if (p.creation === 'confirmed' && p.reference === null || p.source === 'not-needed' && record?.moteMain?.baseline.defaults.conversation || p.source === 'confirmed' && !record?.moteMain?.baseline.defaults.conversation || p.binding === 'confirmed' && p.bindingObserved === null && !['saved','unchanged'].includes(String((p.bindingReceipt as MoteMainBindingReceipt | null)?.status)) || p.binding === 'refused' && !record?.moteMainFollowUps?.refusedBeforeBinding && (p.bindingReceipt as MoteMainBindingReceipt | null)?.status !== 'refused-before-write') return fail(code)
       if (record && p.bindingReceipt !== null) validateMoteMainBindingReceipt(record,p.bindingReceipt as MoteMainBindingReceipt)
       if (record && p.bindingObserved !== null) validateMoteMainBindingObservation(record,p.bindingObserved as MoteMainBindingObservation)
+      for(const field of ['deferredInput','handoverInput'] as const) if(p[field]!==undefined) {
+        const operationId=field==='deferredInput'?record.moteMain.deferredInput?.operationId:record.moteMain.handover?moteMainHandoverInputId(record.requestId):undefined
+        if(!operationId)return fail(code)
+        if(p[field]!==null){const observed=parseMoteDialogueResult('space.mote.dialogue.input.inspect',p[field],{target:query.target,operationId});if(observed.route&&(!dequal(observed.route.reference,p.reference)||observed.route.roleRevision!==moteMainBindingDefaults(record).conversationRevision))return fail(code)}
+      }
     } else if (p.reference !== null || p.creation !== 'unconfirmed' || p.bindingReceipt !== null || p.bindingObserved !== null) return fail(code)
     return p as MoteDialogueResultMap[M]
   }
@@ -197,8 +204,9 @@ export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,v
     return p as MoteDialogueResultMap[M]
   }
   if (method === 'space.mote.dialogue.input.submit' || method === 'space.mote.dialogue.input.inspect') {
-    const p = rpcRecord(value, ['route','record','input','recovery'], 'CONTROL_PROTOCOL_ERROR')
-    if (p.route === null) { if (method !== 'space.mote.dialogue.input.inspect' || p.record !== null || p.input !== null || p.recovery !== undefined) return fail('CONTROL_PROTOCOL_ERROR') }
+    const p = rpcRecord(value, ['route','record','input','recovery','rollover','disposition'], 'CONTROL_PROTOCOL_ERROR')
+    if(p.rollover!==undefined){const r=rpcRecord(p.rollover,['status','decision','issue'],'CONTROL_PROTOCOL_ERROR');if(!['keep-current','not-due','due','unconfirmed'].includes(String(r.status))||r.issue!==null&&typeof r.issue!=='string')return fail('CONTROL_PROTOCOL_ERROR');if(r.status==='due'){const d=parseMoteMainRolloverDecision(r.decision,'CONTROL_PROTOCOL_ERROR'),q=input as MoteDialogueInputSubmit;if(p.disposition!=='rollover-required'||!('input' in q)||d.queryOperationId!==q.input.operationId||d.expectedRoleRevision!==q.expectedRoleRevision||!sameMotePreferencesTarget(d.target,q.target))return fail('CONTROL_PROTOCOL_ERROR')}else if(r.decision!==null)return fail('CONTROL_PROTOCOL_ERROR')}
+    if (p.route === null) { if (method !== 'space.mote.dialogue.input.inspect' && p.disposition!=='rollover-required' || p.record !== null || p.input !== null || p.recovery !== undefined) return fail('CONTROL_PROTOCOL_ERROR') }
     else {
       const route = parseMoteDialogueInputRoute(p.route), query = input as MoteDialogueInputSubmit | MoteDialogueInputRead
       if (route.operationId !== ('input' in query ? query.input.operationId : query.operationId) || route.identity.hostId !== query.target.expectedResource.hostId) return fail('CONTROL_PROTOCOL_ERROR')
@@ -224,8 +232,9 @@ export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,v
   if(method==='space.mote.dialogue.link'){
     if(p.operationId!==(input as MoteDialogueWrite).operationId||links.some(link=>link.operationId!==p.operationId))return fail(code)
   }else{
-    const query=input as MoteDialogueRead,main=rpcRecord(p.main,['target','identity','status','resource','documentRevision','roleRevision','current','issue'],code)
+    const query=input as MoteDialogueRead,main=rpcRecord(p.main,['target','identity','status','resource','documentRevision','roleRevision','current','issue','transition'],code)
     if(!sameMotePreferencesTarget(main.target as MotePreferencesTarget,query.target)||!['ready','unconfirmed'].includes(String(main.status)))return fail(code)
+    if(main.transition!==undefined)parseMoteQuickDefaults({conversationTransition:main.transition},code)
     const identity=main.identity===null?null:parseMoteDialogueIdentity(main.identity,code)
     if(main.current!==null)parseMoteDefaultConversation(main.current,code)
     for(const key of ['documentRevision','roleRevision','issue'])if(main[key]!==null)text(main[key],code)
@@ -241,12 +250,13 @@ export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,v
 }
 
 export function parseMoteDialogueInputRoute(value: unknown): MoteDialogueInputRoute {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['identity','operationId','roleRevision','reference','key','runtimeId','intentDigest','admittedAt','recoveryOperationId'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['identity','operationId','roleRevision','reference','key','runtimeId','intentDigest','admittedAt','recoveryOperationId','rollover'], code)
   parseMoteDialogueIdentity(p.identity, code); text(p.operationId,code); text(p.roleRevision,code)
   const reference = parseMoteDefaultConversation(p.reference,code), key = validateAgentPromptInputKey(p.key)
   if (key.kind !== 'prompt' || key.agentSessionId !== reference.sessionId || key.submissionId !== p.operationId || typeof p.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(p.intentDigest)) return fail(code)
   if (p.runtimeId !== null) text(p.runtimeId,code)
   if (p.recoveryOperationId !== undefined) text(p.recoveryOperationId,code)
+  if(p.rollover!==undefined){const r=rpcRecord(p.rollover,['status','decision','issue'],code);if(!['keep-current','not-due','unconfirmed'].includes(String(r.status))||r.decision!==null||r.issue!==null&&typeof r.issue!=='string')return fail(code)}
   count(p.admittedAt,code)
   return p as MoteDialogueInputRoute
 }

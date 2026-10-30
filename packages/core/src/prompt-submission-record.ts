@@ -93,6 +93,24 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
     'A Runtime launch input cannot also claim terminal submission.', 'INVALID_AGENT_SESSION_STORE')
   if (parsed.admission && parsed.terminalPromptSubmission && parsed.admission.submissionId !== parsed.terminalPromptSubmission.submissionId) throw new AgentMuxError(
     'Original prompt phases name different logical inputs.', 'INVALID_AGENT_SESSION_STORE')
+  if (r.semanticIdle !== undefined) {
+    const idle = record(r.semanticIdle, 'original input semantic idle')
+    const source = idle.source
+    if (idle.state !== 'idle' || runRef(idle.run).runId !== run.runId ||
+        idle.promptSubmissionId !== (parsed.admission?.submissionId ?? parsed.launch?.key?.submissionId) ||
+        !Number.isSafeInteger(idle.sequence) || Number(idle.sequence) < 1 ||
+        source !== 'native-hook' && source !== 'native-status') throw new AgentMuxError(
+      'The idle source does not belong to this original input.', 'INVALID_AGENT_SESSION_STORE')
+    parsed.semanticIdle = { state: 'idle', run,
+      observedAt: timestamp(idle.observedAt, 'idle observation'),
+      sourceId: string(idle.sourceId, 'idle source'), sequence: Number(idle.sequence),
+      nativeSessionId: string(idle.nativeSessionId, 'idle native source'),
+      nativeTurnId: string(idle.nativeTurnId, 'idle native turn'),
+      promptSubmissionId: string(idle.promptSubmissionId, 'idle original input'),
+      ...(source === 'native-status'
+        ? { source, recordId: string(idle.recordId, 'idle native record') }
+        : { source, hookReceiptId: string(idle.hookReceiptId, 'idle receipt') }) }
+  }
   const inputKey = parsed.admission?.inputKey
   if (parsed.admission?.intent && parsed.admission.intent.run.runId !== run.runId || inputKey &&
       (inputKey.agentSessionId !== parsed.agentSessionId || inputKey.expectedRun.runId !== run.runId ||

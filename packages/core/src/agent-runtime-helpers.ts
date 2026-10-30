@@ -5,18 +5,12 @@ import { AgentMuxError } from './errors.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import type { AgentProviderId, AgentMuxAgentSession, AgentMuxRunRef, AgentTerminalHandshake } from './types.js'
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('amux')
 export function runRef(runId: string): AgentMuxRunRef {
   return { runId }
 }
 
-export function safeId(value: string, name: string): string {
-  if (!SAFE_ID.test(value)) {
-    throw new AgentMuxError(`${name} must contain only letters, numbers, underscore, or dash.`, 'INVALID_SESSION_ID')
-  }
-  return value
-}
+export { safeId } from './agent-identifiers.js'
 
 export function terminalHandshakeOperationIdentity(
   providerId: AgentProviderId,

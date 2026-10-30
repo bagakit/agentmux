@@ -178,6 +178,28 @@ export class AgentMuxSpatialStateStore {
       return { record, claimed: true }
     })
   }
+  /** Freeze only an original post-binding input key, never a replacement target. */
+  async claimMoteMainInput(requestId: string, step: 'deferredInputKey'|'handoverInputKey', key: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>) {
+    return this.locked(async () => {
+      const current=await this.requiredState(),record=spatialAgentOpenRecord(current.graph,requestId)
+      if(!record?.moteMain) throw new AgentMuxError('The original Main creation is unavailable.','SPATIAL_CREATION_UNCONFIRMED')
+      const prior=record.moteMainFollowUps?.[step]
+      if(prior) return prior
+      record.moteMainFollowUps={...record.moteMainFollowUps,[step]:key}
+      const graph=structuredClone(current.graph),document=graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] as unknown as {requests:Record<string,typeof record>}
+      document.requests[requestId]=record;spatialAgentOpenRecord(graph,requestId);await this.writeLocked(current,graph)
+      return key
+    })
+  }
+  async observeMoteMainInput(requestId:string,outcome:'admitted'|'terminal-confirmed'|'not-applied') {
+    return this.locked(async()=>{
+      const current=await this.requiredState(),record=spatialAgentOpenRecord(current.graph,requestId)
+      if(!record?.moteMain?.deferredInput||!record.moteMainFollowUps?.deferredInputKey)throw new AgentMuxError('The original deferred Main input key is unavailable.','SPATIAL_CREATION_UNCONFIRMED')
+      if(record.moteMainFollowUps.deferredInputObserved)return
+      record.moteMainFollowUps={...record.moteMainFollowUps,deferredInputObserved:outcome}
+      const graph=structuredClone(current.graph),document=graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] as unknown as {requests:Record<string,typeof record>};document.requests[requestId]=record;spatialAgentOpenRecord(graph,requestId);await this.writeLocked(current,graph)
+    })
+  }
   /** Called only with the result returned by the original writer, never with a client receipt. */
   async recordMoteMainBindingResult(input: import('./mote-preferences.js').MoteQuickPreferencesSaveParams, result: import('./mote-preferences.js').MoteQuickPreferencesSaveResult) {
     return this.locked(async () => {

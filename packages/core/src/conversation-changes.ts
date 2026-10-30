@@ -43,7 +43,7 @@ export type AgentConversationReadPage = ConversationRef & { sourceHostId: string
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
 /** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
 export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning' }
-export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
+export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; through?: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
 export type ConversationWatchInput = ConversationRef & { view?: string }
 export type ConversationViewReleaseInput = ConversationRef & { view: string }
@@ -237,10 +237,10 @@ export function parseConversationTimelineReadInput(value: unknown): Conversation
     ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   const checkpoint = parseConversationCheckpoint(p.checkpoint, ref)
-  return { ...ref, checkpoint, ...options(p) }
+  return { ...ref, checkpoint, ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p) }
 }
 export function parseConversationWatchInput(value: unknown): ConversationWatchInput {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'view'])
