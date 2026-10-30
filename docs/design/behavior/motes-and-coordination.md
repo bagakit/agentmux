@@ -144,7 +144,7 @@ Main Agent 是可轮转的执行角色，Mote 保持同一身份与逻辑主对�
 
 主 Agent 失败或观察未知时，在其原入口说明受影响职责及恢复动作；其他健康成员、原输入与工作面继续可用。恢复或明确更换主 Agent 保留原任务与决定来源，不用空白新 Session 冒充原对接者。主角色的驻留与内部心跳按下述明确持久安排执行；它不自动开启普通日历安排、外部消息或更大权限，这些动作仍沿各自授权和原 owner。
 
-主 Agent 创建后的 source 关联与原 MOTE CAS 由公共 `space.mote.dialogue.setup.inspect/advance` 同一 owner 组合，Desktop、Mobile、Hosted SDK 与 CLI 消费同一入口。输入仅为原完整 target 与 creation `{hostId,operationId}`；creation Host 准确指向原空间 admission owner，不从 MOTE 资源 Host 或 Agent 执行 Host 猜出。inspect 纯读，advance 只供原人类／设备明确推进尚未开始的原 follow-up；不新建、恢复、停止或输入 Agent，不接受客户端自报 File saved。创建、旧 Main source 和绑定分别反馈，原 File 回执与 writer 角色／source journal 观察证据区分。普通 preferences.save 只有 bind operation、完整 target、baseline、role 与 occurrence 均相符的实际 writer 结果才能结原初建 claim；跨 owner 已完成保存可在同一原 setup 明确 reconciliation，未知阶段不重放。
+主 Agent 创建后的 source 关联与原 MOTE CAS 由公共 `space.mote.dialogue.setup.inspect/advance` 同一 owner 组合，Desktop、Mobile、Hosted SDK 与 CLI 消费同一入口。参数仅为原完整 target 与 creation `{hostId,operationId}`；creation Host 准确指向原空间 admission owner，不从 MOTE 资源 Host 或 Agent 执行 Host 猜出。inspect 纯读，advance 只供原人类／设备明确推进原 follow-up；不新建、恢复、停止 Agent，不接受临时追加的 Query 或客户端自报 File saved。已在原创建意图冻结的首条 Query 与接替输入，按[欢迎与流转合同](#欢迎输入与主对话流转)在绑定确认后交同一原 Main input owner；各自的输入资格与回执独立核对。创建、旧 Main source、绑定与输入分别反馈，原 File 回执与 writer 角色／source journal 观察证据区分。普通 preferences.save 只有 bind operation、完整 target、baseline、role 与 occurrence 均相符的实际 writer 结果才能结原初建 claim；跨 owner 已完成保存可在同一原 setup 明确 reconciliation，未知阶段不重放。
 
 ### 合作资料与工作入口
 
