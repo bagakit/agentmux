@@ -47,7 +47,7 @@ export function queryInputReceipt(store: PublicationStore, binding: PublicationB
       query.ingressId !== original.queryFeedback?.ingressId || query.externalMessageId !== original.queryFeedback.messageId ||
       receipt.key.kind !== 'message' || receipt.key.agentSessionId !== query.input.agentSessionId ||
       receipt.key.expectedRun.runId !== query.input.expectedRun.runId || receipt.key.messageId !== query.input.messageId) return
-  const delivered = receipt.status === 'terminal-confirmed' || receipt.status === 'admitted'
+  const delivered = receipt.status === 'terminal-confirmed' || receipt.status === 'admitted' || receipt.status === 'launch-carried'
   if (delivered) queueQueryFeedback(store, binding, query, 'dispatched')
   if (delivered || receipt.status === 'not-applied' || receipt.status === 'stopped' && receipt.control.state === 'stopped-before-dispatch') {
     store.database.prepare("UPDATE connector_publication_operation SET operation_json=json_remove(operation_json,'$.queryPending') WHERE operation_id=?").run(original.operationId)

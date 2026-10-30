@@ -66,7 +66,8 @@ export type DurableIngressOptions = {
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const intakeRows = 'SELECT sequence,connection_id,ingress_id,record_json FROM connection_ingress_message UNION ALL SELECT intake_sequence AS sequence,connection_id,ingress_id,record_json FROM connection_ingress_event WHERE record_json IS NOT NULL'
 const unfinishedIntake = "(json_extract(record_json,'$.state')='received' OR (COALESCE(json_extract(record_json,'$.code'),'')!='INGRESS_CONTENT_UNSUPPORTED' AND json_extract(record_json,'$.group.target.agentSessionId') IS NOT NULL AND json_extract(record_json,'$.group.recorded') IS NULL AND COALESCE(json_extract(record_json,'$.group.recording.state'),'')!='refused'))"
-const recoveryOperationId = (sessionId: string, runId: string) => createHash('sha256').update(JSON.stringify(['connector-input', sessionId, runId])).digest('hex')
+const recoveryOperationId = (ref: import('@agentmux/core').AgentInputWaitRef) => createHash('sha256')
+  .update(JSON.stringify(['connector-input', ref.key, ref.waitGeneration])).digest('hex')
 function fail(code: string): never { throw new AgentMuxError('This external intake cannot use the original target or authority. Existing Agents and inputs are retained.', code) }
 function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
   const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail('INVALID_CONNECTION_INGRESS'); return v as string }
@@ -521,18 +522,21 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     try {
       await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(claimed.record))
     } catch { /* A Core call may have saved or dispatched input. Only inspect this original operation. */ }
-    return await this.inspect({ ingressId })
+    return await this.continueInput(ingressId, receiverSignal)
   }
-  /** The existing Core continuity owner decides whether to reattach, resume or retain unknown. */
-  private async prepareRecipient(record: ConnectionIngressMessage, client: DurableIngressCore) {
+  /** Save the original input before asking Core to carry it through recovery. */
+  private async prepareRecipient(record: ConnectionIngressMessage, client: DurableIngressCore,
+    messageInputRef?: import('@agentmux/core').AgentInputWaitRef) {
     const original = this.authorize(record, record.input)
     const session = await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId)
     if (!session || session.agentSessionId !== original.binding.agentSessionId || session.hostId !== original.binding.executionHostId) fail('INGRESS_TARGET_UNCONFIRMED')
-    const current = session.continuity
+    if (!messageInputRef) return session
+    const originalOperation = session.continuityOperations?.[recoveryOperationId(messageInputRef)]
+    const current = originalOperation ?? session.continuity
     const pending = current && ['pending', 'starting'].includes(current.kind) &&
-      current.operationId === recoveryOperationId(session.agentSessionId, current.previousRun.runId) &&
+      current.operationId === recoveryOperationId(messageInputRef) &&
       [current.previousRun.runId, current.newRun?.runId].includes(session.run.runId) ? current : undefined
-    if (!pending && client.runtimeSubject) {
+    if (!pending && !originalOperation?.messageInput?.plan && client.runtimeSubject) {
       try {
         const subject = await client.runtimeSubject({ kind: 'terminal-run', runId: session.run.runId })
         if (subject.run.runId !== session.run.runId || subject.run.workspacePath !== session.workspacePath) fail('INGRESS_TARGET_UNCONFIRMED')
@@ -544,10 +548,10 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) return session
       }
     }
-    const expectedRun = pending?.previousRun ?? session.run
+    const expectedRun = originalOperation?.previousRun ?? pending?.previousRun ?? session.run
     this.authorize(record, record.input)
     const result = await client.ensureAgentContinuity({ agentSessionId: session.agentSessionId, expectedRun,
-      operationId: pending?.operationId ?? recoveryOperationId(session.agentSessionId, expectedRun.runId), trigger: 'input' })
+      operationId: originalOperation?.operationId ?? pending?.operationId ?? recoveryOperationId(messageInputRef), trigger: 'input', messageInputRef }, this.context(record))
     this.authorize(record, record.input)
     if (result.kind !== 'resumed' && result.kind !== 'reattachable') fail('INGRESS_RECOVERY_PENDING')
     if (result.session.agentSessionId !== session.agentSessionId || result.session.hostId !== session.hostId) fail('INGRESS_TARGET_UNCONFIRMED')
@@ -557,15 +561,18 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const original = await this.inspect({ ingressId }), record = original.ingress, receipt = original.inputReceipt
     // Only an exact original receipt grants continuation; silence or an absent reply never does.
     if (!record || record.kind === 'action' || !record.input || !receipt || receipt.control.state === 'stopped-before-dispatch' ||
-      receipt.control.state !== 'enabled' && receipt.status !== 'not-applied') return original
+      receipt.control.state !== 'enabled' && receipt.status !== 'not-applied' &&
+      !(receipt.status === 'unknown' && receipt.admission?.admission?.transport === 'launch')) return original
     const delay = this.recoveryDelay.get(ingressId)
     if (delay && delay.nextAt > Date.now() || signal?.aborted) return original
     try {
       const client = this.options.core(record.input.hostId, record.input.author.authoritySource?.executionRuntimeId)
       if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-      await this.prepareRecipient(record, client)
+      const waiting = receipt.status === 'not-applied'
+        ? await client.rejoinAgentInputWaiting({ ref: receipt.ref }, this.context(record)) : receipt
+      await this.prepareRecipient(record, client, waiting.ref)
       signal?.throwIfAborted()
-      await client.rejoinAgentInputWaiting({ ref: receipt.ref }, this.context(record))
+      await client.rejoinAgentInputWaiting({ ref: waiting.ref }, this.context(record))
     } finally {
       // Keep the original pending work while bounding repeated unavailable/not-applied attempts.
       const failures = Math.min((delay?.failures ?? 0) + 1, 5)
@@ -655,7 +662,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const inputReceipt = await client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: ingress.input.operationId })
       const context = this.inspectContext(ingress, inputReceipt)
       const result = parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt, observation: 'observed', ...(context ? { context } : {}) }, input)
-      if (inputReceipt && (inputReceipt.status === 'admitted' || inputReceipt.status === 'terminal-confirmed')) {
+      if (inputReceipt && (inputReceipt.status === 'admitted' || inputReceipt.status === 'terminal-confirmed' || inputReceipt.status === 'launch-carried')) {
         try { this.database.prepare('UPDATE connection_ingress_message SET input_settled=1 WHERE ingress_id=? AND input_settled=0').run(ingress.ingressId) }
         catch { /* A failed work-index update leaves extra observation work, never erases a valid Core receipt. */ }
         this.recoveryDelay.delete(ingress.ingressId)
