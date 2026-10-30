@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-import { hashAgentCapability } from './agent-capability.js'
-import { hookBindingIdentity } from './agent-session-identity.js'
+import { hookBindingIdentity, hashAgentCapability } from './agent-capability.js'
 import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
 import { AgentMuxError } from './errors.js'

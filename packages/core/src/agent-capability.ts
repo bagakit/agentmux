@@ -85,3 +85,8 @@ export function resolveCapabilityAuthor(
   }
   return binding.agentSessionId
 }
+
+/** Private Hook binding locator; authentication still requires the separate Hook token. */
+export function hookBindingIdentity(operationId: string): string {
+  return createHash('sha256').update(operationId).digest('base64url')
+}
