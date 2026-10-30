@@ -4,6 +4,10 @@ import { join } from 'node:path'
 
 export const PACKAGE_IDENTITY_FILENAME = 'package-identity.json'
 
+export function packageCompatibilityIdentity({ appVersion, platform, arch }) {
+  return { schema: 'agentmux.package-identity.v1', appVersion, platform, arch }
+}
+
 export function createPackageIdentity({ sourceCommit, sourceTree, appVersion, platform, arch }) {
   const fields = { sourceCommit, sourceTree, appVersion, platform, arch }
   for (const [field, value] of Object.entries(fields)) {
@@ -12,12 +16,9 @@ export function createPackageIdentity({ sourceCommit, sourceTree, appVersion, pl
     }
   }
   return Object.freeze({
-    schema: 'agentmux.package-identity.v1',
+    ...packageCompatibilityIdentity({ appVersion, platform, arch }),
     sourceCommit,
-    sourceTree,
-    appVersion,
-    platform,
-    arch
+    sourceTree
   })
 }
 

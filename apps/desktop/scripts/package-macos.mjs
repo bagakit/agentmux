@@ -1,13 +1,9 @@
-import { copyBrowserExtension } from './prepare-browser-extension-identity.mjs'
-import { materializeStaticAvatarRuntime } from './static-avatar-runtime.mjs'
-import { resolvePackageRoot } from '../../../scripts/package-dependencies.mjs'
-import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
+import { copyRuntimePayload, inspectRuntimeApplicationPayload } from './runtime-application-payload.mjs'
 import { privatePackageSmokeEnvironment, preservePackageSmokeFailure } from './package-smoke-context.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
 import { hashRuntimeArtifact } from './update-identity.mjs'
 import { spawn } from 'node:child_process'
 import {
-  chmod,
   cp,
   lstat,
   mkdir,
@@ -22,7 +18,6 @@ import {
   symlink,
   writeFile
 } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
 import { homedir, tmpdir } from 'node:os'
@@ -32,22 +27,17 @@ import { observeApplicationProcesses, assertApplicationActivationOwnership, appl
 import {
   assertPackageIdentity,
   canonicalInstallPath,
-  createPackageIdentity,
-  packageIdentityPath,
   readPackageIdentity
 } from './package-identity.mjs'
 import { preflightMacosSigning, signAndVerifyMacosApplication } from './macos-signing.mjs'
 import { verifyNativeDesktopCopy, verifyNativeDesktopSigning } from './native-desktop-package.mjs'
 
-const PRODUCT_NAME = 'AgentMux'
-const BUNDLE_ID = 'dev.agentmux.desktop'
-const require = createRequire(import.meta.url)
+import { PRODUCT_NAME, BUNDLE_ID, applicationBranding } from './macos-application-brand.mjs'
+import { inspectElectronApplication } from './electron-application.mjs'
 const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
 const manifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
 const coreRoot = join(repositoryRoot, 'packages', 'core')
-const demandRoot = join(repositoryRoot, 'packages', 'demand')
-const connectorsRoot = join(repositoryRoot, 'packages', 'connectors')
 const releaseRoot = join(desktopRoot, 'release', 'mac')
 const outputApp = join(releaseRoot, `${PRODUCT_NAME}.app`)
 const outputDmg = join(
@@ -147,195 +137,30 @@ async function plistValue(path, key) {
 }
 
 export async function brandApplication(appPath) {
-  const contents = join(appPath, 'Contents')
-  const plist = join(contents, 'Info.plist')
-  const resources = join(contents, 'Resources')
-  const executable = join(contents, 'MacOS', PRODUCT_NAME)
-  await rename(join(contents, 'MacOS', 'Electron'), executable)
-  await plistReplace(plist, 'CFBundleDisplayName', 'string', PRODUCT_NAME)
-  await plistReplace(plist, 'CFBundleName', 'string', PRODUCT_NAME)
-  await plistReplace(plist, 'CFBundleIdentifier', 'string', BUNDLE_ID)
-  await plistReplace(plist, 'CFBundleURLTypes', 'json', JSON.stringify([{ CFBundleURLName: BUNDLE_ID, CFBundleURLSchemes: ['amux'], CFBundleTypeRole: 'Viewer' }, { CFBundleURLName: `${BUNDLE_ID}.web`, CFBundleURLSchemes: ['http', 'https'], CFBundleTypeRole: 'Viewer' }]))
-  await plistReplace(plist, 'CFBundleDocumentTypes', 'json', JSON.stringify(['public.html', 'public.xhtml'].map(type => ({ CFBundleTypeRole: 'Viewer', LSItemContentTypes: [type] }))))
-  await plistReplace(plist, 'CFBundleExecutable', 'string', PRODUCT_NAME)
-  await plistReplace(plist, 'CFBundleIconFile', 'string', 'agentmux.icns')
-  await plistReplace(plist, 'CFBundleShortVersionString', 'string', manifest.version)
-  await plistReplace(plist, 'CFBundleVersion', 'string', manifest.version)
-  await plistReplace(plist, 'LSApplicationCategoryType', 'string', 'public.app-category.developer-tools')
-  await plistReplace(plist, 'NSScreenCaptureUsageDescription', 'string', 'AgentMux captures the screen area you select to attach it to your message.')
-  for (const key of [
-    'NSAppTransportSecurity',
-    'NSAudioCaptureUsageDescription',
-    'NSBluetoothAlwaysUsageDescription',
-    'NSBluetoothPeripheralUsageDescription',
-    'NSCameraUsageDescription',
-    'NSMicrophoneUsageDescription'
-  ]) await plistRemove(plist, key)
-
-  const helpers = [
-    { suffix: '', idSuffix: '' },
-    { suffix: ' (Renderer)', idSuffix: '.renderer' },
-    { suffix: ' (GPU)', idSuffix: '.gpu' },
-    { suffix: ' (Plugin)', idSuffix: '.plugin' }
-  ]
-  const frameworks = join(contents, 'Frameworks')
-  for (const helper of helpers) {
-    const sourceName = `Electron Helper${helper.suffix}`
-    const targetName = `${PRODUCT_NAME} Helper${helper.suffix}`
-    const targetApp = join(frameworks, `${targetName}.app`)
-    await rename(join(frameworks, `${sourceName}.app`), targetApp)
-    await rename(
-      join(targetApp, 'Contents', 'MacOS', sourceName),
-      join(targetApp, 'Contents', 'MacOS', targetName)
-    )
-    const helperPlist = join(targetApp, 'Contents', 'Info.plist')
-    await plistReplace(helperPlist, 'CFBundleDisplayName', 'string', targetName)
-    await plistReplace(helperPlist, 'CFBundleName', 'string', targetName)
-    await plistReplace(helperPlist, 'CFBundleExecutable', 'string', targetName)
-    await plistReplace(helperPlist, 'CFBundleIdentifier', 'string', `${BUNDLE_ID}.helper${helper.idSuffix}`)
+  const contents = join(appPath, 'Contents'), resources = join(contents, 'Resources')
+  const brand = applicationBranding(manifest.version), plist = join(contents, 'Info.plist')
+  await rename(join(contents, 'MacOS', brand.executable.source), join(contents, 'MacOS', brand.executable.target))
+  for (const [key, value] of Object.entries(brand.plist)) {
+    await plistReplace(plist, key, typeof value === 'string' ? 'string' : 'json', typeof value === 'string' ? value : JSON.stringify(value))
   }
-
-  await cp(join(desktopRoot, 'resources', 'icon.icns'), join(resources, 'agentmux.icns'))
-  await rm(join(resources, 'electron.icns'), { force: true })
-  await rm(join(resources, 'default_app.asar'), { force: true })
-}
-
-async function copyDirectoryContents(source, destination) {
-  // macOS cp uses clonefile; the trailing slash merges contents even when destination exists.
-  await run('cp', ['-cR', `${source}${sep}`, destination], { capture: true })
+  for (const key of brand.removedPlistKeys) await plistRemove(plist, key)
+  for (const helper of brand.helpers) {
+    const target = join(contents, 'Frameworks', `${helper.target}.app`)
+    await rename(join(contents, 'Frameworks', `${helper.source}.app`), target)
+    await rename(join(target, 'Contents', 'MacOS', helper.source), join(target, 'Contents', 'MacOS', helper.target))
+    const helperPlist = join(target, 'Contents', 'Info.plist')
+    for (const [key, value] of Object.entries(helper.plist)) await plistReplace(helperPlist, key, 'string', value)
+  }
+  await cp(join(desktopRoot, brand.icon.source), join(resources, brand.icon.target))
+  for (const name of brand.removedResources) await rm(join(resources, name), { force: true })
 }
 
 export async function copyRuntimeApplication(appPath, source) {
-  const resources = join(appPath, 'Contents', 'Resources')
-  const appResources = join(resources, 'app')
-  await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
-  await copyDirectoryContents(join(desktopRoot, 'out'), join(appResources, 'out'))
-  await copyDirectoryContents(join(desktopRoot, 'resources'), join(appResources, 'resources'))
-  await copyBrowserExtension(join(appResources, 'browser-extension'))
-  await cp(join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'), join(appResources, 'THIRD_PARTY_NOTICES.md'))
-  await writeFile(join(appResources, 'package.json'), `${JSON.stringify({
-    name: 'agentmux-desktop',
-    productName: PRODUCT_NAME,
-    version: manifest.version,
-    private: true,
-    type: 'module',
-    main: 'out/main/index.js'
-  }, null, 2)}\n`)
-  await writeFile(
-    packageIdentityPath(appPath),
-    `${JSON.stringify(createPackageIdentity({
-      sourceCommit: source.commit,
-      sourceTree: source.tree,
-      appVersion: manifest.version,
-      platform: process.platform,
-      arch: process.arch
-    }), null, 2)}\n`
-  )
-
+  const appResources = join(appPath, 'Contents', 'Resources', 'app')
+  await copyRuntimePayload(await inspectRuntimeApplicationPayload(repositoryRoot), appResources, source)
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
-  await mkdir(coreRuntime, { recursive: true })
-  await copyDirectoryContents(join(coreRoot, 'dist'), join(coreRuntime, 'dist'))
-  await copyDirectoryContents(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'))
-  await copyDirectoryContents(join(coreRoot, 'bin'), join(coreRuntime, 'bin'))
-  await mkdir(join(coreRuntime, 'src'), { recursive: true })
-  await cp(join(coreRoot, 'src', 'ctxmux-artifact-contract.json'), join(coreRuntime, 'src', 'ctxmux-artifact-contract.json'))
-  await writeFile(join(coreRuntime, 'release.json'), JSON.stringify({ sourceCommit: source.commit, sourceTree: source.tree }) + '\n')
-  await writeEmbeddedCoreCli(join(coreRuntime, 'bin', 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
-  await symlink('amux', join(coreRuntime, 'bin', 'agentmux'))
-  const coreManifest = JSON.parse(await readFile(join(coreRoot, 'package.json'), 'utf8'))
-  await writeFile(join(coreRuntime, 'package.json'), `${JSON.stringify({
-    name: coreManifest.name,
-    version: coreManifest.version,
-    type: coreManifest.type,
-    main: coreManifest.main,
-    exports: coreManifest.exports,
-    engines: coreManifest.engines,
-    os: coreManifest.os,
-    cpu: coreManifest.cpu,
-    license: coreManifest.license,
-    repository: coreManifest.repository,
-    bin: coreManifest.bin
-  }, null, 2)}\n`)
-  await materializeDependencies(
-    coreRoot,
-    coreManifest.dependencies ?? {},
-    join(coreRuntime, 'node_modules')
-  )
-  const demandRuntime = join(appResources, 'node_modules', '@agentmux', 'demand')
-  const demandManifest = JSON.parse(await readFile(join(demandRoot, 'package.json'), 'utf8'))
-  await mkdir(demandRuntime, { recursive: true })
-  await copyDirectoryContents(join(demandRoot, 'dist'), join(demandRuntime, 'dist'))
-  await writeFile(join(demandRuntime, 'package.json'), `${JSON.stringify({
-    name: demandManifest.name,
-    version: demandManifest.version,
-    type: demandManifest.type,
-    main: demandManifest.main,
-    exports: demandManifest.exports,
-    bin: demandManifest.bin
-  }, null, 2)}\n`)
-  await materializeDependencies(
-    demandRoot,
-    demandManifest.dependencies ?? {},
-    join(demandRuntime, 'node_modules')
-  )
-  await materializeDependency(desktopRoot, '@agentmux/git', join(appResources, 'node_modules', '@agentmux', 'git'))
-  await materializeDependency(desktopRoot, '@agentmux/capsule', join(appResources, 'node_modules', '@agentmux', 'capsule'))
-  await materializeDependency(desktopRoot, '@agentmux/identity', join(appResources, 'node_modules', '@agentmux', 'identity'))
-  await materializeDependency(desktopRoot, '@noble/hashes', join(appResources, 'node_modules', '@noble', 'hashes'))
-  await materializeDependency(desktopRoot, 'react', join(appResources, 'node_modules', 'react'))
-  await materializeDependency(desktopRoot, 'react-dom', join(appResources, 'node_modules', 'react-dom'))
-  await materializeStaticAvatarRuntime(repositoryRoot, appResources)
-  await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
-  await materializeDependency(desktopRoot, 'luxon', join(appResources, 'node_modules', 'luxon'))
-  await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
-  await materializeDependency(desktopRoot, 'ws', join(appResources, 'node_modules', 'ws'))
-  await materializeDependency(connectorsRoot, 'fs-native-extensions', join(appResources, 'node_modules', 'fs-native-extensions'))
-  await materializeDependency(connectorsRoot, '@larksuiteoapi/node-sdk', join(appResources, 'node_modules', '@larksuiteoapi', 'node-sdk'))
-  await materializeDependency(connectorsRoot, '@discordjs/ws', join(appResources, 'node_modules', '@discordjs', 'ws'))
-  await materializeDependency(connectorsRoot, '@discordjs/rest', join(appResources, 'node_modules', '@discordjs', 'rest'))
-  await materializeDependency(connectorsRoot, 'discord-api-types', join(appResources, 'node_modules', 'discord-api-types'))
-  await materializeDependency(desktopRoot, 'yaml', join(appResources, 'node_modules', 'yaml'))
-  await materializeDependency(coreRoot, '@agentmux/relay', join(appResources, 'node_modules', '@agentmux', 'relay'))
-  const outBin = join(appResources, 'out', 'bin')
-  await mkdir(outBin, { recursive: true })
-  await copyDirectoryContents(join(coreRoot, 'bin'), outBin)
-  await writeEmbeddedCoreCli(join(outBin, 'amux'), join(appPath, 'Contents', 'MacOS', PRODUCT_NAME), join(coreRuntime, 'dist', 'agentmux.js'))
-  await symlink('amux', join(outBin, 'agentmux'))
-  await Promise.all([
-    chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux'), 0o755),
-    chmod(join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd'), 0o755),
-    chmod(join(coreRuntime, 'bin', 'amux'), 0o755),
-    chmod(join(outBin, 'amux'), 0o755)
-  ])
   await run(process.execPath, [join(coreRuntime, 'bin', 'install-ctxmux.mjs')])
   process.stdout.write('ctxmux_install_validation=passed\n')
-}
-
-async function materializeDependencies(sourcePackage, dependencies, destination) {
-  for (const packageName of Object.keys(dependencies).sort()) {
-    await materializeDependency(
-      sourcePackage,
-      packageName,
-      join(destination, ...packageName.split('/'))
-    )
-  }
-}
-
-async function materializeDependency(sourcePackage, packageName, destination) {
-  const source = await resolvePackageRoot(sourcePackage, packageName, repositoryRoot)
-  const packageManifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
-  await mkdir(destination, { recursive: true })
-  for (const entry of await readdir(source, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue
-    await cp(join(source, entry.name), join(destination, entry.name), {
-      recursive: entry.isDirectory()
-    })
-  }
-  await materializeDependencies(
-    source,
-    packageManifest.dependencies ?? {},
-    join(destination, 'node_modules')
-  )
 }
 
 export async function auditBundle(root, { runtimeRoot = null, forbidden = [] } = {}) {
@@ -1132,13 +957,10 @@ async function main() {
     initialSource.status === '',
     `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
   )
-  const electronRoot = dirname(require.resolve('electron/package.json'))
-  await run(process.execPath, [join(electronRoot, 'install.js')])
-  const electronApp = join(electronRoot, 'dist', 'Electron.app')
-  assert(await pathExists(electronApp), 'The locked Electron application is missing.')
   // Desktop prebuild owns the complete Host/Core/client and native/asset dependency graph.
   // Explicitly preserve that lifecycle even when a caller disables implicit pre/post hooks.
   await run('pnpm', ['--config.enable-pre-post-scripts=true', 'build'], { cwd: desktopRoot })
+  const { application: electronApp } = await inspectElectronApplication(repositoryRoot)
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
   let retainedDiagnostics = false
   let packagingError
