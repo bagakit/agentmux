@@ -1,7 +1,7 @@
 import { parseMobileAgentCreateIntent } from '../src/recovery/agent-create-intents'
 import './mobile-lan-crypto.setup'
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileAgentCreate } from '../src/navigation/MobileAgentCreate'
 import { MobileSpatialNavigation } from '../src/navigation/MobileSpatialNavigation'
 import { MobileZoneWorkface } from '../src/navigation/MobileZoneWorkface'
@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { button, click, deferred, mount, mounted } from './conversation-fixture'
 import { fixturePath } from '../../../test/fixture-values.mjs'
+import { MobileWebUpdateSafetyProvider, useMobileWebUpdateSafety } from '../src/mobile-web/update-safety'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -280,3 +281,150 @@ it('the executable agent-open CLI consumes the same original Launcher creator an
     expect(f.state().tabs).toEqual(original)
   } finally { await server.stop(); await rm(root, { recursive: true, force: true }); vi.unstubAllEnvs() }
 }, 45000)
+
+describe('Mobile recovery usability', () => {
+  let applyUpdate: ReturnType<typeof useMobileWebUpdateSafety>['apply']
+  function UpdateAction() { applyUpdate = useMobileWebUpdateSafety().apply; return null }
+  const tree = (props: ReturnType<typeof setup>['props']) => <MobileWebUpdateSafetyProvider verifyConnection={async () => () => true}>
+    <UpdateAction /><MobileAgentCreate {...props} />
+  </MobileWebUpdateSafetyProvider>
+  async function instruction(value: string) {
+    const input = document.querySelector<HTMLTextAreaElement>('[aria-label="新 Agent 初始指令"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const settled = () => act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, url: location.origin + '/mobile/next/' + 'a'.repeat(64) + '/index.html' })))
+    vi.spyOn(location, 'assign').mockImplementation(() => {})
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('allows the original page update after the same form is confirmed and closed', async () => {
+    const f = setup(), view = await mount(tree(f.props))
+    await choose(f); await instruction('Keep the original creation request')
+    expect(await applyUpdate!()).toMatchObject({ status: 'blocked' })
+    await click(button(document.body, '创建 Agent')); await settled()
+    const saved = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
+    await view.render(tree({ ...f.props, visible: false }))
+    expect(await applyUpdate!()).toEqual({ status: 'navigating' })
+    expect(location.assign).toHaveBeenCalledExactlyOnceWith('/#amux-update')
+    expect(getDeviceWorkface().snapshot().record.agentCreates!.at(-1)).toEqual(saved)
+    expect(f.launch).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves a later instruction while the original confirmed creation returns', async () => {
+    const f = setup(), held = deferred<void>(), source = f.client.forwardRpc
+    f.client.forwardRpc = async (method: string, params: any) => {
+      const result = await source(method, params)
+      if (method === 'agent.open') await held.promise
+      return result
+    }
+    await mount(tree(f.props)); await choose(f); await instruction('First exact instruction')
+    await click(button(document.body, '创建 Agent'))
+    await vi.waitFor(() => expect(f.launch).toHaveBeenCalledTimes(1))
+    await instruction('Later unsent instruction')
+    await act(async () => { held.resolve(); await held.promise }); await settled()
+    expect(document.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Later unsent instruction')
+    expect(getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!.input.content.prompt).toBe('First exact instruction')
+    expect(await applyUpdate!()).toMatchObject({ status: 'blocked', message: expect.stringContaining('指令') })
+    expect(location.assign).not.toHaveBeenCalled()
+    expect(f.launch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps later editing protected even when its final bytes match the older request', async () => {
+    const f = setup(), held = deferred<void>(), source = f.client.forwardRpc
+    f.client.forwardRpc = async (method: string, params: any) => { const result = await source(method, params); if (method === 'agent.open') await held.promise; return result }
+    await mount(tree(f.props)); await choose(f); await instruction('Original instruction')
+    await click(button(document.body, '创建 Agent')); await vi.waitFor(() => expect(f.launch).toHaveBeenCalledTimes(1))
+    await instruction('Later editing'); await instruction('Original instruction')
+    await act(async () => { held.resolve(); await held.promise }); await settled()
+    expect(await applyUpdate!()).toMatchObject({ status: 'blocked' })
+    expect(location.assign).not.toHaveBeenCalled()
+  })
+
+  it('settles the unchanged form when its confirmation arrives after closing', async () => {
+    const f = setup(), held = deferred<void>(), source = f.client.forwardRpc
+    f.client.forwardRpc = async (method: string, params: any) => { const result = await source(method, params); if (method === 'agent.open') await held.promise; return result }
+    const view = await mount(tree(f.props)); await choose(f); await instruction('Retained instruction')
+    await click(button(document.body, '创建 Agent')); await vi.waitFor(() => expect(f.launch).toHaveBeenCalledTimes(1))
+    await view.render(tree({ ...f.props, visible: false }))
+    expect(await applyUpdate!()).toMatchObject({ status: 'blocked', message: expect.stringContaining('进行') })
+    await act(async () => { held.resolve(); await held.promise }); await settled()
+    expect(await applyUpdate!()).toEqual({ status: 'navigating' })
+  })
+
+  it.each([false, true])('joins an inspected original confirmation to its submitted form generation: later edit %s', async laterEdit => {
+    const f = setup(), source = f.client.forwardRpc
+    let originalReceipt: any
+    f.client.forwardRpc = async (method: string, params: any) => {
+      const result = await source(method, params)
+      if (method === 'agent.open') { originalReceipt = result; throw Error('Original confirmed reply delayed') }
+      // Deliver the original public creator's captured, durable receipt. This
+      // bounded transport does not fabricate a new acknowledgement or launch.
+      return method === 'space.inspect' && originalReceipt ? { ...result, request: { ...result.request, report: originalReceipt } } : result
+    }
+    await mount(tree(f.props)); await choose(f); await instruction('Original submitted instruction')
+    await click(button(document.body, '创建 Agent'))
+    await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('unknown')) })
+    if (laterEdit) { await instruction('Later editing'); await instruction('Original submitted instruction') }
+    await click(button(document.body, '核对原创建操作')); await settled()
+    expect(await applyUpdate!()).toMatchObject({ status: laterEdit ? 'blocked' : 'navigating' })
+    expect(f.launch).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not copy unrelated device drafts while the creation surface is hidden', async () => {
+    const f = setup(), owner = getDeviceWorkface()
+    await owner.updateConversation({ version: 1, drafts: [['unrelated-session', 'Unrelated retained draft'.repeat(2000)]], attempts: [], responses: [] })
+    const original = globalThis.structuredClone, copied: unknown[] = []
+    vi.spyOn(globalThis, 'structuredClone').mockImplementation((value, options) => {
+      if (value?.conversation?.drafts?.some(([key]: [string, string]) => key === 'unrelated-session')) copied.push(value)
+      return original(value, options)
+    })
+    const view = await mount(<MobileAgentCreate {...f.props} visible={false} />)
+    for (let index = 0; index < 4; index++) await view.render(<MobileAgentCreate {...f.props} visible={false} />)
+    expect(copied).toHaveLength(0)
+    expect(f.rpc).not.toHaveBeenCalled()
+    await view.render(<MobileAgentCreate {...f.props} />)
+    expect(copied.length).toBeGreaterThan(0)
+    expect(document.querySelector('[aria-label="新 Agent 初始指令"]')).not.toBeNull()
+  })
+
+  it('offers original inspection before another creation and never resends it on inspection', async () => {
+    const f = setup(), source = f.client.forwardRpc
+    let originalReceipt: any
+    f.client.forwardRpc = async (method: string, params: any) => {
+      const result = await source(method, params)
+      if (method === 'agent.open' && !originalReceipt) { originalReceipt = result; throw Error('Original reply unconfirmed') }
+      return method === 'space.inspect' && params.target?.operationId === originalReceipt?.operationId
+        ? { ...result, request: { ...result.request, report: originalReceipt } } : result
+    }
+    await mount(tree(f.props)); await choose(f); await instruction('Original unknown request')
+    await click(button(document.body, '创建 Agent'))
+    await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('unknown')) })
+    const original = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
+    await instruction('A separately confirmed creation')
+    await click(button(document.body, '另建 Agent（保留待核对项）')); await settled()
+    const later = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
+    expect(later.input.operationId).not.toBe(original.input.operationId)
+    const inspect = button(document.body, '核对原创建操作'), create = button(document.body, '另建 Agent（保留待核对项）')
+    expect(inspect.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(inspect.classList.contains('mobile-primary')).toBe(true)
+    expect(create.classList.contains('mobile-primary')).toBe(false)
+    expect(create.disabled).toBe(false)
+    const newCreationFeedback = document.querySelector('[role="status"]')!
+    expect(newCreationFeedback.closest('.mobile-create-receipt')).toBeNull()
+    expect(create.compareDocumentPosition(newCreationFeedback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await click(inspect)
+    await act(async () => { await vi.waitFor(() => expect(document.querySelector('.mobile-create-receipt [role="status"]')?.textContent).toContain('Agent 已创建')) })
+    expect(document.querySelector('.mobile-create-receipt [role="status"]')?.closest('section')?.textContent).toContain(original.input.operationId)
+    expect(document.querySelectorAll('.mobile-agent-create [role="status"]')).toHaveLength(1)
+    expect(f.rpc).toHaveBeenCalledWith('space.inspect', { target: { operationId: original.input.operationId } })
+    expect(f.launch).toHaveBeenCalledTimes(2)
+    expect(getDeviceWorkface().snapshot().record.agentCreates!.find(intent => intent.input.operationId === original.input.operationId)).toMatchObject({ input: original.input, phase: 'confirmed' })
+    expect(getDeviceWorkface().snapshot().record.agentCreates!.at(-1)).toEqual(later)
+    expect(await applyUpdate!()).toMatchObject({ status: 'navigating' })
+  })
+})

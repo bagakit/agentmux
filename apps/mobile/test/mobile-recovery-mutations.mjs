@@ -1,0 +1,25 @@
+const connection = 'apps/mobile/src/connection/MobileConnectionRoot.tsx', creation = 'apps/mobile/src/navigation/MobileAgentCreate.tsx'
+export const recoveryMutations = {
+  'unrecoverable-as-retrying': { file: connection, target: 'uses the actual Hosted unrecoverable state without automatic retries or identity replacement',
+    edits: [[": event.state === 'unrecoverable' ?", ': false ?']] },
+  'late-save-replaces-state': { file: connection, target: 'does not replace an unrecoverable observation with a late first workface save',
+    edits: [['        publish()\n      } catch (error)', "        setConnection({ state: binding.current?.state === 'connected' ? 'connected' : 'disconnected', message: 'Original connection observation' })\n      } catch (error)"]] },
+  'native-as-semantic-failure': { file: connection, target: 'keeps the original semantic connection available when Native observation needs attention',
+    edits: [["if (event.type !== 'connection-state' || event.observationOrigin?.boundary !== 'consumer-core') return", "if (event.type !== 'connection-state') return"]] },
+  'confirmed-form-still-dirty': { file: creation, target: 'allows the original page update after the same form is confirmed and closed',
+    edits: [['authored.edited = false', 'authored.edited = true']] },
+  'later-edit-cleared': { file: creation, target: 'preserves a later instruction while the original confirmed creation returns',
+    edits: [["if (confirmed && sameSource() && original.current.client === source && original.current.targetKey === form.targetKey &&\n        authored.revision === submittedRevision && authored.space === intent.input.destination.spaceId && authored.zone === intent.input.destination.zoneId &&\n        authored.executor === intent.input.content.executorId && authored.prompt === (intent.input.content.prompt ?? '')) authored.edited = false", 'if (confirmed) authored.edited = false']] },
+  'edit-generation-ignored': { file: creation, target: 'keeps later editing protected even when its final bytes match the older request',
+    edits: [['authored.revision === submittedRevision &&', 'true &&']] },
+  'inspection-reclassifies-edit': { file: creation, target: 'joins an inspected original confirmation to its submitted form generation: later edit true',
+    edits: [['const submittedRevision = submittedForm.current?.operationId === intent.input.operationId ? submittedForm.current.revision : null', 'const submittedRevision = authored.revision']] },
+  'hidden-full-copy': { file: creation, target: 'does not copy unrelated device drafts while the creation surface is hidden',
+    edits: [['const intents = visible ? (owner.snapshot()', 'const intents = true ? (owner.snapshot()']] },
+  'original-recovery-subordinate': { file: creation, target: 'offers original inspection before another creation and never resends it on inspection',
+    edits: [["<div className=\"mobile-create-recovery-actions\"><button className=\"mobile-primary\"", "<div className=\"mobile-create-recovery-actions\"><button className=\"mobile-text-button\""]] },
+  'inspection-feedback-away': { file: creation, target: 'offers original inspection before another creation and never resends it on inspection',
+    edits: [['{issue.operationId === intent.input.operationId && feedback}', '{false && feedback}'], ['{!issue.operationId && feedback}', '{feedback}']] },
+  'confirmed-original-feedback-filtered': { file: creation, target: 'offers original inspection before another creation and never resends it on inspection',
+    edits: [["intent === intents.at(-1) || intent.input.operationId === issue.operationId", 'intent === intents.at(-1)']] }
+}
