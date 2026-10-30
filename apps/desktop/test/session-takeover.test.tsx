@@ -24,6 +24,8 @@ import { launcherNativeResumeRows, launcherResumeRows } from '../src/renderer/sr
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { agentNewTabDestinations } from '../src/renderer/src/lib/agent-new-tab-destination'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import type { AgentLaunchResult, AppConfig, SessionSnapshot, ProviderCatalogObservation } from '../src/shared/contracts'
 
 const initial = useAppStore.getState()
@@ -103,6 +105,29 @@ async function mountPicker(onClose = vi.fn()) {
   await act(async () => root.render(<SessionTakeoverSurface source={source} active onClose={onClose} />))
   return onClose
 }
+
+it('an exact Session source without a Region reaches the original spatial owner and keeps one durable takeover intent', async () => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  useAppStore.setState({ tabs: {} })
+  const state = useAppStore.getState()
+  const destination = agentNewTabDestinations(spatialCatalog(state, []), state.layouts, { hostId: original.control.hostId, cwd: original.workspacePath })[0]!.destination
+  const sessionSource: TakeoverSource = { ...source, kind: 'session', agentSessionId: original.control.agentSessionId,
+    presentationSessionId: original.id, expectedRun: original.control.run, origin: { sessionId: original.id }, destination }
+  const result = await takeOverSession(sessionSource, 'fixture', () => true)
+  expect(result.outcome).toBe('opened'); expect(launch).toHaveBeenCalledTimes(1)
+  expect(launch.mock.calls[0]![0]).toMatchObject({ hostId: original.control.hostId, workspacePath: original.workspacePath })
+  expect(launch.mock.calls[0]![0].prompt).toContain("--session 'original'")
+  expect(useAppStore.getState().spatialRequests[result.requestId]?.agentSessionId).toBe(result.agent?.agentSessionId)
+  const repeated = await takeOverSession({ ...sessionSource, destination: { ...destination, groupId: 'later-choice' } }, 'fixture', () => true)
+  expect(repeated.requestId).toBe(result.requestId); expect(launch).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().sessions.find(item => item.id === original.id)).toEqual(original)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+  useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === original.id && item.kind === 'agent'
+    ? { ...item, control: { ...item.control, run: { runId: 'later-original-run' } } } : item) }))
+  expect((await inspectTakeover(sessionSource))?.requestId).toBe(result.requestId)
+  expect(launch).toHaveBeenCalledTimes(1)
+  expect(stop).not.toHaveBeenCalled()
+})
 
 it('the real Agent Region exposes Take over and opening/cancelling keeps its draft without launching', async () => {
   const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')

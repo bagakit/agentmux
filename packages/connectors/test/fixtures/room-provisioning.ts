@@ -4,12 +4,12 @@ import type { RoomProvisioningAdapter } from '../../src/room-provisioning-adapte
 import { RoomProvisioningHost } from '../../src/room-provisioning.js'
 import { config, context, roomBindingFixture, core } from './room-binding.js'
 
-export async function roomProvisioningFixture(options: { create?: RoomProvisioningAdapter['create']; addMembers?: RoomProvisioningAdapter['addMembers']; resolve?: (reference: string) => Promise<string | null>; managedCaller?: boolean } = {}) {
+export async function roomProvisioningFixture(options: { create?: RoomProvisioningAdapter['create']; addMembers?: RoomProvisioningAdapter['addMembers']; resolve?: (reference: string) => Promise<string | null>; managedCaller?: boolean; retired?: boolean } = {}) {
   const create = vi.fn<RoomProvisioningAdapter['create']>(options.create ?? (async () => ({ kind: 'created', externalConversationId: 'created-room' })))
   const addMembers = vi.fn<RoomProvisioningAdapter['addMembers']>(options.addMembers ?? (async input => ({ results: input.members.map(member => ({ member, state: 'joined' })) })))
   const rooms = { create, addMembers }, adapter = { adapterId: 'sample', rooms, test: async () => ({ authentication: { state: 'unknown' as const, reason: 'not-tested' as const }, transport: { state: 'unknown' as const, reason: 'not-tested' as const }, intake: { state: 'unknown' as const, reason: 'not-started' as const }, delivery: { state: 'unknown' as const, reason: 'not-started' as const } }) }
   const resolve = vi.fn(options.resolve ?? (async () => 'private-fixture-credential'))
-  const original = await roomBindingFixture(true, { adapters: [adapter], secrets: { resolve }, ...(options.managedCaller ? { managedCaller: true } : {}) })
+  const original = await roomBindingFixture(true, { adapters: [adapter], secrets: { resolve }, ...(options.managedCaller ? { managedCaller: true } : {}), ...(options.retired !== undefined ? { retired: options.retired } : {}) })
   const provisioning = new RoomProvisioningHost({ connections: original.connections, spatial: original.spatial })
   original.connections.rooms = provisioning
   const createInput: RoomCreateInput = { operationId: 'create-original', connectionId: config.connectionId, expectedConnectionRevision: 1,

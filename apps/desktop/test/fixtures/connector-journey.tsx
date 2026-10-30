@@ -26,7 +26,7 @@ import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/con
 import type { AgentExternalConversationAuthorityPort } from '@agentmux/core'
 
 /** Original Renderer/IPC and Unix Core owners; hosting route, adapter and terminal I/O leaves are controlled. */
-export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; conversationAuthority?: AgentExternalConversationAuthorityPort; connection?: ConnectionConfig; adapter?(): ConnectionAdapter; additionalAdapters?(): ConnectionAdapter[] } = {}) {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; retired?: boolean; conversationAuthority?: AgentExternalConversationAuthorityPort; connection?: ConnectionConfig; adapter?(): ConnectionAdapter; additionalAdapters?(): ConnectionAdapter[] } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createConnectionServices>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
@@ -44,7 +44,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     await useAppStore.persist.rehydrate()
     const stopStartup = await useAppStore.getState().initialize(); stopStartup()
     const artifactDirectory = process.env['AGENTMUX_TEST_CONNECTOR_ARTIFACTS']
-    original = await roomProvisioningFixture()
+    original = await roomProvisioningFixture(options.retired === undefined ? {} : { retired: options.retired })
     if (options.ingress) {
       // The ordinary journey uses a retired history reader. Live ingress needs an original Core input owner.
       const OwnerClient = options.conversationAuthority ? class extends core.AgentMuxClient {
@@ -131,6 +131,8 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       else { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }
     })
     const label = mode === 'details' ? 'Shared group details' : 'Connect group…'
+    const connections = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === 'Connections' && node.hasAttribute('aria-haspopup'))
+    if (connections) await act(async () => { connections.focus(); connections.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
     let item: HTMLElement | undefined
     await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLElement>('[data-connector-menu-group] [role="menuitem"]')].find(node => node.textContent?.trim() === label); expect(item, 'actual ' + label + ' action').toBeDefined() }, { timeout: 6000 })
     await act(async () => item!.click())

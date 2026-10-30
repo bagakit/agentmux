@@ -19,7 +19,13 @@ app.whenReady().then(async () => { try {
   const menuGlyphs = () => read(`[...document.querySelectorAll('.focus-context-menu svg[data-semantic-icon]')].map(svg=>{const href=svg.querySelector('use')?.getAttribute('href'),symbol=href?.startsWith('#')?svg.ownerDocument.getElementById(href.slice(1)):null,bounds=svg.getBBox();return{name:svg.dataset.semanticIcon,href,registered:!!symbol?.childElementCount,paint:{width:bounds.width,height:bounds.height}}})`)
   const menuGeometry = () => read(`(()=>{const e=document.querySelector('.focus-context-menu'),r=e.getBoundingClientRect(),wrapper=e.closest('[data-radix-popper-content-wrapper]'),s=getComputedStyle(e);return{bounds:{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height},viewport:{width:innerWidth,height:innerHeight,clientWidth:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth},wrapper:{style:wrapper?.getAttribute('style'),bounds:wrapper?.getBoundingClientRect().toJSON()},menu:{side:e.dataset.side,align:e.dataset.align,width:s.width,maxWidth:s.maxWidth,availableWidth:s.getPropertyValue('--radix-context-menu-content-available-width'),availableHeight:s.getPropertyValue('--radix-context-menu-content-available-height')}}})()`)
   const copyAgent = '.focus-context-menu [role="menuitem"][aria-label="Copy Agent Link"]'
-  const sharedItems = ['Copy Agent Link','Rename Agent','Session details','Restart Session…','Stop Agent','Maintenance']
+  const sharedItems = ['Copy Agent Link','Rename Agent','Conversation history','Session details','Take over','Pass on experience','Fork current conversation…','Restart Session…','Stop Agent','Connections','Maintenance']
+  async function originalAction(label) {
+    const selector=await read(`(()=>{const item=[...document.querySelectorAll('.focus-context-menu [role="menuitem"],.focus-context-menu button')].find(e=>(e.getAttribute('aria-label')??e.textContent).trim()===${JSON.stringify(label)});if(!item)throw new Error('Missing original action '+${JSON.stringify(label)});item.dataset.privateAction=${JSON.stringify(label)};return '[data-private-action='+JSON.stringify(${JSON.stringify(label)})+']'})()`)
+    await mouse(selector)
+  }
+  async function closeMenu() { await key('Escape');await until('original menu dismissed',()=>read('!document.querySelector(".focus-context-menu")')) }
+  async function openMenu(id='recap-b') { await mouse(row(id),'right');await menuSettled();const items=await menuItems();assert.ok(sharedItems.every(label=>items.includes(label)),JSON.stringify(items));return items }
   async function submenu(label) {
     await read(`(()=>{const item=[...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].find(e=>e.textContent.trim()===${JSON.stringify(label)});if(!item)throw new Error('Missing shared menu disclosure');item.focus()})()`)
     await key('ArrowRight')
@@ -66,7 +72,8 @@ app.whenReady().then(async () => { try {
     const empty=g.rows.find(e=>e.id==='recap-b');assert.ok(empty);assert.equal(empty.detail.text,'No activity details observed')
     await shot('cards-'+width+'.png','original cards + minimum160 + compact28')
   }
-  await mouse(row('recap-b'),'right'); await menuSettled(); assert.deepEqual(await menuItems(),sharedItems)
+  await read('window.recapProof.theme("dark")');await settle()
+  const originalItems=await openMenu()
   result.pointerMenu={bounds:await rect('.focus-context-menu'),sessionId:await read('document.querySelector(".focus-context-menu").dataset.agentSessionId')};assert.equal(result.pointerMenu.sessionId,'recap-b')
   await shot('pointer-menu-360.png','same-name second SID exact original Session menu')
   await mouse(copyAgent);await until('menu selected',()=>read('!document.querySelector(".focus-context-menu")'))
@@ -74,7 +81,7 @@ app.whenReady().then(async () => { try {
   result.afterPointer=await read('window.recapProof.facts()');assert.equal(result.afterPointer.clipboard[0],await read('window.recapProof.expectedSecondAddress'))
   await read(`document.querySelector(${JSON.stringify(row('recap-b'))}).focus()`); await key('F10',8); await menuSettled()
   result.keyboardMenu={sessionId:await read('document.querySelector(".focus-context-menu").dataset.agentSessionId'),items:await menuItems()};assert.equal(result.keyboardMenu.sessionId,'recap-b')
-  assert.deepEqual(result.keyboardMenu.items,sharedItems,'Pointer and keyboard share the common Agent content')
+  assert.deepEqual(result.keyboardMenu.items,originalItems,'Pointer and keyboard share the common Agent content')
   const details=await submenu('Session details')
   result.sessionDetails=await read(`document.getElementById(${JSON.stringify(details)}).textContent`)
   assert.ok(result.sessionDetails.includes('Session: recap-b')&&result.sessionDetails.includes('Host ID: local'),'Shared details preserve the canonical Session and execution Host')
@@ -96,6 +103,46 @@ app.whenReady().then(async () => { try {
   await settle()
   result.escape={exactTrigger:true}
   await key('F10',8);await menuSettled();await mouse('[aria-label="Later explicit input"]');await until('later input wins',()=>read(`!document.querySelector('.focus-context-menu')&&document.activeElement===document.querySelector('[aria-label="Later explicit input"]')`));result.laterFocus={preserved:true}
+  // Same production menu, with actual palette projection and real pointer/keyboard
+  // navigation. These frames do not fabricate menu HTML or dispatch lifecycle work.
+  win.setContentSize(1200,820);await read('window.recapProof.theme("dark")');await settle();await openMenu()
+  await shot('menu-dark-1200.png','Current Focus parity menu · wide dark · canonical Agent and adopted native identity')
+  const avatar='.focus-context-menu [role="menuitem"][data-native-session-copy]'
+  const avatarPosition=await rect(avatar)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:avatarPosition.x,y:avatarPosition.y,buttons:0})
+  await until('native avatar pointer explanation',()=>read(`(()=>{const e=document.querySelector('[role="tooltip"]');return !!e&&e.textContent.includes('native Session ID')&&getComputedStyle(e).visibility==='visible'})()`))
+  result.nativeAvatar={pointerTooltip:await read('document.querySelector("[role=tooltip]").textContent')}
+  await read(`document.querySelector(${JSON.stringify(copyAgent)}).focus()`);await key('ArrowRight')
+  await until('native avatar keyboard focus and explanation',()=>read(`document.activeElement?.hasAttribute('data-native-session-copy')&&Boolean(document.activeElement.getAttribute('aria-describedby'))`))
+  result.nativeAvatar.keyboardTooltip=await read('document.querySelector("[role=tooltip]").textContent')
+  await shot('native-avatar-tooltip-1200.png','Original action-row tooltip and lateral keyboard focus explain native Session ID copy')
+  await mouse(avatar);await until('native ID copy dismisses its original menu',()=>read('!document.querySelector(".focus-context-menu")'))
+  const afterNative=await read('window.recapProof.facts()'),expectedNative=await read('window.recapProof.expectedNativeId')
+  assert.equal(afterNative.clipboard.at(-1),expectedNative);assert.notEqual(expectedNative,afterNative.clipboard[0]);result.nativeAvatar.copied=afterNative.clipboard.at(-1)
+  await read('window.recapProof.theme("light")');await settle();await openMenu();await shot('menu-light-1200.png','Current Focus parity menu · wide light');await closeMenu()
+  win.setContentSize(360,820);await settle();await openMenu();await shot('menu-light-360.png','Current Focus parity menu · narrow light');await closeMenu()
+  win.setContentSize(1200,820);await read('window.recapProof.theme("dark")');await settle();await openMenu()
+  await originalAction('Fork current conversation…')
+  await until('original current-fork review',()=>read('Boolean(document.querySelector("[data-current-fork-review]"))'))
+  result.forkReview=await read('document.querySelector("[data-current-fork-review]").textContent')
+  assert.ok(result.forkReview.includes(expectedNative));assert.ok(result.forkReview.includes('Space, Zone and Group'))
+  await mouse('[aria-label="Fork destination"]')
+  await until('original destination options fully painted',()=>read(`(()=>{const option=document.querySelector('[role=menuitemradio][data-value*=newTab]'),menu=option?.closest('[role=menu]');return !!menu&&Number(getComputedStyle(menu).opacity)>=.999&&!menu.getAnimations({subtree:true}).some(animation=>animation.playState==='running')})()`))
+  await shot('fork-destination-1200.png','Original no-Region Fork controller · explicit existing Space/Zone/Group destination picker')
+  const destinationSelector=await read(`(()=>{const option=[...document.querySelectorAll('[role=menuitemradio]')].find(e=>e.dataset.value?.includes('"newTab":true'));if(!option)throw new Error('An exact original destination must exist');option.dataset.privateForkDestination='true';return '[data-private-fork-destination="true"]'})()`)
+  result.forkDestination=await read(`JSON.parse(document.querySelector(${JSON.stringify(destinationSelector)}).dataset.value)`)
+  assert.equal(result.forkDestination.groupId,'recap-proof-group');assert.equal(result.forkDestination.displayWorkspaceId,'recap-proof')
+  assert.equal(result.forkDestination.newTab,true);assert.ok(!('regionId'in result.forkDestination))
+  await mouse(destinationSelector);await until('chosen original destination review',()=>read(`Boolean(document.querySelector('[aria-label="Fork destination"]')?.dataset.value)`))
+  await shot('fork-ready-1200.png','Original Fork review after explicit destination; cancel retains Agent, Run, workfaces and draft')
+  await originalAction('Cancel fork');await closeMenu()
+  await openMenu('recap-a');const spatialItems=await menuItems();assert.ok(spatialItems.includes('Copy Region Link')&&spatialItems.includes('Split Right'))
+  result.spatialMenu={sessionId:'recap-a',items:spatialItems};await shot('menu-spatial-1200.png','Unique exact occurrence consumes original Region link and layout controls');await closeMenu()
+  await openMenu();const connections=await submenu('Connections')
+  result.connections=await read(`[...document.getElementById(${JSON.stringify(connections)}).querySelectorAll('[role=menuitem]')].map(e=>e.textContent.trim())`)
+  assert.ok(result.connections.includes('Connect group…'));await shot('connections-1200.png','Original Connections hook/menu owner with an exact Session and no invented Region')
+  await key('ArrowLeft');await closeMenu()
+  win.setContentSize(360,820);await settle()
   await read('window.recapProof.denyClipboard(true)');await mouse(row('recap-b'),'right');await menuSettled();await mouse(copyAgent)
   await until('clipboard action releases its original menu',()=>read('!document.querySelector(".focus-context-menu")'))
   await until('original clipboard error event recorded',()=>read('window.recapProof.facts().events.some(event=>event.message.includes("Clipboard denied: private presentation probe"))'))

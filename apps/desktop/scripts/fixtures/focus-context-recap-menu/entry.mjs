@@ -2,7 +2,8 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import { createElement as h, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
-import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
@@ -10,6 +11,8 @@ import { formatSessionAddress } from '../../../src/renderer/src/lib/agent-addres
 import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
 import { FocusContextRow } from '../../../src/renderer/src/components/FocusContextRow'
 import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
+import { ExecutorIdentityContext } from '../../../src/renderer/src/components/AgentAvatar'
+import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
 
 // Maintained typed preview transport, original card/Store/menu/copy/error owners.
@@ -20,12 +23,17 @@ const base = snapshot.sessions.find(session => session.kind === 'agent')
 if (!base?.control.run.runId || !config.workspaces[0]) throw new Error('Nonempty typed preview Agent facts required')
 const { pendingInteraction: _pending, ...agent } = base
 const workspace = { ...config.workspaces[0], id: 'recap-proof', hostId: 'local', path: _hygiene_fixturePath("private/recap-proof"), name: '连续阅读与信息设计' }
+const executor = agent.executorId ?? Object.keys(config.executors)[0]
+if (!executor || !config.executors[executor]) throw new Error('The original Executor configuration is required')
+const originalConfig = { ...config, executors: { ...config.executors, [executor]: { ...config.executors[executor], label: 'Codex · Focus menu proof' } }, workspaces: [workspace] }
 const now = Date.now(), response = '已经修复了滚动锚点，正在核对窄窗口正文与关闭按钮，原草稿及选区均保留。'
 const prompt = '接下来检查加载：保留原请求和已有回复，不把上一轮摘录冒充新一轮结果。'
 const message = (id, kind, content, time = now - 1000) => ({ id, agentSessionId: 'recap-a', kind, content, title: kind, status: 'complete', source: 'native-hook', createdAt: time, updatedAt: time })
 const tool = { id: 'current-tool', agentSessionId: 'recap-a', kind: 'tool_call', title: 'Read', toolName: 'Read', toolInput: JSON.stringify({ file_path: workspace.path + '/src/components/scrolling/repair-anchor-and-preserve-long-chinese-target.tsx' }), status: 'streaming', source: 'native-hook', createdAt: now, updatedAt: now }
 const ids = ['recap-a', 'recap-b', 'permission', 'failed', 'next-prompt', 'result', 'offline']
 const sessions = ids.map((id, index) => ({ ...agent, id, label: index < 2 ? '同名 Agent · 保持原会话与连续阅读' : ['','','等待真实权限确认','失败说明保持直接可读','下一轮请求仍可区分','已完成的合法会话摘录','离线会话紧凑保留'][index], workspacePath: workspace.path,
+  executorId: executor, nativeHandle: { kind: 'provider', providerId: agent.providerId, sessionId: 'native-conversation-' + id },
+  capabilities: { ...agent.capabilities, providerFork: { current: true } },
   processState: index === 5 ? 'exited' : index === 6 ? 'interrupted' : 'running', status: { state: ['working','working','waiting_permission','error','done','done','disconnected'][index], source: 'native-hook', observedAt: now, ...(index === 3 ? { detail: 'History reader unavailable; original Run retained' } : index === 6 ? { detail: 'Disconnected · execution is unconfirmed' } : {}) },
   control: { ...base.control, agentSessionId: id, run: { ...base.control.run, runId: 'typed-recap-' + id } },
   ...(index === 2 ? { pendingInteraction: { id: 'permission-real-owner', kind: 'permission', title: 'Allow editing src/scroll-anchor.ts?', operation: 'edit' } } : {}) }))
@@ -38,7 +46,8 @@ for (const [port, key, count] of [[api.workspaces,'appearance','appearance'], [a
 for (const key of Object.keys(controls)) { const original = api.sessions[key]; api.sessions[key] = (...args) => { controls[key]++; return original(...args) } }
 const clipboard = []; let denyClipboard = false
 api.ui.writeClipboardText = async text => { clipboard.push(text); if (denyClipboard) throw new Error('Clipboard denied: private presentation probe') }
-useAppStore.setState({ loading: false, config: { ...config, workspaces: [workspace] }, sessions, timelines, agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])), scratchTopicSnapshots: {}, tabs: {}, layouts: {}, activeWorkspaceId: workspace.id, mainSurface: 'agents', providerCatalog: [],
+const spatialTab = createWorkbenchTab('recap-spatial-tab', { kind: 'agent', phase: 'attached', regionId: 'recap-spatial-region', workspaceId: workspace.id, sessionId: 'recap-a' })
+useAppStore.setState({ loading: false, config: originalConfig, sessions, timelines, agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])), scratchTopicSnapshots: {}, tabs: { [spatialTab.id]: spatialTab }, layouts: { [workspace.id]: createWorkspaceLayout('recap-proof-group', [spatialTab.id]) }, activeWorkspaceId: workspace.id, mainSurface: 'agents', providerCatalog: [],
   agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { 'recap-b': '保留的原草稿：菜单只复制，不发送' }, error: null, lastError: null, errorDismissed: false })
 const original = useAppStore.getState(), select = createFocusProjectionSelector(), contexts = select(original).contexts
 const compact = contexts.find(context => context.id === 'offline')
@@ -53,10 +62,11 @@ function Probe() {
       h('input', { 'aria-label': 'Later explicit input', defaultValue: original.agentComposerDrafts['recap-b'], style: { flex: 1, minWidth: '160px' } })),
     h('footer', { className: 'window-status-bar', style: { position: 'fixed', left: 0, right: 0, bottom: 0 } }, h(GlobalSystemNotices)))
 }
-createRoot(document.getElementById('root')).render(h(DesktopClientUiProvider, {}, h(Probe)))
+createRoot(document.getElementById('root')).render(h(ExecutorIdentityContext.Provider, { value: { config: originalConfig } }, h(DesktopClientUiProvider, {}, h(Probe))))
 let nodes = [], draft
 window.recapProof = {
-  ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b'),
+  ready: true, response, prompt, population: ids, expectedSecondAddress: formatSessionAddress('recap-b'), expectedNativeId: sessions.find(session => session.id === 'recap-b').nativeHandle.sessionId,
+  theme(mode) { const result = updateThemeSelection({ ...config.appearance, appAppearance: mode }); if (!result.applied) throw new Error(result.reason); return document.documentElement.dataset.appearance },
   remember() { nodes = [...document.querySelectorAll('.focus-context')]; draft = document.querySelector('[aria-label="Later explicit input"]'); draft.setSelectionRange(2,8) },
   denyClipboard(value) { denyClipboard = value },
   churn() { for (let index = 0; index < 200; index++) useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, status: { ...session.status, observedAt: now + index + 1 } })) })) },

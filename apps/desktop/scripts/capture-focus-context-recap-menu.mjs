@@ -20,8 +20,13 @@ const receipt={schema:'agentmux.focus-context-recap-menu-scene.v1',capturedPass:
   privateCssMutation:widthMutation?'unbounded-focus-menu-width':null,
   privateSourceMutation:shiftMutation?'unshifted-focus-submenu':null,
   boundary:'Original compiled Global/Store/projection/Row/menu/clipboard/reportError and CSS. Maintained typed preview API; only PTY and unused editor paint isolated. No true Core/PTY/Run/PID, Writer, OS input, restart or user installation.'}
-const menuOwnerFiles=[...['AgentMenuContent','FocusContextMenu','FocusContextRow','AgentNativeSourceControls','SessionStop','SessionRestart','WorkbenchMenuSubmenu','WorkbenchCopyLinkRow','WorkbenchActionRows','AgentContextContent'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
-  ...['agent-region-header','focus','chrome'].map(name=>`apps/desktop/src/renderer/src/styles/${name}.css`),
+const requiredFrames=['cards-1200.png','cards-360.png','pointer-menu-360.png','keyboard-menu-360.png','clipboard-failure-360.png',
+  'menu-dark-1200.png','menu-light-1200.png','menu-light-360.png','native-avatar-tooltip-1200.png','fork-destination-1200.png','fork-ready-1200.png','menu-spatial-1200.png','connections-1200.png']
+const menuOwnerFiles=[...['AgentMenuContent','FocusContextMenu','FocusContextRow','AgentNativeSourceControls','SessionStop','SessionRestart','WorkbenchMenuSubmenu','WorkbenchCopyLinkRow','WorkbenchActionRows','AgentContextContent',
+    'AgentMenuIdentityActions','AgentAvatar','AgentSessionReadingSurface','ActivityView','SessionLearningSurface','SessionTakeoverSurface','AgentCurrentForkControls','FocusAgentWorkspaceMenu','AgentConnectorDialog','SelectionField','RegionContextMenu'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
+  ...['agent-menu-target','focus-agent-menu-location','agent-current-fork','agent-new-tab-destination','session-takeover','session-conversation-window'].map(name=>`apps/desktop/src/renderer/src/lib/${name}.ts`),
+  'apps/desktop/src/renderer/src/lib/use-agent-connector-menu.tsx',
+  ...['agent-region-header','focus','chrome','agent-current-fork','agent-session-action-surface','session-takeover','session-learning'].map(name=>`apps/desktop/src/renderer/src/styles/${name}.css`),
   ...['runtime','icons','icon-sprite'].map(name=>`packages/client-ui/src/theme/${name}.${name==='icons'?'tsx':'ts'}`)]
 async function menuOwnerHashes(){return Object.fromEntries(await Promise.all(menuOwnerFiles.map(async path=>[path,hash(await readFile(join(root,path)))])))}
 async function mutationEvidence(path){
@@ -48,7 +53,7 @@ if(process.env.AGENTMUX_FOCUS_MENU_SCENE_RECEIPT){
   assert.deepEqual(saved.menuOwnerSources,await menuOwnerHashes());assert.ok(Object.keys(saved.inputs).length>0&&saved.workspaceSources.length>0)
   assert.ok(Object.keys(saved.menuDependencies).length>0)
   for(const[name,sha256]of Object.entries(saved.menuDependencies))assert.equal(hash(await readFile(join(root,name))),sha256,'The actual loaded menu dependency remains unchanged: '+name)
-  assert.equal(saved.frames.length,5)
+  assert.deepEqual(saved.frames.map(frame=>frame.file).sort(),[...requiredFrames].sort())
   assert.deepEqual(saved.frames.map(frame=>frame.file),saved.actual.frames.map(frame=>frame.file))
   for(const owner of menuOwnerFiles)assert.equal(saved.inputs[owner],saved.menuOwnerSources[owner],'The archived Renderer loaded its original menu owner: '+owner)
   for(const frame of saved.frames){const bytes=await readFile(join(path,'..',frame.file));assert.ok(bytes.length>0);assert.equal(hash(bytes),frame.sha256)}
@@ -146,6 +151,7 @@ try{
   for(const name of ['context-menu','menu','popper'])assert.ok(Object.keys(receipt.menuDependencies).some(path=>path.includes('/@radix-ui/react-'+name+'/')),'The actual Renderer loads its original '+name+' dependency')
   receipt.workspaceSources=workspaceSources;receipt.metafile=buildResult.metafile;receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
   for(const suffix of ['GlobalFocusSurface.tsx','FocusContextRow.tsx','FocusContextMenu.tsx','AgentMenuContent.tsx','focus-context.ts','launcher-resume.ts','agent-roster-menu.ts','agent-address.ts','clipboard-copy.ts','RegionContextMenu.tsx','WindowOverlayHost.tsx','GlobalSystemNotices.tsx','NotificationItem.tsx','store.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Nonempty actual module '+suffix)
+  for(const owner of menuOwnerFiles)assert.equal(receipt.inputs[owner],receipt.menuOwnerSources[owner],'The captured Renderer loaded its original menu owner: '+owner)
   const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
   receipt.compiled={renderer:hash(await readFile(join(out,'app.js'))),css:hash(await readFile(join(out,'app.css')))}
   const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(privateRoot,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:join(privateRoot,'state')};delete env.ELECTRON_RUN_AS_NODE
@@ -153,7 +159,7 @@ try{
   receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
   receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
   assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true)
-  assert.equal(receipt.frames.length,5,'Wide/narrow, pointer menu, keyboard menu and actual clipboard failure')
+  assert.deepEqual(receipt.frames.map(frame=>frame.file).sort(),[...requiredFrames].sort(),'Original five frames plus bounded parity/identity/action review frames')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])))
   receipt.parallelInputChanges=Object.keys(receipt.inputs).filter(path=>receipt.sourceAfter[path]!==receipt.inputs[path])
   for(const[name,sha256]of Object.entries(receipt.menuDependencies))assert.equal(receipt.sourceAfter[name],sha256,'The actual loaded menu dependency remains stable: '+name)

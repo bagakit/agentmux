@@ -261,7 +261,8 @@ it('shares Session details and maintenance with Region menus without guessing a 
   await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); await settle()
   const menu = document.querySelector<HTMLElement>('.focus-context-menu')!
   const labels = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(item => item.getAttribute('aria-label') ?? item.textContent)
-  expect(labels).toEqual(expect.arrayContaining(['Copy Agent Link', 'Rename Agent', 'Session details', 'Restart Session…', 'Stop Agent', 'Maintenance']))
+  expect(labels).toEqual(expect.arrayContaining(['Copy Agent Link', 'Rename Agent', 'Conversation history', 'Pass on experience', 'Session details', 'Restart Session…', 'Stop Agent', 'Maintenance']))
+  expect(labels).not.toEqual(expect.arrayContaining(['Paste', 'Find', 'Copy Output']))
   const details = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Session details')!
   await act(async () => { details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' })) }); await settle()
   const content = document.getElementById(details.getAttribute('aria-controls')!)!
@@ -279,7 +280,7 @@ it('closed card menus add no Store listeners while an open menu reads current Se
   await act(async () => render(false))
   expect(subscribe).not.toHaveBeenCalled()
   await act(async () => render(true)); await settle()
-  expect(subscribe).toHaveBeenCalledOnce()
+  expect(subscribe).toHaveBeenCalledTimes(2) // Open menu facts plus its exact Tab label consumer.
   await act(async () => render(false)); await settle()
   subscribe.mockClear()
   await act(async () => useAppStore.setState({ errorDismissed: !useAppStore.getState().errorDismissed }))

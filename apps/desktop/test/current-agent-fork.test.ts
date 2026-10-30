@@ -111,6 +111,37 @@ async function fixture(providerId: 'codex' | 'claude', executionRoute = 'local')
     cli: (args: string[], stdin = '') => runCompiledObjectCli(args, objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: `unix:${server.path}` }), stdin) }
 }
 
+it('Focus Session-source fork without an occurrence keeps both real Runs and reloads original identities in a new process', async () => {
+  const f = await fixture('claude')
+  // Absence of a source projection is a fixture premise, never a cleanup of a
+  // user workface. A separate existing Group is explicitly selected for output.
+  f.ports.patch({ tabs: {}, layouts: { 'private-workspace': createWorkspaceLayout('destination-group', []) } })
+  await f.ports.save(false)
+  const destination = { zoneId: workspaceZoneId(directoryIdentity('local', f.root), 'private-workspace'),
+    displayWorkspaceId: 'private-workspace', groupId: 'destination-group', newTab: true }
+  const operationId = 'focus-session-source-fork'
+  const receipt = await f.rpc.call('agent.open', { operationId, content: { kind: 'fork-agent', source: f.source }, destination, focus: false })
+  expect(receipt.outcome).toBe('opened'); expect(receipt.agent?.forkedFrom).toEqual(f.source)
+  expect(receipt.to).toMatchObject({ displayWorkspaceId: destination.displayWorkspaceId, groupId: destination.groupId })
+  expect(f.ids).toHaveLength(2)
+  expect((await f.client.statusAgent(f.parent.agentSessionId)).run.state).toBe('running')
+  expect(f.client.agentSession(f.parent.agentSessionId).run).toEqual(f.parent.run)
+  expect((await f.client.statusAgent(receipt.agent!.agentSessionId)).run.state).toBe('running')
+  const tabs = structuredClone(f.state().tabs)
+  const repeated = await f.rpc.call('agent.open', { operationId, content: { kind: 'fork-agent', source: f.source }, destination, focus: false })
+  expect(repeated.agent?.agentSessionId).toBe(receipt.agent?.agentSessionId); expect(f.ids).toHaveLength(2); expect(f.state().tabs).toEqual(tabs)
+  const modulePath = process.env.AMX_FORK_STORE_MODULE, spatialModule = process.env.AMX_FORK_SPATIAL_MODULE
+  expect(modulePath).toBeTruthy(); expect(spatialModule).toBeTruthy()
+  const restored = spawn(process.execPath, ['--input-type=module', '-e', `const fs=await import('node:fs/promises'),m=await import(process.argv[1]),s=await import(process.argv[4]);console.log(JSON.stringify({pid:process.pid,sessions:await m.loadAgentSessions(new m.AgentMuxFileAgentSessionStore(process.argv[2])),workbench:JSON.parse(await fs.readFile(process.argv[3],'utf8')),spatial:await new s.AgentMuxSpatialStateStore(process.argv[5]).read()}))`, modulePath!, join(f.root, 'sessions.json'), join(f.root, 'workbench.json'), spatialModule!, join(f.root, 'spatial.json')], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let output = '', error = ''; restored.stdout!.on('data', data => output += data); restored.stderr!.on('data', data => error += data)
+  expect((await once(restored, 'exit'))[0], error).toBe(0)
+  const facts = JSON.parse(output); expect(facts.pid).not.toBe(process.pid)
+  expect(facts.sessions.find((item: AgentMuxAgentSession) => item.agentSessionId === f.parent.agentSessionId).run).toEqual(f.parent.run)
+  expect(facts.sessions.map((item: AgentMuxAgentSession) => item.agentSessionId).sort()).toEqual(f.ids.toSorted())
+  expect(facts.workbench.state.tabs).toEqual(tabs); expect(facts.spatial).toEqual(await f.spatial.read())
+  await f.client.writeAgent({ agentSessionId: f.parent.agentSessionId, expectedRun: f.parent.run, source: 'user', data: 'x' })
+}, 60000)
+
 it.each([['codex', 'local'], ['claude', 'local'], ['codex', 'remote-core-route']] as const)('forks current %s on route %s through actual CLI and original spatial owner, retains both real Runs and reconciles without replay', async (providerId, executionRoute) => {
   const f = await fixture(providerId, executionRoute), operationId = 'current-fork-' + providerId
   const args = ['agent', 'open', '--fork-from', f.parent.agentSessionId, '--fork-source', '-', '--tab', 'original-tab', '--region', 'original-region', '--split', 'right', '--operation-id', operationId, '--focus']
