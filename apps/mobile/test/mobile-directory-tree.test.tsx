@@ -35,13 +35,14 @@ describe('original mobile directory tree consumers', () => {
       regions: [{ ...catalog.regions[0]!, agentSessionId: null }] }
     f.client.forwardRpc = vi.fn(async () => ({ catalog: decoded(unknown) })) as never
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={open} openMainAgent={main} />)
-    const notice = view.element.querySelector<HTMLDetailsElement>('.mobile-directory-notice')!
+    const notice = view.element.querySelector<HTMLButtonElement>('.mobile-directory-notice')!
     expect(notice).not.toBeNull()
-    expect(notice.textContent).toContain('The original Agent binding is unconfirmed.')
-    expect(notice.textContent).not.toContain('Unrelated diagnostic')
-    expect(notice.open).toBe(false)
-    await click(notice.querySelector('summary')!); expect(notice.open).toBe(true)
-    await click(notice.querySelector('summary')!); expect(notice.open).toBe(false)
+    expect(notice.getAttribute('aria-expanded')).toBe('false')
+    await click(notice)
+    const diagnostic = document.body.querySelector('.mobile-directory-issues')!
+    expect(diagnostic.textContent).toContain('The original Agent binding is unconfirmed.')
+    expect(diagnostic.textContent).not.toContain('Unrelated diagnostic')
+    await click(button(diagnostic as HTMLElement, '关闭目录信息')); expect(notice.getAttribute('aria-expanded')).toBe('false')
     await click(view.element.querySelector('.mobile-mote-choice')!)
     expect(view.element.querySelector('.mobile-mote-contents')?.textContent).toContain('原 Agent 绑定尚未确认')
     expect(view.element.querySelector('.mobile-mote-contents')?.textContent).not.toContain('尚无已绑定 Agent')
@@ -84,8 +85,11 @@ describe('original mobile directory tree consumers', () => {
     f.client.forwardRpc = vi.fn(async () => { if (fail) throw Error('original observation failed'); return { catalog: decoded(catalog) } }) as never
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} onBackChange={back} />)
     await click(view.element.querySelector('.mobile-mote-choice')!);fail = true;await click(button(view.element, '刷新空间目录'))
-    expect(view.element.querySelector('.mobile-directory-notice')?.textContent).toContain('original observation failed')
-    expect(view.element.querySelector('.mobile-directory-notice')?.hasAttribute('open')).toBe(false)
+    const notice = view.element.querySelector('.mobile-directory-notice')!
+    expect(notice.getAttribute('aria-expanded')).toBe('false')
+    await click(notice)
+    expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('original observation failed')
+    await click(button(document.body, '关闭目录信息'))
     expect(view.element.querySelector('.mobile-mote-contents')).not.toBeNull()
     expect(back.mock.calls.at(-1)![0]).toBeNull()
     expect(view.element.querySelector('.mobile-mote-selected')?.getAttribute('data-space-id')).toBe('mote-original')
@@ -161,13 +165,14 @@ describe('original mobile directory tree consumers', () => {
   })
   it('retains exact original failure details and recovery under a compact persistent service disclosure', async () => {
     const retry = vi.fn(), view = await mount(<MobileDirectoryNotice issues={[{ source: 'Original Mote', message: 'Actual owner observation failed; durable binding retained.' }]} retry={retry} />)
-    const details = view.element.querySelector('details')!
-    expect(details.open).toBe(false)
-    expect(details.querySelector('summary')?.textContent).toContain('部分目录信息未确认')
-    expect(details.querySelector('summary')?.textContent).not.toContain('Actual owner observation failed')
+    const entry = view.element.querySelector('button')!
+    expect(entry.getAttribute('aria-expanded')).toBe('false')
+    expect(entry.getAttribute('aria-label')).toContain('目录信息')
+    expect(entry.textContent).not.toContain('Actual owner observation failed')
+    await click(entry)
+    const details = document.body.querySelector('.mobile-directory-issues')!
     expect(details.textContent).toContain('Actual owner observation failed; durable binding retained.')
-    await act(async () => { details.open = true })
-    await click(details.querySelector('button')!);expect(retry).toHaveBeenCalledOnce()
+    await click(button(details as HTMLElement, '重新读取目录'));expect(retry).toHaveBeenCalledOnce()
   })
 
 })

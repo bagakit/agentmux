@@ -98,7 +98,9 @@ describe('T-007 original Space selected content frame', () => {
     expect(view.element.textContent).toContain('当前绑定尚未重新确认')
     expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
     view.failDirectory(); await view.click('刷新空间目录')
-    expect(view.element.textContent).toContain('原目录观察暂缺')
+    await act(async () => view.element.querySelector<HTMLButtonElement>('.mobile-directory-notice')!.click())
+    expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('原目录观察暂缺')
+    await act(async () => document.body.querySelector<HTMLButtonElement>('[aria-label="关闭目录信息"]')!.click())
     expect(view.fileRead).toHaveBeenCalledTimes(reads)
   })
   it('keeps the exact mounted Note editor and unknown save across Region back and a different Browser, without retrying or selecting the first file', async () => {

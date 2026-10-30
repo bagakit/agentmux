@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { openTreeSession, button, click, editor, fixture, mount, mounted } from './conversation-fixture'
+import { openTreeSession, button, click, editor, fixture, mount, mounted, waitForElement } from './conversation-fixture'
 const connection = { state: 'connected' as const, message: '已连接 Mac' }
 const catalog = { spaces: [{ spaceId: 'space', kind: 'folder', name: 'Actual Space', hostId: 'host-original', directoryPath: fixturePath("unrelated"), projectId: null }],
   zones: [], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: 'Original Agent', regionIds: ['region'] }],
@@ -133,8 +133,10 @@ it('shows a presentation owner failure in a mounted directory without taking awa
   f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog: failed })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
-  expect(view.element.textContent).toContain('appearance owner unavailable')
-  expect(button(view.element, '刷新原目录与呈现')).toBeDefined()
+  await click(await waitForElement(view.element, '.mobile-directory-notice'))
+  expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('appearance owner unavailable')
+  expect(button(document.body, '重新读取目录')).toBeDefined()
+  await click(button(document.body, '关闭目录信息'))
   await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(value => value.textContent?.includes('Actual Space'))!)
   await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')!)
   expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')

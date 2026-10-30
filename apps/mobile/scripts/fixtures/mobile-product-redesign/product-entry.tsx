@@ -95,6 +95,7 @@ let connected = location.hash !== '#fixture-offline', unknownNext = false, promp
 let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
+let directoryReadFails = false, missingSessionMetadata = false
 let agentMenuScene = false, densityScene = false, copyFails = false
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
 const copiedTexts: string[] = []
@@ -108,7 +109,7 @@ const appearanceSnapshot = (appAppearance: 'dark' | 'light') => ({
 const submittedBySession = new Map<string, Array<{ id: string; text: string }>>()
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
 const client = {
-  agentSession: (id: string) => { record('sdk.agentSession', { id }); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
+  agentSession: (id: string) => { record('sdk.agentSession', { id }); if (missingSessionMetadata && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
   agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
@@ -269,6 +270,7 @@ const client = {
       return reply
     }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
+    if ((method === 'space.ls' || method === 'space.inspect') && directoryReadFails) throw Error('本次目录读取失败 [DIRECTORY_READ_FAILED]；已读目录仍可使用，请核对 Mac 连接后重试。')
     if (method === 'space.ls' || method === 'space.inspect') return { catalog: { ...catalog } }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
     if (method === 'agent.inspect') {
@@ -362,6 +364,23 @@ function Scene() {
     prepareFocusState: () => {
       catalog.agentPresentation![1]!.stateMark = 'unknown'
       catalog.agentPresentation![1]!.stateLabel = 'Activity not confirmed'
+    },
+    prepareDirectoryNotices: () => {
+      const reason = '部分项目资料读取未完成。已知的项目和对话仍可继续使用，可重新读取目录。\n[SOURCE_UNAVAILABLE] Host=host-original; Space=other-space; request=directory-original-read. 完整技术原因保留在同一对象。'
+      catalog.spaces.find(value => value.spaceId === 'other-space')!.issue = reason
+      catalog.spaces.find(value => value.spaceId === 'mote-original')!.issue = reason
+      const [current, attention, old, ...others] = catalog.agentPresentation!
+      attention!.projectGroup = current!.projectGroup
+      attention!.stateMark = 'attention'; attention!.stateLabel = '需要你回应'
+      catalog.agentPresentation = [attention!, current!, old!, ...others,
+        { agentSessionId: 'retained-directory-session', name: '待接回的资料整理', project: '归属未确认', detail: '当前会话资料暂不可读；原身份与位置保留。',
+          group: 'idle', state: 'disconnected', stateMark: 'unknown', stateLabel: '状态未确认', presenceUnknown: true, providerId: '', recap: null }]
+    },
+    setDirectoryReadFailure: (value: boolean) => { directoryReadFails = value },
+    resolveDirectoryIssues: () => { directoryReadFails = false; for (const space of catalog.spaces) delete space.issue },
+    unconfirmSelectedMetadata: () => {
+      missingSessionMetadata = true
+      for (const listener of listeners) listener({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as AgentMuxClientEvent)
     },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
     prepareDensity: () => {

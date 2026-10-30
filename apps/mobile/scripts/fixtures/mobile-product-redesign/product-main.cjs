@@ -101,6 +101,10 @@ app.whenReady().then(async () => {
     await require('./floating-tools.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
     result.passed = true; return
   }
+  if (mode === 'directory-notices') {
+    await require('./directory-notices.cjs')({ win, read, until, resize, tap, button, capture, result, openMote })
+    result.passed = true; return
+  }
   if (mode === 'conversation-spacing') {
     await require('./conversation-spacing.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return
@@ -185,11 +189,11 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-directory-notice")&&document.querySelector(\'[data-space-id="mote-original"] .mobile-mote-contents\')?.textContent.includes("原 Agent 绑定尚未确认")')
     assert.equal(await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-mote-contents\').textContent.includes("尚无已绑定 Agent")'),false)
     await capture('mote-binding-unknown-narrow')
-    await tap('.mobile-directory-notice summary', 'Expand original binding diagnostic')
-    assert.equal(await read('document.querySelector(".mobile-directory-notice").open'),true)
+    await tap('.mobile-directory-notice', 'Expand original binding diagnostic')
+    await until('!!document.querySelector(".mobile-directory-issues")')
     await capture('mote-binding-diagnostic-narrow')
-    await tap('.mobile-directory-notice summary', 'Collapse original binding diagnostic')
-    assert.equal(await read('document.querySelector(".mobile-directory-notice").open'),false)
+    await button('关闭目录信息', '.mobile-directory-issues')
+    assert.equal(await read('!!document.querySelector(".mobile-directory-issues")'),false)
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="agent.open"||call.method==="sdk.submitAgentPrompt").length'),0)
     result.passed=true; return
   }
