@@ -35,7 +35,7 @@ export function nativeConfirmationInput(session: Agent, operationId: string,
 ): AgentMuxNativeSessionConfirmationInput | null {
   const old = session.nativeHandle, observation = session.nativeSourceObservation
   if (old?.kind !== 'provider' || !observation || !candidate || !nativeCandidates(session).includes(candidate)) return null
-  return { agentSessionId: session.id, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(old),
+  return { agentSessionId: session.control.agentSessionId, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(old),
     candidateNativeHandle: structuredClone(candidate), expectedObservationAt: observation.observedAt, operationId }
 }
 
@@ -92,7 +92,11 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
       if (owner.current !== exactOwner) return
       setNotice(result.current ? 'Conversation target confirmed.' : 'This earlier confirmation is retained; the current source is unchanged.')
       setReview(null)
-    } catch (cause) { if (owner.current === exactOwner) setNotice(presentError(cause)) }
+    } catch (cause) {
+      useAppStore.getState().reportError(cause, { kind: 'indeterminate', subject: { ...session.control, run: review.expectedRun },
+        summary: `Conversation target confirmation did not complete. Original operation: ${review.operationId}. Check its receipt before confirming again; the Session and terminal remain available.` })
+      if (owner.current === exactOwner) setNotice(presentError(cause))
+    }
     finally {
       try { await useAppStore.getState().refreshSession(session.id) }
       catch (cause) { if (owner.current === exactOwner) setNotice(previous => [previous, presentError(cause)].filter(Boolean).join(' ')) }

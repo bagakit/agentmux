@@ -6,8 +6,8 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { useRegionMenuEntries, useRegionMenuObservation, type RegionContextContribution } from './RegionContextMenu'
-import { AgentRegionMenuContent } from './AgentRegionMenuContent'
+import { RegionCopyLinkRow, RegionMenuEntryView, useRegionMenuEntries, useRegionMenuObservation, type RegionContextContribution } from './RegionContextMenu'
+import { AgentMenuContent } from './AgentMenuContent'
 import { useSessionStop } from './SessionStop'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { WorkbenchMenuScope } from './WorkbenchMenuScope'
@@ -77,16 +77,30 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     return () => observer.disconnect()
   }, [host, targetId])
   useLayoutEffect(() => () => host?.remove(), [host])
-  const content = (contextual?: RegionContextContribution | null) => <AgentRegionMenuContent name={name} executorLabel={executorLabel} sessionId={sessionId}
+  const content = (Menu: typeof ContextMenu | typeof DropdownMenu, contextual?: RegionContextContribution | null) => <AgentMenuContent
+    name={name} executorLabel={executorLabel} sessionId={nativeSession?.control.agentSessionId ?? sessionId}
     sessionKind={sessionKind} executionHost={executionHost} readOnly={readOnly}
-    entries={[...(contextual?.agentLink ? [{ kind: 'action' as const, action: contextual.agentLink }] : []),
-      ...(sessionKind === 'agent' && !readOnly ? [...entries, { kind: 'stop' as const, onSelect: () => {
+    links={contextual?.agentLink || entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={[...(contextual?.agentLink ? [{ kind: 'action' as const, action: contextual.agentLink }] : []), ...entries]}
+      Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} /> : null}
+    onRestart={entries.find(entry => entry.kind === 'restart')?.onSelect}
+    onStop={sessionKind === 'agent' && !readOnly ? () => {
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)
-    } }] : entries)]}
+    } : undefined}
     onTakeOver={onTakeOver ? () => { handoffFocus.current = true; onTakeOver(moreTrigger.current ?? undefined) } : undefined}
     onLearn={onLearn ? () => { handoffFocus.current = true; onLearn(moreTrigger.current ?? undefined) } : undefined}
-    onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined} onRefreshObservation={onRefreshObservation} refreshing={refreshing}
-    nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction} currentConversationActions={currentConversationActions} contextualActions={contextual?.tools} />
+    onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined}
+    onRefreshObservation={onRefreshObservation} refreshing={refreshing}
+    nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction}
+    extensions={{ context: contextual?.tools, controls: currentConversationActions,
+      workspace: entries.some(entry => ['layout', 'swaps', 'promote', 'window'].includes(entry.kind)) ? entries
+        .filter(entry => ['layout', 'swaps', 'promote', 'window'].includes(entry.kind))
+        .map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index}
+          Item={Menu.Item} Separator={Menu.Separator} Group={Menu.Group} Label={Menu.Label}
+          Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal} />) : null,
+      connections: entries.some(entry => entry.kind === 'connector-group') ? entries.filter(entry => entry.kind === 'connector-group')
+        .map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index} nested
+          Item={Menu.Item} Separator={Menu.Separator} Group={Menu.Group} Label={Menu.Label}
+          Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal} />) : null }} />
   function closeMenuFocus(event: Event) {
     if (handoffFocus.current || menuObservation.dialogOpen || stop.dialog !== null) event.preventDefault()
     handoffFocus.current = false
@@ -112,7 +126,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
         data-menu-entry="more" data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={0} collisionPadding={8}
         onPointerDown={(event) => event.stopPropagation()}
         onCloseAutoFocus={closeMenuFocus}>
-        <WorkbenchMenuScope.Provider value={DropdownMenu}>{content()}</WorkbenchMenuScope.Provider>
+        <WorkbenchMenuScope.Provider value={DropdownMenu}>{content(DropdownMenu)}</WorkbenchMenuScope.Provider>
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     {sessionKind === 'agent' && menuObservation.setAgentMenuAvailable ? <DocumentOverlayPortal component={ContextMenu.Portal}>
@@ -122,7 +136,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           closeMenuFocus(event)
           menuObservation.onContextCloseAutoFocus?.(event)
         }}>
-        <WorkbenchMenuScope.Provider value={ContextMenu}>{content(menuObservation.contextualMenu)}</WorkbenchMenuScope.Provider>
+        <WorkbenchMenuScope.Provider value={ContextMenu}>{content(ContextMenu, menuObservation.contextualMenu)}</WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </header>

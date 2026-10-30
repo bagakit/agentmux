@@ -1,19 +1,24 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { useRef, type ReactNode } from 'react'
+import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
-import { RegionMenuEntryView } from './RegionContextMenu'
+import { WorkbenchCopyLinkRow } from './WorkbenchCopyLinkRow'
+import { AgentMenuContent } from './AgentMenuContent'
+import { WorkbenchMenuScope } from './WorkbenchMenuScope'
+import { useAgentNativeSourceControls } from './AgentNativeSourceControls'
+import { agentMenuSession } from '../lib/agent-menu-target'
+import { executionHostProjection } from '../lib/region-execution-host'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useSessionStop } from './SessionStop'
 import { useSessionRestart } from './SessionRestart'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
-const ThemeActionStopIcon = semanticIconComponent('action.stop')
-const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
+const AgentIcon = semanticIconComponent('object.agent')
 
 
 /** The original card carries both its presentation address and canonical execution control. */
@@ -27,6 +32,28 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   const origin = useRef<HTMLElement | null>(null)
   const stop = useSessionStop(active)
   const restart = useSessionRestart(active)
+  // Keep the original confirmation controller through dismissal, but only an open
+  // menu subscribes to Store changes. Closed cards add no update fan-out/readers.
+  const subscribe = useCallback((listener: () => void) => open ? useAppStore.subscribe(listener) : () => {}, [open])
+  const selectFacts = useShallow((state: ReturnType<typeof useAppStore.getState>) => ({
+    session: agentMenuSession(state.sessions, context),
+    host: state.config?.hosts.find(host => host.id === (context.control?.hostId ?? context.hostId)),
+    executor: context.executorId ? state.config?.executors[context.executorId] : undefined
+  }))
+  const heldFacts = useRef<ReturnType<typeof selectFacts>>({ session: undefined, host: undefined, executor: undefined })
+  const readFacts = useCallback(() => {
+    if (open) heldFacts.current = selectFacts(useAppStore.getState())
+    return heldFacts.current
+  }, [open, selectFacts])
+  const { session, host, executor } = useSyncExternalStore(subscribe, readFacts, readFacts)
+  const nativeSource = useAgentNativeSourceControls({ session: session ?? null, readOnly: false })
+  const [refreshing, setRefreshing] = useState(false)
+  async function refreshObservation() {
+    setRefreshing(true)
+    try { await useAppStore.getState().refreshSession(context.id) }
+    catch (error) { useAppStore.getState().reportError(error) }
+    finally { setRefreshing(false) }
+  }
   const actions = context.control ? agentRosterMenuActions({ sessionId: context.control.agentSessionId, writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
   } }) : [{ key: 'copy-session' as const, label: 'Copy Agent Link' as const, onSelect: async () => {
@@ -52,13 +79,20 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
           if (actionOwnsFocus.current || laterFocus) { event.preventDefault(); actionOwnsFocus.current = false }
           else onRestoreFocus()
         }}>
-        <ContextMenu.Label className="focus-context-menu__identity"><strong title={context.name}>{context.name}</strong></ContextMenu.Label>
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item>
-        <ContextMenu.Separator className="tab-context-menu__separator" />
-        {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
-        <ContextMenu.Separator className="tab-context-menu__separator" />
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></ContextMenu.Item>
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(context, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
+        <WorkbenchMenuScope.Provider value={ContextMenu}>
+          <AgentMenuContent name={context.name} executorLabel={executor?.label ?? context.providerId ?? 'Executor unknown'}
+            sessionId={context.control?.agentSessionId}
+            executionHost={executionHostProjection(context.control?.hostId ?? context.hostId, context.workspacePath, host)}
+            links={<WorkbenchCopyLinkRow actions={actions.map(action => ({ ...action, icon: <AgentIcon size={16} /> }))}
+              Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} />}
+            nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction}
+            onRefreshObservation={session ? refreshObservation : undefined} refreshing={refreshing}
+            onRestart={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(context, context.name, origin.current) }}
+            onStop={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(context, context.name, origin.current) }}
+            extensions={{ identityActions: <ContextMenu.Item className="tab-context-menu__item" onSelect={() => {
+              actionOwnsFocus.current = true; onRename()
+            }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item> }} />
+        </WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}</> : null}</>

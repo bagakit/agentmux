@@ -1,0 +1,76 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index bffb3cd79339bf87dd2527967055423518ec7645..a6d44bbf2bac58ad0ade411238f62beed73e68e1 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -26,6 +26,8 @@ interface PopperContentProps extends PrimitiveDivProps {
+     alignOffset?: number;
+     arrowPadding?: number;
+     avoidCollisions?: boolean;
++    /** Allow viewport shifting across the placement axis after trying both sides. */
++    shiftCrossAxis?: boolean;
+     collisionBoundary?: Boundary | Boundary[];
+     collisionPadding?: number | Partial<Record<Side, number>>;
+     sticky?: 'partial' | 'always';
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index bffb3cd79339bf87dd2527967055423518ec7645..a6d44bbf2bac58ad0ade411238f62beed73e68e1 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -26,6 +26,8 @@ interface PopperContentProps extends PrimitiveDivProps {
+     alignOffset?: number;
+     arrowPadding?: number;
+     avoidCollisions?: boolean;
++    /** Allow viewport shifting across the placement axis after trying both sides. */
++    shiftCrossAxis?: boolean;
+     collisionBoundary?: Boundary | Boundary[];
+     collisionPadding?: number | Partial<Record<Side, number>>;
+     sticky?: 'partial' | 'always';
+diff --git a/dist/index.js b/dist/index.js
+index 4c568463c552d1cab44a91a1c414d13dfe169fda..e1dd620cd8f8df6e82622aad154c93d98e27f913 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -133,6 +133,7 @@ var PopperContent = React.forwardRef(
+       alignOffset = 0,
+       arrowPadding = 0,
+       avoidCollisions = true,
++      shiftCrossAxis = false,
+       collisionBoundary = [],
+       collisionPadding: collisionPaddingProp = 0,
+       sticky = "partial",
+@@ -180,6 +181,12 @@ var PopperContent = React.forwardRef(
+           ...detectOverflowOptions
+         }),
+         avoidCollisions && (0, import_react_dom.flip)({ ...detectOverflowOptions }),
++        avoidCollisions && shiftCrossAxis && (0, import_react_dom.shift)({
++          mainAxis: true,
++          crossAxis: true,
++          limiter: sticky === "partial" ? (0, import_react_dom.limitShift)() : void 0,
++          ...detectOverflowOptions
++        }),
+         (0, import_react_dom.size)({
+           ...detectOverflowOptions,
+           apply: ({ elements, rects, availableWidth, availableHeight }) => {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 395855837a438bfa02026e6637f2ea251d3ca5bb..9fe2e3701c8f744f7c70952ffa8061e568bf8e09 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -98,6 +98,7 @@ var PopperContent = React.forwardRef(
+       alignOffset = 0,
+       arrowPadding = 0,
+       avoidCollisions = true,
++      shiftCrossAxis = false,
+       collisionBoundary = [],
+       collisionPadding: collisionPaddingProp = 0,
+       sticky = "partial",
+@@ -145,6 +146,12 @@ var PopperContent = React.forwardRef(
+           ...detectOverflowOptions
+         }),
+         avoidCollisions && flip({ ...detectOverflowOptions }),
++        avoidCollisions && shiftCrossAxis && shift({
++          mainAxis: true,
++          crossAxis: true,
++          limiter: sticky === "partial" ? limitShift() : void 0,
++          ...detectOverflowOptions
++        }),
+         size({
+           ...detectOverflowOptions,
+           apply: ({ elements, rects, availableWidth, availableHeight }) => {

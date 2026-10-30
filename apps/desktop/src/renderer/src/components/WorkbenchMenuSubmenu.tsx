@@ -26,7 +26,7 @@ export function WorkbenchMenuSubmenu({ label, icon, children, className = '', on
     </SubTrigger>
     <DocumentOverlayPortal component={Portal}>
       <SubContent className={`tab-context-menu workbench-menu-submenu ${className}`.trim()}
-        collisionPadding={8} sideOffset={4} onFocusCapture={onFocusCapture}>
+        shiftCrossAxis collisionPadding={8} sideOffset={4} onFocusCapture={onFocusCapture}>
         {children}
       </SubContent>
     </DocumentOverlayPortal>

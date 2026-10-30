@@ -34,3 +34,4 @@ patchedDependencies:
   react-remove-scroll@2.7.2: patches/react-remove-scroll@2.7.2.patch
   react-remove-scroll-bar@2.3.8: patches/react-remove-scroll-bar@2.3.8.patch
   react-style-singleton@2.2.3: patches/react-style-singleton@2.2.3.patch
+  '@radix-ui/react-popper@1.3.3': patches/@radix-ui__react-popper@1.3.3.patch

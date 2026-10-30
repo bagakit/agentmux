@@ -154,10 +154,11 @@ export function RegionCopyLinkRow({ entries, ...primitives }: {
     : [])} />
 }
 
-export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label,
+export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label, nested = false,
   Sub = ContextMenu.Sub, SubTrigger = ContextMenu.SubTrigger, SubContent = ContextMenu.SubContent, Portal = ContextMenu.Portal }: {
   entry: RegionMenuEntry
   index: number
+  nested?: boolean
   Item: typeof ContextMenu.Item
   Separator: typeof ContextMenu.Separator
   Group?: typeof ContextMenu.Group
@@ -168,8 +169,8 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
   Portal?: typeof ContextMenu.Portal
 }) {
   if (entry.kind === 'connector-group') return <Group aria-label={entry.group.label} data-connector-menu-group="">
-    <Separator className="tab-context-menu__separator" data-connector-menu-separator="" />
-    {entry.group.entries.length > 0 ? <Label className="agent-connector-menu__label">{entry.group.label}</Label> : null}
+    {!nested ? <Separator className="tab-context-menu__separator" data-connector-menu-separator="" /> : null}
+    {!nested && entry.group.entries.length > 0 ? <Label className="agent-connector-menu__label">{entry.group.label}</Label> : null}
     {entry.group.entries.map(action => <Item key={action.label} className="tab-context-menu__item" onSelect={action.onSelect}><ThemeObjectConversationsIcon size={14} /><span>{action.label}</span></Item>)}
     {entry.group.issue ? <WorkbenchMenuSubmenu label={`${entry.group.label} service notice`} icon={<InformationIcon size={14} />}
       Sub={Sub} SubTrigger={SubTrigger} SubContent={SubContent} Portal={Portal}>
