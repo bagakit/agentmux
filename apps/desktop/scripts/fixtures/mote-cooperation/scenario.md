@@ -34,3 +34,5 @@ Core 原 conversation projector 和 read-page codec 消费有限的原生页面�
 采集一律标记 `captureOnly: true`、`aestheticReview: not-performed`。独立 reviewer 必须实际打开完整图，判断交流主次、团队密度、身份与状态、请求/回流可读性，问题修正后复拍相同场景。这里没有审美分数、像素门或截图即通过的判断。
 
 所有 Session、Run、空间、原生记录和通知均为明确合成的 API 来源，不连接用户 App 或健康 Run，不启动 CLI/模型，不证明 Provider 实际采用、真实远端、持久恢复、打包或安装。那些证据由各 owning 任务及最终联合交付承担。
+
+`node apps/desktop/scripts/fixtures/mote-cooperation/capture.mjs --notice-only` reuses the same App/Composer/Store and original-source assertions for a bounded notice addendum. A trusted reading-wheel operation reveals the original Format/Copy row before the full-reference image; the three full frames include the collapsed notice, decision and complete reference details. It never writes Agent input.
