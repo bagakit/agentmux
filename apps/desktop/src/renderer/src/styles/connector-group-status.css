@@ -1,0 +1,18 @@
+.connector-group-status { display: grid; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-3); min-width: 0; }
+.connector-group-status small { color: var(--text-3); font-size: var(--fs-meta); white-space: normal; line-height: 1.4; }
+.connector-group-status__traffic { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); padding-block: var(--sp-2); }
+.connector-group-status__traffic > div { display: grid; gap: var(--sp-1); min-width: 0; }
+.connector-group-status__traffic strong { font-size: var(--fs-body); font-weight: 500; }
+.connector-group-status__people-title, .connector-group-status__scope { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.connector-group-status__people-title > strong { font-size: var(--fs-meta); font-weight: 500; }
+.connector-group-status__person { display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px minmax(70px, auto); gap: var(--sp-2); align-items: center; min-width: 0; }
+.connector-group-status__person > span, .connector-group-status__person > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); }
+.connector-group-status__person > strong { text-align: right; font-size: var(--fs-meta); font-weight: 500; }
+.connector-group-status__person > small { text-align: right; max-width: 120px; }
+.connector-group-status__recovery { display: grid; gap: var(--sp-2); justify-items: start; }
+.connector-group-status__recovery .primary-button { min-height: 28px; font-size: var(--fs-meta); }
+.connector-header-menu__item > .connector-header-menu__group-heading { display: flex; flex-direction: row; gap: var(--sp-2); min-width: 0; align-items: center; }
+.connector-header-menu__group-heading > span { min-width: 0; }
+.connector-header-menu__title > span { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.connector-header-menu__receiving { display: inline-flex; align-items: center; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
+.connector-header-menu__receiving[data-state=online] { color: var(--green); }

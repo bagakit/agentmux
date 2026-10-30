@@ -8,6 +8,7 @@ export function connectorConnectionPresentation(report: GroupDiagnosis | null) {
   const state = receiver?.state === 'ready' && current?.transport.state === 'ready' ? 'online' :
     receiver?.state === 'starting' || receiver?.state === 'recovering' || scheduled ? 'recovering' : receiver?.state === 'ended' ? 'stopped' : 'unknown'
   const title = { online: 'Receiving online', recovering: 'Reconnecting', stopped: 'Receiving stopped', unknown: 'Needs checking' }[state]
+  const shortTitle = { online: 'Online', recovering: 'Reconnecting', stopped: 'Stopped', unknown: 'Not checked' }[state]
   const policies = report ? [report.service, report.adapterService, report.connection, report.binding] : []
   const active = policies.length > 0 && policies.every(section => !!section.value && !section.issue && !section.retained) &&
     report!.service.value!.enabled && report!.adapterService.value!.enabled && report!.connection.value!.enabled && report!.binding.value!.state === 'active'
@@ -28,6 +29,6 @@ export function connectorConnectionPresentation(report: GroupDiagnosis | null) {
     out?.effectObservation?.state === 'unknown' || out?.deliveries.some(row => row.state === 'unknown' || row.state === 'not-applied') ||
     !!out?.coverage?.gaps.length || sourceNeedsRecovery && !busy)
   const policyState = policy?.kind === 'sharing' ? 'paused' as const : policy ? 'off' as const : null
-  return { state, title, hint, primary, actionLabel, active, policyState, waiting, attention: needsCheck ? 'check' as const : null,
+  return { state, title, shortTitle, hint, primary, actionLabel, active, policyState, waiting, attention: needsCheck ? 'check' as const : null,
     scope: 'Receiving connection for this bot’s groups.' }
 }
