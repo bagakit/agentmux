@@ -4,14 +4,14 @@ import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseAgentInputResourceResult, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPageForWindow, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationContentRef, type ConversationRef } from '@agentmux/core/conversation'
-import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryRetryInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { isConversationPublicationPart, publicationContent, publicationPartKey } from './publication-content.js'
-import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
+import { PublicationStore, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
 import { readPublicationA2A, publicationMessageTargets, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
 import { publicationSpeaker, type PublicationSpeaker, type PublicationSpeakerDetails, type PublicationSpeakerReader } from './publication-speaker.js'
 import type { CardCreateReceipt, PortraitReceipt } from './publication-card.js'
@@ -861,25 +861,26 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   async inspect(value: ConnectionDeliveryOperationInput) {
     const input = parseConnectionDeliveryParams('connection.delivery.inspect', value), original = this.store.inspect(input.operationId)
-    return { delivery: original ? publicDelivery(original) : null }
+    return { delivery: original ? this.store.delivery(original) : null }
   }
   async list(value: ConnectionDeliveryListInput) {
     const input = parseConnectionDeliveryParams('connection.delivery.ls', value), binding = this.options.bindings.readExact(input.bindingId, input.bindingRevision)
     if (!binding || binding.connectionId !== input.connectionId) throw new AgentMuxError('The delivery audience does not match this exact Binding.', 'PUBLICATION_SOURCE_CONFLICT')
-    const deliveries = this.store.list(binding, input.limit ?? 30, input.after, input.order).map(publicDelivery)
+    const deliveries = this.store.list(binding, input.limit ?? 30, input.after, input.order).map(operation => this.store.delivery(operation))
     const lane = this.lanes.get(binding.bindingId), sourceObservation = lane?.binding.revision === binding.revision ? lane.sourceObservation : undefined
     const effectObservation = this.effectObservation(binding)
     return { ...(sourceObservation ? { sourceObservation: { ...sourceObservation } } : {}), ...(effectObservation ? { effectObservation } : {}), deliveries, next: deliveries.length === (input.limit ?? 30) ? deliveries.at(-1)!.operationId : null, observation: this.observation(binding.bindingId, binding.revision), coverage: this.store.coverage(binding, input.limit ?? 30, input.afterContent) }
   }
-  async retry(value: ConnectionDeliveryOperationInput, context: RoomBindingCallContext) {
+  async retry(value: ConnectionDeliveryRetryInput, context: RoomBindingCallContext) {
     if (this.closed) throw new AgentMuxError('The original publication owner is closed. Inspect the retained operation through its current Host.', 'PUBLICATION_OWNER_UNAVAILABLE')
     const input = parseConnectionDeliveryParams('connection.delivery.retry', value)
     parseRoomBindingAuthority(context.actor); await context.assertCurrent?.()
     if (this.closed) throw new AgentMuxError('The original publication owner closed during authorization. Its original outcome is retained.', 'PUBLICATION_OWNER_UNAVAILABLE')
     const original = this.store.inspect(input.operationId)
     if (!original) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
-    const delivery = publicDelivery(this.store.retry(original.operationId, () => !this.closed && (original.payload.kind === 'binding-lifecycle' ? this.noticeAuthorized(original) : this.options.bindings.publicationAuthority(original.bindingId, original.bindingRevision).authorized)))
-    this.refresh(); return { delivery }
+    const result = this.store.retry(input, () => !this.closed && (original.payload.kind === 'binding-lifecycle' ? this.noticeAuthorized(original) : this.options.bindings.publicationAuthority(original.bindingId, original.bindingRevision).authorized))
+    if (result.accepted) this.refresh()
+    return { delivery: this.store.delivery(result.operation), continuation: result.continuation }
   }
   close(): void {
     if (this.closed) return

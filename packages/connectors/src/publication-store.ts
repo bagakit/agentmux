@@ -14,7 +14,7 @@ import type { PublicationCardAdapter, PublicationCardPreparation, PublicationPor
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
-import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
+import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDeliveryRetrySource, parseConnectionDeliveryContinuation, type ConnectionDeliveryRetrySource, type ConnectionDeliveryContinuation, type ConnectionDeliveryRetryInput, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
 import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
@@ -63,7 +63,9 @@ export type PublicationState = ConnectionDeliveryState
 export type PublicationMapping = ConnectionDeliveryMapping
 export type PublicationFailureReason = ConnectionDeliveryReceiptReason
 export type PublicationReceipt = ConnectionDeliveryReceipt
-export type PublicationOperation = ConnectionDelivery & {
+type PublicationContinuation = ConnectionDeliveryContinuation & { resolution?: { kind: 'attempt'; attempt: number } | { kind: 'source-confirmed' } }
+export type PublicationOperation = Omit<ConnectionDelivery, 'retrySource' | 'lastContinuation'> & {
+  continuations?: PublicationContinuation[]
   /** Presentation only: original source time or the first recorded operation time. */
   presentationTime?: number
   payload: PublicationPayload
@@ -95,7 +97,7 @@ export type PublicationOperation = ConnectionDelivery & {
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
+  const { continuations: _continuations, payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...(cardPreparation || portrait ? { presentation: {
     ...(cardPreparation ? { entity: { state: cardPreparation.receipt.state, ...('reason' in cardPreparation.receipt ? { reason: cardPreparation.receipt.reason } : {}) } } : {}),
@@ -325,6 +327,46 @@ export class PublicationStore {
   }
   inspect(operationId: string): PublicationOperation | null {
     return this.read(this.database.prepare('SELECT operation_json, state FROM connector_publication_operation WHERE operation_id=?').get(operationId))
+  }
+  private continuations(original: PublicationOperation): PublicationContinuation[] {
+    if (original.continuations === undefined) return []
+    if (!Array.isArray(original.continuations)) throw new AgentMuxError('Original source consumption is unconfirmed.', 'PUBLICATION_RETRY_UNCONFIRMED')
+    const seen = new Set<string>()
+    return original.continuations.map(value => {
+      const edge = parseConnectionDeliveryContinuation({ source: value.source, acceptedAt: value.acceptedAt })
+      const key = encode(edge.source), resolution = value.resolution
+      if (seen.has(key) || Object.keys(value).some(key => !['source', 'acceptedAt', 'resolution'].includes(key)) || resolution &&
+          (resolution.kind === 'attempt' ? Object.keys(resolution).some(key => !['kind', 'attempt'].includes(key)) || resolution.attempt !== edge.source.attempt + 1
+            : resolution.kind !== 'source-confirmed' || edge.source.kind !== 'content-upload' || Object.keys(resolution).length !== 1)) throw new AgentMuxError(
+        'Original source consumption does not identify its exact successor.', 'PUBLICATION_RETRY_UNCONFIRMED')
+      seen.add(key)
+      return { ...edge, ...(resolution ? { resolution: { ...resolution } } : {}) }
+    })
+  }
+  /** Qualification reads the actual original effect receipt; it is never a grant. */
+  private retrySource(original: PublicationOperation): ConnectionDeliveryRetrySource | undefined {
+    if (original.state !== 'not-applied') return
+    let source: ConnectionDeliveryRetrySource | undefined
+    if (original.attempt !== undefined) {
+      if (!original.prepared) return
+      const row = this.database.prepare('SELECT receipt_json FROM connector_publication_attempt WHERE operation_id=? AND attempt=?').get(original.operationId, original.attempt)
+      const receipt = row?.receipt_json ? parseReceipt(JSON.parse(String(row.receipt_json))) : undefined
+      if (receipt?.state === 'not-applied' && same(receipt, original.receipt)) source = { kind: 'message', attempt: original.attempt }
+    } else if (!original.prepared && original.effect === 'upsert' && ['image', 'file'].includes(original.payload.kind) && original.uploads?.at(-1)?.state === 'unknown') {
+      source = { kind: 'content-upload', attempt: original.uploads.length }
+    }
+    if (source && !this.continuations(original).some(edge => same(edge.source, source))) return parseConnectionDeliveryRetrySource(source)
+  }
+  /** Safe public observation from this original Store, not a client eligibility copy. */
+  delivery(original: PublicationOperation): ConnectionDelivery {
+    const retrySource = this.retrySource(original), last = this.continuations(original).at(-1)
+    return parseConnectionDelivery({ ...publicDelivery(original), ...(retrySource ? { retrySource } : {}),
+      ...(last ? { lastContinuation: { source: last.source, acceptedAt: last.acceptedAt } } : {}) })
+  }
+  private bindContinuation(original: PublicationOperation, kind: ConnectionDeliveryRetrySource['kind'], attempt: number): PublicationOperation {
+    const continuations = this.continuations(original)
+    const edge = continuations.find(edge => edge.source.kind === kind && edge.source.attempt === attempt - 1 && edge.resolution === undefined)
+    return edge ? { ...original, continuations: continuations.map(value => value === edge ? { ...value, resolution: { kind: 'attempt', attempt } } : value) } : original
   }
   /** Only original confirmed messages wholly sourced from this native conversation are already known.
    * Captured/relay/mixed or missing source facts remain useful context; no body or bot name is inspected. */
@@ -1264,7 +1306,7 @@ export class PublicationStore {
       if (!authorized() || !original || original.state !== 'pending' || original.effect !== 'upsert' || (original.payload.kind !== 'image' && original.payload.kind !== 'file') || original.prepared || original.attempt !== undefined || ['dispatching', 'confirmed'].includes(original.uploads?.at(-1)?.state ?? '')) return null
       const predecessor = original.predecessorOperationId ? this.inspect(original.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
-      const claimed = { ...original, uploads: [...(original.uploads ?? []), { state: 'dispatching' as const }] }
+      const claimed = { ...this.bindContinuation(original, 'content-upload', (original.uploads?.length ?? 0) + 1), uploads: [...(original.uploads ?? []), { state: 'dispatching' as const }] }
       this.write(claimed); return claimed
     })
   }
@@ -1298,8 +1340,13 @@ export class PublicationStore {
       }
       const uploads = original.uploads!.map((value, index) => index === attempt - 1 ? receipt : value)
       const { reason: _reason, ...retained } = original
-      const result = attempt === uploads.length && original.attempt === undefined && ['pending', 'not-applied'].includes(original.state)
-        ? { ...retained, uploads, ...(receipt.state === 'confirmed' ? { state: 'pending' as const } : { state: 'not-applied' as const, reason: 'effect-unconfirmed' as const }) }
+      const edges = this.continuations(original)
+      const accepted = edges.find(edge => edge.source.kind === 'content-upload' && edge.source.attempt === attempt && edge.resolution === undefined)
+      const current = attempt === uploads.length && original.attempt === undefined && !original.prepared && ['pending', 'not-applied'].includes(original.state)
+      const retainedPending = accepted !== undefined && original.state === 'pending'
+      const result = current
+        ? { ...retained, uploads, ...(receipt.state === 'confirmed' || retainedPending ? { state: 'pending' as const } : { state: 'not-applied' as const, reason: 'effect-unconfirmed' as const }),
+          ...(receipt.state === 'confirmed' && retainedPending ? { continuations: edges.map(edge => edge === accepted ? { ...edge, resolution: { kind: 'source-confirmed' as const } } : edge) } : {}) }
         : { ...original, uploads }
       this.write(result); return result
     })
@@ -1443,7 +1490,7 @@ export class PublicationStore {
       if (!original.prepared && prepared.renderVersion !== adapter.renderVersion)
         throw new AgentMuxError('The adapter must prepare its declared current render version.', 'PUBLICATION_PREPARATION_UNCONFIRMED')
       if (!authorized()) return null
-      const claimed = { ...original, prepared, attempt: (original.attempt ?? 0) + 1, state: 'dispatching' as const }
+      const claimed = { ...this.bindContinuation(original, 'message', (original.attempt ?? 0) + 1), prepared, attempt: (original.attempt ?? 0) + 1, state: 'dispatching' as const }
       if (original.effect === 'upsert' && ['speech', 'question'].includes(original.payload.kind) && original.speaker?.avatar && !this.portraitAvailable(original) &&
           (original.mapping?.nativeCard || original.cardPreparation?.useForMessage)) claimed.portrait = { state: 'pending' }
       this.database.prepare('INSERT INTO connector_publication_attempt (operation_id,attempt) VALUES (?,?)').run(claimed.operationId, claimed.attempt)
@@ -1514,17 +1561,21 @@ export class PublicationStore {
   attempts(operationId: string): Array<{ attempt: number; receipt: PublicationReceipt | null }> {
     return this.database.prepare('SELECT attempt,receipt_json FROM connector_publication_attempt WHERE operation_id=? ORDER BY attempt').all(operationId).map(row => ({ attempt: Number(row.attempt), receipt: row.receipt_json ? parseReceipt(JSON.parse(String(row.receipt_json))) : null }))
   }
-  /** Explicit retry of a non-applied message or an upload whose message was never attempted. */
-  retry(operationId: string, authorized: () => boolean): PublicationOperation {
+  /** Consume this original actual failure source once, before any successor claim. */
+  retry(input: ConnectionDeliveryRetryInput, authorized: () => boolean): { operation: PublicationOperation; continuation: ConnectionDeliveryContinuation; accepted: boolean } {
+    const source = parseConnectionDeliveryRetrySource(input.source)
     return this.transaction(() => {
-      const original = this.inspect(operationId)
+      const original = this.inspect(input.operationId)
       if (!original) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
-      if (original.state !== 'not-applied') throw new AgentMuxError('The platform has not confirmed non-application. Inspect the original operation.', 'PUBLICATION_RETRY_UNCONFIRMED')
+      const edges = this.continuations(original), previous = edges.find(edge => same(edge.source, source))
+      if (previous) return { operation: original, continuation: { source: previous.source, acceptedAt: previous.acceptedAt }, accepted: false }
+      if (!same(this.retrySource(original), source)) throw new AgentMuxError('This exact original failure source cannot grant another continuation. Inspect its retained outcome.', 'PUBLICATION_RETRY_UNCONFIRMED')
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes dispatch.', 'PUBLICATION_NOT_AUTHORIZED')
       const { reason: _reason, ...retained } = original
-      const pending: PublicationOperation = { ...retained, state: 'pending' }
+      const continuation: ConnectionDeliveryContinuation = { source, acceptedAt: Date.now() }
+      const pending: PublicationOperation = { ...retained, state: 'pending', continuations: [...edges, continuation] }
       this.write(pending)
-      return pending
+      return { operation: pending, continuation, accepted: true }
     })
   }
 }

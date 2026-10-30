@@ -912,7 +912,8 @@ export class AgentMuxRpcService {
       }
       if (caller && method === 'connection.delivery.retry') {
         const request = parseConnectionDeliveryParams(method, input)
-        const original = parseConnectionResult('connection.delivery.inspect', await readAgentConnectionDelivery(owner, 'connection.delivery.inspect', request, { hostId: caller.hostId, agentSessionId: caller.agentSessionId }), request)
+        const selector = { operationId: request.operationId }
+        const original = parseConnectionResult('connection.delivery.inspect', await readAgentConnectionDelivery(owner, 'connection.delivery.inspect', selector, { hostId: caller.hostId, agentSessionId: caller.agentSessionId }), selector)
         if (!original.delivery) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
         const result = await owner.delivery!.retry(request, { ...administration,
           assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
@@ -1010,7 +1011,8 @@ export class AgentMuxRpcService {
         if (!delivery) throw new AgentMuxError('Delivery inspection is not enabled on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
         const result = method === 'connection.delivery.inspect' ? await delivery.inspect(parseConnectionDeliveryParams(method, params))
           : method === 'connection.delivery.ls' ? await delivery.list(parseConnectionDeliveryParams(method, params))
-          : await delivery.retry(parseConnectionDeliveryParams(method, params), administration)
+          : await delivery.retry(parseConnectionDeliveryParams(method, params), { ...administration,
+            assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       if (method === 'connection.ingress.inspect' || method === 'connection.ingress.ls' || method === 'connection.ingress.authority' || method === 'connection.ingress.record-authority' || method === 'connection.ingress.rejoin') {

@@ -46,6 +46,11 @@ export type ConnectionDeliveryMapping = { messageId: string; threadId?: string; 
 export type ConnectionDeliveryReceipt =
   | { state: 'confirmed'; mapping: ConnectionDeliveryMapping }
   | { state: 'unknown' | 'not-applied'; reason: ConnectionDeliveryReceiptReason }
+/** An original actual failed effect, never an authorization grant. */
+export type ConnectionDeliveryRetrySource = { kind: 'message' | 'content-upload'; attempt: number }
+/** Durable acceptance is separate from the current queue fate and platform result. */
+export type ConnectionDeliveryContinuation = { source: ConnectionDeliveryRetrySource; acceptedAt: number }
+export type ConnectionDeliveryRetryInput = { operationId: string; source: ConnectionDeliveryRetrySource }
 /** A safe observation of one original external effect. No body, prepared wire or credentials cross this boundary. */
 export type ConnectionDelivery = {
   operationId: string
@@ -62,6 +67,8 @@ export type ConnectionDelivery = {
   mapping?: ConnectionDeliveryMapping
   reason?: ConnectionDeliveryReason
   receipt?: ConnectionDeliveryReceipt
+  retrySource?: ConnectionDeliveryRetrySource
+  lastContinuation?: ConnectionDeliveryContinuation
   event?: ConnectionDeliveryEvent
   /** Milestone on the original external query, not another authored message. */
   queryFeedback?: { stage: 'received' | 'queued' | 'dispatched' | 'started' | 'completed' | 'failed' | 'interrupted'; ingressId: string; messageId: string }
@@ -84,17 +91,17 @@ export type ConnectionDeliveryListInput = { connectionId: string; bindingId: str
 export type ConnectionDeliveryParamsMap = {
   'connection.delivery.inspect': ConnectionDeliveryOperationInput
   'connection.delivery.ls': ConnectionDeliveryListInput
-  'connection.delivery.retry': ConnectionDeliveryOperationInput
+  'connection.delivery.retry': ConnectionDeliveryRetryInput
 }
 export type ConnectionDeliveryResultMap = {
   'connection.delivery.inspect': { delivery: ConnectionDelivery | null }
   'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; sourceObservation?: ConnectionDeliverySourceObservation; effectObservation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
-  'connection.delivery.retry': { delivery: ConnectionDelivery }
+  'connection.delivery.retry': { delivery: ConnectionDelivery; continuation: ConnectionDeliveryContinuation }
 }
 export type ConnectionDeliveryMethod = keyof ConnectionDeliveryParamsMap
 /** Borrow the exact Host owner. Retry keeps the same message identity: known non-application, or an upload whose message was never attempted. */
 export interface ConnectionDeliveryPort {
   inspect(input: ConnectionDeliveryOperationInput): Promise<ConnectionDeliveryResultMap['connection.delivery.inspect']>
   list(input: ConnectionDeliveryListInput): Promise<ConnectionDeliveryResultMap['connection.delivery.ls']>
-  retry(input: ConnectionDeliveryOperationInput, context: RoomBindingCallContext): Promise<ConnectionDeliveryResultMap['connection.delivery.retry']>
+  retry(input: ConnectionDeliveryRetryInput, context: RoomBindingCallContext): Promise<ConnectionDeliveryResultMap['connection.delivery.retry']>
 }

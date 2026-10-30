@@ -6,7 +6,7 @@ import { parseConversationVersionedAnchor, parseConversationSource } from './con
 import type { ConversationItemRef } from './conversation.js'
 import { conversationRecordId } from './conversation-stream.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
-import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDeliveryEvent, ConnectionDeliveryGap, ConnectionOriginRepresentation, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
+import type { ConnectionDelivery, ConnectionDeliveryContinuation, ConnectionDeliveryRetrySource, ConnectionDeliveryCoverage, ConnectionDeliveryEvent, ConnectionDeliveryGap, ConnectionOriginRepresentation, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
 
 export const CONNECTION_DELIVERY_RPC_METHODS = { 'connection.delivery.inspect': 'long', 'connection.delivery.ls': 'long', 'connection.delivery.retry': 'long' } as const
 export const isConnectionDeliveryMethod = (value: unknown): value is ConnectionDeliveryMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_DELIVERY_RPC_METHODS, value)
@@ -17,6 +17,15 @@ const fail = (): never => { throw new AgentMuxError('Delivery data does not desc
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CONNECTION_DELIVERY_DATA')
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 function integer(value: unknown, minimum: number): number { if (!Number.isSafeInteger(value) || Number(value) < minimum) fail(); return value as number }
+export function parseConnectionDeliveryRetrySource(value: unknown): ConnectionDeliveryRetrySource {
+  const p = object(value, ['kind', 'attempt'])
+  if (p.kind !== 'message' && p.kind !== 'content-upload') fail()
+  return { kind: p.kind as ConnectionDeliveryRetrySource['kind'], attempt: integer(p.attempt, 1) }
+}
+export function parseConnectionDeliveryContinuation(value: unknown): ConnectionDeliveryContinuation {
+  const p = object(value, ['source', 'acceptedAt'])
+  return { source: parseConnectionDeliveryRetrySource(p.source), acceptedAt: integer(p.acceptedAt, 0) }
+}
 function reason(value: unknown, queue = false): ConnectionDeliveryReason {
   if (!CONNECTION_DELIVERY_RECEIPT_REASONS.includes(value as ConnectionDeliveryReceiptReason) && !(queue && ['binding-revised', 'original-speech-withdrawn', 'outside-conversation-scope', 'private-content', 'public-content-unconfirmed', 'version-unavailable'].includes(String(value)))) fail()
   return value as ConnectionDeliveryReason
@@ -112,7 +121,7 @@ export function parseConnectionDeliveryReceipt(value: unknown): ConnectionDelive
   return { state: p.state as 'unknown' | 'not-applied', reason: reason(p.reason) as ConnectionDeliveryReceiptReason }
 }
 export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
-  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay', 'resourceUpload', 'queryFeedback', 'presentation'])
+  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay', 'resourceUpload', 'queryFeedback', 'presentation', 'retrySource', 'lastContinuation'])
   const target = object(p.target, ['connectionId', 'application', 'externalConversationId']), app = object(target.application, ['domain', 'appId']), fragment = object(p.fragment, ['ordinal', 'count'])
   const domain = text(app.domain), ordinal = integer(fragment.ordinal, 0), count = integer(fragment.count, 0)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text(app.appId))) fail()
@@ -158,9 +167,13 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
     if (v.entity === undefined && v.portrait === undefined || queryFeedback) fail()
     presentation = { ...(v.entity === undefined ? {} : { entity: effect(v.entity, false) }), ...(v.portrait === undefined ? {} : { portrait: effect(v.portrait, true) }) } as ConnectionDelivery['presentation']
   }
+  const retrySource = p.retrySource === undefined ? undefined : parseConnectionDeliveryRetrySource(p.retrySource)
+  if (retrySource && (p.state !== 'not-applied' || (retrySource.kind === 'message' ? receipt?.state !== 'not-applied'
+    : resourceUpload?.state !== 'unknown' || resourceUpload.attempt !== retrySource.attempt))) fail()
+  const lastContinuation = p.lastContinuation === undefined ? undefined : parseConnectionDeliveryContinuation(p.lastContinuation)
   return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: original,
     target: { connectionId: text(target.connectionId), application: { domain, appId: text(app.appId) }, externalConversationId: text(target.externalConversationId) }, effect: p.effect as ConnectionDelivery['effect'], fragment: { ordinal, count }, state: p.state as ConnectionDeliveryState,
-    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }), ...(resourceUpload ? { resourceUpload } : {}), ...(queryFeedback ? { queryFeedback } : {}), ...(presentation ? { presentation } : {}) }
+    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }), ...(resourceUpload ? { resourceUpload } : {}), ...(queryFeedback ? { queryFeedback } : {}), ...(presentation ? { presentation } : {}), ...(retrySource ? { retrySource } : {}), ...(lastContinuation ? { lastContinuation } : {}) }
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
@@ -178,7 +191,8 @@ export function parseConnectionDeliverySourceObservation(value: unknown): Connec
     code: p.code as ConnectionDeliverySourceObservation['code'], codeRecorded: p.codeRecorded as boolean, checkpointKey: p.checkpointKey === null ? null : version(p.checkpointKey) }
 }
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {
-  if (method !== 'connection.delivery.ls') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
+  if (method === 'connection.delivery.retry') { const p = object(value, ['operationId', 'source']); return { operationId: text(p.operationId), source: parseConnectionDeliveryRetrySource(p.source) } as ConnectionDeliveryParamsMap[M] }
+  if (method === 'connection.delivery.inspect') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
   const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit', 'order'])
   const limit = p.limit === undefined ? undefined : integer(p.limit, 1); if (limit !== undefined && limit > 100) fail()
   if (p.order !== undefined && p.order !== 'oldest' && p.order !== 'newest') fail()
@@ -193,6 +207,12 @@ export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod
     const coverage = p.coverage === undefined ? undefined : parseConnectionDeliveryCoverage(p.coverage)
     if (coverage?.origins.some(o => o.origin.connectionId !== expected.connectionId)) fail()
     return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }), ...(p.sourceObservation === undefined ? {} : { sourceObservation: parseConnectionDeliverySourceObservation(p.sourceObservation) }), ...(p.effectObservation === undefined ? {} : { effectObservation: parseConnectionDeliveryObservation(p.effectObservation) }), ...(coverage ? { coverage } : {}) } as ConnectionDeliveryResultMap[M]
+  }
+  if (method === 'connection.delivery.retry') {
+    const p = object(value, ['delivery', 'continuation']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.retry']
+    const delivery = parseConnectionDelivery(p.delivery), continuation = parseConnectionDeliveryContinuation(p.continuation)
+    if (delivery.operationId !== expected.operationId || continuation.source.kind !== expected.source.kind || continuation.source.attempt !== expected.source.attempt) fail()
+    return { delivery, continuation } as ConnectionDeliveryResultMap[M]
   }
   const p = object(value, ['delivery']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.inspect']
   const delivery = p.delivery === null && method === 'connection.delivery.inspect' ? null : parseConnectionDelivery(p.delivery)
