@@ -51,6 +51,8 @@ export type ConnectionDeliveryRetrySource = { kind: 'message' | 'content-upload'
 /** Durable acceptance is separate from the current queue fate and platform result. */
 export type ConnectionDeliveryContinuation = { source: ConnectionDeliveryRetrySource; acceptedAt: number }
 export type ConnectionDeliveryRetryInput = { operationId: string; source: ConnectionDeliveryRetrySource }
+/** Earliest native resource availability, separate from authority, source acceptance and effect outcome. */
+export type ConnectionDeliveryWait = { reason: 'rate-limit'; notBefore: number; basis: 'native' | 'local' }
 /** A safe observation of one original external effect. No body, prepared wire or credentials cross this boundary. */
 export type ConnectionDelivery = {
   operationId: string
@@ -69,6 +71,7 @@ export type ConnectionDelivery = {
   receipt?: ConnectionDeliveryReceipt
   retrySource?: ConnectionDeliveryRetrySource
   lastContinuation?: ConnectionDeliveryContinuation
+  wait?: ConnectionDeliveryWait
   event?: ConnectionDeliveryEvent
   /** Milestone on the original external query, not another authored message. */
   queryFeedback?: { stage: 'received' | 'queued' | 'dispatched' | 'started' | 'completed' | 'failed' | 'interrupted'; ingressId: string; messageId: string }

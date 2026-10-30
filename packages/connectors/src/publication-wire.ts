@@ -1,5 +1,6 @@
 import { AgentMuxError } from '@agentmux/core'
 import type { PublicationOperation, PublicationPayload } from './publication-store.js'
+import type { PublicationRateLimitAdvice, PublicationRateLimitScopes } from './publication-rate-limit.js'
 
 /** Stored speech operations retain their original encoding, including legacy question payloads. */
 export function publicationSpeechText(payload: Extract<PublicationPayload, { kind: 'speech' }>): string {
@@ -22,7 +23,11 @@ export type PreparedPublication = {
 }
 /** Private bytes remain in the original Outbox operation, never in a mutable cache or URL. */
 export type PreparedPublicationResource = { resourceId: string; sha256: string; byteLength: number; name: string; contentType: string; source?: 'public-interaction-text' }
-export type PublicationEffectContext = { readResource(resource: Readonly<PreparedPublicationResource>): Uint8Array }
+export type PublicationEffectContext = {
+  readResource(resource: Readonly<PreparedPublicationResource>): Uint8Array
+  /** Metadata is bound by the Host to this actual attempt and settled with its public receipt. */
+  reportRateLimit?(advice: Readonly<PublicationRateLimitAdvice>): void
+}
 /** Preparation is synchronous and pure; all network effects occur after the original transaction commits. */
 export interface PublicationPreparer {
   adapterId: string
@@ -30,6 +35,8 @@ export interface PublicationPreparer {
   supportedRenderVersions: readonly string[]
   readonly directResources?: true
   prepare(operation: Readonly<PublicationOperation>): PreparedPublication
+  /** Pure membership of the original frozen native request; no quota or permission is granted. */
+  rateLimitScopes?(prepared: Readonly<PreparedPublication>, target: Readonly<PublicationOperation['target']>): PublicationRateLimitScopes | undefined
 }
 export function parsePreparedPublication(value: unknown, adapter: PublicationPreparer): PreparedPublication {
   const invalid = (): never => { throw new AgentMuxError('The adapter could not prepare a bounded original request. No platform effect was dispatched.', 'PUBLICATION_PREPARATION_UNCONFIRMED') }

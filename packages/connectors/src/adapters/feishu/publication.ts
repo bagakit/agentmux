@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
+import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 import type { PublicationImage, PublicationFile } from '../../publication-resource.js'
 import type { PublicationAdapter } from '../../publication-adapter.js'
 import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget, PublicationPayload, PublicationTextFragment } from '../../publication-store.js'
-import { parsePreparedPublication, publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
+import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationEffectContext } from '../../publication-wire.js'
 import type { FeishuAdapter } from './index.js'
 import { feishuFailure, feishuIdentity, FEISHU_MESSAGE_BODY_BYTES } from './message.js'
 import { feishuQuestionCard } from './question-card.js'
@@ -23,6 +24,13 @@ const cardsPath = '/open-apis/cardkit/v1/cards'
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 const key = (operationId: string) => createHash('sha256').update(operationId).digest('base64url')
+const quotaKey = (identity: readonly string[]) => createHash('sha256').update(JSON.stringify(identity)).digest('hex')
+function resetSeconds(headers: Record<string, unknown>): number | undefined {
+  const raw = Object.entries(headers).find(([name]) => name.toLowerCase() === 'x-ogw-ratelimit-reset')?.[1]
+  if (typeof raw !== 'string' || !/^\d+(?:\.\d+)?$/u.test(raw.trim())) return
+  const value = Number(raw)
+  return value >= 0 && Number.isSafeInteger(value * 1000) ? value : undefined
+}
 function inputStatus(payload: Extract<PublicationPayload, { kind: 'speech' }>): string | undefined {
   const input = payload.inputSubmission
   return input ? ({ waiting: 'Saved · waiting for Agent', stopped: 'Saved · delivery stopped', 'terminal-confirmed': 'Sent to Agent · acceptance not confirmed',
@@ -180,7 +188,7 @@ function failure(status: number | undefined, code: unknown): PublicationReceipt 
   // An explicit in-flight response cannot establish non-application, even under a retry's request key.
   if (code === 230049) return unknown()
   if (status !== undefined && status >= 500) return { state: 'unknown', reason: 'platform-unavailable' }
-  if (status === 429 || code === 230020) return { state: 'not-applied', reason: 'rate-limited' }
+  if (status === 429 || code === 230020 || code === 99991400) return { state: 'not-applied', reason: 'rate-limited' }
   if ([230011, 230019, 230050, 230110, 232009].includes(code as number) || status === 404) return { state: 'not-applied', reason: 'thread-unavailable' }
   if ([230025, 230054].includes(code as number)) return { state: 'not-applied', reason: 'unsupported-format' }
   if ([230001, 230002, 230006, 230013, 230015, 230017, 230018, 230022, 230027, 230028, 230035, 230038, 230055, 230071, 230072, 230075, 230111].includes(code as number) || status === 401 || status === 403) return { state: 'not-applied', reason: 'platform-rejected' }
@@ -207,6 +215,17 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly questionActions = true as const
   readonly queryFeedback = true as const
   readonly replyMetadata = true as const
+  rateLimitScopes(prepared: Readonly<PreparedPublication>, target: Readonly<PublicationTarget>) {
+    if (prepared.adapterId !== this.adapterId || prepared.request.method !== 'POST') return
+    let api: string
+    if (prepared.request.path === path && prepared.request.query?.receive_id_type === 'chat_id') api = 'message-create'
+    else if (/^\/open-apis\/im\/v1\/messages\/[^/]+\/reply$/u.test(prepared.request.path)) api = 'message-reply'
+    else return
+    return {
+      request: quotaKey(['feishu', api, target.application.domain, target.application.appId]),
+      conversation: quotaKey(['feishu', 'message-send', target.application.domain, target.externalConversationId])
+    }
+  }
   readonly cards: PublicationCardAdapter = {
     prepareCreate: operation => {
       const card = requestCard(this.prepare(operation, true))
@@ -430,12 +449,20 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   }
   private async request(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal) {
     let status: number | undefined
+    let observedAt: number | undefined, reset: number | undefined
+    const defaults = defaultHttpInstance.defaults.transformResponse
+    const transforms = Array.isArray(defaults) ? defaults : defaults ? [defaults] : []
     const response = await this.clients.withClient(target, credential, client => client.request<unknown>({
       url: prepared.request.path, method: prepared.request.method, params: prepared.request.query, headers: { 'Content-Type': 'application/json; charset=utf-8' },
       ...(prepared.request.body === undefined ? {} : { data: {}, transformRequest: [() => prepared.request.body] }),
-      validateStatus: value => { status = value; return true }, signal
+      validateStatus: value => { status = value; return true }, signal,
+      transformResponse: [...transforms, (data: unknown, headers: Record<string, unknown>, responseStatus?: number) => {
+        observedAt = Date.now(); reset = resetSeconds(headers)
+        if (responseStatus !== undefined) status = responseStatus
+        return data
+      }]
     }), signal)
-    return { response, result: object(response), status }
+    return { response, result: object(response), status, observedAt: observedAt ?? Date.now(), reset }
   }
   private async readMessage(target: PublicationTarget, credential: string, signal: AbortSignal, mapping: Readonly<PublicationMapping>): Promise<Record<string, unknown> | null> {
     let status: number | undefined
@@ -446,15 +473,22 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     const original = matches.length === 1 ? matches[0] : null
     return original && original.chat_id === target.externalConversationId && ownSender(original.sender, target.application) && (original.thread_id === undefined || original.thread_id === mapping.threadId) ? original : null
   }
-  async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
+  async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>, context?: PublicationEffectContext): Promise<PublicationReceipt> {
     if (!this.valid(prepared, target, mapping)) return { state: 'not-applied', reason: 'unsupported-format' }
     try {
-      const { response, status } = await this.request(prepared, target, credential, signal)
+      const { response, status, observedAt, reset } = await this.request(prepared, target, credential, signal)
       const reaction = readFeishuQueryReaction(prepared)
       if (reaction) return feishuReactionReceipt(response, status, reaction, target.application, mapping)
       const result = object(response), failed = failure(status, result?.code)
       if (mapping?.nativeCard && prepared.request.method === 'PUT') return nativeFailure(status, result?.code) ?? { state: 'confirmed', mapping: { ...mapping } }
-      if (failed) return failed
+      if (failed) {
+        if (failed.state === 'not-applied' && failed.reason === 'rate-limited') {
+          const scopes = this.rateLimitScopes(prepared, target)
+          const scopeKey = result?.code === 230020 ? scopes?.conversation : scopes?.request
+          if (scopeKey) context?.reportRateLimit?.({ scopeKey, observedAt, ...(reset === undefined ? {} : { resetSeconds: reset }) })
+        }
+        return failed
+      }
       const data = object(result?.data)
       if (!data || !consistent(data, target, mapping)) return unknown()
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()

@@ -10,6 +10,7 @@ import { credentialLookupFailure } from './credential-observation.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
+import type { PublicationRateLimitAdvice, PublicationRateLimitCursor, PublicationRateLimitPendingCursor } from './publication-rate-limit.js'
 import { isConversationPublicationPart, publicationContent, publicationPartKey } from './publication-content.js'
 import { PublicationStore, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
 import { readPublicationA2A, publicationMessageTargets, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
@@ -34,7 +35,7 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
-type Lane = { portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
@@ -87,10 +88,30 @@ export class PublicationHost implements ConnectionDeliveryPort {
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
       } else {
+        if (recoveryOnly) this.recoverRateLimits(lane)
         if (!recoveryOnly || lane.queryInput?.failed) lane.queryInput?.wake()
         if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted) this.wake(lane)
       }
     }
+  }
+  /** Only the existing recovery tick considers no-effect sources. Normal source reads stay notification-driven. */
+  private recoverRateLimits(lane: Lane): void {
+    try {
+      const sources = this.store.rateLimitSources(lane.binding, lane.rateLimitAfter, 25)
+      if (sources.next) lane.rateLimitAfter = sources.next
+      else delete lane.rateLimitAfter
+      for (const original of sources.operations) {
+        const authorized = () => !this.closed && !lane.abort.signal.aborted && this.authorized(lane.binding) &&
+          this.queryAuthorized(original, lane.binding) && (!['permission', 'question'].includes(original.payload.kind) || this.options.permissions?.authorized(original) === true)
+        if (!authorized() || !original.rateLimit) continue
+        const accepted = this.store.retry({ operationId: original.operationId, source: original.rateLimit.source }, authorized)
+        if (accepted.accepted) this.wake(lane)
+      }
+      const pending = this.store.rateLimitPending(lane.binding, lane.rateLimitPendingAfter, 25)
+      if (pending.next) lane.rateLimitPendingAfter = pending.next
+      else delete lane.rateLimitPendingAfter
+      if (pending.due) this.wake(lane)
+    } catch { lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' } }
   }
   /** Optional feedback has no network work on the ingress path; its durable effect wakes only this audience. */
   receiveQuery(binding: RoomBinding, record: import('@agentmux/core/connections').ConnectionIngressMessage, directAdmission?: () => boolean): void {
@@ -823,9 +844,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (['permission', 'question'].includes(claimed.payload.kind) && !this.options.permissions?.authorized(claimed)) { authorityObservation = { state: 'unavailable', reason: 'source-unconfirmed' }; this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); after = claimed.operationId; continue }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
-      try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping, publicationEffectContext(claimed))) }
+      let rateLimit: Readonly<PublicationRateLimitAdvice> | undefined
+      const context = { ...publicationEffectContext(claimed), reportRateLimit: (advice: Readonly<PublicationRateLimitAdvice>) => { rateLimit ??= { ...advice } } }
+      try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping, context)) }
       catch { effect = Promise.reject(new Error('Unconfirmed original platform effect.')) }
-      const settle = (receipt: PublicationReceipt) => { if (!this.closed) this.store.settle(claimed.operationId, claimed.attempt!, receipt) }
+      const settle = (receipt: PublicationReceipt) => { if (!this.closed) this.store.settle(claimed.operationId, claimed.attempt!, receipt, rateLimit) }
       // A late authoritative receipt can settle this same identity after timeout, never launch another effect.
       effect.then(receipt => {
         try { settle(receipt) } catch { try { settle({ state: 'unknown', reason: 'effect-unconfirmed' }) } catch { /* Retain an authoritative outcome or unconfirmed storage. */ } }

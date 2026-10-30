@@ -3,6 +3,7 @@ import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { projectQueryFeedback, queueQueryFeedback, queryFeedbackOperationId, reconcileQueryFeedback } from './publication-query-feedback.js'
 import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
+import { publicationRateLimitObservation, publicationRateLimitScopes, type PublicationRateLimitAdvice, type PublicationRateLimitObservation, type PublicationRateLimitScopes, type PublicationRateLimitCursor, type PublicationRateLimitPendingCursor } from './publication-rate-limit.js'
 import { publicationImage, type PublicationImage, type PublicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
 import { publicationInputAlias } from './publication-input-alias.js'
@@ -64,8 +65,12 @@ export type PublicationMapping = ConnectionDeliveryMapping
 export type PublicationFailureReason = ConnectionDeliveryReceiptReason
 export type PublicationReceipt = ConnectionDeliveryReceipt
 type PublicationContinuation = ConnectionDeliveryContinuation & { resolution?: { kind: 'attempt'; attempt: number } | { kind: 'source-confirmed' } }
-export type PublicationOperation = Omit<ConnectionDelivery, 'retrySource' | 'lastContinuation'> & {
+export type PublicationOperation = Omit<ConnectionDelivery, 'retrySource' | 'lastContinuation' | 'wait'> & {
   continuations?: PublicationContinuation[]
+  /** Pure native membership frozen beside the original prepared request. */
+  rateLimitScopes?: PublicationRateLimitScopes
+  /** One actual response; another physical attempt must first pass this window. */
+  rateLimit?: PublicationRateLimitObservation
   /** Presentation only: original source time or the first recorded operation time. */
   presentationTime?: number
   payload: PublicationPayload
@@ -97,7 +102,7 @@ export type PublicationOperation = Omit<ConnectionDelivery, 'retrySource' | 'las
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { continuations: _continuations, payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
+  const { continuations: _continuations, rateLimitScopes: _rateLimitScopes, rateLimit: _rateLimit, payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...(cardPreparation || portrait ? { presentation: {
     ...(cardPreparation ? { entity: { state: cardPreparation.receipt.state, ...('reason' in cardPreparation.receipt ? { reason: cardPreparation.receipt.reason } : {}) } } : {}),
@@ -202,6 +207,15 @@ function representationFragments(value: RepresentationPayload | QuestionRepresen
 }
 // Query and derived index use the same original recovery qualification.
 const recoverableGapPredicate = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') AND json_type(decision_json,'$.gap.anchor')='object' AND (json_extract(decision_json,'$.gap.code')='PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' OR (json_type(decision_json,'$.gap.part')='object' AND json_type(decision_json,'$.gap.event')='object'))"
+const rateLimitSourcePredicate = "state='not-applied' AND json_extract(operation_json,'$.reason')='rate-limited' AND json_type(operation_json,'$.prepared')='object' AND json_extract(operation_json,'$.rateLimit.source.kind')='message' AND json_extract(operation_json,'$.rateLimit.source.attempt')=json_extract(operation_json,'$.attempt')"
+const rateLimitOtherScope = "CASE WHEN json_extract(operation_json,'$.rateLimit.scopeKey')=json_extract(operation_json,'$.rateLimitScopes.request') THEN COALESCE(json_extract(operation_json,'$.rateLimitScopes.conversation'),'') ELSE json_extract(operation_json,'$.rateLimitScopes.request') END"
+/** Both candidate selection and the final claim consume the same durable resource window. */
+const rateLimitAvailable = (alias: string) => `NOT EXISTS (
+  SELECT 1 FROM connector_publication_operation cooling INDEXED BY connector_publication_rate_scope
+  WHERE json_type(cooling.operation_json,'$.rateLimit')='object'
+    AND json_extract(cooling.operation_json,'$.rateLimit.scopeKey') IN (
+      json_extract(${alias}.operation_json,'$.rateLimitScopes.request'),json_extract(${alias}.operation_json,'$.rateLimitScopes.conversation'))
+    AND json_extract(cooling.operation_json,'$.rateLimit.notBefore')>?)`
 
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
@@ -232,6 +246,15 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_pending
         ON connector_publication_operation(binding_id, binding_revision, ordinal)
         WHERE state IN ('pending','dispatching','unknown','not-applied');
+      CREATE INDEX IF NOT EXISTS connector_publication_rate_scope
+        ON connector_publication_operation(json_extract(operation_json,'$.rateLimit.scopeKey'),json_extract(operation_json,'$.rateLimit.notBefore') DESC,json_extract(operation_json,'$.rateLimit.basis'))
+        WHERE json_type(operation_json,'$.rateLimit')='object';
+      CREATE INDEX IF NOT EXISTS connector_publication_rate_source
+        ON connector_publication_operation(binding_id,binding_revision,json_extract(operation_json,'$.rateLimit.scopeKey'),${rateLimitOtherScope},ordinal,operation_id)
+        WHERE ${rateLimitSourcePredicate};
+      CREATE INDEX IF NOT EXISTS connector_publication_rate_pending
+        ON connector_publication_operation(binding_id,binding_revision,json_extract(operation_json,'$.rateLimitScopes.request'),COALESCE(json_extract(operation_json,'$.rateLimitScopes.conversation'),''),ordinal)
+        WHERE state='pending' AND json_type(operation_json,'$.rateLimitScopes')='object';
       CREATE INDEX IF NOT EXISTS connector_publication_open_state
         ON connector_publication_operation(binding_id, binding_revision, state, ordinal)
         WHERE state IN ('pending','dispatching','unknown','not-applied');
@@ -360,8 +383,79 @@ export class PublicationStore {
   /** Safe public observation from this original Store, not a client eligibility copy. */
   delivery(original: PublicationOperation): ConnectionDelivery {
     const retrySource = this.retrySource(original), last = this.continuations(original).at(-1)
+    const currentRate = original.rateLimit?.source.attempt === original.attempt && (original.state === 'pending' || retrySource?.kind === 'message' && original.reason === 'rate-limited')
+      ? original.rateLimit : undefined
+    const cooling = original.state === 'pending' || currentRate ? this.rateLimitCooling(original.rateLimitScopes) : undefined
+    const waiting = cooling && cooling.notBefore > Date.now() && (!currentRate || cooling.notBefore > currentRate.notBefore) ? cooling : currentRate
     return parseConnectionDelivery({ ...publicDelivery(original), ...(retrySource ? { retrySource } : {}),
-      ...(last ? { lastContinuation: { source: last.source, acceptedAt: last.acceptedAt } } : {}) })
+      ...(last ? { lastContinuation: { source: last.source, acceptedAt: last.acceptedAt } } : {}),
+      ...(waiting ? { wait: { reason: 'rate-limit', notBefore: waiting.notBefore, basis: waiting.basis } } : {}) })
+  }
+  private rateLimitCooling(scopes: PublicationRateLimitScopes | undefined): (NonNullable<ConnectionDelivery['wait']> & { scopeKey: string }) | undefined {
+    if (!scopes) return
+    const read = this.database.prepare(`SELECT json_extract(operation_json,'$.rateLimit.notBefore') AS not_before,json_extract(operation_json,'$.rateLimit.basis') AS basis
+      FROM connector_publication_operation INDEXED BY connector_publication_rate_scope
+      WHERE json_type(operation_json,'$.rateLimit')='object' AND json_extract(operation_json,'$.rateLimit.scopeKey')=?
+      ORDER BY json_extract(operation_json,'$.rateLimit.notBefore') DESC LIMIT 1`)
+    let latest: (NonNullable<ConnectionDelivery['wait']> & { scopeKey: string }) | undefined
+    for (const scope of [scopes.request, scopes.conversation]) {
+      if (!scope) continue
+      const row = read.get(scope)
+      if (row && (!latest || Number(row.not_before) > latest.notBefore))
+        latest = { scopeKey: scope, reason: 'rate-limit', notBefore: Number(row.not_before), basis: row.basis as 'native' | 'local' }
+    }
+    return latest
+  }
+  /** A scope seek skips every message in a still-closed native bucket. Cursor is background progress only. */
+  rateLimitSources(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after: PublicationRateLimitCursor | undefined, limit: number): { operations: PublicationOperation[]; next?: PublicationRateLimitCursor } {
+    const operations: PublicationOperation[] = []
+    let cursor = after, skip: 'scope' | 'other' | undefined
+    for (let n = 0; n < limit; n++) {
+      const source = "json_extract(operation_json,'$.rateLimit.scopeKey')"
+      const read = (range: string, parameters: Array<string | number>, order = `${source},${rateLimitOtherScope},ordinal`) => this.database.prepare(`SELECT operation_id,ordinal,${source} AS scope_key,${rateLimitOtherScope} AS other_key
+        FROM connector_publication_operation INDEXED BY connector_publication_rate_source
+        WHERE binding_id=? AND binding_revision=? AND ${rateLimitSourcePredicate}
+          ${range ? 'AND ' + range : ''} ORDER BY ${order} LIMIT 1`).get(...scopeKey(boundary), ...parameters)
+      // SQLite does not range-seek row-value comparisons over these expression
+      // indexes. Equal scalar prefixes make every cursor component a real seek.
+      let row: ReturnType<StatementSync['get']>
+      if (!cursor) row = read('', [])
+      else {
+        if (!skip) row = read(`${source}=? AND ${rateLimitOtherScope}=? AND ordinal>?`, [cursor.scopeKey, cursor.otherKey, cursor.ordinal], 'ordinal')
+        if (!row && skip !== 'scope') row = read(`${source}=? AND ${rateLimitOtherScope}>?`, [cursor.scopeKey, cursor.otherKey], `${rateLimitOtherScope},ordinal`)
+        if (!row) row = read(`${source}>?`, [cursor.scopeKey])
+      }
+      if (!row) return { operations }
+      cursor = { scopeKey: String(row.scope_key), otherKey: String(row.other_key), ordinal: Number(row.ordinal) }
+      if ((this.rateLimitCooling({ request: cursor.scopeKey })?.notBefore ?? 0) > Date.now()) { skip = 'scope'; continue }
+      if (cursor.otherKey && (this.rateLimitCooling({ request: cursor.otherKey })?.notBefore ?? 0) > Date.now()) { skip = 'other'; continue }
+      skip = undefined
+      const original = this.inspect(String(row.operation_id))
+      if (original?.rateLimit && same(this.retrySource(original), original.rateLimit.source)) operations.push(original)
+    }
+    return { operations, ...(cursor === undefined ? {} : { next: cursor }) }
+  }
+  rateLimitPending(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after: PublicationRateLimitPendingCursor | undefined, limit: number): { due: boolean; next?: PublicationRateLimitPendingCursor } {
+    let cursor = after, skipRequest = false
+    for (let n = 0; n < limit; n++) {
+      const request = "json_extract(operation_json,'$.rateLimitScopes.request')", conversation = "COALESCE(json_extract(operation_json,'$.rateLimitScopes.conversation'),'')"
+      const read = (range: string, parameters: string[], order = `${request},${conversation},ordinal`) => this.database.prepare(`SELECT ${request} AS request_key,${conversation} AS conversation_key
+        FROM connector_publication_operation INDEXED BY connector_publication_rate_pending
+        WHERE binding_id=? AND binding_revision=? AND state='pending' AND json_type(operation_json,'$.rateLimitScopes')='object'
+          ${range ? 'AND ' + range : ''} ORDER BY ${order} LIMIT 1`).get(...scopeKey(boundary), ...parameters)
+      let row: ReturnType<StatementSync['get']>
+      if (!cursor) row = read('', [])
+      else {
+        if (!skipRequest) row = read(`${request}=? AND ${conversation}>?`, [cursor.request, cursor.conversation], `${conversation},ordinal`)
+        if (!row) row = read(`${request}>?`, [cursor.request])
+      }
+      if (!row) return { due: false }
+      cursor = { request: String(row.request_key), conversation: String(row.conversation_key) }
+      skipRequest = (this.rateLimitCooling({ request: cursor.request })?.notBefore ?? 0) > Date.now()
+      if (skipRequest || cursor.conversation && (this.rateLimitCooling({ request: cursor.conversation })?.notBefore ?? 0) > Date.now()) continue
+      return { due: true }
+    }
+    return { due: false, ...(cursor ? { next: cursor } : {}) }
   }
   private bindContinuation(original: PublicationOperation, kind: ConnectionDeliveryRetrySource['kind'], attempt: number): PublicationOperation {
     const continuations = this.continuations(original)
@@ -1125,7 +1219,8 @@ export class PublicationStore {
           SELECT 1 FROM connector_publication_operation predecessor WHERE predecessor.operation_id=json_extract(original.operation_json,'$.predecessorOperationId')
             AND predecessor.binding_id=original.binding_id AND predecessor.binding_revision=original.binding_revision AND predecessor.projection_id=original.projection_id
             AND predecessor.state='confirmed' AND json_type(predecessor.operation_json,'$.mapping')='object'))
-      ORDER BY original.ordinal LIMIT 1`).get(...scopeKey(boundary), Number(cursor?.ordinal ?? 0), ...(projectionId === undefined ? [] : [projectionId]))
+        AND ${rateLimitAvailable('original')}
+      ORDER BY original.ordinal LIMIT 1`).get(...scopeKey(boundary), Number(cursor?.ordinal ?? 0), ...(projectionId === undefined ? [] : [projectionId]), Date.now())
   }
   /** Read-only recovery advances through this audience's retained open rows, never another queue or history. */
   nextUnconfirmed(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after?: string, projectionId?: string): PublicationOperation | null {
@@ -1497,7 +1592,15 @@ export class PublicationStore {
       if (!original.prepared && prepared.renderVersion !== adapter.renderVersion)
         throw new AgentMuxError('The adapter must prepare its declared current render version.', 'PUBLICATION_PREPARATION_UNCONFIRMED')
       if (!authorized()) return null
-      const claimed = { ...this.bindContinuation(original, 'message', (original.attempt ?? 0) + 1), prepared, attempt: (original.attempt ?? 0) + 1, state: 'dispatching' as const }
+      const scopes = publicationRateLimitScopes(original.rateLimitScopes) ?? publicationRateLimitScopes(adapter.rateLimitScopes?.(prepared, original.target))
+      const retained = { ...original, prepared, ...(scopes ? { rateLimitScopes: scopes } : {}) }
+      if ((this.rateLimitCooling(scopes)?.notBefore ?? 0) > Date.now()) {
+        // Freeze once without an effect claim. Subsequent selection skips this
+        // native scope through its index instead of preparing every message on every tick.
+        this.write(retained)
+        return null
+      }
+      const claimed = { ...this.bindContinuation(retained, 'message', (original.attempt ?? 0) + 1), attempt: (original.attempt ?? 0) + 1, state: 'dispatching' as const }
       if (original.effect === 'upsert' && ['speech', 'question'].includes(original.payload.kind) && original.speaker?.avatar && !this.portraitAvailable(original) &&
           (original.mapping?.nativeCard || original.cardPreparation?.useForMessage)) claimed.portrait = { state: 'pending' }
       this.database.prepare('INSERT INTO connector_publication_attempt (operation_id,attempt) VALUES (?,?)').run(claimed.operationId, claimed.attempt)
@@ -1509,7 +1612,7 @@ export class PublicationStore {
     this.database.prepare('UPDATE connector_publication_operation SET operation_json=?, state=? WHERE operation_id=?')
       .run(encode(operation), operation.state, operation.operationId)
   }
-  settle(operationId: string, attempt: number, value: PublicationReceipt): PublicationOperation {
+  settle(operationId: string, attempt: number, value: PublicationReceipt, advice?: PublicationRateLimitAdvice): PublicationOperation {
     const result = parseReceipt(value)
     return this.transaction(() => {
       const original = this.inspect(operationId)
@@ -1541,6 +1644,10 @@ export class PublicationStore {
       let settled: PublicationOperation = result.state === 'confirmed'
         ? { ...retained, state: 'confirmed', mapping: result.mapping, receipt: result }
         : { ...retained, state: result.state, reason: result.reason, receipt: result }
+      if (result.state === 'not-applied' && result.reason === 'rate-limited') {
+        const observed = publicationRateLimitObservation(attempt, advice, original.rateLimitScopes)
+        if (observed) settled = { ...settled, rateLimit: observed }
+      }
       this.write(settled)
       if (result.state === 'confirmed' && settled.effect === 'upsert' && settled.payload.kind === 'speech')
         this.refreshReplyMetadata({ bindingId: settled.bindingId, revision: settled.bindingRevision }, settled.projectionId)
