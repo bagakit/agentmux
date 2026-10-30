@@ -3,7 +3,7 @@ import { connectHostedAgentMux, type AgentMuxHostedBootstrap, type AgentMuxHoste
   type AgentMuxHostedRpcPort, type AgentMuxHostedOutputRpcPort, type AgentMuxHostedSubscription } from './hosted.js'
 import { AgentMuxError, AgentMuxRpcError, parseRpcRequest, parseRpcResponse, rpcRecord,
   rpcResponseError } from './public-rpc-http.js'
-import { openAgentMuxRpcRelayRequest, type AgentMuxRpcRelayOptions, type AgentMuxRpcRelayReader } from './public-rpc-relay.js'
+import { createAgentMuxRpcRelayClient, type AgentMuxRpcRelayClient, type AgentMuxRpcRelayOptions, type AgentMuxRpcRelayReader } from './public-rpc-relay.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcStreamMethod, AgentMuxRpcStreamParams, AgentMuxRpcStreamInitial, AgentMuxRpcStreamEvent } from './public-rpc.js'
 import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
@@ -22,7 +22,8 @@ const cancelled = () => new AgentMuxError('This device consumer request was canc
 export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   private readonly pending = new Set<() => void>()
   private closed = false
-  constructor(private readonly options: AgentMuxRpcRelayOptions) {}
+  private readonly relay: AgentMuxRpcRelayClient
+  constructor(options: AgentMuxRpcRelayOptions) { this.relay = createAgentMuxRpcRelayClient(options) }
   async hello(name: string): Promise<void> { await this.exchange('device.hello', { name }) }
 
   private exchange(method: string, params: object, handlers?: Handlers,
@@ -88,8 +89,8 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
       }
       this.pending.add(abort); signal?.addEventListener('abort', abort, { once: true })
       if (signal?.aborted) { abort(); return }
-      void openAgentMuxRpcRelayRequest(this.options,
-      { jsonrpc: '2.0', id, method, params: { ...body, ...(runtimeFence ? { runtimeFence } : {}) } }, receive, finish, controller.signal)
+      void this.relay.open(
+      { jsonrpc: '2.0', id, method, params: { ...body, ...(runtimeFence ? { runtimeFence } : {}) } }, receive, finish, controller.signal, Boolean(handlers))
         .then(value => { reader = value; if (ended) return value.dispose() })
         .catch(error => finish(error instanceof Error ? error : protocol()))
     })
@@ -153,7 +154,17 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   async forward<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context?: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> {
     return (await this.exchange(method, params, undefined, context)).value as AgentMuxRpcResult<M>
   }
-  dispose(): void { if (this.closed) return; this.closed = true; for (const abort of [...this.pending]) abort() }
+  dispose(): void {
+    if (this.closed) return
+    this.closed = true
+    const errors: unknown[] = []
+    for (const abort of [...this.pending]) {
+      try { abort() } catch (error) { errors.push(error) }
+    }
+    try { this.relay.dispose() } catch (error) { errors.push(error) }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Hosted Relay readers reported errors during release.')
+  }
 }
 
 export async function connectRelayHostedClient(options: AgentMuxRpcRelayOptions & { name: string; signal: AbortSignal }) {
@@ -165,6 +176,14 @@ export async function connectRelayHostedClient(options: AgentMuxRpcRelayOptions 
     await rpc.hello(options.name)
     const client = await connectHostedAgentMux({ rpc, forwardRpc: (method, params, context) => rpc.forward(method, params, context),
       subscribeRpc: (method, params, handlers) => rpc.subscribePublic(method, params, handlers) })
+    const dispose = client.dispose.bind(client)
+    client.dispose = async () => {
+      const errors: unknown[] = []
+      try { await dispose() } catch (error) { errors.push(error) }
+      try { rpc.dispose() } catch (error) { errors.push(error) }
+      if (errors.length === 1) throw errors[0]
+      if (errors.length) throw new AggregateError(errors, 'Hosted client release reported errors.')
+    }
     if (options.signal.aborted) { await client.dispose(); throw cancelled() }
     return client
   } catch (error) { rpc.dispose(); throw error }

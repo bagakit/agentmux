@@ -7,7 +7,7 @@ import { validateDeliveryLogId } from './delivery-attempt.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { loadOrCreateRelayKeyPair } from './rpc-relay-keypair.js'
-import { openAgentMuxRpcRelayRequest } from './public-rpc-relay.js'
+import { createAgentMuxRpcRelayClient, type AgentMuxRpcRelayClient } from './public-rpc-relay.js'
 import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
 import { type KeyPair } from '@agentmux/relay/e2ee'
 import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
@@ -120,12 +120,11 @@ export function agentMuxRpcSshArguments(endpoint: Extract<AgentMuxRpcEndpoint, {
 }
 type Reader = { dispose(): Promise<void> }
 async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCRequest, onFrame: (frame: unknown) => void,
-  onEnd: (error?: Error) => void, signal: AbortSignal, relayKeyPair?: KeyPair, forwarding?: RpcForwardingSource): Promise<Reader> {
+  onEnd: (error?: Error) => void, signal: AbortSignal, forwarding?: RpcForwardingSource): Promise<Reader> {
   if (forwarding) {
     if (endpoint.transport !== 'unix') throw new AgentMuxError("This route cannot verify the original caller's authority. Continue through the original authenticated Host with the same Session and input.", 'CONTROL_PERMISSION_DENIED')
     return await openForwardedUnixRequest(endpoint.path, request, forwarding, onFrame, onEnd, signal)
   }
-  if (endpoint.transport === 'relay') return await openAgentMuxRpcRelayRequest({ offer: endpoint.offer, ...(relayKeyPair ? { keyPair: relayKeyPair } : {}) }, request, onFrame, onEnd, signal)
   const encoded = rpcEncode(request)
   if (endpoint.transport === 'http') {
     if (!endpoint.token) throw new AgentMuxError('HTTP RPC requires explicit authorization.', 'AGENT_CAPABILITY_INVALID')
@@ -289,7 +288,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   }
   throw new AgentMuxError('Reader received an event from another domain.', 'CONTROL_PROTOCOL_ERROR')
 }
-type RpcRoute = { endpoint: AgentMuxRpcEndpoint; ssh?: AgentMuxRpcSshTransport; unix?: AgentMuxRpcStreamTransport }
+type RpcRoute = { endpoint: AgentMuxRpcEndpoint; ssh?: AgentMuxRpcSshTransport; unix?: AgentMuxRpcStreamTransport; relay?: AgentMuxRpcRelayClient }
 // Local transport provenance is intentionally not accepted from wire error fields.
 // It grants only original-operation reconciliation, never authority to replay input.
 const unconfirmedReplies = new WeakSet<object>()
@@ -467,6 +466,10 @@ class RpcClient implements AgentMuxRpcClient {
             }
             sharedDispatch = 'queued'
             opening = route.unix.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() })
+          } else if (route.endpoint.transport === 'relay' && !(options.forwarding ?? this.forwarding)) {
+            route.relay ??= createAgentMuxRpcRelayClient({ offer: route.endpoint.offer, ...(this.relayKeyPair ? { keyPair: this.relayKeyPair } : {}) })
+            armDeadline()
+            opening = route.relay.open(payload, receive, end, controller.signal, Boolean(handlers))
           } else {
             if (route.endpoint.transport === 'unix') {
               // Forwarded requests use separate authenticated channels. Only
@@ -477,7 +480,7 @@ class RpcClient implements AgentMuxRpcClient {
               sharedDispatch = undefined
             }
             armDeadline()
-            opening = openRequest(route.endpoint, payload, receive, end, controller.signal, this.relayKeyPair, options.forwarding ?? this.forwarding)
+            opening = openRequest(route.endpoint, payload, receive, end, controller.signal, options.forwarding ?? this.forwarding)
           }
           reader = await opening
         } catch (error) { end(transportError(error)); return }
@@ -540,7 +543,7 @@ class RpcClient implements AgentMuxRpcClient {
     } catch (error) { await dispose(); throw error }
   }
   async dispose(): Promise<void> { if (this.closed) return; this.closed = true
-    for (const route of [this.route, ...this.candidates]) { route.ssh?.dispose(); route.unix?.dispose() }
+    for (const route of [this.route, ...this.candidates]) { route.ssh?.dispose(); route.unix?.dispose(); route.relay?.dispose() }
     this.candidates.clear()
     await Promise.all([...this.readers].map(reader => reader.dispose())); this.readers.clear() }
 }
