@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
@@ -24,12 +25,17 @@ vi.mock('node:child_process', async original => {
       ? fileURLToPath(new URL('../src/control-endpoint-listener-worker.ts', import.meta.url)) : path, args, options)) as typeof actual.fork }
 })
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => {
+  const errors: unknown[] = []
+  for (const close of cleanups.splice(0).reverse()) try { await close() } catch (error) { errors.push(error) }
+  vi.restoreAllMocks(); vi.unstubAllEnvs()
+  if (errors.length) throw new AggregateError(errors, 'Private resume fixture cleanup failed')
+})
 async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'positional-argv', fatal = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'adr-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'r'), state = join(root, 's')
-  await mkdir(runtime); await mkdir(state)
+  await mkdir(runtime, { mode: 0o700 }); await mkdir(state, { mode: 0o700 })
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', state)
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const daemon = spawn(process.env.AGENTMUX_TEST_CTXMUXD ?? resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
@@ -50,22 +56,40 @@ async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'posit
   async function reader() {
     const store = new core.AgentMuxFileAgentSessionStore(storePath), client = new core.AgentMuxClient({ store, providers: [provider] }), inner = client as any
     Object.defineProperty(inner.hookServer, 'port', { value: 0 }); await client.connect()
-    const value = { store, client, inner, nativeStart: inner.kernel.start.bind(inner.kernel), nativeList: inner.kernel.list.bind(inner.kernel),
-      start: vi.spyOn(inner.kernel, 'start'), stop: vi.spyOn(inner.kernel, 'stop'), input: vi.spyOn(inner.kernel, 'input') }
+    const rawInput = vi.fn(), openInput = inner.kernel.openInput.bind(inner.kernel), observed = new WeakSet<object>()
+    vi.spyOn(inner.kernel, 'openInput').mockImplementation(async (...args: any[]) => {
+      const channel = await openInput(...args)
+      if (!observed.has(channel)) {
+        observed.add(channel); const dispatch = channel.input.bind(channel)
+        channel.input = (data: unknown) => { rawInput(data); return dispatch(data) }
+      }
+      return channel
+    })
+    const semanticInput = vi.spyOn(inner.kernel, 'input')
+    const value = { store, client, inner, rawInput, nativeStart: inner.kernel.startPrepared.bind(inner.kernel), nativeList: inner.kernel.list.bind(inner.kernel),
+      start: vi.spyOn(inner.kernel, 'startPrepared'), stop: vi.spyOn(inner.kernel, 'stop'), input: semanticInput,
+      inputCount: () => rawInput.mock.calls.length + semanticInput.mock.calls.length }
     clients.push(value); return value
   }
   const original = await reader()
   cleanups.push(async () => {
+    const errors: unknown[] = []
     for (const value of clients.slice().reverse()) {
-      if (value.inner.kernel.isConnected()) for (const run of await value.nativeList()) if (run.state.type === 'running') await value.inner.kernel.stop(await value.inner.kernel.prepareStop(run.runId))
-      await value.client.dispose()
-      // Runtime exit callbacks can already be queued for this private Session.
-      // Drain that original metadata owner before deleting its fixture files.
-      await value.inner.registry.enqueue('original-session', async () => {})
+      try {
+        if (value.inner.kernel.isConnected()) for (const run of await value.nativeList()) if (run.state.type === 'running') {
+          try { await value.inner.kernel.stop(await value.inner.kernel.prepareStop(run.runId)) } catch (error) { errors.push(error) }
+        }
+      } catch (error) { errors.push(error) }
+      try { await value.client.dispose() } catch (error) { errors.push(error) }
+      // Drain original metadata owners before deleting their private fixture files.
+      try { await value.inner.registry.enqueue('original-session', async () => {}) } catch (error) { errors.push(error) }
     }
+    if (errors.length) throw new AggregateError(errors, 'Private Core clients cleanup failed')
   })
-  const ended = await original.nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
+
+  const ended = await original.inner.kernel.start({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await original.inner.kernel.status(ended.runId)).state.type).toBe('exited'))
+  original.start.mockClear()
   const previous: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-session', providerId: provider.id, executorId: 'configured-resume',
     hostId: 'local', workspacePath: root, run: { runId: ended.runId }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1),
     hookBindingId: 'original-binding', hookToken: 'original-token', nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } }
@@ -82,24 +106,50 @@ async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'posit
   }
   const noReplacement = (inputs = 0) => {
     expect(clients.reduce((n, value) => n + value.start.mock.calls.length, 0)).toBe(1)
-    expect(clients.reduce((n, value) => n + value.input.mock.calls.length, 0)).toBe(inputs)
+    expect(clients.reduce((n, value) => n + value.inputCount(), 0)).toBe(inputs)
     for (const value of clients) expect(value.stop).not.toHaveBeenCalled()
   }
   const correlation = async () => (await original.store.loadResumeCorrelation(previous.agentSessionId, agentLifecycleOperationIdentity('resume', previous.agentSessionId, request.operationId))) ?? undefined
   return { ...original, root, previous, request, provider, reader, resume, replay, write, noReplacement, correlation }
 }
 
+async function otherRuntime(f: Awaited<ReturnType<typeof fixture>>) {
+  const runtime = join(f.root, 'r2'), state = join(f.root, 's2')
+  await mkdir(runtime, { mode: 0o700 }); await mkdir(state, { mode: 0o700 })
+  const socketPath = join(runtime, 'ctxmux.sock')
+  const daemon = spawn(process.env.AGENTMUX_TEST_CTXMUXD ?? resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
+    ['--socket', socketPath, '--state-dir', state, '--readiness-fd', '3'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
+  let stderr = ''; daemon.stderr!.on('data', bytes => { stderr += String(bytes) })
+  const kernel = new f.inner.kernel.constructor()
+  Object.defineProperty(kernel, 'socketPath', { value: socketPath, configurable: true })
+  cleanups.push(async () => {
+    const errors: unknown[] = []
+    try { if (kernel.isConnected()) for (const run of await kernel.list()) if (run.state.type === 'running') await kernel.stop(await kernel.prepareStop(run.runId)) } catch (e) { errors.push(e) }
+    if (kernel.isConnected() && f.inner.kernel.isConnected() && f.inner.kernel.creationRuntimeIdentity().runtimeId === kernel.creationRuntimeIdentity().runtimeId) f.inner.kernel.disconnect()
+    kernel.disconnect()
+    if (daemon.exitCode === null && daemon.signalCode === null) { const exited = once(daemon, 'exit'); daemon.kill('SIGTERM'); await exited }
+    if (errors.length) throw new AggregateError(errors, 'Second private Runtime cleanup failed')
+  })
+  await Promise.race([once(daemon.stdio[3]!, 'data'), once(daemon, 'exit').then(() => { throw new Error(stderr) })])
+  await kernel.connect()
+  expect(kernel.creationRuntimeIdentity().runtimeId).not.toBe(f.inner.kernel.creationRuntimeIdentity().runtimeId)
+  return { kernel, socketPath }
+}
+
 it('freezes direct native resume input and exact plan before Start with no automatic recovery text', async () => {
   const f = await fixture(), start = f.nativeStart
-  f.start.mockImplementation(async (input: any) => {
+  f.start.mockImplementation(async (...args: any[]) => { const [input, operationKey] = args;
     const prepared = await f.correlation(), op = prepared?.preparedSession?.continuity
-    expect(prepared, 'Original native resume request is not prepared').toBeDefined()
-    expect(prepared?.operationId).toBe(input.operationKey)
+    expect(prepared?.preparedSession, 'Original native resume request is not prepared').toBeDefined()
+    expect(prepared?.operationId).toBe(operationKey)
+    expect(prepared?.preparedDispatch).toMatchObject({ runtime: f.inner.kernel.creationRuntimeIdentity(), nativeTarget: f.previous.nativeHandle })
+    expect(JSON.parse(prepared!.preparedDispatch!.prepared.launch)).toEqual({ createOperationId: operationKey, request: input })
+    expect(input.env.RESUME_FIXTURE).toBe('original'); expect(input.initial_size).toEqual({ cols: 81, rows: 25 })
     expect(op).toMatchObject({ trigger: 'input', requestDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), recoveryInputs: { reminder: '', continuation: '' },
       previousRun: f.previous.run, nativeTarget: f.previous.nativeHandle, launchInput: { state: 'prepared', input: { prompt: f.request.prompt, agentMuxNote: f.request.agentMuxNote,
-        submissionId: `launch-prompt:${input.operationKey}` }, launchPlan: { program: '/usr/bin/env' } } })
+        submissionId: `launch-prompt:${operationKey}` }, launchPlan: { program: '/usr/bin/env' } } })
     expect(op!.launchInput!.prompt).toBe(input.args.at(-1)); expect(input.args.at(-2)).toBe('original-native')
-    return await start(input)
+    return await start(...args)
   })
   const resumed = await f.resume()
   expect(resumed.continuity).toMatchObject({ kind: 'resumed', launchInput: { state: 'launch-carried', receipt: { run: resumed.run } } })
@@ -134,10 +184,10 @@ it('reads the same direct resume receipt after applied commit ACK loss', async (
 
 it('reconciles an applied direct Start with lost ACK after dispose without another Start or input', async () => {
   const f = await fixture(); let actual: any
-  f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Lost original Start ACK', 'CONTROL_UNAVAILABLE', undefined, { disposition: 'unknown', confirmedInputBytes: null }) })
+  f.start.mockImplementationOnce(async (...args: any[]) => { const [input, operationKey] = args; actual = await f.nativeStart(...args); throw new core.AgentMuxError('Lost original Start ACK', 'CONTROL_UNAVAILABLE', undefined, { disposition: 'unknown', confirmedInputBytes: null }) })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
   expect((await f.correlation())?.preparedSession?.continuity?.launchInput?.state).toBe('prepared')
-  const observation = vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce(null)
+  const observation = vi.spyOn(f.inner.kernel, 'inspectPreparedStart').mockResolvedValueOnce(null)
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' }); observation.mockRestore()
   await f.client.dispose(); const second = await f.reader(), recovery = f.resume({}, second)
   await expect(recovery).resolves.toMatchObject({ agentSessionId: f.previous.agentSessionId, run: { runId: actual.runId } })
@@ -151,10 +201,10 @@ it('does not claim a foreign lifecycle or repeat an unknown Start without a matc
   f.start.mockRejectedValueOnce(new core.AgentMuxError('Original Start unknown', 'CONTROL_UNAVAILABLE'))
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
   const originalStart: any = f.start.mock.calls[0]![0]
-  const foreign = await f.nativeStart({ ...originalStart, operationKey: 'foreign-operation', env: { ...originalStart.env, AGENTMUX_LIFECYCLE_OPERATION_ID: 'foreign-operation' } })
+  const foreign = await f.nativeStart({ ...originalStart, env: { ...originalStart.env, AGENTMUX_LIFECYCLE_OPERATION_ID: 'foreign-operation' } }, 'foreign-operation')
   expect(foreign.lifecycleOperationId).toBe('foreign-operation')
   const inventory = vi.spyOn(f.inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory unavailable'))
-  vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce(foreign)
+  vi.spyOn(f.inner.kernel, 'inspectPreparedStart').mockResolvedValueOnce(foreign)
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
   expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run); expect(await f.correlation()).toBeDefined(); f.noReplacement(); expect(inventory).not.toHaveBeenCalled()
 })
@@ -162,7 +212,7 @@ it('does not claim a foreign lifecycle or repeat an unknown Start without a matc
 it.each([{ prompt: 'changed task' }, { agentMuxNote: 'changed context' }, { args: ['-e', 'process.exit(1)'] },
   { env: { RESUME_FIXTURE: 'changed' } }, { cols: 93 }, { commandOverride: 'another-command' }])('rejects changed direct input or launch intent against the immutable original operation: %j', async patch => {
   const f = await fixture()
-  f.start.mockImplementationOnce(async (input: any) => { await f.nativeStart(input); throw new core.AgentMuxError('Original Start unknown', 'CONTROL_UNAVAILABLE') })
+  f.start.mockImplementationOnce(async (...args: any[]) => { const [input, operationKey] = args; await f.nativeStart(...args); throw new core.AgentMuxError('Original Start unknown', 'CONTROL_UNAVAILABLE') })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
   const original = await f.correlation()
   await expect(f.resume(patch)).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
@@ -180,7 +230,7 @@ it('admits one direct resume across independent FileStore clients and reconciles
   const f = await fixture(), second = await f.reader(), prepare = f.store.prepareResume.bind(f.store)
   let release!: () => void, entered!: () => void
   const arrived = new Promise<void>(done => { entered = done }), held = new Promise<void>(done => { release = done })
-  vi.spyOn(f.store, 'prepareResume').mockImplementationOnce(async (...args: any[]) => { const result = await prepare(...args as [any, any]); entered(); await held; return result })
+  vi.spyOn(f.store, 'prepareResume').mockImplementationOnce(async (...args: any[]) => { const result = await prepare(...args as [any, any, any]); entered(); await held; return result })
   const first = f.resume(); await arrived
   try { await expect(f.resume({}, second)).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' }) } finally { release() }
   const resumed = await first
@@ -211,9 +261,9 @@ it('retains the original unknown post-launch claim without replay after retry', 
 
 it('releases unused direct preparation for an authoritatively not-applied Start', async () => {
   const f = await fixture()
-  f.start.mockImplementationOnce(async (input: { operationKey: string }) => {
+  f.start.mockImplementationOnce(async (_request: unknown, operationKey: string) => {
     throw new core.AgentMuxError('Start not applied', 'CONTROL_UNAVAILABLE', undefined, undefined, undefined,
-      { operationId: input.operationKey, disposition: 'not_applied' })
+      { operationId: operationKey, disposition: 'not_applied' })
   })
   await expect(f.resume()).rejects.toMatchObject({ creationFailure: { disposition: 'not_applied' } })
   expect(await f.correlation()).toBeUndefined(); expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run)
@@ -260,7 +310,7 @@ it('existing Hosted direct resume and actual public CLI inspect share the origin
 
 it('reconciles post-launch-only Start ACK loss before dispatching the original first input once', async () => {
   const f = await fixture('post-launch-only')
-  f.start.mockImplementationOnce(async (input: any) => { await f.nativeStart(input); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
+  f.start.mockImplementationOnce(async (...args: any[]) => { const [input, operationKey] = args; await f.nativeStart(...args); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' }); expect(f.input).not.toHaveBeenCalled()
   await f.client.dispose(); const second = await f.reader(), resumed = await f.resume({}, second)
   expect(resumed.continuity!.launchInput).toMatchObject({ delivery: 'post-launch', state: 'terminal-confirmed' })
@@ -269,10 +319,16 @@ it('reconciles post-launch-only Start ACK loss before dispatching the original f
 
 it('rejects a mismatching actual RunSpec without claiming or replacing the original unknown Start', async () => {
   const f = await fixture(); let actual: any
-  f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
+  f.start.mockImplementationOnce(async (...args: any[]) => { const [input, operationKey] = args; actual = await f.nativeStart(...args); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
-  vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce({ ...actual, program: 'foreign-program' })
-  await expect(f.resume()).rejects.toMatchObject({ code: 'CONTINUITY_OPERATION_MISMATCH' })
+  const native = f.inner.kernel.client, observe = native.observeCreation.bind(native)
+  vi.spyOn(native, 'observeCreation').mockImplementationOnce(async (...args: any[]) => {
+    const retained = await observe(...args)
+    expect(retained.observation.outcome).toBe('retained')
+    retained.observation.run.spec.env.RESUME_FIXTURE = 'different-private-environment'
+    return retained
+  })
+  await expect(f.resume()).rejects.toMatchObject({ code: 'PREPARED_START_UNCONFIRMED' })
   expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run); f.noReplacement()
 })
 
@@ -303,7 +359,7 @@ it('does not revive the prepared projection after authoritative user retirement'
 
 it('reports an already-exited original Start as typed fatal after ACK loss without replaying its task', async () => {
   const f = await fixture('positional-argv', true); let actual: any
-  f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
+  f.start.mockImplementationOnce(async (...args: any[]) => { const [input, operationKey] = args; actual = await f.nativeStart(...args); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
   await vi.waitFor(async () => expect((await f.inner.kernel.status(actual.runId)).state.type).toBe('exited'))
   await f.client.dispose(); const second = await f.reader()
@@ -334,8 +390,9 @@ it('keeps the prepared operation after a real fatal exit and unconfirmed origina
   f.noReplacement()
 })
 
-it('keeps a real failed recovery terminal through source CLI reads and permits a separate explicit recovery', async () => {
+it('keeps a real failed recovery terminal through public CLI reads and permits a separate explicit recovery', async () => {
   const f = await fixture('positional-argv', true)
+  const runCli = process.env.AGENTMUX_TEST_OBJECT_CLI ? runCompiledObjectCli : runSourceObjectCli
   const request = { agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: 'failed-manual-recovery',
     trigger: 'manual' as const, args: f.request.args!, env: f.request.env! }
   const failure = { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED', message: expect.stringContaining('controlled startup exit') }
@@ -348,11 +405,11 @@ it('keeps a real failed recovery terminal through source CLI reads and permits a
   await server.start(); cleanups.push(() => server.stop())
   const env = objectCliEnvironment(f.root, { NODE_NO_WARNINGS: '1' })
   for (let i = 0; i < 2; i++) {
-    const checked = await runSourceObjectCli(['agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', request.operationId], env)
+    const checked = await runCli(['agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', request.operationId], env)
     expect(checked.code, checked.stderr).toBe(1)
     expect(JSON.parse(checked.stderr)).toMatchObject({ ok: false, error: { code: failure.code, message: failure.message } })
   }
-  const inspected = await runSourceObjectCli(['agent', 'inspect', '--session', f.previous.agentSessionId], env)
+  const inspected = await runCli(['agent', 'inspect', '--session', f.previous.agentSessionId], env)
   expect(inspected.code, inspected.stderr).toBe(0)
   expect(JSON.parse(inspected.stdout)).toMatchObject({ ok: true, result: { session: { run: f.previous.run, nativeHandle: f.previous.nativeHandle,
     continuity: operation, continuityOperations: { [request.operationId]: operation } } } })
@@ -367,24 +424,24 @@ it('keeps a real failed recovery terminal through source CLI reads and permits a
   expect(saved.continuityOperations![request.operationId]).toEqual(operation)
   expect(saved.retiredRuns).toEqual([operation.newRun, f.previous.run])
   await expect(f.client.ensureAgentContinuity(request)).rejects.toMatchObject(failure)
-  const oldResult = await runSourceObjectCli(['agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', request.operationId], env)
+  const oldResult = await runCli(['agent', 'resume', '--session', f.previous.agentSessionId, '--operation-id', request.operationId], env)
   expect(oldResult.code, oldResult.stderr).toBe(1)
   expect(JSON.parse(oldResult.stderr)).toMatchObject({ ok: false, error: { code: failure.code, message: failure.message } })
   expect(await f.store.readMetadata(f.previous.agentSessionId)).toEqual(saved)
   expect((await f.inner.kernel.status(recovered.run.runId)).state.type).toBe('running')
   await expect(f.client.ensureAgentContinuity({ ...request, operationId: 'new-explicit-recovery', args: ['-e', healthy] }))
     .resolves.toMatchObject({ kind: 'resumed', run: recovered.run })
-  const before = f.input.mock.calls.length
+  const before = f.inputCount()
   await f.client.writeAgent({ agentSessionId: f.previous.agentSessionId, expectedRun: recovered.run, source: 'user', data: 'still-usable' })
   await vi.waitFor(async () => expect(await f.replay(recovered)).toContain('INPUT:still-usable'))
-  expect(f.input).toHaveBeenCalledTimes(before + 1); expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).not.toHaveBeenCalled()
+  expect(f.inputCount()).toBe(before + 1); expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).not.toHaveBeenCalled()
 })
 
 it('keeps an unknown recovery Start reconcilable after a new Core owner without classifying it as a rolled-back failure', async () => {
   const f = await fixture()
   const request = { agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId: f.request.operationId,
     trigger: 'manual' as const, args: f.request.args!, env: f.request.env! }
-  f.start.mockImplementationOnce(async (input: any) => { await f.nativeStart(input); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
+  f.start.mockImplementationOnce(async (...args: any[]) => { const [input, operationKey] = args; await f.nativeStart(...args); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
   expect((await f.store.readMetadata(f.previous.agentSessionId))!.run).toEqual(f.previous.run)
   expect(await f.correlation()).toBeDefined()
@@ -395,4 +452,159 @@ it('keeps an unknown recovery Start reconcilable after a new Core owner without 
   await f.write(restored.session, second)
   await expect(second.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'resumed', run: restored.run })
   f.noReplacement(1)
+})
+
+
+it.each(['positional-argv', 'post-launch-only'] as const)('settles a legacy prepared resume from its accurate retained secret binding: %s', async delivery => {
+  const f = await fixture(delivery); let actual: any
+  f.start.mockImplementationOnce(async (...args: any[]) => {
+    actual = await f.nativeStart(...args)
+    throw new core.AgentMuxError('Original legacy Start ACK lost', 'CONTROL_UNAVAILABLE')
+  })
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  await f.client.dispose()
+  // Private historical fixture: preserve the original prepared Session but omit the field old owners never wrote.
+  const db = new DatabaseSync(f.store.path)
+  try { db.prepare("UPDATE reservations SET json=json_remove(json, '$.preparedDispatch') WHERE id=?").run(f.previous.agentSessionId) } finally { db.close() }
+  expect((await f.correlation())?.preparedDispatch).toBeUndefined()
+  const second = await f.reader(), resumed = await f.resume({}, second)
+  expect(resumed.run.runId).toBe(actual.runId); expect(resumed.nativeHandle).toEqual(f.previous.nativeHandle)
+  expect((await f.resume({}, second)).run).toEqual(resumed.run)
+  f.noReplacement(delivery === 'post-launch-only' ? 1 : 0)
+  await f.write(resumed, second)
+})
+
+it.each(['AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_HOOK_TOKEN', 'AGENTMUX_PROVIDER_ID', 'AGENTMUX_EXECUTOR_ID'] as const)(
+  'rejects a legacy retained wrong subject without a second Start: %s', async field => {
+  const f = await fixture(); let actual: any
+  f.start.mockImplementationOnce(async (...args: any[]) => {
+    actual = await f.nativeStart(...args); throw new core.AgentMuxError('Original legacy Start ACK lost', 'CONTROL_UNAVAILABLE')
+  })
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  const db = new DatabaseSync(f.store.path)
+  try { db.prepare("UPDATE reservations SET json=json_remove(json, '$.preparedDispatch') WHERE id=?").run(f.previous.agentSessionId) } finally { db.close() }
+  const native = f.inner.kernel.client, observe = native.observeCreation.bind(native)
+  vi.spyOn(native, 'observeCreation').mockImplementationOnce(async (...args: any[]) => {
+    const retained = await observe(...args)
+    retained.observation.run.spec.env[field] = 'foreign-subject'
+    return retained
+  })
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_RETAINED_MISMATCH' })
+  expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run)
+  expect(await f.correlation()).toBeDefined(); expect((await f.inner.kernel.status(actual.runId)).state.type).toBe('running')
+  f.noReplacement()
+})
+
+it('keeps a legacy missing key unknown without backfilling current Runtime or dispatching again', async () => {
+  const f = await fixture()
+  f.start.mockRejectedValueOnce(new core.AgentMuxError('Original Start unknown', 'CONTROL_UNAVAILABLE'))
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  const db = new DatabaseSync(f.store.path)
+  try { db.prepare("UPDATE reservations SET json=json_remove(json, '$.preparedDispatch') WHERE id=?").run(f.previous.agentSessionId) } finally { db.close() }
+  const original = await f.correlation()
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_SOURCE_UNCONFIRMED', message: expect.stringContaining('dispatch Runtime and complete request') })
+  expect(await f.correlation()).toEqual(original); expect(original?.preparedDispatch).toBeUndefined(); f.noReplacement()
+})
+
+
+it('does not dispatch a frozen original Start to a different real Runtime after durable prepare awaits', async () => {
+  const f = await fixture(), second = await otherRuntime(f), originalSocket = f.inner.kernel.socketPath
+  const source = f.inner.kernel.creationRuntimeIdentity(), prepare = f.store.prepareResume.bind(f.store)
+  const r1 = f.inner.kernel.client, r1Start = vi.spyOn(r1, 'start'), r2Start = vi.spyOn(second.kernel.client, 'start')
+  vi.spyOn(f.store, 'prepareResume').mockImplementationOnce(async (...args: any[]) => {
+    const saved = await prepare(...args as [any, any, any])
+    expect(saved.preparedDispatch!.runtime).toEqual(source)
+    f.inner.kernel.disconnect()
+    Object.defineProperty(f.inner.kernel, 'socketPath', { value: second.socketPath, configurable: true })
+    await f.inner.kernel.connect()
+    return saved
+  })
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  expect(r1Start).not.toHaveBeenCalled(); expect(r2Start).not.toHaveBeenCalled()
+  expect(await second.kernel.list()).toEqual([])
+  expect((await f.correlation())?.preparedDispatch?.runtime).toEqual(source)
+  await expect(f.resume()).rejects.toMatchObject({ code: 'PREPARED_START_RUNTIME_MISMATCH' })
+  f.inner.kernel.disconnect(); Object.defineProperty(f.inner.kernel, 'socketPath', { value: originalSocket, configurable: true }); await f.inner.kernel.connect()
+  expect((await f.nativeList()).map((run: any) => run.runId)).toEqual([f.previous.run.runId])
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  expect((await f.correlation())?.preparedDispatch?.runtime).toEqual(source); f.noReplacement()
+})
+
+it('does not treat another Runtime missing the healthy original Run as ended', async () => {
+  const f = await fixture(), second = await otherRuntime(f), originalSocket = f.inner.kernel.socketPath
+  const actual = await f.inner.kernel.start({ operationKey: 'healthy-original', program: process.execPath, args: f.request.args!, cwd: f.root, env: {} })
+  f.start.mockClear()
+  const before = (await f.store.readMetadata(f.previous.agentSessionId))!
+  const healthy = { ...before, run: { runId: actual.runId }, updatedAt: before.updatedAt + 1 }
+  await f.store.compareAndSwapMetadata(before, healthy); await f.inner.registry.load('local')
+  f.inner.kernel.disconnect(); Object.defineProperty(f.inner.kernel, 'socketPath', { value: second.socketPath, configurable: true }); await f.inner.kernel.connect()
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_ORIGINAL_RUN_UNCONFIRMED' })
+  expect(f.start).not.toHaveBeenCalled(); expect(await second.kernel.list()).toEqual([])
+  expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(healthy.run)
+  f.inner.kernel.disconnect(); Object.defineProperty(f.inner.kernel, 'socketPath', { value: originalSocket, configurable: true }); await f.inner.kernel.connect()
+  expect((await f.inner.kernel.status(actual.runId)).state.type).toBe('running')
+  await f.write(f.client.agentSession(f.previous.agentSessionId))
+  expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+})
+
+it('does not dispatch when durable preparation fails', async () => {
+  const f = await fixture()
+  vi.spyOn(f.store, 'prepareResume').mockRejectedValueOnce(new Error('Private durable preparation failed'))
+  await expect(f.resume()).rejects.toThrow('Private durable preparation failed')
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  expect((await f.nativeList()).map((run: any) => run.runId)).toEqual([f.previous.run.runId])
+})
+
+it.each(['memory', 'file'] as const)('binds frozen Agent secrets through the original %s Store owner', async owner => {
+  const f = await fixture()
+  f.start.mockRejectedValueOnce(new core.AgentMuxError('Private unknown Start', 'CONTROL_UNAVAILABLE'))
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  const original = (await f.correlation())!, { preparedSession, preparedDispatch, ...reservation } = original
+  const store = owner === 'memory' ? new core.AgentMuxMemoryAgentSessionStore() : new core.AgentMuxFileAgentSessionStore(join(f.root, 'binding.sqlite'))
+  await store.compareAndSwap(null, f.previous); await store.reserveLifecycle(reservation)
+  let rejected = 0
+  for (const field of ['AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_HOOK_TOKEN', 'AGENTMUX_PROVIDER_ID', 'AGENTMUX_EXECUTOR_ID']) {
+    const wrong = structuredClone(preparedDispatch!), launch = JSON.parse(wrong.prepared.launch)
+    launch.request.env[field] = 'different-subject'; wrong.prepared.launch = JSON.stringify(launch)
+    await expect(store.prepareResume(reservation, preparedSession!, wrong)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+    expect((await store.readLifecycleReservation(f.previous.agentSessionId))?.preparedSession).toBeUndefined(); rejected++
+  }
+  expect(rejected).toBe(4)
+  expect((await store.prepareResume(reservation, preparedSession!, preparedDispatch!)).preparedDispatch).toEqual(preparedDispatch)
+  f.noReplacement()
+})
+
+
+it('publishes the current legacy source gap on original continuity recheck without rewriting its historical failure', async () => {
+  const f = await fixture(), request = { agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run,
+    operationId: f.request.operationId, trigger: 'manual' as const, args: f.request.args, env: f.request.env }
+  f.start.mockRejectedValueOnce(new core.AgentMuxError('Historical private database mutation failed', 'CTXMUX_io'))
+  await expect(f.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
+  const db = new DatabaseSync(f.store.path)
+  try { db.prepare("UPDATE reservations SET json=json_remove(json, '$.preparedDispatch') WHERE id=?").run(f.previous.agentSessionId) } finally { db.close() }
+  const original = await f.correlation()
+  const before = (await f.store.readMetadata(f.previous.agentSessionId))!, old = before.continuity!
+  const historical = { ...old, error: 'Historical private database mutation failed', errorCode: 'CTXMUX_io' }
+  await f.store.compareAndSwapMetadata(before, { ...before, continuity: historical, continuityOperations: { ...before.continuityOperations, [request.operationId]: historical } })
+  for (let index = 0; index < 2; index++) {
+    const checked = await f.client.ensureAgentContinuity(request)
+    expect(checked).toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed', continuity: {
+      errorCode: 'AGENT_RESUME_SOURCE_UNCONFIRMED', error: expect.stringContaining('dispatch Runtime and complete request') } })
+    expect(checked.continuity!.error).not.toContain('Historical private database mutation failed')
+    expect((await f.store.readMetadata(f.previous.agentSessionId))?.continuity?.errorCode).toBe('AGENT_RESUME_SOURCE_UNCONFIRMED')
+  }
+  expect(await f.correlation()).toEqual(original); f.noReplacement()
+})
+
+
+it('retains the public Terminal preparation codec and its original error contract', () => {
+  const createOperationId = 'terminal-codec', workspacePath = '/private/terminal-codec'
+  const request = { program: '/bin/sh', args: [], cwd: workspacePath, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: createOperationId },
+    initial_size: { cols: 80, rows: 24 }, declared_inputs: [] }
+  const prepared = { createOperationId, workspacePath, launch: JSON.stringify({ createOperationId, request }) }
+  expect(core.parsePreparedTerminal(prepared)).toEqual(prepared)
+  for (const wrong of [{ ...prepared, extra: true }, { ...prepared, createOperationId: 'different-key' },
+    { ...prepared, launch: JSON.stringify({ createOperationId, request: { ...request, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: 'different-key' } } }) }]) {
+    expect(() => core.parsePreparedTerminal(wrong)).toThrow(expect.objectContaining({ code: 'INVALID_TERMINAL_PREPARATION' }))
+  }
 })

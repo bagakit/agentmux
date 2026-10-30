@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile, copyFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile, copyFile, rm } from 'node:fs/promises'
 import { createRequire, isBuiltin } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
 const { build } = require('esbuild')
-const output = join(root, 'packages/core/.tmp/durable-direct-resume')
+const dispatchMode = process.argv.includes('--dispatch'), compileOnly = process.argv.includes('--compile-only')
+const output = join(root, 'packages/core/.tmp', dispatchMode ? 'prepared-resume-dispatch' : 'durable-direct-resume')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-')), packageRoot = join(attempt, 'package')
 await mkdir(join(packageRoot, 'dist'), { recursive: true })
@@ -22,6 +23,9 @@ async function bind(path) {
 for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/lifecycle.ts', 'packages/core/src/agent-session-recovery/reconciliation.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-registry.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/ctxmux-run-adapter.ts',
   'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/durable-direct-resume.config.mts',
+  'packages/core/src/prepared-run.ts', 'packages/core/src/terminal-preparation.ts',
+  ...(dispatchMode ? ['packages/core/test/prepared-resume-dispatch.test.ts', 'packages/core/test/prepared-resume-dispatch.config.mts',
+    'packages/core/test/fixtures/prepared-resume-process.mjs', 'packages/core/scripts/verify-prepared-resume-recovery.mjs'] : []),
   'packages/core/test/agent-start-failure-recovery.test.ts', 'apps/desktop/src/main/runtime-controller.ts',
   'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-client-contract.ts', 'packages/core/src/public-rpc-service.ts',
   'packages/core/scripts/verify-durable-direct-resume.mjs',
@@ -39,12 +43,21 @@ for (const name of await readdir(join(root, 'packages'))) {
     try { await stat(path); alias[key === '.' ? pkg.name : pkg.name + key.slice(1)] = path } catch {}
   }
 }
-const variants = [
+// This generated module is built from this checkout, never resolved through another tree's dist.
+const identity = join(root, 'packages/identity')
+await new Promise((yes, no) => {
+  const child = spawn(process.execPath, [join(identity, 'scripts/build.mjs')], { cwd: identity, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' }, stdio: 'inherit' })
+  child.once('error', no); child.once('close', code => code === 0 ? yes() : no(new Error('Current identity runtime build failed')))
+})
+alias['@agentmux/identity/runtime-source'] = join(identity, 'dist/runtime-source.js')
+for (const name of await readdir(join(identity, 'src'))) await bind(join(identity, 'src', name))
+for (const name of ['build.mjs', 'runtime-bundle.mjs']) await bind(join(identity, 'scripts', name))
+const directVariants = [
   { name: 'candidate' },
   { name: 'skip-direct-prepare', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
-    from: "if (reservation.kind === 'resume' && continuity?.operationId === input.operationId)",
-    to: "if (reservation.kind === 'resume' && continuity?.operationId === input.operationId && continuity.trigger !== 'input')",
-    target: 'freezes direct native resume input', expected: 'expected undefined to match object' },
+    from: "      if (reservation.kind === 'resume') {",
+    to: "      if (reservation.kind === 'resume' && continuity?.trigger !== 'input') {",
+    target: 'freezes direct native resume input', expected: 'Original native resume request is not prepared' },
   { name: 'forget-unknown-start', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
     from: "          preserveUnconfirmedRun = true\n          const failure = new AgentMuxError(`Continue start is unconfirmed.",
     to: "          preserveUnconfirmedRun = false\n          const failure = new AgentMuxError(`Continue start is unconfirmed.",
@@ -59,17 +72,17 @@ const variants = [
     target: 'rejects changed direct input', expected: 'promise resolved' },
   { name: 'replace-healthy-operation', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
     from: "      if (oldRun?.state.type === 'running' && !restartReservation)", to: "      if (false)",
-    target: 'serializes same-client original operation', expected: 'promise resolved' },
+    target: 'serializes same-client original operation', expected: 'AGENT_SESSION_STILL_RUNNING' },
   { name: 'claim-foreign-lifecycle', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
-    from: "const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)\n    if (!prepared || candidates.length !== 1) return null",
-    to: "const candidates = runs.filter(run => run.lifecycleOperationId === 'foreign-operation')\n    if (!prepared || candidates.length !== 1) return null",
+    from: "if (!prepared || !run || run.lifecycleOperationId !== reservation.operationId) return null",
+    to: "if (!prepared || !run || run.lifecycleOperationId !== 'foreign-operation') return null",
     target: 'does not claim a foreign lifecycle', expected: 'promise resolved' },
   { name: 'lose-started-projection', path: 'packages/core/src/client.ts',
     from: 'const durable = await Promise.all((await loadAgentSessionMetadata(this.store)).map(session => this.registry.readStartedResume(session)))',
     to: 'const durable = await loadAgentSessionMetadata(this.store)',
     target: 'keeps acknowledged direct resume work', expected: 'expected' },
   { name: 'freeze-provider-plan', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
-    from: "if (continuity.launchInput) continuity.launchInput.launchPlan = this.ports.runtime.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })",
+    from: "if (continuity.launchInput) continuity.launchInput.launchPlan = identity",
     to: "if (continuity.launchInput) continuity.launchInput.launchPlan = { program: plan.command, argsDigest: createHash('sha256').update(JSON.stringify(plan.args)).digest('base64url') }",
     target: 'reconciles an applied direct Start', expected: 'promise rejected' },
   { name: 'lose-original-fatal-operation', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
@@ -77,6 +90,24 @@ const variants = [
     to: "              if (false) {\n                const failed = { ...next.continuity, kind: 'unavailable' as const, reason: 'process-exited',",
     target: 'retains the typed original direct-resume fatal operation', expected: 'expected undefined to match object' }
 ]
+const dispatchVariants = [
+  { name: 'candidate' },
+  { name: 'dispatch-without-durable-prepare', path: 'packages/core/src/agent-session-recovery/lifecycle.ts',
+    from: 'reservation = await this.ports.sessions.registry.prepareResume(reservation,',
+    to: 'reservation = await (async (_reservation, preparedSession, preparedDispatch) => ({ ...reservation, preparedSession, preparedDispatch }))(reservation,',
+    target: 'freezes direct native resume input', expected: 'Original native resume request is not prepared' },
+  { name: 'cross-runtime-dispatch', path: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: 'if (expected && (parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId ||',
+    to: 'if (false && (parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId ||',
+    target: 'different real Runtime after durable prepare', expected: 'promise resolved' },
+  { name: 'ignore-retained-full-request', path: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: 'if (!isDeepStrictEqual(observed.spec, request)) throw new AgentMuxError(',
+    to: 'if (false) throw new AgentMuxError(',
+    target: 'mismatching actual RunSpec', expected: 'promise resolved' },
+  directVariants.find(variant => variant.name === 'forget-unknown-start')
+]
+const variants = compileOnly ? [{ name: 'candidate' }] : (dispatchMode ? dispatchVariants : directVariants).flatMap(variant => variant.from
+  ? [variant, { name: 'restore-' + variant.name, target: variant.target }] : [variant])
 const receipt = { schema: 'agentmux.durable-direct-resume-proof.v1', passed: false, sourceStable: false, results: [],
   scope: { actual: 'Private Native Runtime + two input carriers + FileStore/Core direct resume/Hosted/public compiled CLI and fatal regression owner',
     controlled: 'Start/commit ACK loss and rejection, exact prepared-operation contention and unknown input receipt', userRuntimeTouched: false,
@@ -92,18 +123,17 @@ try {
           if (isBuiltin(args.path) || alias[args.path]) return null
           const resolver = createRequire(args.importer || join(root, 'packages/core/package.json'))
           let entry
-          try { entry = resolver.resolve(args.path) } catch (error) {
-            const parts = args.path.split('/'), name = args.path.startsWith('@') ? parts.splice(0, 2).join('/') : parts.shift()
-            for (const directory of resolver.resolve.paths(name) ?? []) {
-              try {
-                const manifest = join(directory, name, 'package.json'), pkg = JSON.parse(await readFile(manifest, 'utf8'))
-                const shape = pkg.exports?.[parts.length ? './' + parts.join('/') : '.'], value = typeof shape === 'string' ? shape : shape?.import
-                if (!value) continue
-                entry = resolve(dirname(manifest), value); await stat(entry); await bind(manifest); break
-              } catch {}
-            }
-            if (!entry) throw error
+          const parts = args.path.split('/'), name = args.path.startsWith('@') ? parts.splice(0, 2).join('/') : parts.shift()
+          // Node's import branch can differ from require (for example ws named exports).
+          for (const directory of resolver.resolve.paths(name) ?? []) {
+            try {
+              const manifest = join(directory, name, 'package.json'), pkg = JSON.parse(await readFile(manifest, 'utf8'))
+              const shape = pkg.exports?.[parts.length ? './' + parts.join('/') : '.'] ?? (parts.length ? undefined : pkg.exports), value = typeof shape === 'string' ? shape : shape?.import
+              if (typeof value !== 'string') continue
+              entry = resolve(dirname(manifest), value); await stat(entry); await bind(manifest); break
+            } catch {}
           }
+          entry ??= resolver.resolve(args.path)
           await bind(entry); return { path: entry, external: true }
         })
       } }, ...(variant?.from ? [{ name: 'loaded-' + variant.name, setup(plugin) {
@@ -126,13 +156,17 @@ try {
   await copyFile(join(root, 'packages/core/bin/amux'), join(cli, 'bin/amux')); await bind('packages/core/bin/amux')
   await bundle({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(cli, 'dist/agentmux.js') })
   for (const variant of variants) {
-    const file = join(packageRoot, 'dist', variant.name + '.mjs'), report = join(attempt, variant.name + '.json')
+    const file = join(packageRoot, 'dist', variant.name.startsWith('restore-') ? 'candidate.mjs' : variant.name + '.mjs'), report = join(attempt, variant.name + '.json')
     const source = ['export * from "./packages/core/src/index.ts"',
       'export { AgentMuxControlServer } from "./packages/core/src/public-rpc-server.ts"',
       'export { AgentMuxHostedRuntimeService } from "./packages/core/src/hosted-runtime-service.ts"',
       ...(variant.from ? ['export const AGENTMUX_DURABLE_RESUME_MUTANT = ' + JSON.stringify(variant.name)] : [])].join('\n')
-    await bundle({ stdin: { contents: source, resolveDir: root, loader: 'ts' }, outfile: file }, variant)
-    const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', 'packages/core/test/durable-direct-resume.config.mts',
+    if (!variant.name.startsWith('restore-')) await bundle({ stdin: { contents: source, resolveDir: root, loader: 'ts' }, outfile: file }, variant)
+    if (compileOnly) {
+      await writeFile(join(output, 'compile-only.json'), JSON.stringify({ qualified: false, entry: pathToFileURL(file).href, cli: join(cli, 'bin/amux') }))
+      console.log('Compile only; no verification result: ' + join(output, 'compile-only.json')); process.exit(0)
+    }
+    const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', dispatchMode ? 'packages/core/test/prepared-resume-dispatch.config.mts' : 'packages/core/test/durable-direct-resume.config.mts',
       '--reporter=default', '--reporter=json', '--outputFile=' + report]
     if (variant.target) args.push('-t', variant.target)
     const result = await new Promise((yes, no) => {
@@ -155,7 +189,7 @@ try {
       failed: tests.numFailedTests, total: assertions.filter(test => test.status !== 'pending').length, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 34 && tests.success, 'Actual nonempty direct resume baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests > 0 && (variant.target || tests.numPassedTests === (dispatchMode ? 60 : 57)) && tests.success, 'Actual nonempty direct resume baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   const ts = require('typescript'), consumers = []
@@ -186,6 +220,8 @@ try {
   assert.ok(methods.length > 0 && methods.includes('resumeAgent'), 'The actual Hosted contract must retain its direct resume owner')
   receipt.consumers = consumers
   for (const path of inputs.keys()) await bind(path)
+  await rm(packageRoot, { recursive: true, force: true }); await rm(cli, { recursive: true, force: true })
+  receipt.cleanup = { privateBundlesRemoved: true, fixtureProcessesAndDirectories: dispatchMode ? 'verified by exact private Stop/PID and teardown assertions' : 'verified by private fixture teardown assertions' }
   receipt.inputs = Object.fromEntries(inputs); receipt.sourceStable = true; receipt.passed = true; await save()
   await writeFile(join(output, 'latest.json'), JSON.stringify({ receipt: relative(root, join(attempt, 'receipt.json')) }))
   console.log(relative(root, join(attempt, 'receipt.json')))

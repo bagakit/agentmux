@@ -42,7 +42,11 @@ beforeEach(async () => {
   await inner.hookServer.start()
   inner.kernel.isConnected = () => true
   inner.kernel.identity = () => ({ daemonInstanceId: 'private-startup', protocolVersion: 18, buildIdentity: 'fixture' })
-  inner.kernel.start = vi.fn(async () => ({ ...newRun, state: { type: 'running' } }))
+  inner.kernel.creationRuntimeIdentity = () => ({ runtimeId: 'private-startup-runtime', instanceId: 'private-startup', protocolVersion: 18, buildIdentity: 'fixture' })
+  inner.kernel.start = inner.kernel.startPrepared = vi.fn(async (request: any, operationKey?: string) => {
+    if (operationKey) newRun = { ...newRun, program: request.program, args: request.args, lifecycleOperationId: operationKey }
+    return { ...newRun, state: { type: 'running' } }
+  })
   inner.kernel.status = vi.fn(async (id: string) => id === oldRun.runId ? oldRun : newRun)
   input = vi.fn(); inner.kernel.input = input
   inner.kernel.hasAttachment = () => false; inner.kernel.detach = vi.fn(async () => {})

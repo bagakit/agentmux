@@ -9,7 +9,7 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { CtxmuxProtocolError, createOperationKey } from '@ctxmux/sdk'
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
-import { decodePreparedTerminal } from '../src/terminal-preparation.js'
+import { decodePreparedRun } from '../src/prepared-run.js'
 import { parseCapsuleRuntimeParams, parseCapsuleRuntimeResult } from '../src/capsule-runtime.js'
 import { spawn } from 'node:child_process'
 
@@ -192,7 +192,7 @@ it('consumes exact SDK23 creation and storage facts through the original adapter
   }) }
   Object.assign(adapter, { client: sdk })
   vi.spyOn(f.client, 'createPreparedTerminal').mockImplementation(async prepared => {
-    const decoded = decodePreparedTerminal(prepared)
+    const decoded = decodePreparedRun(prepared)
     return await adapter.startPrepared(decoded.request, decoded.prepared.createOperationId) as never
   })
   const result = await f.manager.runtime.call('capsule.runtime.start', { operationId: 'sdk-refusal', expectedRevision: 0 })

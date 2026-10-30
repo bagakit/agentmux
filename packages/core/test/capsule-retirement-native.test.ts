@@ -13,7 +13,7 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { AgentMuxError } from '../src/errors.js'
-import { decodePreparedTerminal } from '../src/terminal-preparation.js'
+import { decodePreparedRun } from '../src/prepared-run.js'
 import { parseCapsuleRuntimeResult, type CapsuleRuntimeObservation } from '../src/capsule-runtime.js'
 
 const closes: Array<() => Promise<unknown>> = []
@@ -52,7 +52,7 @@ it('recovers through actual private Native, Core manager, Unix RPC and source co
   expect(first.operation?.phase).toBe('unknown')
   lost.mockRestore()
   const originalBinding = JSON.parse(await readFile(join(state, 'capsule-service.json'), 'utf8'))
-  const originalLaunch = decodePreparedTerminal(originalBinding.launch)
+  const originalLaunch = decodePreparedRun(originalBinding.launch)
   const originalRecord = await readFile(join(state, 'capsule-service-operations/native-original-start.json'), 'utf8')
   const host = new AgentMuxHostedRuntimeService(client, null, () => ({ runtimeId: 'private-core-runtime', ownerInstanceId: 'private-core-owner',
     protocolVersion: 2, processId: process.pid, availability: 'connected', ctxmux: client.runtimeIdentity() })); closes.push(() => host.dispose())
