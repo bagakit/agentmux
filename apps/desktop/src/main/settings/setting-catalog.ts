@@ -9,6 +9,7 @@ import { focusSettings } from './modules/focus.js'
 import { focusMapSettings } from './modules/focus-map.js'
 import { goalsSettings } from './modules/goals.js'
 import { notesSettings } from './modules/notes.js'
+import { topicSettings } from './modules/topic.js'
 import { continuitySettings } from './modules/continuity.js'
 import { automationSettings } from './modules/automation.js'
 import type { AppConfig } from '../../shared/contracts.js'
@@ -20,6 +21,7 @@ export const scalarSettings = (config: AppConfig) => [
   ...focusMapSettings(config),
   ...goalsSettings,
   ...notesSettings,
+  ...topicSettings,
   ...continuitySettings,
   ...automationSettings,
   ...a2aSettings,

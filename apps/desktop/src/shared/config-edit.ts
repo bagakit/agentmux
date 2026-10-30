@@ -1,7 +1,7 @@
 import { DEFAULT_COMPOSER_INPUT_CONFIG, resolveComposerInputConfig, type ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
-import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
+import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_A2A_NOTIFICATION, resolveA2ANotifications } from './a2a-preferences'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
@@ -61,6 +61,7 @@ function effective(path: string, value: unknown): unknown {
   if (path.startsWith('messageToolCompletion.')) return value === undefined ? DEFAULT_COMPOSER_INPUT_CONFIG[path.slice('messageToolCompletion.'.length) as keyof ComposerInputConfig] : value
   if (path === 'messageToolInitialLayout') return value ?? MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT
   if (path === 'moteDirectoryView') return value ?? MOTE_DIRECTORY_VIEW_DEFAULT
+  if (path === 'topicDirectoryInitialView') return value ?? TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT
   if (path === 'moteDirectoryAvatarSize') return value ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT
   if (path === 'goalsCommonActions') return resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined)
   if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }

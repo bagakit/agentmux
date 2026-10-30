@@ -310,6 +310,10 @@ export const MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT: MessageToolInitialLayout = 'on
 export const MOTE_DIRECTORY_VIEW_IDS = ['collaborators', 'list'] as const
 export type MoteDirectoryView = (typeof MOTE_DIRECTORY_VIEW_IDS)[number]
 export const MOTE_DIRECTORY_VIEW_DEFAULT: MoteDirectoryView = 'collaborators'
+/** Presentation seed for newly mounted Topic directory panels; current views keep their choice. */
+export const TOPIC_DIRECTORY_INITIAL_VIEW_IDS = ['topics', 'knowledge'] as const
+export type TopicDirectoryInitialView = (typeof TOPIC_DIRECTORY_INITIAL_VIEW_IDS)[number]
+export const TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT: TopicDirectoryInitialView = 'topics'
 export const MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT = 45
 export const MOTE_DIRECTORY_AVATAR_SIZE_MIN = 24
 export const MOTE_DIRECTORY_AVATAR_SIZE_MAX = 48
@@ -489,6 +493,8 @@ export type AppConfig = {
   gitHistoryShowTime?: boolean
   moteDirectoryView?: MoteDirectoryView
   moteDirectoryAvatarSize?: number
+  /** Absent means Topics; changing this does not retarget an already mounted directory panel. */
+  topicDirectoryInitialView?: TopicDirectoryInitialView
   /**
    * 复制路径时是否给绝对地址。默认（缺席 / `false`）把当前用户家目录缩写成 `~`；`true` 是用户主动
    * 选择的「我要绝对路径」这一档。用户原话：「默认是波浪线，但也可以支持用户配置这种绝对地址」，

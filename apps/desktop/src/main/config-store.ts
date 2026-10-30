@@ -27,6 +27,7 @@ import {
   PROJECT_RAIL_DENSITY_IDS,
   MESSAGE_TOOL_INITIAL_LAYOUT_IDS,
   MOTE_DIRECTORY_VIEW_IDS,
+  TOPIC_DIRECTORY_INITIAL_VIEW_IDS,
   MOTE_DIRECTORY_AVATAR_SIZE_MIN,
   MOTE_DIRECTORY_AVATAR_SIZE_MAX,
   SCRATCH_WORKSPACE_ID,
@@ -371,6 +372,7 @@ const configSchema = z
     projectRailDensity: z.enum(PROJECT_RAIL_DENSITY_IDS).optional(),
     gitHistoryShowTime: z.boolean().optional(),
     moteDirectoryView: z.enum(MOTE_DIRECTORY_VIEW_IDS).optional(),
+    topicDirectoryInitialView: z.enum(TOPIC_DIRECTORY_INITIAL_VIEW_IDS).optional(),
     moteDirectoryAvatarSize: z.number().int().min(MOTE_DIRECTORY_AVATAR_SIZE_MIN).max(MOTE_DIRECTORY_AVATAR_SIZE_MAX).optional(),
     // 复制路径给绝对地址还是缩写 `~`。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
     // 没有它，写成必需会让整块判失败）——且**不回填**：缺席与默认（缩写）同义，补盘只是白写；读处

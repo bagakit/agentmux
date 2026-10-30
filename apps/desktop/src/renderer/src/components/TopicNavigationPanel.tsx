@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import { TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT, type ScratchTopicSnapshot, type TopicDirectoryInitialView, type WorkspaceRecord } from '../../../shared/contracts'
 import { TopicKnowledgePanel } from './TopicKnowledgePanel'
 import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
 /** Category directory and knowledge share the secondary surface; Chats live in the right Tab strip. */
-export function TopicNavigationPanel({ workspace, topic, selectedTopicId, topics, categorySpaceId, visible, onRevealDirectory }: {
+export function TopicNavigationPanel({ workspace, topic, selectedTopicId, topics, categorySpaceId, visible, onRevealDirectory, initialView = TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT }: {
   workspace: WorkspaceRecord
   topic?: ScratchTopicSnapshot | undefined
   selectedTopicId?: string | null | undefined
@@ -13,9 +13,10 @@ export function TopicNavigationPanel({ workspace, topic, selectedTopicId, topics
   categorySpaceId?: string | undefined
   visible: boolean
   onRevealDirectory(path: string): void
+  initialView?: TopicDirectoryInitialView | undefined
 }) {
-  const [view, setView] = useState<'topics' | 'knowledge'>('topics')
-  const [knowledgeOpened, setKnowledgeOpened] = useState(false)
+  const [view, setView] = useState<TopicDirectoryInitialView>(initialView)
+  const [knowledgeOpened, setKnowledgeOpened] = useState(initialView === 'knowledge')
   return <section className="topic-navigation-panel" aria-label="Topic directory and knowledge">
     <SurfaceModeSwitch value={view} active={visible} ariaLabel="Topic directory view"
       options={[{ value: 'topics', label: 'Topics', ariaLabel: 'Show Topics' }, { value: 'knowledge', label: 'Knowledge', ariaLabel: 'Show Knowledge' }]}

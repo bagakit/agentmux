@@ -10,6 +10,7 @@ import type { FileExplorerRevealRequest } from './FileExplorer'
 import { TopicNavigationPanel } from './TopicNavigationPanel'
 import { WorkspaceZonesPanel } from './WorkspaceZonesPanel'
 import { WorkspaceFilesFrame, type WorkspaceFileActions } from './WorkspaceFilesFrame'
+import { TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT } from '../../../shared/contracts'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
@@ -22,6 +23,7 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
   const scratch = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const { topics } = useScratchTopics(scratch?.id ?? null, visible)
   const bindings = useAppStore(state => state.spaceZoneBindings)
+  const initialView = useAppStore(state => state.config?.topicDirectoryInitialView ?? TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT)
   const selectedTopicId = topicId ?? choice?.topicId
   const topic = selectedTopicId ? topics?.find(item => item.id === selectedTopicId && (isKnowledgeTopicInBindings(item, bindings) || Object.values(bindings).some(binding => binding.topicId === item.id && (binding.contentKind === 'topic' || binding.contentKind === 'mote')))) : undefined
   const categorySpaceId = choice?.spaceId && choice.spaceId !== directoryIdentity(workspace.hostId, workspace.path) ? choice.spaceId : undefined
@@ -42,7 +44,7 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
       {scratch ? <button type="button" className="icon-button" aria-label="Retry directory discovery" title="Retry directory discovery" onClick={() => void useAppStore.getState().refreshScratchTopics(scratch.id, true)}><ThemeActionRefreshIcon size={13} /></button> : null}</div> : undefined}>
     {content}
   </WorkspaceFilesFrame>
-  return presentation.showTopics ? frame(<TopicNavigationPanel workspace={workspace} topic={topic} selectedTopicId={selectedTopicId}
+  return presentation.showTopics ? frame(<TopicNavigationPanel workspace={workspace} topic={topic} selectedTopicId={selectedTopicId} initialView={initialView}
     topics={topics ?? []} categorySpaceId={categorySpaceId} visible={visible} onRevealDirectory={path => {
       setReveal({ selection: selectedTopicId ?? null, categorySpaceId, request: { workspaceId: workspace.id, path, requestId: ++requestId.current } })
       useAppStore.getState().setExplorerCollapsed(workspace.id, false)
