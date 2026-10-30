@@ -66,7 +66,7 @@ try {
     runs.push(evidence)
     await save()
     assert.equal(run.signal, null, 'A source consumer process must finish normally: ' + label)
-    assert.equal(assertions.length, 21, 'All maintained cases must collect; setup failures cannot replace behavior proof')
+    assert.equal(assertions.length, 22, 'All maintained cases must collect; setup failures cannot replace behavior proof')
     for (const row of evaluations) {
       assert.equal(row.originalSHA256, inputs[row.path], 'The evaluated original source must match this proof input: ' + row.path)
       assert.ok(row.surface === 'vitest' || row.surface === 'node-process')
@@ -80,27 +80,41 @@ try {
       assert.ok(failures.length > 0 && failures.every(test => new RegExp(mutation.pattern).test(test.fullName)), 'Only the selected real consumers may fail')
       assert.ok(failures.some(test => test.failureMessages.some(message => /AssertionError|__VITEST_(?:REJECTS|RESOLVES)__/u.test(message))), 'A consumer assertion must detect the mutation; setup or timeout is not proof')
       for (const [path] of mutation.edits) assert.ok(evaluations.some(row => row.path === path && row.mutant === label && row.originalSHA256 !== row.loadedSHA256), 'The actual consumer did not evaluate the changed owner: ' + path)
+      if (label === 'directory-sync-ack-omitted') {
+        const faults = observations.filter(row => row.phase === 'directory-durability')
+        assert.equal(faults.length, 1)
+        assert.equal(faults[0].fileSyncs, 1); assert.equal(faults[0].renames, 1); assert.equal(faults[0].directorySyncs, 1)
+        assert.equal(faults[0].confirmedDirectorySyncs, 0); assert.equal(faults[0].directoryCloses, 1); assert.equal(faults[0].nativeInputs, 0)
+      }
     } else {
-      assert.equal(run.code, 0, run.output); assert.equal(cases.length, 21); assert.equal(failures.length, 0)
+      assert.equal(run.code, 0, run.output); assert.equal(cases.length, 22); assert.equal(failures.length, 0)
       const names = cases.map(test => test.fullName).sort()
       if (originalCases) assert.deepEqual(names, originalCases, 'Restoration must rerun the same real cases')
       else originalCases = names
       assert.ok(evaluations.some(row => row.path === 'apps/host/src/continuous-progress-loop-store.ts' && row.surface === 'node-process'), 'The separately reopened Store must execute its source in the independent process')
       const readers = observations.filter(row => row.phase === 'independent-store-reader')
-      assert.equal(readers.length, 1, 'Exactly one actual independent Store reader must complete')
-      const reader = readers[0]
-      assert.notEqual(reader.pid, reader.parentPid)
-      assert.equal(hash(await readFile(resolve(root, reader.file))), reader.bundleSHA256)
-      const provenanceBytes = await readFile(resolve(root, reader.provenance))
-      assert.equal(hash(provenanceBytes), reader.provenanceSHA256)
-      const provenance = JSON.parse(provenanceBytes)
-      assert.equal(provenance.bundleSHA256, reader.bundleSHA256)
-      assert.ok(provenance.sources.some(source => source.path === 'apps/host/src/continuous-progress-loop-store.ts'), 'The bundle must contain the original Store implementation')
-      for (const source of provenance.sources) {
-        assert.equal(hash(await readFile(resolve(root, source.path))), source.originalSHA256, 'A bundled original source changed: ' + source.path)
-        if (inputs[source.path]) assert.equal(source.originalSHA256, inputs[source.path])
-        else inputs[source.path] = source.originalSHA256
+      assert.equal(readers.length, 2, 'Before-write and after-replace recovery must each reopen the original Store independently')
+      assert.deepEqual(readers.map(reader => reader.readerTag).sort(), ['before-write', 'directory-sync'])
+      assert.equal(new Set(readers.map(reader => reader.file)).size, 2, 'The two reader artifacts must not overwrite one another')
+      for (const reader of readers) {
+        assert.notEqual(reader.pid, reader.parentPid)
+        assert.equal(hash(await readFile(resolve(root, reader.file))), reader.bundleSHA256)
+        const provenanceBytes = await readFile(resolve(root, reader.provenance))
+        assert.equal(hash(provenanceBytes), reader.provenanceSHA256)
+        const provenance = JSON.parse(provenanceBytes)
+        assert.equal(provenance.bundleSHA256, reader.bundleSHA256)
+        assert.ok(provenance.sources.some(source => source.path === 'apps/host/src/continuous-progress-loop-store.ts'), 'The bundle must contain the original Store implementation')
+        for (const source of provenance.sources) {
+          assert.equal(hash(await readFile(resolve(root, source.path))), source.originalSHA256, 'A bundled original source changed: ' + source.path)
+          if (inputs[source.path]) assert.equal(source.originalSHA256, inputs[source.path])
+          else inputs[source.path] = source.originalSHA256
+        }
       }
+      const directoryProof = observations.filter(row => row.phase === 'directory-durability')
+      assert.equal(directoryProof.length, 1)
+      assert.equal(directoryProof[0].renames, 3); assert.equal(directoryProof[0].directorySyncs, 3)
+      assert.equal(directoryProof[0].confirmedDirectorySyncs, 1); assert.equal(directoryProof[0].directoryCloses, 3)
+      assert.equal(directoryProof[0].nativeInputs, 0)
     }
     await checkInputs()
     evidence.validated = true; delete receipt.current
