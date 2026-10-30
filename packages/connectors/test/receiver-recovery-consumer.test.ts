@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fork } from 'node:child_process'
+import { once } from 'node:events'
 import { connectAgentMuxRpc } from '../../core/src/index.js'
 import { receiverRecoveryFixture, waitReceiver } from './fixtures/receiver-recovery.js'
 const cleanup: Array<() => void | Promise<void>> = []
@@ -76,6 +78,25 @@ it('concurrent old-ref operations schedule one consumer and same-operation confl
   await expect(f.recover({ ...input, receiverRef: current })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
   expect(f.wire.requests.filter(r => r.url?.endsWith('/callback/ws/endpoint'))).toHaveLength(2)
   expect(f.wire.sockets).toHaveLength(1); expect((await f.current()).receiver!.ref).toBe(current); f.unchanged()
+})
+
+it('original journal inspection survives actual management-process death and a new owner instance', async () => {
+  const f = await receiverRecoveryFixture(cleanup); await f.ready()
+  const input = await f.target('process-original'), admitted = await f.recover(input)
+  await f.services.close()
+  for (let generation = 0; generation < 2; generation++) {
+    const child = fork(new URL('./fixtures/receiver-journal-owner.mjs', import.meta.url), [join(f.root, 'receiver-host'), f.fence.runtimeId], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] })
+    let stderr = ''; child.stderr!.on('data', data => { stderr += data })
+    cleanup.push(async () => { if (child.exitCode === null && child.signalCode === null) { const ended = once(child, 'exit'); child.kill('SIGKILL'); await ended } })
+    const ready = await Promise.race([once(child, 'message').then(([value]) => value as { socketPath: string }), once(child, 'exit').then(() => { throw Error('Private journal process failed: ' + stderr) })])
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: ready.socketPath } }); cleanup.push(() => rpc.dispose())
+    const { owner } = await rpc.call('runtime.owner.identity', {}), runtimeFence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    expect((await rpc.call('connection.receiver.inspect', { operationId: input.operationId }, { runtimeFence })).operation).toEqual(admitted.operation)
+    expect((await rpc.call('connection.receiver.recover', input, { runtimeFence })).operation).toEqual(admitted.operation)
+    expect(f.wire.sockets).toHaveLength(1)
+    const ended = once(child, 'exit'); child.kill('SIGKILL'); await ended; await rpc.dispose()
+  }
+  f.unchanged()
 })
 
 it('a lost commit acknowledgement can only continue the durably admitted original ref once', async () => {
