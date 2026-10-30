@@ -10,7 +10,7 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
 import { parseAgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
-import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, spatialAgentOpenRecord } from './spatial-agent-open.js';
+import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
 export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
   type AgentMuxNameTarget, type AgentMuxNameContext, type AgentMuxNameChangeIntent, type AgentMuxNameChangeRecord,
@@ -154,6 +154,64 @@ export class AgentMuxSpatialStateStore {
       const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(admission.graph));
       return { ...admission, state: projectSpatialState(state) };
     });
+  }
+  /** Claim only a follow-up on the original creation. Its outcomes remain at Files/dialogue owners. */
+  async claimMoteMainFollowUp(input: MoteMainFollowUpInput) {
+    return this.locked(async () => {
+      const current = await this.requiredState(), record = spatialAgentOpenRecord(current.graph, input.requestId)
+      if (!record?.moteMain || !['source','binding'].includes(input.step)) throw new AgentMuxError('The original Main creation admission is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED')
+      if (input.baselineChanged) {
+        const observed = parseMoteMainBaseline(input.baselineChanged, record.moteMain.target)
+        if (input.step !== 'binding' || input.receipt || record.moteMainFollowUps?.bindStarted || sameMoteMainBaseline(observed, record.moteMain.baseline)) throw new AgentMuxError('Inspect the original dispatched binding; it cannot become a pre-submission refusal.', 'SPATIAL_CREATION_UNCONFIRMED')
+        record.moteMainFollowUps = { ...record.moteMainFollowUps, refusedBeforeBinding: observed }
+      }
+      const key = input.step === 'source' ? 'sourceStarted' : 'bindStarted'
+      if (record.moteMainFollowUps?.refusedBeforeBinding && !input.baselineChanged) return { record, claimed: false }
+      if (!input.receipt && record.moteMainFollowUps?.[key]) return { record, claimed: false }
+      if (input.receipt && (input.step !== 'binding' || !record.moteMainFollowUps?.bindStarted)) throw new AgentMuxError('A binding receipt needs its original dispatched request.', 'SPATIAL_CREATION_UNCONFIRMED')
+      if (!input.baselineChanged) record.moteMainFollowUps = { ...record.moteMainFollowUps, [key]: true, ...(input.receipt ? { bindingReceipt: retainedMoteMainBindingReceipt(record, input.receipt) } : {}) }
+      const graph = structuredClone(current.graph), stored = graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] as unknown as { requests: Record<string, typeof record> }
+      stored.requests[record.requestId] = record
+      // Validate the original receipt and its request pair before retaining it.
+      spatialAgentOpenRecord(graph, record.requestId)
+      await this.writeLocked(current, graph)
+      return { record, claimed: true }
+    })
+  }
+  /** Called only with the result returned by the original writer, never with a client receipt. */
+  async recordMoteMainBindingResult(input: import('./mote-preferences.js').MoteQuickPreferencesSaveParams, result: import('./mote-preferences.js').MoteQuickPreferencesSaveResult) {
+    return this.locked(async () => {
+      const current = await this.read()
+      if (!current) return false
+      const candidates = Object.keys(spatialAgentOpenDocument(current.graph).requests).map(id => spatialAgentOpenRecord(current.graph,id)!).filter(record => matchesMoteMainBindingInput(record,input))
+      if (candidates.length !== 1) return false
+      const record = candidates[0]!
+      if (record.moteMainFollowUps?.refusedBeforeBinding) return false
+      const receipt = retainedMoteMainBindingReceipt(record,result)
+      const prior = record.moteMainFollowUps?.bindingReceipt
+      if (prior && prior.status !== 'unconfirmed') return false
+      record.moteMainFollowUps = { ...record.moteMainFollowUps, bindStarted:true, bindingReceipt:receipt }
+      const graph = structuredClone(current.graph)
+      ;(graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] as unknown as {requests:Record<string,typeof record>}).requests[record.requestId] = record
+      spatialAgentOpenRecord(graph,record.requestId)
+      await this.writeLocked(current,graph)
+      return true
+    })
+  }
+  /** Reconciliation evidence stays distinct from a native File save acknowledgement. */
+  async observeMoteMainBinding(requestId: string, source: MoteMainBindingObservation) {
+    return this.locked(async () => {
+      const current = await this.requiredState(), record = spatialAgentOpenRecord(current.graph,requestId)
+      if (!record?.moteMain) throw new AgentMuxError('The original creation admission is unavailable.', 'SPATIAL_CREATION_UNCONFIRMED')
+      validateMoteMainBindingObservation(record,source)
+      if (record.moteMainFollowUps?.bindingObserved) return record
+      record.moteMainFollowUps = {...record.moteMainFollowUps,bindingObserved:source}
+      const graph = structuredClone(current.graph)
+      ;(graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] as unknown as {requests:Record<string,typeof record>}).requests[record.requestId] = record
+      spatialAgentOpenRecord(graph,requestId)
+      await this.writeLocked(current,graph)
+      return record
+    })
   }
   /** The exact Session receipt fills its reserved Region; a changed binding is never replaced. */
   async settleAgentOpen(requestId: string, session: { agentSessionId: string; run: { runId: string } }, regionResource: import('./spatial-graph.js').SpatialJson) {

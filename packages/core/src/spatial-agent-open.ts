@@ -5,35 +5,29 @@ import { spatialCatalog, type AgentMuxSpatialGraph, type SpatialJson } from './s
 import { spatialDestination } from './spatial-destination.js'
 import { addTabOrThrow, createWorkspaceLayout, createWorkbenchViewLayout, splitWorkbenchRegion } from './spatial-layout.js'
 
-import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from './spatial-agent-open-contract.js'
+import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, parseMoteMainCreationIntent, pendingMoteMainCreation, spatialAgentOpenRecord, spatialAgentOpenDocument, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from './spatial-agent-open-contract.js'
 export * from './spatial-agent-open-contract.js'
 
-type Document = { schema: 'agentmux.spatial-agent-open.v1'; requests: Record<string, AgentMuxSpatialAgentOpenRecord> }
-function document(graph: AgentMuxSpatialGraph): Document {
-  const stored = graph.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE]
-  if (stored === undefined) return { schema: 'agentmux.spatial-agent-open.v1', requests: {} }
-  if (!stored || typeof stored !== 'object' || Array.isArray(stored) || stored.schema !== 'agentmux.spatial-agent-open.v1' ||
-      !stored.requests || typeof stored.requests !== 'object' || Array.isArray(stored.requests)) throw new AgentMuxError(
-    'The original spatial creation associations are unreadable. Keep their graph and inspect the original operation.', 'SPATIAL_CREATION_UNCONFIRMED')
-  return stored as unknown as Document
-}
-export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: string): AgentMuxSpatialAgentOpenRecord | null {
-  const requests = document(graph).requests
-  const original = Object.hasOwn(requests, requestId) ? requests[requestId] : undefined
-  if (!original) return null
-  if (original.requestId !== requestId || typeof original.digest !== 'string' || typeof original.agentSessionId !== 'string' ||
-      !original.address || !original.execution || typeof original.execution.hostId !== 'string' || typeof original.execution.workspacePath !== 'string') throw new AgentMuxError(
-    'The exact spatial creation association is unconfirmed. Keep its Session and original request.', 'SPATIAL_CREATION_UNCONFIRMED')
-  return structuredClone(original)
-}
 export function spatialAgentOpenDigest(request: AgentMuxSpatialAgentOpenRequest): string {
   return agentCreationIntentDigest({ operation: request.operation, content: request.content, destination: request.destination,
-    focus: request.focus, callerAgentSessionId: request.caller?.agentSessionId ?? null })
+    focus: request.focus, callerAgentSessionId: request.caller?.agentSessionId ?? null, ...(request.moteMain ? { moteMain: request.moteMain } : {}) })
 }
 /** Admission and topology are one graph mutation; no Runtime operation occurs here. */
 export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { request: AgentMuxSpatialAgentOpenRequest;
   agentSessionId: string; execution: AgentMuxSpatialAgentOpenRecord['execution']; regionResource: SpatialJson }) {
+  if (input.request.moteMain) {
+    const intent = parseMoteMainCreationIntent(input.request.moteMain)
+    if (intent.target.expectedResource.hostId !== input.execution.hostId || intent.target.expectedResource.workspaceId !== input.execution.workspaceId ||
+      intent.target.spaceId !== input.request.destination.spaceId || intent.target.zoneId !== input.request.destination.zoneId ||
+      input.request.content.kind !== 'new-agent' || intent.baseline.defaults.executorId !== input.request.content.executorId)
+      throw new AgentMuxError('The Main intent belongs to another original execution resource.', 'SPACE_RESOURCE_CHANGED')
+  }
   const digest = spatialAgentOpenDigest(input.request), previous = spatialAgentOpenRecord(graph, input.request.requestId)
+  const mainIntent = input.request.moteMain
+  const pending = mainIntent && !mainIntent.baseline.defaults.conversation ? pendingMoteMainCreation(graph, mainIntent.target) : null
+  if (pending && pending.requestId !== input.request.requestId) throw new AgentMuxError(
+    'This Mote already has an original unfinished Main creation. Inspect that operation without starting another Agent.',
+    'MOTE_MAIN_CREATION_PENDING', JSON.stringify({ operationId: pending.requestId, target: pending.moteMain!.target }))
   if (previous) {
     if (previous.digest !== digest) throw new AgentMuxError('This operation belongs to another original spatial creation intent.', 'SPACE_REQUEST_CONFLICT')
     const original = graph.regions.find(region => region.tabId === previous.address.tabId && region.regionId === previous.address.regionId)
@@ -81,8 +75,8 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
     runId: null, execution: { hostId: input.execution.hostId, cwd: input.execution.workspacePath } })
   next.resources['region:' + address.regionId] = structuredClone(input.regionResource)
   const record: AgentMuxSpatialAgentOpenRecord = { executorId: input.request.content.executorId, requestId: input.request.requestId, digest, agentSessionId: input.agentSessionId,
-    address, execution: structuredClone(input.execution) }
-  const original = document(next); original.requests = Object.fromEntries([...Object.entries(original.requests), [record.requestId, record]])
+    address, execution: structuredClone(input.execution), ...(input.request.moteMain ? { moteMain: structuredClone(input.request.moteMain) } : {}) }
+  const original = spatialAgentOpenDocument(next); original.requests = Object.fromEntries([...Object.entries(original.requests), [record.requestId, record]])
   next.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] = original as unknown as SpatialJson
   return { graph: next, record, admitted: true }
 }

@@ -422,7 +422,10 @@ const mockApi: AgentMuxDesktopApi = {
   notesStorage: { inspect: async () => ({ directory: new URL("preview/notes", new URL('/', new URL(import.meta.url))).pathname, catalogPath: new URL("preview/notes/notebooks.json", new URL('/', new URL(import.meta.url))).pathname, resourceChanges: [], directoryChanges: [], operation: null }), change: async () => { throw new Error('Change the Notes directory in Desktop Settings. Your preview is retained.') }, onChange: () => () => {} },
   moteChat: { call: async () => { throw new Error('Open Desktop to configure this Mote’s private chat or inspect its original history.') } },
   moteConnections: { call: async () => { throw new Error('Open Desktop to read or continue the original Mote bot setup. Your request and current bot are retained.') } },
-  moteDialogue: { read: async () => { throw new Error('Mote conversation sources are not connected in this preview. Original conversations and input remain available.') } },
+  moteDialogue: { inspectSetup: async () => { throw new Error('Open Desktop to inspect the original Main setup.') }, advanceSetup: async () => { throw new Error('Open Desktop to continue the original Main setup.') }, read: async () => { throw new Error('Mote conversation sources are not connected in this preview. Original conversations and input remain available.') },
+    ensureRecovery: async () => { throw new Error('Open Desktop to restore this original main Session. Its history and draft are retained.') },
+    inspectRecovery: async () => { throw new Error('Open Desktop to inspect this original recovery operation.') },
+    link: async () => { throw new Error('Open Desktop to associate this original Main source. Existing conversations remain available.') } },
   motePreferences: {
     read: async () => { throw new Error('Open Desktop to read the original Mote preferences. Existing choices and work remain available.') },
     save: async () => { throw new Error('Open Desktop to save through the original Mote Files owner. Your draft and request are retained.') }

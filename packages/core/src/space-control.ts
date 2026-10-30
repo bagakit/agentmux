@@ -320,6 +320,7 @@ export type AgentMuxSpaceControlRequest = Base & (
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       | { kind: 'agent-session'; agentSessionId: string };
       destination: AgentMuxSpaceDestination; focus: boolean;
+      moteMain?: import('./spatial-agent-open-contract.js').MoteMainCreationIntent;
       caller?: { agentSessionId: string; capability?: string } }
   | { operation: 'space.bind'; binding: AgentMuxSpaceBindingTarget }
   | { operation: 'space.unbind'; binding: AgentMuxSpaceBindingTarget }

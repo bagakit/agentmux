@@ -1715,7 +1715,12 @@ export type AgentMuxDesktopApi = {
     call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
   }
   moteDialogue: {
+    inspectSetup(params: import('@agentmux/core/mote-dialogue').MoteMainSetupRequest): Promise<import('@agentmux/core/mote-dialogue').MoteMainSetupResult>
+    advanceSetup(params: import('@agentmux/core/mote-dialogue').MoteMainSetupRequest): Promise<import('@agentmux/core/mote-dialogue').MoteMainSetupResult>
+    ensureRecovery(params: import('@agentmux/core/mote-dialogue').MoteDialogueRecoveryRequest): Promise<import('@agentmux/core/mote-dialogue').MoteDialogueRecoveryInspection>
+    inspectRecovery(params: import('@agentmux/core/mote-dialogue').MoteDialogueRecoveryRequest): Promise<import('@agentmux/core/mote-dialogue').MoteDialogueRecoveryInspection>
     read(params: import('@agentmux/core/mote-dialogue').MoteDialogueRead): Promise<import('@agentmux/core/mote-dialogue').MoteDialoguePage>
+    link(params: import('@agentmux/core/mote-dialogue').MoteDialogueWrite): Promise<import('@agentmux/core/mote-dialogue').MoteDialogueReceipt>
   }
   motePreferences: {
     read(params: import('@agentmux/core/mote-preferences').MotePreferencesReadInput, target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-preferences').MotePreferencesReadResult>

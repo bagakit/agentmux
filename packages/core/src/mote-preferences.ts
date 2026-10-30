@@ -23,13 +23,17 @@ export interface MoteQuickPreferencesPort {
   read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
   save(input: MoteQuickPreferencesSaveParams, context?: import('./connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
 }
+/** Generation of one changed Main, shared by the writer and its exact original-operation reader. */
+export function moteChangedMainRoleRevision(spaceId: string, operationId: string, documentRevision: string | null): string {
+  return deriveObjectId('mote-main-role', JSON.stringify([spaceId, operationId, documentRevision]))
+}
 /** Metadata is authored by the original CAS writer, never by a display or a new read. */
 export function effectiveMoteQuickSave(input: MoteQuickPreferencesSaveParams): MoteQuickDefaults {
   const { conversationRevision: _requested, recovery: _historical, ...values } = input.values
   const before = input.baseline.defaults
   const same = JSON.stringify(before.conversation ?? null) === JSON.stringify(values.conversation ?? null) ||
     !!before.conversation && !!values.conversation && Object.keys(before.conversation).every(key => before.conversation![key as keyof MoteDefaultConversation] === values.conversation![key as keyof MoteDefaultConversation])
-  return { ...values, ...(before.recovery === undefined ? {} : { recovery: before.recovery }), conversationRevision: same ? before.conversationRevision ?? `legacy:${input.baseline.document?.revision ?? 'missing'}` : deriveObjectId('mote-main-role', JSON.stringify([input.target.spaceId, input.operationId, input.baseline.document?.revision ?? null])) }
+  return { ...values, ...(before.recovery === undefined ? {} : { recovery: before.recovery }), conversationRevision: same ? before.conversationRevision ?? `legacy:${input.baseline.document?.revision ?? 'missing'}` : moteChangedMainRoleRevision(input.target.spaceId, input.operationId, input.baseline.document?.revision ?? null) }
 }
 export type MotePreferencesTarget = { spaceId: string; zoneId: string; expectedResource: FileResource }
 export type MotePreferencesDestination =

@@ -5,6 +5,7 @@ import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
+import { parseMoteMainCreationIntent } from './spatial-agent-open-contract.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
@@ -129,7 +130,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'moteMain'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -208,7 +209,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     fields(source, ['schemaVersion', 'requestId', 'operation', 'binding'], code)
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller', 'moteMain'], code)
     const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
@@ -237,7 +238,12 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       return { agentSessionId: spaceControlId(owner.agentSessionId, 'Caller Session', code),
         ...(Object.hasOwn(owner, 'capability') ? { capability: spaceControlId(owner.capability, 'Caller capability', code) } : {}) }
     })() : undefined
-    request = { ...base, operation, content, destination: target, focus: bool(source.focus, 'focus', code), ...(caller ? { caller } : {}) }
+    const moteMain = Object.hasOwn(source, 'moteMain') ? parseMoteMainCreationIntent(source.moteMain, code) : undefined
+    if (moteMain && (content.kind !== 'new-agent' || content.executorId !== moteMain.baseline.defaults.executorId ||
+      source.focus !== false || !target.newTab || target.spaceId !== moteMain.target.spaceId || target.zoneId !== moteMain.target.zoneId ||
+      content.prompt !== undefined || content.executionWorkspaceId !== undefined || content.toolWorkspaceId !== undefined || content.nativeResumeSource !== undefined ||
+      target.displayWorkspaceId !== undefined || target.groupId !== undefined)) fail('Main creation retains its configured default, original home and no-input background admission.', code)
+    request = { ...base, operation, content, destination: target, focus: bool(source.focus, 'focus', code), ...(caller ? { caller } : {}), ...(moteMain ? { moteMain } : {}) }
   } else {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'fromRegionId', 'expectedAgentSessionId', 'destination', 'focus', 'fromLocation'], code)
     const target = destination(source.destination, code)
