@@ -155,7 +155,8 @@ export class AgentSessionContinuitySupervisor {
     const roots = Object.values(session.continuityOperations ?? {}).filter(op => {
       const active = op.supervision && session.continuityOperations?.[op.supervision.activeAttemptOperationId]
       return !op.action && op.supervision && active && (active.operationId === op.operationId || active.intentOperationId === op.operationId) &&
-        (!terminal(op.supervision.phase) || retryObservation && op.supervision.phase === 'paused' && reobservableReasons.includes(op.supervision.reason))
+        (!terminal(op.supervision.phase) || op.supervision.phase === 'paused' && reobservableReasons.includes(op.supervision.reason) &&
+          (retryObservation || this.reobservations.has(JSON.stringify([session.agentSessionId, op.operationId]))))
     })
     const live = new Set(roots.map(op => op.operationId))
     for (const rootId of this.roots.get(session.agentSessionId) ?? []) if (!live.has(rootId)) this.clearTimer(session.agentSessionId, rootId)
@@ -254,9 +255,13 @@ export class AgentSessionContinuitySupervisor {
     if (this.disposed) return
     if (!session || !root || !supervision) { this.release(id); return }
     if (terminal(supervision.phase)) {
-      if (supervision.phase === 'paused' && this.reobservations.delete(JSON.stringify([id, rootId]))) {
+      const reobservation = JSON.stringify([id, rootId])
+      if (supervision.phase === 'paused' && this.reobservations.has(reobservation)) {
+        // A regular Session publication cannot revoke an exact wake waiting on
+        // this SID owner. Consume it only after the observing state is durable.
         await this.save(session, root, { ...supervision, phase: 'observing', observedAt: Date.now() }, undefined,
           { rechecks: 0, ...(supervision.attemptCount === 0 ? { nextActionAt: Date.now() } : {}) })
+        this.reobservations.delete(reobservation)
         return await this.advance(id, rootId)
       }
       this.clearTimer(id, rootId); this.roots.get(id)?.delete(rootId)
