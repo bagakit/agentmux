@@ -1,3 +1,4 @@
+import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -20,7 +21,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
-import { useMoteDefaultConversation } from '../lib/mote-quick-preferences'
+import { resolveMoteDefaultConversation, moteDefaultCatalog, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import '../styles/mote-cooperation.css'
 
 const Team = semanticIconComponent('object.team')
@@ -60,7 +61,15 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   }))
   const defaults = useMoteDefaultConversation(scope.topic, scope.workspace.id, active)
   const saved = scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults.conversation : undefined
-  const primary = defaults.conversation ?? saved
+  const dialogue = useMoteDialogueView()
+  const observedMain = dialogue?.page?.main
+  const hasMainSnapshot = observedMain?.identity?.hostId === scope.workspace.hostId && observedMain.identity.moteId === scope.topic.id
+  const primary = hasMainSnapshot ? observedMain.current ?? undefined : defaults.conversation ?? saved
+  const roleConfirmed = Boolean(hasMainSnapshot && observedMain.status === 'ready' && !dialogue?.unavailable)
+  const primaryResolution = hasMainSnapshot ? resolveMoteDefaultConversation(useAppStore.getState(), { ...scope.topic,
+    quickMode: { status: 'saved', version: observedMain.documentRevision ?? '', defaults: primary ? { conversation: primary } : {} } }, scope.workspace.id, primary ? moteDefaultCatalog(useAppStore.getState(), scope.topic, primary) : graph) : defaults
+  const primaryLocation = primaryResolution.conversation
+  const primaryIssue = primaryResolution.issue
   const current = reference ? members.find(member => member.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) : undefined
   const session = current ? sessions[current.key] : undefined
   const isPrimary = (member: MoteMember) => {
@@ -173,7 +182,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
           data-member-host={member.hostId ?? ''} data-attention={request ? 'true' : undefined}>
           <div className="mote-cooperation__member-info">
             {observed ? <ResolvedAgentAvatar label={observed.label} providerId={observed.providerId} state={observed.status.state} size={22} /> : <Team size={20} />}
-            <div><strong title={name}>{name}</strong><span>{isPrimary(member) ? 'Main Agent' : 'Member'}<span aria-hidden="true"> · </span>{detail}</span></div>
+            <div><strong title={name}>{name}</strong><span>{isPrimary(member) ? roleConfirmed ? 'Main Agent' : 'Last confirmed main Agent' : roleConfirmed ? 'Member' : 'Agent'}<span aria-hidden="true"> · </span>{detail}</span></div>
           </div>
           <div className="mote-cooperation__locations">
             {member.locations.map((location, index) => <button type="button" key={JSON.stringify(location)} aria-label={`Open ${name}${member.locations.length > 1 ? ` · location ${index + 1}` : ''}`}
@@ -199,9 +208,9 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
           onOpenAutoFocus={event => { event.preventDefault(); panel?.focus({ preventScroll: true }) }}>
           <header className="mote-cooperation__popover-heading"><Dialog.Title>Team &amp; cooperation</Dialog.Title>
             <Dialog.Close type="button" className="icon-button" aria-label="Close team work"><Close size={14} /></Dialog.Close></header>
-          {issue || defaults.issue ? <p className="mote-cooperation__issue" role="status">{issue || defaults.issue}</p> : null}
-          {primary && defaults.conversation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="Return to main Agent"
-            onClick={() => open(defaults.conversation!)}>Main conversation<Forward size={13} /></button> : null}
+          {issue || primaryIssue ? <p className="mote-cooperation__issue" role="status">{issue || primaryIssue}</p> : null}
+          {primary && primaryLocation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="Return to main Agent"
+            onClick={() => open(primaryLocation!)}>Main conversation<Forward size={13} /></button> : null}
           {membersPanel}
           <footer className="mote-cooperation__popover-actions">
             <button type="button" className="mote-cooperation__return" onClick={() => { setExpanded(false); setEditing(true) }}><Settings size={14} />Cooperation settings</button>
@@ -218,14 +227,14 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
         <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
           avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={active} />
         <div className="mote-cooperation__copy"><strong title={scope.topic.title}>{scope.topic.title}</strong>
-          <span>{current ? <>{isPrimary(current) ? 'Main Agent' : 'Team member'}<span aria-hidden="true"> · </span><b title={title(current)}>{title(current)}</b></> : primary ? 'Original conversation retained' : 'Choose your main Agent'}
+          <span>{current ? <>{isPrimary(current) ? roleConfirmed ? 'Main Agent' : 'Last confirmed main Agent' : 'Team member'}<span aria-hidden="true"> · </span><b title={title(current)}>{title(current)}</b></> : primary ? 'Original conversation retained' : 'Choose your main Agent'}
             {session ? <><span aria-hidden="true"> · </span>{sessionStatusLabel(session)}</> : null}</span>
         </div>
       </div>
       <div className="mote-cooperation__actions">
-        {primary && defaults.conversation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="Return to main Agent"
-          onClick={() => open(defaults.conversation!)}>Main Agent<Forward size={13} /></button> : null}
-        {!defaults.conversation ? <button type="button" className="mote-cooperation__return" onClick={() => setEditing(true)}>{primary || defaults.issue ? 'Review main Agent' : 'Choose main Agent'}</button> : null}
+        {primary && primaryLocation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="Return to main Agent"
+          onClick={() => open(primaryLocation!)}>Main Agent<Forward size={13} /></button> : null}
+        {!primaryLocation ? <button type="button" className="mote-cooperation__return" onClick={() => setEditing(true)}>{primary || primaryIssue ? 'Review main Agent' : 'Choose main Agent'}</button> : null}
         <button type="button" ref={trigger} className="mote-cooperation__team" aria-label="Team work" aria-expanded={expanded} aria-controls={id}
           data-needs-you={needed > 0 ? 'true' : undefined} onClick={() => setExpanded(value => !value)}>
           <Team size={15} /><span>{needed ? `${needed} needs you` : 'Team'}</span><small>{members.length}</small><Down size={12} /></button>
@@ -234,7 +243,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     </div>
     {goals[0] && !expanded ? <button type="button" className="mote-cooperation__work" onClick={() => openGoal(goals[0]!.id)}>
       <span>Current work</span><strong>{goals[0].title}</strong><Forward size={12} /></button> : null}
-    {issue || defaults.issue ? <p className="mote-cooperation__issue mote-space-frame__issue" role="status">{issue || defaults.issue}</p> : null}
+    {issue || primaryIssue ? <p className="mote-cooperation__issue mote-space-frame__issue" role="status">{issue || primaryIssue}</p> : null}
     {expanded ? membersPanel : null}
     {editDialog}
   </section>

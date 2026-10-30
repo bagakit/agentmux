@@ -1,3 +1,4 @@
+import type { WorkbenchProjectionSelection } from './workbench-projection'
 import type { MoteDefaultConversation } from '../../../shared/mote-quick-mode'
 import { createContext, useMemo, useRef } from 'react'
 import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
@@ -12,7 +13,12 @@ export type MoteWorkfaceScope = { topic: ScratchTopicSnapshot; workspace: Worksp
 export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   floating: boolean
   defaultConversation?: MoteDefaultConversation | undefined
+  /** This surface's local chrome choice; it owns no Agent role or execution state. */
+  presentation?: 'conversation' | 'workface'
+  showOriginalWorkface?(): void
+  showConversation?(): void
   selectTab(tabId: string, groupId: string): void
+  selectReference(reference: WorkbenchProjectionSelection): boolean
 }) | null>(null)
 
 /** Mote identity owns its files, independently of a member Zone's display Workspace. */

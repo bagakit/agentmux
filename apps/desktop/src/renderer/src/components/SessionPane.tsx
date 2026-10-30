@@ -1,3 +1,4 @@
+import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { MoteInputReceipt } from './MoteInputReceipt'
 import { moteInputSource } from '../lib/mote-input-source'
 import { AgentToolExecutionNotice } from './AgentToolExecutionNotice'
@@ -198,6 +199,12 @@ export function SessionPane({
   const sourceWorkspaceId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => linkOrigin.tabId ? state.tabs[linkOrigin.tabId]?.workspaceId : undefined)
   const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId,
     visible || presentations.some(target => target.visible !== false))
+  const moteDialogue = useMoteDialogueView()
+  const mainSources = useMemo(() => {
+    const page = moteDialogue?.page, current = page?.main.current
+    return new Set([...(current ? [JSON.stringify([current.hostId, current.sessionId])] : []),
+      ...(page?.links.flatMap(link => link.kind === 'main' ? [JSON.stringify([link.reference.hostId, link.reference.sessionId])] : []) ?? [])])
+  }, [moteDialogue?.page])
   const timeline = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const timelineSnapshot = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId])
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
@@ -487,11 +494,13 @@ export function SessionPane({
     })
     return (speaker: Parameters<typeof original>[0], avatarSize?: number) => {
       const described = original(speaker)
-      const mote = speaker.role === 'agent' ? moteConversationIdentity(moteOwner,
-        sessionPresentationById(useAppStore.getState().sessions).get(speaker.id)) : undefined
+      const author = speaker.role === 'agent' ? sessionPresentationById(useAppStore.getState().sessions).get(speaker.id) : undefined
+      const mote = speaker.role !== 'agent' ? undefined : moteDialogue?.target
+        ? moteOwner && author?.kind === 'agent' && mainSources.has(JSON.stringify([author.control.hostId, author.control.agentSessionId])) ? moteOwner : undefined
+        : moteConversationIdentity(moteOwner, author)
       return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} {...(avatarSize === undefined ? {} : { size: avatarSize })} /> } : described
     }
-  }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
+  }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner, moteDialogue?.target, mainSources]
   )
   const refreshSession = useAppStore.getState().refreshSession
   const recoverSession = useAppStore.getState().recoverSession

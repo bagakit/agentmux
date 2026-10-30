@@ -1,9 +1,10 @@
 import type { SessionInputWriteResult, SessionInputOperationResult } from './contracts'
 import { deliveryFailure } from '@agentmux/core/delivery-attempt'
 import type { AgentMuxControlFailure, AgentInputSubmissionReceipt, MoteInputSubmissionReference } from '@agentmux/core'
+import type { MoteDialogueInputReference } from '@agentmux/core/mote-dialogue'
 
 /** One write attempt; uncertain input is reported, never replayed at the IPC boundary. */
-export async function sessionInputWriteResult(write: () => Promise<void | AgentInputSubmissionReceipt | MoteInputSubmissionReference>): Promise<SessionInputWriteResult> {
+export async function sessionInputWriteResult(write: () => Promise<void | AgentInputSubmissionReceipt | MoteInputSubmissionReference | MoteDialogueInputReference>): Promise<SessionInputWriteResult> {
   try {
     const inputReceipt = await write()
     return { ok: true, ...(inputReceipt ? { inputReceipt } : {}) }
@@ -20,7 +21,7 @@ export async function sessionInputWriteResult(write: () => Promise<void | AgentI
 }
 
 /** Restore the original typed failure in Renderer after IPC and contextBridge copy the envelope. */
-export function unwrapSessionInputWriteResult(result: SessionInputWriteResult): void | AgentInputSubmissionReceipt | MoteInputSubmissionReference {
+export function unwrapSessionInputWriteResult(result: SessionInputWriteResult): void | AgentInputSubmissionReceipt | MoteInputSubmissionReference | MoteDialogueInputReference {
   if (!result.ok) throw Object.assign(new Error(result.error.message), result.error)
   return result.inputReceipt
 }

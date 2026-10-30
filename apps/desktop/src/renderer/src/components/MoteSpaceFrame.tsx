@@ -1,3 +1,4 @@
+import { MoteDialogueViewProvider } from '../lib/mote-dialogue-view'
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import { type MoteWorkfaceScope, useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useSpaceContentPresentation } from '../lib/space-content-presentation'
@@ -34,9 +35,9 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
     else { setContent({ owner, section: next }); presentation?.expand() }
   }
   const visible = active && scope !== null && presentation !== null
-  return <MoteSpaceContext.Provider value={scope && presentation ? { topicId: scope.topic.id, section, select } : null}>
+  return <MoteDialogueViewProvider scope={scope} active={visible}><MoteSpaceContext.Provider value={scope && presentation ? { topicId: scope.topic.id, section, select } : null}>
     <WindowSidebarLayoutContext.Provider value={sidebars ? { ...sidebars, chromeInFrame: visible } : null}>
-    <div className="mote-space-frame" data-mote-space={visible ? scope.topic.id : undefined}>
+    <div className="mote-space-frame" data-mote-space={visible ? scope.topic.id : undefined} data-mote-page={visible ? section : undefined}>
       {scope && presentation ? <header className="mote-space-frame__header" hidden={!visible}>
         <div className="mote-space-frame__navigation">
         {!projectRailOpen ? <SidebarToggleChrome /> : null}
@@ -49,7 +50,7 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
       {children}
     </div>
     </WindowSidebarLayoutContext.Provider>
-  </MoteSpaceContext.Provider>
+  </MoteSpaceContext.Provider></MoteDialogueViewProvider>
 }
 
 /** Entry controls navigate original work; the shared Composer remains its only input. */

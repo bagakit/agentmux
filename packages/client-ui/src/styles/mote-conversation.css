@@ -1,0 +1,41 @@
+.mote-conversation { min-width: 0; }
+.mote-conversation__navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-block: 4px 14px; }
+.mote-conversation__navigation button, .mote-conversation__link, .mote-work-event__actions button { appearance: none; border: 1px solid transparent; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--text-2); padding: 6px 9px; font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }
+.mote-conversation__navigation button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); border-color: var(--line-soft); }
+.mote-conversation__navigation button:focus-visible, .mote-work-event button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mote-conversation__refresh { margin-inline-start: auto; }
+.mote-conversation__issue, .mote-conversation__muted { color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.mote-conversation__issue { padding: 8px 0; }
+.mote-conversation__messages[hidden], .mote-conversation__history[hidden] { display: none; }
+.mote-conversation__handoff { display: flex; justify-content: space-between; gap: 12px; padding-block: 10px; margin-block: 8px; border-block: 1px solid var(--line-soft); font-size: var(--fs-meta, 12px); color: var(--text-3); }
+.mote-conversation__handoff details { min-width: 0; }
+.mote-conversation__handoff p { overflow-wrap: anywhere; }
+.mote-work-event { margin-block: 8px; min-width: 0; border-block: 1px solid var(--line-soft); background: transparent; }
+.mote-work-event[data-expanded="true"] { background: var(--surface-2); border-radius: var(--radius-lg, 10px); }
+.mote-work-event__summary { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; color: var(--text); padding: 9px 10px; text-align: start; font: inherit; cursor: pointer; }
+.mote-work-event__summary > span:nth-child(2) { flex: 1; min-width: 0; }
+.mote-work-event__summary strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: var(--fs-body, 14px); font-weight: 550; line-height: 1.55; overflow-wrap: anywhere; }
+.mote-work-event__summary small { display: block; margin-top: 3px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.5; overflow-wrap: anywhere; }
+.mote-work-event__summary > time, .mote-work-event__summary > span:last-child { flex-shrink: 0; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-work-event__mark { color: var(--text-3); align-self: flex-start; flex-shrink: 0; margin-top: 4px; }
+.mote-work-event__thread { padding: 0 14px 12px; border-top: 1px solid var(--line-soft); font-size: var(--fs-body, 14px); line-height: 1.65; }
+.mote-work-event__thread p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mote-work-event__thread > details { margin-block: 8px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-work-event__reply { padding-block: 10px; border-top: 1px solid var(--line-soft); }
+.mote-work-event__reply small { color: var(--text-3); }
+.mote-work-event__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mote-work-event__actions button { border-color: var(--line); color: var(--text); }
+@media (max-width: 520px) { .mote-work-event__summary { flex-wrap: wrap; gap: 6px; } .mote-work-event__summary > time { margin-inline-start: 24px; } }
+
+.mote-work-event__assignment { margin-block: 10px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+.mote-work-event__assignment[open] { color: var(--text-2); }
+.mote-conversation__day { margin-block: 18px; }
+.mote-conversation__day > h3 { margin: 0 0 10px; font-size: var(--fs-meta, 12px); font-weight: 500; color: var(--text-3); }
+.mote-conversation__day > ol { list-style: none; padding: 0 0 0 10px; margin: 0; border-inline-start: 1px solid var(--line-soft); }
+.mote-conversation__day .mote-work-event { border-block-start: 0; margin-block: 0; }
+.mote-conversation__navigation { position: sticky; top: 0; z-index: 2; background: var(--surface-0); padding-block: 6px; margin-block-start: 0; }
+.mote-conversation__reading-tools { color: var(--text-3); font-size: var(--fs-meta, 12px); padding-block: 5px; }
+.mote-conversation__reading-tools > summary { cursor: pointer; width: fit-content; padding: 5px 0; }
+.mote-conversation__reading-tools[open] { padding-block-end: 8px; }
+
+.mote-work-event__summary > .mote-work-event__time { font-size: var(--fs-meta, 12px); font-weight: 400; color: var(--text-3); flex-shrink: 0; }

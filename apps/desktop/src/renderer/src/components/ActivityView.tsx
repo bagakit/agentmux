@@ -1,3 +1,4 @@
+import { MoteActivityConversation } from './MoteActivityConversation'
 import { CapturedProcessRecord } from '@agentmux/client-ui/components/CapturedProcessRecord'
 import { conversationItemRef, conversationRecordId } from '@agentmux/core/conversation'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
@@ -803,7 +804,7 @@ export function ActivityView({
   ) : null
   const readNotice = <>
     {readingNotice}
-    {conversationReading ? !fullReadFailure && readingIssues.length > 0 ? <ConversationReadFailure
+    {conversationReading ? (!fullReadFailure || moteConversation) && readingIssues.length > 0 ? <ConversationReadFailure
       scope={readingServiceScope} issues={readingIssues} visible={readingEnabled} /> : null : readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
   </>
@@ -844,13 +845,14 @@ export function ActivityView({
     </div>
   ) : null
 
-  const renderReadingHeader = (tools: ReactNode, rulerContent?: ReactNode): JSX.Element => (
-    <div key="reading-header" className="activity-feed__reading-header" data-has-ruler={rulerContent ? 'true' : undefined}>
+  const renderReadingHeader = (tools: ReactNode, rulerContent?: ReactNode): JSX.Element => {
+    const header = <div key="reading-header" className="activity-feed__reading-header" data-has-ruler={rulerContent ? 'true' : undefined}>
       {rulerContent ?? emptyReadStatus}
       {readingEntry}
       {!rulerContent ? <div className="reading-find__floating-trigger">{tools}</div> : null}
     </div>
-  )
+    return moteConversation ? <details className="mote-conversation__reading-tools"><summary>阅读与来源</summary>{header}</details> : header
+  }
 
   const renderSurface = (content: (findTrigger: ReactNode) => JSX.Element): JSX.Element => {
     return <ReadingFind className="activity-feed-frame"
@@ -864,6 +866,26 @@ export function ActivityView({
   </ReadingFind>
   }
 
+  // Native reading and the original Mote dialogue/dispatches are independent
+  // sources. Keep both inside this same feed, including before a native window
+  // has been accepted; a missing native cut must not remove healthy work rows.
+  const renderMoteBody = (renderCurrent: ComponentProps<typeof MoteActivityConversation>['renderCurrent'], unlocated = false) => !moteConversation && unlocated ? renderCurrent([]) : (
+    <div ref={logRef}>
+      <MoteActivityConversation sessionId={sessionId} executionHostId={executionHostId} enabled={moteConversation} visible={readingEnabled && documentVisible}
+        records={conversationRecords} {...(describeSpeaker ? { describeSpeaker } : {})} sourceRevision={JSON.stringify([activitySemantic, originalConversationRecords.filter(record => record.source.kind === 'captured').at(-1)?.id])}
+        geometry={{ viewport: () => feedEl, content: () => logRef.current, following: () => false, pinToBottom,
+          captureAnchor: () => { if (feedEl) anchorRef.current = captureReadingAnchor(feedEl) },
+          restoreAnchor: () => { if (feedEl && anchorRef.current) { restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) } } }}
+        renderCurrent={unlocated ? insertions => <>
+          {renderCurrent([])}
+          {insertions.length ? <section aria-label="未定位的原工作事件">
+            <p className="mote-conversation__muted">主对话记录的切点尚未读到；以下工作事件保留其原来源。</p>
+            {insertions.map(insertion => <div key={insertion.key}>{insertion.content}</div>)}
+          </section> : null}
+        </> : renderCurrent} />
+    </div>
+  )
+
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return renderSurface(findTrigger => (
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
@@ -872,9 +894,9 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        {!emptyReadStatus ? <div className="activity-feed__empty">
+        {renderMoteBody(() => !emptyReadStatus ? <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
-        </div> : null}
+        </div> : null, true)}
       </div>
     ))
   }
@@ -886,9 +908,9 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        {!emptyReadStatus && (!readPending || hasAcceptedFrame) && !readingWindow.error ? <div className="activity-feed__empty">
+        {renderMoteBody(() => !emptyReadStatus && (!readPending || hasAcceptedFrame) && !readingWindow.error ? <div className="activity-feed__empty">
           No structured activity yet. Terminal remains available.
-        </div> : null}
+        </div> : null, true)}
       </div>
     ))
   }
@@ -902,7 +924,7 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        {!emptyReadStatus ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
+        {renderMoteBody(() => !emptyReadStatus ? <WorkingIndicator active={activitySemantic === 'active'} /> : null, true)}
       </div>
     ))
   }
@@ -984,8 +1006,8 @@ export function ActivityView({
         selectRulerRecord={selectRulerRecord} hasMore={conversationReading ? readingWindow.hasMore : undefined}
         pending={readPending && !earlierReadPending} activity={activity.segments} describeSpeaker={describeSpeaker}
         tools={<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>} /> : undefined)}
-      <div ref={logRef}>
-      <ConversationView
+      {renderMoteBody(moteInsertions => (
+      <ConversationView detailsOnlyMetadata={moteConversation} sourceLabelsInDetails={moteConversation} showInputSource={!moteConversation}
         readingGeometry={{ viewport: () => feedEl, content: () => logRef.current,
           following: () => !readingWindow.historical && followRef.current.following, pinToBottom,
           captureAnchor: () => { if (feedEl) anchorRef.current = captureReadingAnchor(feedEl) },
@@ -1006,7 +1028,7 @@ export function ActivityView({
           const segment = placedByRecord.get(record.id) ?? (record.original.kind === 'captured' ? { entry: { kind: 'item' as const, item: record.original.item, record }, key: JSON.stringify(['item', record.rawId]), from: 0, to: 0 } : undefined)
           return segment ? renderPlaced(segment, disclosure, submissionDisclosure) : null
         }}
-        insertions={[{ key: 'native-reading-tail', role: 'anchor', ...(nativeTailBeforeRecordId ? { beforeRecordId: nativeTailBeforeRecordId } : {}), content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
+        insertions={[...moteInsertions, { key: 'native-reading-tail', role: 'anchor', ...(nativeTailBeforeRecordId ? { beforeRecordId: nativeTailBeforeRecordId } : {}), content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
         traceDisclosure={traceDisclosure}
         questionAnswerContext={questionAnswerContext}
         {...(historyBoundary ? {
@@ -1041,7 +1063,7 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       />
-      </div>
+        ))}
       <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
       <div ref={readingSpaceRef} data-conversation-reading-space aria-hidden="true" />

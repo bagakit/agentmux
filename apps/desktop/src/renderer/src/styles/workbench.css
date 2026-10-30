@@ -53,6 +53,12 @@
   border-bottom: 1px solid var(--line);
   background: var(--surface-0);
 }
+/* Presentation changes only the controls inside the original first grid row.
+   Its content row and StableWorkbench slots retain their existing geometry. */
+.pane-tabbar__workface { display: contents; }
+.pane-tabbar__workface[hidden] { display: none; }
+.pane-group.pane-group--mote-conversation { --pane-tabbar-height: 28px; }
+.pane-group--mote-conversation > .pane-tabbar { box-shadow: none; background: transparent; }
 .workbench-tab-strip { min-width: 0; flex: 1 1 auto; position: relative; overflow: hidden; }
 .pane-tabbar__tabs {
   width: 100%;

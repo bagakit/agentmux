@@ -1079,7 +1079,7 @@ export type ProviderCatalogObservation = {
 }
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
-export type SessionInputWriteResult = { ok: true; inputReceipt?: import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference } | { ok: false; error: {
+export type SessionInputWriteResult = { ok: true; inputReceipt?: import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | import('@agentmux/core/mote-dialogue').MoteDialogueInputReference } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
 } }
 /** The same plain error owner carries read/control results through Electron. */
@@ -1714,6 +1714,9 @@ export type AgentMuxDesktopApi = {
   moteConnections: {
     call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
   }
+  moteDialogue: {
+    read(params: import('@agentmux/core/mote-dialogue').MoteDialogueRead): Promise<import('@agentmux/core/mote-dialogue').MoteDialoguePage>
+  }
   motePreferences: {
     read(params: import('@agentmux/core/mote-preferences').MotePreferencesReadInput, target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-preferences').MotePreferencesReadResult>
     save(params: import('@agentmux/core/mote-preferences').MotePreferencesSaveParams, target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-preferences').MotePreferencesSaveResult>
@@ -1865,10 +1868,10 @@ export type AgentMuxDesktopApi = {
   continuousProgress: ContinuousProgressApi
   schedule: {
     list(params: AgentMuxRpcParams<'schedule.list'>): Promise<AgentMuxRpcResult<'schedule.list'>>
-    inspect(params: AgentMuxRpcParams<'schedule.inspect'>): Promise<AgentMuxRpcResult<'schedule.inspect'>>
+    inspect(params: AgentMuxRpcParams<'schedule.inspect'>, ownerHostId?: string): Promise<AgentMuxRpcResult<'schedule.inspect'>>
     create(params: AgentMuxRpcParams<'schedule.create'>): Promise<AgentMuxRpcResult<'schedule.create'>>
     pause(params: AgentMuxRpcParams<'schedule.pause'>): Promise<AgentMuxRpcResult<'schedule.pause'>>
-    resume(params: AgentMuxRpcParams<'schedule.resume'>): Promise<AgentMuxRpcResult<'schedule.resume'>>
+    resume(params: AgentMuxRpcParams<'schedule.resume'>, ownerHostId?: string): Promise<AgentMuxRpcResult<'schedule.resume'>>
     cancel(params: AgentMuxRpcParams<'schedule.cancel'>): Promise<AgentMuxRpcResult<'schedule.cancel'>>
   }
   search: {
@@ -1921,7 +1924,7 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource; moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'> }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | import('@agentmux/core/mote-dialogue').MoteDialogueInputReference>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
     inspectMoteInput(session: SessionHistoryReference, observationId: string): Promise<import('@agentmux/core').MoteInputInspection | null>
@@ -1955,7 +1958,7 @@ export type AgentMuxDesktopApi = {
     // Transport loss remains an error and never authorizes resume.
     // Returns the Core continuity disposition; the renderer rebinds only an attached/resumed
     // Agent or a newly restarted raw Terminal.
-    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>): Promise<SessionRecoveryResult>
+    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
     /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */
     onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl): () => void

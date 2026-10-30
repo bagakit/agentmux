@@ -335,6 +335,7 @@ const api: AgentMuxPreloadApi = {
   },
   moteChat: { call: async (method, params, target) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteChat:call', method, params, ...(target === undefined ? [] : [target]))) },
   moteConnections: { call: (method, params, target) => ipcRenderer.invoke('moteConnections:call', method, params, ...(target === undefined ? [] : [target])) },
+  moteDialogue: { read: params => ipcRenderer.invoke('moteDialogue:read', params) },
   motePreferences: {
     read: (params, target) => ipcRenderer.invoke('motePreferences:read', params, ...(target === undefined ? [] : [target])),
     save: (params, target) => ipcRenderer.invoke('motePreferences:save', params, ...(target === undefined ? [] : [target]))
@@ -536,10 +537,10 @@ const api: AgentMuxPreloadApi = {
   },
   schedule: {
     list: (params: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => ipcRenderer.invoke('schedule:list', params),
-    inspect: (params: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => ipcRenderer.invoke('schedule:inspect', params),
+    inspect: (params: import('@agentmux/core').ScheduleParamsMap['schedule.inspect'], ownerHostId?: string) => ipcRenderer.invoke('schedule:inspect', params, ownerHostId),
     create: (params: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => ipcRenderer.invoke('schedule:create', params),
     pause: (params: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => ipcRenderer.invoke('schedule:pause', params),
-    resume: (params: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => ipcRenderer.invoke('schedule:resume', params),
+    resume: (params: import('@agentmux/core').ScheduleParamsMap['schedule.resume'], ownerHostId?: string) => ipcRenderer.invoke('schedule:resume', params, ownerHostId),
     cancel: (params: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => ipcRenderer.invoke('schedule:cancel', params)
   },
   sessions: {

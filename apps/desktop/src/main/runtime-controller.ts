@@ -11,6 +11,7 @@ import { isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
 import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, type AgentExecutionBindingService, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
+import { agentPromptSubmissionOutcome, type MoteDialogueInputReference } from '@agentmux/core/mote-dialogue'
 import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from '@agentmux/core'
 import type { ConnectionMethod } from '@agentmux/core/connections'
@@ -1835,15 +1836,40 @@ export class RuntimeController {
     operationId: string,
     condition: AgentPromptInputBinding,
     automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
-    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource },
+    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource; moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'> },
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool',
     inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference,
     inputImages?: readonly import('@agentmux/core').AgentInputImageReference[],
     authorProfile?: import('@agentmux/core').AgentPreparedAuthorProfile
-  ): Promise<void | AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference> {
+  ): Promise<void | AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference | MoteDialogueInputReference> {
     const capturedCondition = validateAgentPromptInputBinding(condition)
+    if (choice?.moteMain) {
+      if (automation || authorHuman !== true || control.run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError(
+        'This logical main input retains its original human intent, Session and Run.', 'INVALID_AGENT_PROMPT')
+      const content = {
+        agentSessionId: control.agentSessionId, operationId, prompt, sourceChannel,
+        ...(choice.allowUncertainTurn ? { allowUncertainTurn: true } : {}),
+        ...(choice.moteSource ? { moteSource: choice.moteSource } : {}),
+        ...(inputImages?.length ? { inputImages: [...inputImages] } : {}),
+        ...(inputContextCapture ? { capturedContext: { reference: inputContextCapture, ...(agentMuxNote === undefined ? {} : { agentMuxNote }) } } : {})
+      }
+      const input: import('@agentmux/core').AgentInputSubmit = 'admissionIntent' in capturedCondition
+        ? { ...content, ...capturedCondition, execution: 'immediate' }
+        : { ...content, ...capturedCondition, ...(choice.execution ? { execution: choice.execution } : {}), ...(choice.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}) }
+      const result = await this.trackHostOperation(control.hostId, () => this.callOriginalCore(
+        choice.moteMain!.target.expectedResource.hostId, 'space.mote.dialogue.input.submit', { ...choice.moteMain!, input }, { transport: 'unix' }))
+      if ('admissionIntent' in capturedCondition) {
+        if (!result.input) throw new AgentMuxError('The original main input has no confirmed receipt yet. Its role and operation are retained; inspect the original request before sending again.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
+        return result.input
+      }
+      const outcome = agentPromptSubmissionOutcome(result.record)
+      if (outcome === 'not-applied') throw new AgentMuxError('The original input owner confirmed that this exact main input was not applied. Keep its original key and explicit retry fence.', 'AGENT_PROMPT_NOT_APPLIED')
+      if (!result.route || !result.record || outcome !== 'admitted' && outcome !== 'terminal-confirmed') throw new AgentMuxError(
+        'The original exact main input is unconfirmed. Its role, condition and operation are retained; inspect the original request before sending again.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
+      return { inputKey: result.route.key, record: result.record, outcome }
+    }
     if ('admissionIntent' in capturedCondition) {
       if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError(
         'The original automatic or conditional prompt cannot become a new manual input.', 'INVALID_AGENT_PROMPT')
@@ -2140,7 +2166,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath?: string,
     operationId: string = mintObjectId(),
-    request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
+    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostOperation(
       control.hostId,
@@ -2153,9 +2179,33 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath: string | undefined,
     operationId: string,
-    request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
+    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId, 'runtime')
+    if (request?.moteMain) {
+      if (control.kind !== 'agent' || request.trigger !== 'input' || !request.input) throw new AgentMuxError(
+        'The original Mote recovery input and Agent target are required.', 'INVALID_AGENT_PROMPT')
+      const original = request.input
+      const result = await this.callOriginalCore(request.moteMain.target.expectedResource.hostId, 'space.mote.dialogue.input.submit', {
+        ...request.moteMain, recovery: { operationId }, input: {
+          agentSessionId: control.agentSessionId, operationId: original.submissionId, prompt: original.prompt,
+          expectedRun: control.run, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
+          ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}),
+          ...(request.inputImages?.length ? { inputImages: [...request.inputImages] } : {}),
+          ...(original.inputContextCapture ? { capturedContext: { reference: original.inputContextCapture,
+            ...(original.agentMuxNote === undefined ? {} : { agentMuxNote: original.agentMuxNote }) } } : {})
+        }
+      }, { transport: 'unix' })
+      const recovery = result.recovery
+      if (!recovery || recovery.kind !== 'resumed' || !recovery.newRun) throw new AgentMuxError(
+        'The original main recovery input is unconfirmed. Its operation, captured context and source are retained; inspect that original request.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
+      const session = await this.sessionByTarget(client, { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
+      if (session.kind !== 'agent' || session.control.hostId !== control.hostId || session.control.agentSessionId !== control.agentSessionId ||
+          session.control.run.runId !== recovery.newRun.runId) throw new AgentMuxError('The original recovery Run changed before its result was projected.', 'STALE_AGENT_SESSION')
+      // The existing Store consumes this exact Session's original continuity/launch
+      // receipt. A new running process alone never confirms input delivery.
+      return { kind: 'resumed', session }
+    }
     if (control.kind === 'terminal') {
       if (control.runId !== control.run.runId) throw new AgentMuxError('Terminal recovery control refers to different original Runs.', 'TERMINAL_RECOVERY_TARGET_MISMATCH')
       const cwd = workspacePath ?? (await this.sessionByTarget(
@@ -2185,7 +2235,7 @@ export class RuntimeController {
       const result = await client.ensureAgentContinuity({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
-        operationId, ...request, ...(config.continuity ? { policy: config.continuity } : {})
+        operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {})
       })
       if (result.kind === 'reattachable' || result.kind === 'resumed') {
         const session = await this.sessionByTarget(client,
@@ -2220,7 +2270,7 @@ export class RuntimeController {
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
-      operationId, ...request, ...(config.continuity ? { policy: config.continuity } : {}),
+      operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {}),
       ...executor,
       ...(executor.env && scratchTopicId ? { env: { ...executor.env, AGENTMUX_WIKI_DIR: stored.workspacePath } } : {})
     })

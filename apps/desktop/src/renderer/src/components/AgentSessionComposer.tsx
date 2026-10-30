@@ -1,3 +1,4 @@
+import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteInputSource } from '../lib/mote-input-source'
 import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
@@ -91,6 +92,8 @@ export function AgentSessionComposer({
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
 }) {
+  const moteDialogue = useMoteDialogueView()
+  const main = moteDialogue?.page?.main
   useObservedConsumerCommit('composer', visible)
   const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: false }), [sessionId])
   const insertionRef = useRef<ComposerInsertionHandle>(null)
@@ -116,6 +119,9 @@ export function AgentSessionComposer({
   const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const moteMain = moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
+    main.current.sessionId === session.control.agentSessionId && main.current.hostId === session.control.hostId
+    ? { target: moteDialogue.target, expectedRoleRevision: main.roleRevision } : undefined
   const nativeService = useRunService(session)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
   const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
@@ -172,8 +178,8 @@ export function AgentSessionComposer({
     if (disabled || readOnly || (!submitMode.canSubmit && !queueStatusPrompt)) return false
     // State actions leave the independently authored Composer draft intact.
     const accepted = queueStatusPrompt
-      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin) })
-      : send(sessionId, prompt.body, feedback.report, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin) })
+      ? enqueueAgentSteer(sessionId, prompt.body, feedback.report, undefined, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
+      : send(sessionId, prompt.body, feedback.report, 'manual', undefined, { moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
     if (!accepted) return false
     feedback.dismiss()
     if (queueStatusPrompt) void useAppStore.getState().flushAgentSteerQueue(sessionId)
@@ -184,7 +190,7 @@ export function AgentSessionComposer({
     if (!submitMode.canSubmit || !text.trim()) return
     const { text: value, inputImages } = expandComposerInput(text)
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
-    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin) })) return
+    if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.record(sessionId, value)
@@ -198,7 +204,7 @@ export function AgentSessionComposer({
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
     // must leave the words in the box — the store has already said why, and clearing here would strand
     // the user's message in a banner they cannot copy from.
-    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin) })) return
+    if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)

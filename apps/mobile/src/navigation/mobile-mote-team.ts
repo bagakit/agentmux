@@ -13,6 +13,7 @@ export type MobileMoteMember = {
 }
 export type MobileMoteTeam = {
   spaceId: string; name: string; members: MobileMoteMember[]
+  appearance?: NonNullable<AgentMuxSpaceCatalog['appearance']>[number] | undefined
   main: { reference: AgentMuxMoteConversationReference; confirmed: boolean } | undefined
   facts: NonNullable<AgentMuxSpaceCatalog['motePresentation']>[number] | undefined
 }
@@ -47,7 +48,8 @@ export function mobileMoteTeam(catalog: AgentMuxSpaceCatalog, spaceId: string, c
       region.kind === 'agent' && region.agentSessionId === saved.sessionId && region.execution?.hostId === saved.hostId) &&
     catalog.locations.some(place => place.spaceId === spaceId && place.tabId === saved.tabId && place.regionId === saved.regionId &&
       place.displayWorkspaceId === saved.displayWorkspaceId && place.groupId === saved.groupId)
-  return { spaceId, name: owner.name, facts: fact,
+  const appearances = catalog.appearance?.filter(value => value.spaceId === spaceId)
+  return { spaceId, name: owner.name, facts: fact, appearance: appearances?.length === 1 ? appearances[0] : undefined,
     main: saved ? { reference: saved, confirmed: Boolean(confirmed) } : undefined,
     members: [...records].map(([key, record]) => {
       const { sessionId, hostId } = record

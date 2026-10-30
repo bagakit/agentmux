@@ -6,7 +6,8 @@ import { moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferences
   sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
 import { getDeviceWorkface, DeviceWorkfaceRecordChangedError, type DeviceWorkfaceStore } from '../recovery/device-workface'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickScope, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError,
-  type MoteQuickDraft, type MoteQuickScope, type MoteQuickAttempt } from '../recovery/mote-quick-drafts'
+  type MoteQuickDraft, type MoteQuickScope, type MoteQuickAttempt, type MoteMaintenanceAttempt } from '../recovery/mote-quick-drafts'
+import { parseScheduleRpcParams, validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 
 type Editable = Omit<MoteQuickDraft, 'scope'> & { scope: MoteQuickScope | null }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -19,7 +20,8 @@ function connection(client: AgentMuxHostedClient | null, owner: DeviceWorkfaceSt
   } catch { return null }
 }
 function restore(draft: MoteQuickDraft): MoteQuickDraft {
-  return { ...draft, attempts: draft.attempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown', issue: a.issue ?? '原保存回执尚未确认；重开不会重发。' } : a) }
+  return { ...draft, ...(draft.maintenanceAttempts ? { maintenanceAttempts: draft.maintenanceAttempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown' as const, issue: a.issue ?? '原安排恢复回执尚未确认；重开不会重发。' } : a) } : {}),
+    attempts: draft.attempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown', issue: a.issue ?? '原保存回执尚未确认；重开不会重发。' } : a) }
 }
 export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMuxHostedClient | null, visible: boolean, onSaved: () => void) {
   const initial = useRef<{ owner: DeviceWorkfaceStore; recordId: string | null; saved: MoteQuickDraft | null } | null>(null)
@@ -44,6 +46,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   const [destination, setDestination] = useState<MotePreferencesDestination | null>(null)
   const latest = useRef({ client, visible, onSaved }); latest.current = { client, visible, onSaved }
   const readEpoch = useRef(0)
+  const maintenanceOwner = useRef<{ client: AgentMuxHostedClient; scope: string; ownerInstanceId: string } | null>(null)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; readEpoch.current++ } }, [])
   const display = (next: Editable) => { current.current = next; if (mounted.current) setDraft(next) }
   async function retain(next: Editable) {
@@ -80,6 +83,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       if (!mounted.current || epoch !== readEpoch.current || latest.current.client !== original || !now || now.ownerInstanceId !== source.ownerInstanceId ||
         moteQuickDraftKey(now.scope) !== moteQuickDraftKey(source.scope) || owner.recordIdentity() !== recordId) return
       setRead(result)
+      maintenanceOwner.current = { client: original, scope: moteQuickDraftKey(source.scope), ownerInstanceId: source.ownerInstanceId }
       setDestination(existing => existing && result.choices.destinations.some(c => JSON.stringify(c.reference) === JSON.stringify(existing)) ? existing :
         result.choices.destinations.length === 1 ? result.choices.destinations[0]!.reference : null)
       const baseline = moteQuickBaseline(result)
@@ -90,6 +94,53 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     } catch (error) { if (mounted.current && epoch === readEpoch.current) setNotice(message(error)) }
   }
   useEffect(() => { if (visible) void inspect(); return () => { readEpoch.current++ } }, [client, visible])
+  async function resumeMaintenance(pending?: MoteMaintenanceAttempt) {
+    if (flight.current || adopting.current) return
+    const original = latest.current.client, source = connection(original, owner, target), selected = current.current
+    if (!latest.current.visible || !original?.forwardRpc || !source || !selected.scope || moteQuickDraftKey(selected.scope) !== moteQuickDraftKey(source.scope) || owner.recordIdentity() !== recordId) {
+      setNotice('原安排的连接或设备归属尚未确认；原请求与配置保留。'); return
+    }
+    if (!pending && selected.maintenanceAttempts?.some(value => value.phase === 'unknown' || value.phase === 'sending')) {
+      setNotice('原恢复回执尚未确认，请先核对该原请求；不会另建恢复操作。'); return
+    }
+    const schedule = read?.maintenance?.schedule, admitted = maintenanceOwner.current
+    if (!pending && (!schedule || schedule.status !== 'paused' || !schedule.revision || read?.defaults?.presence?.enabled === false ||
+      admitted?.client !== original || admitted.scope !== moteQuickDraftKey(source.scope) || admitted.ownerInstanceId !== source.ownerInstanceId)) {
+      setNotice('请先核对并保存启用配置，再读取原暂停安排；本次没有恢复其他安排。'); return
+    }
+    const input = pending?.input ?? parseScheduleRpcParams('schedule.resume', { scheduleId: schedule!.loopId, expectedRevision: schedule!.revision, operationId: randomClientRequestId() })
+    let operation: MoteMaintenanceAttempt = pending ?? { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
+    let requested = false
+    const sameSource = () => {
+      const now = connection(original, owner, target)
+      return mounted.current && latest.current.visible && latest.current.client === original && owner.recordIdentity() === recordId && now?.ownerInstanceId === source.ownerInstanceId && moteQuickDraftKey(now.scope) === moteQuickDraftKey(source.scope)
+    }
+    flight.current = true; setBusy(true)
+    try {
+      if (!pending) {
+        const ack = await retain({ ...current.current, maintenanceAttempts: [...current.current.maintenanceAttempts ?? [], operation] })
+        if (!ack.canForward || !sameSource()) { operation = { ...operation, phase: 'not-sent', issue: '原请求尚未发送；配置与安排引用保留。' }; return }
+      }
+      requested = true
+      const fence = { runtimeId: source.scope.runtimeId, ownerInstanceId: source.ownerInstanceId }
+      const result = pending
+        ? validateScheduleRpcResult('schedule.inspect', await original.forwardRpc('schedule.inspect', { operationId: input.operationId }, {}, fence), { operationId: input.operationId })
+        : validateScheduleRpcResult('schedule.resume', await original.forwardRpc('schedule.resume', input, {}, fence), input)
+      if (!sameSource()) return
+      if (!result.schedule || result.schedule.loopId !== input.scheduleId || result.schedule.lastMutation?.operationId !== input.operationId || result.schedule.lastMutation.action !== 'resume' || result.schedule.lastMutation.expectedRevision !== input.expectedRevision) {
+        operation = { ...operation, phase: 'unknown', issue: '尚未读到这次原恢复的准确回执；不重复恢复。' }; return
+      }
+      operation = { ...operation, phase: pending ? 'observed' : 'confirmed', result, issue: null }
+      setNotice(pending ? '已读到原恢复记录；原写入回执与实际投递仍分别核对。' : '原安排的恢复回执已确认；主 Agent 接回和心跳投递分别核对。')
+    } catch (error) { operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: message(error) }; if (mounted.current) setNotice('原恢复回执未确认；原请求保留，可核对。') }
+    finally {
+      if (operation.phase === 'sending') operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: '原连接或页面已变化，原请求保留；没有改投。' }
+      const retained = { ...current.current, maintenanceAttempts: (current.current.maintenanceAttempts ?? []).map(value => value.input.operationId === input.operationId ? operation : value) }
+      if (owner.recordIdentity() === recordId) await retain(retained); else display(retained)
+      if (sameSource() && (operation.phase === 'confirmed' || operation.phase === 'observed')) void inspect()
+      flight.current = false; if (mounted.current) setBusy(false)
+    }
+  }
   async function adopt() {
     const baseline = read && moteQuickBaseline(read), source = connection(latest.current.client, owner, target), old = current.current
     if (!baseline || !source || flight.current || adopting.current || conflicted.current || !latest.current.visible) return
@@ -170,5 +221,5 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     durable.current = canonical; conflicted.current = false; display(restore(canonical)); setNotice('已采用设备原稿；本页另一份选择与请求仍可复制。')
   }
   return { draft, read, destination, setDestination, edit, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
-    conflict: conflicted.current, copies }
+    conflict: conflicted.current, copies, resumeMaintenance }
 }

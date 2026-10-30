@@ -5,6 +5,7 @@ import { parseQuestionReplyAttempt } from '@agentmux/client-ui/conversation-ques
 import type { MobileQuestionReplyAttempt } from '../conversation/question-replies'
 import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import { parseAgentInputMoteSource } from '@agentmux/core/mote-input-source'
+import { parseMobileMoteMainInput } from '../conversation/mote-main-input'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-lock'
 import { parseMobileGoalOperationRecord, type MobileGoalOperationRecord } from './goal-operation-record'
@@ -120,12 +121,17 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (item && typeof item === 'object' && Object.hasOwn(item, 'manualInput')) keys.push('manualInput')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'moteSource')) keys.push('moteSource')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'agentMuxNote')) keys.push('agentMuxNote')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'moteMain')) keys.push('moteMain')
     const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
       || !body(attempt.draft) || !phase(attempt.phase)) throw invalid()
     if (attempt.logId !== undefined) validateDeliveryLogId(attempt.logId)
     if (attempt.moteSource !== undefined) parseAgentInputMoteSource(attempt.moteSource)
     if (attempt.agentMuxNote !== undefined && !body(attempt.agentMuxNote)) throw invalid()
+    if (attempt.moteMain !== undefined) {
+      const main = parseMobileMoteMainInput(attempt.moteMain)
+      if (attempt.agentMuxNote !== undefined || attempt.originalHostId && attempt.originalHostId !== main.reference.hostId) throw invalid()
+    }
     if (attempt.inputRequested !== undefined && typeof attempt.inputRequested !== 'boolean') throw invalid()
     if (attempt.explicit !== undefined && typeof attempt.explicit !== 'boolean') throw invalid()
     if (attempt.originalRuntimeId !== undefined && !(attempt.originalRuntimeId === null || id(attempt.originalRuntimeId))) throw invalid()
@@ -136,6 +142,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
         ...['stopIntent', 'stopReceipt'].filter(key => Object.hasOwn(attempt.manualInput ?? {}, key))])
       const binding = validateAgentPromptInputBinding({ expectedRun: input.expectedRun, admissionIntent: { kind: 'manual-actor' } })
       if (!id(input.agentSessionId) || binding.expectedRun.runId !== attempt.runId || !(input.runtimeId === null || id(input.runtimeId))) throw invalid()
+      if (attempt.moteMain !== undefined && parseMobileMoteMainInput(attempt.moteMain).reference.sessionId !== input.agentSessionId) throw invalid()
       const checkRef = (value: unknown) => {
         const ref = record(value, ['key', 'waitGeneration']), key = validateAgentPromptInputKey(ref.key)
         if (key.kind !== 'prompt' || key.agentSessionId !== input.agentSessionId || key.submissionId !== attempt.operationId ||

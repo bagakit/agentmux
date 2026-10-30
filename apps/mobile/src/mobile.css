@@ -384,6 +384,21 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-mote-quick-editor form { min-width: 0; display: grid; gap: 16px; }
 .mobile-mote-quick-editor label { min-width: 0; display: grid; gap: 6px; }
 .mobile-mote-quick-editor select { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; font-size: 16px; color: inherit; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px; }
+.mobile-mote-presence { min-width: 0; margin: 0; padding: 12px; display: grid; gap: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.mobile-mote-presence input[type="number"] { box-sizing: border-box; min-width: 0; width: 100%; min-height: 44px; padding: 8px; color: inherit; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 16px; }
+.mobile-mote-presence label:has(input[type="checkbox"]) { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+.mobile-mote-presence input[type="checkbox"] { width: 22px; height: 22px; }
+.mobile-conversation .mote-conversation__navigation button, .mobile-conversation .mote-conversation__link, .mobile-conversation .mote-work-event button { min-width: 44px; min-height: 44px; }
+.mobile-conversation .mote-work-event summary, .mobile-conversation .mote-conversation__handoff summary, .mobile-conversation .mote-conversation__reading-tools > summary { box-sizing: border-box; min-width: 44px; min-height: 44px; padding-block: 12px; }
+.mobile-conversation .mote-conversation__handoff > span { min-width: 0; overflow-wrap: anywhere; }
+/* Short Mote chat uses the reader's remaining space; long history keeps its natural scroll height. */
+.mobile-conversation__reading:has(> .mote-conversation) { display: flex; flex-direction: column; }
+.mobile-conversation__reading > .mote-conversation { flex: 1 0 auto; display: flex; flex-direction: column; }
+.mobile-conversation__reading > .mote-conversation > .mote-conversation__messages { margin-block-start: auto; }
+/* The sticky quick-settings title covers the sheet's padding band while content scrolls underneath. */
+.mobile-sheet:has(.mobile-mote-quick-editor) { overflow-x: hidden; isolation: isolate; }
+.mobile-sheet:has(.mobile-mote-quick-editor) > .mobile-sheet-title::before { content: ""; position: absolute; inset: -6px -12px 0; z-index: -1; border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--surface-1); pointer-events: none; }
+
 .mobile-mote-quick-editor details, .mobile-mote-quick-editor article { min-width: 0; overflow-wrap: anywhere; }
 .mobile-mote-quick-editor pre { max-width: 100%; overflow: auto; white-space: pre; }
 .mobile-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

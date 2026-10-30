@@ -36,7 +36,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { createPortal } from 'react-dom'
 import { lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
+import { createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { useWorkbenchActivityPresentation, useWorkbenchRegionLabels, useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { WorkbenchSplitHandle } from './WorkbenchSplitHandle'
@@ -71,6 +71,9 @@ import { WorkbenchEmptyState } from './WorkbenchEmptyState'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
+import { useMoteDialogueView } from '../lib/mote-dialogue-view'
+import { showMoteConversation } from '../lib/mote-conversation-mode'
+import { confirmedMoteReference } from '../lib/mote-materials-actions'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter, synchronizeSplitLayout } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
@@ -1163,6 +1166,7 @@ function PaneGroup({
 }) {
   const projection = useContext(WorkbenchProjectionContext)
   const mote = useContext(MoteWorkfaceContext)
+  const dialogue = useMoteDialogueView()
   const tabsById = useAppStore(useShallow((state) => projection
     ? Object.fromEntries(group.tabOrder.flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, allLayout)))
@@ -1224,6 +1228,35 @@ function PaneGroup({
   const activeRuntimeSession = useAppStore((state) => activeSurface && isSessionSurface(activeSurface)
     ? sessionPresentationById(state.sessions).get(activeSurface.sessionId) ?? null
     : null)
+  const selectMoteViewMode = useMemo(() => mote && activeRuntimeSession?.kind === 'agent'
+    ? createSessionViewModeSelector(activeRuntimeSession.id) : null, [Boolean(mote), activeRuntimeSession?.kind, activeRuntimeSession?.id])
+  const activeViewMode = useAppStore(state => selectMoteViewMode?.(state) ?? null)
+  const conversationChrome = mote?.presentation === 'conversation' && activeRuntimeSession?.kind === 'agent' && activeViewMode === 'activity'
+  const main = dialogue?.page?.main
+  const currentMain = main?.status === 'ready' && !dialogue?.unavailable && main.identity?.moteId === mote?.topic.id ? main.current : null
+  const presentationActionLabel = conversationChrome ? '原工作面' : currentMain ? '返回主对话' : '返回交流'
+  function selectMotePresentation() {
+    if (!mote) return
+    if (conversationChrome) { mote.showOriginalWorkface?.(); return }
+    if (currentMain) {
+      const reference = { displayWorkspaceId: currentMain.displayWorkspaceId, groupId: currentMain.groupId, tabId: currentMain.tabId, regionId: currentMain.regionId }
+      const state = useAppStore.getState(), region = state.tabs[reference.tabId]?.regions[reference.regionId]
+      const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
+      if (!confirmedMoteReference(state, mote, { reference }) || session?.control.kind !== 'agent' ||
+          session.control.hostId !== currentMain.hostId || session.control.agentSessionId !== currentMain.sessionId || !mote.selectReference(reference)) {
+        state.reportError(new Error('主对话的原位置尚未确认。当前工作面、正文和草稿保留；请从团队入口核对原位置。'), { kind: 'indeterminate' })
+        return
+      }
+      showMoteConversation(mote, { floating: mote.floating, reference })
+    } else if (!showMoteConversation(mote, { floating: mote.floating })) {
+      useAppStore.getState().reportError(new Error('原交流位置尚未确认。当前工作面、正文和草稿保留；请从团队入口核对原位置。'), { kind: 'indeterminate' })
+      return
+    }
+    mote.showConversation?.()
+  }
+  const motePresentationAction = mote?.showOriginalWorkface && mote.showConversation ? <button type="button"
+    className="mote-workface__presentation-action" onClick={selectMotePresentation}
+    title={conversationChrome ? '展开原 Tab、分屏、终端与全部工具' : presentationActionLabel}>{presentationActionLabel}</button> : null
   const pendingStopSession = useAppStore((state) => pendingStopSessionId
     ? sessionPresentationById(state.sessions).get(pendingStopSessionId) ?? null
     : null)
@@ -1246,14 +1279,14 @@ function PaneGroup({
     <ThemeActionCreateTabIcon size={13} />
   </button>
   const tabNavigation = <SortableContext items={orderedTabIds} strategy={horizontalListSortingStrategy}>
-    <WorkbenchTabStrip visible={surfaceVisible} activeTabId={group.activeTabId} tabIds={orderedTabIds}
+    <WorkbenchTabStrip visible={surfaceVisible && !conversationChrome} activeTabId={group.activeTabId} tabIds={orderedTabIds}
       trailingAction={mote && !showEmptySpace ? createTabAction : undefined}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
   </SortableContext>
 
   return (
     <section
       ref={setNodeRef}
-      className={`pane-group ${isRootLeaf ? 'pane-group--root' : ''} ${paneGroupFocus} ${
+      className={`pane-group ${isRootLeaf ? 'pane-group--root' : ''} ${conversationChrome ? 'pane-group--mote-conversation' : ''} ${paneGroupFocus} ${
         isOver ? 'pane-group--drop-over' : ''
       }`}
       data-pane-group-id={group.id}
@@ -1262,11 +1295,14 @@ function PaneGroup({
         : focusTabGroup(workspaceId, group.id)}
     >
       <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
+        {conversationChrome ? motePresentationAction : null}
+        <div className="pane-tabbar__workface" hidden={conversationChrome} inert={conversationChrome}>
         {showWindowChrome ? (
           <TopRowLeadingChrome />
         ) : leadingChrome ?? null}
         {tabNavigation}
         <div className="pane-tabbar__actions">
+          {!conversationChrome ? motePresentationAction : null}
           {layout.activeGroupId === group.id ? presentationAction : null}
           {activeRuntimeSession && canStopSessionRun(activeRuntimeSession) ? (
             <button
@@ -1292,6 +1328,7 @@ function PaneGroup({
             }}
           />
           {!mote ? createTabAction : null}
+        </div>
         </div>
       <div className="service-disclosure-home" data-workbench-moved-focus={focusMoved ? '' : undefined}>
         <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['local:focus-moved', workspaceId, group.id]),

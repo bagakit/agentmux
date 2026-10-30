@@ -2,11 +2,13 @@ import { parseMotePreferencesTarget, parseMoteQuickDefaults, parseMoteQuickBasel
   parseMotePreferencesSaveResult, sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickDefaults,
   type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
+import { parseScheduleRpcParams, validateScheduleRpcResult, type ScheduleMutation, type ScheduleReceipt, type ScheduleResultMap } from '@agentmux/core/schedule-rpc'
 
 export type MoteQuickScope = { origin: string; runtimeId: string; deviceHostId: string | null; target: MotePreferencesTarget }
 export type MoteQuickAttempt = { input: MoteQuickPreferencesSaveParams; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'saved' | 'failed'; result: MoteQuickPreferencesSaveResult | null; issue: string | null }
+export type MoteMaintenanceAttempt = { input: ScheduleMutation; ownerInstanceId: string; phase: 'sending' | 'unknown' | 'confirmed' | 'observed' | 'not-sent'; result: ScheduleReceipt | ScheduleResultMap['schedule.inspect'] | null; issue: string | null }
 export type MoteQuickDraft = { scope: MoteQuickScope; values: MoteQuickDefaults; baseline: MoteQuickBaseline | null;
-  attempts: MoteQuickAttempt[]; blockedAttemptId: string | null }
+  attempts: MoteQuickAttempt[]; blockedAttemptId: string | null; maintenanceAttempts?: MoteMaintenanceAttempt[] }
 export type MoteQuickDraftCommit = { recordId: string | null; applied: boolean; draft: MoteQuickDraft | null; conflict: MoteQuickDraft | null }
 export class MoteQuickDraftInvalidError extends Error {}
 export class MoteQuickDraftCapacityError extends MoteQuickDraftInvalidError {}
@@ -32,7 +34,7 @@ export function moteQuickDraftKey(scope: MoteQuickScope): string {
   return JSON.stringify([scope.origin, scope.runtimeId, scope.deviceHostId, t.spaceId, t.zoneId, r.hostId, r.workspaceId, r.workspacePath])
 }
 export function parseMoteQuickDraft(value: unknown): MoteQuickDraft {
-  const v = object(value, ['scope', 'values', 'baseline', 'attempts', 'blockedAttemptId']), scope = parseMoteQuickScope(v.scope)
+  const v = object(value, ['scope', 'values', 'baseline', 'attempts', 'blockedAttemptId', ...(Object.hasOwn(value ?? {}, 'maintenanceAttempts') ? ['maintenanceAttempts'] : [])]), scope = parseMoteQuickScope(v.scope)
   try {
     parseMoteQuickDefaults(v.values)
     if (v.baseline !== null) parseMoteQuickBaseline(v.baseline, scope.target)
@@ -46,6 +48,22 @@ export function parseMoteQuickDraft(value: unknown): MoteQuickDraft {
       if (a.phase === 'saved' && (!a.result || !['saved', 'unchanged'].includes((a.result as MoteQuickPreferencesSaveResult).status))) invalid()
       if (a.phase === 'failed' && (!a.result || (a.result as MoteQuickPreferencesSaveResult).status !== 'refused-before-write')) invalid()
       ids.add(input.operationId)
+    }
+    if (v.maintenanceAttempts !== undefined) {
+      if (!Array.isArray(v.maintenanceAttempts)) invalid()
+      for (const value of v.maintenanceAttempts) {
+        const a = object(value, ['input', 'ownerInstanceId', 'phase', 'result', 'issue']), input = parseScheduleRpcParams('schedule.resume', a.input)
+        if (!identity(a.ownerInstanceId) || ids.has(input.operationId) || !['sending', 'unknown', 'confirmed', 'observed', 'not-sent'].includes(String(a.phase)) || !(a.issue === null || typeof a.issue === 'string')) invalid()
+        if (a.result !== null) {
+          if (a.phase === 'confirmed') validateScheduleRpcResult('schedule.resume', a.result, input)
+          else if (a.phase === 'observed') {
+            const result = validateScheduleRpcResult('schedule.inspect', a.result, { operationId: input.operationId }), s = result.schedule
+            if (!s || s.loopId !== input.scheduleId || s.lastMutation?.action !== 'resume' || s.lastMutation.expectedRevision !== input.expectedRevision) invalid()
+          } else invalid()
+        }
+        if ((a.phase === 'confirmed' || a.phase === 'observed') && !a.result) invalid()
+        ids.add(input.operationId)
+      }
     }
     if (!(v.blockedAttemptId === null || typeof v.blockedAttemptId === 'string' && (v.attempts as MoteQuickAttempt[]).some(a =>
       a.input.operationId === v.blockedAttemptId && (a.phase === 'sending' || a.phase === 'unknown')))) invalid()

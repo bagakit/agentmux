@@ -35,6 +35,12 @@ import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentCom
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
 import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
+import { MobileMoteConversation, type MobileMoteWork, type MobileMoteDialogue } from './MobileMoteConversation'
+import type { MoteDefaultConversation, MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { observedMobileMoteMain } from './mote-main-input'
+import { MobileMoteSpeakerAvatar } from './MobileMoteSpeakerAvatar'
+import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
+import type { DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import './conversation.css'
 import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
@@ -60,9 +66,17 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   visible?: boolean
   displayName?: string
   moteMemberName?: ClientUiPlatform['moteMemberName'] | undefined
+  moteTarget?: MotePreferencesTarget | undefined
+  moteDialogue?: MobileMoteDialogue | undefined
+  moteDirectAgent?: boolean | undefined
+  moteAppearance?: AgentMuxSpaceAppearance | undefined
+  moteName?: string | undefined
+  moteWorkMemberName?(source: MobileMoteWork): string
+  onOpenMoteWork?(source: MobileMoteWork): void
+  onReturnMoteMain?(reference: MoteDefaultConversation): void
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onReturnMoteMain,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -110,8 +124,10 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
+  const moteMain = useMemo(() => moteDirectAgent ? undefined : observedMobileMoteMain(moteDialogue?.page?.main, moteTarget, agentSessionId),
+    [moteDirectAgent, moteDialogue?.page?.main, moteTarget, agentSessionId])
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteDirectAgent,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
@@ -254,7 +270,10 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询原答复回执</button>
     </aside>
   }
-  const describeSpeaker = useMemo(() => createSpeakerResolver({
+  const mainAvatar = useCallback((size?: number) => <MobileMoteSpeakerAvatar spaceId={moteTarget?.spaceId ?? ''} name={moteName ?? 'Mote'} appearance={moteAppearance} {...(size === undefined ? {} : { size })} />,
+    [moteTarget?.spaceId, moteName, moteAppearance])
+  const describeSpeaker = useMemo<DescribeSpeaker>(() => {
+    const original = createSpeakerResolver({
     lookupAgent: id => {
       try {
         const author = session?.agentSessionId === id ? session : client?.agentSession(id)
@@ -262,7 +281,14 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       } catch { return undefined }
     },
     ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
-  }), [client, session, agentSessionId, displayName])
+    })
+    const main = moteDialogue?.page?.main.current, owner = reading.pageOwner
+    return (speaker, size) => {
+      const prior = original(speaker, size)
+      return moteTarget && main && owner?.client === client && owner.agentSessionId === agentSessionId && main.hostId === owner.hostId && main.sessionId === agentSessionId && speaker.role === 'agent' && speaker.id === agentSessionId
+        ? { ...prior, name: moteName ?? prior.name, avatar: mainAvatar(size) } : prior
+    }
+  }, [client, session, agentSessionId, displayName, moteDialogue?.page?.main.current, reading.pageOwner, moteTarget, moteName, mainAvatar])
   // Source-history search is keyed by original records, independently of message entities.
   const mailboxMessages = useMemo(() => reading.projection?.originalRecords.flatMap(record => record.input ? [record.input] : []) ?? [], [reading.projection])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
@@ -348,13 +374,13 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
               ? original.phase === 'unknown' ? '先前消息结果未确认 · 原记录保留' : '先前消息未发送 · 原记录保留'
               : original.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
             {original.phase !== 'sending' ? <div className="mobile-send-status__actions">
-              <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{promptWasRefused(original) ? '重新发送原正文' : key === draftKey ? '重试原请求' : '重试这条原请求'}</button>
+              <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{original.moteMain ? '核对原主对话输入' : promptWasRefused(original) ? '重新发送原正文' : key === draftKey ? '重试原请求' : '重试这条原请求'}</button>
               <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
               <button type="button" className="mobile-send-status__dismiss" aria-label="关闭操作说明" title="关闭操作说明" onClick={() => updateDismissed(set => set.add(signature))}>收起</button>
             </div> : null}
           </div>
           {original.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
-            <p>{original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
+            <p>{original.moteMain ? '原主对话输入与正文保留。核对只读取这次原操作，不会改投新的主 Agent。' : original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
             <details><summary>消息正文</summary><pre>{original.draft}</pre>
               <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`原正文未复制：${errorMessage(error)}`))
                 .then(copied => { if (copied) setCopyNotice('已复制原正文。') }) }}>复制原正文</button>
@@ -423,8 +449,16 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
-        {agentSessionId ? <>
-          <ConversationView readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails detailsOnlyMetadata coverageSummary="阅读范围与来源" readingGeometry={{ viewport: () => feed.current,
+        {agentSessionId ? <MobileMoteConversation client={pageClient ?? null} agentSessionId={pageSessionId ?? agentSessionId} hostId={reading.pageOwner?.hostId}
+          target={pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined} dialogue={moteDialogue} name={moteName ?? 'Mote'}
+          visible={visible} records={reading.projection?.records ?? []} describeSpeaker={describeSpeaker}
+          mainAvatar={mainAvatar}
+          {...(moteWorkMemberName ? { memberName: moteWorkMemberName } : {})} {...(onOpenMoteWork ? { onOpenWork: onOpenMoteWork } : {})}
+          {...(onReturnMoteMain ? { onReturnMain: onReturnMoteMain } : {})}
+          readingGeometry={{ viewport: () => feed.current, following: () => follow.current.following && !reading.olderWindow,
+            pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }}
+          renderCurrent={insertions => <ConversationView insertions={insertions}
+            readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails detailsOnlyMetadata coverageSummary="阅读范围与来源" readingGeometry={{ viewport: () => feed.current,
             following: () => follow.current.following && !reading.olderWindow,
             pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }} presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
@@ -447,8 +481,8 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             } : undefined}
             questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
             {...(onShowTerminal && pageClient === client ? { onOpenQuestionTerminal: onShowTerminal } : {})}
-            {...(reading.page ? nativeReadingProps : readingProps)} />
-        </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
+            {...(reading.page ? nativeReadingProps : readingProps)} />} />
+          : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
       </div>
         {toolbarTarget ? createPortal(conversationTools, toolbarTarget) : null}
       </div>

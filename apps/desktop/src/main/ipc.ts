@@ -76,6 +76,7 @@ import { createNotebookObservationServices } from './notebook-observation-reques
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { parseFileHistoryParams, parseFileHistoryResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult } from '@agentmux/core/files'
 import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
+import { registerMoteDialogueIpc } from './mote-dialogue-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FilePreviewResources } from './file-preview-resources.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
@@ -1681,9 +1682,10 @@ export async function registerIpc(args: {
     requireTrustedSender('schedule:list', event)
     return callUserRpc('schedule.list', input)
   })
-  handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => {
+  handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect'], ownerHostId?: string) => {
     requireTrustedSender('schedule:inspect', event)
-    return callUserRpc('schedule.inspect', input)
+    return ownerHostId === undefined ? callUserRpc('schedule.inspect', input)
+      : args.runtime.callOriginalCore(ownerHostId, 'schedule.inspect', input, { transport: 'unix' })
   })
   handleWithEvent('schedule:create', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => {
     requireTrustedSender('schedule:create', event)
@@ -1693,9 +1695,10 @@ export async function registerIpc(args: {
     requireTrustedSender('schedule:pause', event)
     return callUserRpc('schedule.pause', input)
   })
-  handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => {
+  handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume'], ownerHostId?: string) => {
     requireTrustedSender('schedule:resume', event)
-    return callUserRpc('schedule.resume', input)
+    return ownerHostId === undefined ? callUserRpc('schedule.resume', input)
+      : args.runtime.callOriginalCore(ownerHostId, 'schedule.resume', input, { transport: 'unix' })
   })
   handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
     requireTrustedSender('schedule:cancel', event)
@@ -1809,7 +1812,7 @@ export async function registerIpc(args: {
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
     let submission: Awaited<ReturnType<RuntimeController['submitPrompt']>> = undefined
-    if (inputContextCapture !== undefined || inputImages !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
+    if (choice?.moteMain || inputContextCapture !== undefined || inputImages !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if ('admissionIntent' in condition) {
       assertManualPromptSenderTrusted(event.sender, contents)
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
@@ -1911,7 +1914,7 @@ export async function registerIpc(args: {
   handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
   handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) => await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)))
+  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { if (request?.moteMain) assertManualPromptSenderTrusted(event.sender, contents); return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
   handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
     requireTrustedSender('sessions:restart', event)
     if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
@@ -2349,6 +2352,7 @@ export async function registerIpc(args: {
       observation: (watchId, state) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_OBSERVATION_CHANNEL, { watchId, state }) } } })
   registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
+  registerMoteDialogueIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
   const executionBindingReaders = new ExecutionBindingReaders(bindingId => executionBindings.inspect(bindingId))
   const executionBindings = new AgentExecutionBindingService(join(app.getPath('userData'), 'execution-bindings'), {

@@ -724,7 +724,12 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
         active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
       !target.tabId && discussionChoices.length === 0 && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
-        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} onTabSelect={selectDiscussion}>
+        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} onTabSelect={selectDiscussion} onReferenceSelect={reference => {
+          const state = useAppStore.getState()
+          if (!workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) return false
+          spaceActionRef.current?.abort(); state.rememberMoteAgent(reference)
+          setFloating({ targetTabId: reference.tabId, reference, targetAgent: undefined }); return true
+        }}>
         <MoteWorkfaceCooperation active={visible} reference={projectionState?.activeReference ?? floating.reference}
           onSelect={reference => {
             const state = useAppStore.getState()

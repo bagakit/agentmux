@@ -1,5 +1,6 @@
 import type { MobileQuestionReplyAttempt } from './question-replies'
-import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput } from '@agentmux/core'
+import type { MobileMoteMainInput } from './mote-main-input'
+import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput, AgentPromptSubmissionRecord } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
@@ -11,6 +12,8 @@ export type PromptAttempt = {
   moteSource?: AgentInputMoteSource
   /** Platform discovery frozen before first intake; old absent values remain absent. */
   agentMuxNote?: string
+  /** Frozen before original logical-main intake; old generic operations stay generic. */
+  moteMain?: MobileMoteMainInput
   phase: 'sending' | 'unknown' | 'rejected' | 'confirmed'
   message: string
   request?: { condition: AgentPromptCondition; execution: 'default' | 'immediate'; explicit: boolean; runtimeId: string | null }
@@ -19,6 +22,8 @@ export type PromptAttempt = {
     stopIntent?: { ref: AgentInputWaitRef; cancelOperationId: string }; stopReceipt?: AgentInputWaitStopReceipt }
   /** Live projection only. Cold readers inspect the original Core key instead of restoring authority. */
   inputReceipt?: AgentInputSubmissionReceipt
+  /** Live original Core observation; never serialized as cold authority. */
+  mainRecord?: AgentPromptSubmissionRecord
   /** Missing means historical/unknown, never permission to construct another input. */
   inputRequested?: boolean
   originalRuntimeId?: string | null
@@ -120,6 +125,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.manualInput ? { manualInput: structuredClone(intent.manualInput) } : {}),
           ...(intent.moteSource ? { moteSource: structuredClone(intent.moteSource) } : {}),
           ...(intent.agentMuxNote === undefined ? {} : { agentMuxNote: intent.agentMuxNote }),
+          ...(intent.moteMain ? { moteMain: structuredClone(intent.moteMain) } : {}),
           ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),

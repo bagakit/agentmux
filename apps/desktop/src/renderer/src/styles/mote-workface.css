@@ -362,6 +362,13 @@
 /* A retained service notice uses real space without pushing the original Composer below its workface. */
 .workbench-context-frame { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
 .workbench-context-frame > .workspace-workbench { flex: 1; height: auto; }
+.mote-workface__presentation-action { margin-inline-start: auto; margin-inline-end: 8px; align-self: center; padding: 3px 7px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; -webkit-app-region: no-drag; }
+.mote-workface__presentation-action:hover, .mote-workface__presentation-action:focus-visible { color: var(--text); background: var(--surface-2); }
+/* A portal may retain its original React owner. Scope chrome to this actual
+   displayed Mote surface, so opening the floating workface never changes its
+   background neighbour. Original controls and native content stay mounted. */
+[data-mote-workface-presentation="conversation"] .agent-surface[data-agent-surface-mode="activity"] > .agent-region-header-home { display: none; }
+[data-mote-workface-presentation="conversation"] .agent-surface[data-agent-surface-mode="activity"]:has(> .agent-region-header-home) { --agent-region-reading-inset: 0px; }
 
 @container mote-space (max-width: 760px) {
   .mote-space-frame__header { align-items: flex-start; gap: 4px 8px; }
