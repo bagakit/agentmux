@@ -77,10 +77,15 @@ Read the matching leaf help for the exact JSON input:
   can leave the original HTTP page available. Open never confirms Agent delivery.
 - amux capsule operation inspect --input FILE reads {operationId} without replaying it.
 
-To embed a saved page in an AgentMux Desktop conversation reply, write
-![Page title](amux://capsule/ORIGINAL_ID) in its own Markdown paragraph. Use the actual
-returned capsuleId. Several such references may share a paragraph; ordinary bare links
-and [labels](amux://capsule/ORIGINAL_ID) remain compact object links. Code stays literal.
+To display a saved page in an AgentMux Desktop conversation, include its actual returned
+amux://capsule/ORIGINAL_ID or [Page title](amux://capsule/ORIGINAL_ID). Ordinary references
+automatically display the page; ![Page title](amux://capsule/ORIGINAL_ID) is also supported.
+A paragraph containing only Capsule references displays the bounded pages directly.
+In a sentence the original link stays in the prose and its page follows that paragraph;
+headings, lists, quotes, tables and footnotes likewise keep their text and show the page
+after its owning block. Repeated references to the same URI in one block share one page.
+Code and math stay literal. Reading uses the original message identity and page owner,
+not a second copy of the author's Markdown or a new page publication.
 For new pages intended for conversation replies, prefer explicit mode "injected" and
 theme "follow" in capsule create. Use the granted App theme variables and respond to
 theme changes so typography, colors and light/dark appearance fit the conversation.

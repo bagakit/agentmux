@@ -18,6 +18,11 @@ a new page is wanted. Preserve material ambiguity and the user's exact target/to
 
 Read only the matching local help:
 - amux browser targets --help: discover available exact targets and their readiness.
+  A target's optional objectLink is its stable original resource reference; url remains the
+  actual document loading address, including its route. Neither grants input permission.
+  Keep a Capsule's amux://capsule/ID reference when copying or saving it, and use the
+  original capsule open owner to resolve and display that page; do not send its object URI
+  to a generic webpage navigation or system application handoff.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
 - amux browser task --help: saved task versions and their run/stop/inspect journey.
 - amux browser open --help: open a new page only when needed.
