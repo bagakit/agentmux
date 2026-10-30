@@ -262,7 +262,7 @@ export async function createConnectionServices(options: { directory: string | un
         authority: async input => (await ensure()).ingress!.authority(input),
         recordAuthority: async input => (await ensure()).ingress!.recordAuthority(input),
         rejoin: async (input, context) => (await ensure()).ingress!.rejoin(input, context)
-      } satisfies import('@agentmux/core/connections').ConnectionIngressReadPort } : {}),
+      } satisfies import('@agentmux/core/connections').ConnectionIngressPort } : {}),
       delete: async (input, context) => { const owner = await ensure(); const result = await owner.connections.delete(input, context); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
       inspectDeletion: async input => (await ensure()).connections.inspectDeletion(input),
       list: async () => (await ensure()).connections.list(),

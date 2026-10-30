@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
 import { readRoomPublicationBinding, sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
 import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
-import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parseChannelTranscriptQuote, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
 import { ingressContextRevision, IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
@@ -85,7 +85,7 @@ function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
 }
 
 /** Durable transport admission only. The original Core queue owns all Agent input and delivery facts. */
-export class DurableIngressHost implements ConnectionIngressReadPort {
+export class DurableIngressHost implements ConnectionIngressPort {
   readonly permissions: ConversationActions
   /** Host-private read for a native modal; submitting still enters the original durable action owner. */
   questionForm(input: ConnectionQuestionFormInput): ConnectionQuestionForm | null { return this.permissions.questionForm(input) }

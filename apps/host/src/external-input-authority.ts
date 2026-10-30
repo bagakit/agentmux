@@ -1,11 +1,11 @@
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agentQuestionReplyIntentDigest, type AgentExternalInputAuthorityPort } from '@agentmux/core'
 
-import type { ConnectionIngressReadPort } from '@agentmux/core/connections'
+import type { ConnectionIngressPort } from '@agentmux/core/connections'
 import type { AgentExternalAuthoritySource } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 
-type OriginalIngressAuthority = Pick<ConnectionIngressReadPort, 'authority' | 'recordAuthority'>
+type OriginalIngressAuthority = Pick<ConnectionIngressPort, 'authority' | 'recordAuthority'>
 /** Verify the original ingress owner directly; no client lifetime or recursive admission RPC. */
 export function createConnectionExternalInputAuthority(options: { ingress(): Promise<OriginalIngressAuthority>; executionHostId: string;
   runtimeId?(): string | undefined; signal?: AbortSignal;

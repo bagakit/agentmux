@@ -72,7 +72,7 @@ export class ConnectionHost implements ConnectionPort {
   rooms?: import('@agentmux/core/connections').RoomPort
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
-  ingress?: import('@agentmux/core/connections').ConnectionIngressReadPort
+  ingress?: import('@agentmux/core/connections').ConnectionIngressPort
   receiverObservation?: ((connectionId: string, revision: number) => (Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'> & { receiver?: import('@agentmux/core/connections').ConnectionReceiverObservation }) | null) | undefined
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>

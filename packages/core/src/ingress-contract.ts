@@ -126,7 +126,7 @@ export type ConnectionIngressAudiencePage = { ingresses: ConnectionIngressRecord
  * no-input return or Core receipt lookup. Authorization failures must not become observation gaps. */
 export type ConnectionIngressReadContext = { authorize(ingress: ConnectionIngressRecord | null): void | Promise<void> }
 export type ConnectionIngressRejoinContext = RoomBindingCallContext & Partial<ConnectionIngressReadContext>
-export interface ConnectionIngressReadPort {
+export interface ConnectionIngressPort {
   /** Local latest-first audience window across receiver aliases. Never dispatches or reads a platform. */
   listAudience?(input: ConnectionIngressAudienceInput): Promise<ConnectionIngressAudiencePage>
   inspect(input: ConnectionIngressInspectInput, context?: ConnectionIngressReadContext): Promise<ConnectionIngressInspection>

@@ -74,7 +74,7 @@ export interface ConnectionPort {
   enrollment?: import('./connection-enrollment-contract.js').ConnectionEnrollmentPort
   rooms?: import('./room-discovery-contract.js').RoomPort
   delivery?: import('./connection-delivery-contract.js').ConnectionDeliveryPort
-  ingress?: import('./ingress-contract.js').ConnectionIngressReadPort
+  ingress?: import('./ingress-contract.js').ConnectionIngressPort
   bindings?: import('./room-binding-contract.js').RoomBindingsPort
   list(): Promise<ConnectionResultMap['connection.ls']>
   inspect(input: ConnectionInspectInput): Promise<ConnectionInspectResult>
