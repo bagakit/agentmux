@@ -1,7 +1,9 @@
 import { HostBadge } from './HostBadge'
+import { FocusLaneHeadingMenu } from './FocusLaneHeadingMenu'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useEffect, useId, useMemo, useState, type ReactNode, type Ref, type ComponentProps, type SyntheticEvent, type CSSProperties } from 'react'
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode, type Ref, type ComponentProps, type SyntheticEvent, type CSSProperties } from 'react'
+import type { TopicCategory } from '@agentmux/core/control'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { focusProjectKey, type FocusRetainedProject } from '../lib/focus-project-lanes'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
@@ -17,6 +19,10 @@ import type { FocusReplyLines } from '../../../shared/focus-preferences'
 import { FocusLaneGroups } from './FocusLaneGroups'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { focusCollectionTopicCount, type FocusScanLane } from '../lib/focus-collection-lanes'
+import { categorySpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import { TopicCategoryDialog } from './TopicCategoryDialog'
+import { SpaceIconPicker } from './SpaceIconPicker'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeObjectIdentifierIcon = semanticIconComponent('object.identifier')
@@ -30,8 +36,21 @@ function collectionCountLabel(lane: FocusScanLane) {
   return `${topics} ${topics === 1 ? 'Topic' : 'Topics'} · ${agents} ${agents === 1 ? 'Agent' : 'Agents'}`
 }
 
+function FocusCollectionHeadingIcon({ lane, icons, resourceMenus }: { lane: FocusScanLane; icons: SpaceIconOverrides; resourceMenus: boolean }) {
+  // Static examples never consume real saved assets, even when their IDs collide.
+  const category = resourceMenus && lane.collection?.confirmed && lane.collection.categories.length === 1 ? lane.collection.categories[0] : undefined
+  const target = category ? categorySpaceIconTarget(category) : null
+  const manual = target ? icons[target.key] ?? null : null
+  if (!target || manual === null) return <CollectionIcon size={14} aria-hidden="true" />
+  // A saved preset needs no asset lookup. Never probe automatic appearance for a heading.
+  const selectedImage = typeof manual === 'object' && (manual.kind === 'image' || manual.kind === 'series')
+  return <SpaceObjectIcon kind="category" name={target.name} manualIcon={manual} imageTarget={selectedImage ? target.imageTarget : undefined} />
+}
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2 }: {
+
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false }: {
+  /** Only a real resource consumer opts in; Settings examples remain static. */
+  resourceMenus?: boolean
   leading?: ReactNode
   origins?: ReadonlyMap<string, FocusLaneOrigin>
   visible?: boolean
@@ -46,6 +65,18 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   const hosts = useAppStore(state => state.config?.hosts)
+  const ownerDocument = useWorkbenchDocument()
+  // This one editor host survives Collection reparenting after metadata changes.
+  const [categoryTarget, setCategoryTarget] = useState<TopicCategory | null>(null)
+  const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
+  const invoker = useRef<HTMLElement | null>(null)
+  const captureInvoker = () => {
+    const Element = ownerDocument.defaultView?.HTMLElement, active = ownerDocument.activeElement
+    invoker.current = Element && active instanceof Element ? active : null
+  }
+  const changeIcon = (target: SpaceIconTarget) => { captureInvoker(); setIconTarget(target) }
+  const renameCategory = (target: TopicCategory) => { captureInvoker(); setCategoryTarget(target) }
+  const returnFocus = () => invoker.current?.isConnected ? invoker.current : null
   const descriptionId = useId()
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const currentCollectionId = lanes.find(lane => lane.collection?.topics.some(topic => topic.id === currentLaneId))?.id
@@ -71,25 +102,25 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
         <span className="focus-project-lanes__heading">
           {lane.collection ? <>
             <span className="focus-project-lanes__source">Collection</span>
-            <button type="button" className="focus-project-lanes__axis focus-project-lanes__collection" aria-expanded={!collapsed.has(lane.id)}
+            <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} collapsed={collapsed.has(lane.id)} onToggleCollection={() => toggleCollection(lane.id)} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis focus-project-lanes__collection" aria-expanded={!collapsed.has(lane.id)}
               aria-current={lane.collection.topics.some(topic => topic.id === currentLaneId) ? 'location' : undefined}
               aria-label={`${lane.name} · ${collectionCountLabel(lane)}`}
               title={lane.name} onClick={() => toggleCollection(lane.id)}>
-              <ThemeNavigationDisclosureIcon size={11} aria-hidden="true" /><CollectionIcon size={14} aria-hidden="true" />
+              <ThemeNavigationDisclosureIcon size={11} aria-hidden="true" /><FocusCollectionHeadingIcon lane={lane} icons={icons} resourceMenus={resourceMenus} />
               <span className="focus-project-lanes__label"><strong>{lane.name}</strong></span>
               <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
-            </button>
+            </button></FocusLaneHeadingMenu>
             {lane.summary ? <span className="focus-project-lanes__recovery focus-project-lanes__collection-notice" role="status" title={lane.summary}>Details unconfirmed</span> : null}
             {lane.collection.pending ? <span className="focus-project-lanes__recovery focus-project-lanes__collection-notice" role="status" title="Collection membership changed. Finish editing or leave the current card to update its grouping.">Update pending</span> : null}
             <span className="focus-project-lanes__collection-count">{collectionCountLabel(lane)}</span>
           </> : <><FocusProjectOrigin origin={origins?.get(lane.id)} />
-          <button type="button" className="focus-project-lanes__axis" aria-describedby={lane.summary ? descriptionId + lane.id : undefined} aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId)].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
+          <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis" aria-describedby={lane.summary ? descriptionId + lane.id : undefined} aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId)].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}
                 {lane.labels.map((label, index) => <span className="focus-project-lanes__label" key={index}>{index ? <ThemeNavigationDisclosureIcon size={10} /> : null}{index && lane.topicId && index === lane.labels.length - 1 ? <ThemeObjectIdentifierIcon size={11} /> : index ? <ThemeObjectBranchIcon size={11} /> : null}<strong>{label}</strong></span>)}</>}
             <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
-          </button>
+          </button></FocusLaneHeadingMenu>
           {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}</>}
           <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} />
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
@@ -101,6 +132,8 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
       </article>)}
     </div>
     {!leading && lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
+    {categoryTarget ? <TopicCategoryDialog target={categoryTarget} onClose={() => setCategoryTarget(null)} returnFocus={returnFocus} /> : null}
+    {iconTarget ? <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={returnFocus} /> : null}
   </section>
 }
 

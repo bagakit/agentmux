@@ -14,18 +14,18 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
 type CategoryMenuActions = {
   target: SpaceIconTarget
-  onChangeIcon(target: SpaceIconTarget): void
-  onRename(): void
+  onChangeIcon?(target: SpaceIconTarget): void
+  onRename?(): void
   onCopyLink(): void
 }
 
 /** Both entries act on this Category Space, independently from its member Topics. */
-function categoryMenuItems(Item: typeof ContextMenu.Item, Separator: typeof ContextMenu.Separator,
+export function categoryMenuItems(Item: typeof ContextMenu.Item, Separator: typeof ContextMenu.Separator,
   actions: CategoryMenuActions, openDialog: (callback: () => void) => void) {
   return <>
-    <Item className="tab-context-menu__item" onSelect={() => openDialog(() => actions.onChangeIcon(actions.target))}><ThemeObjectShapesIcon size={14} /><span>Change avatar…</span></Item>
-    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><ThemeActionEditIcon size={14} /><span>Rename category…</span></Item>
-    <Separator className="tab-context-menu__separator" />
+    {actions.onChangeIcon ? <Item className="tab-context-menu__item" onSelect={() => openDialog(() => actions.onChangeIcon?.(actions.target))}><ThemeObjectShapesIcon size={14} /><span>Change avatar…</span></Item> : null}
+    {actions.onRename ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename!)}><ThemeActionEditIcon size={14} /><span>Rename category…</span></Item> : null}
+    {actions.onChangeIcon || actions.onRename ? <Separator className="tab-context-menu__separator" /> : null}
     <Item className="tab-context-menu__item" onSelect={actions.onCopyLink}><ThemeObjectLinkIcon size={14} /><span>Copy Category link</span></Item>
   </>
 }
