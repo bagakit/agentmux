@@ -1,3 +1,7 @@
+import { assertPreparedResumeBinding } from './agent-prepared-resume.js'
+import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
+import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
+import { rpcRecord } from './rpc-data.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
@@ -118,9 +122,26 @@ export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
   'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
   'capabilityHash' | 'createdAt' | 'updatedAt' | 'toolExecution' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor' | 'initialInput'>
 
+/** Private exact Start material. Never project this onto a public Agent Session. */
+export type AgentMuxPreparedResumeDispatch = {
+  prepared: PreparedRun
+  runtime: AgentMuxCreationRuntime
+  nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+}
+
+function preparedResumeDispatch(value: unknown, session: AgentMuxStoredAgentSession | undefined, operationId: string): AgentMuxPreparedResumeDispatch {
+  const source = rpcRecord(value, ['prepared', 'runtime', 'nativeTarget'], 'INVALID_AGENT_SESSION_STORE')
+  const { prepared } = decodePreparedRun(source.prepared)
+  assertPreparedResumeBinding(prepared, session, operationId)
+  const runtime = parseCreationRuntime(source.runtime)
+  if (!session || session.nativeHandle?.kind !== 'provider' || !isDeepStrictEqual(source.nativeTarget, session.nativeHandle)) throw new AgentMuxError(
+    'The original resume dispatch does not match its prepared Session and native target.', 'INVALID_AGENT_SESSION_STORE')
+  return { prepared, runtime, nativeTarget: structuredClone(session.nativeHandle) }
+}
+
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
   | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
-  | { kind: 'resume'; expectedRun: AgentMuxRunRef; preparedSession?: AgentMuxStoredAgentSession; stopOperation?: never; ownerReleased?: true; restart?: { requestDigest: string; request: AgentMuxAgentRestartInput; nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>; stopOperation: AgentMuxRecoverableStopOperation; startNotApplied?: { code: string; message: string; observedAt: number } } }
+  | { kind: 'resume'; expectedRun: AgentMuxRunRef; preparedSession?: AgentMuxStoredAgentSession; preparedDispatch?: AgentMuxPreparedResumeDispatch; stopOperation?: never; ownerReleased?: true; restart?: { requestDigest: string; request: AgentMuxAgentRestartInput; nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>; stopOperation: AgentMuxRecoverableStopOperation; startNotApplied?: { code: string; message: string; observedAt: number } } }
   | { kind: 'reopen'; expectedRetirement: AgentMuxRetiredAgentSession; callerOperationId?: string; preparedSession?: AgentMuxStoredAgentSession; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
   | {
       kind: 'stop'
@@ -236,7 +257,7 @@ export type AgentMuxAgentSessionStore = {
   readLifecycleReservation(agentSessionId: string): Promise<AgentMuxLifecycleReservation | null>
   loadResumeCorrelation(agentSessionId: string, operationId: string): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> | null>
   recordRestartStartNotApplied(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, failure: { code: string; message: string; observedAt: number }): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
-  prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
+  prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
   prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>>
   releaseReopenOwner(ownerId: string): Promise<void>
   claimRestart(agentSessionId: string, operationId: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> | null>
@@ -499,6 +520,7 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
     }
     if (source.ownerReleased !== undefined && (source.ownerReleased !== true || !restart)) throw new AgentMuxError('Invalid restart owner release.', 'INVALID_AGENT_SESSION_STORE')
     return { ...base, kind: 'resume', expectedRun: expectedRun!, ...(preparedSession ? { preparedSession } : {}),
+      ...(source.preparedDispatch === undefined ? {} : { preparedDispatch: preparedResumeDispatch(source.preparedDispatch, preparedSession, base.operationId) }),
       ...(restart ? { restart } : {}), ...(source.ownerReleased === true ? { ownerReleased: true as const } : {}) }
   }
   return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation! }
@@ -2289,17 +2311,17 @@ function restartStartNotAppliedReservation(current: AgentMuxLifecycleReservation
 ): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> {
   if (!current || current.kind !== 'resume' || !current.restart || !current.preparedSession || !sameReservationOwner(current, expected) ||
     !sameSession(current.preparedSession, expected.preparedSession ?? null)) throw new AgentMuxError('The original restart Start owner changed before its not-applied receipt.', 'STALE_AGENT_SESSION')
-  const { preparedSession, ...retained } = current
+  const { preparedSession, preparedDispatch, ...retained } = current
   return lifecycleReservation({ ...retained, restart: { ...current.restart, startNotApplied: failure } }) as Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
 }
 
 function preparedResumeReservation(current: AgentMuxLifecycleReservation | undefined,
-  expected: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> {
+  expected: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> {
   if (!current || current.kind !== 'resume' || !sameReservationOwner(current, expected)) throw new AgentMuxError('Resume reservation changed before preparation.', 'STALE_AGENT_SESSION')
-  if (current.preparedSession && !sameSession(current.preparedSession, session)) throw new AgentMuxError('Original resume preparation is immutable.', 'STALE_AGENT_SESSION')
+  if (current.preparedSession && (!sameSession(current.preparedSession, session) || !isDeepStrictEqual(current.preparedDispatch, dispatch))) throw new AgentMuxError('Original resume preparation is immutable.', 'STALE_AGENT_SESSION')
   const restart = current.restart ? { ...current.restart } : undefined
   if (restart) delete restart.startNotApplied
-  return lifecycleReservation({ ...current, ...(restart ? { restart } : {}), preparedSession: session }) as Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
+  return lifecycleReservation({ ...current, ...(restart ? { restart } : {}), preparedSession: session, ...(dispatch ? { preparedDispatch: dispatch } : {}) }) as Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
 }
 
 function preparedReopenReservation(current: AgentMuxLifecycleReservation | undefined,
@@ -2696,8 +2718,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return structuredClone(next)
   }
 
-  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
-    const next = preparedResumeReservation(this.reservations.get(reservation.agentSessionId), reservation, session)
+  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch) {
+    const next = preparedResumeReservation(this.reservations.get(reservation.agentSessionId), reservation, session, dispatch)
     assertReservationPrecondition(next, [...this.sessions.values()], this.retiredAgentSessions)
     assertSupervisedResumeClaim(next, [...this.sessions.values()])
     this.reservations.set(next.agentSessionId, structuredClone(next))
@@ -3378,11 +3400,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return structuredClone(next)
   }
 
-  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
+  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch) {
     let next!: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
     await this.enqueue(async () => {
       const document = await this.read()
-      next = preparedResumeReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, session)
+      next = preparedResumeReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, session, dispatch)
       assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
       assertSupervisedResumeClaim(next, document.sessions)
       await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next.agentSessionId ? next : item) })

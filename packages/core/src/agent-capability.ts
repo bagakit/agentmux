@@ -6,18 +6,19 @@ import { AgentMuxError } from './errors.js'
  *
  * 公开的 `AGENTMUX_AGENT_SESSION_ID` 只是上下文提示——它就在环境变量里，改一下就能冒充另一个
  * Agent，因此**不能**用来认证 author。Core 在受管 Agent 启动时签发一枚不透明凭证，
- * 只持久化它的 hash；调用方把 raw 交回来，Core 比对后才认定"这句话是谁说的"。
+ * Session 元数据只持久化它的 hash；调用方把 raw 交回来，Core 比对后才认定"这句话是谁说的"。
  *
  * 形状沿用仓库既有的 hook token（`randomBytes(32).toString('base64url')`），但更严一档：
- * hook token 是明文持久化、仅在公开投影里剥离，而这里**只存 hash**。
+ * hook token 是明文持久化、仅在公开投影里剥离，而 capability 在 Session 元数据中只存 hash。完整私有 prepared Run 为准确恢复保留原环境，
+ * 不投影到公共 Session。
  */
 
-/** 签发一枚新凭证。raw 只在受管进程的环境里存在，绝不进 argv、日志、Timeline、receipt。 */
+/** 签发一枚新凭证。raw 只用于受管进程及其私有 prepared Run 环境，绝不进 argv、日志、Timeline、receipt。 */
 export function issueAgentCapability(): string {
   return randomBytes(32).toString('base64url')
 }
 
-/** 只有 hash 会落盘。沿用仓库既有的 sha256/base64url 写法。 */
+/** Session 元数据只保留 hash。沿用仓库既有的 sha256/base64url 写法。 */
 export function hashAgentCapability(raw: string): string {
   return createHash('sha256').update(raw).digest('base64url')
 }

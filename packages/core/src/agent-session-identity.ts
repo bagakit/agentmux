@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import type { AgentHookReceipt, AgentMuxAgentSession, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentNativeSessionHandle } from './types.js'
 
@@ -71,4 +72,8 @@ export function agentTurnEndEvidence(session: Pick<AgentMuxAgentSession,
 export function agentTurnEndBoundary(session: Parameters<typeof agentTurnEndEvidence>[0]): ReturnType<typeof agentTurnEndEvidence> {
   return session.terminalPromptReadiness?.consumedBySubmissionId === undefined
     ? agentTurnEndEvidence(session) : undefined
+}
+
+export function hookBindingIdentity(operationId: string): string {
+  return createHash('sha256').update(operationId).digest('base64url')
 }

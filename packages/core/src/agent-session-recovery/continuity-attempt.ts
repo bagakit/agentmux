@@ -408,7 +408,7 @@ export async function performAgentContinuity(
           // Old-Run frontend/initialization observations cannot hide this operation's
           // durable Start. Reconcile its existing Run before considering another launch.
           startUnconfirmed = true
-          const recovered = await lifecycle.completePreparedResume(reservation, await ports.runtime.kernel.inspectCreation(reservation.operationId))
+          const recovered = await lifecycle.completePreparedResume(reservation)
           if (recovered) { current = ports.sessions.registry.get(input.agentSessionId); return record({ kind: 'resumed', session: ports.events.projectSession(current),
             previousRun: { ...input.expectedRun }, run: { ...current.run }, evidence: { kind: 'provider-native', providerId: current.providerId,
               nativeSessionId: current.nativeHandle!.sessionId, previousRun: evidence } }, recovered.continuity?.reason ?? prior.reason) }
@@ -418,6 +418,7 @@ export async function performAgentContinuity(
         const known = await recordKnownSupervisedStart(error)
         if (known) return known
         receipt.error = error instanceof Error ? error.message : String(error)
+        receipt.errorCode = error instanceof AgentMuxError ? error.code : 'AGENT_CONTINUITY_UNCONFIRMED'
       }
       if (startUnconfirmed) {
         receipt.rechecks++

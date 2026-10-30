@@ -18,10 +18,6 @@ export function safeId(value: string, name: string): string {
   return value
 }
 
-export function hookBindingIdentity(operationId: string): string {
-  return createHash('sha256').update(operationId).digest('base64url')
-}
-
 export function terminalHandshakeOperationIdentity(
   providerId: AgentProviderId,
   runId: string,

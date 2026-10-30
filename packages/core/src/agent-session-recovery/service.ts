@@ -283,10 +283,9 @@ export class AgentSessionRecoveryService {
     return this.lifecycle.completePreparedReopen(reservation, run)
   }
 
-  async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
-    run: CtxmuxAdapterRun | null): Promise<AgentMuxStoredAgentSession | null> {
+  async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     return this.continuitySupervisor.serialize(reservation.agentSessionId, async () => {
-      const restored = await this.lifecycle.completePreparedResume(reservation, run)
+      const restored = await this.lifecycle.completePreparedResume(reservation)
       if (!restored) return null
       // Lifecycle commit preserves newer controls/supervision in the Store.
       // Publish that canonical result, not the older prepared observation.

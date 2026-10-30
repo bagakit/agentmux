@@ -1,3 +1,5 @@
+import { assertPreparedResumeBinding } from '../agent-prepared-resume.js'
+import { decodePreparedRun } from '../prepared-run.js'
 import { hasSelectedNativeTarget } from '../agent-native-source.js'
 import { lifecycleObserved } from '../lifecycle-diagnostic.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
@@ -13,17 +15,28 @@ import { splitLaunchPromptByDelivery } from '../agent-provider.js'
 import { composeAgentResumePrompt } from '../agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability } from '../agent-capability.js'
 import { AGENT_TERMINAL_HANDSHAKE_FAILED } from '../agent-terminal-handshake-outcome.js'
-import { sameRun } from '../agent-session-identity.js'
+import { hookBindingIdentity, sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
-import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
-import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from './continuity-contract.js'
+import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js'
+import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityRunEvidence } from './continuity-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
 import type { AgentCapabilitySnapshot, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
 import { agentCreationIntentDigest } from '../agent-creation-authority.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput, AgentMuxAgentResumeOperationInput } from './resume-contract.js'
-import { runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from '../agent-runtime-helpers.js'
+import { runRef, safeId, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from '../agent-runtime-helpers.js'
 import type { AgentSessionRecoveryPorts } from './ports.js'
+
+/** A saved terminal observation names this exact old Run and native target, never a missing mapping. */
+function retainedRunEnd(session: AgentMuxStoredAgentSession | undefined): Extract<AgentMuxAgentContinuityRunEvidence, { kind: 'run-ended' }> | undefined {
+  if (!session) return
+  for (const operation of [session.continuity, ...Object.values(session.continuityOperations ?? {})]) {
+    if (operation && sameRun(operation.previousRun, session.run) &&
+        matchesProviderNativeSessionTarget(operation.nativeTarget, session.nativeHandle) && operation.evidence.kind === 'run-ended') {
+      return structuredClone(operation.evidence)
+    }
+  }
+}
 
 /** Executes original lifecycle reservations; shares the supervisor's single Session serializer. */
 export class AgentSessionRunLifecycle {
@@ -93,7 +106,7 @@ export class AgentSessionRunLifecycle {
         reservation = await this.ports.sessions.registry.claimRestart(input.agentSessionId, operation)
         if (!reservation) throw new AgentMuxError('The original restart reservation is unconfirmed.', 'AGENT_RESTART_UNCONFIRMED')
         if (reservation.preparedSession) {
-          const restored = await this.completePreparedResume(reservation, await this.ports.runtime.kernel.inspectCreation(reservation.operationId))
+          const restored = await this.completePreparedResume(reservation)
           if (restored) return this.ports.events.projectSession(restored)
           throw new AgentMuxError('The original restart Start has no single confirmed Run. Inspect the same operation; no Start was repeated.',
             'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
@@ -141,7 +154,7 @@ export class AgentSessionRunLifecycle {
         const conflict = { ...result, session: this.ports.events.projectSession(canonical!), phase: 'unconfirmed' as const, canRetry: false }
         if (reservation.preparedSession) {
           try {
-            const run = await this.ports.runtime.kernel.inspectCreation(operation), frozen = reservation.preparedSession.continuity?.restartLaunch
+            const run = await this.inspectPreparedResume(reservation), frozen = reservation.preparedSession.continuity?.restartLaunch
             const exact = run?.lifecycleOperationId === operation && run.workspacePath === reservation.preparedSession.workspacePath && frozen &&
               frozen.program === run.program && frozen.argsDigest === createHash('sha256').update(JSON.stringify(run.args)).digest('base64url')
             return { ...conflict, ...(exact && run ? { newRun: runRef(run.runId) } : {}), detail: exact
@@ -167,7 +180,7 @@ export class AgentSessionRunLifecycle {
     if (canonical) result.session = this.ports.events.projectSession(canonical)
     if (reservation.restart.startNotApplied) return { ...result, phase: 'starting', canRetry: true, detail: 'The original Run stopped. Its replacement Start was confirmed not applied; explicitly retry this same operation and frozen plan.' }
     if (reservation.preparedSession) {
-      const run = await this.ports.runtime.kernel.inspectCreation(operation)
+      const run = await this.inspectPreparedResume(reservation)
       const frozen = reservation.preparedSession.continuity?.restartLaunch
       if (run?.lifecycleOperationId === operation && run.workspacePath === reservation.preparedSession.workspacePath && frozen &&
         frozen.program === run.program && frozen.argsDigest === createHash('sha256').update(JSON.stringify(run.args)).digest('base64url')) {
@@ -207,7 +220,7 @@ export class AgentSessionRunLifecycle {
           return this.ports.events.projectSession(restored)
         }
         if (reservation?.preparedSession && sameRun(reservation.expectedRun, canonical.run)) {
-          const restored = await this.completePreparedResume(reservation, await this.ports.runtime.kernel.inspectCreation(reservation.operationId))
+          const restored = await this.completePreparedResume(reservation)
           if (restored) return this.ports.events.projectSession(restored)
         }
         throw new AgentMuxError('The original resume result is unconfirmed. Inspect the same operation; no Start or input was repeated.',
@@ -417,13 +430,18 @@ export class AgentSessionRunLifecycle {
       if (oldRun?.state.type === 'running' && !restartReservation) {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
+      let ended: Extract<AgentMuxAgentContinuityRunEvidence, { kind: 'run-ended' }> | undefined = oldRun && oldRun.state.type !== 'running'
+        ? { kind: 'run-ended', state: oldRun.state.type, observedAt: Date.now() } : retainedRunEnd(previous)
+      if (reservation.kind === 'resume' && !restartReservation && !ended) throw new AgentMuxError(
+        'The original Run has no confirmed terminal observation. A missing Run on this Runtime does not authorize replacement; the Session and original operation are retained.',
+        'AGENT_RESUME_ORIGINAL_RUN_UNCONFIRMED')
       if (directRequestDigest && (!restartReservation || !continuity)) {
         const now = Date.now()
         continuity = { operationId: input.operationId, agentSessionId: current.agentSessionId, trigger: restartReservation ? 'manual' : 'input',
           ...(restartReservation ? { action: 'restart' as const } : {}),
           policy: normalizeAgentContinuityPolicy(), previousRun: { ...current.run }, nativeTarget: structuredClone(current.nativeHandle),
           admittedAt: now, observedAt: now, rechecks: 0, kind: 'starting', reason: 'explicit-request', requestDigest: directRequestDigest,
-          evidence: oldRun ? { kind: 'run-ended', state: oldRun.state.type as 'exited' | 'interrupted', observedAt: now } : { kind: 'run-missing', observedAt: now },
+          evidence: ended ?? { kind: 'run-missing', observedAt: now },
           recoveryInputs: { reminder: '', continuation: '' } }
         const directInput = prepareContinuityLaunchInput(continuity, this.ports.providers.providers.get(current.providerId).catalog,
           lifecycleOperationId, { submissionId: `launch-prompt:${lifecycleOperationId}`, prompt: input.prompt ?? '',
@@ -485,7 +503,9 @@ export class AgentSessionRunLifecycle {
         catch (error) { if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') oldRun = null; else throw error }
         if (oldRun?.state.type === 'running') throw new AgentMuxError('The original Run has not ended. No replacement was started.',
           'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
-        if (continuity) continuity.evidence = oldRun ? { kind: 'run-ended', state: oldRun.state.type as 'exited' | 'interrupted', observedAt: Date.now() } : { kind: 'run-missing', observedAt: Date.now() }
+        ended = oldRun ? { kind: 'run-ended', state: oldRun.state.type as 'exited' | 'interrupted', observedAt: Date.now() } : retainedRunEnd(previous)
+        if (!ended) throw new AgentMuxError('The original Run end is unconfirmed on this Runtime. The original restart remains available for exact observation.', 'AGENT_RESTART_UNCONFIRMED')
+        if (continuity) continuity.evidence = ended
         if (continuity) {
           continuity.reason = 'restart-starting'
           const pending = structuredClone(continuity)
@@ -539,30 +559,36 @@ export class AgentSessionRunLifecycle {
         }) : null
       const launchEnvironment = this.ports.hooks.agentEnvironment(plan.env, current.agentSessionId, current.providerId, current.executorId,
         hookBinding, lifecycleOperationId, invocationCapability)
-      if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {
+      const launch = { program: plan.command, args: plan.args, cwd: current.workspacePath, env: launchEnvironment,
+        ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows }) }
+      let dispatch: AgentMuxPreparedResumeDispatch | undefined
+      if (reservation.kind === 'resume') {
+        if (continuity?.operationId !== input.operationId || !ended) throw new AgentMuxError(
+          'The original resume intent or ended Run is unconfirmed. No Start was dispatched.', 'AGENT_RESUME_UNCONFIRMED')
+        const request = this.ports.runtime.kernel.prepareStart(launch)
+        const identity = { program: request.program, argsDigest: createHash('sha256').update(JSON.stringify(request.args)).digest('base64url') }
+        dispatch = { prepared: { createOperationId: lifecycleOperationId, workspacePath: current.workspacePath,
+          launch: JSON.stringify({ createOperationId: lifecycleOperationId, request }) },
+          runtime: this.ports.runtime.kernel.creationRuntimeIdentity(), nativeTarget: structuredClone(current.nativeHandle) }
         if (restartReservation) {
-          const identity = this.ports.runtime.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })
           if (restartReservation.restart?.startNotApplied && continuity.restartLaunch && !isDeepStrictEqual(continuity.restartLaunch, identity)) throw new AgentMuxError(
             'The original not-applied restart launch changed. Its original plan and native identity are retained.', 'AGENT_RESTART_CONFLICT')
           continuity.restartLaunch = identity
         }
-        if (continuity.launchInput) continuity.launchInput.launchPlan = this.ports.runtime.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })
+        if (continuity.launchInput) continuity.launchInput.launchPlan = identity
+        continuity.evidence = ended
         reservation = await this.ports.sessions.registry.prepareResume(reservation, { ...nativeSession, continuity,
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
-          capabilityHash: hashAgentCapability(invocationCapability) })
+          capabilityHash: hashAgentCapability(invocationCapability) }, dispatch)
+        if (!isDeepStrictEqual(reservation.preparedDispatch, dispatch)) throw new AgentMuxError(
+          'The complete original resume dispatch was not durably retained. No Start was dispatched.', 'AGENT_RESUME_UNCONFIRMED')
         this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
       launchAttempted = true
-      const run = await this.ports.runtime.kernel.start({
-        operationKey: lifecycleOperationId,
-        program: plan.command,
-        args: plan.args,
-        cwd: current.workspacePath,
-        env: launchEnvironment,
-        ...(input.cols === undefined ? {} : { cols: input.cols }),
-        ...(input.rows === undefined ? {} : { rows: input.rows })
-      }).catch(async error => {
+      const run = await (dispatch
+        ? this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, lifecycleOperationId, dispatch.runtime)
+        : this.ports.runtime.kernel.start({ operationKey: lifecycleOperationId, ...launch })).catch(async error => {
         if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&
           error.creationFailure.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
@@ -842,8 +868,27 @@ export class AgentSessionRunLifecycle {
     }
   }
 
-  async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
-    run: CtxmuxAdapterRun | null): Promise<AgentMuxStoredAgentSession | null> {
+  private async inspectPreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<CtxmuxAdapterRun | null> {
+    const dispatch = reservation.preparedDispatch
+    if (!dispatch) {
+      // A legacy reservation cannot authorize a negative conclusion or a fence on today's Runtime.
+      // Its original secret binding can still recognize an accurately retained positive witness.
+      const observed = await this.ports.runtime.kernel.inspectRetainedStart(reservation.operationId)
+      if (!observed) throw new AgentMuxError(
+        'The original resume dispatch Runtime and complete request were not retained by this Core owner, and this read-only key observation found no retained Run. Preserve the original Session and operation; obtain the original dispatch source or a matching retained Run. This observation does not authorize Start or retirement.',
+        'AGENT_RESUME_SOURCE_UNCONFIRMED')
+      assertPreparedResumeBinding(observed.prepared, reservation.preparedSession, reservation.operationId, 'AGENT_RESUME_RETAINED_MISMATCH')
+      if (reservation.preparedSession?.run.runId !== reservation.expectedRun.runId) throw new AgentMuxError(
+        'The original resume expected Run changed. Its Run and operation were preserved.', 'AGENT_RESUME_RETAINED_MISMATCH')
+      // No reconstructed environment or persisted dispatch claim: settle the actual retained Run.
+      return observed.run
+    }
+    return await this.ports.runtime.kernel.inspectPreparedStart(decodePreparedRun(dispatch.prepared).request,
+      reservation.operationId, undefined, dispatch.runtime)
+  }
+
+  async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
+    const run = await this.inspectPreparedResume(reservation)
     const prepared = reservation.preparedSession
     if (!prepared || !run || run.lifecycleOperationId !== reservation.operationId) return null
     if (reservation.restart && (!prepared.continuity?.restartLaunch || prepared.continuity.restartLaunch.program !== run.program ||

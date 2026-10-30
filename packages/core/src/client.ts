@@ -1,3 +1,4 @@
+import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
 import { parseAgentExecutionNotices } from './agent-execution-helper.js'
 import { AgentExecutionJournal } from './agent-execution-journal.js'
@@ -12,7 +13,7 @@ import { validateMessageFieldRead } from './agent-message-field.js'
 import { readMessageField } from './agent-message-field-reader.js'
 import type { AgentMuxMessageRead, AgentMuxMessageReadRequest, AgentMuxMessageFieldRead, AgentMuxMessageReadView, AgentMuxMessageFieldPage } from './agent-message-query.js'
 import { lifecycleDiagnosticSource, lifecycleObserved } from './lifecycle-diagnostic.js'
-import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
+import { parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
 import { TerminalRecoveryOwner } from './terminal-recovery-owner.js'
 import { parseTerminalRecoveryInput, type AgentMuxTerminalRecoveryInput, type AgentMuxTerminalRecoveryResult } from './terminal-recovery.js'
 import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
@@ -20,7 +21,7 @@ import { AgentSessionRecoveryService } from './agent-session-recovery/service.js
 import { retryAgentCreationResources, type AgentCreationResourceContext } from './agent-creation-resource-retry.js'
 import { parseCreationContinueInput, type AgentMuxCreationContinueInput, type AgentMuxCreationContinueReceipt } from './agent-creation-continue.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/resume-contract.js'
-import { runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
+import { runRef, safeId, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
 import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
@@ -146,7 +147,7 @@ import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
   type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
-import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
+import { hookBindingIdentity, agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
@@ -4276,7 +4277,7 @@ export class AgentMuxClient {
   }
 
   async createPreparedTerminal(input: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {
-    const { prepared, request } = decodePreparedTerminal(input)
+    const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     const run = await this.kernel.startPrepared(request, prepared.createOperationId)
     this.runPids.set(run.runId, run.pid)
@@ -4287,7 +4288,7 @@ export class AgentMuxClient {
 
   /** Without an exact ref, null means unconfirmed. With a ref, null confirms that original Run is absent. Never submits Start. */
   async inspectPreparedTerminal(input: AgentMuxPreparedTerminal, ref?: AgentMuxRunRef): Promise<AgentMuxRun | null> {
-    const { prepared, request } = decodePreparedTerminal(input)
+    const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     const run = await this.kernel.inspectPreparedStart(request, prepared.createOperationId, ref?.runId)
     if (!run) return null
@@ -4299,7 +4300,7 @@ export class AgentMuxClient {
   terminalCreationRuntimeIdentity(): AgentMuxCreationRuntime { this.requireConnected(); return this.kernel.creationRuntimeIdentity() }
 
   async retirePreparedTerminalCreation(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirement> {
-    const { prepared, request } = decodePreparedTerminal(input)
+    const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     const result = await this.kernel.retirePreparedStart(request, prepared.createOperationId, runtime)
     if (result.outcome === 'retired') return result
@@ -4309,7 +4310,7 @@ export class AgentMuxClient {
   }
 
   async observePreparedTerminalCreationRetirement(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirementObservation> {
-    const { prepared } = decodePreparedTerminal(input)
+    const { prepared } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     return await this.kernel.observePreparedStartRetirement(prepared.createOperationId, runtime)
   }
@@ -7661,7 +7662,7 @@ export class AgentMuxClient {
         continue
       }
       if (reservation.kind === 'resume' && reservation.preparedSession) {
-        try { await this.recovery.completePreparedResume(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
+        try { await this.recovery.completePreparedResume(reservation) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_CONTINUITY_UNCONFIRMED', message: String(error),
           lifecycle: lifecycleDiagnosticSource(reservation), failure: deliveryFailure(error),
@@ -7990,7 +7991,8 @@ export class AgentMuxClient {
       AGENTMUX_PROVIDER_ID: providerId,
       AGENTMUX_EXECUTOR_ID: executorId,
       AGENTMUX_LIFECYCLE_OPERATION_ID: lifecycleOperationId,
-      // 这枚凭证是这个 Agent 说话时的身份证明。Core 只留它的 hash；公开的
+      // 这枚凭证是这个 Agent 说话时的身份证明。Session 元数据只留 hash；准确的
+      // 私有 prepared Run 保留原完整环境用于核对，不进入公开投影。公开的
       // AGENTMUX_AGENT_SESSION_ID 只是上下文提示，改一下就能冒充，故不能用于认证。
       AGENTMUX_AGENT_CAPABILITY: capability,
       ...(usage ? { AGENTMUX_USAGE_TRANSCRIPT_FORMAT: usage.transcriptFormat } : {}),

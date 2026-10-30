@@ -14,6 +14,7 @@ import {
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
   type AgentMuxPreparedCreation,
+  type AgentMuxPreparedResumeDispatch,
   type AgentMuxRecoverableStopOperation,
   type AgentMuxRetiredAgentSession
 } from './agent-session-store.js'
@@ -342,8 +343,8 @@ export class AgentMuxAgentSessionRegistry {
     return await this.store.recordRestartStartNotApplied(reservation, failure)
   }
 
-  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
-    return await this.store.prepareResume(reservation, session)
+  async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch) {
+    return await this.store.prepareResume(reservation, session, dispatch)
   }
 
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession) {

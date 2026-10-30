@@ -1,3 +1,4 @@
+import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
 import { mintObjectId } from './object-id.js'
 import { observeRead } from './observation-read.js'
 import { execFile } from 'node:child_process'
@@ -1263,10 +1264,15 @@ export class CtxmuxRunAdapter {
     return await this.startPrepared(this.prepareStart(input), input.operationKey)
   }
 
-  /** Replay the original complete request, without reading the current Host environment. */
-  async startPrepared(request: RunSpec, operationKey: string): Promise<CtxmuxAdapterRun> {
+  /** Submit one frozen request; a source mismatch says nothing about an earlier same-key Start. */
+  async startPrepared(request: RunSpec, operationKey: string, expected?: AgentMuxCreationRuntime): Promise<CtxmuxAdapterRun> {
     try {
-      return this.projectRun(await this.requireClient().start(request, createOperationKey(operationKey)))
+      const client = this.requireClient()
+      if (expected && (parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId ||
+          request.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey)) throw new AgentMuxError(
+        'This dispatch did not reach its original prepared Runtime. The original operation remains unconfirmed.', 'PREPARED_START_RUNTIME_MISMATCH')
+      // Do not reacquire a connection after source validation or a durable preparation await.
+      return this.projectRun(await client.start(request, createOperationKey(operationKey)))
     } catch (error) {
       throw translateCtxmuxError(error)
     }
@@ -1321,24 +1327,50 @@ export class CtxmuxRunAdapter {
     } catch (error) { throw translateCtxmuxError(error) }
   }
 
-  /** Observe one frozen creation without ever submitting Start again. */
-  async inspectPreparedStart(request: RunSpec, operationKey: string, runId?: string): Promise<CtxmuxAdapterRun | null> {
-    if (request.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey) throw new AgentMuxError(
-      'The prepared terminal has no original creation binding.', 'INVALID_TERMINAL_PREPARATION')
+  /** Positive witness only: the serving Native retained this exact key and complete actual request.
+   * This observation is not a claim that Core froze dispatch provenance before the old Start.
+   */
+  async inspectRetainedStart(operationKey: string): Promise<{
+    runtime: AgentMuxCreationRuntime; prepared: PreparedRun; run: CtxmuxAdapterRun
+  } | null> {
     try {
+      const client = this.requireClient(), source = this.creationRuntimeIdentity()
+      const { runtime, observation } = await client.observeCreation(createOperationKey(operationKey))
+      if (runtime.runtimeId !== source.runtimeId) throw new AgentMuxError(
+        'The retained creation observation came from another Runtime.', 'PREPARED_START_RUNTIME_MISMATCH')
+      if (observation.outcome !== 'retained') return null
+      const run = observation.run
+      const { prepared } = decodePreparedRun({ createOperationId: operationKey, workspacePath: run.spec?.cwd,
+        launch: JSON.stringify({ createOperationId: operationKey, request: run.spec }) })
+      return { runtime: { runtimeId: runtime.runtimeId, instanceId: runtime.daemonInstanceId,
+        buildIdentity: runtime.buildId, protocolVersion: runtime.protocolGeneration }, prepared, run: this.projectRun(run) }
+    } catch (error) { throw translateCtxmuxError(error) }
+  }
+
+  /** Observe one frozen creation without ever submitting Start again. */
+  async inspectPreparedStart(request: RunSpec, operationKey: string, runId?: string, expected?: AgentMuxCreationRuntime): Promise<CtxmuxAdapterRun | null> {
+    if (request.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey) throw new AgentMuxError(
+      'The prepared Run has no original creation binding.', expected ? 'INVALID_PREPARED_RUN' : 'INVALID_TERMINAL_PREPARATION')
+    try {
+      const client = this.requireClient()
+      if (expected && parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId) throw new AgentMuxError(
+        'The original prepared Start belongs to another persistent Runtime.', 'PREPARED_START_RUNTIME_MISMATCH')
       if (runId !== undefined) {
         let run: RunInfo
-        try { run = await this.requireClient().status(runId) }
+        try { run = await client.status(runId) }
         catch (error) { if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null; throw error }
         if (run.id !== runId || run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey || !isDeepStrictEqual(run.spec, request))
-          throw new AgentMuxError('The exact Run does not match the original complete prepared launch. The Run was preserved.', 'TERMINAL_PREPARATION_RUN_MISMATCH')
+          throw new AgentMuxError('The exact Run does not match the original complete prepared launch. The Run was preserved.', expected ? 'PREPARED_START_RUN_MISMATCH' : 'TERMINAL_PREPARATION_RUN_MISMATCH')
         return this.projectRun(run)
       }
-      const observed = await this.originalCreationRun(operationKey)
-      if (observed === null) return null
+      const { runtime, observation } = await client.observeCreation(createOperationKey(operationKey))
+      if (expected && runtime.runtimeId !== expected.runtimeId) throw new AgentMuxError(
+        'The prepared Start observation came from another persistent Runtime.', 'PREPARED_START_RUNTIME_MISMATCH')
+      if (observation.outcome !== 'retained') return null
+      const observed = observation.run
       if (!isDeepStrictEqual(observed.spec, request)) throw new AgentMuxError(
         'The original creation does not match its complete frozen launch. Preserve the operation without resending.',
-        'TERMINAL_CREATION_UNCONFIRMED')
+        expected ? 'PREPARED_START_UNCONFIRMED' : 'TERMINAL_CREATION_UNCONFIRMED')
       return this.projectRun(observed)
     } catch (error) { throw translateCtxmuxError(error) }
   }
