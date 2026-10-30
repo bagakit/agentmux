@@ -13,7 +13,7 @@ const variants = {
   'destination-binding': ['packages/core/src/rpc-forwarding.ts', 'grant.destination !== p.destinationInstanceId', 'false'],
   'single-claim': ['packages/core/src/rpc-forwarding.ts', '!grant || grant.claimed ||', '!grant ||'],
   'reader-authority': ['packages/core/src/rpc-forwarding.ts', '// This is current *authorization*, independently of the original reader.', 'grant.context.signal?.throwIfAborted()'],
-  'return-authority': ['apps/host/src/host.ts', '? await (await authorityReady).bindForwardedDevice(principal) : undefined', '? undefined : undefined'],
+  'return-authority': ['apps/host/src/host.ts', '? await (await getAuthority()).bindForwardedDevice(principal) : undefined', '? undefined : undefined'],
   'return-identity': ['apps/desktop/src/main/desktop-host.ts', "...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {})", '...{}'],
   'ssh-device-authority': ['packages/core/src/runtime-client.ts', "context.principal?.kind === 'device' && !context.forwarding", 'false'],
   'ssh-device-forwarding': ['packages/core/src/runtime-client.ts', "...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {})", '...{}']

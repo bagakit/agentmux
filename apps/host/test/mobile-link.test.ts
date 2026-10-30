@@ -51,7 +51,7 @@ describe('original mobile link discovery', () => {
   it.each([['192.168.1.20:8443', false], ['relay.example.org', true]])('freezes one %s offer and exposes its existing endpoint even while disconnected', async (endpoint, tls) => {
     const original = await authority(), url = offer(original.hostId, endpoint, tls), link = vi.fn(() => url)
     const state = vi.fn((_url?: string) => ({ state: 'disconnected' as const, message: 'Original connection observation' }))
-    const administration = createDeviceAdministration(Promise.resolve(original), state, link)
+    const administration = createDeviceAdministration(() => Promise.resolve(original), state, link)
     const result = await administration.call('device.link', {}, {})
     expect(result).toEqual({ hostId: original.hostId, url, pageUrl: url.split('#')[0], relay: { endpoint, useTls: tls },
       mobileAccess: { state: 'disconnected', message: 'Original connection observation', origin: new URL(url).origin } })
@@ -64,7 +64,7 @@ describe('original mobile link discovery', () => {
     }
   })
   it('authenticates the exact local caller before reading while retaining device administration boundaries', async () => {
-    const h = await owner(), original = await authority(), administration = createDeviceAdministration(Promise.resolve(original),
+    const h = await owner(), original = await authority(), administration = createDeviceAdministration(() => Promise.resolve(original),
       () => ({ state: 'connected', message: 'Ready' }), () => offer(original.hostId, '192.168.1.20:8443'))
     const call = vi.spyOn(administration, 'call'), service = new core.AgentMuxRpcService({ coreClients: h.coreClients, deviceAdministration: administration })
     expect((await service.call('device.link', {}, { caller: h.credentials, transport: 'unix' })).hostId).toBe(original.hostId)
@@ -82,7 +82,7 @@ describe('original mobile link discovery', () => {
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   })
   it('keeps missing original address explicit without affecting the healthy caller', async () => {
-    const h = await owner(), original = await authority(), administration = createDeviceAdministration(Promise.resolve(original),
+    const h = await owner(), original = await authority(), administration = createDeviceAdministration(() => Promise.resolve(original),
       () => ({ state: 'starting', message: 'Starting' }), () => { throw new core.AgentMuxError('Original address unavailable', 'CONTROL_UNAVAILABLE') })
     const service = new core.AgentMuxRpcService({ coreClients: h.coreClients, deviceAdministration: administration })
     await expect(service.call('device.link', {}, { caller: h.credentials })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
