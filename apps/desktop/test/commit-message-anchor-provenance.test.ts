@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { resolve } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { reviewGitFixture } from '../../../test/helpers/review-git-fixture.js'
+import { closeReviewFixtures } from '../../../test/helpers/review-guard-isolation.mjs'
 import {
   ANCHOR_CODE_EXTENSIONS,
   anchorResolvesInTree,
@@ -11,12 +10,11 @@ import {
   resolveAnchorPath
 } from '../scripts/commit-message-anchor-provenance.mjs'
 
-const run = promisify(execFile)
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
-
-async function git(args: string[]): Promise<string> {
-  const { stdout } = await run('git', args, { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 })
-  return stdout
+const cleanup: (() => Promise<unknown>)[] = []
+afterEach(() => closeReviewFixtures(cleanup))
+async function fixture() {
+  const value = await reviewGitFixture(); cleanup.push(value.close)
+  return value
 }
 
 describe('Detector 2: commit-message line anchor provenance', () => {
@@ -156,25 +154,24 @@ describe('Detector 2: commit-message line anchor provenance', () => {
     expect(resolveAnchorPath('src/index.ts', tree), '两个同后缀却选了一个——歧义应返回 null').toBe(null)
   })
 
-  // ---- Real-tree drive: the ban is REAL, and this detector reads actual history -----------
-
-  it('runs against real history (incl. a pinned anchor-bearing commit) and proves the regex still bites', async () => {
-    // 正则活性判据必须钉在「历史里确有的锚点」上，而不是「最近的提交恰好带锚点」上——后者会腐烂:
-    // 干净约定被强制执行后，近 30 条提交自然全是符号名、零锚点，滑动窗口就假红了。故显式钉入一条
-    // 真实历史提交 5815fa58（其 message 带 `apps/desktop/test/activity-groups.test.ts:30`），把
-    // 「正则还咬得动真实历史」与「锚点用得多近」解耦。若正则失效，这条真锚点扫不到 → 红。
-    const ANCHOR_BEARING_SHA = '5815fa58' // 真实历史，prose 锚点 activity-groups.test.ts:30
-    const recent = (await git(['rev-list', '--max-count=30', 'HEAD'])).trim().split('\n').filter(Boolean)
-    // 前提自证 (AGENTS.md 契约测试第三种白绿: 扫到空内容): there MUST be commits to scan.
-    expect(recent.length, 'rev-list 返回空——没有历史可扫，下面的断言全是空转').toBeGreaterThan(0)
-    const shas = recent.includes(ANCHOR_BEARING_SHA) ? recent : [...recent, ANCHOR_BEARING_SHA]
-    let anchorsSeen = 0
-    for (const sha of shas) {
-      const message = await git(['log', '-1', '--format=%B', sha])
-      anchorsSeen += findMessageAnchors(message).length
-    }
-    // The point of this assertion: the classifier ran over real (not synthetic) commit messages and
-    // still found a real anchor, proving the regex bites live history rather than being a dead regex.
-    expect(anchorsSeen, '真实历史（含钉死的锚点提交）里一个锚点都没扫到——正则可能已失效').toBeGreaterThan(0)
-  })
+  it('reads real commit messages and trees through the detector CLI without repository history', async () => {
+    const f = await fixture()
+    const script = resolve(import.meta.dirname, '../scripts/commit-message-anchor-provenance.mjs')
+    await f.commit({ 'src/example.ts': 'first\nsecond\n' }, 'chore: initialize fixture')
+    const valid = await f.commit({}, 'fix: valid diagnostic\n\nsrc/example.ts:2: error TS2322: fixture failure')
+    const message = await f.git(['log', '-1', '--format=%B', valid])
+    const anchors = findMessageAnchors(message)
+    expect(anchors).toHaveLength(1)
+    expect(anchors[0]).toMatchObject({ path: 'src/example.ts', line: 2, kind: 'diagnostic' })
+    expect(await f.cli(script, [valid])).toMatchObject({ code: 0, stdout: expect.stringContaining('1 commit(s)') })
+    const prose = await f.commit({}, 'fix: explanation cites src/example.ts:2')
+    expect(await f.cli(script, [prose])).toMatchObject({ code: 1, stderr: expect.stringContaining('banned prose line anchor') })
+    const beyondTree = await f.commit({}, 'fix: dirty-tree diagnostic\n\nsrc/example.ts:3: error TS2322: fixture failure')
+    expect(await f.cli(script, [beyondTree])).toMatchObject({ code: 1, stderr: expect.stringContaining('has only 2 lines') })
+    // The read must come from the committed tree, not the current worktree.
+    await f.commit({ 'src/example.ts': 'first\nsecond\nthird\n' }, 'fix: extend fixture')
+    expect(await f.cli(script, [beyondTree])).toMatchObject({ code: 1, stderr: expect.stringContaining('has only 2 lines') })
+    await expect(f.git(['cat-file', '-e', '5815fa58^{commit}'])).rejects.toBeDefined()
+    await expect(f.git(['cat-file', '-e', '3afe619^{commit}'])).rejects.toBeDefined()
+  }, 30_000)
 })

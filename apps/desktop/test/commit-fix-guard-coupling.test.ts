@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { resolve } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { reviewGitFixture } from '../../../test/helpers/review-git-fixture.js'
+import { closeReviewFixtures } from '../../../test/helpers/review-guard-isolation.mjs'
 import {
   citesMutationEvidence,
   classifyVitestOutput,
@@ -13,12 +12,11 @@ import {
   verifyCouplingLogic
 } from '../scripts/commit-fix-guard-coupling.mjs'
 
-const run = promisify(execFile)
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
-
-async function git(args: string[]): Promise<string> {
-  const { stdout } = await run('git', args, { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 })
-  return stdout
+const cleanup: (() => Promise<unknown>)[] = []
+afterEach(() => closeReviewFixtures(cleanup))
+async function fixture() {
+  const value = await reviewGitFixture(); cleanup.push(value.close)
+  return value
 }
 
 describe('Detector 1: fix/guard same-commit coupling (Layer A structural screen)', () => {
@@ -243,22 +241,22 @@ describe('Detector 1: fix/guard same-commit coupling (Layer A structural screen)
     ])
   })
 
-  // ---- Real-tree drive against the documented precedent commits ---------------------------
-
-  it('screens the precedent commit 3afe619 from real history and confirms the scan ran', async () => {
-    // 3afe619 shipped its guard (client-connection-lost.test.ts) AND measured mutations, so the
-    // WEAK screen must not flag it as definitelyUncoupled. We assert the file list was actually
-    // read from git (non-empty) so a broken diff-tree cannot pass this as a vacuous green.
-    const paths = (await git(['diff-tree', '--no-commit-id', '--name-only', '-r', '3afe619']))
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-    expect(paths.length, '3afe619 的文件列表读成空——git 读取失败会让下面全是空转').toBeGreaterThan(0)
-    const message = await git(['log', '-1', '--format=%B', '3afe619'])
-    const s = structuralCoupling(paths, message)
-    expect(s.touchesSource, '3afe619 应当改了 source').toBe(true)
-    expect(s.touchesTest, '3afe619 应当带了 test 文件').toBe(true)
-    expect(s.hasMutationNumbers, '3afe619 消息里应有 N failed | M passed').toBe(true)
-    expect(s.definitelyUncoupled).toBe(false)
-  })
+  it('screens self-owned commits through real Git tree/message IO and the original CLI', async () => {
+    const f = await fixture()
+    const script = resolve(import.meta.dirname, '../scripts/commit-fix-guard-coupling.mjs')
+    await f.commit({ 'src/example.ts': 'original\n' }, 'chore: initialize fixture')
+    const coupled = await f.commit({ 'src/example.ts': 'fixed\n', 'test/example.test.ts': 'guard\n' },
+      'fix: keep the guard\n\ntest/example.test.ts\nmutation: 1 failed | 2 passed')
+    const paths = (await f.git(['diff-tree', '--no-commit-id', '--name-only', '-r', coupled])).split('\n').filter(Boolean)
+    expect(paths).toEqual(['src/example.ts', 'test/example.test.ts'])
+    const message = await f.git(['log', '-1', '--format=%B', coupled])
+    expect(structuralCoupling(paths, message)).toMatchObject({ touchesSource: true, touchesTest: true, hasMutationNumbers: true, definitelyUncoupled: false })
+    expect(await f.cli(script, [coupled])).toMatchObject({ code: 0, stdout: expect.stringContaining('test files: 1, mutation numbers cited: true') })
+    const uncoupled = await f.commit({ 'src/example.ts': 'unguarded change\n' }, 'fix: missing guard')
+    expect(await f.cli(script, [uncoupled])).toMatchObject({ code: 1, stderr: expect.stringContaining('UNCOUPLED') })
+    const cited = await f.commit({ 'src/example.ts': 'measured change\n' }, 'fix: measured mutation\n\n1 failed | 2 passed')
+    expect(await f.cli(script, [cited])).toMatchObject({ code: 0, stdout: expect.stringContaining('test files: 0, mutation numbers cited: true') })
+    await expect(f.git(['cat-file', '-e', '5815fa58^{commit}'])).rejects.toBeDefined()
+    await expect(f.git(['cat-file', '-e', '3afe619^{commit}'])).rejects.toBeDefined()
+  }, 30_000)
 })
