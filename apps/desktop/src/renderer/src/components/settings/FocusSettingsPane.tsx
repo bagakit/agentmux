@@ -54,6 +54,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
         <section className="settings-group" data-settings-preview-group="project-scanning"><header><span>Project scanning</span></header>
           <Choices id="recent-activity" legend="Recent activity window" value={draft.value.recentActivityHours} options={FOCUS_RECENT_ACTIVITY_HOURS.map(value => ({ value, label: value === 168 ? '1 week' : `${value}h` }))} onChange={value => change('recentActivityHours', value, 'board')} />
           <p className="focus-settings-description">Recent work moves forward. Attention and Working stay first; older projects remain available.</p>
+          <Choices id="topic-presentation" legend="Topics in Collections" value={draft.value.topicPresentation} options={[{ value: 'cards', label: 'On Agent cards', hint: 'Keep the Topic beside each task' }, { value: 'sections', label: 'Topic sections', hint: 'Use light headings within each Collection' }]} onChange={value => change('topicPresentation', value, 'board')} />
           <Choices id="reply-lines" legend="Reply excerpt" value={draft.value.replyLines} options={FOCUS_REPLY_LINES.map(value => ({ value, label: `${value} ${value === 1 ? 'line' : 'lines'}`, hint: value === 1 ? 'Scan faster' : value === 2 ? 'Balanced' : 'More context' }))} onChange={value => change('replyLines', value, 'board')} />
           {previewButton('project-scanning', 'Project scanning', 'board')}
         </section>

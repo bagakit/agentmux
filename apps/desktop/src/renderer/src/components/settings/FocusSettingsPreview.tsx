@@ -1,14 +1,20 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
-import type { WorkspaceRecord } from '../../../../shared/contracts'
+import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../../shared/contracts'
+import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control'
+import { homeZoneId, type SpaceZoneBindings } from '../../../../shared/space-addresses'
 import type { FocusSettingsValues } from './FocusSettingsPane'
 import { AgentContextContent } from '../AgentContextContent'
 import { ResolvedAgentAvatar } from '../AgentAvatar'
 import { AgentInputEntry, type InputPresentation } from '../AgentInputEntry'
 import { AgentInformationSummary } from '../AgentInformationDetails'
 import { deriveFocusProjectLanes } from '../../lib/focus-project-lanes'
-import { focusCardTrackHeight } from '../../lib/focus-lane-layout'
+import { deriveFocusCollectionLanes, focusTopicContextKey, type FocusTopicHeading } from '../../lib/focus-collection-lanes'
+import { FocusProjectLanes } from '../FocusProjectLanes'
+import { FocusScanLaneContent } from '../FocusScanLaneContent'
+import { FocusTopicLabel } from '../FocusTopicLabel'
+import { focusCardTrackHeight, type FocusLaneMetrics } from '../../lib/focus-lane-layout'
 import type { FocusContext } from '../../lib/focus-context'
 import { useAgentPreviewIntent } from '../../lib/use-agent-preview-intent'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
@@ -32,6 +38,32 @@ function exampleContexts(now: number): FocusContext[] {
   })
 }
 
+/** Typed example membership uses the same disposable Collection join as Focus. */
+function exampleTopicCollection(now: number) {
+  const workspace: WorkspaceRecord = { id: 'example-topic-home', name: 'Example Topics', path: '/example/topics', hostId: 'example', kind: 'folder' }
+  const category: TopicCategory = { categoryId: '33333333-3333-4333-8333-333333333333', hostId: 'example', spaceId: 'example-collection', directoryPath: '/example/collections/workspace-tools', title: 'Workspace tools', revision: null }
+  const topics: ScratchTopicSnapshot[] = ['Reading flow', 'Workspace layout'].map((title, index) => ({
+    id: `launcher:${index ? '22222222-2222-4222-8222-222222222222' : '11111111-1111-4111-8111-111111111111'}`,
+    kind: 'topic', title, summary: index ? 'Keep the original workspace easy to scan.' : 'Keep a task and its sources readable.',
+    directoryPath: `${workspace.path}/${index}`, topicPath: `${workspace.path}/${index}/topic.md`, collaborators: []
+  }))
+  const base = exampleContexts(now)[0]!
+  const contexts = topics.map((topic, index): FocusContext => ({ ...base,
+    id: `example-topic-agent-${index}`, name: index ? 'Align the workspace controls' : 'Review the original reading flow',
+    topicId: topic.id, workspaceId: workspace.id, workspaceName: workspace.name, workspacePath: topic.directoryPath, workspace,
+    runId: `example-topic-run-${index}`, lastActivityAt: now - 2 * hour
+  }))
+  const bindings: SpaceZoneBindings = {}
+  const zones = topics.map((topic, index) => {
+    const spaceId = `example-topic-resource-${index}`, zoneId = homeZoneId(spaceId)
+    bindings[zoneId] = { spaceId, workspaceId: workspace.id, topicId: topic.id, contentKind: 'topic', relations: { [category.spaceId]: true } }
+    return { zoneId, workspaceId: workspace.id, hostId: workspace.hostId, kind: 'home' as const, directoryPath: topic.directoryPath, branch: null }
+  })
+  const catalog: AgentMuxSpaceCatalog = { spaces: [{ spaceId: category.spaceId, kind: 'container', hostId: category.hostId, name: category.title, directoryPath: category.directoryPath, projectId: null }],
+    zones, tabs: [], regions: [], locations: [], bindings: zones.map(zone => ({ spaceId: category.spaceId, zoneId: zone.zoneId })) }
+  return { workspace, contexts, topics, catalog, content: { bindings, categories: [category] } }
+}
+
 /** Static example facts and local interaction only; original product leaves own the drawings. */
 export function FocusSettingsPreview({ values, active, scene, onScene, previewRef, returnAction, mapPreviewLastValid = false }: { values: FocusSettingsValues; active: boolean; scene: FocusPreviewScene; onScene(value: FocusPreviewScene): void; previewRef?: Ref<HTMLElement>; returnAction?: ReactNode; mapPreviewLastValid?: boolean }) {
   const document = useWorkbenchDocument(), [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
@@ -43,8 +75,30 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   }, [active, document])
   const enabled = active && documentVisible, [now] = useState(Date.now), id = useId()
   const contexts = useMemo(() => exampleContexts(now), [now])
-  const config = useMemo(() => ({ workspaces: contexts.map(context => context.workspace!), focus: { recentActivityHours: values.recentActivityHours } }), [contexts, values.recentActivityHours])
-  const lanes = useMemo(() => deriveFocusProjectLanes(contexts, config, undefined, undefined, now), [contexts, config, now])
+  const collectionExample = useMemo(() => exampleTopicCollection(now), [now])
+  const boardContexts = useMemo(() => [...contexts, ...collectionExample.contexts], [contexts, collectionExample])
+  const config = useMemo(() => ({ workspaces: [...contexts.map(context => context.workspace!), collectionExample.workspace], focus: { recentActivityHours: values.recentActivityHours } }), [contexts, collectionExample, values.recentActivityHours])
+  const lanes = useMemo(() => deriveFocusCollectionLanes(deriveFocusProjectLanes(boardContexts, config,
+    { topics: { [collectionExample.workspace.id]: collectionExample.topics }, worktrees: [] }, undefined, now), collectionExample.catalog, collectionExample.content), [boardContexts, config, collectionExample, now])
+  const boardRows = useRef<HTMLDivElement>(null)
+  const [boardMetrics, setBoardMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
+  useLayoutEffect(() => {
+    const rows = boardRows.current
+    if (!enabled || scene !== 'board' || !rows || typeof ResizeObserver === 'undefined') return
+    const measure: ResizeObserverCallback = entries => {
+      const width = entries.find(entry => entry.target === rows)?.contentRect.width ?? rows.clientWidth
+      const groups = rows.querySelector<HTMLElement>('.focus-project-lanes__groups')
+      if (width <= 0 || !groups) return
+      const style = getComputedStyle(groups), cards = groups.querySelector<HTMLElement>('.focus-context-group__cards')
+      const gap = parseFloat(style.columnGap) || 0
+      const next = { width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap,
+        cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
+      setBoardMetrics(current => current.width === next.width && current.padding === next.padding && current.gap === next.gap && current.cardGap === next.cardGap ? current : next)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(rows); measure([], observer)
+    return () => observer.disconnect()
+  }, [enabled, scene])
   const [peek, setPeek] = useState(false), [inspected, setInspected] = useState<number | null>(null), [resourceOpen, setResourceOpen] = useState(false), [agentOpen, setAgentOpen] = useState(false)
   const inspectionRef = useRef<HTMLElement>(null), previousInspection = useRef<HTMLElement | null>(null), cardRef = useRef<HTMLButtonElement>(null), readingRef = useRef<HTMLElement>(null), entryRef = useRef<HTMLDivElement | null>(null), enterReading = useRef(false), returningFocus = useRef(false)
   function openPeek(focus = false) { if (!enabled) return; if (focus && readingRef.current) readingRef.current.focus(); else if (focus) enterReading.current = true; setPeek(true) }
@@ -64,8 +118,8 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   useEffect(() => { setPeek(false); setInspected(null); setResourceOpen(false); setAgentOpen(false) }, [scene])
   useEffect(() => { if (!enabled) { intent.cancel(); setPeek(false) } }, [enabled, intent.cancel])
   const style = { '--focus-reply-lines': values.replyLines, '--focus-card-track-height': `${focusCardTrackHeight(values.replyLines)}px` } as CSSProperties
-  const card = (context: FocusContext, interactive = false) => {
-    const content = <AgentContextContent context={context} presentation="card" identity={<ResolvedAgentAvatar label="Example Executor" providerId="codex" size={18} />} />
+  const card = (context: FocusContext, interactive = false, topic?: FocusTopicHeading) => {
+    const content = <AgentContextContent context={context} presentation="card" topic={topic} identity={<ResolvedAgentAvatar label="Example Executor" providerId="codex" size={18} />} />
     if (!interactive) return <div className="focus-context focus-context--card" data-example-agent={context.id} data-bucket={context.bucket}>{content}</div>
     return <button type="button" className="focus-context focus-context--card" tabIndex={interactive ? 0 : -1} data-example-agent={context.id} data-bucket={context.bucket} aria-label={`Example Agent: ${context.name}`} ref={interactive ? cardRef : undefined}
     onPointerEnter={interactive ? intent.schedule : undefined} onPointerLeave={interactive ? intent.cancel : undefined}
@@ -79,11 +133,18 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
     <div className="focus-settings-preview__canvas" data-scene={scene}>
       {scene === 'map' ? <FocusMapPreview value={values.map} contexts={contexts} lastValid={mapPreviewLastValid} /> : null}
       {scene === 'board' ? <div className="focus-settings-preview__board">
-        <div className="focus-settings-preview__caption"><span>Project contexts</span><span>Recent · {values.recentActivityHours === 168 ? '1 week' : `${values.recentActivityHours}h`}</span></div>
-        {lanes.map(lane => { const context = contexts.find(item => item.id === lane.contextIds[0])!; return <section className="focus-settings-preview__lane" key={lane.id} data-example-project={lane.name}>
-          <header><SemanticIcon name="object.project" size={13} /><strong>{lane.name}</strong><small>{context.lastActivityAt === null ? 'Activity unknown' : `${Math.round((now - context.lastActivityAt) / hour)}h ago`}</small></header>
-          {card(context)}
-        </section> })}
+        <div className="focus-settings-preview__caption"><span>Projects and Collections</span><span>Recent · {values.recentActivityHours === 168 ? '1 week' : `${values.recentActivityHours}h`}</span></div>
+        <FocusProjectLanes lanes={lanes} selectedProjectKey="all" onSelect={() => {}} visible={enabled} rowsRef={boardRows}
+          renderLane={(lane, heading) => <div data-example-project={lane.collection ? undefined : lane.name} data-example-collection={lane.collection ? lane.id : undefined}>
+            <FocusScanLaneContent lane={lane} contexts={boardContexts.filter(context => lane.contextIds.includes(context.id))} heading={heading}
+              metrics={boardMetrics} replyLines={values.replyLines} topicPresentation={values.topicPresentation}
+              renderCards={(rows, columns, topics, sections) => <div className="focus-context-group__cards" style={{ '--focus-card-columns': columns } as CSSProperties}>
+                {rows.map(context => { const key = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(key), section = sections?.get(key)
+                  return <Fragment key={key}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`Topic · ${section.name}`}><FocusTopicLabel topic={section} /></div> : null}
+                    <div className="focus-context-card" style={{ minHeight: focusCardTrackHeight(values.replyLines) + (topic ? 28 : 0) }}>{card(context, false, topic)}</div></Fragment>
+                })}
+              </div>} />
+          </div>} />
       </div> : null}
       {scene === 'reading' ? <div className="focus-settings-preview__reading" onKeyDown={event => { if (event.key === 'Escape' && (peek || inspected !== null)) { event.preventDefault(); event.stopPropagation(); if (inspected !== null) setInspected(null); else closePeek() } }}>
         <p className="focus-settings-preview__hint">{values.previewTrigger === 'keyboard' ? 'Focus the card and press ↓, or try the preview button.' : 'Hover the card to feel the preview timing.'}</p>

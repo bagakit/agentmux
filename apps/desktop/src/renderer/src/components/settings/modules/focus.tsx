@@ -8,10 +8,11 @@ const FocusIcon = semanticIconComponent('navigation.focus')
 export const focusSettingsModule = {
   id: 'focus', group: 'work', title: 'Focus', icon: FocusIcon,
   selectionAnimation: true,
-  description: 'Project scanning, Agent previews, Map contours and zoom levels, and where links open.',
-  keywords: 'focus work recent activity hours window project lanes timeline time ruler time zone reply excerpt density preview hover keyboard inputs links demo map motion animation reduced system polygon bezier contours LOD zoom levels information',
+  description: 'Project and Collection scanning, Topic presentation, Agent previews, Map contours and zoom levels, and where links open.',
+  keywords: 'focus work recent activity hours window project collection topic card sections lanes timeline time ruler time zone reply excerpt density preview hover keyboard inputs links demo map motion animation reduced system polygon bezier contours LOD zoom levels information',
   searchTargets: [
     { id: 'recent-activity', title: 'Recent activity window', keywords: 'hours projects timeline' },
+    { id: 'topic-presentation', title: 'Topics in Collections', keywords: 'topic collection card source sections grouping layout' },
     { id: 'reply-lines', title: 'Reply excerpt lines', keywords: 'density card summary compact context' },
     { id: 'preview-trigger', title: 'Automatic Agent preview', keywords: 'hover quick deliberate keyboard delay' },
     { id: 'recent-inputs', title: 'Recent inputs in a new preview', keywords: 'messages reading recall bookmark' },
@@ -20,6 +21,6 @@ export const focusSettingsModule = {
     { id: 'map', title: 'Map boundary and zoom levels', keywords: 'polygon bezier contour LOD shape levels information status summary' },
     { id: 'timeline', title: 'Timeline ruler and time zone', keywords: 'grid interval time zone' },
   ],
-  savedSummary: config => { const value = resolveFocusPreferences(config.focus); return `${value.recentActivityHours} hours · ${value.replyLines} reply lines · ${value.previewTrigger === 'keyboard' ? 'Keyboard previews' : value.previewTrigger === 'deliberate' ? 'Deliberate previews' : 'Quick previews'}` },
+  savedSummary: config => { const value = resolveFocusPreferences(config.focus); return `${value.recentActivityHours} hours · ${value.topicPresentation === 'sections' ? 'Topic sections' : 'Topics on cards'} · ${value.replyLines} reply lines · ${value.previewTrigger === 'keyboard' ? 'Keyboard previews' : value.previewTrigger === 'deliberate' ? 'Deliberate previews' : 'Quick previews'}` },
   Pane({ config, active }) { return <FocusSettingsPane preferences={config.focus} active={active} onSave={saveFocusPreferences} /> }
 } as const satisfies SettingsModule
