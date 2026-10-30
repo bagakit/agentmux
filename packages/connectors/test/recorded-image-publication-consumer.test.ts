@@ -1,60 +1,19 @@
+import { png, reference, closes, retryRequest, contentOperations, fixture, imageBlock, native, append, contentMessage, posts, imageWrites, imageOperation } from './fixtures/publication-source-owner.js'
 import { createHash } from 'node:crypto'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
-import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import type { PublicationStore } from '../dist/publication-store.js'
-import { feishuMediaPlatform } from './fixtures/feishu-media-platform.js'
+import type { PublicationOperation, PublicationStore } from '../dist/publication-store.js'
 import * as core from '../../core/dist/index.js'
 import { parseConnectionDelivery } from '../../core/dist/connections.js'
 import { createPublicationConversationPort } from '../dist/index.js'
 import { createConnectionServices } from '../src/connection-services.js'
-import { ingressFixture } from './fixtures/ingress.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import { context } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { recordedRaster } from '../../core/test/helpers/recorded-raster.js'
 import * as diagramRenderer from '../src/mermaid-renderer.js'
-
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
-const reference = 'data:image/png;base64,' + png.toString('base64')
-const closes: Array<() => unknown | Promise<unknown>> = []
-const contentOperations = (store: PublicationStore, ...args: Parameters<PublicationStore['list']>) =>
-  store.list(...args).filter(operation => operation.payload.kind !== 'binding-lifecycle')
-afterEach(async () => {
-  const errors: unknown[] = []
-  for (const close of closes.splice(0).reverse()) try { await close() } catch (error) { errors.push(error) }
-  vi.restoreAllMocks(); vi.unstubAllEnvs()
-  if (errors.length) throw new AggregateError(errors, 'Recorded image consumer cleanup failed')
-})
-
-
-async function fixture(scope: 'future-shared-conversation' | 'future-native-user-facing' = 'future-shared-conversation') {
-  const original = await ingressFixture(false, feishuConfig, undefined, { publication: 'future-shared-conversation' }); closes.push(original.close)
-  const remote = await feishuMediaPlatform(), port = createPublicationConversationPort(original.coreClients)
-  closes.push(remote.close)
-  const openServices = () => createConnectionServices({ directory: join(original.root, 'image-host'),
-    bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
-  let services = await openServices()
-  closes.push(() => services.close())
-  const credential = await services.secrets.store({ operationId: 'image-credential', secret: 'fixture-image-credential' })
-  await services.connections.configure({ operationId: 'image-configuration', expectedRevision: null, connection: { ...feishuConfig, credentialRef: credential.credentialRef } })
-  const bound = await services.connections.bindings!.bind({ ...original.input, scope: { ...original.input.scope, publication: scope } }, context)
-  expect(bound.state).toBe('applied'); if (bound.state !== 'applied') throw new Error('Original image sharing Binding required')
-  const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'images.sock'), connections: new Proxy({} as typeof services.connections, { get: (_target, key) => Reflect.get(services.connections, key) }), spatialState: original.spatial, coreClients: original.coreClients })
-  await server.start(); closes.push(() => server.stop())
-  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); closes.push(() => rpc.dispose())
-  const managed = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: original.credentials }); closes.push(() => managed.dispose())
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux'))
-  const retryCli = (operationId: string) => runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'retry', '--operation-id', operationId],
-    objectCliEnvironment(original.root, { AGENTMUX_AGENT_SESSION_ID: original.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: original.credentials.capability }))
-  const cli = async (operationId: string) => {
-    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'inspect', '--operation-id', operationId], objectCliEnvironment(original.root))
-    expect(result.code, result.stderr).toBe(0); return JSON.parse(result.stdout).result
-  }
-  return { ...original, remote, get services() { return services }, port, binding: bound.binding, rpc, managed, cli, retryCli,
-    async restart() { services.close(); services = await openServices(); closes.push(() => services.close()); return services } }
-}
 
 it('the original public raster reaches the default Host, durable Outbox, official multipart SDK and original message delivery', async () => {
   const f = await fixture(), before = 'Original text before image 中文🙂', after = 'Original text after image', resource = vi.spyOn(f.port, 'resource')
@@ -91,16 +50,6 @@ it('the original public raster reaches the default Host, durable Outbox, officia
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 25_000)
 
-const imageBlock = () => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } })
-const native = (uuid: string, content: unknown[], extra: Record<string, unknown> = {}) => ({ sessionId: 'ingress-native', uuid, type: 'assistant', message: { role: 'assistant', content }, ...extra })
-const append = (f: Awaited<ReturnType<typeof fixture>>, record: unknown) => appendFile(f.transcript, JSON.stringify(record) + '\n')
-const contentMessage = (message: Record<string, unknown>) => message.msg_type === 'interactive' &&
-  JSON.parse((message.body as { content: string }).content).header?.title?.content !== 'Conversation connected'
-const posts = (f: Awaited<ReturnType<typeof fixture>>) => f.remote.calls.filter(call => call.method === 'POST' &&
-  (call.body as { msg_type: string }).msg_type === 'interactive' && JSON.parse((call.body as { content: string }).content).header?.title?.content !== 'Conversation connected')
-const imageWrites = (f: Awaited<ReturnType<typeof fixture>>) => f.remote.calls.filter(call => ['POST', 'PATCH'].includes(call.method) && JSON.stringify(call.body).includes('img_key'))
-const imageOperation = (f: Awaited<ReturnType<typeof fixture>>) => contentOperations(f.services.publication!.store, f.binding).find(operation => operation.payload.kind === 'image')
-
 it.each(['native', 'markdown'] as const)('held original %s resource observations keep ordinary replies and prepared effects flowing', async kind => {
   const f = await fixture()
   f.remote.controls.rejectImageMessage = true
@@ -130,7 +79,7 @@ it.each(['native', 'markdown'] as const)('held original %s resource observations
   expect(originalGaps.every(gap => !!gap.anchor && !!gap.part)).toBe(true)
   for (const text of ['Ordinary progress beside held resources', 'Independent final beside held resources']) await append(f, native(text, [{ type: 'text', text }]))
   f.remote.controls.rejectImageMessage = false
-  await f.services.connections.delivery!.retry({ operationId: prepared.operationId }, context)
+  await f.services.connections.delivery!.retry(retryRequest(prepared), context)
   await vi.waitFor(() => {
     const deliveries = contentOperations(f.services.publication!.store, f.binding)
     expect(deliveries.find(operation => operation.operationId === prepared.operationId)?.state).toBe('confirmed')
@@ -372,12 +321,12 @@ it('a missing upload key stays upload-unknown until the bound Agent explicitly r
   f.remote.controls.missingUploadKey = false
   expect(await f.services.connections.ownsEnrollmentConnection?.(f.binding.connectionId, f.credentials.agentSessionId)).toBe(false)
   const retry = vi.spyOn(f.services.connections.delivery!, 'retry')
-  const result = await f.retryCli(original.operationId)
+  const result = await f.retryCli(retryRequest(original))
   expect(result.code, result.stdout + result.stderr).toBe(0)
   expect(JSON.parse(result.stdout).result.delivery).toMatchObject({ operationId: original.operationId, state: 'pending' })
-  expect(retry).toHaveBeenCalledWith({ operationId: original.operationId }, expect.objectContaining({ actor: { kind: 'agent', id: f.credentials.agentSessionId } }))
+  expect(retry).toHaveBeenCalledWith(retryRequest(original), expect.objectContaining({ actor: { kind: 'agent', id: f.credentials.agentSessionId } }))
   const help = await runCompiledObjectCli(['connection', 'delivery', 'retry', '--help'], objectCliEnvironment(f.root))
-  expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('without owning the bot enrollment')
+  expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('without bot enrollment ownership')
   await vi.waitFor(() => expect(f.services.publication!.store.inspect(original.operationId)?.state).toBe('confirmed'))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
   expect(recovered.uploads).toEqual([{ state: 'unknown' }, { state: 'confirmed', imageKey: 'original-image-key-2' }])
@@ -392,8 +341,8 @@ it('a possibly applied message keeps the exact uploaded key and prepared wire ac
   const original = imageOperation(f)!
   expect(original.uploads).toEqual([{ state: 'confirmed', imageKey: 'original-image-key-1' }]); expect(original.attempt).toBe(1)
   expect(imageWrites(f)).toHaveLength(1); expect([...f.remote.messages.values()].filter(contentMessage)).toHaveLength(1)
-  await expect(f.managed.call('connection.delivery.retry', { operationId: original.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
-  const retry = await f.retryCli(original.operationId)
+  await expect(f.managed.call('connection.delivery.retry', retryRequest(original))).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  const retry = await f.retryCli(retryRequest(original))
   expect(retry.code).not.toBe(0); expect(retry.stderr).toContain('PUBLICATION_RETRY_UNCONFIRMED')
   await f.restart(); f.services.publication!.refresh()
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision).state).toBe('unknown'))
@@ -407,10 +356,10 @@ it('managed retry checks the original receipt and current authority before chang
   const f = await fixture(); f.remote.controls.missingUploadKey = true
   await append(f, native('guarded-upload', [imageBlock()])); f.services.publication!.refresh()
   await vi.waitFor(() => expect(imageOperation(f)?.state).toBe('not-applied'))
-  const original = imageOperation(f)!, request = { operationId: original.operationId }, owner = f.services.connections
+  const original = imageOperation(f)!, request = retryRequest(original), owner = f.services.connections
   const inspect = owner.delivery!.inspect.bind(owner.delivery), retry = vi.spyOn(owner.delivery!, 'retry')
   const read = vi.spyOn(owner.delivery!, 'inspect')
-  const known = (await inspect(request)).delivery!
+  const known = (await inspect({ operationId: request.operationId })).delivery!
   for (const [delivery, code] of [
     [null, 'UNKNOWN_PUBLICATION_OPERATION'],
     [{ ...known, operationId: 'another-operation' }, 'INVALID_CONNECTION_DELIVERY_DATA'],
@@ -551,7 +500,7 @@ it('a rejected image message lets the bound Agent retry through the SDK with its
   await vi.waitFor(() => expect(JSON.stringify(posts(f))).toContain('Independent text after rejected image message'))
   f.remote.controls.rejectImageMessage = false
   expect(await f.services.connections.ownsEnrollmentConnection?.(f.binding.connectionId, f.credentials.agentSessionId)).toBe(false)
-  await f.managed.call('connection.delivery.retry', { operationId: original.operationId })
+  await f.managed.call('connection.delivery.retry', retryRequest(original))
   await vi.waitFor(() => expect(f.services.publication!.store.inspect(original.operationId)?.state).toBe('confirmed'))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
   expect(recovered.attempt).toBe(2); expect(recovered.uploads).toEqual(original.uploads); expect(recovered.prepared).toEqual(original.prepared)

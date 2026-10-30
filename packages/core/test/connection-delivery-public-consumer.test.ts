@@ -14,7 +14,7 @@ const close: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose() })
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'delivery-consumer-')); close.push(() => rm(root, { recursive: true, force: true }))
-  const first: ConnectionDelivery = { ...deliveryFact('z-original'), state: 'not-applied', reason: 'platform-rejected', receipt: { state: 'not-applied', reason: 'platform-rejected' } }
+  const first: ConnectionDelivery = { ...deliveryFact('z-original'), retrySource: { kind: 'message', attempt: 1 }, state: 'not-applied', reason: 'platform-rejected', receipt: { state: 'not-applied', reason: 'platform-rejected' } }
   const unknown: ConnectionDelivery = { ...deliveryFact('a-unknown'), state: 'unknown', reason: 'effect-unconfirmed', receipt: { state: 'unknown', reason: 'effect-unconfirmed' } }
   const facts = new Map([first, unknown].map(fact => [fact.operationId, fact])), calls: Array<{ method: string; operationId?: string; actor?: RoomBindingCallContext['actor'] }> = []
   let authorized = true, observation: ConnectionDeliveryObservation | undefined
@@ -31,18 +31,19 @@ async function fixture() {
       const original = facts.get(input.operationId)
       if (!authorized) throw new AgentMuxError('The exact original audience is no longer authorized.', 'PUBLICATION_NOT_AUTHORIZED')
       if (!original || original.state !== 'not-applied') throw new AgentMuxError('Inspect the original operation; non-application is not confirmed.', 'PUBLICATION_RETRY_UNCONFIRMED')
-      const { reason: _reason, ...retained } = original
-      const pending: ConnectionDelivery = { ...retained, state: 'pending' }; facts.set(input.operationId, pending)
-      return { delivery: structuredClone(pending) }
+      const { reason: _reason, retrySource: _source, ...retained } = original
+      const continuation = { source: input.source, acceptedAt: 1 }
+      const pending: ConnectionDelivery = { ...retained, state: 'pending', lastContinuation: continuation }; facts.set(input.operationId, pending)
+      return { delivery: structuredClone(pending), continuation }
     }
   }
   const connections: ConnectionPort = { delivery, list: async () => ({ connections: [] }), inspect: async () => ({ connection: null, operation: null }), configure: async () => { throw new Error('Outside this finite fixture') }, test: async () => { throw new Error('Outside this finite fixture') } }
   const socketPath = join(root, 'public.sock'), server = new AgentMuxControlServer({ socketPath, connections, coreClients: () => { throw new Error('Delivery inspection must not create or borrow another Runtime') } })
   await server.start(); close.push(() => server.stop())
-  const env = objectCliEnvironment(root), cli = (args: string[]) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'delivery', ...args], env)
+  const env = objectCliEnvironment(root), cli = (args: string[], input = '') => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'delivery', ...args], env, input)
   return { first, unknown, facts, calls, delivery, connections, root, env, socketPath, cli, revoke: () => { authorized = false }, observe: (value: ConnectionDeliveryObservation) => { observation = value } }
 }
-function result(output: { code: number; stdout: string; stderr: string }) { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
+function result(output: { code: number | null; stdout: string; stderr: string }) { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 
 describe('compiled public delivery consumers', () => {
   it('reads exact original facts and bounded continuations through CLI and SDK, then requests only an explicit same-ID retry', async () => {
@@ -54,24 +55,24 @@ describe('compiled public delivery consumers', () => {
     expect(f.calls.filter(call => call.method === 'retry')).toEqual([])
     const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.socketPath } }); close.push(() => sdk.dispose())
     expect(await sdk.call('connection.delivery.inspect', { operationId: 'missing' })).toEqual({ delivery: null })
-    const retried = result(await f.cli(['retry', '--operation-id', f.first.operationId])).delivery
-    expect(retried).toEqual({ ...f.first, state: 'pending', reason: undefined })
+    const retried = result(await f.cli(['retry', '--input', '-'], JSON.stringify({ operationId: f.first.operationId, source: { kind: 'message', attempt: 1 } }))).delivery
+    expect(retried).toEqual({ ...f.first, state: 'pending', reason: undefined, retrySource: undefined, lastContinuation: { source: f.first.retrySource!, acceptedAt: 1 } })
     expect(retried.receipt).toEqual(f.first.receipt)
-    expect(f.calls.filter(call => call.method === 'retry')).toEqual([{ method: 'retry', operationId: f.first.operationId, actor: expect.objectContaining({ kind: 'user' }) }])
+    expect(f.calls.filter(call => call.method === 'retry')).toEqual([{ method: 'retry', operationId: f.first.operationId, source: f.first.retrySource, actor: expect.objectContaining({ kind: 'user' }) }])
     expect([...f.facts.keys()]).toEqual([f.first.operationId, f.unknown.operationId])
   }, 20_000)
   it('preserves unknown and revoked original deliveries while forwarding only transport-approved retry authority', async () => {
     const f = await fixture(), service = new AgentMuxRpcService({ connections: f.connections }); close.push(() => service.dispose())
-    expect((await f.cli(['retry', '--operation-id', f.unknown.operationId])).code).not.toBe(0)
+    expect((await f.cli(['retry', '--input', '-'], JSON.stringify({ operationId: f.unknown.operationId, source: { kind: 'message', attempt: 1 } }))).code).not.toBe(0)
     expect(result(await f.cli(['inspect', '--operation-id', f.unknown.operationId])).delivery).toEqual(f.unknown)
-    f.revoke(); expect((await f.cli(['retry', '--operation-id', f.first.operationId])).code).not.toBe(0)
+    f.revoke(); expect((await f.cli(['retry', '--input', '-'], JSON.stringify({ operationId: f.first.operationId, source: { kind: 'message', attempt: 1 } }))).code).not.toBe(0)
     expect(result(await f.cli(['inspect', '--operation-id', f.first.operationId])).delivery).toEqual(f.first)
-    await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId }, {})).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId, source: { kind: 'message', attempt: 1 } }, {})).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
     const principal = { principal: { kind: 'device' as const, id: 'approved-device' } }
-    await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId }, principal)).rejects.toMatchObject({ code: 'PUBLICATION_NOT_AUTHORIZED' })
-    expect(f.calls.at(-1)).toEqual({ method: 'retry', operationId: f.first.operationId, actor: principal.principal })
+    await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId, source: { kind: 'message', attempt: 1 } }, principal)).rejects.toMatchObject({ code: 'PUBLICATION_NOT_AUTHORIZED' })
+    expect(f.calls.at(-1)).toEqual({ method: 'retry', operationId: f.first.operationId, source: f.first.retrySource, actor: principal.principal })
     let authorityChecks = 0
-    await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId }, { ...principal, assertCurrent: () => { if (++authorityChecks === 2) throw new AgentMuxError('The original authority changed.', 'CONTROL_PERMISSION_DENIED') } })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId, source: { kind: 'message', attempt: 1 } }, { ...principal, assertCurrent: () => { if (++authorityChecks === 2) throw new AgentMuxError('The original authority changed.', 'CONTROL_PERMISSION_DENIED') } })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
     expect(authorityChecks).toBe(2)
     expect(f.facts.get(f.first.operationId)).toEqual(f.first)
     await expect(service.call('connection.delivery.retry', { operationId: f.first.operationId, actor: { kind: 'user', id: 'forged' } } as never, principal)).rejects.toMatchObject({ code: 'INVALID_CONNECTION_DELIVERY_DATA' })
@@ -92,9 +93,11 @@ describe('compiled public delivery consumers', () => {
     const help = await runCompiledObjectCli(['connection', 'delivery', 'ls', '--help'], f.env)
     expect(help.code).toBe(0); expect(help.stdout).toContain('--binding-revision'); expect(help.stdout).toContain('--after'); expect(help.stdout).toContain('--limit')
     const retryHelp = await runCompiledObjectCli(['connection', 'delivery', 'retry', '--help'], f.env)
-    expect(retryHelp.code).toBe(0); expect(retryHelp.stdout).toContain('Unknown operations cannot be retried'); expect(retryHelp.stdout).toContain('same operation')
-    const skill = await runCompiledObjectCli(['connection', '--help'], f.env)
+    expect(retryHelp.code).toBe(0); expect(retryHelp.stdout).toContain('--input FILE|-'); expect(retryHelp.stdout).toContain('repeat only that source')
+    const skill = await runCompiledObjectCli(['connection', 'delivery', '--help'], f.env)
     expect(skill.code).toBe(0); expect(skill.stdout).toContain('connection delivery inspect'); expect(skill.stdout).toContain('connection delivery retry')
+    const guide = await runCompiledObjectCli(['connection', '--skill'], f.env)
+    expect(guide.code).toBe(0); expect(guide.stdout).toContain('source'); expect(guide.stdout).toContain('retry --input FILE|-')
     expect((await f.cli(['ls', '--connection', f.first.target.connectionId, '--binding', f.first.bindingId, '--binding-revision', '3', '--limit', '101'])).code).not.toBe(0)
     const probe = new ObjectCliProbe(() => ({ delivery: { ...f.first, operationId: 'foreign', prepared: 'private-wire', payload: 'private-body' } })); await probe.start(); close.push(() => probe.stop())
     const bad = await runCompiledObjectCli(['--endpoint', 'unix:' + probe.socketPath, 'connection', 'delivery', 'inspect', '--operation-id', f.first.operationId], probe.environment())

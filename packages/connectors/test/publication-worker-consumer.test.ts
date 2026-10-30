@@ -58,8 +58,8 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'publication.sock'), connections: services.connections, spatialState: original.spatial,
     coreClients: () => [{ hostId: 'local', client: original.client }] })
   await server.start(); cleanup.push(() => server.stop())
-  const env = objectCliEnvironment(original.root), cli = async (args: string[]) => {
-    const output = await runCompiledObjectCli(['--endpoint', 'unix:' + join(original.root, 'publication.sock'), 'connection', 'delivery', ...args], env)
+  const env = objectCliEnvironment(original.root), cli = async (args: string[], input?: unknown) => {
+    const output = await runCompiledObjectCli(['--endpoint', 'unix:' + join(original.root, 'publication.sock'), 'connection', 'delivery', ...args], env, input === undefined ? '' : JSON.stringify(input))
     expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result
   }
   const speech = () => services.publication!.store.list(binding.binding).filter(operation => operation.reference.source.kind !== 'binding-operation')
@@ -888,7 +888,7 @@ it('unknown original effects retain their identity across worker replacement whi
   await vi.waitFor(() => expect(restored.observation(f.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' }))
   expect(restored.store.inspect(original.operationId)).toEqual(original)
   expect(f.dispatched).toHaveLength(2)
-  await expect(restored.retry({ operationId: original.operationId }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  await expect(restored.retry({ operationId: original.operationId, source: { kind: 'message', attempt: original.attempt! } }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   expect(restored.store.list(f.binding).filter(operation => operation.reference.source.kind !== 'binding-operation')[1]?.state).toBe('confirmed')
 }, 15_000)
 
@@ -1052,7 +1052,7 @@ it('a late first dispatch cannot certify a later same-ID retry as not-applied', 
   await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('not-applied'))
   f.adapter.inspect = async () => null
   const original = f.speech()[0]!
-  await f.cli(['retry', '--operation-id', original.operationId])
+  await f.cli(['retry', '--input', '-'], { operationId: original.operationId, source: { kind: 'message', attempt: original.attempt! } })
   await vi.waitFor(() => expect(f.dispatched).toHaveLength(2))
   deadlines.at(-1)!.abort()
   await vi.waitFor(() => expect(f.services.publication!.store.inspect(original.operationId)?.state).toBe('unknown'))
@@ -1060,7 +1060,9 @@ it('a late first dispatch cannot certify a later same-ID retry as not-applied', 
   await new Promise(resolve => setImmediate(resolve))
   expect(f.services.publication!.store.inspect(original.operationId)).toMatchObject({ state: 'unknown', attempt: original.attempt! + 1 })
   expect(f.dispatched[1]!.request).toEqual(f.dispatched[0]!.request)
-  await expect(f.services.connections.delivery!.retry({ operationId: original.operationId }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  const previous = await f.services.connections.delivery!.retry({ operationId: original.operationId, source: { kind: 'message', attempt: original.attempt! } }, { actor: { kind: 'user', id: 'original-user' } })
+  expect(previous).toMatchObject({ continuation: { source: { kind: 'message', attempt: original.attempt! } }, delivery: { state: 'unknown' } })
+  await expect(f.services.connections.delivery!.retry({ operationId: original.operationId, source: { kind: 'message', attempt: original.attempt! + 1 } }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   expect(calls).toBe(2)
 }, 15_000)
 
@@ -1075,7 +1077,7 @@ it('an unavailable authority read preserves the lane and reports unknown service
   owner.refresh()
   await vi.waitFor(() => expect(owner.observation(f.binding.bindingId, 1).state).toBe('ready'))
   owner.close()
-  await expect(owner.retry({ operationId: 'unknown-operation' }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_OWNER_UNAVAILABLE' })
+  await expect(owner.retry({ operationId: 'unknown-operation', source: { kind: 'message', attempt: 1 } }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_OWNER_UNAVAILABLE' })
   expect(f.client.connect).not.toHaveBeenCalled()
 }, 15_000)
 
@@ -1108,7 +1110,7 @@ it('closing while current human authorization is pending retains the original no
   const original = f.speech()[0]!
   let approve!: () => void
   const current = new Promise<void>(resolve => { approve = resolve })
-  const retry = f.services.publication!.retry({ operationId: original.operationId }, { actor: { kind: 'user', id: 'original-user' }, assertCurrent: () => current })
+  const retry = f.services.publication!.retry({ operationId: original.operationId, source: { kind: 'message', attempt: original.attempt! } }, { actor: { kind: 'user', id: 'original-user' }, assertCurrent: () => current })
   f.services.publication!.close(); approve()
   await expect(retry).rejects.toMatchObject({ code: 'PUBLICATION_OWNER_UNAVAILABLE' })
   expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)

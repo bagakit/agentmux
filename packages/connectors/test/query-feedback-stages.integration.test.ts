@@ -167,7 +167,7 @@ it.each(['confirmed', 'unknown', 'retried-cleanup'] as const)('retained %s Get s
   if (failedCleanup) {
     const calls = f.remote.calls.filter(call => call.method === 'DELETE' && call.path.endsWith('/' + received.mapping!.reactionId)).length
     expect(calls).toBe(1)
-    await f.sdk.call('connection.delivery.retry', { operationId: failedCleanup.operationId })
+    await f.sdk.call('connection.delivery.retry', { operationId: failedCleanup.operationId, source: { kind: 'message', attempt: 1 } })
     await expect.poll(() => f.outbox().inspect(failedCleanup!.operationId)?.state, { timeout: 10000 }).toBe('superseded')
     expect(f.outbox().inspect(failedCleanup.operationId)).toMatchObject({ prepared: failedCleanup.prepared, attempt: failedCleanup.attempt, receipt: failedCleanup.receipt })
     expect(f.remote.calls.filter(call => call.method === 'DELETE' && call.path.endsWith('/' + received.mapping!.reactionId))).toHaveLength(calls)

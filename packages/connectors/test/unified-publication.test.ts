@@ -223,7 +223,7 @@ it('late same-event materialization cannot rewrite or replay an unknown frozen c
   expect(f.host.store.inspect(first.operationId)).toEqual(first)
   expect(dispatch).toHaveBeenCalledTimes(1); expect(f.posts()).toHaveLength(0)
   expect(f.host.store.list(f.binding)[1]).toMatchObject({ state: 'pending', predecessorOperationId: first.operationId })
-  expect(() => f.host.store.retry(first.operationId, () => true)).toThrowError(/not confirmed non-application/)
+  expect(() => f.host.store.retry({ operationId: first.operationId, source: { kind: 'message', attempt: first.attempt! } }, () => true)).toThrowError(/exact original failure source/)
   // An explicit original attempt receipt proves non-application, so only the
   // newer full representation can enter the normal dispatch lane.
   f.host.store.settle(first.operationId, first.attempt!, { state: 'not-applied', reason: 'platform-rejected' })

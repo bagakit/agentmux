@@ -128,7 +128,7 @@ it('coalesces undispatched revisions and isolates an unknown predecessor from in
   expect(independent.reference.source.recordId).toBe('reply-b')
   owner.settle(independent.operationId, independent.attempt!, { state: 'confirmed', mapping: { messageId: 'platform-b' } })
   expect(owner.next(boundary)).toBeNull()
-  expect(() => owner.retry(second.operationId, () => true)).toThrowError(/not confirmed non-application/)
+  expect(() => owner.retry({ operationId: second.operationId, source: { kind: 'message', attempt: second.attempt ?? 1 } }, () => true)).toThrowError(/exact original failure source/)
   expect(owner.inspect(second.operationId)).toMatchObject({ target: { externalConversationId: 'room-a' }, payload: { text: 'Second' } })
   const mapping = { messageId: 'platform-a', threadId: 'original-thread' }
   owner.settle(second.operationId, owner.inspect(second.operationId)!.attempt!, { state: 'confirmed', mapping })
@@ -152,13 +152,13 @@ it('restarts with the same unresolved effect, original audience and payload; onl
   expect(restored.inspect(dispatched.operationId)).toEqual(dispatched)
   expect(restored.checkpoint(boundary, 'host-a')).toEqual(checkpoint('next-cut'))
   expect(restored.claimNext(boundary, restored.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
-  expect(() => restored.retry(dispatched.operationId, () => true)).toThrowError(/not confirmed non-application/)
+  expect(() => restored.retry({ operationId: dispatched.operationId, source: { kind: 'message', attempt: dispatched.attempt ?? 1 } }, () => true)).toThrowError(/exact original failure source/)
   restored.settle(dispatched.operationId, restored.inspect(dispatched.operationId)!.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
-  expect(() => restored.retry(dispatched.operationId, () => false)).toThrowError(/no longer authorizes/)
-  const pending = restored.retry(dispatched.operationId, () => true)
+  expect(() => restored.retry({ operationId: dispatched.operationId, source: { kind: 'message', attempt: dispatched.attempt ?? 1 } }, () => false)).toThrowError(/no longer authorizes/)
+  const pending = restored.retry({ operationId: dispatched.operationId, source: { kind: 'message', attempt: dispatched.attempt ?? 1 } }, () => true)
   const receipt = { state: 'not-applied', reason: 'platform-rejected' }
-  expect(pending).toEqual({ ...dispatched, state: 'pending', receipt })
-  expect(restored.claimNext(boundary, restored.next(boundary)?.operationId ?? '', () => true, adapter)).toEqual({ ...dispatched, attempt: dispatched.attempt! + 1, receipt })
+  expect(pending.operation).toEqual({ ...dispatched, state: 'pending', receipt, continuations: [pending.continuation] })
+  expect(restored.claimNext(boundary, restored.next(boundary)?.operationId ?? '', () => true, adapter)).toEqual({ ...dispatched, attempt: dispatched.attempt! + 1, receipt, continuations: [{ ...pending.continuation, resolution: { kind: 'attempt', attempt: dispatched.attempt! + 1 } }] })
 })
 
 it('retains old exact operations after relinking and bounds inspection without allowing the new audience to claim them', () => {
@@ -294,7 +294,7 @@ it('superseding a known non-applied fragment retains that receipt while admittin
   commit(owner, boundary, checkpoint('cut-1'), page([speech('reply-a', 'New')], 'cut-2'), () => true)
   expect(owner.inspect(original.operationId)).toMatchObject({ state: 'superseded', receipt, payload: { text: 'Old' } })
   expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toMatchObject({ payload: { text: 'New' } })
-  expect(() => owner.retry(original.operationId, () => true)).toThrowError(/not confirmed non-application/)
+  expect(() => owner.retry({ operationId: original.operationId, source: { kind: 'message', attempt: original.attempt ?? 1 } }, () => true)).toThrowError(/exact original failure source/)
 })
 
 it('a late authoritative non-application advances an already pending newer source without replaying the old body', () => {
@@ -309,7 +309,7 @@ it('a late authoritative non-application advances an already pending newer sourc
   const next = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(next).toMatchObject({ payload: { text: 'New' }, effect: 'upsert' })
   expect(next.predecessorOperationId).toBeUndefined(); expect(next.mapping).toBeUndefined()
-  expect(() => owner.retry(original.operationId, () => true)).toThrowError(/not confirmed non-application/)
+  expect(() => owner.retry({ operationId: original.operationId, source: { kind: 'message', attempt: original.attempt ?? 1 } }, () => true)).toThrowError(/exact original failure source/)
 })
 
 it('a late non-applied create cancels its redundant withdrawal; a late non-applied update retains the earlier exact mapping', () => {
@@ -362,7 +362,7 @@ it('freezes the complete prepared request with the original effect before dispat
   expect(prepared).toBe(1)
   expect(owner.inspect(update.operationId)?.prepared).toEqual(update.prepared)
   owner.settle(update.operationId, owner.inspect(update.operationId)!.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
-  owner.retry(update.operationId, () => true)
+  owner.retry({ operationId: update.operationId, source: { kind: 'message', attempt: update.attempt ?? 1 } }, () => true)
   expect(() => owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, { ...adapter, renderVersion: 'speech-v2', supportedRenderVersions: ['speech-v2'] }))
     .toThrowError(/compatible adapter version/)
   expect(owner.inspect(update.operationId)?.state).toBe('pending')
@@ -401,7 +401,7 @@ it('correlates late receipts to their original durable attempt without changing 
   const first = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   owner.settle(first.operationId, first.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   owner.settle(first.operationId, first.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
-  owner.retry(first.operationId, () => true)
+  owner.retry({ operationId: first.operationId, source: { kind: 'message', attempt: first.attempt ?? 1 } }, () => true)
   const second = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(second.operationId).toBe(first.operationId)
   expect(second.prepared).toEqual(first.prepared)
@@ -416,7 +416,7 @@ it('correlates late receipts to their original durable attempt without changing 
     { attempt: first.attempt, receipt: { state: 'not-applied', reason: 'platform-rejected' } },
     { attempt: second.attempt, receipt: { state: 'unknown', reason: 'effect-unconfirmed' } }
   ])
-  expect(() => owner.retry(second.operationId, () => true)).toThrowError(/not confirmed non-application/)
+  expect(() => owner.retry({ operationId: second.operationId, source: { kind: 'message', attempt: second.attempt ?? 1 } }, () => true)).toThrowError(/exact original failure source/)
 })
 
 it.each([false, true])('deferred process headers preserve the original checkpoint until a complete reading (empty selectors: %s)', empty => {

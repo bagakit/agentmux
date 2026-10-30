@@ -198,7 +198,7 @@ it('keeps upload unknown across reopening, permits independent text and reupload
   await wait(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision).state).toBe('unavailable'))
   expect(f.remote.uploads).toHaveLength(1)
   f.remote.controls.missingUploadKey = false
-  await f.rpc.call('connection.delivery.retry', { operationId: original.operationId })
+  await f.rpc.call('connection.delivery.retry', { operationId: original.operationId, source: { kind: 'content-upload', attempt: 1 } })
   await wait(() => expect(f.services.publication!.store.inspect(original.operationId)?.state).toBe('confirmed'))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
   expect(recovered.uploads).toEqual([{ state: 'unknown' }, { state: 'confirmed', fileKey: 'original-file-key-2' }])
@@ -214,7 +214,7 @@ it('preserves a possibly applied file message and cannot retry, reupload or repl
   const original = fileOperation(f)!
   expect(original.uploads).toEqual([{ state: 'confirmed', fileKey: 'original-file-key-1' }]); expect(original.attempt).toBe(1)
   expect(filePosts(f)).toHaveLength(1); expect([...f.remote.messages.values()].filter(message => message.msg_type === 'file')).toHaveLength(1)
-  await expect(f.rpc.call('connection.delivery.retry', { operationId: original.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  await expect(f.rpc.call('connection.delivery.retry', { operationId: original.operationId, source: { kind: 'message', attempt: 1 } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   await f.restart(); f.services.publication!.refresh()
   await wait(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision)).toMatchObject({ state: 'unknown', reason: 'effect-unconfirmed' }))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
@@ -300,7 +300,7 @@ it('an explicitly rejected file withdrawal remains a barrier until retrying that
   expect(filePosts(f)).toHaveLength(1); expect(f.remote.uploads).toHaveLength(1)
   expect(await f.cli(withdrawal.operationId)).toMatchObject({ delivery: { state: 'not-applied', effect: 'withdraw' } })
   f.remote.controls.rejectDelete = false
-  await f.rpc.call('connection.delivery.retry', { operationId: withdrawal.operationId })
+  await f.rpc.call('connection.delivery.retry', { operationId: withdrawal.operationId, source: { kind: 'message', attempt: 1 } })
   await wait(() => expect(f.services.publication!.store.inspect(withdrawal.operationId)?.state).toBe('confirmed'))
   await wait(() => expect(filePosts(f)).toHaveLength(3))
   expect(f.remote.calls.filter(call => call.method === 'DELETE')).toHaveLength(2)

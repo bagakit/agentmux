@@ -64,9 +64,12 @@ describe('finite original delivery DTO', () => {
   it('correlates inspections and retries with the original operation without manufacturing missing facts', () => {
     const original = deliveryFact()
     expect(parseConnectionDeliveryResult('connection.delivery.inspect', { delivery: null }, { operationId: original.operationId })).toEqual({ delivery: null })
-    expect(parseConnectionDeliveryResult('connection.delivery.retry', { delivery: original }, { operationId: original.operationId })).toEqual({ delivery: original })
-    for (const method of ['connection.delivery.inspect', 'connection.delivery.retry'] as const) expect(() => parseConnectionDeliveryResult(method, { delivery: original }, { operationId: 'foreign' })).toThrow()
-    expect(() => parseConnectionDeliveryResult('connection.delivery.retry', { delivery: null }, { operationId: original.operationId })).toThrow()
+    const source = { kind: 'message' as const, attempt: 1 }, continuation = { source, acceptedAt: 1 }
+    expect(parseConnectionDeliveryResult('connection.delivery.retry', { delivery: original, continuation }, { operationId: original.operationId, source })).toEqual({ delivery: original, continuation })
+    expect(() => parseConnectionDeliveryResult('connection.delivery.retry', { delivery: original, continuation: { ...continuation, source: { kind: 'message', attempt: 2 } } }, { operationId: original.operationId, source })).toThrow()
+    for (const source of [undefined, { kind: 'message', attempt: 0 }, { kind: 'avatar', attempt: 1 }]) expect(() => parseConnectionDeliveryParams('connection.delivery.retry', { operationId: original.operationId, source })).toThrow()
+    for (const method of ['connection.delivery.inspect', 'connection.delivery.retry'] as const) expect(() => parseConnectionDeliveryResult(method, { delivery: original }, { operationId: 'foreign', source: { kind: 'message', attempt: 1 } } as never)).toThrow()
+    expect(() => parseConnectionDeliveryResult('connection.delivery.retry', { delivery: null }, { operationId: original.operationId, source: { kind: 'message', attempt: 1 } })).toThrow()
   })
 })
 

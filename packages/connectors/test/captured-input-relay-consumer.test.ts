@@ -142,7 +142,7 @@ it('an unknown relay keeps its original target, typed author and frozen request 
   await vi.waitFor(() => expect(f.services().publication!.store.list(f.binding())).toHaveLength(2))
   expect(f.posts()).toHaveLength(1)
   expect(f.services().publication!.store.inspect(original.operationId)).toEqual(original)
-  await expect(f.services().connections.delivery!.retry({ operationId: original.operationId }, context)).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  await expect(f.services().connections.delivery!.retry({ operationId: original.operationId, source: { kind: 'message', attempt: 1 } }, context)).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   expect(f.posts()).toHaveLength(1)
   expect(f.inner.kernel.input).toHaveBeenCalledTimes(2)
 }, 20_000)

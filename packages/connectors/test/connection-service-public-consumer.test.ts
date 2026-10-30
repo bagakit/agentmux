@@ -316,7 +316,7 @@ it.each(['prepare', 'claim'] as const)('rechecks persisted policy after %s befor
   vi.restoreAllMocks()
   if (phase === 'prepare') { const prepare = signedRoomAdapter().adapter.publication!.prepare; f.wire.adapter.publication!.prepare = prepare }
   await f.set('publication-race-on', 1, true)
-  if (phase === 'claim') { expect(f.wire.effects).toEqual([]); await f.sdk.call('connection.delivery.retry', { operationId: original.operationId }) }
+  if (phase === 'claim') { expect(f.wire.effects).toEqual([]); await f.sdk.call('connection.delivery.retry', { operationId: original.operationId, source: { kind: 'message', attempt: 1 } }) }
   await vi.waitFor(() => expect(f.wire.effects).toHaveLength(1))
   expect(f.services.publication!.store.list(f.binding)[0]).toMatchObject({ operationId: original.operationId, state: 'confirmed' })
   evidence('publication-' + phase + '-off', { original, afterExplicitRecovery: f.services.publication!.store.list(f.binding)[0], effects: f.wire.effects })
@@ -341,7 +341,7 @@ it.each([{ scope: 'global', adapterId: null }, { scope: 'adapter', adapterId: 's
   await set('unknown-off', 2, false); await set('unknown-on', 3, true)
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' }))
   expect(f.wire.effects).toHaveLength(1); expect(f.services.publication!.store.inspect(unknown.operationId)?.attempt).toBe(1)
-  await expect(f.sdk.call('connection.delivery.retry', { operationId: unknown.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  await expect(f.sdk.call('connection.delivery.retry', { operationId: unknown.operationId, source: { kind: 'message', attempt: 1 } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   evidence('publication-late-ack-and-unknown-' + selection.scope, { originalClaim: original, settledWhileOff: f.services.publication!.store.inspect(original.operationId), originalUnknown: unknown, retainedUnknown: f.services.publication!.store.inspect(unknown.operationId), effects: f.wire.effects })
 }, 20_000)
 
