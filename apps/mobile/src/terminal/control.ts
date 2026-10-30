@@ -83,19 +83,36 @@ export function createMobileTerminalControl({ client, agentSessionId, report, st
     active = true
     try {
       while (!closed && state.mode === 'control' && !unknown() && queue.length) {
-        const intent = queue[0]!
+        let intent = queue[0]!
         const facts = currentFacts()
         if (!sameOwner(facts.identity) || facts.run.runId !== intent.run.runId) {
           problem('identity', { mode: 'watch', message: '当前 Host/Run 与原输入不同；未发送的旧输入保留，不会投给另一个 owner。' }); break
+        }
+        let count = 1
+        if (intent.kind === 'input') {
+          const parts: Uint8Array[] = []
+          for (let index = 1; index < queue.length; index++) {
+            const next = queue[index]!
+            if (next.kind !== 'input' || next.run.runId !== intent.run.runId) break
+            parts.push(typeof next.data === 'string' ? new TextEncoder().encode(next.data) : next.data)
+            count++
+          }
+          if (count > 1) {
+            parts.unshift(typeof intent.data === 'string' ? new TextEncoder().encode(intent.data) : intent.data)
+            const data = new Uint8Array(parts.reduce((bytes, part) => bytes + part.length, 0))
+            let offset = 0
+            for (const part of parts) { data.set(part, offset); offset += part.length }
+            intent = { ...intent, data }
+          }
         }
         // This identity protects device storage ownership only; it is never sent as a
         // Core/ctxmux operation ID or used to claim an Input receipt.
         unresolved = { intentId: randomClientRequestId(), runId: intent.run.runId, kind: intent.kind, createdAt: Date.now() }
         persist()
         publish({ phase: 'sending', message: intent.kind === 'input' ? '正在确认原 Run 的输入回执。' : '正在确认用户选择的 PTY 尺寸。' })
-        // Remove only the exact operation being dispatched. Later user bytes remain in order,
-        // never inherit this receipt, and cannot be replayed after an unknown result.
-        queue.shift()
+        // Only adjacent, unsent input shares this one operation. A resize remains
+        // a barrier; later bytes never inherit or replay an unknown batch receipt.
+        queue.splice(0, count)
         if (intent.kind === 'input') publish({ queuedBytes: state.queuedBytes - byteLength(intent.data) })
         const dispatchClient = currentClient!
         try {
