@@ -222,6 +222,8 @@ Goal 模块同时面向管理者和执行者，沿[执行责任、停滞告警�
 
 `local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。聚合发现与检查保留原 Session 的 `hostId`，另返回该服务内可复用的 `routeHostId`，用于后续按 Host 范围准确读取；配置 Host ID 不是 SSH 地址或跨 endpoint 的全局机器 ID。`agent context` 的 `hostId` 是本次路由，`sourceHostId` 与 descriptor 保留源服务身份。发现结果只在同一 endpoint 范围续用，未知或多 owner 不按首项猜测。
 
+`agent context` 完整读取原 Store 已保留的 history metadata，包括创建来源、fork 祖先与分端工具执行绑定；公开解码复用原领域投影与 parser，严格拒绝未知字段、畸形结构及与本次已确认来源冲突的回包，不通过删除合法元数据绕过校验。创建时的 Run 与祖先身份仅表示原始来源，不能据此推断当前 Run／Session 或输入资格；Hook、能力秘密与生命周期控制不进入该只读投影。
+
 默认 Host 入口的 `agent ls` 消费其已连接 Client 的多 Host 聚合，不能因本地清单非空而遗漏远端。聚合连接不可用时仍返回可用的本地事实，并在 `errors` 明示聚合观察缺失；Client 已明确返回的业务拒绝不改为本地成功。准确 Session 的 `agent inspect` 与 `agent output` 优先读取本 Core 已知 owner；只有本地明确查无目标时，才沿既有 Client 聚合通路继续定位。来源认证与请求校验先于委托，歧义、存储未确认或读取中故障不冒充查无目标。输出委托保持原 opening response、ordered bytes、Gap 与 reader 取消，开始观察后不自动换源或重订阅；已知本地 Session 的读取不以 Client 可用为前提。
 
 ### 传输、业务回执与持续读取
