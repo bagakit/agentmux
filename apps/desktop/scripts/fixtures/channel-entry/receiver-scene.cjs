@@ -2,6 +2,14 @@ const assert=require('node:assert/strict')
 module.exports=async({win,read,until,click,press,settle,layout,open,close,capture,details,dismiss,result})=>{
  const set=values=>read('Object.assign(window.channelEntryProof.receiver,'+JSON.stringify(values)+')')
  const button=name=>'[data-receiver-action="'+name+'"]'
+ if(process.argv.includes('--receiver-header-only')){
+  await set({state:'ended',longName:true});await read('window.channelEntryProof.setTheme("dark");window.channelEntryProof.setScenario("healthy")');await layout(true);await open('feishu')
+  await until('document.querySelector(".connector-header-menu [data-direction=incoming]")?.textContent.includes("Receiver stopped")')
+  const width=await read('document.querySelector("[data-workbench-region-id=channel-preview-region]").getBoundingClientRect().width')
+  assert.ok(width>=350&&width<=520);await capture('receiver-compact-split-dark');await press('Escape');await close()
+  result.receiverScope='One complete current compact header popover on the original split Region; no modal, live platform or Host write.'
+  return
+ }
  if(process.argv.includes('--receiver-review-delta')){
   await set({state:'ended'});await details('healthy','light',1380);await click(button('recover'));await until('document.querySelector(".connector-traffic-summary").textContent.includes("Reconnect requested")')
   assert.equal(await read('!!document.querySelector("[data-receiver-action=continue]")'),false);await capture('receiver-scheduled-wide-light');await dismiss()
