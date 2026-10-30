@@ -5,6 +5,14 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symli
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Approved narrow slices do not consume the legacy full/default receipt.
+if (process.argv.length > 2) {
+  assert.ok(process.argv[2] === '--history-metadata' && process.argv.slice(3).every(arg => arg === '--development') && process.argv.length <= 4,
+    'Usage: verify-agent-context.mjs [--history-metadata [--development]]')
+  await import('./verify-agent-context-history-metadata.mjs')
+  process.exit(process.exitCode ?? 0)
+}
+
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const evidence = join(root, '.tmp/session-takeover/core-context')
 const copy = join(evidence, `source-${Date.now()}`)

@@ -1,27 +1,42 @@
 import { fixtureClock, fixtureDay, fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, sessionHistoryMetadata } from '../src/agent-session-store.js'
+import { normalizeSessionHistoryMetadata, type AgentSessionHistoryMetadata } from '../src/index.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 
 const close: Array<() => Promise<void>> = []
-afterEach(async () => { for (const cleanup of close.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })
+const roots: string[] = []
+afterEach(async () => {
+  const failures: unknown[] = []
+  for (const cleanup of close.splice(0).reverse()) { try { await cleanup() } catch (error) { failures.push(error) } }
+  vi.restoreAllMocks()
+  const removed = []
+  for (const root of roots.splice(0)) {
+    try { await stat(root); failures.push(new Error('Private Context root remains: ' + root)) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') removed.push(root); else failures.push(error) }
+  }
+  if (process.env.AGENTMUX_CONTEXT_FACTS) await appendFile(process.env.AGENTMUX_CONTEXT_FACTS, JSON.stringify({
+    test: expect.getState().currentTestName, removedRoots: removed, cleanupErrors: failures.map(String) }) + '\n')
+  if (failures.length) throw new AggregateError(failures, 'Context private resource cleanup failed')
+})
 const fullText = 'Original complete context 中\n'.repeat(4000) + 'END-OF-LONG-ENTRY'
 async function endpoint(provider: 'claude' | 'pi' = 'claude') {
   const f = await nativeHistoryFixture(provider, root => jsonl(provider === 'claude'
     ? [0, 1, 2].map(i => ({ sessionId: 'native-main', uuid: `native-${i}`, type: 'user', timestamp: `${fixtureDay(1)}T00:0${i}:00Z`, message: { role: 'user', content: i === 2 ? fullText : `Native ${i}` } }))
     : [{ type: 'session', version: 3, id: 'native-main', cwd: root, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" },
       ...[0, 1, 2].map(i => ({ type: 'message', id: `native-${i}`, parentId: i === 0 ? null : `native-${i - 1}`, timestamp: `${fixtureDay(1)}T00:0${i}:00Z`, message: { role: 'user', content: i === 2 ? fullText : `Native ${i}` } }))]))
-  close.push(f.close)
+  close.push(f.close); roots.push(f.root)
   for (let i = 0; i < 3; i++) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: {
     id: `captured-${i}`, agentSessionId: f.session.agentSessionId, kind: 'user_message', status: 'complete', source: 'user',
     createdAt: i, updatedAt: i, title: 'Saved original input', content: i === 2 ? fullText : `Captured ${i}`, authorHuman: true } })
@@ -221,4 +236,94 @@ it('preserves original sourceDevice and sourceChannel through durable context, p
     expect(() => parseRpcNativeResult('agent.context', bad, { ...f.input, limit: 30 })).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
   }
   for (const control of f.controls) expect(control).not.toHaveBeenCalled(); expect(f.connect).not.toHaveBeenCalled()
+})
+
+
+async function metadataEndpoint(provider: 'claude' | 'pi', retired = false) {
+  const f = await endpoint(provider)
+  const stored = { ...f.session,
+    creation: { createOperationId: 'original-create', initialPrompt: 'not-requested' as const, agentMuxContext: 'confirmed' as const,
+      createdRun: { runId: 'original-birth-run' }, createdBy: { agentSessionId: 'creator-ancestor', run: { runId: 'creator-run' }, owner: { kind: 'local' as const } },
+      intentDigest: 'a'.repeat(64) },
+    forkedFrom: { agentSessionId: 'fork-ancestor', expectedRun: { runId: 'ancestor-run' },
+      expectedNativeHandle: { kind: 'provider' as const, providerId: provider, sessionId: 'ancestor-native' } },
+    toolExecution: { bindingId: 'original-tools', resourceHostId: 'tool-host', resourceRuntimeId: 'tool-runtime', workspacePath: join(f.root, 'tools') } }
+  await f.store.compareAndSwap(f.session, stored)
+  const persisted = await f.client.readAgentSession(stored.agentSessionId)
+  expect(persisted).not.toBeNull()
+  if (!persisted) throw new Error('Original stored metadata is unavailable')
+  expect(persisted.creation).toEqual(stored.creation)
+  expect(persisted.forkedFrom).toEqual(stored.forkedFrom)
+  expect(persisted.toolExecution).toEqual(stored.toolExecution)
+  const expected = sessionHistoryMetadata(stored)
+  expect(expected.creation).toEqual(stored.creation)
+  expect(expected.forkedFrom).toEqual(stored.forkedFrom)
+  expect(expected.toolExecution).toEqual(stored.toolExecution)
+  const publicMetadata: AgentSessionHistoryMetadata = normalizeSessionHistoryMetadata(expected as unknown)
+  expect(publicMetadata).toEqual(expected)
+  if (!retired) return { ...f, expected }
+  const reservation = { kind: 'stop' as const, reservationId: 'metadata-retire', ownerId: 'metadata-owner', ownerPid: process.pid,
+    agentSessionId: stored.agentSessionId, expectedRun: stored.run, operationId: 'metadata-retire-operation', expiresAt: Date.now() + 60_000,
+    stopOperation: { daemonInstance: 'private-unconnected', operationKey: 'metadata-stop', runId: stored.run.runId } }
+  await f.store.reserveLifecycle(reservation); await f.store.commitLifecycle(reservation, null)
+  const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(f.storePath) }); close.push(() => client.dispose())
+  const connect = vi.spyOn(client, 'connect'), kernel = (client as unknown as { kernel: CtxmuxRunAdapter }).kernel
+  const controls = [...f.controls, ...['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name as 'start'))]
+  const socketPath = join(f.root, 'retired.sock'), server = new AgentMuxControlServer({ socketPath, coreClients: () => [{ hostId: 'local', client }] })
+  close.push(() => server.stop()); await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); close.push(() => rpc.dispose())
+  return { ...f, expected, rpc, socketPath, connect, controls }
+}
+
+it.each(['claude', 'pi'] as const)('history metadata: %s active and retired original fields survive FileStore, Unix and compiled CLI', async provider => {
+  for (const retired of [false, true]) {
+    const f = await metadataEndpoint(provider, retired), before = await f.bytes()
+    const input = { ...f.input, limit: 30 }
+    const observed = await f.rpc.call('agent.context', input).then(page => ({ page }), error => ({ error }))
+    expect(observed).not.toHaveProperty('error')
+    if ('error' in observed) throw observed.error
+    const page = observed.page
+    expect(page.descriptor.history).toEqual(f.expected)
+    expect(page.descriptor.state).toBe(retired ? 'retired' : 'active')
+    expect(page.captured!.items.at(-1)!.content).toBe(fullText)
+    expect(page.native, JSON.stringify(page.unavailable)).not.toBeNull()
+    expect(page.native!.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: fullText, contentEligibility: 'unconfirmed' }])
+    expect(JSON.stringify(page.descriptor.history)).not.toContain('private-token')
+    expect(page.descriptor.history).not.toHaveProperty('hookBindingId')
+    expect(page.descriptor.history!.creation!.createdRun).not.toEqual(f.session.run)
+    expect(page.descriptor.history!.forkedFrom!.agentSessionId).not.toBe(f.session.agentSessionId)
+    const cli = process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux')
+    const output = await promisify(execFile)(process.execPath, [cli, '--endpoint', `unix:${f.socketPath}`, 'agent', 'context', '--host', 'local', '--session', f.session.agentSessionId], {
+      env: objectCliEnvironment(f.root), timeout: 15_000, maxBuffer: 4 * 1024 * 1024 })
+    const response = JSON.parse(output.stdout)
+    expect(response.ok).toBe(true); expect(response.result.descriptor.history).toEqual(f.expected)
+    expect(response.result.captured.items.at(-1).content).toBe(fullText)
+    expect(response.result.native.items.at(-1).contentParts).toEqual([{ kind: 'text', text: fullText, contentEligibility: 'unconfirmed' }])
+    expect(await f.bytes()).toEqual(before)
+    for (const control of f.controls) expect(control).not.toHaveBeenCalled(); expect(f.connect).not.toHaveBeenCalled()
+  }
+})
+
+it.each(['creation', 'forkedFrom', 'toolExecution'] as const)('history metadata: rejects malformed %s and unknown metadata through the original decoder', async field => {
+  const f = await metadataEndpoint('claude', true), input = { ...f.input, limit: 30 }
+  const page = await f.rpc.call('agent.context', input)
+  const value = f.expected[field]!
+  const malformed: unknown[] = [null, false, 1, [], { ...value, extra: 'not-public' }]
+  if (field === 'creation') malformed.push(
+    { ...value, initialPrompt: ['confirmed'] }, { ...value, agentMuxContext: ['confirmed'] },
+    { ...value, failure: { step: ['session-commit'], code: 'original', message: 'Not a literal step' } },
+    { ...value, createdRun: { runId: 1 } }, { ...value, createdBy: { agentSessionId: 'ancestor', run: { runId: 'original' }, owner: { kind: 'unknown' } } },
+    { ...value, createdRun: { runId: 'original', secret: 'not-public' } })
+  if (field === 'forkedFrom') malformed.push({ ...value, expectedRun: { runId: 1 } },
+    { ...value, expectedNativeHandle: { kind: 'provider', providerId: 'claude', sessionId: false } },
+    { ...value, expectedNativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'ancestor', secret: 'not-public' } })
+  if (field === 'toolExecution') malformed.push({ ...value, resourceRuntimeId: [] }, { ...value, bindingId: '' }, { ...value, workspacePath: { path: f.root } })
+  expect(malformed.length).toBeGreaterThan(5)
+  for (const metadata of malformed) expect(() => parseRpcNativeResult('agent.context', { ...page, descriptor: { ...page.descriptor,
+    history: { ...page.descriptor.history, [field]: metadata } } }, input)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  for (const history of [{ ...f.expected, hookToken: 'not-public' }, { ...f.expected, nativeHandle: { ...f.expected.nativeHandle, providerId: 'foreign' } },
+    { ...f.expected, previousNativeHandle: { kind: 'acp', adapterId: 'not-provider', sessionId: 'wrong-source' } }]) {
+    expect(() => parseRpcNativeResult('agent.context', { ...page, descriptor: { ...page.descriptor, history } }, input))
+      .toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  }
 })

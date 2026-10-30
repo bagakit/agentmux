@@ -40,9 +40,11 @@ export async function nativeHistoryFixture(
   return { root, path, storePath, store, session, client, controls, before,
     bytes: async () => ({ native: await readFile(path), store: await readFile(storePath) }),
     close: async () => {
-      await client.dispose()
+      const failures: unknown[] = []
+      try { await client.dispose() } catch (error) { failures.push(error) }
       await Promise.allSettled(physicalReads)
-      await rm(root, { recursive: true, force: true })
+      try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
+      if (failures.length) throw new AggregateError(failures, 'Native history fixture cleanup failed')
     } }
 }
 
