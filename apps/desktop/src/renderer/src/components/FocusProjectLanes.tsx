@@ -3,7 +3,7 @@ import { hostIdentityProjection } from '../lib/region-execution-host'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useEffect, useId, useMemo, useState, type ReactNode, type Ref, type ComponentProps, type SyntheticEvent, type CSSProperties } from 'react'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
-import { focusProjectKey, type FocusProjectLane, type FocusRetainedProject } from '../lib/focus-project-lanes'
+import { focusProjectKey, type FocusRetainedProject } from '../lib/focus-project-lanes'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { ProjectIcon } from './ProjectIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -16,22 +16,30 @@ import type { FocusLaneMetrics } from '../lib/focus-lane-layout'
 import type { FocusReplyLines } from '../../../shared/focus-preferences'
 import { FocusLaneGroups } from './FocusLaneGroups'
 import { ResolvedAgentAvatar } from './AgentAvatar'
+import { focusCollectionTopicCount, type FocusScanLane } from '../lib/focus-collection-lanes'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeObjectIdentifierIcon = semanticIconComponent('object.identifier')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
+const CollectionIcon = semanticIconComponent('object.folder')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const UNMEASURED_CARDS: FocusLaneMetrics = { width: 0, padding: 4, gap: 2, cardGap: 2 }
 
+function collectionCountLabel(lane: FocusScanLane) {
+  const topics = focusCollectionTopicCount(lane), agents = lane.contextIds.length
+  return `${topics} ${topics === 1 ? 'Topic' : 'Topics'} · ${agents} ${agents === 1 ? 'Agent' : 'Agents'}`
+}
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2 }: {
+
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2 }: {
   leading?: ReactNode
   origins?: ReadonlyMap<string, FocusLaneOrigin>
   visible?: boolean
   rowsRef?: Ref<HTMLDivElement>
-  lanes: readonly FocusProjectLane[]; selectedProjectKey: string
+  lanes: readonly FocusScanLane[]; selectedProjectKey: string
   currentLaneId?: string | null | undefined
-  onSelect(projectKey: string): void; renderLane(lane: FocusProjectLane, heading: ReactNode): ReactNode
+  revealRequestId?: string | undefined
+  onSelect(projectKey: string): void; renderLane(lane: FocusScanLane, heading: ReactNode): ReactNode
   recentProjects?: readonly FocusRetainedProject[]; onRead?(at: number): void
   cardMetrics?: FocusLaneMetrics; replyLines?: FocusReplyLines
 }) {
@@ -39,6 +47,15 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
   const icons = useAppStore(state => state.spaceObjectIcons)
   const hosts = useAppStore(state => state.config?.hosts)
   const descriptionId = useId()
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const currentCollectionId = lanes.find(lane => lane.collection?.topics.some(topic => topic.id === currentLaneId))?.id
+  useEffect(() => {
+    if (!revealRequestId || !currentCollectionId) return
+    setCollapsed(current => { if (!current.has(currentCollectionId)) return current; const next = new Set(current); next.delete(currentCollectionId); return next })
+  }, [revealRequestId, currentCollectionId])
+  function toggleCollection(id: string) {
+    setCollapsed(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  }
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (!visible) return
@@ -49,10 +66,23 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
   return <section className="focus-project-lanes" aria-label="Focus context scan">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
       {leading}
-      {lanes.map(lane => <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-source={origins?.get(lane.id)?.kind} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
+      {lanes.map(lane => <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${!lane.collection && selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-source={lane.collection ? 'collection' : origins?.get(lane.id)?.kind} data-focus-collection={lane.collection ? lane.id : undefined} data-collapsed={lane.collection && collapsed.has(lane.id) || undefined} data-focus-current={currentLaneId === lane.id || lane.collection?.topics.some(topic => topic.id === currentLaneId) || undefined} data-project-id={lane.collection ? undefined : lane.projectId} data-project-key={lane.collection ? undefined : focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
-          <FocusProjectOrigin origin={origins?.get(lane.id)} />
+          {lane.collection ? <>
+            <span className="focus-project-lanes__source">Collection</span>
+            <button type="button" className="focus-project-lanes__axis focus-project-lanes__collection" aria-expanded={!collapsed.has(lane.id)}
+              aria-current={lane.collection.topics.some(topic => topic.id === currentLaneId) ? 'location' : undefined}
+              aria-label={`${lane.name} · ${collectionCountLabel(lane)}`}
+              title={lane.name} onClick={() => toggleCollection(lane.id)}>
+              <ThemeNavigationDisclosureIcon size={11} aria-hidden="true" /><CollectionIcon size={14} aria-hidden="true" />
+              <span className="focus-project-lanes__label"><strong>{lane.name}</strong></span>
+              <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
+            </button>
+            {lane.summary ? <span className="focus-project-lanes__recovery focus-project-lanes__collection-notice" role="status" title={lane.summary}>Details unconfirmed</span> : null}
+            {lane.collection.pending ? <span className="focus-project-lanes__recovery focus-project-lanes__collection-notice" role="status" title="Collection membership changed. Finish editing or leave the current card to update its grouping.">Update pending</span> : null}
+            <span className="focus-project-lanes__collection-count">{collectionCountLabel(lane)}</span>
+          </> : <><FocusProjectOrigin origin={origins?.get(lane.id)} />
           <button type="button" className="focus-project-lanes__axis" aria-describedby={lane.summary ? descriptionId + lane.id : undefined} aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId)].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
@@ -60,7 +90,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
                 {lane.labels.map((label, index) => <span className="focus-project-lanes__label" key={index}>{index ? <ThemeNavigationDisclosureIcon size={10} /> : null}{index && lane.topicId && index === lane.labels.length - 1 ? <ThemeObjectIdentifierIcon size={11} /> : index ? <ThemeObjectBranchIcon size={11} /> : null}<strong>{label}</strong></span>)}</>}
             <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
           </button>
-          {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}
+          {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}</>}
           <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} />
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
         </span>

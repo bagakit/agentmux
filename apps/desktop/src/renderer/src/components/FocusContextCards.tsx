@@ -1,4 +1,4 @@
-import { useLayoutEffect, useReducer, useRef, type RefObject } from 'react'
+import { Fragment, useLayoutEffect, useReducer, useRef, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import type { FocusContext } from '../lib/focus-context'
 import { focusContextIdentityKey, type FocusContextIdentity } from '../lib/focus-context-identity'
@@ -8,12 +8,14 @@ import type { FocusReplyLines } from '../../../shared/focus-preferences'
 import type { FocusAgentReveal } from '../lib/focus-agent-navigation'
 import { desktopPresentationCommitted } from '../lib/desktop-presentation'
 import { focusCardTrackHeight } from '../lib/focus-lane-layout'
+import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
+import { FocusTopicLabel } from './FocusTopicLabel'
 
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect }: {
+export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections }: {
   contexts: readonly FocusContext[]; columns: number; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
   layoutReady?: boolean
   replyLines?: FocusReplyLines
@@ -22,6 +24,8 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
   onRevealed?: ((requestId: string) => void) | undefined
   selectedId: string | null; goalLinks: ReadonlyMap<string, FocusGoalLinks>; identities: ReadonlyMap<string, FocusContextIdentity>
   onSelect(id: string): void
+  topics?: ReadonlyMap<string, FocusTopicHeading> | undefined
+  sections?: ReadonlyMap<string, FocusTopicHeading> | undefined
 }) {
   const grid = useRef<HTMLDivElement>(null)
   const cardHeight = focusCardTrackHeight(replyLines), viewportMargin = cardHeight * 2
@@ -41,7 +45,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     // Unknown/zero geometry or absent observers retain full usable bodies.
     if (!layoutReady && rows && rows.clientWidth > 0 && rows.clientHeight > 0
       && typeof ResizeObserver !== 'undefined' && typeof IntersectionObserver !== 'undefined') return
-    const slots = [...element.children] as HTMLDivElement[]
+    const slots = [...element.querySelectorAll<HTMLDivElement>(':scope > [data-focus-card-key]')]
     const viewport = rows?.getBoundingClientRect()
     const usable = layoutReady && rows && viewport && rows.clientHeight > 0 && rows.clientWidth > 0 && typeof IntersectionObserver !== 'undefined'
     const bounds = usable ? element.getBoundingClientRect() : null
@@ -112,15 +116,17 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
       (revealRequest.presentationSessionId === undefined || revealRequest.presentationSessionId === context.id)
     const full = visited.current.has(contextKey(context)) || requested
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === contextKey(context)
-    return <div className="focus-context-card" style={{ display: 'grid', minHeight: cardHeight }} key={contextKey(context)}
+    const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
+    return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`Topic · ${section.name}`}><FocusTopicLabel topic={section} /></div> : null}
+    <div className="focus-context-card" style={{ display: 'grid', minHeight: cardHeight + (topic ? 28 : 0) }}
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
       {full ? <FocusContextCardBody context={context} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
-        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} />
+        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} topic={topic} />
         : <button type="button" className={`focus-context focus-context--card${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
-          aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}`} aria-description={context.originAddress}
+          aria-pressed={selected} aria-label={`${topic ? `Topic · ${topic.name} · ` : ''}${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}`} aria-description={context.originAddress}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
           onClick={() => onSelect(context.id)}
           onFocus={event => { reveal(context, event.currentTarget.parentElement as HTMLDivElement) }}
@@ -128,7 +134,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
             event.preventDefault(); event.stopPropagation()
             const button = reveal(context, event.currentTarget.parentElement as HTMLDivElement)
             button?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }))
-          }}><span className="focus-context__copy"><strong>{context.name}</strong><span className="focus-context__detail">{context.stateLabel}</span></span></button>}
-    </div>
+          }}><span className="focus-context__copy">{topic ? <FocusTopicLabel topic={topic} /> : null}<strong>{context.name}</strong><span className="focus-context__detail">{context.stateLabel}</span></span></button>}
+    </div></Fragment>
   })}</div>
 }

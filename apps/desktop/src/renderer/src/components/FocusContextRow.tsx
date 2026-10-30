@@ -10,11 +10,12 @@ import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { FocusGoalLinks, FocusGoalMark } from './FocusGoalLinks'
 import type { FocusGoalLinks as GoalLinks } from '../lib/focus-goal-links'
+import type { FocusTopicHeading } from '../lib/focus-collection-lanes'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 
 
-export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, disclosure, onSelect, onOpenWorkface }: { context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined }) {
+export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, disclosure, onSelect, onOpenWorkface, topic }: { context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined; topic?: FocusTopicHeading | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false), [draft, setDraft] = useState<string | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
   const active = useWorkbenchPresentationActive()
@@ -53,8 +54,8 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
         if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; ++editGeneration.current; setDraft(null) }
       }} />
   </div>
-  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel} · ${description}`} aria-description={context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
-    <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
+  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} aria-pressed={selected} aria-label={`${topic ? `Topic · ${topic.name} · ` : ''}${context.name} · ${context.stateLabel} · ${description}`} aria-description={context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
+    <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
   return <><div className="focus-context-card">{main}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>

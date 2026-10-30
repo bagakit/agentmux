@@ -3,7 +3,7 @@ import type { FocusProjectLane } from './focus-project-lanes'
 
 /** Coalesce only presentation order. Facts stay current and continuous activity
  * cannot postpone an update forever. Hidden Focus owns no reorder timer. */
-export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible: boolean, rows: RefObject<HTMLElement | null>): FocusProjectLane[] {
+export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible: boolean, rows: RefObject<HTMLElement | null>, interaction?: RefObject<boolean>): FocusProjectLane[] {
   const desired = lanes.map(lane => lane.id)
   const signature = JSON.stringify(desired)
   const latest = useRef(desired)
@@ -15,8 +15,8 @@ export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible
   const pressed = useRef(false)
   useEffect(() => {
     if (!visible) return
-    const down = (event: PointerEvent) => { pressed.current = Boolean(event.target instanceof Node && rows.current?.contains(event.target)) }
-    const up = () => { pressed.current = false }
+    const down = (event: PointerEvent) => { pressed.current = Boolean(event.target instanceof Node && rows.current?.contains(event.target)); if (interaction) interaction.current = pressed.current }
+    const up = () => { pressed.current = false; if (interaction) interaction.current = false }
     document.addEventListener('pointerdown', down, true)
     document.addEventListener('pointerup', up, true)
     document.addEventListener('pointercancel', up, true)
@@ -28,7 +28,7 @@ export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible
       document.removeEventListener('pointercancel', up, true)
       window.removeEventListener('blur', up)
     }
-  }, [visible, rows])
+  }, [visible, rows, interaction])
   useEffect(() => {
     const entering = visible && !wasVisible.current
     wasVisible.current = visible

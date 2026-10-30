@@ -612,3 +612,18 @@
 .focus-coordination-results { flex: none; margin: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); min-width: 0; }
 .focus-coordination-results > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .focus-coordination-results > header small { color: var(--text-3); }
+
+/* Collection is a scan projection; Topic remains visible provenance, separate from the task. */
+.focus-project-lanes__collection-count { flex: 0 0 auto; color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; }
+.focus-project-lanes__collection > svg:first-child { transition: transform 120ms ease; }
+.focus-project-lanes__collection[aria-expanded='true'] > svg:first-child { transform: rotate(90deg); }
+.focus-project-lanes__row[data-collapsed='true'] .focus-project-lanes__groups { display: none; }
+.focus-context__topic { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-micro); font-weight: 400; }
+.focus-context__topic > svg { flex: 0 0 auto; margin-top: 2px; }
+.focus-context__topic > span { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.focus-topic-section { grid-column: 1 / -1; min-width: 0; padding: var(--sp-2) var(--sp-1) var(--sp-1); }
+.focus-topic-section:first-child { padding-top: var(--sp-1); }
+.focus-topic-section .focus-context__topic { color: var(--text-2); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .focus-project-lanes__collection > svg:first-child { transition: none; } }
+
+.focus-project-lanes__recovery.focus-project-lanes__collection-notice { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; }

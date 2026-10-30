@@ -6,15 +6,18 @@ import { launcherRecapExcerpt } from '@agentmux/client-ui/conversation-recap'
 import { AgentAvatar } from './AgentAvatar'
 import { FocusContextStateMark } from './FocusContextState'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import type { FocusTopicHeading } from '../lib/focus-collection-lanes'
+import { FocusTopicLabel } from './FocusTopicLabel'
 
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 
 
 /** Pure held-fact content. Each surface keeps its own button, navigation and disclosures. */
-export function AgentContextContent({ context, metadata, identity, headingAccessory, presentation = 'row', disclosure }: {
+export function AgentContextContent({ context, metadata, identity, headingAccessory, presentation = 'row', disclosure, topic }: {
   context: FocusContext; metadata?: ReactNode; identity?: ReactNode; headingAccessory?: ReactNode; presentation?: 'row' | 'card'
   disclosure?: { status: number; summary: number } | undefined
+  topic?: FocusTopicHeading | undefined
 }) {
   const active = useWorkbenchPresentationActive()
   // A retained excerpt describes its original record, even after its known Run
@@ -28,6 +31,7 @@ export function AgentContextContent({ context, metadata, identity, headingAccess
   return <>
     {presentation === 'row' ? avatar : null}
     <span className="focus-context__copy">
+      {topic ? <FocusTopicLabel topic={topic} /> : null}
       <span className="focus-context__identity">{presentation === 'card' ? avatar : null}<strong>{context.name}</strong>{metadata}{headingAccessory}<span className="focus-context__state" style={disclosure ? { opacity: status } : undefined} title={context.detailKind === 'observation' ? context.detail : context.stateLabel} aria-hidden={context.detailKind === 'observation' ? undefined : true}><FocusContextStateMark context={context} /><small>{presentation !== 'card' && context.detailKind === 'observation' ? context.detail : context.stateLabel}</small></span></span>
       <span className={`focus-context__detail${recap ? ' focus-context__detail--recap' : ''}${showActivity ? ' focus-context__detail--service' : ''}`} style={disclosure ? { opacity: summary } : undefined} aria-hidden={summary === 0 || undefined}>
         {recap ? <><span className="focus-context__recap" title={`${recap.source} (${recap.origin})`}>{presentation === 'row' ? <ThemeObjectConversationIcon size={10} aria-hidden="true" /> : null}<MarkdownExcerpt content={launcherRecapExcerpt(recap)} /></span>{showActivity ? <span className="focus-context__activity">{context.detail}</span> : null}</> : presentation !== 'card' && context.detailKind === 'observation' ? context.stateLabel : context.detail}
