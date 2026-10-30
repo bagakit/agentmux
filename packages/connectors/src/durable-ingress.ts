@@ -402,9 +402,12 @@ export class DurableIngressHost implements ConnectionIngressPort {
     } catch { return unavailableChannelQuote(record, range, this.historyAbort.signal.aborted ? 'native-history-cancelled' : 'native-history-unavailable') }
   }
   async dispatch(ingressId: string, receiverSignal?: AbortSignal): Promise<ConnectionIngressInspection> {
+    return await this.dispatchOriginal(ingressId, receiverSignal)
+  }
+  private async dispatchOriginal(ingressId: string, receiverSignal?: AbortSignal, custodyOnly = false): Promise<ConnectionIngressInspection> {
     const active = this.pending.get(ingressId)
     if (active) return await active
-    const work = this.deliver(ingressId, receiverSignal).then(async result => {
+    const work = this.deliver(ingressId, receiverSignal, custodyOnly).then(async result => {
       try {
         const record = this.read(ingressId)
         if (record && record.kind !== 'action' && record.group?.recorded) await this.recordGroup(record)
@@ -423,7 +426,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     this.pending.set(ingressId, work)
     return await work
   }
-  private async deliver(ingressId: string, receiverSignal?: AbortSignal): Promise<ConnectionIngressInspection> {
+  private async deliver(ingressId: string, receiverSignal?: AbortSignal, custodyOnly = false): Promise<ConnectionIngressInspection> {
     let intake = this.read(ingressId)
     if (!intake) fail('UNKNOWN_CONNECTION_INGRESS')
     if (intake.kind === 'action') return intake.state === 'refused' ? await this.inspect({ ingressId }) : await this.dispatchAction(intake)
@@ -444,7 +447,9 @@ export class DurableIngressHost implements ConnectionIngressPort {
         })
       }
     }
-    if (intake.state !== 'received') return intake.state === 'claimed' ? await this.continueInput(ingressId, receiverSignal) : await this.inspect({ ingressId })
+    if (intake.state !== 'received') return intake.state === 'claimed'
+      ? custodyOnly ? await this.ensureOriginalInput(intake) : await this.continueInput(ingressId, receiverSignal)
+      : await this.inspect({ ingressId })
     if (this.options.prepareInput) {
       let preparation: Awaited<ReturnType<NonNullable<DurableIngressOptions['prepareInput']>>>
       try { preparation = await this.options.prepareInput(intake) }
@@ -780,7 +785,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       // Current input grants authorize only new advancement; an already stored
       // handoff remains readable without turning those observations into grants.
       const inspection = input.source.kind === 'firstsave' ? await this.ensureOriginalInput(selected.record)
-        : input.source.kind === 'received' ? await this.dispatch(input.ingressId) : await this.inspect({ ingressId: input.ingressId })
+        : input.source.kind === 'received' ? await this.dispatchOriginal(input.ingressId, undefined, true) : await this.inspect({ ingressId: input.ingressId })
       if (inspection.inputReceipt) {
         action = this.transaction(() => {
           const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
