@@ -166,7 +166,7 @@ it('explains source gaps through the real public diagnosis without exposing sour
   const report = await f.sdk.call('connection.diagnose', request), group = report.groups.value!.items[0]!
   expect(group.outgoing.value!.coverage!.gaps.map(({ association: _association, ...gap }) => gap)).toEqual([
     { gapKey: connectionDiagnosisGapKey(group.target, 'cut-gap'), reason: 'source-gap', code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE', codeRecorded: true, sourceKind: 'native' },
-    { gapKey: connectionDiagnosisGapKey(group.target, 'private-gap'), reason: 'source-gap', code: null, codeRecorded: true, sourceKind: null },
+    { gapKey: connectionDiagnosisGapKey(group.target, 'private-gap'), reason: 'source-gap', code: null, codeRecorded: true, sourceKind: 'captured' },
     { gapKey: connectionDiagnosisGapKey(group.target, 'unrecorded-gap'), reason: 'source-gap', code: null, codeRecorded: false, sourceKind: null }
   ])
   expect(output(await f.cli(['diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.input.bindingId]))).toEqual(report)
@@ -246,4 +246,39 @@ it('diagnosis keeps raw JSON gap identities private and separates the same origi
   expect(connectionDiagnosisGapKey({ ...group.target, executionHostId: 'foreign-host' }, originalGapId)).not.toBe(gap.gapKey)
   expect(connectionDiagnosisGapKey({ ...group.target, agentSessionId: 'foreign-session' }, originalGapId)).not.toBe(gap.gapKey)
   expect(f.connections.delivery.retry).not.toHaveBeenCalled()
+}, 30_000)
+
+
+it('keeps original gap source kinds through actual SDK RPC and compiled diagnosis CLI', async () => {
+  const f = await fixture(), reference = { hostId: 'local', agentSessionId: 'original-agent' }
+  const native = { ...reference, source: { kind: 'native' as const, providerId: 'fixture', nativeSessionId: 'PRIVATE native identity', recordId: 'PRIVATE native record' } }
+  const captured = { ...reference, source: { kind: 'captured' as const, recordId: 'PRIVATE captured record' } }
+  const explicit = { kind: 'native-unavailable' as const, providerId: 'fixture' }
+  const part = { record: native, recordRevision: 'a'.repeat(64), selector: { kind: 'native-part' as const, partIndex: 0 } }
+  const inspect = vi.fn(async () => ({ delivery: null })), retry = vi.fn(async () => { throw Error('Read-only diagnosis must not retry') })
+  f.connections.delivery = { inspect, retry, list: async () => ({ deliveries: [], next: null, coverage: {
+    state: 'incomplete', nextContent: null, origins: [], gaps: [
+      { gapId: 'part-source', reason: 'public-content-unconfirmed', part },
+      { gapId: 'record-source', reason: 'public-content-unconfirmed', record: captured },
+      { gapId: 'explicit-source', reason: 'source-gap', source: explicit, record: captured },
+      { gapId: 'missing-source', reason: 'public-content-unconfirmed' },
+      { gapId: 'record-before-part', reason: 'public-content-unconfirmed', record: captured, part }
+    ]
+  } }) }
+  const dispatch = vi.spyOn(f.ingress, 'dispatch'), submit = vi.spyOn(f.client, 'submitAgentMessage'), rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
+  const request = { ...f.target, bindingId: f.input.bindingId }, report = await f.sdk.call('connection.diagnose', request)
+  const group = report.groups.value!.items[0]!, gaps = group.outgoing.value!.coverage!.gaps
+  expect(gaps.map(gap => gap.sourceKind), 'original part-only native and record-only captured source kinds must survive public diagnosis').toEqual(['native', 'captured', 'native-unavailable', null, 'captured'])
+  expect(gaps.map(gap => [gap.code, gap.codeRecorded])).toEqual(Array.from({ length: 5 }, () => [null, false]))
+  expect(gaps[0]!.association).toEqual({ sourceKey: connectionDiagnosisSourceKey(reference, native.source), recordKey: connectionDiagnosisRecordKey(native), partKey: connectionDiagnosisPartKey(part), eventKey: null })
+  expect(gaps[1]!.association).toMatchObject({ sourceKey: connectionDiagnosisSourceKey(reference, captured.source), recordKey: connectionDiagnosisRecordKey(captured), partKey: null })
+  expect(gaps[2]!.association).toMatchObject({ sourceKey: connectionDiagnosisSourceKey(reference, explicit), recordKey: connectionDiagnosisRecordKey(captured) })
+  expect(gaps[3]!.association).toEqual({ sourceKey: null, recordKey: null, eventKey: null, partKey: null })
+  expect(gaps[4]!.association).toMatchObject({ sourceKey: connectionDiagnosisSourceKey(reference, captured.source), recordKey: connectionDiagnosisRecordKey(captured), partKey: connectionDiagnosisPartKey(part) })
+  expect(parseConnectionResult('connection.diagnose', report, request)).toEqual(report)
+  expect(output(await f.cli(['diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.input.bindingId]))).toEqual(report)
+  const formatted = formatGroupDiagnosis({ ...group, service: report.service })
+  expect(formatted).toContain('source native'); expect(formatted).toContain('source captured'); expect(formatted).toContain('source native-unavailable'); expect(formatted).toContain('source unrecorded')
+  for (const encoded of [JSON.stringify(report), formatted]) expect(encoded).not.toMatch(/PRIVATE|nativeSessionId|recordId|recordRevision|partIndex/u)
+  for (const effect of [inspect, retry, dispatch, submit, rejoin]) expect(effect).not.toHaveBeenCalled()
 }, 30_000)
