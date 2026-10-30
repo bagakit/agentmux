@@ -605,7 +605,9 @@ Mote 飞书私聊在原专属会话准备就绪、准确原接收决定与当前
 
 原生入站 ACK 只确认原收件 owner 已耐久保管完整事件与正文；Core 首次保存仍确认完整冻结的输入表示。原收件已经冻结 operation／MID、正文、quote、作者和准确目标而 Core 回执未取得时，沿同原完整请求确保接收，由 Core 的原 operation 事务核对已存意图及历史 claim；不能从 null、网络恢复或当前 Run 正常推定未施效。已存输入先按既有读取权限返回原事实，当前授权或反向来源暂不可用只限制新的推进，不把已保存事实改成不存在；缺原来源的旧记录不补资格，既有未知效果不重放。Run 已变且尚无 Core 意图时，只能依据原 Core 的准确语义恢复链和原执行来源核对同目标；缺失保持原未知，不以今天的 native 身份改写原请求。
 
-原收件恢复动作另有稳定 operationId，并绑定只读 inspection 给出的准确本 owner 来源；重复同动作只读取或接回原结果，旧来源不能影响后来准备代次。收件 owner 仅管理 received、原 firstsave 交接及自身准确观察，已有 Core ref 只返回原指针与当前推进观察，retry、重新启用和派发控制仍归原输入 owner。正常确保或自动唤醒不得因同 ref 后来变成 not-applied 而升级为后继尝试，不复活 stopped；这项限制不妨碍同一个已具备原资格 gate 的首次效果继续。动作身份或来源引用不授予读取正文、授权或跨 Runtime 控制权。
+原收件恢复动作另有稳定 operationId，并绑定只读 inspection 给出的准确本 owner 来源；动作身份限定在原 Hosting Runtime 的 `(ingressId, operationId)`，只在原收件行核对，其他收件不参与查重。重复同动作只读取或接回原结果，旧来源不能影响后来准备代次。收件 owner 仅管理 received、原 firstsave 交接及自身准确观察，已有 Core ref 只返回原指针与当前推进观察，retry、重新启用和派发控制仍归原输入 owner。正常确保或自动唤醒不得因同 ref 后来变成 not-applied 而升级为后继尝试，不复活 stopped；这项限制不妨碍同一个已具备原资格 gate 的首次效果继续。动作身份或来源引用不授予读取正文、授权或跨 Runtime 控制权。
+
+原 message 的 frozen Host、Session、Binding 与 audience 已满足原收件授权的 managed recipient 可确保同一请求，无需 bot enrollment；它保真实 agent 身份与当前 Runtime 核验，实际 firstsave／effect 仍由 Core 重核原外部 author、grant 和目标。无冻结目标或只可读同群未分配 action 的旁观者不因此取得输入权；context 取消另按实际动作核资格。
 
 原收件 owner 已获准且仍待处理的消息，不因原 Agent 未连接而永久停在未确认：沿[会话连续性](session-recovery.md#会话连续性策略与输入)自动尝试恢复准确原 Session，并在准确恢复后重新取得当前资格，按[原输入队列](conversation-input.md#composer-消息队列与紧凑状态)的顺序继续原请求，不要求用户重新发言。恢复、授权或输入观察失败分别留在同一原记录，等待超时只结束本次观察；后续相关原事实到达仍能继续核对，不丢弃旧 pending、不把另一条新消息成功当旧请求已处理。
 
