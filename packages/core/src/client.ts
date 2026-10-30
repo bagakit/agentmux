@@ -7083,7 +7083,7 @@ export class AgentMuxClient {
         ? await this.observeAgentInputPreparation(session, preparationMs, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
-          () => { preparationStarted = true }, protocolInput, deadline, retainedQualification ? { inputByte: retainedQualification.inputByte, nativeSourceId: retainedQualification.nativeSourceId } : input.preparationRetry)
+          () => { preparationStarted = true }, deadline, retainedQualification ? { inputByte: retainedQualification.inputByte, nativeSourceId: retainedQualification.nativeSourceId } : input.preparationRetry)
       }, input.signal, protocolInput, release => { releasePreparationObservation = release }) : undefined
     } catch (error) {
       releasePreparationObservation?.()
@@ -7091,10 +7091,11 @@ export class AgentMuxClient {
       throw error
     }
     try {
-      if (transportQualification) protocolInput.preclaim = {
+      if (transportQualification) protocolInput.origin = { inputByte: transportQualification.inputByte, processId: transportQualification.processId }
+      protocolInput.preclaim = {
         interruption: new Error('Read-only input preparation yielded for its terminal protocol ACK.'), claimStarted: false,
-        observation: { phase: 'input-lane', phaseEnteredAt: Date.now(), lastCompletedPhase: null,
-          lastPhaseCompletedAt: null, deadline: transportQualification.deadline, pane: null }
+        ...(transportQualification ? { observation: { phase: 'input-lane', phaseEnteredAt: Date.now(), lastCompletedPhase: null,
+          lastPhaseCompletedAt: null, deadline: transportQualification.deadline, pane: null } } : {})
       }
       let delivered: AgentPromptMessageContent | undefined
       for (;;) {
@@ -7117,16 +7118,19 @@ export class AgentMuxClient {
                 // Historical asynchronous answers are new native input, not a live
                 // callback or steer. The original thread owns idle queue dispatch.
                 ...(questionReply ? { requiredNativeSource: questionReply.source, nativeIdleOnly: true as const } : {}),
-                ...(platformNotification?.mode === 'idle' ? { idleOnly: platformNotification.idle! } : {}) }, diagnostic)
-          }, { kind: 'semantic', bytes: null, work: 'prompt-submit' }, { renderObservation, protocolInput: transportQualification ? protocolInput : undefined,
+                ...(platformNotification?.mode === 'idle' ? { idleOnly: platformNotification.idle! } : {}) }, diagnostic, protocolInput)
+          }, { kind: 'semantic', bytes: null, work: 'prompt-submit' }, { renderObservation, protocolInput,
             onQueued: releasePreparationObservation, retainPreclaimYield: release => { releasePreparationObservation = release },
-            preclaimDeadline: transportQualification?.deadline })
+            preclaimDeadline: transportQualification?.deadline, preclaimSignal: input.signal })
           break
         } catch (error) {
           const preclaim = protocolInput.preclaim
-          if (!transportQualification || !preclaim || preclaim.claimStarted || error !== preclaim.interruption ||
+          if (!preclaim || preclaim.claimStarted || error !== preclaim.interruption ||
               renderObservation.signal.reason !== preclaim.interruption) throw error
-          if (input.signal?.aborted || Date.now() >= transportQualification.deadline) throw promptPreparationFailure(input.signal?.reason ?? error)
+          if (input.signal?.aborted || transportQualification && Date.now() >= transportQualification.deadline) throw promptPreparationFailure(input.signal?.reason ?? error)
+          // The next lane queues behind the original raw ACK, preserving the same
+          // observation/key. Ordinary input gains no new qualification or deadline.
+          if (!transportQualification) continue
           try {
             const current = await this.observeAgentInputPreparation(session,
               Math.max(1, transportQualification.deadline - Date.now()), async signal => {
@@ -9605,19 +9609,25 @@ export class AgentMuxClient {
         kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : 'user', bytes: 0, parent: observation ?? null
       }, { rawInput: call })
     }
-    // Capture only observers present when this write entered. Whole mouse controls may
+    // Capture at authorized preemption, before dispatch. Whole mouse controls may
     // change the target, so their ACK permits re-verification, never reuse of the old pane.
-    // A late ACK cannot grant authority to a later preparation or another Run.
+    // A late ACK cannot grant authority to an observer registered after that point.
     const mousePreparation = source === 'user' && inputKind === 'write' && isTerminalMouseReportPayload(data)
-    const protocolObservers = source === 'terminal-protocol' || mousePreparation
-      ? [...(this.agentInputLanes.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
-          .filter(observation => sameRun(observation.run, requestedSession.run) && observation.protocolInput &&
-            (!mousePreparation || !observation.protocolInput.preclaim?.claimStarted))
-      : []
+    let protocolObservers: AgentInputObservation[] = []
+    const protocolInputs = new Set<AgentPromptProtocolInputBoundary>()
+    let preempted = false, protocolSettled = false
     // This is the same operation later passed to ctxmux, before any input-lane or ACK fact exists.
     const operationId = mintObjectId()
     const preempt = () => {
       call.check()
+      if (source === 'terminal-protocol' || mousePreparation) {
+        protocolObservers = [...(this.agentInputLanes.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
+          .filter(observation => sameRun(observation.run, requestedSession.run) && observation.protocolInput &&
+            (!mousePreparation || !observation.protocolInput.preclaim?.claimStarted))
+        for (const observation of protocolObservers) protocolInputs.add(observation.protocolInput!)
+      }
+      preempted = true
+      for (const protocol of protocolInputs) protocol.pending = (protocol.pending ?? 0) + 1
       this.cancelPromptRenderObservation(requestedSession, source,
         rawInputCancellationDetail(requestedSession, data, operationId, inputKind), mousePreparation)
     }
@@ -9626,6 +9636,9 @@ export class AgentMuxClient {
     const preparation = call.author ? this.assertRawInputCurrent(call).then(preempt) : (preempt(), undefined)
     if (preparation) void preparation.catch(() => {}) // The queued owner below consumes its original failure.
     return await this.serializeAgentInput(requestedSession, async (session, run, diagnostic, dispatch) => {
+      // If the semantic observer has not read its first Run yet, this exact
+      // channel snapshot establishes the pre-write cursor, never the ACK's end.
+      for (const protocol of protocolInputs) protocol.origin ??= { inputByte: run.acceptedInputBytes, processId: run.pid }
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
       // Raw input uses the original connection's immutable Run qualification.
@@ -9709,7 +9722,6 @@ export class AgentMuxClient {
           })
         }
       } catch (error) {
-        for (const observation of protocolObservers) observation.protocolInput!.invalid = true
         if (!dispatched || error instanceof AgentMuxError && error.detail === 'not_applied') await observeNativeInput('not_applied')
         throw error
       }
@@ -9729,6 +9741,9 @@ export class AgentMuxClient {
             previous && (previous.endByte !== range.startByte || previous.processId !== run.pid)) {
           protocol.invalid = true
         } else {
+          // The native writer's exact range can establish the first known
+          // cursor when the earlier Run observation did not expose one.
+          if (protocol.origin?.inputByte === null && protocol.origin.processId === run.pid) protocol.origin.inputByte = range.startByte
           protocol.acknowledged = { startByte: previous?.startByte ?? range.startByte,
             endByte: range.endByte, processId: run.pid }
         }
@@ -9736,6 +9751,8 @@ export class AgentMuxClient {
       if (result.acceptedThroughByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
+      for (const protocol of protocolInputs) protocol.pending = protocol.pending! - 1
+      protocolSettled = true
       if (source === 'terminal-protocol' && result.runId === session.run.runId && result.pid === run.pid &&
           result.appliedByteRange.endByte - result.appliedByteRange.startByte === Buffer.byteLength(data)) {
         try { await this.recovery.protocolAccepted(session.agentSessionId, session.run.runId, operationId, result.appliedByteRange) }
@@ -9753,7 +9770,14 @@ export class AgentMuxClient {
       }
     }, {
       kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : mousePreparation ? 'mouse' : 'user', bytes: Buffer.byteLength(data), parent: observation ?? null
-    }, { rawInput: call, rawPreparation: preparation, orderedRaw: inputKind !== 'posture' })
+    }, { rawInput: call, rawPreparation: preparation, orderedRaw: inputKind !== 'posture' }).catch(error => {
+      // A report can fail before dispatch (capacity, author or Run reads).
+      // Such a yield has no confirmed ACK either.
+      if (preempted) for (const protocol of protocolInputs) protocol.invalid = true
+      throw error
+    }).finally(() => {
+      if (preempted && !protocolSettled) for (const protocol of protocolInputs) protocol.pending = protocol.pending! - 1
+    })
   }
 
   private cancelPromptRenderObservation(session: AgentMuxAgentSession,
@@ -9851,17 +9875,17 @@ export class AgentMuxClient {
       renderObservation?: AbortController | undefined; protocolInput?: AgentPromptProtocolInputBoundary | undefined
       onQueued?: ((next?: AbortController) => void) | undefined
       retainPreclaimYield?: ((release: (next?: AbortController) => void) => void) | undefined
-      preclaimDeadline?: number | undefined
+      preclaimDeadline?: number | undefined; preclaimSignal?: AbortSignal | undefined
       rawInput?: RawInputCall; rawPreparation?: Promise<void> | undefined; orderedRaw?: boolean
     } = {}
   ): Promise<T> {
-    const { renderObservation, protocolInput, onQueued, retainPreclaimYield, preclaimDeadline, rawInput, rawPreparation, orderedRaw } = options
+    const { renderObservation, protocolInput, onQueued, retainPreclaimYield, preclaimDeadline, preclaimSignal, rawInput, rawPreparation, orderedRaw } = options
     const agentSessionId = requestedSession.agentSessionId
     const lifetime = this.inputPreparationLifetime.signal
     // A preclaim cancellation owns its read-only preparation. Ordinary raw
     // preemption only yields optional rendering and must retain typed dispatch.
     const preparationSignal = protocolInput?.preclaim && !protocolInput.preclaim.claimStarted && renderObservation
-      ? AbortSignal.any([lifetime, renderObservation.signal]) : lifetime
+      ? AbortSignal.any([lifetime, renderObservation.signal, ...(preclaimSignal ? [preclaimSignal] : [])]) : lifetime
     const lane: AgentInputLane = this.agentInputLanes.get(agentSessionId) ?? {
       admission: Promise.resolve(),
       pending: new Set(),
@@ -9898,7 +9922,8 @@ export class AgentMuxClient {
     }
     beginPromptPreparationPhase(protocolInput, 'input-lane')
     let result!: T
-    const queued = previous.catch(() => {}).then(async () => {
+    const predecessor = previous.catch(() => {})
+    const queued = (preparationSignal === lifetime ? predecessor : observePromptInput(preparationSignal, () => predecessor)).then(async () => {
       lane.running = diagnostic
       diagnostic.dequeue()
       if (rawPreparation) await rawPreparation
@@ -9920,8 +9945,17 @@ export class AgentMuxClient {
         ? observePromptInput(rawInput.signal, () => this.requireCurrentAgentRun(session))
         : observePromptInput(preparationSignal, () => this.requireCurrentAgentRun(session)))
       if (channel) this.assertAgentRun(session, run)
+      if (protocolInput?.preclaim && !protocolInput.preclaim.claimStarted) protocolInput.origin ??= { inputByte: run.acceptedInputBytes, processId: run.pid }
       preparationSignal.throwIfAborted()
       rawInput?.check()
+      if (protocolInput?.preclaim && !protocolInput.preclaim.claimStarted &&
+          (protocolInput.invalid || protocolInput.pending || protocolInput.acknowledged &&
+            (protocolInput.acknowledged.processId !== run.pid || protocolInput.origin?.processId !== run.pid ||
+              protocolInput.origin.inputByte === null ||
+              protocolInput.acknowledged.endByte > protocolInput.origin.inputByte && protocolInput.acknowledged.startByte > protocolInput.origin.inputByte ||
+              Math.max(protocolInput.origin.inputByte, protocolInput.acknowledged.endByte) !== run.acceptedInputBytes))) {
+        throw new AgentMuxError('The original preparation protocol input receipt is unconfirmed; the original input and terminal are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      }
       completePromptPreparationPhase(protocolInput)
       if (run.state.type !== 'running') {
         throw new AgentMuxError(
