@@ -142,10 +142,15 @@ delivery pages use connection delivery ls --order oldest|newest (default oldest)
 the same requested order, while --after-content independently pages unresolved content. Managed callers
 can list and inspect body-free receipts on their exact original Host/Session binding and audience,
 including historical revisions, without being the bot creator. To explicitly retry your own original
-delivery, use connection delivery retry with the same operationId. The Host rechecks that original
-binding and audience, current publication authority and Runtime, and the original delivery's retry
-eligibility; bot enrollment ownership is not required. An unknown resource upload can retry only
-while its message was not attempted; an unknown message effect cannot replay. Receipt reads alone
+delivery, save {operationId,source} from its owner-qualified retrySource and use connection delivery
+retry --input FILE|-. Each exact message or content-upload source attempt accepts one durable
+continuation; retain that complete input after a lost reply. Repeating it observes the same accepted
+edge and current delivery, without selecting a newer failed source or requeueing it. A new failure
+requires a new explicit action with its own source. The Host rechecks the original binding and
+audience, current publication authority and Runtime; bot enrollment ownership is not required.
+An unknown content upload qualifies only before any message preparation or attempt; unknown message
+effects remain inspect-only. Late old upload results cannot undo accepted pending work or change
+a newer frozen message. Acceptance, queue fate and platform success are separate facts. Receipt reads alone
 grant no write or administration authority. A newer confirmed operation does not prove complete
 synchronization. Diagnosis returns no bodies, member identities,
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
