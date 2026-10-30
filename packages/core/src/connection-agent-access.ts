@@ -4,8 +4,8 @@ import type { ConnectionDelivery, ConnectionDeliveryParamsMap, ConnectionDeliver
 import type { RoomBinding } from './room-binding-contract.js'
 import type { ConnectionIngressInspectInput, ConnectionIngressRecord } from './ingress-contract.js'
 
-/** Original intake scope is separate from bot administration and input authority. */
-export async function readAgentConnectionIngress(owner: ConnectionPort, input: ConnectionIngressInspectInput,
+/** One original intake scope, shared by reads and exactly scoped custody continuation. */
+export function agentConnectionIngressAuthorization(owner: ConnectionPort,
   session: { hostId: string; agentSessionId: string }, assertCurrent: () => Promise<void>) {
   const deny = (): never => { throw new AgentMuxError('Ingress inspection requires this authenticated Host and Session on its original target or current bound audience.', 'CONTROL_PERMISSION_DENIED') }
   if (!owner.ingress || !owner.bindings) throw new AgentMuxError('Original ingress or binding inspection is unavailable. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
@@ -32,7 +32,14 @@ export async function readAgentConnectionIngress(owner: ConnectionPort, input: C
     if (!current.bindings.some(binding => binding.state !== 'detached' &&
       self({ hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }) && audience(binding, record))) deny()
   }
-  const result = await owner.ingress.inspect(input, { authorize: async record => { await authorize(record); await assertCurrent() } })
+  return async (record: ConnectionIngressRecord | null) => { await authorize(record); await assertCurrent() }
+}
+
+/** Original intake scope is separate from bot administration and input authority. */
+export async function readAgentConnectionIngress(owner: ConnectionPort, input: ConnectionIngressInspectInput,
+  session: { hostId: string; agentSessionId: string }, assertCurrent: () => Promise<void>) {
+  const authorize = agentConnectionIngressAuthorization(owner, session, assertCurrent)
+  const result = await owner.ingress!.inspect(input, { authorize })
   await authorize(result.ingress)
   return result
 }

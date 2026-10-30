@@ -9,7 +9,7 @@ import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, par
 import type { ConnectionHost } from './connection-host.js'
 import { parseChannelTranscriptQuote, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
 import { ingressContextRevision, IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
-import type { ConnectionIngressRuntimeObservation, ConnectionIngressRejoinInput, ConnectionIngressRejoinAction, ConnectionIngressRejoinSource, RoomBindingCallContext } from '@agentmux/core/connections'
+import type { ConnectionIngressRuntimeObservation, ConnectionIngressRejoinInput, ConnectionIngressRejoinAction, ConnectionIngressRejoinSource, ConnectionIngressRejoinContext, RoomBindingCallContext } from '@agentmux/core/connections'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
 export type VerifiedIngressMessage = {
@@ -748,13 +748,16 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return result
   }
   /** Ensure this owner's original custody only; explicit Core controls stay at Core. */
-  async rejoin(value: ConnectionIngressRejoinInput, context: RoomBindingCallContext): Promise<import('@agentmux/core/connections').ConnectionIngressRejoinResult> {
+  async rejoin(value: ConnectionIngressRejoinInput, context: ConnectionIngressRejoinContext): Promise<import('@agentmux/core/connections').ConnectionIngressRejoinResult> {
     const input = parseIngressParams('connection.ingress.rejoin', value)
     await context.assertCurrent?.()
-    if (context.actor.kind !== 'user' && context.actor.kind !== 'device') throw new AgentMuxError('Original ingress recovery requires its authorized user or device. Existing Core inputs remain controllable by their original participants.', 'CONTROL_PERMISSION_DENIED')
+    const observed = this.read(input.ingressId)
+    if (context.actor.kind === 'agent' && (!context.authorize || input.source.kind === 'context-observation' ||
+      !observed || observed.kind === 'action' || !observed.input && !observed.group?.target)) throw new AgentMuxError(
+      'Custody continuation requires this Agent on the original frozen message target. Context cancellation has separate authority.', 'CONTROL_PERMISSION_DENIED')
+    await context.authorize?.(observed)
     const selected = this.transaction(() => {
-      const foreign = this.database.prepare('SELECT ingress_id FROM connection_ingress_message, json_each(rejoin_json) WHERE json_each.key=? LIMIT 1').get(input.operationId)
-      if (foreign && foreign.ingress_id !== input.ingressId) fail('INGRESS_REJOIN_CONFLICT')
+      // The Hosting Runtime and ingress row scope this action identity.
       const record = this.read(input.ingressId)
       if (!record || record.kind === 'action') fail('INGRESS_REJOIN_SOURCE_UNAVAILABLE')
       const row = this.database.prepare('SELECT rejoin_json FROM connection_ingress_message WHERE ingress_id=?').get(input.ingressId)!
@@ -772,6 +775,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     })
     let action = selected.action
     if (action.outcome === 'pending') {
+      await context.authorize?.(this.read(input.ingressId))
       await context.assertCurrent?.()
       // Current input grants authorize only new advancement; an already stored
       // handoff remains readable without turning those observations into grants.
@@ -790,7 +794,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         })
       }
     }
-    return parseIngressResult('connection.ingress.rejoin', { action, inspection: await this.inspect({ ingressId: input.ingressId }) }, input)
+    return parseIngressResult('connection.ingress.rejoin', { action, inspection: await this.inspect({ ingressId: input.ingressId },
+      context.authorize ? { authorize: context.authorize } : undefined) }, input)
   }
   private rejoinSource(record: ConnectionIngressMessage): ConnectionIngressRejoinSource | undefined {
     if (record.state === 'received') return { kind: 'received', preparationRevision: 0 }

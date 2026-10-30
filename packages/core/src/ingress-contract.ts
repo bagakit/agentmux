@@ -125,6 +125,7 @@ export type ConnectionIngressAudiencePage = { ingresses: ConnectionIngressRecord
 /** Internal read scope. The intake owner must authorize this exact snapshot before any
  * no-input return or Core receipt lookup. Authorization failures must not become observation gaps. */
 export type ConnectionIngressReadContext = { authorize(ingress: ConnectionIngressRecord | null): void | Promise<void> }
+export type ConnectionIngressRejoinContext = RoomBindingCallContext & Partial<ConnectionIngressReadContext>
 export interface ConnectionIngressReadPort {
   /** Local latest-first audience window across receiver aliases. Never dispatches or reads a platform. */
   listAudience?(input: ConnectionIngressAudienceInput): Promise<ConnectionIngressAudiencePage>
@@ -132,7 +133,7 @@ export interface ConnectionIngressReadPort {
   list(input: ConnectionIngressListInput): Promise<ConnectionIngressPage>
   authority(input: { operationId: string }): Promise<ConnectionIngressAuthority>
   recordAuthority(input: import('./external-conversation.js').AgentExternalConversationReference): Promise<import('./external-conversation.js').AgentExternalConversationAuthority>
-  rejoin?(input: ConnectionIngressRejoinInput, context: RoomBindingCallContext): Promise<ConnectionIngressRejoinResult>
+  rejoin?(input: ConnectionIngressRejoinInput, context: ConnectionIngressRejoinContext): Promise<ConnectionIngressRejoinResult>
 }
 export type ConnectionIngressParamsMap = {
   'connection.ingress.inspect': ConnectionIngressInspectInput
