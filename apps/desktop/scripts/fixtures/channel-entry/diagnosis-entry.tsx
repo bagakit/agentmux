@@ -4,8 +4,10 @@ import { deliveryFacts } from '@agentmux/core/connections'
 import { api } from '../../../src/renderer/src/lib/api'
 import { channelFixture } from './facts'
 const { proof, connection, target } = channelFixture
-const scene = { active: false, mode: 'busy' as 'busy' | 'ready' | 'waiting' | 'admitted', bindingId: '', revision: 1, room: '', longName: false }
+const scene = { active: false, mode: 'busy' as 'busy' | 'ready' | 'waiting' | 'admitted', bindingId: '', revision: 1, room: '', longName: false, receiver: 'ready' as 'ready' | 'ended' | 'recovering' | 'unknown', recoveryLost: false }
 Object.assign(proof, { diagnosis: scene })
+connection.capabilities = { ...connection.capabilities!, receiverRecovery: true }
+const recoveries = new Map<string, any>()
 const oldOperation = 'preview-original-older-result', before = 'preview-before-older-results'
 function receipt(): AgentInputSubmissionReceipt {
   const key = { kind: 'message' as const, agentSessionId: target.agentSessionId, expectedRun: { runId: 'preview-original-run' }, messageId: 'preview-original-message' }, ref = { key, waitGeneration: 1 }
@@ -20,6 +22,16 @@ function delivery(id = oldOperation, unknown = true): ConnectionDelivery {
 }
 const original = api.connections.call
 api.connections.call = (async (method: any, input: any, owner: any) => {
+  if (method === 'connection.delivery.source.recover') {
+    proof.calls.push(method); proof.requests.push({ method, input: structuredClone(input), owner: structuredClone(owner) })
+    return { disposition: 'requested', observation: { state: 'unavailable', reason: 'source-unconfirmed' }, sourceObservation: { state: 'unavailable', reason: 'source-gap', code: 'AGENT_SESSION_HISTORY_BUSY', codeRecorded: true, checkpointKey: 'a'.repeat(64) } }
+  }
+  if (method === 'connection.receiver.recover' || method === 'connection.receiver.inspect') {
+    proof.calls.push(method); proof.requests.push({ method, input: structuredClone(input), owner: structuredClone(owner) })
+    if (scene.recoveryLost) throw Error('Controlled original receiver observation loss')
+    if (method === 'connection.receiver.recover') { recoveries.set(input.operationId, { operationId: input.operationId, connectionId: input.connectionId, configurationRevision: input.expectedRevision, receiverRef: input.receiverRef, disposition: 'scheduled' }); scene.receiver = 'recovering' }
+    return { operation: recoveries.get(input.operationId) ?? null, connection: { ...connection, receiver: scene.receiver === 'unknown' ? undefined : { ref: 'preview-original-receiver', state: scene.receiver } } }
+  }
   if (method === 'connection.delivery.inspect') { proof.calls.push(method); proof.requests.push({ method, input: structuredClone(input), owner: structuredClone(owner) }); return { delivery: delivery(input.operationId) } }
   if (method === 'connection.ingress.inspect') {
     proof.calls.push(method); proof.requests.push({ method, input: structuredClone(input), owner: structuredClone(owner) })
@@ -32,7 +44,7 @@ api.connections.call = (async (method: any, input: any, owner: any) => {
   if (method === 'connection.diagnose') for (const group of result.groups.value?.items ?? []) {
     scene.bindingId = group.target.bindingId; scene.revision = group.target.publicationRevision; scene.room = group.target.externalConversationId
     if (!scene.active) continue
-    group.connection.value = { ...group.connection.value, receiver: { ref: 'preview-original-receiver', state: 'ready' }, transport: { state: 'ready' }, authentication: { state: 'ready' }, intake: { state: 'unknown', reason: 'check-failed' } }
+    group.connection.value = { ...group.connection.value, receiver: scene.receiver === 'unknown' ? undefined : { ref: 'preview-original-receiver', state: scene.receiver }, transport: { state: scene.receiver === 'ready' ? 'ready' : scene.receiver === 'ended' ? 'unavailable' : 'unknown' }, authentication: { state: 'ready' }, intake: { state: 'unknown', reason: 'check-failed' } }
     const out = group.outgoing.value
     out.sourceObservation = scene.mode === 'busy' || scene.mode === 'waiting' ? { state: 'unavailable', reason: 'source-gap', code: scene.mode === 'busy' ? 'AGENT_SESSION_HISTORY_BUSY' : 'AGENT_SESSION_HISTORY_TIMEOUT', codeRecorded: true, checkpointKey: 'a'.repeat(64) } : { state: 'ready', code: null, codeRecorded: false, checkpointKey: 'a'.repeat(64) }
     out.observation = { state: 'unavailable', reason: 'content-unconfirmed' }; out.effectObservation = { state: 'unknown', reason: 'effect-unconfirmed' }

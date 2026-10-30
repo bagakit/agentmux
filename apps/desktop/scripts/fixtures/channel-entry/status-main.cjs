@@ -9,6 +9,7 @@ const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
 const receiverRecovery = process.argv.includes('--receiver-recovery')
+const connectionOverview = process.argv.includes('--connection-overview')
 const diagnosisExplanations = process.argv.includes('--diagnosis-explanations')
 const deliverySourceRetry = process.argv.includes('--delivery-source-retry')
 const groupClarity = process.argv.includes('--group-clarity')
@@ -104,7 +105,9 @@ app.whenReady().then(async () => {
         assert.ok(await read('document.querySelector(".agent-connector-dialog__body").scrollTop < 20'), 'Default entry keeps group identity at the top')
       }
       const dismiss = async () => { await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')'); assert.equal(await read('document.activeElement?.dataset.channelEntry'), 'feishu') }
-      if (diagnosisExplanations) {
+      if (connectionOverview) {
+        await require('./connection-overview-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, layout, open, close, result })
+      } else if (diagnosisExplanations) {
         await require('./diagnosis-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, layout, open, close, result })
       } else if (deliverySourceRetry) {
         await require('./delivery-retry-scene.cjs')({ win, read, until, click, press, settle, capture, details, dismiss, result })

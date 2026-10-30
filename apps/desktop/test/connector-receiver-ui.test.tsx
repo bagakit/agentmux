@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import {act} from 'react'
+import {act,useState} from 'react'
 import {afterEach,expect,it,vi} from 'vitest'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
@@ -19,6 +19,10 @@ import {api} from '../src/renderer/src/lib/api'
 import {useAppStore} from '../src/renderer/src/store'
 import {ConnectorDeliveryDetails} from '../src/renderer/src/components/ConnectorDeliveryDetails'
 import {ConnectorReceiverControl} from '../src/renderer/src/components/ConnectorReceiverControl'
+import {ConnectorConnectionOverview} from '../src/renderer/src/components/ConnectorConnectionOverview'
+import {ConnectorGroupActivity} from '../src/renderer/src/components/ConnectorGroupActivity'
+import type {ConnectorGroupSection} from '../src/renderer/src/components/ConnectorGroupDetails'
+import {connectorDiagnosisKey,useConnectorGroupDiagnosis} from '../src/renderer/src/lib/use-connector-group-diagnosis'
 import {connectorGroupSummary} from '../src/renderer/src/lib/connector-group-status'
 import {groupTarget,readGroupDiagnosis} from '../src/renderer/src/lib/group-diagnosis'
 import {composerDOM,composerConfig} from './helpers/composer-dom-fixture'
@@ -68,6 +72,36 @@ it('current stopped receiver outranks earlier accepted input through the origina
  expect(connectorGroupSummary({...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:report.incoming.value!.rows.map(row=>({...row,coreStatus:'admitted'}))}}}).incoming.value).toBe('Receiver stopped')
  expect(f.trusted).toHaveBeenCalled();f.unchanged()
 })
+it('uses the single overview recovery action with the original ref through Main Host and the real SDK socket',async()=>{
+ const f=await fixture(true),record=await f.record()
+ function Surface(){const read=useConnectorGroupDiagnosis([f.binding],0,true,null,f.target,[f.binding]);return <ConnectorConnectionOverview binding={f.binding} connection={record} hostingTarget={f.target} report={read.entries[connectorDiagnosisKey(f.binding)]?.report??null} onCheck={read.check}/>}
+ await dom.render(<Surface/>);await wait(()=>expect(dom.container.querySelector('[data-receiver-action="recover"]')).not.toBeNull())
+ expect(dom.container.querySelector('[data-receiving-state] h3')?.textContent).toBe('Receiving stopped')
+ expect(dom.container.querySelectorAll('.primary-button')).toHaveLength(1)
+ f.wire.state.endpointCode=0;await dom.click('[data-receiver-action="recover"]')
+ await wait(()=>expect(f.calls.filter(call=>call.method==='connection.receiver.recover')).toHaveLength(1))
+ const original=f.calls.find(call=>call.method==='connection.receiver.recover')!
+ expect(original.params).toMatchObject({connectionId:record.config.connectionId,expectedRevision:record.revision,receiverRef:record.receiver!.ref});expect(original.target).toEqual(f.target)
+ const receipt=await api.connections.call('connection.receiver.inspect',{operationId:original.params.operationId},f.target)
+ expect(receipt.operation?.disposition).toBe('scheduled');expect(receipt.operation?.receiverRef).toBe(record.receiver!.ref)
+ await wait(async()=>expect((await f.record()).receiver?.state).toBe('ready'));expect(f.wire.sockets).toHaveLength(1)
+ f.wire.message('overview-saved-input');await wait(()=>expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+ const report=await readGroupDiagnosis((method,params)=>api.connections.call(method,params,f.target),groupTarget(f.binding))
+ const row=report.incoming.value!.rows.find(row=>row.kind==='message'&&row.scope==='current-binding'&&row.inputOperationId)!
+ expect(row).toBeTruthy()
+ // A lagging waiting observation can only open this input's real receipt; it
+ // cannot grant resume authority when the actual Core result has settled.
+ const waiting={...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:[{...row,coreStatus:'waiting' as const}]}}}
+ function Activity(){const [section,setSection]=useState<ConnectorGroupSection>('overview');return <><button onClick={()=>setSection('overview')}>Return to overview</button><ConnectorGroupActivity id="original-wait" section={section} binding={f.binding} connection={record} hostingTarget={f.target} snapshot={{report:waiting,checking:false,checkedAt:null}} onCheck={()=>{}} onSection={setSection} actions={{}} details={null} configuration={null}/></>}
+ await dom.render(<Activity/>);await dom.click('.agent-connector-text-action')
+ await wait(()=>expect(f.calls.some(call=>call.method==='connection.ingress.inspect'&&call.params.ingressId===row.ingressId)).toBe(true))
+ await wait(()=>expect(dom.container.querySelector('[data-original-input-waiting]')).not.toBeNull())
+ const diagnostics=dom.container.querySelector<HTMLElement>('[data-connection-panel="diagnostics"]')!
+ expect(diagnostics.hidden).toBe(false)
+ await dom.click('button');expect(diagnostics.hidden).toBe(true)
+ expect(dom.container.querySelector('[data-connection-panel="diagnostics"]')).toBe(diagnostics)
+ expect(f.trusted).toHaveBeenCalled();f.unchanged()
+},25000)
 it('lost recovery reply is inspected and explicitly continued with the same frozen operation through actual Main and Host',async()=>{
  const f=await fixture(true);await f.mount();await wait(()=>expect(dom.container.querySelector('[data-receiver-action="recover"]')).not.toBeNull())
  f.wire.state.endpointCode=0;f.wire.state.handshakeDelay=2000;f.drop();await dom.click('[data-receiver-action="recover"]');await wait(()=>expect(dom.container.textContent).toContain('Recovery reply unconfirmed'))
