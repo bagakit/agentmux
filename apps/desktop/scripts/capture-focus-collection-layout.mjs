@@ -8,19 +8,27 @@ import { join, relative, resolve } from 'node:path'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop'),argument=process.argv.indexOf('--evidence')
+const headingMode=process.argv.includes('--heading-menus'),schema=headingMode?'agentmux.focus-group-heading-menu-scene.v1':'agentmux.focus-collection-scene.v1'
+const mode=headingMode?'heading-menu-join':'collection-layout',reuseVariable=headingMode?'AGENTMUX_FOCUS_GROUP_HEADING_SCENE_RECEIPT':'AGENTMUX_FOCUS_COLLECTION_SCENE_RECEIPT'
+const requiredScenes=[...['dark','light'].flatMap(theme=>[1200,360].flatMap(width=>['cards','sections'].flatMap(value=>[
+ `board-${value}-${theme}-${width}.png`,...(theme==='dark'?[`sources-${value}-${width}.png`]:[])]))),
+ 'category-service-notice.png',...([1200,360].flatMap(width=>[`settings-sections-${width}.png`,...(width===360?['settings-preview-sections-360.png']:[]),`settings-cards-${width}.png`,...(width===360?['settings-preview-cards-360.png']:[])])),'saved-mode-on-board.png',
+ ...(headingMode?['category','rename','picker','project','multi','unknown'].map(name=>`heading-${name}-dark-1200.png`).concat(['category','rename','picker','project','multi'].map(name=>`heading-${name}-light-360.png`),'saved-category-avatar-dark-1200.png'):[])]
 assert.ok(argument>=0&&process.argv[argument+1],'Use --evidence <private directory>')
 const evidence=resolve(process.argv[argument+1]),fixture=join(desktop,'scripts/fixtures/focus-collection-layout')
 await mkdir(evidence,{recursive:true})
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
-const owners=[...['GlobalFocusSurface','FocusProjectLanes','FocusScanLaneContent','FocusContextCards','FocusContextCardBody','FocusContextRow','FocusContextMenu','AgentContextContent','FocusTopicLabel','FocusLaneGroups','WorkbenchNameTooltip','settings/FocusSettingsPane','settings/FocusSettingsPreview'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
+const owners=[...['GlobalFocusSurface','FocusProjectLanes','FocusScanLaneContent','FocusContextCards','FocusContextCardBody','FocusContextRow','FocusContextMenu','AgentContextContent','FocusTopicLabel','FocusLaneGroups','WorkbenchNameTooltip','settings/FocusSettingsPane','settings/FocusSettingsPreview',
+ 'FocusLaneHeadingMenu','TopicCategoryMenu','TopicCategoryDialog','SpaceIconPicker','WorkspaceRowContextMenu','SpaceObjectContextMenu','WorkbenchMenuSubmenu','WindowOverlayHost','SpaceObjectIcon','SpaceDirectoryImage'].map(name=>`apps/desktop/src/renderer/src/components/${name}.tsx`),
  ...['focus-collection-lanes','use-focus-collection-lanes','use-focus-project-order','focus-project-lanes','focus-context','focus-lane-origin','focus-lane-layout','focus-preferences'].map(name=>`apps/desktop/src/renderer/src/lib/${name}.ts`),
  ...['focus','settings-focus','settings-workview-layout'].map(name=>`apps/desktop/src/renderer/src/styles/${name}.css`),
- 'apps/desktop/src/shared/focus-preferences.ts','apps/desktop/src/shared/config-edit.ts']
+ 'apps/desktop/src/shared/focus-preferences.ts','apps/desktop/src/shared/config-edit.ts','apps/desktop/src/renderer/src/store.ts']
 const ownerHashes=()=>Promise.all(owners.map(async name=>[name,hash(await readFile(join(root,name)))])).then(Object.fromEntries)
-if(process.env.AGENTMUX_FOCUS_COLLECTION_SCENE_RECEIPT){
- const path=resolve(process.env.AGENTMUX_FOCUS_COLLECTION_SCENE_RECEIPT),saved=JSON.parse(await readFile(path,'utf8'))
- assert.equal(saved.schema,'agentmux.focus-collection-scene.v1');assert.equal(saved.capturedPass,true);assert.equal(saved.actual.passed,true);assert.equal(saved.userRuntimeTouched,false)
- assert.deepEqual(saved.ownerSources,await ownerHashes());assert.equal(saved.frames.length,20)
+if(process.env[reuseVariable]){
+ const path=resolve(process.env[reuseVariable]),saved=JSON.parse(await readFile(path,'utf8'))
+ assert.equal(saved.schema,schema);assert.equal(saved.mode,mode);assert.equal(saved.capturedPass,true);assert.equal(saved.actual.passed,true);assert.equal(saved.userRuntimeTouched,false)
+ assert.deepEqual(saved.requiredScenes,requiredScenes);assert.deepEqual(saved.frames.map(frame=>frame.file).sort(),[...requiredScenes].sort())
+ assert.deepEqual(saved.ownerSources,await ownerHashes());assert.equal(saved.frames.length,requiredScenes.length)
  for(const name of owners)assert.equal(saved.inputs[name],saved.ownerSources[name],'The Renderer actually loaded '+name)
  for(const[name,sha]of Object.entries(saved.drivers))assert.equal(hash(await readFile(join(root,name))),sha)
  for(const[name,sha]of Object.entries(saved.menuDependencies))assert.equal(hash(await readFile(join(root,name))),sha)
@@ -30,8 +38,8 @@ if(process.env.AGENTMUX_FOCUS_COLLECTION_SCENE_RECEIPT){
 }
 const require=createRequire(join(desktop,'package.json')),{build}=createRequire(require.resolve('vite/package.json'))('esbuild')
 const temporary=await mkdtemp(join(tmpdir(),'amx-focus-collection-')),inputs=new Map(),transformations=[],manifests=new Map(),logs=[]
-const receipt={schema:'agentmux.focus-collection-scene.v1',capturedPass:false,aestheticReview:'not-performed',userRuntimeTouched:false,
- boundary:'Actual original current-source Global Focus/Store/cards/Collection projection and original Settings/Preview. Static private typed transport; adjacent Timeline and unselected PTY/editor paint isolated. No real Provider, Native Session receipt, persisted settings or user installation is represented by these images.'}
+const receipt={schema,mode,requiredScenes,capturedPass:false,aestheticReview:'not-performed',userRuntimeTouched:false,
+ boundary:'Actual original current-source Global Focus/Store/cards/Collection projection and original Settings/Preview'+(headingMode?', heading object menus, shared Category Dialog, avatar Picker and original Store saved-preset feedback':'')+'. Static private typed transport; adjacent Timeline and unselected PTY/editor paint isolated. Clipboard and the one declared preset configuration save use private in-memory transport; no System clipboard, real resource write, Provider, Native Session receipt, persisted settings or user installation is represented by these images.'}
 try{
  receipt.ownerSources=await ownerHashes()
  const workspaceSources={name:'original-public-workspace-sources',setup(builder){builder.onResolve({filter:/^@agentmux\//},async({path:specifier})=>{
@@ -65,7 +73,7 @@ try{
   builder.onLoad({filter:/.*/,namespace:'unselected-worker'},()=>({contents:'export default class UnselectedWorker {constructor(){throw new Error("No File editor exists in this scan scene")}}',loader:'js'}))
  }}
  receipt.drivers={}
- for(const name of [relative(root,new URL(import.meta.url).pathname),relative(root,join(fixture,'entry.mjs')),relative(root,join(fixture,'main.cjs'))]){const bytes=await readFile(join(root,name));receipt.drivers[name]=hash(bytes);await writeFile(join(evidence,'driver-'+name.slice(name.lastIndexOf('/')+1)),bytes)}
+ for(const name of [relative(root,new URL(import.meta.url).pathname),relative(root,join(fixture,'entry.mjs')),relative(root,join(fixture,'main.cjs')),...(headingMode?['apps/desktop/scripts/capture-focus-group-heading-menu.mjs']:[])]){const bytes=await readFile(join(root,name));receipt.drivers[name]=hash(bytes);await writeFile(join(evidence,'driver-'+name.slice(name.lastIndexOf('/')+1)),bytes)}
  const out=join(temporary,'out');await mkdir(out)
  await build({entryPoints:[join(fixture,'entry.mjs')],outfile:join(out,'app.js'),bundle:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',plugins:[workspaceSources,observe],logLevel:'silent',
   alias:{react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'react-dom/server':join(desktop,'node_modules/react-dom/server.browser.js')},
@@ -77,10 +85,11 @@ try{
  receipt.compiled={renderer:hash(await readFile(join(out,'app.js'))),css:hash(await readFile(join(out,'app.css')))}
  const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
  const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(temporary,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(temporary,'runtime'),AGENTMUX_STATE_DIRECTORY:join(temporary,'state')};delete env.ELECTRON_RUN_AS_NODE
- receipt.process=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),html,temporary,evidence],{temporaryRoot:temporary,cwd:root,env,timeoutMs:90000,onLine:line=>logs.push(line)})
+ receipt.process=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),html,temporary,evidence,mode],{temporaryRoot:temporary,cwd:root,env,timeoutMs:headingMode?120000:90000,onLine:line=>logs.push(line)})
  receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
  receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
- assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true);assert.equal(receipt.frames.length,20)
+ assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true);assert.equal(receipt.frames.length,requiredScenes.length)
+ assert.deepEqual(receipt.frames.map(frame=>frame.file).sort(),[...requiredScenes].sort())
  assert.deepEqual(await ownerHashes(),receipt.ownerSources)
  receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])))
  receipt.parallelInputChanges=Object.keys(receipt.inputs).filter(path=>receipt.inputs[path]!==receipt.sourceAfter[path])

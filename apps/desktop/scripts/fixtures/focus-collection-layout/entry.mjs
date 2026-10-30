@@ -15,6 +15,7 @@ import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
+import { formatSpaceAddress } from '@agentmux/core/sharing'
 import '../../../src/renderer/src/styles/index.css'
 
 // Actual current Renderer, static private transport facts. This does not claim
@@ -43,15 +44,40 @@ mountThemeRuntime(window, candidate.appearance ?? {})
 api.scratch.listTopics = async () => topics
 api.workspaces.listBranches = async id => ({ kind: 'not-git-repository', workspaceId: id, branches: [] })
 const controls = { stop: 0, resume: 0, write: 0, launchAgent: 0, interrupt: 0 }
+const headingTransport = { clipboard: [], topicReads: [], topicWrites: [], appearanceReads: [], avatarWrites: [], iconWrites: [], reveals: [], terminalOpens: [], workspaceSelections: [] }
+api.ui.writeClipboardText = async text => { headingTransport.clipboard.push(text) }
+api.topics.call = async (method, params) => {
+  if (method === 'topic.category.ls') { headingTransport.topicReads.push({ method, params }); return { categories: useAppStore.getState().topicCategories } }
+  headingTransport.topicWrites.push({ method, params }); throw new Error('Category writes are outside this cancel-only Renderer scene')
+}
+api.spaceObjects.appearance = async target => { headingTransport.appearanceReads.push(target); return { local: true, icon: null } }
+api.spaceObjects.saveAvatar = async (...args) => { headingTransport.avatarWrites.push(args); throw new Error('Avatar writes are outside this cancel-only Renderer scene') }
+api.files.reveal = async (...args) => { headingTransport.reveals.push(args); throw new Error('No filesystem reveal is authorized in this scene') }
 for (const name of Object.keys(controls)) api.sessions[name] = async () => { controls[name]++; throw new Error('Unexpected lifecycle/input in a layout-only Renderer scene') }
-api.config.save = async next => { useAppStore.setState({ config: next }); return next }
+api.config.save = async (next, requestedBefore) => {
+  const before = useAppStore.getState().config
+  if (JSON.stringify(next.appearance?.spaceObjectIcons ?? {}) !== JSON.stringify(before.appearance?.spaceObjectIcons ?? {})) {
+    const originalIcons = before.appearance?.spaceObjectIcons ?? {}, expected = { ...originalIcons, [categories[0].spaceId]: 'book' }
+    const accepted = headingTransport.iconWrites.length === 0 && requestedBefore === before && JSON.stringify(next.appearance.spaceObjectIcons) === JSON.stringify(expected)
+    headingTransport.iconWrites.push({ accepted, subject: { hostId: categories[0].hostId, categoryId: categories[0].categoryId, spaceId: categories[0].spaceId }, key: categories[0].spaceId,
+      choice: next.appearance.spaceObjectIcons[categories[0].spaceId], before: originalIcons, after: next.appearance.spaceObjectIcons })
+    if (!accepted) throw new Error('Only the declared private Category preset save is authorized in this Renderer scene')
+    return next
+  }
+  useAppStore.setState({ config: next }); return next
+}
 const tab = { ...createWorkbenchTab('original-topic-tab', { kind: 'agent', phase: 'attached', regionId: 'original-topic-region', workspaceId: scratch.id, sessionId: 'task1' }), topicId: topics[0].id, space: { zoneId: homeZoneId(directoryIdentity('local', topics[0].directoryPath)), spaceId: categories[0].spaceId } }
 useAppStore.setState({ loading: false, config: candidate, sessions, timelines: {}, agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])),
   tabs: { [tab.id]: tab }, layouts: { [scratch.id]: createWorkspaceLayout('original-group', [tab.id]), [project.id]: createWorkspaceLayout('project-group', []) }, activeWorkspaceId: project.id, mainSurface: 'agents',
   scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1, topics, error: null, reading: false } },
   spaceZoneBindings: bindings, topicCategories: categories, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } },
   agentComposerDrafts: { task1: '保留的原 Agent 草稿', task2: '另一份原草稿' }, error: null, lastError: null, errorDismissed: false })
+useAppStore.setState({ localHome: fixturePath('private/focus-collection-preview/home'),
+  selectWorkspace: async id => { headingTransport.workspaceSelections.push(id); throw new Error('No Project navigation is authorized in this scene') },
+  launchTerminal: async id => { headingTransport.terminalOpens.push(id); throw new Error('No Terminal is authorized in this scene') } })
 const original = useAppStore.getState(), selections = []
+const headingInvokers = new Map()
+const heading = id => document.querySelector(`button.focus-context[data-session-id="${id}"]`)?.closest('.focus-project-lanes__row')?.querySelector('.focus-project-lanes__axis')
 let setView
 function Scene() {
   const [view, viewSetter] = useState('board'); setView = viewSetter
@@ -68,8 +94,15 @@ window.collectionProof = {
   theme(value) { const result = updateThemeSelection({ ...candidate.appearance, appAppearance: value }); if (!result.applied) throw new Error(result.reason) },
   view(value) { setView(value) },
   metadataError(value) { useAppStore.setState({ topicCategories: categories.map((category, index) => index === 0 && value ? { ...category, readError: 'Private Category metadata read failed; the original binding is kept.' } : category) }) },
+  rememberHeading(id) { const node = heading(id); if (!node) throw new Error('Missing original heading'); headingInvokers.set(id, node); node.focus(); return true },
+  headingReturned(id) { const original = headingInvokers.get(id); return !!original?.isConnected && document.activeElement === original },
+  headingFacts(id) { const node = heading(id); if (!node) throw new Error('Missing original heading'); return { text: node.textContent, collapsed: node.closest('.focus-project-lanes__row').getAttribute('data-collapsed'),
+    cards: [...document.querySelectorAll('.global-focus-main button.focus-context[data-session-id]')].map(node => node.dataset.sessionId).sort(), projectFilter: !!document.querySelector('[aria-label="Remove Project filter"]') } },
+  headingTargets() { return { category: { title: categories[0].title, link: formatSpaceAddress({ spaceId: categories[0].spaceId }), subject: { hostId: categories[0].hostId, categoryId: categories[0].categoryId, spaceId: categories[0].spaceId }, preset: 'book' },
+    secondCategory: { title: categories[1].title, link: formatSpaceAddress({ spaceId: categories[1].spaceId }) }, projectPath: project.path } },
   facts() { const state = useAppStore.getState(); return { controls, selections, mode: state.config.focus.topicPresentation,
+    headingTransport, spaceObjectIcons: state.spaceObjectIcons, configuredSpaceObjectIcons: state.config.appearance.spaceObjectIcons ?? {},
     sameSessions: state.sessions === original.sessions, sameTabs: state.tabs === original.tabs, sameLayouts: state.layouts === original.layouts,
-    sameDrafts: state.agentComposerDrafts === original.agentComposerDrafts, sameFocus: state.agentFocus === original.agentFocus,
+    sameDrafts: state.agentComposerDrafts === original.agentComposerDrafts, sameFocus: state.agentFocus === original.agentFocus, sameIcons: state.spaceObjectIcons === original.spaceObjectIcons,
     cards: [...document.querySelectorAll('.global-focus-main button.focus-context[data-session-id]')].map(node => node.dataset.sessionId) } }
 }
