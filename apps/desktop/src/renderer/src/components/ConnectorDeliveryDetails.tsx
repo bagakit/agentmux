@@ -34,7 +34,7 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
   const visible = read?.key === key ? read.value : checked?.report ?? null
   const original = detail?.key === key ? detail : null
   const selectedReceipt = useRef<HTMLDivElement | null>(null)
-  useEffect(() => { if (original?.value) { selectedReceipt.current?.scrollIntoView({ block: 'nearest' }); selectedReceipt.current?.focus({ preventScroll: true }) } }, [original?.request])
+  useEffect(() => { if (original?.value) { selectedReceipt.current?.scrollIntoView({ block: 'start' }); selectedReceipt.current?.focus({ preventScroll: true }) } }, [original?.request])
   const accepts = () => live.current && current.current.key === key && current.current.source === source && api.connections.call === originalSource
   function focusOriginal(section: 'incoming' | 'receipts' | 'content') {
     const node = originalSections.current[section]
