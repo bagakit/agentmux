@@ -49,8 +49,7 @@ async function fixture(timing: MoteRecoveryTiming, main: boolean) {
   await vi.waitFor(() => {
     expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]).toMatchObject({ topics, reading: false })
     expect(useAppStore.getState().sessions.find(session => session.id === selected.id)).toMatchObject(
-      main || timing === 'startup' ? { control: { ...selected.control, run: { runId: 'original-resumed-run' } } }
-        : { processState: 'exited', control: ended.control })
+      { processState: 'exited', control: ended.control })
   })
   return { selected, tab, recover, sessions, snapshot, preserved, launch, send, write }
 }
@@ -83,11 +82,10 @@ afterEach(async () => {
   if (dispose) { dispose(); dispose = undefined; await prepareRendererUpdate() }
   vi.restoreAllMocks(); useAppStore.setState(baseline, true); await rm(directory, { recursive: true, force: true })
 })
-it('actual initialize restores original workface before mandatory Main continuity', async () => {
+it('actual initialize restores the original workface while the Host owns Main continuity', async () => {
   const f = await fixture('on-open', true)
-  expect(f.recover).toHaveBeenCalledTimes(1)
-  expect(f.recover).toHaveBeenCalledWith(f.selected.control, f.selected.workspacePath, expect.any(String), { trigger: 'startup', timingOverride: 'startup' })
-  expectOriginalWorkface(f, true)
+  expect(f.recover).not.toHaveBeenCalled()
+  expectOriginalWorkface(f, false)
 })
 it('actual initialize and later canonical membership do not resume an on-open fixed conversation through the old 24-hour policy', async () => {
   const f = await fixture('on-open', false); expect(f.recover).not.toHaveBeenCalled(); expectOriginalWorkface(f, false)
@@ -102,16 +100,16 @@ it('actual initialize and later canonical membership do not resume an on-open fi
   })
   expect(f.recover).not.toHaveBeenCalled(); expectOriginalWorkface(f, false)
 })
-it('actual initialize uses the optional startup choice exactly once and keeps healthy neighbors', async () => {
-  const f = await fixture('startup', false); expect(f.recover).toHaveBeenCalledTimes(1)
-  expectOriginalWorkface(f, true)
+it('legacy startup timing cannot create another Mote lifecycle owner and keeps healthy neighbors', async () => {
+  const f = await fixture('startup', false); expect(f.recover).not.toHaveBeenCalled()
+  expectOriginalWorkface(f, false)
   expect(useAppStore.getState().sessions.find(session => session.id === neighborAgent.id)?.control).toEqual(neighborAgent.control)
 })
 
-it('a failed metadata ensure still reads the original directory and reconnects its confirmed Main conversation', async () => {
+it('a failed metadata ensure keeps the original directory and delegates Main continuity to its Host', async () => {
   vi.spyOn(api.scratch, 'ensureMote').mockRejectedValue(new Error('Metadata ensure failed'))
   const f = await fixture('on-open', true)
-  expect(f.recover).toHaveBeenCalledTimes(1)
-  expectOriginalWorkface(f, true)
+  expect(f.recover).not.toHaveBeenCalled()
+  expectOriginalWorkface(f, false)
   expect(useAppStore.getState().error).toContain('Metadata ensure failed')
 })

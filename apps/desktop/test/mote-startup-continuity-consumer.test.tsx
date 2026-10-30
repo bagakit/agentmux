@@ -8,7 +8,8 @@ import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-
 import type { AgentMuxAgentContinuityResult } from '../../../packages/core/src/agent-session-recovery/continuity-contract.js'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { beginMoteStartupRecovery, recoverMoteConversationAtStartup, useMoteConversationRecovery } from '../src/renderer/src/lib/mote-session-recovery'
+import { beginMoteStartupRecovery, recoverMoteConversationAtStartup } from '../src/renderer/src/lib/mote-session-recovery'
+import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { createMoteApp, type MoteAppFixture } from './fixtures/mote-app'
@@ -90,51 +91,31 @@ async function fixture(options: { timing?: 'startup' | 'on-open'; cancelled?: bo
   return { ...f, ended, operation, results, recover, assertPreserved }
 }
 
-it('fixed application startup reaches current Core policy after the original Runtime restart', async () => {
+it('actual Renderer startup delegates the original Mote role without changing its retained Core recovery intent', async () => {
   const f = await fixture()
   await recoverMoteConversationAtStartup(f.ended)
-  expect(f.results).toHaveLength(1)
-  expect(f.results[0]).toMatchObject({ kind: 'pending', reason: 'resume-disabled', continuity: {
-    trigger: 'startup', timingOverride: 'startup', policy: { resumeAfterExit: false } } })
-  expect(useAppStore.getState().sessions.find(session => session.id === f.ended.id)).toMatchObject({ continuity: {
-    operationId: f.results[0]!.continuity!.operationId, reason: 'resume-disabled' } })
-  expect(f.results[0]!.continuity!.operationId).not.toBe(f.operation.operationId)
-  await recoverMoteConversationAtStartup(f.ended)
-  expect(f.results).toHaveLength(1)
+  expect(f.recover).not.toHaveBeenCalled(); expect(f.results).toHaveLength(0)
   await f.assertPreserved()
 })
-
-it('on-open is deferred at startup and rejoins its original intent when the actual workface opens', async () => {
+it('mounted original workface cannot bypass its Host with legacy on-open recovery', async () => {
   const f = await fixture({ timing: 'on-open' })
   await recoverMoteConversationAtStartup(f.ended)
-  expect(f.recover).not.toHaveBeenCalled()
-  function OpenConversation() {
-    const topic = useAppStore(state => state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]?.topics?.find(item => item.id === customMoteId))
-    useMoteConversationRecovery(topic, SCRATCH_WORKSPACE_ID, true)
-    return null
-  }
-  host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
-  await act(async () => root!.render(createElement(OpenConversation)))
-  await vi.waitFor(() => expect(f.results).toHaveLength(1))
-  expect(f.recover.mock.calls[0]![3]).toEqual({ trigger: 'workspace-open', timingOverride: 'on-open' })
-  expect(f.results[0]).toMatchObject({ kind: 'pending', reason: 'recovery-supervised', continuity: {
-    operationId: f.operation.operationId, trigger: 'startup' } })
   await f.assertPreserved()
+  host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
+  await act(async () => root!.render(createElement(MoteWorkface,{workspaceId:SCRATCH_WORKSPACE_ID,topicId:customMoteId,visible:true,children:createElement('span',null,'Original retained work')})))
+  expect(host.textContent).toContain('Original retained work')
+  expect(f.recover).not.toHaveBeenCalled();expect(f.results).toHaveLength(0)
+  expect(f.inner.kernel.start).not.toHaveBeenCalled();expect(f.inner.kernel.stop).not.toHaveBeenCalled();expect(f.rawInput).not.toHaveBeenCalled()
 })
-
-it('a new fixed startup preserves the original explicit cancellation and durable budget', async () => {
+it('a new Renderer startup preserves explicit cancellation and its original durable budget', async () => {
   const f = await fixture({ cancelled: true })
   await recoverMoteConversationAtStartup(f.ended)
-  expect(f.results).toHaveLength(1)
-  expect(f.results[0]).toMatchObject({ kind: 'pending', reason: 'intent-cancelled', continuity: {
-    operationId: f.operation.operationId, supervision: { phase: 'cancelled', attemptCount: 1, attemptLimit: 4 } } })
+  expect(f.recover).not.toHaveBeenCalled(); expect(f.results).toHaveLength(0)
   await f.assertPreserved()
 })
-
-it('a healthy original Run keeps its workface and does not create a recovery request', async () => {
+it('a healthy original Run keeps its workface without a new Renderer recovery request', async () => {
   const f = await fixture({ healthy: true })
   await recoverMoteConversationAtStartup(f.ended)
-  expect(f.recover).not.toHaveBeenCalled()
-  expect(f.results).toHaveLength(0)
+  expect(f.recover).not.toHaveBeenCalled();expect(f.results).toHaveLength(0)
   await f.assertPreserved()
 })
