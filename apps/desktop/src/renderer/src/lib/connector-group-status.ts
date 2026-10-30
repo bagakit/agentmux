@@ -48,11 +48,11 @@ function incomingStatus(report: GroupDiagnosis): string {
   return `${recorded} · ${input}`
 }
 
-export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' | 'access-unconfirmed' |
+export type ConnectorProblemKind = 'receiver-unconfirmed' | 'receiver-stopped' | 'receiver-recovering' | 'intake-unconfirmed' | 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' | 'access-unconfirmed' |
   'outgoing-unconfirmed' | 'outgoing-not-applied' | 'outgoing-read-unavailable' | 'incoming-read-unavailable' | 'member-access' | 'request-refused' | 'agent-waiting' | 'agent-stopped' | 'agent-not-applied' | 'agent-unconfirmed' | 'recording-unconfirmed'
 export type ConnectorProblemAction = { kind: 'members' | 'content' | 'receipts' | 'incoming' | 'sync' | 'channel-settings' | 'sharing'; label: string }
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted'; action?: ConnectorProblemAction }
-export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; secondary?: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
+export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; secondary?: string; receiver?: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
 export type ConnectorGroupSummary = { problems: ConnectorProblem[]; outgoing: ConnectorDirectionSummary; incoming: ConnectorDirectionSummary; retained: boolean; note: string | null }
 export type ConnectorGroupAction = 'overview' | 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'channel-settings'
 
@@ -132,11 +132,32 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     else if (row.coreStatus === 'not-applied') { value = 'Not delivered to Agent'; tone = 'warning'; incomingProblem = 'agent-not-applied'; add('agent-not-applied', value, 'Check the original input receipt.', 'warning') }
     else { value = row.coreStatus === 'terminal-confirmed' || row.coreStatus === 'bytes-accepted' ? 'Sent to Agent · awaiting confirmation' : 'Agent acceptance not confirmed'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'Input transport or recording is separate from Agent acceptance.') }
   }
-  const earlierIncoming = report?.incoming.issue && incoming ? `Earlier check: ${value}` : undefined
+  let earlierIncoming = report?.incoming.issue && incoming ? `Earlier check: ${value}` : undefined
   if (report?.incoming.issue) { value = 'Agent inputs could not be checked'; tone = 'warning'; incomingProblem = 'incoming-read-unavailable' }
+  const connection = report?.connection
+  const receiver = connection?.value?.receiver
+  const scheduled = receiver?.state === 'ended' && receiver.nextAttemptAt !== undefined
+  const receiverText = receiver?.state === 'ready' ? 'Receiver connected' : scheduled ? 'Recovery scheduled' : receiver?.state === 'ended' ? 'Receiver stopped' : receiver?.state === 'recovering' ? 'Reconnecting' : receiver?.state === 'starting' ? 'Connecting' : 'Connection unconfirmed'
+  const transportUnknown = !!connection && (connection.issue || !connection.value || connection.value.transport.state !== 'ready')
+  const currentReceiverGap = receiver?.state !== 'ready' || transportUnknown
+  const receivingEnabled = report?.service.value?.enabled !== false && report?.adapterService.value?.enabled !== false && connection?.value?.enabled !== false
+  if (report && receivingEnabled && currentReceiverGap) {
+    const earlier = value
+    const uncertain = !!connection?.issue || connection?.retained || !receiver
+    value = uncertain ? 'Connection unconfirmed' : receiverText
+    incomingProblem = uncertain ? 'receiver-unconfirmed' : receiver?.state === 'ended' && !scheduled ? 'receiver-stopped' : 'receiver-recovering'
+    tone = receiver?.state === 'ended' && !uncertain && !scheduled ? 'warning' : 'muted'
+    detail = uncertain ? 'Current receiver observation is unavailable.' : receiver?.state === 'ended' && !scheduled ? 'This bot receives messages for its connected groups.' : 'The original Host is reconnecting automatically.'
+    add(incomingProblem, value, detail, tone === 'warning' ? 'warning' : 'muted')
+    if (row) earlierIncoming = 'Earlier message: ' + earlier
+  } else if (report && receivingEnabled && connection?.value?.intake.reason === 'check-failed') {
+    value = 'Inputs need checking'; detail = 'Receiver connected. Open the original input receipts.'
+    incomingProblem = 'intake-unconfirmed'; tone = 'muted'
+    add(incomingProblem, value, detail, 'muted', { kind: 'incoming', label: 'View input details' })
+  }
   const remaining = problems.filter(problem => problem.kind !== outgoing.problem && problem.kind !== incomingProblem).map(problem => problem.title).join(' · ')
   const note = [remaining, retained ? 'Earlier observations are kept; the latest check is incomplete.' : null].filter(Boolean).join(' ') || null
-  return { problems, outgoing, incoming: { direction: 'incoming', title: 'Group → Agent', value, detail, tone, ...(earlierIncoming ? { secondary: earlierIncoming } : {}), ...(incomingProblem ? { problem: incomingProblem } : {}) }, retained, note }
+  return { problems, outgoing, incoming: { direction: 'incoming', title: 'Group → Agent', value, detail, tone, ...(report && !currentReceiverGap ? { receiver: receiverText } : {}), ...(earlierIncoming ? { secondary: earlierIncoming } : {}), ...(incomingProblem ? { problem: incomingProblem } : {}) }, retained, note }
 }
 
 function outgoingFacts(out: GroupDiagnosis['outgoing']['value'] | undefined) {

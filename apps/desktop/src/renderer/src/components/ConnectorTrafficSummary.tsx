@@ -1,4 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { ReactNode } from 'react'
 import type { ConnectorGroupSummary, ConnectorProblem, ConnectorProblemAction, ConnectorProblemKind } from '../lib/connector-group-status'
 import '../styles/connector-traffic-summary.css'
 
@@ -12,7 +13,7 @@ export function ConnectorProblemIcon({ kind }: { kind: ConnectorProblemKind }) {
 }
 
 /** The same bounded facts in popover and details. It cannot dispatch or authorize an operation. */
-export function ConnectorTrafficSummary({ summary, compact = false, onInspect, actions }: { summary: ConnectorGroupSummary; compact?: boolean; onInspect?(): void;
+export function ConnectorTrafficSummary({ summary, compact = false, onInspect, actions, incomingControl }: { summary: ConnectorGroupSummary; compact?: boolean; onInspect?(): void; incomingControl?: ReactNode;
   actions?: Partial<Record<ConnectorProblemAction['kind'], () => void>> }) {
   function action(problem: ConnectorProblem | undefined) {
     const request = problem?.action, perform = request && actions?.[request.kind]
@@ -30,7 +31,7 @@ export function ConnectorTrafficSummary({ summary, compact = false, onInspect, a
         return <section className="connector-traffic-summary__tile" key={direction.direction} data-direction={direction.direction} data-tone={direction.tone} aria-label={direction.title}>
           {compact ? <><span className="connector-traffic-summary__direction">{direction.direction === 'outgoing' ? <OutgoingIcon size={14} /> : <IncomingIcon size={14} />}{direction.direction === 'outgoing' ? 'To group' : 'To Agent'}</span><div className="connector-traffic-summary__copy"><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}</div></>
             : <><span className="connector-traffic-summary__leading" aria-hidden="true">{direction.direction === 'outgoing' ? <OutgoingIcon size={16} /> : <IncomingIcon size={16} />}</span>
-              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small className="connector-traffic-summary__context">{problem?.detail ?? direction.detail}</small></div>{action(problem)}</>}
+              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span>{direction.receiver ? <small>{direction.receiver}</small> : null}<strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small className="connector-traffic-summary__context">{problem?.detail ?? direction.detail}</small></div>{action(problem)}{direction.direction === 'incoming' ? incomingControl : null}</>}
         </section>
       })}
     </div>

@@ -11,7 +11,7 @@ import { channelMetadataSubjectKey, parseConnectionParams, type ConnectionActor,
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
-import { connectorRoomDraftKey, invalidateConnectorTarget, sameConnectorTarget, type ConnectorRoomIntent } from '../lib/connector-room-intent'
+import { connectorRoomDraftKey, invalidateConnectorTarget, sameConnectorTarget, type ConnectorRoomIntent as StoredConnectorIntent } from '../lib/connector-room-intent'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { SettingsNavigation } from './SettingsNavigation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -31,6 +31,9 @@ import { useMoteIdentityReadings } from './settings/MoteIdentityCards'
 import { linkedMoteUses } from './settings/ConnectionIdentityFacts'
 import { ConnectorMemberAccess } from './ConnectorMemberAccess'
 import { acknowledgeConnectorMemberDraft, connectorMemberKey, reviewConnectorMemberDraft, type ConnectorMemberDrafts } from '../lib/connector-member-draft'
+
+type ConnectorRoomIntent = Exclude<StoredConnectorIntent, { method: 'connection.receiver.recover' }>
+const groupIntent = (intent: StoredConnectorIntent): intent is ConnectorRoomIntent => intent.method !== 'connection.receiver.recover'
 
 const CloseIcon = semanticIconComponent('action.close')
 const LoadingIcon = semanticIconComponent('status.loading')
@@ -134,8 +137,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const defaultChoice = defaultRef ? moteConnectionChoice(defaultRef, connections) : null
   const creationUnsupported = connection?.capabilities?.roomCreation === false
   const identityReadings = useMoteIdentityReadings(true, 0, hostingTarget)
-  const relevant = Object.values(intents).filter(intent => { const input = intent.input; return sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget) && ('connectionId' in input ? input.connectionId === connectionId : bindings.some(binding => binding.bindingId === input.bindingId && binding.connectionId === connectionId)) })
-  const otherOriginals = Object.values(intents).filter(intent => {
+  const relevant = Object.values(intents).filter(groupIntent).filter(intent => { const input = intent.input; return sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget) && ('connectionId' in input ? input.connectionId === connectionId : bindings.some(binding => binding.bindingId === input.bindingId && binding.connectionId === connectionId)) })
+  const otherOriginals = Object.values(intents).filter(groupIntent).filter(intent => {
     if (!sameConnectorTarget(intent.target, target)) return false
     if (!sameHosting(intent.hostingTarget, hostingTarget)) return true
     const input = intent.input
@@ -278,7 +281,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     // initialization still waits for the original bindings; manual choice stays available.
     setLoaded(apps.status === 'fulfilled' && audience.status === 'fulfilled')
     if (apps.status === 'rejected' || audience.status === 'rejected') throw new Error([apps, audience].flatMap(result => result.status === 'rejected' ? [presentError(result.reason)] : []).join(' '))
-    for (const intent of Object.values(useAppStore.getState().connectorRoomIntents)) if (epoch.current === token && sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget)) await inspect(intent)
+    for (const intent of Object.values(useAppStore.getState().connectorRoomIntents).filter(groupIntent)) if (epoch.current === token && sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget)) await inspect(intent)
   }
   useEffect(() => { const token = {}; epoch.current = token; void refresh().catch(error => { if (epoch.current === token) setIssue(presentError(error)) }); return () => { epoch.current = {} } }, [identity])
   useEffect(() => {
@@ -298,7 +301,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
       if (!originalBinding) return
       initialized.current = true; setConnectionId(originalBinding.connectionId); return
     }
-    const retained = Object.values(intents).filter(intent => sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget))
+    const retained = Object.values(intents).filter(groupIntent).filter(intent => sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget))
     const channelConnections = connections.filter(inChannel)
     const originalIds = new Set([...bindings.map(item => item.connectionId), ...retained.flatMap(intent => 'connectionId' in intent.input ? [intent.input.connectionId] : [])].filter(id => channelConnections.some(item => item.config.connectionId === id)))
     if (originalIds.size > 1) return
@@ -348,7 +351,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     if (retained && (!sameHosting(retained.hostingTarget, hostingTarget) || !sameHosting(intent.hostingTarget, hostingTarget))) throw new Error('Keep the original request on its original bot hosting owner.')
     if (!retained) intent.hostingTarget = structuredClone(hostingTarget)
     if (recordedRepliesOnly(intent)) { await inspect(intent); return }
-    if (retained?.phase === 'may-have-dispatched' && !explicitPending) { await inspect(retained); return }
+    if (retained?.phase === 'may-have-dispatched' && groupIntent(retained) && !explicitPending) { await inspect(retained); return }
     const saved = await retainConnectorRoomIntent({ ...intent, phase: 'not-dispatched' })
     if (!saved.localStorageWritten) throw new Error('The original intent could not be saved. No request was sent; save this same intent before continuing.')
     const dispatch = await retainConnectorRoomIntent({ ...intent, phase: 'may-have-dispatched' })
@@ -592,7 +595,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
             {disconnecting ? <div className="agent-connector-disconnect" role="group" aria-label="Confirm group disconnection"><strong>Disconnect this group?</strong><p className="agent-connector-note">New messages will stop in both directions. This Agent keeps running and its conversation stays here. An end card is sent to this group; a card failure does not prevent disconnection.</p><div className="agent-connector-link-actions"><button className="small-button" disabled={busy} onClick={() => setDisconnecting(false)}>Keep connected</button><button className="small-button" disabled={busy} onClick={() => lifecycle('connection.binding.detach')}>Confirm disconnect</button></div></div> : null}
           </section> : null
   const groupOverview = binding ? <>
-    <ConnectorDeliveryDetails active={section === 'overview'} showConfiguration={false} details={technicalDetails} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} actions={{ sync: () => showSection('sync'), sharing: () => showSection('sharing'), ...(openChannelSettings ? { 'channel-settings': openChannelSettings } : {}) }} />
+    <ConnectorDeliveryDetails connection={connection} active={section === 'overview'} showConfiguration={false} details={technicalDetails} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} actions={{ sync: () => showSection('sync'), sharing: () => showSection('sharing'), ...(openChannelSettings ? { 'channel-settings': openChannelSettings } : {}) }} />
     <section className="connector-group-details__section" aria-label="Group information"><h3><GroupIcon size={16} aria-hidden="true" />Group information</h3><ConnectorRoomDetails facts={roomFacts} groupId={audience} requestedName={created === audience ? frozenRoom?.name : undefined} /></section>
     <section className="connector-group-details__section agent-connector-host-sync" data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active={section === 'overview'} hostingTarget={hostingTarget} /></section>
   </> : null
