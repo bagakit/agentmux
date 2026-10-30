@@ -44,6 +44,7 @@ type InlineContext = {
   readOnlyImages: boolean
   visible: boolean
   hasDiagramRenderer: boolean
+  embedCapsules: boolean
   embedIdentity?: string | undefined
   inLink?: boolean
   renderObjectLink?: ClientUiPlatform['renderObjectLink']
@@ -178,7 +179,49 @@ function MarkdownTable({ node, context }: { node: Extract<BlockNode, { kind: 'ta
   </div>
 }
 
-/** An image-shaped reference is an explicit page request, never raw HTML or an ordinary link. */
+type CapsuleBlockReference = { uri: string; capsuleId: string; title: string; position: string | number }
+
+/** All page syntax shares Core's exact identity reader; code and link labels stay literal. */
+function capsuleBlockReferences(nodes: InlineNode[]): CapsuleBlockReference[] {
+  const references = new Map<string, CapsuleBlockReference>()
+  function add(uri: string, title: string, position: string | number): void {
+    const reference = objectLinkReference(uri)
+    if (reference?.target.kind === 'capsule' && !references.has(uri)) references.set(uri, {
+      uri, capsuleId: reference.target.capsuleId, title, position
+    })
+  }
+  function visit(children: InlineNode[], prefix = ''): void {
+    children.forEach((node, index) => {
+      const position = prefix ? `${prefix}:${index}` : index
+      if (node.kind === 'text') for (const [segmentIndex, segment] of splitObjectLinkReferences(node.text).entries()) {
+        if (segment.kind === 'object') add(segment.reference.uri, '', `${position}:text:${segmentIndex}`)
+      }
+      else if (node.kind === 'link') add(node.href, inlineLabel(node.children), position)
+      else if (node.kind === 'image') add(node.href, node.alt, position)
+      else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') visit(node.children, String(position))
+    })
+  }
+  visit(nodes)
+  return [...references.values()]
+}
+
+function onlyCapsuleReferences(nodes: InlineNode[]): boolean {
+  return nodes.every(node => {
+    if (node.kind === 'break') return true
+    if (node.kind === 'text') return splitObjectLinkReferences(node.text).every(segment => segment.kind === 'object'
+      ? segment.reference.target.kind === 'capsule' : !segment.text.trim())
+    if (node.kind === 'link' || node.kind === 'image') return objectLinkReference(node.href)?.target.kind === 'capsule'
+    return (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') && onlyCapsuleReferences(node.children)
+  })
+}
+
+function MarkdownCapsuleReferences({ references, context, path }: { references: CapsuleBlockReference[]; context: InlineContext; path: string }) {
+  return <>{references.map(reference => <MarkdownCapsule key={`${reference.position}:${reference.uri}`} uri={reference.uri}
+    capsuleId={reference.capsuleId} title={reference.title} active={context.visible} inert={context.readOnly || context.documentMode}
+    presentationKey={context.embedIdentity ? JSON.stringify([context.embedIdentity, path, reference.position, reference.uri]) : undefined} />)}</>
+}
+
+/** The Host owns the page; the reader only acquires its visible presentation. */
 function MarkdownCapsule({ uri, capsuleId, title, active, inert, presentationKey }: { uri: string; capsuleId: string; title: string; active: boolean; inert: boolean; presentationKey?: string | undefined }) {
   const render = useCapsuleEmbedRenderer()
   const viewport = useVisibleWork<HTMLDivElement>(active && !inert && Boolean(render) && Boolean(presentationKey))
@@ -195,21 +238,20 @@ function Block({ node, context, path, topLevel = false }: { node: BlockNode; con
     const target = link ? resolveLink(link, context) : null
     if (link && target?.kind === 'http' && textOnlyLinkLabel(link.children)) return <ConversationLinkCard url={target.url} href={link.href} label={inlineLabel(link.children)} open={context.openHttpLink} />
   }
-  if (node.kind === 'paragraph' && node.children.some(child => child.kind === 'image') && node.children.every(child =>
-    child.kind === 'break' || child.kind === 'text' && !child.text.trim() || child.kind === 'image' && objectLinkReference(child.href)?.target.kind === 'capsule')) {
-    return <>{node.children.flatMap((child, index) => {
-      if (child.kind !== 'image') return []
-      const reference = objectLinkReference(child.href)!
-      return reference.target.kind === 'capsule' ? [<MarkdownCapsule key={`${index}:${child.href}`} uri={reference.uri}
-        capsuleId={reference.target.capsuleId} title={child.alt} active={context.visible} inert={context.readOnly || context.documentMode}
-        presentationKey={context.embedIdentity ? JSON.stringify([context.embedIdentity, path, index, reference.uri]) : undefined} />] : []
-    })}</>
+  if (node.kind === 'paragraph') {
+    const explicit = node.children.some(child => child.kind === 'image') && node.children.every(child =>
+      child.kind === 'break' || child.kind === 'text' && !child.text.trim() || child.kind === 'image' && objectLinkReference(child.href)?.target.kind === 'capsule')
+    const references = context.embedCapsules || explicit ? capsuleBlockReferences(node.children) : []
+    const pages = <MarkdownCapsuleReferences references={references} context={context} path={path} />
+    if (references.length && (explicit || onlyCapsuleReferences(node.children))) return pages
+    return <><p className="md-paragraph"><Inline nodes={node.children} context={context} /></p>{pages}</>
   }
   if (node.kind === 'heading') {
     const Heading = context.documentMode ? (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[node.level - 1] ?? 'h6' : 'p'
-    return <Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
+    return <><Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
       {context.inputMode && node.sourceMarker ? `${node.sourceMarker}${node.children.length ? ' ' : ''}` : null}
       <Inline nodes={node.children} context={context} /></Heading>
+      {context.embedCapsules ? <MarkdownCapsuleReferences references={capsuleBlockReferences(node.children)} context={context} path={path} /> : null}</>
   }
   if (node.kind === 'code') return <MarkdownCodeBlock code={node.text} language={node.language} visible={context.visible && !context.readOnly} readOnly={context.readOnly} />
   if (node.kind === 'math') return <MarkdownMath expression={node.text} source={node.source} display visible={context.visible && !context.readOnly} />
@@ -225,13 +267,13 @@ function Block({ node, context, path, topLevel = false }: { node: BlockNode; con
   }
   if (node.kind === 'quote') return <blockquote className="md-quote">{node.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:quote:${index}`} />)}</blockquote>
   if (node.kind === 'rule') return <hr className="md-rule" />
-  if (node.kind === 'table') return <MarkdownTable node={node} context={context} />
-  if (node.kind === 'footnotes') return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
+  if (node.kind === 'table') return <><MarkdownTable node={node} context={context} />
+    {context.embedCapsules ? <MarkdownCapsuleReferences references={capsuleBlockReferences([...node.header, ...node.rows.flat()].flat())} context={context} path={path} /> : null}</>
+  return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
     data-md-footnote={note.number} tabIndex={context.readOnly ? undefined : -1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:footnote:${note.number}:${index}`} />)}
     {!context.readOnly && <span className="md-footnote-backlinks">{Array.from({ length: note.references }, (_, index) => <button key={index} type="button" className="md-link"
       aria-label={`Return to footnote ${note.number} reference ${index + 1}`} onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote-reference', `${note.number}:${index + 1}`)}><ThemeFootnoteReferenceIcon size={12} />{index > 0 ? index + 1 : ''}</button>)}</span>}
   </li>)}</ol></section>
-  return <p className="md-paragraph"><Inline nodes={node.children} context={context} /></p>
 }
 
 type AgentMarkdownProps = {
@@ -271,6 +313,7 @@ export function AgentMarkdown(props: AgentMarkdownProps) {
     readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true, reveal = false, embedIdentity } = props
   const renderObjectLink = useObjectLinkRenderer()
   const hasDiagramRenderer = Boolean(useMarkdownDiagramRenderer())
+  const embedCapsules = Boolean(useCapsuleEmbedRenderer() && embedIdentity && !readOnly && !documentMode)
   const isInput = inputMode && !documentMode
   const parseMode = documentMode && outline && !readOnly ? 'document' : documentMode || isInput ? 'blocks' : 'auto'
   const parse = useMemo(() => {
@@ -279,15 +322,15 @@ export function AgentMarkdown(props: AgentMarkdownProps) {
     return () => {
       if (!evaluated) {
         evaluated = true
-        if (parseMode !== 'auto' || looksLikeMarkdown(content)) {
+        if (parseMode !== 'auto' || looksLikeMarkdown(content) || embedCapsules && splitObjectLinkReferences(content).some(segment => segment.kind === 'object' && segment.reference.target.kind === 'capsule')) {
           const document = parseMode === 'document' ? parseAgentMarkdownDocument(content) : null
           value = { document, blocks: document?.blocks ?? parseAgentMarkdown(content) }
         }
       }
       return value
     }
-  }, [content, parseMode])
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, readOnlyImages, visible, hasDiagramRenderer, embedIdentity,
+  }, [content, parseMode, embedCapsules])
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, readOnlyImages, visible, hasDiagramRenderer, embedCapsules, embedIdentity,
     ...(!readOnly && !documentMode && renderObjectLink ? { renderObjectLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...((!readOnly || readOnlyImages) && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),
