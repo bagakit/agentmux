@@ -183,7 +183,7 @@ describe('IPC 两侧的对齐（跨进程那条缝没有类型检查）', () => 
   })
 
   it('自检：移除实际跨模块调用会留下五个 preload 调用缺席，不能直接拼入 leaf 清单', () => {
-    const call = 'registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })'
+    const call = 'registerDeviceManagementIpc({ handleWithEvent })'
     expect(IPC_SOURCE.split(call)).toHaveLength(2)
     const mutated = IPC_SOURCE.replace(call, '')
     const before = new Set(registrations().map(item => item.channel))

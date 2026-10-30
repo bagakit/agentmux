@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -139,13 +140,13 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed, send: vi.fn(),
     session: { flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ initialConfig: config, window: { isDestroyed: () => destroyed, setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { isDestroyed: () => destroyed, setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { validate: (next: AppConfig) => next, save: async (next: AppConfig) => (config = next), get: async () => config } as unknown as ConfigStore,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never,
     scratchTopics: topics, workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    return handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+    return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values)
   })
   // Finish the private Notes bootstrap before deleting its state in teardown.
   await api.notesStorage.inspect()

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -14,14 +15,14 @@ const bridge = vi.hoisted(() => {
   const { tmpdir } = process.getBuiltinModule('node:os')
   const { join } = process.getBuiltinModule('node:path')
   const initialHome = mkdtempSync(join(tmpdir(), 'amx-main-origin-home-'))
-  return { initialHome, api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>(), directory: initialHome,
+  return {  initialHome, api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>(), directory: initialHome,
   listeners: new Map<string, Set<Function>>(), mainListeners: new Map<string, Function>(), sender: null as unknown, desktopOptions: null as import('@agentmux/core').AgentMuxRpcServiceOptions | null }
 })
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => bridge.directory }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
   safeStorage: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: vi.fn(async () => {}), decryptStringAsync: vi.fn(async () => {}) },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.defineProperty(window, 'agentmux', { configurable: true, value: api }) } },
-  ipcRenderer: { invoke: bridge.invoke, send: (channel: string, ...args: unknown[]) => bridge.mainListeners.get(channel)?.({ sender: bridge.sender }, ...args), on: (channel: string, listener: Function) => { const set = bridge.listeners.get(channel) ?? new Set(); set.add(listener); bridge.listeners.set(channel, set) },
+  ipcRenderer: { invoke: bridge.invoke, send: (channel: string, ...args: unknown[]) => bridge.mainListeners.get(channel)?.({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender }, ...args), on: (channel: string, listener: Function) => { const set = bridge.listeners.get(channel) ?? new Set(); set.add(listener); bridge.listeners.set(channel, set) },
     off: (channel: string, listener: Function) => bridge.listeners.get(channel)?.delete(listener) }, webFrame: { getZoomFactor: () => 1 },
   app: { getPath: () => bridge.directory, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: (channel: string, listener: Function) => bridge.mainListeners.set(channel, listener), removeListener: (channel: string) => bridge.mainListeners.delete(channel) },
@@ -73,12 +74,12 @@ it.each([true, false])('registered Desktop public send retains the original sema
   const window = { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
   let dispose: (() => Promise<void>) | undefined, releaseRenderer: (() => void) | undefined, rpc: AgentMuxRpcService | undefined
   try {
-    dispose = await registerIpc({ initialConfig: config, window, runtime: controller,
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(window.webContents), initialConfig: config, window, runtime: controller,
       workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => window, presentationWindow: () => window } as never,
       configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as never,
       progressLoops: { subscribe: () => () => {} } as never, scratchTopics: { setNameAudit: vi.fn() } as never,
       workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as never })
-    bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => bridge.handlers.get(channel)!({ sender } as unknown as IpcMainInvokeEvent, ...args))
+    bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => bridge.handlers.get(channel)!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args))
     useAppStore.setState({ config, sessions: [composerSession('sender'), composerSession('recipient')], closingWorkbenchViews: {} })
     const { api } = await import('../src/renderer/src/lib/api')
     const operations: string[] = []
@@ -98,7 +99,7 @@ it.each([true, false])('registered Desktop public send retains the original sema
       ...(managed ? {} : { sourceDevice: device }) })
     expect(operations).not.toContain('send')
     expect(submit).toHaveBeenCalledOnce()
-    expect(submit.mock.calls[0]![0]).toMatchObject({ envelope: { messageId: params.messageId, body: params.text,
+    expect(submit.mock.calls[0]![0]).toMatchObject({ envelope: {  messageId: params.messageId, body: params.text,
       sender: managed ? { kind: 'agent-session', agentSessionId: 'sender' } : { kind: 'human', principal: 'local-cli' } }, sourceChannel: 'cli' })
     expect(submit.mock.calls[0]![0].sourceDevice).toEqual(managed ? undefined : device)
     const writes = f.inner.kernel.input as ReturnType<typeof vi.fn>, queue = new DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath())

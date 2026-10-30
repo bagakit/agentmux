@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -48,7 +49,7 @@ async function fixture(disposeFiles = vi.fn(async () => {})) {
   const host = Object.assign(new EventEmitter(), { id: 37, setBackgroundColor: vi.fn(), isDestroyed: () => departed, webContents: contents })
   Object.defineProperty(host, 'webContents', { get() { if (departed) throw new Error('Object has been destroyed'); return contents } })
   const releaseNative = vi.fn()
-  const dispose = await registerIpc({ initialConfig: config, window: host as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources((host as unknown as BrowserWindow).webContents), initialConfig: config, window: host as unknown as BrowserWindow,
     workbenchWindows: { setNativeOwner: () => releaseNative } as never,
     runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,
     progressLoops: { subscribe: () => () => {} } as never, scratchTopics: new ScratchTopics(),

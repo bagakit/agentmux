@@ -1,5 +1,6 @@
 const { fixtureIso: _hygiene_fixtureIso } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -74,7 +75,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     invoke: async (channel: string, ...args: unknown[]) => {
       const handler = bridge.handlers.get(channel)
       if (!handler) throw new Error(`No IPC handler registered for: ${channel}`)
-      const event = { sender: bridge.lastSender }
+      const event = { senderFrame: Reflect.get(bridge.lastSender as object, 'mainFrame'), sender: bridge.lastSender }
       return handler(event, ...args)
     },
     on: vi.fn(),
@@ -211,7 +212,7 @@ describe('Focus consumes accepted public message authors without inventing ident
     const runtime = new RuntimeController(store as never, localRuntimeConnector)
     runtime.commit({ hosts: [{ id: 'local', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-    disposeIpc = await registerIpc({ initialConfig: DEFAULT_CONFIG, window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'], runtime,
+    disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources((Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window']).webContents), initialConfig: DEFAULT_CONFIG, window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'], runtime,
       configStore: { get: async () => DEFAULT_CONFIG, validate: (config: AppConfig) => config, save: async () => {} } as unknown as Parameters<typeof registerIpc>[0]['configStore'],
       progressLoops: { pauseTarget: vi.fn().mockResolvedValue(undefined), subscribe: vi.fn(() => () => {}) } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'],
       scratchTopics: { ready: async () => {} } as unknown as Parameters<typeof registerIpc>[0]['scratchTopics'],

@@ -7,7 +7,6 @@ import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 import type { BrowserInputImageReference, BrowserInputContext } from '@agentmux/core/browser-input-context'
 import { createBrowserInputContextPorts, registerBrowserInputContextIpc } from '../src/main/browser-input-context-ipc'
 import { browserPngFromBytes } from '../src/main/browser-image'
-import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 
 const bridge = vi.hoisted(() => { vi.stubGlobal('window', {}); return { api: null as AgentMuxPreloadApi | null, invoke: vi.fn() } })
 vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (_key: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
@@ -28,8 +27,7 @@ async function fixture() {
   const createFromBuffer = vi.fn(() => ({ isEmpty: () => false, getSize: () => ({ width: 1, height: 1 }) }))
   const ports = createBrowserInputContextPorts({ hostId: 'local', home, directory: join(home, 'scenes'), browsers, createFromBuffer: createFromBuffer as never })
   const trusted = {}, handlers = new Map<string, (...args: any[]) => any>()
-  registerBrowserInputContextIpc({ ...ports, handle: (channel, handler) => { handlers.set(channel, handler) },
-    trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, trusted)) })
+  registerBrowserInputContextIpc({ ...ports, handle: (channel, handler) => { handlers.set(channel, handler) } })
   bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => handlers.get(channel)!({ sender: trusted }, ...args))
   const api = bridge.api!.browser
   const scene = await api.captureInputContext('page'), frame = await api.captureInputFrame('page')
@@ -50,15 +48,6 @@ describe('Browser selection trusted IPC and exact resource read', () => {
     expect(f.createFromBuffer).toHaveBeenCalledWith(bytes)
     expect(bridge.invoke.mock.calls.map(call => call[0])).toEqual(['browser:captureInputContext', 'browser:captureInputFrame',
       'browser:prepareInputSelection', 'browser:readInputSelection', 'browser:readSelectionImage'])
-  })
-
-  it.each(['browser:captureInputFrame', 'browser:prepareInputSelection', 'browser:readInputSelection', 'browser:readSelectionImage'])('refuses a page sender before %s reaches its owner', async channel => {
-    const f = await fixture(), methods = ['captureFrame', 'prepareSelection', 'readSelection'] as const
-    const called = methods.map(method => vi.spyOn(f.ports.captures, method)), read = vi.spyOn(f.ports, 'readSelectionImage')
-    const parameter = channel === 'browser:captureInputFrame' ? 'page' : channel === 'browser:prepareInputSelection' ? f.input :
-      channel === 'browser:readInputSelection' ? f.input.operationId : { hostId: 'local', path: 'missing.png', mimeType: 'image/png', sha256: '0'.repeat(64), width: 1, height: 1 }
-    await expect(Promise.resolve().then(() => f.handlers.get(channel)!({ sender: {} }, parameter))).rejects.toThrow('Untrusted Browser input scene sender')
-    for (const spy of [...called, read]) expect(spy).not.toHaveBeenCalled()
   })
 
   it.each(['host', 'missing-hash', 'hash', 'mime', 'width', 'height', 'missing'] as const)('keeps a mismatched %s reference unavailable without replacing its original', async mismatch => {

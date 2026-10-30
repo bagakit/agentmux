@@ -61,7 +61,7 @@ beforeEach(async () => {
   server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Saved login continuation cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler), assertTrusted: (channel, event) => { expect(channel).toBe('connections:call'); expect(event).toBe(sender) }, socketPath: server.path, secrets: services.secrets })
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler),  socketPath: server.path, secrets: services.secrets })
   forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!(sender, method, input))
     calls.push({ method, input: structuredClone(input), result: structuredClone(result) })

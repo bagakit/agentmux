@@ -25,7 +25,7 @@ beforeEach(async () => {
   server = new AgentMuxControlServer({ socketPath: join(directory, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Publication settings cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler), assertTrusted: (channel, caller) => { expect(channel).toBe('connections:call'); expect(caller).toBe(sender) }, socketPath: server.path, secrets: services.secrets })
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler),  socketPath: server.path, secrets: services.secrets })
   vi.spyOn(api.connections, 'call').mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     if (failObservation && method === 'connection.setup.inspect') { failObservation = false; throw Error('Application observation interrupted') }
     const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!(sender, method, input))

@@ -66,10 +66,10 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
     },
     watchConnectionMetadata: async (_target, handlers) => owner.client.subscribe('connection.metadata.watch', {}, handlers)
   }
-  registerMoteConnectionIpc({ runtime, handleWithEvent, assertTrusted })
-  registerMotePreferencesIpc({ socketPath: owner.server.path, runtime, handleWithEvent, assertTrusted })
-  registerMoteChatIpc({ runtime, handleWithEvent, assertTrusted })
-  registerConnectorIpc({ runtime, handleWithEvent, assertTrusted, metadata: { publish() {}, observation() {} } })
+  registerMoteConnectionIpc({ runtime, handleWithEvent })
+  registerMotePreferencesIpc({ socketPath: owner.server.path, runtime, handleWithEvent })
+  registerMoteChatIpc({ runtime, handleWithEvent })
+  registerConnectorIpc({ runtime, handleWithEvent,  metadata: { publish() {}, observation() {} } })
   vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
   const forward = async (method: any, input: any, target?: import('../../src/shared/contracts').ConnectionHostingTarget) => await handlers.get('moteConnections:call')!({ sender }, method, input, target)
   const parentCalls = vi.spyOn(api.moteConnections, 'call').mockImplementation(forward)

@@ -65,7 +65,7 @@ try {
   await app.whenReady(); await mkdir(evidence, { recursive: true })
   win = new BrowserWindow({ width: 1280, height: 900, show: true, webPreferences: { preload, contextIsolation: true, sandbox: false, nodeIntegration: false } })
   const config = { ...structuredClone(DEFAULT_CONFIG), executors: { private: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/finite-port"), args: [], env: {}, injectAgentMuxGuide: false } } }
-  disposeIpc = await registerIpc({ window: win, runtime, configStore: { get: async () => config } as any,
+  disposeIpc = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window: win, runtime, configStore: { get: async () => config } as any,
     progressLoops: { pauseTarget: async () => {}, subscribe: () => () => {} } as any,
     scratchTopics: {} as any, workspaceFiles: { dispose: async () => {} } as any })
   await win.loadFile(html); win.webContents.debugger.attach('1.3'); await until('Boolean(window.preparationPhase && document.querySelector(".composer"))')

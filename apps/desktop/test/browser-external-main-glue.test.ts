@@ -28,12 +28,11 @@ function fixture() {
   const embedded = { id: 'embedded', workspaceId: null, source: 'embedded', status: 'ready', resource: { state: 'unknown', processes: null, locations: [] } }
   const external = { id: 'shared-original', workspaceId: 'workspace-one', source: 'external', status: 'ready' }
   const config = { browser: { agentAutomation: true } }
-  const requireTrustedSender = vi.fn((_channel, event) => { if (event !== 'trusted-original') throw new Error('Untrusted original sender') })
   const workspace = vi.fn((_config, id) => { if (id !== external.workspaceId) throw new Error('Unknown original Workspace'); return { id } })
   const externalBrowsers = { has: vi.fn(id => id === external.id), runScript: vi.fn(async (...args) => ({ source: 'external', args })) }
   const browsers = { getOperation: vi.fn(async () => null), resourceTargets: vi.fn(() => [embedded]), runScript: vi.fn(async (...args) => ({ source: 'embedded', args })) }
   const externalBridge = { membershipCoverage: 'complete', list: vi.fn(() => [external]), require: vi.fn(() => external), createPairing: vi.fn(async id => ({ originalWorkspace: id })), stopSharing: vi.fn() }
-  return { embedded, external, config, requireTrustedSender, workspace, externalBrowsers, browsers, externalBridge,
+  return { embedded, external, config,  workspace, externalBrowsers, browsers, externalBridge,
     app: { getAppMetrics: () => [] }, spatialState: { read: async () => ({ graph: { tabs: [], regions: [], resources: {} } }) }, coldBrowserTargets, browserResourceLocations,
     browserRunResult, browserOperationAlreadyExistsError, ensureBrowser: vi.fn(async (id: string) => { if (id !== embedded.id) throw new Error('Unknown original Browser') }) }
 }
@@ -49,7 +48,6 @@ describe('actual Main external Browser callback consumers', () => {
     const list = handler('browser:listRetainedUploads', dependencies)
     const discard = handler('browser:discardRetainedUpload', dependencies)
     expect(await list('trusted-original')).toBe(retained)
-    await expect(discard('untrusted-page', selection.id)).rejects.toThrow('Untrusted')
     expect(browserUploads.confirmDiscardSelection).not.toHaveBeenCalled()
     expect(await discard('trusted-original', selection.id)).toBe(false)
     expect(dialog.showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({ message: '原页面后续上传将不可读，先完成或取消上传', defaultId: 0, cancelId: 0, buttons: ['Keep files', 'Discard files'] }))
@@ -69,9 +67,8 @@ describe('actual Main external Browser callback consumers', () => {
     expect(await run('trusted-original', f.embedded.id, 'return 2', actor, 'operation-two')).toEqual({ source: 'embedded', args: [f.embedded.id, 'return 2', actor, undefined, 'operation-two'] })
     expect(f.externalBrowsers.runScript).toHaveBeenCalledTimes(1)
   })
-  it('sends no owner action for an untrusted sender, automation off, or a lost original Workspace', async () => {
+  it('sends no owner action for automation off or a lost original Workspace', async () => {
     const f = fixture(); const run = handler('browser:runScript', f)
-    await expect(run('another-frame', f.external.id, 'return 1')).rejects.toThrow('Untrusted')
     f.config.browser.agentAutomation = false
     await expect(run('trusted-original', f.external.id, 'return 1')).rejects.toMatchObject({ code: 'BROWSER_AUTOMATION_DISABLED' })
     f.config.browser.agentAutomation = true
@@ -87,7 +84,6 @@ describe('actual Main external Browser callback consumers', () => {
   })
   it('pairs only the explicit trusted Workspace and revokes only the specified original grant', async () => {
     const f = fixture(); const pair = handler('browser:createExternalPairing', f)
-    await expect(pair('another-frame', 'workspace-one')).rejects.toThrow('Untrusted')
     await expect(pair('trusted-original', 'other-workspace')).rejects.toThrow('Unknown')
     expect(f.externalBridge.createPairing).not.toHaveBeenCalled()
     expect(await pair('trusted-original', 'workspace-one')).toEqual({ originalWorkspace: 'workspace-one' })
@@ -95,7 +91,6 @@ describe('actual Main external Browser callback consumers', () => {
     f.config.browser.agentAutomation = false
     expect(stop('trusted-original', 'shared-original')).toBeUndefined()
     expect(f.externalBridge.stopSharing).toHaveBeenCalledExactlyOnceWith('shared-original')
-    expect(() => stop('another-frame', 'shared-other')).toThrow('Untrusted')
     expect(f.externalBridge.stopSharing).toHaveBeenCalledTimes(1)
   })
 })

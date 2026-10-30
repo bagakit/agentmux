@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, realpath, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,7 +10,7 @@ import type { RuntimeController } from '../src/main/runtime-controller'
 import type { ConfigStore } from '../src/main/config-store'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 
-const fixture = vi.hoisted(() => ({ root: '', api: undefined as unknown as AgentMuxPreloadApi,
+const fixture = vi.hoisted(() => ({  root: '', api: undefined as unknown as AgentMuxPreloadApi,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
   sender: { id: 1, isDestroyed: () => false, send: vi.fn(), on: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } }
@@ -22,7 +23,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   ipcRenderer: { invoke: async (channel: string, ...values: unknown[]) => {
     fixture.invokes.push({ channel, values }); const handler = fixture.handlers.get(channel)
     if (!handler) throw Error('No registered original IPC handler: ' + channel)
-    return handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
+    return handler({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
   }, on: vi.fn(), off: vi.fn(), send: vi.fn() }, safeStorage: {}, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => fixture.root }))
@@ -70,7 +71,7 @@ beforeEach(async () => {
   let config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [workspace] }
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {}, executionHost: () => host,
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {}, observeContinuousProgress: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, reportBindingSaveFailure: vi.fn(), rpcClients: () => [] } as unknown as RuntimeController
-  dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: value => value, save: async value => { config = value; return value } } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: files,
@@ -124,8 +125,8 @@ it('uses renderer→preload→registered Main→original files/history for timel
 it('refuses an untrusted sender, a self-reported actor and an inexact original resource without changing bytes', async () => {
   const f = await seed(), writes = vi.spyOn(files, 'write')
   const restore = { ...f.target, expectedRevision: f.document.revision, operationId: 'rejected-restore', eventId: f.created.noteHistory!.eventId! }
-  await expect(fixture.handlers.get('files:historyPublic')!({ sender: {} } as IpcMainInvokeEvent, f.target)).rejects.toThrow('Untrusted original Note history read sender')
-  await expect(fixture.handlers.get('files:restorePublic')!({ sender: {} } as IpcMainInvokeEvent, restore)).rejects.toThrow('Untrusted original Note history restore sender')
+  await expect(Promise.resolve().then(() => fixture.handlers.get('files:historyPublic')!({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} } as IpcMainInvokeEvent, f.target))).rejects.toThrow("Untrusted application")
+  await expect(Promise.resolve().then(() => fixture.handlers.get('files:restorePublic')!({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} } as IpcMainInvokeEvent, restore))).rejects.toThrow("Untrusted application")
   await expect(api.files.restorePublic({ ...restore, actor: { kind: 'agent', id: 'forged-agent' } } as typeof restore)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   await expect(api.files.restorePublic({ ...restore, expectedResource: { ...f.target.expectedResource, workspaceId: 'another-original-workspace' } })).rejects.toMatchObject({ code: 'FILE_RESOURCE_MISMATCH' })
   expect(writes).not.toHaveBeenCalled(); expect(await readFile(join(fixture.root, 'workspace', path), 'utf8')).toBe(f.original)

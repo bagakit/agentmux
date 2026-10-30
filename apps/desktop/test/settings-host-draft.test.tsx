@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act } from 'react'
 import { EventEmitter } from 'node:events'
@@ -51,7 +52,7 @@ let publications: AppConfig[], sender: EventEmitter & { id: number; isDestroyed:
 async function invoke<T>(channel: string, ...values: unknown[]): Promise<T> {
   const handler = ipc.handlers.get(channel)
   expect(handler).toBeTypeOf('function')
-  return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values) as T
+  return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values) as T
 }
 beforeEach(async () => {
   ipc.directory = await mkdtemp(join(tmpdir(), 'amux-host-draft-owner-'))
@@ -72,7 +73,7 @@ beforeEach(async () => {
       if (channel === CONFIG_CHANGED_CHANNEL) { config = value as AppConfig; publications.push(config); useAppStore.setState({ config }) }
     } })
   ipc.handlers.clear()
-  dispose = await registerIpc({ initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: disk, runtime, progressLoops, scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   useAppStore.setState({ config, hostChecks: {}, checkHost: vi.fn(async () => {}), providerCatalog: await api.providers.list() })
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => await invoke<AppConfig>('config:save', next, expected))

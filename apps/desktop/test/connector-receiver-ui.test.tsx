@@ -47,7 +47,7 @@ async function fixture(rejected=false){
  vi.spyOn(hosted,'connect').mockRejectedValue(Error('Only startup observation is controlled'))
  const controller=new RuntimeController(f.store,async()=>hosted);cleanup.push(()=>controller.dispose());controller.commit(await controller.prepare(composerConfig))
  const target={hostId:'local',runtimeId:identity.runtimeId},handlers=new Map<string,(...args:any[])=>Promise<unknown>>(),trusted=vi.fn()
- registerConnectorIpc({handleWithEvent:(method,handler)=>handlers.set(method,handler),assertTrusted:trusted,runtime:controller,metadata:{publish(){},observation(){}}})
+ registerConnectorIpc({handleWithEvent:(method,handler)=>handlers.set(method,handler),runtime:controller,metadata:{publish(){},observation(){}}})
  const calls:Array<{method:string;params:any;target:any}>=[];let drop=false,hold:Promise<void>|undefined,release=()=>{}
  const source=vi.spyOn(api.connections,'call').mockImplementation(async(method,params,owner)=>{calls.push({method,params:structuredClone(params),target:structuredClone(owner)});const reply=await handlers.get('connections:call')!({},method,params,owner);if(method==='connection.receiver.recover'&&drop){drop=false;throw Error('Lost actual Host reply')}if(method==='connection.receiver.recover')await hold;return unwrapSessionInputOperationResult(structuredClone(reply)) as any})
  await wait(async()=>expect((await services.connections.inspect({connectionId:feishuConfig.connectionId})).connection?.receiver?.state).toBe(rejected?'ended':'ready'))
@@ -70,7 +70,7 @@ it('current stopped receiver outranks earlier accepted input through the origina
  // Prior native adoption is a controlled typed observation only; the real Core
  // input above proves dispatch, not native Agent acceptance.
  expect(connectorGroupSummary({...report,incoming:{...report.incoming,value:{...report.incoming.value!,rows:report.incoming.value!.rows.map(row=>({...row,coreStatus:'admitted'}))}}}).incoming.value).toBe('Receiver stopped')
- expect(f.trusted).toHaveBeenCalled();f.unchanged()
+ f.unchanged()
 })
 it('uses the single overview recovery action with the original ref through Main Host and the real SDK socket',async()=>{
  const f=await fixture(true),record=await f.record()
@@ -100,7 +100,7 @@ it('uses the single overview recovery action with the original ref through Main 
  expect(diagnostics.hidden).toBe(false)
  await dom.click('button');expect(diagnostics.hidden).toBe(true)
  expect(dom.container.querySelector('[data-connection-panel="diagnostics"]')).toBe(diagnostics)
- expect(f.trusted).toHaveBeenCalled();f.unchanged()
+ f.unchanged()
 },25000)
 it('lost recovery reply is inspected and explicitly continued with the same frozen operation through actual Main and Host',async()=>{
  const f=await fixture(true);await f.mount();await wait(()=>expect(dom.container.querySelector('[data-receiver-action="recover"]')).not.toBeNull())

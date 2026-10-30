@@ -67,7 +67,7 @@ beforeEach(async context => {
     }
   }
   const release = registerConnectorIpc({ runtime, handleWithEvent: (channel, handler) => { bridge.handlers.set(channel, handler) },
-    assertTrusted: (_channel, event) => { expect(event.sender).toBe('original-renderer') },
+
     metadata: { publish: (watchId, change) => { metadataChanges++; for (const listener of bridge.listeners.get('connections:metadataChanged') ?? []) listener({}, { watchId, change }) },
       observation: (watchId, state) => { metadataReady = state === 'ready'; for (const listener of bridge.listeners.get('connections:metadataObservation') ?? []) listener({}, { watchId, state }) } } })
   cleanup.push(() => release.dispose())

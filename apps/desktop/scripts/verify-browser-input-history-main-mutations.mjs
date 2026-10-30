@@ -24,7 +24,6 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const originals = new Map(await Promise.all(inputs.map(async file => [file, await readFile(join(root, file))])))
 const hashes = values => Object.fromEntries([...values].map(([file, bytes]) => [file, digest(bytes)]))
 const recordBinding = `  handleWithEvent('browser:recordInputHistory', async (event, target: BrowserInputHistoryTarget, text: string) => {
-    requireTrustedSender('browser:recordInputHistory', event)
     return await browserInputHistory.record(resolveInputHistoryScope(target), text)
   })
 `
@@ -53,8 +52,7 @@ const mutations = [
       throw new Error('The input history scope changed. Reopen this input history before deleting.')
     }
 `, after: '' },
-  { label: 'foreign-record-sender-accepted', file: ipc, test: 'rejects another sender',
-    before: "    requireTrustedSender('browser:recordInputHistory', event)\n", after: '' },
+
   { label: 'product-record-handler-removed', file: ipc, test: 'round-trips real durable history',
     before: recordBinding, after: '' },
   { label: 'agent-navigation-recorded', file: ipc, test: 'rejects another sender',

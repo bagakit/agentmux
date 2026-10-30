@@ -11,7 +11,6 @@ const mutations:Record<string,[string,string,string]>={
  'presence-interval':['apps/desktop/src/renderer/src/components/MoteQuickMode.tsx','intervalMs: Number(value) * 60000','intervalMs: DEFAULT_MOTE_PRESENCE.intervalMs'],
  'invalid-interval':['apps/desktop/src/renderer/src/components/MoteQuickMode.tsx',"if (!minutes.trim() || !Number.isSafeInteger(Number(minutes)) || Number(minutes) < 1 || !Number.isSafeInteger(Number(minutes) * 60000))",'if (false)'],
  'main-missing-receipt':['apps/desktop/src/main/runtime-controller.ts','if (!result.input) throw new AgentMuxError','if (false) throw new AgentMuxError'],
- 'recovery-provenance':['apps/desktop/src/main/ipc.ts','if (request?.moteMain) assertManualPromptSenderTrusted','if (false) assertManualPromptSenderTrusted'],
  'resource-host':['apps/desktop/src/main/mote-dialogue-ipc.ts','input.target.expectedResource.hostId',"'local'"],
  'host-guidance-owner':['apps/desktop/src/renderer/src/store.ts','(!(entry.moteMain && !original.input.inputContextCapture) && receipt.input.agentMuxNote !== entry.agentMuxNote)','receipt.input.agentMuxNote !== entry.agentMuxNote'],
  'resume-unknown-replay':['apps/desktop/src/renderer/src/components/MoteQuickMode.tsx','const result = existing ? await api.schedule.inspect','const result = false ? await api.schedule.inspect'],

@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -151,17 +152,17 @@ beforeEach(async () => {
   originalProfileConfig = config
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
     session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => config, validate: (value: unknown) => value, save: async () => config } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {}, listFiles: async () => [] } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
-    if (channel !== 'sessions:submitPrompt') return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+    if (channel !== 'sessions:submitPrompt') return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values)
     try {
       // Electron structured-clones return values but discards custom fields on a rejection.
-      return structuredClone(await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values))
+      return structuredClone(await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values))
     } catch (error) {
       throw new Error(`Error invoking remote method '${channel}': ${error instanceof Error ? error.message : String(error)}`)
     }

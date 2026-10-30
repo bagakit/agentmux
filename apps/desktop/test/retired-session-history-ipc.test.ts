@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -59,12 +60,12 @@ it('reads retired source, native and captured content through actual preload/IPC
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
       configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as never })
     bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => {
       const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-      return handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)
+      return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args)
     })
     expect(bridge.api).not.toBeNull()
     const reference: SessionHistoryReference = { hostId: 'private-host', agentSessionId: 'retired-agent' }

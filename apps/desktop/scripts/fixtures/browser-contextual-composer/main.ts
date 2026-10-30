@@ -104,7 +104,7 @@ async function run() {
     if (channel.startsWith('browser:') || channel === 'sessions:submitPrompt' || channel === 'ui:publishNativeOverlays') receipt.ipc.push(fact)
     return Promise.resolve(handler(event, ...args)).then(value => { fact.result = value; return value })
   })
-  releaseIpc = await registerIpc({ window, workbenchWindows: windows, initialConfig: config, configStore, runtime, applicationAccess: access,
+  releaseIpc = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(directory, 'renderer/index.html') }, loading: null }), window, workbenchWindows: windows, initialConfig: config, configStore, runtime, applicationAccess: access,
     scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never })
   server = createServer((request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end(`<!doctype html><meta name="viewport" content="width=device-width"><title>Original collaboration page</title><style>body{font:16px system-ui;margin:24px;min-height:1800px;background:#f5f7f6;color:#19342c}button{padding:12px}input{padding:10px;margin:12px}</style><h1>Original live page</h1><p>This Browser keeps working while its trace and opinion are read.</p><button id="action">Page action</button><input id="text" aria-label="Page draft"><script>globalThis.pageProof={events:[],clicks:0};document.querySelector('#action').onclick=()=>pageProof.clicks++;for(const type of ['pointerdown','pointerup','wheel','keydown','input'])addEventListener(type,e=>pageProof.events.push(type));</script>`) })
   await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve))

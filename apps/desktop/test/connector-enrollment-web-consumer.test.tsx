@@ -81,7 +81,7 @@ beforeEach(async () => {
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>()
   const sender = { syntheticRenderer: 'owned-settings-consumer' }
   trusted = vi.fn((channel, event) => { expect(channel).toBe('connections:call'); expect(event).toBe(sender) })
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler), assertTrusted: trusted, socketPath: server.path, secrets: services.secrets })
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler),  socketPath: server.path, secrets: services.secrets })
   vi.spyOn(api.connections, 'call').mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     calls.push({ method, input: structuredClone(input) })
     const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!(sender, method, input))
@@ -151,7 +151,7 @@ it('keeps independently available creation after list failure and reaches native
   expect((await services.connections.list()).connections[0]!.config).toMatchObject({ connectionId: begin.connectionId, application: APP, label: 'My Agent bot' })
   expect(platform.filter(call => call.path.startsWith('/developers/')).slice(0, 3).map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
   expect(JSON.parse(String(platform.find(call => call.path === '/developers/v1/manifest/upsert_by_template')!.body)).createAppUserCustomField.i18n.zh_cn.name).toBe('My Agent bot')
-  expect(trusted).toHaveBeenCalled()
+
   for (const privateText of [QR, COOKIE, CSRF, 'settings-private-app-secret']) expect(dom.container.textContent).not.toContain(privateText)
   expect(dom.draft('agent-1')).toBe('Keep my draft')
 }, 20_000)

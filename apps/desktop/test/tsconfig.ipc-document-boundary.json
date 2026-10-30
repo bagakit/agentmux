@@ -1,0 +1,30 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite/client",
+      "vitest/globals"
+    ],
+    "baseUrl": "../../..",
+    "paths": {
+      "@agentmux/capsule": [
+        "packages/capsule/src/index.ts"
+      ],
+      "@agentmux/capsule/node": [
+        "packages/capsule/src/node.ts"
+      ],
+      "@agentmux/core/capsule": [
+        "packages/core/src/capsule.ts"
+      ]
+    }
+  },
+  "include": [
+    "../src/main/index.ts",
+    "../src/main/ipc.ts",
+    "../src/preload/index.ts",
+    "ipc-document-boundary.test.ts",
+    "ipc-sender-trust.test.ts",
+    "../scripts/fixtures/ipc-document-boundary/native.ts"
+  ]
+}

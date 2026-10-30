@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { once } from 'node:events'
 import { spawn } from 'node:child_process'
@@ -11,7 +12,7 @@ import type { BrowserWindow } from 'electron'
 import type { AgentMuxControlRequest } from '@agentmux/core'
 import type { AgentMuxRpcServiceOptions } from '../../../packages/core/src/public-rpc-service'
 
-const fixture = vi.hoisted(() => ({ root: '', socket: '', generation: 1, loading: false, active: false,
+const fixture = vi.hoisted(() => ({  root: '', socket: '', generation: 1, loading: false, active: false,
   ports: null as AgentMuxRpcServiceOptions | null,
   handlers: new Map<string, (...args: any[]) => unknown>(), events: new Map<string, (...args: any[]) => void>(),
   sender: null as any, hold: false, pending: [] as AgentMuxControlRequest[], sent: [] as AgentMuxControlRequest[],
@@ -97,7 +98,7 @@ async function main() {
     onCancellation: listener => { fixture.cancel = listener; return () => { fixture.cancel = null } },
     respond: response => {
       fixture.replies.push(structuredClone(response))
-      fixture.events.get(CONTROL_RESPONSE_CHANNEL)?.({ sender: fixture.sender }, structuredClone(response))
+      fixture.events.get(CONTROL_RESPONSE_CHANNEL)?.({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender }, structuredClone(response))
     }
   })
   cleanup.push(control.onRequest((request, signal) => useAppStore.getState().executeControl(request, signal)))
@@ -106,7 +107,7 @@ async function main() {
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {},
     rpcClients: () => [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation }
   const config = useAppStore.getState().config!
-  const dispose = await registerIpc({ initialConfig: config,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
     workbenchWindows: { setNativeOwner: () => () => {} } as never,
     runtime: runtime as never, configStore: { get: async () => config } as never,

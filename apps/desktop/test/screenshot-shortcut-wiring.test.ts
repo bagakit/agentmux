@@ -25,8 +25,6 @@ import '../src/preload/index'
 import { registerScreenshotShortcut } from '../src/main/screenshot-shortcut'
 import { SCREENSHOT_SHORTCUT_ACCELERATOR } from '../src/shared/screenshot-shortcut'
 
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
-
 const homes: string[] = []
 afterEach(async () => { bridge.listeners.clear(); bridge.invoke.mockReset(); await Promise.all(homes.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 function nodes(source: string, name: string) {
@@ -63,13 +61,12 @@ async function mainFixture() {
   const nativeWindow = { isDestroyed: () => false, isFocused: () => true, isMinimized: () => false }
   const body = statements.join('\n') + '\n' + nativeRegistration[0]!.getText(source.file) + '\n' + statusHandlers[0]!.getText(source.file)
   const original = new Function('ScreenCapture', 'GlobalScreenshot', 'SystemScreenshotEditor', 'registerScreenshotShortcut', 'registerNativeDesktopIpc', 'process', 'globalShortcut',
-    'app', 'getDesktopNativeUiOwner', 'contents', 'args', 'BrowserWindow', 'config', 'handleWithEvent', 'requireTrustedSender',
+    'app', 'getDesktopNativeUiOwner', 'contents', 'args', 'BrowserWindow', 'config', 'handleWithEvent',
     transpile(body) + '\nreturn { screenshotShortcut, globalScreenshot }')(
     ScreenCapture, GlobalScreenshot, class { edit = vi.fn(); dispose = vi.fn() }, registerScreenshotShortcut, registerNativeDesktopIpc,
     { platform: 'darwin' }, { register, unregister }, { getPath: () => home }, () => native, contents,
     { workbenchWindows: { windowForDocument: () => nativeWindow } }, { getFocusedWindow: () => nativeWindow }, { appearance: {} },
-    (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler),
-    (channel: string, event: { sender: unknown }) => assertSenderTrusted(senderTrust(channel as never, event.sender, trusted)))
+    (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler))
   bridge.invoke.mockImplementation((channel: string) => Promise.resolve(handlers.get(channel)!({ sender: trusted })))
   return { ...original, register, unregister, native, receiver, contents, home, bytes, handlers, markDestroyed: () => { destroyed = true } }
 }
@@ -83,7 +80,6 @@ it('the actual Main callback captures and copies with no Composer, without a Ren
   expect(f.receiver.complete).not.toHaveBeenCalled()
   expect(f.contents.send).not.toHaveBeenCalled()
   expect(await bridge.api!.ui.screenshotShortcutStatus()).toMatchObject({ state: 'registered', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR })
-  expect(() => f.handlers.get('ui:screenshotShortcutStatus')!({ sender: {} })).toThrow('Untrusted')
   f.screenshotShortcut.dispose()
   expect(f.unregister).toHaveBeenCalledExactlyOnceWith(SCREENSHOT_SHORTCUT_ACCELERATOR)
 })
@@ -92,7 +88,6 @@ it('the Main native composition and actual preload retain the explicit Capture b
   const f = await mainFixture(), path = await bridge.api!.ui.captureScreenshot()
   expect(await readFile(path!)).toEqual(f.bytes)
   expect(f.native.writeClipboardImage).toHaveBeenCalledOnce()
-  expect(() => f.handlers.get('ui:captureScreenshot')!({ sender: {} })).toThrow('Untrusted')
   f.screenshotShortcut.dispose()
 })
 

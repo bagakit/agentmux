@@ -9,7 +9,6 @@ import { AgentMuxControlServer, type ExecutionHost, type NotebookObservationPort
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import { createNotebookObservationServices, NotebookObservationRequests } from '../src/main/notebook-observation-requests'
-import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from '../src/main/ipc-sender-trust'
 import { createPreloadNotebookObservation } from '../src/preload/notebook-observation'
 import { createRendererNotebookObservation } from '../src/renderer/src/lib/notebook-observation-api'
 import { noteContentMatchesGraph, type NotebookObservationPreloadApi } from '../src/shared/notebook-observation'
@@ -38,7 +37,6 @@ function gui(requests:NotebookObservationRequests,sender=new Sender(),trusted=se
   const calls:{channel:string;args:unknown[]}[]=[]
   const preload=createPreloadNotebookObservation(async(channel,...args)=>{
     calls.push({channel,args:structuredClone(args)})
-    assertSenderTrusted(senderTrust(channel as PrivilegedChannel,sender,trusted))
     const data=structuredClone(args[0])
     if(channel==='notebook:graph')return structuredClone(await requests.graph(sender,data))
     if(channel==='notebook:content')return structuredClone(await requests.content(sender,data))
@@ -121,9 +119,8 @@ describe('Note graph original owner through Renderer, preload and scoped Main ob
     await expect(requests.graph(sender,{requestId:'original',params:{}})).rejects.toMatchObject({code:'INVALID_CONTROL_REQUEST'})
     requests.cancel(sender,'original');captured.resolve(emptyNotebookState());expect((await result).name).toBe('AbortError');expect(graph).not.toHaveBeenCalled();expect(sender.listenerCount('destroyed')).toBe(0)
   })
-  it('refuses untrusted calls before reading and validates malformed or misaddressed replies at the actual Renderer facade',async()=>{
-    const f=await fixture(),read=vi.spyOn(f.services.owner,'graph'),untrusted=gui(f.services.requests,new Sender(),new Sender())
-    await expect(untrusted.api.graph({})).rejects.toThrow('Untrusted original Note graph observation sender');expect(read).not.toHaveBeenCalled()
+  it('validates malformed or misaddressed replies at the actual Renderer facade',async()=>{
+    const f=await fixture()
     const good=await gui(f.services.requests).api.graph({}),content=await f.services.owner.content(good.catalog,'target')
     const base:NotebookObservationPreloadApi={resolve:vi.fn(),graph:async()=>({...good,graph:{...good.graph,catalogRevision:good.graph.catalogRevision+1}}),content:async()=>({...content,noteId:'different'}),cancelObservation:async()=>{}}
     await expect(createRendererNotebookObservation(base).graph({})).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})

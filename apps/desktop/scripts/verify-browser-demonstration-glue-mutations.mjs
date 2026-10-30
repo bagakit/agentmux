@@ -12,7 +12,6 @@ const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const pane = 'apps/desktop/src/renderer/src/components/BrowserPane.tsx'
 const managerTest = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const paneTest = 'apps/desktop/test/browser-demonstration-wiring.test.tsx'
-const trustTest = 'apps/desktop/test/ipc-sender-trust.test.ts'
 const release = '// Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.\n    void this.releaseDemonstrationCapture(entry)'
 const cases = [
   ['old-capture-overwrites-new', manager, 'if (this.demonstrationCapture !== current || !this.owns(entry, view) || contents.isDestroyed()) return', 'if (!this.owns(entry, view) || contents.isDestroyed()) return', managerTest],
@@ -22,10 +21,9 @@ const cases = [
   ['restore-starts-recording', manager, 'void this.getDemonstration(id).catch', 'void this.startDemonstration(id).catch', managerTest],
   ['draft-snapshot-projection-disconnected', manager, '...(entry.demonstration ? { demonstration: entry.demonstration } : {}),', '...{},', managerTest],
   ['synthetic-toolbar-can-record', pane, 'if (event.nativeEvent.isTrusted !== true) return', 'if (false) return', paneTest],
-  ['renderer-does-not-consume-draft', pane, 'draft={tab.demonstration?.draft ?? null}', 'draft={null}', paneTest],
-  ['untrusted-ipc-can-record', 'apps/desktop/src/main/ipc.ts', "    requireTrustedSender('browser:startDemonstration', event)", '    void event', trustTest]
+  ['renderer-does-not-consume-draft', pane, 'draft={tab.demonstration?.draft ?? null}', 'draft={null}', paneTest]
 ]
-const inputs = [...new Set([manager, pane, ...cases.map(([, file]) => file), managerTest, paneTest, trustTest,
+const inputs = [...new Set([manager, pane, ...cases.map(([, file]) => file), managerTest, paneTest,
   'apps/desktop/src/main/browser-demonstration-capture.ts', 'apps/desktop/src/main/browser-demonstration-recorder.ts',
   'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts'])]
 const original = new Map(await Promise.all(inputs.map(async file => [file, await fs.readFile(path.join(root, file))])))
@@ -39,12 +37,12 @@ try {
   }
   await fs.symlink(path.join(root, 'apps/desktop/resources'), path.join(isolated, 'apps/desktop/resources'), 'dir')
   await fs.mkdir(path.join(isolated, 'apps/desktop/test'), { recursive: true })
-  for (const file of [managerTest, paneTest, trustTest]) await fs.writeFile(path.join(isolated, file), original.get(file))
+  for (const file of [managerTest, paneTest]) await fs.writeFile(path.join(isolated, file), original.get(file))
   await fs.symlink(path.join(root, 'node_modules'), path.join(isolated, 'node_modules'), 'dir')
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   await fs.writeFile(path.join(isolated, 'package.json'), '{"type":"module"}\n')
   const config = path.join(isolated, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([managerTest, paneTest, trustTest])} } }\n`)
+  await fs.writeFile(config, `export default { esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([managerTest, paneTest])} } }\n`)
   const run = async (name, test) => {
     const args = [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', test, '--root', isolated, '--config', config, '--maxWorkers=1']
     if (test === managerTest) args.push('-t', 'human demonstration via')
@@ -53,7 +51,7 @@ try {
     await fs.writeFile(path.join(evidence, `${name}.log`), log)
     return { exit: result.status, log }
   }
-  for (const test of [managerTest, paneTest, trustTest]) assert.equal((await run(`baseline-${path.basename(test)}`, test)).exit, 0, `Baseline must pass: ${test}`)
+  for (const test of [managerTest, paneTest]) assert.equal((await run(`baseline-${path.basename(test)}`, test)).exit, 0, `Baseline must pass: ${test}`)
   for (const [name, file, before, after, test] of cases) {
     const source = original.get(file).toString('utf8')
     assert.equal(source.split(before).length - 1, 1, `Unique source anchor: ${name}`)
@@ -65,7 +63,7 @@ try {
       receipt.cases.push({ name, file, redExit: red.exit, log: `${name}.log` })
     } finally { await fs.writeFile(path.join(isolated, file), original.get(file)) }
   }
-  for (const test of [managerTest, paneTest, trustTest]) assert.equal((await run(`restored-${path.basename(test)}`, test)).exit, 0, `Restored source must pass: ${test}`)
+  for (const test of [managerTest, paneTest]) assert.equal((await run(`restored-${path.basename(test)}`, test)).exit, 0, `Restored source must pass: ${test}`)
   receipt.passed = true
 } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
 finally {

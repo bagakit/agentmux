@@ -15,7 +15,7 @@ import { WorkbenchWindows } from '../../../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
 import { NativeOverlayWindows } from '../../../src/main/native-overlay-windows'
 import { browserColdDescriptor } from '../../../src/main/browser-cold-descriptor'
-import { senderTrust, assertSenderTrusted } from '../../../src/main/ipc-sender-trust'
+import { assertAppDocumentSender } from '../../../src/main/ipc-sender-trust'
 import { DEFAULT_CONFIG } from '../../../src/main/config-store'
 import { WORKBENCH_WINDOW_RESPONSE } from '../../../src/shared/workbench-windows'
 import { surveyAliasScene } from './survey-alias'
@@ -48,7 +48,7 @@ async function sourceInputFacts() {
 }
 function handle(channel: string, action: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown) {
   ipcMain.handle(channel, async (event, ...args) => {
-    assertSenderTrusted(senderTrust(channel as any, event.sender, main.webContents))
+    assertAppDocumentSender(event, main.webContents, { current: { mode: 'prod', filePath: join(compiled, 'renderer/index.html') }, loading: null })
     const call: any = { channel, senderId: event.sender.id, frame: { processId: event.senderFrame?.processId, frameToken: event.senderFrame?.frameToken }, args, at: Date.now() }
     receipt.calls.push(call)
     try { return await action(event, ...args) } finally { call.returnedAt = Date.now() }

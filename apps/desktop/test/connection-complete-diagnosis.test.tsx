@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 import { enrollmentInitialWeb } from '../../../packages/connectors/test/fixtures/connection-enrollment-initial'
 import { registerLoadedIdentityIpc } from '../src/main/client-observation'
-import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 import { api } from '../src/renderer/src/lib/api'
 import { ConnectionRequestTrace } from '../src/renderer/src/components/settings/ConnectionRequestTrace'
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -18,10 +17,9 @@ let renderer = { kind: 'bundled' as const, id: 'a'.repeat(64), identity: { shell
 beforeEach(async () => {
   f = await moteBotUi()
   const handlers = new Map<string, (event: any) => unknown>()
-  registerLoadedIdentityIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, f.sender)),
+  registerLoadedIdentityIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
     package: { ...loadedPackage, ...{ rawPrivate: 'private-package-extra' } }, renderer: () => ({ ...renderer, ...{ rawPrivate: 'private-renderer-extra' } }) })
   vi.spyOn(api.ui, 'readLoadedIdentity').mockImplementation(async () => handlers.get('ui:readLoadedIdentity')!({ sender: f.sender }) as any)
-  expect(() => handlers.get('ui:readLoadedIdentity')!({ sender: {} })).toThrow('Untrusted loaded application identity sender')
 })
 afterEach(async () => { await f?.close() })
 async function create() {

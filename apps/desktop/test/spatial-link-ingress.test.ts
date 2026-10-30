@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { parseAgentMuxControlRequest, formatAmuxObjectLink, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
 import { focusFacts } from '../../../packages/core/test/fixtures/desktop-focus-facts'
 import { SpatialLinkIngress, receiveSpatialLinkArguments } from '../src/main/spatial-link-ingress'
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 import type { CapsuleOpenResult } from '@agentmux/core/capsule'
 
 const space = (spaceId: string) => formatAmuxObjectLink({ kind: 'space', spaceId })
@@ -75,11 +74,6 @@ describe('the single native spatial link ingress', () => {
     finish({ ...capsuleResult(originalOperation), rendering: { status: 'unavailable', reason: 'Old response.' } }); await settled()
     expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'newer' }])
     expect(open).toHaveBeenCalledTimes(1); expect(p.report).not.toHaveBeenCalled()
-  })
-  it('keeps readiness behind the original trusted sender owner', () => {
-    const original = { frame: 'original' }
-    expect(() => assertSenderTrusted(senderTrust('ui:spatialLinksReady', original, original))).not.toThrow()
-    expect(() => assertSenderTrusted(senderTrust('ui:spatialLinksReady', { ...original }, original))).toThrow('Untrusted spatial link readiness sender')
   })
   it('waits for actual renderer initialization, dispatches the latest cold URL once through typed focus, and preserves input', async () => {
     const ingress = new SpatialLinkIngress(), p = ports()

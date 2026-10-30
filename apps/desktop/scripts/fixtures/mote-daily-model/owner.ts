@@ -327,7 +327,7 @@ export async function runModelOwner(input: { html: string; preload: string; root
     installInputFence()
     win = new BrowserWindow({ width: 1180, height: 860, show: false,
       webPreferences: { preload: input.preload, contextIsolation: true, sandbox: false, backgroundThrottling: false } })
-    disposeIpc = await registerIpc({ window: win, configStore, runtime, progressLoops: manager, demands: goals, scratchTopics: topics })
+    disposeIpc = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: input.html }, loading: null }), window: win, configStore, runtime, progressLoops: manager, demands: goals, scratchTopics: topics })
     await manager.start(); await win.loadFile(input.html)
     await until(() => call('facts'), value => value.ready === true, 20000, 'original App initialization')
     result.original = await call('createMote')

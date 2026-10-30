@@ -2,6 +2,7 @@ const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => awai
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -50,7 +51,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
       if (channel === 'ui:setAgentAttentionCount') await fixture.beforeBadge
       const handler = fixture.handlers.get(channel)
       if (!handler) throw new Error(`No registered Main handler: ${channel}`)
-      return await handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
+      return await handler({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
     },
     on(channel: string, listener: (...values: unknown[]) => void) {
       const listeners = fixture.listeners.get(channel) ?? new Set()
@@ -147,7 +148,7 @@ beforeEach(async () => {
     observeInputOccupation: () => () => {}, observeCoreEvents: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     runtimeBindings: () => new Map(), endpointWarningSnapshot: () => [], reportBindingSaveFailure: () => {}, providerCatalog: (options?: { observation: true }) => options ? { catalog: [], warnings: [] } : [], sessionHistorySources: async (options?: { observation: true }) => options ? { sources: [], warnings: [] } : [], inspectInput: async () => null, notifyInputOccupation: async () => {}, snapshot: async () => ({ sessions, timelines: Object.fromEntries(sessions.filter(session => session.kind === 'agent').map(session => [session.id, { agentSessionId: session.id, revision: 0, items: [] }])), recoveryCandidates: [] }), submitPrompt: submit
   } as unknown as RuntimeController
-  dispose = await registerIpc({ progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { validate: (next: unknown) => next, save: async (next: unknown) => next, get: async () => ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }) } as unknown as ConfigStore,
     scratchTopics: { listTopics: async () => [], setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })
@@ -250,7 +251,7 @@ it('ignores an in-flight failure after the actual App owner unmounts', async () 
 it('skips a platform without Dock explicitly and keeps its native receiver untouched', async () => {
   Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'linux' })
   const handler = fixture.handlers.get('ui:setAgentAttentionCount')!
-  expect(await handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, 2)).toBe(false)
+  expect(await handler({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender } as unknown as IpcMainInvokeEvent, 2)).toBe(false)
   await mountApp()
   expect(badgeRequests()).toEqual([[0], [2]])
   expect(fixture.dock.setBadge).not.toHaveBeenCalled()
@@ -260,12 +261,12 @@ it('skips a platform without Dock explicitly and keeps its native receiver untou
 
 it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '2'])('rejects malformed count %j before a native side effect', async count => {
   const handler = fixture.handlers.get('ui:setAgentAttentionCount')!
-  expect(() => handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, count)).toThrow('nonnegative safe integer')
+  expect(() => handler({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender } as unknown as IpcMainInvokeEvent, count)).toThrow('nonnegative safe integer')
   expect(fixture.dock.setBadge).not.toHaveBeenCalled()
 })
 
 it('rejects another sender before validating its number or reaching the native Dock', () => {
   const handler = fixture.handlers.get('ui:setAgentAttentionCount')!
-  expect(() => handler({ sender: { ...fixture.sender, id: 2 } } as unknown as IpcMainInvokeEvent, 2)).toThrow('Untrusted Dock badge sender')
+  expect(() => handler({ senderFrame: Reflect.get({ ...fixture.sender, id: 2 } as object, 'mainFrame'), sender: { ...fixture.sender, id: 2 } } as unknown as IpcMainInvokeEvent, 2)).toThrow("Untrusted application")
   expect(fixture.dock.setBadge).not.toHaveBeenCalled()
 })

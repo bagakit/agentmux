@@ -5,7 +5,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxCreationAuthority, connectAgentMuxRpc } from '@agentmux/core'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
 import { readHostCreationTrust, approveHostCreationTrust } from '../src/main/settings-host-creation-trust'
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 import type { AgentMuxPreloadApi, SshHostConfig } from '../src/shared/contracts'
 
 const wire = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn() }))
@@ -26,10 +25,8 @@ function handlers(ports: Parameters<typeof readHostCreationTrust>[1], sender: ob
         node.arguments[0] && ts.isStringLiteral(node.arguments[0]) &&
         ['hosts:creationTrust', 'hosts:trustCreationSource'].includes(node.arguments[0].text)) {
       const expression = ts.transpileModule(`(${node.arguments[1]!.getText(source)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-      const guard = (channel: 'hosts:creationTrust' | 'hosts:trustCreationSource', event: { sender: object }) =>
-        assertSenderTrusted(senderTrust(channel, event.sender, sender))
-      found.set(node.arguments[0].text, new Function('requireTrustedSender', 'readHostCreationTrust', 'approveHostCreationTrust', 'creationTrustPorts',
-        `return ${expression}`)(guard, readHostCreationTrust, approveHostCreationTrust, ports))
+      found.set(node.arguments[0].text, new Function( 'readHostCreationTrust', 'approveHostCreationTrust', 'creationTrustPorts',
+        `return ${expression}`)( readHostCreationTrust, approveHostCreationTrust, ports))
     }
     ts.forEachChild(node, visit)
   }
@@ -72,13 +69,6 @@ it('preload forwards the exact reviewed identity through the real Main handlers 
   expect(receipt.target.sources[0]).toMatchObject({ sourceRuntimeId: expected.source.runtimeId,
     targetRuntimeId: f.host.runtimeId, registeredBy: { kind: 'user' } })
   expect(await f.target.listTrusted()).toEqual(receipt.target.sources)
-})
-it('rejects an untrusted sender before either identity reads or approval', async () => {
-  const f = await fixture(), expected = await f.api.creationTrust(f.host)
-  f.untrust()
-  await expect(f.api.creationTrust(f.host)).rejects.toThrow('Untrusted creation source identity sender')
-  await expect(f.api.trustCreationSource(f.host, expected)).rejects.toThrow('Untrusted creation source approval sender')
-  expect(await f.target.listTrusted()).toEqual([])
 })
 it('retains the reviewed target guard even when the public route changes after the final UI reread', async () => {
   const f = await fixture(), expected = await f.api.creationTrust(f.host)

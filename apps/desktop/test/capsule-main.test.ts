@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -93,7 +94,7 @@ async function fixture() {
   const submit = vi.spyOn(runtime, 'submitPrompt')
   const app = Object.assign(new EventEmitter(), { id: 810, mainFrame: { framesInSubtree: [] }, isDestroyed: () => false, send: vi.fn() })
   const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'workspace', hostId: 'local', name: 'Original project', path: directory, kind: 'folder' as const }] }
-  const disposeMain = await registerIpc({ window: { webContents: app, setBackgroundColor() {}, isDestroyed: () => false } as unknown as BrowserWindow,
+  const disposeMain = await registerIpc({ appDocumentSources: testAppDocumentSources(app), window: { webContents: app, setBackgroundColor() {}, isDestroyed: () => false } as unknown as BrowserWindow,
     initialConfig: config, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,
     runtime, scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {} } as never,
     workbenchWindows: { setNativeOwner: () => () => {} } as never, workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
@@ -115,7 +116,7 @@ async function fixture() {
   const content = join(directory, 'content'); await mkdir(content); await writeFile(join(content, 'index.html'), '<!doctype html><title>Question</title>Original page')
   const page = await rpc.call('capsule.create', { operationId: 'original-page', sourcePath: content, mode: 'injected', theme: 'follow', target: { hostId: 'local', agentSessionId: 'recipient' } })
   const pageSender = { mainFrame: {}, getURL: () => page.endpoint.status === 'available' ? page.endpoint.url : '', isDestroyed: () => false, send: vi.fn() }
-  bridge.nativeDocument = { sender: pageSender, frame: pageSender.mainFrame, record: page.record, browserId: 'original-browser', navigationId: 'original-document',
+  bridge.nativeDocument = {  sender: pageSender, frame: pageSender.mainFrame, record: page.record, browserId: 'original-browser', navigationId: 'original-document',
     ...(page.endpoint.status === 'available' ? { instanceId: page.endpoint.instanceId } : {}) }
   const invoke = async (channel: string, args: unknown[], sender = app as unknown, frame = (sender as typeof app).mainFrame) => {
     const handler = bridge.handlers.get(channel); expect(handler, 'Actual registered handler: ' + channel).toBeTypeOf('function')
@@ -145,7 +146,7 @@ it('does not turn a page sender, App subframe, local RPC user or forged envelope
   const h = await fixture()
   expect(await h.invoke('capsule:document', ['capabilities', {}], h.pageSender)).toMatchObject({ humanReply: false, interaction: true })
   await expect(h.invoke('capsules:reply', [h.params], h.pageSender)).rejects.toThrow()
-  await expect(h.invoke('capsules:reply', [h.params], h.app, {})).rejects.toThrow('main frame')
+  await expect(Promise.resolve().then(() => h.invoke('capsules:reply', [h.params], h.app, {}))).rejects.toThrow("Untrusted application")
   await expect(h.invoke('capsule:document', ['reply', h.params], h.pageSender)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(h.invoke('capsule:document', ['request', { question: 'Fake', operationId: 'fake', authorHuman: true }], h.pageSender)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(h.desktopRpc.call('capsule.input', { phase: 'submit', prepared: prepared(h) }, { credentials: h.credentials })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })

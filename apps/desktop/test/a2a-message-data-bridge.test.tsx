@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import './helpers/mailbox-note-execution-fence'
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { EventEmitter } from 'node:events'
@@ -70,12 +71,12 @@ it('the visible bounded hook reaches the original SDK through production Rendere
   const window = { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow
   let dispose: (() => Promise<void>) | undefined, unmount: (() => void) | undefined, container: HTMLDivElement | undefined
   try {
-    dispose = await registerIpc({ initialConfig: config, window, runtime: controller, applicationAccess,
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(window.webContents), initialConfig: config, window, runtime: controller, applicationAccess,
       workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => window, presentationWindow: () => window } as never,
       configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as never,
       progressLoops: { subscribe: () => () => {} } as never, scratchTopics: { setNameAudit: vi.fn() } as never,
       workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as never })
-    bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => bridge.handlers.get(channel)!({ sender } as unknown as IpcMainInvokeEvent, ...args))
+    bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => bridge.handlers.get(channel)!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args))
     const { api } = await import('../src/renderer/src/lib/api'), { useSessionMessages } = await import('../src/renderer/src/lib/use-session-messages')
     const reference: SessionHistoryReference = { hostId: 'original-host', agentSessionId: 'reader' }
     expect((await api.sessions.listMessages(reference, { direction: 'incoming', limit: 1 })).messages.map(item => item.envelope.messageId)).toEqual(['incoming'])
@@ -83,7 +84,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     await expect(api.sessions.readMessage(reference, 'incoming')).resolves.toMatchObject({ hostId: reference.hostId, message: { envelope: { messageId: 'incoming', body } } })
     await expect(api.sessions.readMessage({ ...reference, agentSessionId: 'stranger' }, 'incoming')).rejects.toMatchObject({ code: 'MESSAGE_PARTICIPANT_MISMATCH' })
     await expect(api.sessions.listMessages({ ...reference, hostId: 'replacement-host' }, { direction: 'incoming' })).rejects.toThrow('not configured')
-    await expect(bridge.handlers.get('sessions:message')!({ sender: {} }, reference, 'incoming')).rejects.toThrow('Untrusted')
+    await expect(Promise.resolve().then(() => bridge.handlers.get('sessions:message')!({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} }, reference, 'incoming'))).rejects.toThrow("Untrusted application")
     // Both relation readers traverse the same Renderer → preload → trusted IPC → exact Host owner.
     // No current Run is supplied, even while Runtime connection is unavailable.
     const bodyRead = vi.spyOn(client, 'readMessage'), storeBefore = await store.loadMetadata()
@@ -118,7 +119,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
       ['sessions:messageEvents', { latest: true }, eventsRead], ['sessions:spawns', { direction: 'created' }, spawnsRead]
     ] as const) {
       const before = read.mock.calls.length
-      await expect(bridge.handlers.get(channel)!({ sender: {} }, reference, options)).rejects.toThrow('Untrusted')
+      await expect(Promise.resolve().then(() => bridge.handlers.get(channel)!({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} }, reference, options))).rejects.toThrow("Untrusted application")
       expect(read).toHaveBeenCalledTimes(before)
     }
     await expect(api.sessions.messageEvents({ ...reference, hostId: 'replacement-host' })).rejects.toThrow('not configured')
@@ -164,7 +165,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     expect(container!.querySelector('[data-a2a-original-message-id]')).toBeNull()
     expect(wrongHost).toHaveBeenCalledExactlyOnceWith(reference, 'incoming', 'same-original-platform-notice'); wrongHost.mockRestore()
     // Explicit UI notification crosses the registered trusted bridge into the actual Core journal.
-    const notificationOriginal = { messageId: 'manual-reference', operationId: 'manual-source-operation', createdAt: 3,
+    const notificationOriginal = {  messageId: 'manual-reference', operationId: 'manual-source-operation', createdAt: 3,
       sender: { kind: 'agent-session' as const, agentSessionId: 'sender' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'child-a' },
       senderSessionId: 'sender', senderRunId: 'original-sender-run', recipientSessionId: 'child-a', recipientRunId: 'original-child-a',
       threadId: 'original-thread', correlationId: 'original-correlation', replyTo: null, workspaceId: null, body }
@@ -173,7 +174,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     await store.compareAndSwap(retainedRecipient, { ...retainedRecipient, run: { runId: 'current-child-a' }, retiredRuns: [retainedRecipient.run] })
     const recipient = { hostId: 'original-host', agentSessionId: 'child-a' }, operationId = 'explicit-notify-operation'
     const notify = vi.spyOn(client, 'notifyMessages')
-    await expect(bridge.handlers.get('sessions:notifyMessage')!({ sender: {} }, recipient, 'manual-reference', operationId)).rejects.toThrow('Untrusted')
+    await expect(Promise.resolve().then(() => bridge.handlers.get('sessions:notifyMessage')!({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} }, recipient, 'manual-reference', operationId))).rejects.toThrow("Untrusted application")
     await expect(api.sessions.notifyMessage({ ...recipient, agentSessionId: 'stranger' }, 'manual-reference', operationId)).rejects.toMatchObject({ code: 'MESSAGE_PARTICIPANT_MISMATCH' })
     expect(notify).not.toHaveBeenCalled()
     const notificationAction = api.sessions.notifyMessage(recipient, 'manual-reference', operationId)
@@ -197,7 +198,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     expect(observed.notification?.key).toEqual(notified.notification.key)
     expect(inspect).toHaveBeenCalledWith({ operationId })
     await expect(api.sessions.inspectMessageNotification(recipient, 'another-original-mid', operationId)).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
-    await expect(bridge.handlers.get('sessions:inspectMessageNotification')!({ sender: {} }, recipient, 'manual-reference', operationId)).rejects.toThrow('Untrusted')
+    await expect(Promise.resolve().then(() => bridge.handlers.get('sessions:inspectMessageNotification')!({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} }, recipient, 'manual-reference', operationId))).rejects.toThrow("Untrusted application")
     await expect(api.sessions.inspectMessageNotification(recipient, 'manual-reference', 'not-yet-retained')).resolves.toEqual({ hostId: reference.hostId, notification: null, input: null, inputOrigin: null })
     expect(notify).toHaveBeenCalledTimes(1); expect(await queue.readJournal()).toEqual(beforeInspect)
 

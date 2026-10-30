@@ -84,7 +84,6 @@ describe('Browser Profile current user approval', () => {
 // Execute the actual registered handler without constructing unrelated Electron services.
 // The callback comes from the production AST; no hand-written mirror of its checks.
 function productionDeleteHandler(dependencies: {
-  requireTrustedSender: (channel: string, event: unknown) => void
   browsers: { usesProfile: (id: string) => boolean }
   browserProfiles: { deleteProfile: (id: string, approval: unknown) => Promise<void> }
 }): (event: unknown, id: string, approval: unknown) => Promise<void> {
@@ -104,35 +103,23 @@ function productionDeleteHandler(dependencies: {
   const compiled = ts.transpileModule(`const handler = ${callbacks[0]!.getText(parsed)}; return handler;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 }
   }).outputText
-  return new Function('requireTrustedSender', 'browsers', 'browserProfiles', compiled)(
-    dependencies.requireTrustedSender, dependencies.browsers, dependencies.browserProfiles
+  return new Function('browsers', 'browserProfiles', compiled)(
+    dependencies.browsers, dependencies.browserProfiles
   ) as ReturnType<typeof productionDeleteHandler>
 }
 
 describe('production Browser deletion IPC callback', () => {
-  it('rejects an untrusted sender before consulting or clearing Profiles', async () => {
-    const usesProfile = vi.fn(() => false)
-    const deleteProfile = vi.fn(async () => {})
-    const handler = productionDeleteHandler({
-      requireTrustedSender: () => { throw new Error('Untrusted Browser Profile sender') },
-      browsers: { usesProfile }, browserProfiles: { deleteProfile }
-    })
-    await expect(handler({}, profile.id, {})).rejects.toThrow('Untrusted Browser Profile sender')
-    expect(usesProfile).not.toHaveBeenCalled()
-    expect(deleteProfile).not.toHaveBeenCalled()
-  })
+
   it('rechecks current usage and forwards the exact target approval only when unused', async () => {
     const usesProfile = vi.fn(() => true)
     const deleteProfile = vi.fn(async () => {})
-    const requireTrustedSender = vi.fn()
     const approval = { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id }
-    const handler = productionDeleteHandler({ requireTrustedSender, browsers: { usesProfile }, browserProfiles: { deleteProfile } })
+    const handler = productionDeleteHandler({  browsers: { usesProfile }, browserProfiles: { deleteProfile } })
     await expect(handler({}, profile.id, approval)).rejects.toThrow('Browser Profile is still used by an open Browser')
     expect(usesProfile).toHaveBeenCalledWith(profile.id)
     expect(deleteProfile).not.toHaveBeenCalled()
     usesProfile.mockReturnValue(false)
     await handler({}, profile.id, approval)
-    expect(requireTrustedSender).toHaveBeenCalledWith('browser:deleteProfile', {})
     expect(deleteProfile).toHaveBeenCalledExactlyOnceWith(profile.id, approval)
   })
 })

@@ -16,7 +16,7 @@ async function setup() {
   fixture = await owningBridge()
   const { app } = await import('electron')
   vi.spyOn(app, 'getAppPath').mockReturnValue(fileURLToPath(new URL('../', import.meta.url)))
-  const sender = Object.assign(fixture.sender, { mainFrame: {} })
+  const sender = fixture.sender
   const execute = vi.spyOn(ToolkitOwner.prototype, 'execute')
   const subscribe = vi.spyOn(ToolkitOwner.prototype, 'subscribe')
   return { sender, execute, subscribe }
@@ -48,7 +48,7 @@ it.each([
     { sender },
     { sender: undefined, senderFrame: undefined }
   ]) {
-    await expect(Promise.resolve().then(() => handler(event, ...values))).rejects.toThrow('original Workbench')
+    await expect(Promise.resolve().then(() => handler(event, ...values))).rejects.toThrow('Untrusted application')
   }
   expect(execute).not.toHaveBeenCalled()
   expect(subscribe).not.toHaveBeenCalled()
@@ -57,7 +57,7 @@ it.each([
 it('refuses an unavailable main frame even when both frame handles are absent', async () => {
   const { sender, execute, subscribe } = await setup()
   Reflect.set(sender, 'mainFrame', undefined)
-  await expect(Promise.resolve().then(() => bridge.handlers.get('toolkit:list')!({ sender }))).rejects.toThrow('original Workbench')
+  await expect(Promise.resolve().then(() => bridge.handlers.get('toolkit:list')!({ sender }))).rejects.toThrow('Untrusted application')
   expect(execute).not.toHaveBeenCalled()
   expect(subscribe).not.toHaveBeenCalled()
 })

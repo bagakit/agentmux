@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { EventEmitter } from 'node:events'
@@ -120,7 +121,7 @@ it('delivers original Host metadata through Main, preload and the mounted reader
   vi.spyOn(runtime, 'connectionHostingTarget').mockImplementation(async (hostId = 'local') => { expect(hostId).toBe(hostingTarget.hostId); return hostingTarget })
   vi.spyOn(runtime, 'callConnectionHost').mockImplementation((target, method, params) => { expect(target).toEqual(hostingTarget); return rpc.call(method, params) })
   vi.spyOn(runtime, 'watchConnectionMetadata').mockImplementation((target, handlers) => { expect(target).toEqual(hostingTarget); return rpc.subscribe('connection.metadata.watch', {}, handlers) })
-  const dispose = await registerIpc({ initialConfig: config,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => windowDestroyed, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: typeof config) => value, save: async (value: typeof config) => { config = value; return value } } as never,

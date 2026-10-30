@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { resolve } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -59,7 +60,7 @@ async function owner() {
     command: 'current-private-cli', args: ['--model', 'current-model'], env: { CURRENT_POSTURE: 'configured' }, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 77, isDestroyed: () => false, send: vi.fn() })
-  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime: controller,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime: controller,
     workbenchWindows: { setNativeOwner: () => () => {} } as never,
     progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config,
       validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as unknown as ConfigStore,
@@ -68,7 +69,7 @@ async function owner() {
   cleanups.push(dispose)
   preload.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = preload.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    return structuredClone(await handler!({ sender } as unknown as IpcMainInvokeEvent, ...args))
+    return structuredClone(await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args))
   })
   await preload.api!.notesStorage.inspect()
   await messageObservation

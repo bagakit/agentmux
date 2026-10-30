@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
@@ -63,14 +64,14 @@ async function registered() {
     async () => { throw new Error('Host diagnostic cannot deliver progress input') }, undefined,
     async () => { throw new Error('Host diagnostic cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   const execute = ipc.execute!
   const native = ipc.handlers.get('hosts:check')!
   expect(execute).toBeTypeOf('function'); expect(native).toBeTypeOf('function')
-  return { config, runtime, prepare, commit, attach, sender, dispose, execute,
-    native: (input: unknown) => native({ sender } as unknown as IpcMainInvokeEvent, input),
+  return {  config, runtime, prepare, commit, attach, sender, dispose, execute,
+    native: (input: unknown) => native({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, input),
     bytes: () => readFile(store.filePath, 'utf8') }
 }
 
@@ -101,7 +102,7 @@ describe('Host diagnostics use the registered Main owner', () => {
       // The Main configuration owner can publish another value without waiting for a temporary Test.
       const set = ipc.handlers.get('config:save')!; expect(set).toBeTypeOf('function')
       const changed: AppConfig = { ...f.config, hosts: [f.config.hosts[0]!, { ...remote, hostname: 'later.invalid' }] }
-      await set({ sender: f.sender } as unknown as IpcMainInvokeEvent, changed, f.config)
+      await set({ senderFrame: Reflect.get(f.sender as object, 'mainFrame'), sender: f.sender } as unknown as IpcMainInvokeEvent, changed, f.config)
       resolve({ detail: 'Runtime original · protocol 1' })
       expect(await pending).toEqual({ operation: 'settings.hosts.test', input: remote, outcome: 'ready', detail: 'Runtime original · protocol 1' })
       expect(await f.execute({ ...envelope, operation: 'settings.hosts.list' })).toEqual({ operation: 'settings.hosts.list', hosts: changed.hosts })

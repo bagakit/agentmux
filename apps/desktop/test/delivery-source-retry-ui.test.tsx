@@ -28,7 +28,7 @@ async function consumer(mode:'message'|'upload'|'unknown'='message'){
  vi.spyOn(hosted,'connect').mockRejectedValue(Error('Only startup observation is controlled'))
  const controller=new RuntimeController(f.store,async()=>hosted);closes.push(()=>controller.dispose());controller.commit(await controller.prepare(composerConfig))
  const handlers=new Map<string,(...args:any[])=>Promise<unknown>>(),trusted=vi.fn()
- registerConnectorIpc({handleWithEvent:(name,handler)=>handlers.set(name,handler),assertTrusted:trusted,runtime:controller,metadata:{publish(){},observation(){}}})
+ registerConnectorIpc({handleWithEvent:(name,handler)=>handlers.set(name,handler),runtime:controller,metadata:{publish(){},observation(){}}})
  const calls:Array<{method:string;input:any;target:any}>=[];let drop=false,hold:Promise<void>|undefined,release=()=>{}
  closes.push(()=>release())
  const bridge=vi.spyOn(api.connections,'call').mockImplementation(async(method,input,target)=>{calls.push({method,input:structuredClone(input),target:structuredClone(target)});const result=await handlers.get('connections:call')!({},method,input,target);if(method==='connection.delivery.retry'){if(drop){drop=false;throw Error('Original Host acceptance reply lost')}await hold}return unwrapSessionInputOperationResult(structuredClone(result)) as any})
@@ -42,7 +42,7 @@ async function consumer(mode:'message'|'upload'|'unknown'='message'){
   await wait(()=>expect(dom.container.querySelector('[data-selected-delivery]')?.getAttribute('data-selected-delivery')).toBe(operationId))
  }
  const record=()=>f.rpc.call('connection.delivery.inspect',{operationId}).then(r=>r.delivery!)
- const unchanged=()=>{expect(starts).not.toHaveBeenCalled();expect(f.inner.kernel.input).not.toHaveBeenCalled();expect(f.inner.kernel.stop).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep original source draft');expect(trusted).toHaveBeenCalled()}
+ const unchanged=()=>{expect(starts).not.toHaveBeenCalled();expect(f.inner.kernel.input).not.toHaveBeenCalled();expect(f.inner.kernel.stop).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep original source draft');}
  const facts=()=>{if(process.env.DELIVERY_RETRY_UI_FACTS)appendFileSync(process.env.DELIVERY_RETRY_UI_FACTS,JSON.stringify({case:expect.getState().currentTestName,operationId,hostingTarget,calls,imageWrites:imageWrites(f).length,uploads:f.remote.uploads.length,starts:starts.mock.calls.length,stops:f.inner.kernel.stop.mock.calls.length,intents:Object.values(useAppStore.getState().connectorRoomIntents)})+'\n')}
  return{...f,operationId,hostingTarget,calls,bridge,mount,select,record,unchanged,facts,drop:()=>{drop=true},hold(){hold=new Promise<void>(resolve=>{release=resolve})},release(){hold=undefined;release()}}
 }

@@ -90,7 +90,7 @@ async function fixture() {
     handleWithEvent: (name, handler) => {
       handlers.set(name, handler)
     },
-    assertTrusted: vi.fn(),
+
     metadata: { publish() {}, observation() {} },
     runtime: {
       connectionHostingTarget: async () => hostingTarget,

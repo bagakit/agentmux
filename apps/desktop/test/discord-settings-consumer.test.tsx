@@ -37,7 +37,7 @@ async function fixture() {
   const server = new AgentMuxControlServer({ socketPath: join(original.root, 'discord-ui.sock'), connections: services.connections, coreClients: original.coreClients })
   await server.start(); cleanup.push(() => server.stop())
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: () => {}, socketPath: server.path, secrets: services.secrets })
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: server.path, secrets: services.secrets })
   const calls: Array<{ method: string; params: unknown }> = []
   vi.spyOn(api.connections, 'call').mockImplementation(async (method, params) => { calls.push({ method, params: structuredClone(params) }); return unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, params)) })
   const store = vi.spyOn(api.connections, 'storeCredential').mockImplementation(input => handlers.get('connections:storeCredential')!({}, input))

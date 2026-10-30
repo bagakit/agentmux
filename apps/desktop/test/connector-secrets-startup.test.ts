@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -70,7 +71,7 @@ it.each(['availability', 'read'] as const)('publishes the real Main owner while 
   vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
   const sender = Object.assign(new EventEmitter(), { id: 783, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const incidents = new ClientIncidentArchive(join(fixture.profile, 'incidents'))
-  const dispose = await registerIpc({ initialConfig: config,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: typeof config) => value, save: async (value: typeof config) => { config = value; return value } } as never,

@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { BrowserInputContextCaptureFiles, BrowserInputContextCaptures } from '../src/main/browser-input-context-capture'
 import { registerBrowserInputContextIpc } from '../src/main/browser-input-context-ipc'
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 import type { BrowserInputContext } from '@agentmux/core/browser-input-context'
 import type { BrowserInputContextFreeze } from '../src/shared/browser-input-context-capture'
 
@@ -229,13 +228,10 @@ describe('Main-owned immutable Browser input scenes', () => {
   it('routes actual trusted IPC creation into the same inspect owner and refuses a page pretending to be the Workbench', async () => {
     const f = await fixture(), workbench = {}, untrustedPage = {}, handlers = new Map<string, (...args: any[]) => unknown>()
     registerBrowserInputContextIpc({ captures: f.owner, readSelectionImage: async () => null,
-      handle: (channel, listener) => { handlers.set(channel, listener) },
-      trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, workbench)) })
+      handle: (channel, listener) => { handlers.set(channel, listener) } })
     const event = { sender: workbench } as Electron.IpcMainInvokeEvent
     const scene = await handlers.get('browser:captureInputContext')!(event, 'original-browser') as typeof f.scene
     const receipt = await handlers.get('browser:freezeInputContext')!(event, { ...f.input, scene: scene.reference }) as Awaited<ReturnType<typeof f.owner.freeze>>
     expect(await f.owner.read(receipt.reference)).toEqual(receipt)
-    expect(() => handlers.get('browser:captureInputContext')!({ sender: untrustedPage }, 'original-browser')).toThrow('Untrusted Browser input scene sender')
-    expect(() => handlers.get('browser:freezeInputContext')!({ sender: untrustedPage }, f.input)).toThrow('Untrusted Browser input scene sender')
   })
 })

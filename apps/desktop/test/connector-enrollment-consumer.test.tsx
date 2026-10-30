@@ -55,7 +55,7 @@ beforeEach(async () => {
   }
   await openOwner(); clean.push(() => services.close()); clean.push(() => server.stop())
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: () => {}, socketPath: server.path,
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: server.path,
     secrets: { store: input => services.secrets.store(input), inspect: operationId => services.secrets.inspect(operationId) } })
   vi.spyOn(api.connections, 'call').mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, input))

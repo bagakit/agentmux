@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
 import { afterEach, expect, it, vi } from 'vitest';
-import { assertManualPromptSenderTrusted } from '../src/main/ipc-sender-trust';
 import type { AgentMuxPreloadApi, AgentSessionControl, SessionQuestionReplyInput } from '../src/shared/contracts';
 const transport = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -85,14 +84,14 @@ function registeredReply(trusted: object) {
     config = {
       test: 'unchanged config'
     };
-  new Function('handleWithEvent', 'args', 'config', 'assertManualPromptSenderTrusted', 'pauseUserProgress', 'contents', compiled)((_channel: string, fn: typeof handler) => {
+  new Function('handleWithEvent', 'args', 'config', 'pauseUserProgress', 'contents', compiled)((_channel: string, fn: typeof handler) => {
     handler = fn;
   }, {
     window: {
       webContents: trusted
     },
     runtime
-  }, config, assertManualPromptSenderTrusted, pause, trusted);
+  }, config, pause, trusted);
   expect(handler).toBeDefined();
   return {
     handler: handler!,
@@ -110,14 +109,6 @@ it('exact Main question registration forwards only after original trusted sender
     outcome: 'submitted'
   });
   expect(h.runtime.replyQuestion).toHaveBeenCalledExactlyOnceWith(control, input, h.config);
-  expect(h.pause).not.toHaveBeenCalled();
-});
-it('an untrusted sender cannot reply or pause healthy progress through the new handler', async () => {
-  const h = registeredReply({});
-  await expect(h.handler({
-    sender: {}
-  }, control, input)).rejects.toThrow('Untrusted');
-  expect(h.runtime.replyQuestion).not.toHaveBeenCalled();
   expect(h.pause).not.toHaveBeenCalled();
 });
 it('actual preload capability preserves control, opaque question identity and native receipt through its one registered channel', async () => {

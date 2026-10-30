@@ -13,8 +13,6 @@ const variants = {
   'queue-unknown': { file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
     from: "enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual')",
     to: 'enqueueAgentSteer(sessionId, value, feedback.report)' },
-  'sender-trust-skipped': { file: 'apps/desktop/src/main/ipc.ts',
-    from: 'assertManualPromptSenderTrusted(event.sender, args.window.webContents)', to: 'void event.sender' },
   'human-speaker-unknown': { file: 'packages/client-ui/src/lib/conversation-speaker.ts',
     from: "if (message.author.kind === 'human') {\n    return { role: 'human', id: HUMAN_SPEAKER_ID }",
     to: "if (message.author.kind === 'human') {\n    return { role: 'unknown', id: UNKNOWN_SPEAKER_ID }" },

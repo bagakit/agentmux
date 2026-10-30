@@ -53,7 +53,7 @@ async function hosting() {
     }, watchConnectionMetadata: async (owner, handlers) => (JSON.stringify(owner) === JSON.stringify(f.hostingTarget) ? a : b).subscribe('connection.metadata.watch', {}, handlers)
   }
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: vi.fn(), runtime, metadata: { publish() {}, observation() {} } })
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  runtime, metadata: { publish() {}, observation() {} } })
   const forward = async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], owner?: ConnectionHostingTarget) => unwrapSessionInputOperationResult(structuredClone(await handlers.get('connections:call')!({}, method, params, owner)) as SessionInputOperationResult<ConnectionResultMap[M]>)
   vi.mocked(api.connections.hostingTarget).mockImplementation(id => runtime.connectionHostingTarget(id))
   vi.mocked(api.connections.call).mockImplementation(forward)

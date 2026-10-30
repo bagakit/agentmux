@@ -4,7 +4,7 @@ const [html,privateRoot,phase,evidence,ownerFile,preload]=process.argv.slice(2)
 app.setPath('userData',path.join(privateRoot,'profile'));app.setPath('sessionData',path.join(privateRoot,'session'))
 const result={passed:false,pid:process.pid,phase,frames:[],calls:[],userRunTouched:false},wait=ms=>new Promise(r=>setTimeout(r,ms));let win
 app.whenReady().then(async()=>{try{
-  const {ScratchTopics,observeClientRpcSnapshot,SCRATCH_WORKSPACE_ID,AgentMuxSpatialStateStore,spatialCatalog,WorkspaceFiles,FileReadOwner,senderTrust,assertSenderTrusted}=await import(ownerFile),owner=new ScratchTopics()
+  const {ScratchTopics,observeClientRpcSnapshot,SCRATCH_WORKSPACE_ID,AgentMuxSpatialStateStore,spatialCatalog,WorkspaceFiles,FileReadOwner,assertAppDocumentSender}=await import(ownerFile),owner=new ScratchTopics()
   const scratch={id:SCRATCH_WORKSPACE_ID,hostId:'local',path:path.join(privateRoot,'home/.agentmux/scratch'),name:'Topics',kind:'folder'}
   await fs.mkdir(scratch.path,{recursive:true});const healthy=await owner.ensureMote(scratch,'launcher:leader')
   await fs.mkdir(path.join(privateRoot,'home/.agentmux/motes','0123456789abcdef'),{recursive:true})
@@ -12,7 +12,7 @@ app.whenReady().then(async()=>{try{
   ipcMain.handle('config:get',()=>config)
   const originalHandlers=require(path.join(privateRoot,'actual-scratch-handlers.cjs'))
   const spatialState=new AgentMuxSpatialStateStore(path.join(privateRoot,'spatial-state.json')),files=new WorkspaceFiles(()=>({id:'local',kind:'local'}))
-  originalHandlers({handle:(channel,listener)=>ipcMain.handle(channel,(_event,...values)=>listener(...values)),handleWithEvent:(channel,listener)=>ipcMain.handle(channel,listener),args:{scratchTopics:owner},config,workspace:(current,id)=>{const found=current.workspaces.find(w=>w.id===id);if(!found)throw Error('Private original workspace unavailable');return found},spatialState,files,FileReadOwner,spatialCatalog,requireTrustedSender:(channel,event)=>assertSenderTrusted(senderTrust(channel,event.sender,win.webContents))})
+  originalHandlers({handle:(channel,listener)=>ipcMain.handle(channel,(event,...values)=>{assertAppDocumentSender(event,win.webContents,{current:{mode:'prod',filePath:html},loading:null});return listener(...values)}),handleWithEvent:(channel,listener)=>ipcMain.handle(channel,(event,...values)=>{assertAppDocumentSender(event,win.webContents,{current:{mode:'prod',filePath:html},loading:null});return listener(event,...values)}),args:{scratchTopics:owner},config,workspace:(current,id)=>{const found=current.workspaces.find(w=>w.id===id);if(!found)throw Error('Private original workspace unavailable');return found},spatialState,files,FileReadOwner,spatialCatalog})
   for(const name of ['ui:requestStorageFlush','window:nativeOverlayRegions'])ipcMain.handle(name,()=>{})
   result.publicObservation=await observeClientRpcSnapshot(config,owner,{include:['motes']});assert.ok(result.publicObservation.motes.some(t=>t.id===healthy.id));assert.ok(result.publicObservation.unavailable.length)
   win=new BrowserWindow({width:1040,height:780,show:false,webPreferences:{preload,contextIsolation:true,sandbox:false,backgroundThrottling:false}})

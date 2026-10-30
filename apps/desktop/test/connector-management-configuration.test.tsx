@@ -35,7 +35,7 @@ beforeEach(async () => {
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
   trusted = vi.fn(); calls = []; native = []; beforeCall = undefined; afterCall = undefined
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: server.path,
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: server.path,
     secrets: { store: input => services.secrets.store(input), inspect: operationId => services.secrets.inspect(operationId) } })
   forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     const call: Call = { method, input: structuredClone(input) }; calls.push(call)
@@ -241,7 +241,7 @@ it('original mounted Settings reads the exact bot, explicitly enables once and c
   await click('[data-management-console]'); expect(api.ui.openExternal).toHaveBeenCalledWith('https://open.feishu.cn/app')
   await leavePrivate(); expect(dom.container.querySelector('[data-connection-check]')).not.toBeNull()
   expectNoSetupWrites(); await unchanged(saved); expect(await forward('connection.service.get', {})).toEqual(off.service)
-  expect(trusted.mock.calls.map(value => value[0])).toContain('connections:call')
+
   assertPrivateFree(await forward('connection.setup.ls', { connectionId: saved.connection.config.connectionId }))
   assertPrivateFree({ local: { ...localStorage }, session: { ...sessionStorage } })
 }, 30_000)

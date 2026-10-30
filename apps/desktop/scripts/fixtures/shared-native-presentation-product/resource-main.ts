@@ -55,7 +55,7 @@ app.whenReady().then(async () => {
     controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     controller.prepare = async () => ({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     const config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: [] }
-    dispose = await registerIpc({ window, runtime: controller, configStore: { get: async () => config } as never,
+    dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window, runtime: controller, configStore: { get: async () => config } as never,
       progressLoops: { subscribe: () => () => {} } as never, scratchTopics: {} as never,
       workspaceFiles: { dispose: async () => {} } as never })
     await window.loadFile(html); window.show(); window.focus()

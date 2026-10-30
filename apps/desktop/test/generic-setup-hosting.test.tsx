@@ -61,7 +61,7 @@ async function fixture() {
     if (method === heldMethod && input.operationId === heldId && selected === a) { started = true; await pending }
     return result
   }, watchConnectionMetadata: async () => { throw Error('This fixture does not open metadata readers') } }
-  const ipc = registerConnectorIpc({ runtime, handleWithEvent: (name, handler) => handlers.set(name, handler), assertTrusted: (_channel, event) => expect(event.sender).toBe(sender), metadata: { publish() {}, observation() {} } }); cleanup.push(ipc.dispose)
+  const ipc = registerConnectorIpc({ runtime, handleWithEvent: (name, handler) => handlers.set(name, handler),  metadata: { publish() {}, observation() {} } }); cleanup.push(ipc.dispose)
   vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, target) => unwrapSessionInputOperationResult(await handlers.get('connections:call')!({ sender }, method, input, target)))
   return { a, b, calls, hold(method: string, id: string) { heldMethod = method; heldId = id; pending = new Promise(resolve => { release = resolve }) }, started: () => started, release() { heldMethod = ''; release?.() } }
 }

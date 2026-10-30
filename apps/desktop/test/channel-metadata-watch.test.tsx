@@ -90,7 +90,7 @@ async function main(socket: string, connect: typeof core.connectAgentMuxRpc = co
     callConnectionHost: (original, method, params) => { expect(original).toEqual(target); return rpc.call(method, params, { runtimeFence }) },
     watchConnectionMetadata: (original, handlers) => { expect(original).toEqual(target); return rpc.subscribe('connection.metadata.watch', {}, { ...handlers, runtimeFence }) }
   }
-  const ipc = registerConnectorIpc({ runtime, assertTrusted: () => {}, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
+  const ipc = registerConnectorIpc({ runtime,  handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
     metadata: { publish: (watchId, change) => bridge.events.emit(CONNECTION_METADATA_CHANGED_CHANNEL, {}, { watchId, change }),
       observation: (watchId, state) => { states.push(state); bridge.events.emit(CONNECTION_METADATA_OBSERVATION_CHANNEL, {}, { watchId, state }) } } })
   const release = () => ipc.dispose()

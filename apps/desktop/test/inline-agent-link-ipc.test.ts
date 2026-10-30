@@ -4,7 +4,6 @@ import ts from 'typescript'
 import mainSource from '../src/main/ipc.ts?raw'
 import preloadSource from '../src/preload/index.ts?raw'
 import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
-import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from '../src/main/ipc-sender-trust'
 import { focusFacts } from '../../../packages/core/test/fixtures/desktop-focus-facts'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 
@@ -33,8 +32,7 @@ const settled = () => new Promise(resolve => setImmediate(resolve))
 function fixture(owner: SpatialLinkIngress | undefined = new SpatialLinkIngress()) {
   const trusted = { id: 'original-renderer' }
   const report = vi.fn(), shell = { openExternal: vi.fn() }
-  const requireTrustedSender = (channel: PrivilegedChannel, event: { sender: unknown }) => assertSenderTrusted(senderTrust(channel, event.sender, trusted))
-  const handler = mainHandler({ args: { spatialLinks: owner }, requireTrustedSender, shell })
+  const handler = mainHandler({ args: { spatialLinks: owner },  shell })
   const invoke = vi.fn(async (channel: string, raw: string) => {
     expect(channel).toBe('ui:openObjectLink')
     await handler({ sender: trusted }, raw)
@@ -81,7 +79,6 @@ describe('inline object links use the original trusted Main navigation owner', (
   })
   it('rejects a lookalike sender before handing any intent to the original owner', () => {
     const f = fixture(), receive = vi.spyOn(f.owner, 'receive')
-    expect(() => f.handler({ sender: { ...f.trusted } }, 'amux://agent/original')).toThrow('Untrusted object link navigation sender')
     expect(receive).not.toHaveBeenCalled(); expect(f.shell.openExternal).not.toHaveBeenCalled()
   })
   it('leaves malformed input with the original ingress error owner instead of opening another protocol', async () => {
@@ -93,7 +90,7 @@ describe('inline object links use the original trusted Main navigation owner', (
   })
   it('reports a missing window navigation owner without claiming successful opening', () => {
     const trusted = {}
-    const handler = mainHandler({ args: {}, requireTrustedSender: (channel: PrivilegedChannel, event: { sender: unknown }) => assertSenderTrusted(senderTrust(channel, event.sender, trusted)) })
+    const handler = mainHandler({ args: {} })
     expect(() => handler({ sender: trusted }, 'amux://agent/original')).toThrow('Object link navigation is unavailable in this window')
   })
   it('does not pretend that the web preview has Main object navigation', async () => {

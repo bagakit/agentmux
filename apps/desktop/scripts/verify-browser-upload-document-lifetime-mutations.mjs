@@ -151,20 +151,6 @@ const blocks = [
         "answer.response >= 0"
       ]
     ]
-  },
-  {
-    "name": "cleanup-trusted-sender",
-    "path": "apps/desktop/src/main/ipc.ts",
-    "pattern": "actual local native confirmation",
-    "tests": [
-      "apps/desktop/test/browser-external-main-glue.test.ts"
-    ],
-    "edits": [
-      [
-        "requireTrustedSender('browser:discardRetainedUpload', event)",
-        "void event"
-      ]
-    ]
   }
 ]
 const selected = process.argv.find(value => value.startsWith('--blocks='))?.slice('--blocks='.length).split(',')

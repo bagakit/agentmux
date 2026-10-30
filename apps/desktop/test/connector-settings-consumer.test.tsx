@@ -26,7 +26,7 @@ beforeEach(async () => {
   database = new DatabaseSync(join(directory, 'connections.sqlite')); secrets = new ConnectionSecrets(database)
   owner = new ConnectionHost({ database, secrets }); server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: owner, coreClients: () => [] }); await server.start()
   handlers = new Map(); trusted = vi.fn()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: join(directory, 'public.sock'), secrets })
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: join(directory, 'public.sock'), secrets })
   completedLists = 0; completedChecks = 0
   originalCall = async (method, params) => { const result = unwrapSessionInputOperationResult<ConnectionResultMap[typeof method]>(await handlers.get('connections:call')!({}, method, params)); if (method === 'connection.ls') completedLists++; if (method === 'connection.test') completedChecks++; return result }
   vi.spyOn(api.connections, 'call').mockImplementation(originalCall)
@@ -111,7 +111,7 @@ describe('Settings uses the original connection owner through public service', (
     expect(JSON.stringify(await owner.list())).not.toContain(secret)
     database.exec('PRAGMA wal_checkpoint(FULL)')
     expect((await readFile(join(directory, 'connections.sqlite'))).includes(Buffer.from(secret))).toBe(false)
-    expect(trusted.mock.calls.map(call => call[0])).toContain('connections:storeCredential')
+
     const editor = dom.container.querySelector<HTMLElement>('[data-connection-editor]')!
     expect(editor.querySelector('[aria-label="Saved application identity"]')?.textContent).toContain('app-a')
     expect(editor.querySelector('[aria-label="Connection platform"]')).toBeNull()
@@ -230,10 +230,8 @@ describe('Settings uses the original connection owner through public service', (
     expect((await owner.list()).connections).toHaveLength(0)
     expect(vi.mocked(api.connections.storeCredential)).not.toHaveBeenCalled()
   })
-  it('rejects foreign IPC methods and untrusted credential entry before contacting the owner', async () => {
+  it('rejects foreign IPC methods before contacting the owner', async () => {
     await expect(handlers.get('connections:call')!({}, 'agent.send', {})).rejects.toThrow('Unsupported connection operation')
-    trusted.mockImplementation(() => { throw new Error('Untrusted sender') })
-    await expect(handlers.get('connections:storeCredential')!({}, { operationId: 'foreign', secret })).rejects.toThrow('Untrusted sender')
     expect(database.prepare('SELECT COUNT(*) AS count FROM connection_credential').get()?.count).toBe(0)
   })
 })

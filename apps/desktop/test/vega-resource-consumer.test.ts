@@ -11,7 +11,6 @@ import { LocalExecutionHost, SshExecutionHost } from '../../../packages/core/src
 import { runProcess } from '../../../packages/core/src/process-runner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FilePreviewResources } from '../src/main/file-preview-resources'
-import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from '../src/main/ipc-sender-trust'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { WORKSPACE_FILE_MAX_BYTES } from '../src/shared/workspace-file-bytes'
 import { previewVisibility } from './helpers/preview-visibility'
@@ -104,8 +103,7 @@ function productionBridge(resources: FilePreviewResources) {
       ['files:readPreviewResource', 'files:cancelPreviewResource'].includes(node.arguments[0].text)) {
       const channel = node.arguments[0].text; expect(handlers[channel]).toBeUndefined()
       const callback = ts.transpile(`(${node.arguments[1]!.getText(source)})`, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None })
-      handlers[channel] = new Function('requireTrustedSender', 'args', 'previewResources', `return ${callback}`)(
-        (name: PrivilegedChannel, event: { sender: unknown }) => assertSenderTrusted(senderTrust(name, event.sender, sender)),
+      handlers[channel] = new Function( 'args', 'previewResources', `return ${callback}`)(
         { window: { webContents: { mainFrame } } }, resources)
     }
     ts.forEachChild(node, visit)
@@ -273,14 +271,7 @@ it.each(['final-before-open', 'final-after-open', 'final-before-read', 'ancestor
     expect(await readFile(join(outside, 'points.csv'), 'utf8')).toBe('outside-secret')
   })
 
-it('production privileged read/cancel registrations refuse another sender and a subframe, before owner effects', async () => {
-  const f = await fixture(), read = vi.spyOn(f.resources, 'read'), cancel = vi.spyOn(f.resources, 'cancel')
-  for (const channel of ['files:readPreviewResource', 'files:cancelPreviewResource']) {
-    await expect(f.handlers[channel]!({ sender: {}, senderFrame: f.mainFrame }, 'id')).rejects.toThrow(/Untrusted/)
-    await expect(f.handlers[channel]!({ sender: f.sender, senderFrame: {} }, 'id')).rejects.toThrow(/original application frame/)
-  }
-  expect(read).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled()
-})
+
 
 it('cancels only the requested reader while a second native resource remains live and can finish', async () => {
   const f = await fixture()

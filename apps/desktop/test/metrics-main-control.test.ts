@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { rendererMemoryFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -133,7 +134,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   vi.spyOn(api.control, 'onRequest').mockImplementation(listener => {
     const control = createRendererControlApi({ onRequest: fn => { fixture.rendererRequest = fn; return () => { fixture.rendererRequest = undefined } },
       onCancellation: fn => { fixture.rendererCancel = fn; return () => { fixture.rendererCancel = undefined } },
-      respond: response => { for (const accept of fixture.ipc.listeners.get(CONTROL_RESPONSE_CHANNEL) ?? []) accept({ sender }, response) }
+      respond: response => { for (const accept of fixture.ipc.listeners.get(CONTROL_RESPONSE_CHANNEL) ?? []) accept({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender }, response) }
     })
     rendererRelease = control.onRequest(listener)
     return rendererRelease
@@ -163,7 +164,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
       if (channel === CONTROL_REQUEST_CHANNEL) {
         rendererReads++
         if (options.rendererFailure) {
-          for (const accept of fixture.ipc.listeners.get(CONTROL_RESPONSE_CHANNEL) ?? []) accept({ sender }, {
+          for (const accept of fixture.ipc.listeners.get(CONTROL_RESPONSE_CHANNEL) ?? []) accept({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender }, {
             requestId: (value as { requestId: string }).requestId, ok: false,
             error: { code: 'CONTROL_UNAVAILABLE', message: 'Registered Renderer reader failed' }
           })
@@ -176,7 +177,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   const disposeRenderer = await useAppStore.getState().initialize()
   useAppStore.setState({ config, agentComposerDrafts: { 'healthy-session': 'preserved input' } })
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
-  const dispose = await registerIpc({ initialConfig: await configStore.get(), window: { setBackgroundColor: vi.fn(), id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await configStore.get(), window: { setBackgroundColor: vi.fn(), id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     workbenchWindows: { setNativeOwner: () => () => {} } as never,
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
     scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {}, read: vi.fn(async () => { throw new Error('Unexpected file read in metrics fixture') }), listFiles: vi.fn(async () => { throw new Error('Unexpected file list in metrics fixture') }), write: vi.fn(async () => { throw new Error('Unexpected file write in metrics fixture') }) } as any })
@@ -191,7 +192,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   cleanup.push(() => rpc.dispose())
   events.get('local')!({ type: 'process-state', state: 'running', pid: 100, run: { runId: 'healthy-run', hostId: 'local' } })
   events.get('remote')!({ type: 'process-state', state: 'running', pid: 777, run: { runId: 'remote-run', hostId: 'remote' } })
-  return { directory, sampler, runtime, rpc, configBefore, configStore, resourceReads, diagnostics, readTable, sender,
+  return {  directory, sampler, runtime, rpc, configBefore, configStore, resourceReads, diagnostics, readTable, sender,
     stop, input, attach, resume, get rendererReads() { return rendererReads }, tick: () => { clock += 1000 }, dispose }
 }
 

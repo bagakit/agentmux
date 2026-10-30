@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -101,14 +102,14 @@ async function owner() {
   const sender = Object.assign(new EventEmitter(), { id: 77, isDestroyed: () => destroyed, send: vi.fn() })
   let wireSender = sender
   const unexpectedFileAccess = () => { throw new Error('Remote Agent launch must not access workspace files.') }
-  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { read: unexpectedFileAccess, listFiles: unexpectedFileAccess, write: unexpectedFileAccess, dispose: async () => {} } as unknown as WorkspaceFiles })
   cleanups.push(dispose)
   ipc.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = ipc.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    try { return structuredClone(await handler!({ sender: wireSender } as unknown as IpcMainInvokeEvent, ...structuredClone(args))) }
+    try { return structuredClone(await handler!({ senderFrame: Reflect.get(wireSender as object, 'mainFrame'), sender: wireSender } as unknown as IpcMainInvokeEvent, ...structuredClone(args))) }
     catch (error) {
       // Electron transports a rejected Error message, stripping its custom code/outcome/identity.
       // A fulfilled plain carrier must preserve those fields before preload reconstructs the Error.

@@ -1,4 +1,5 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { gapFacts } from '../../../packages/core/test/helpers/output-gap.js'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -37,7 +38,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     async invoke(key: string, ...values: unknown[]) {
       const handler = bridge.handlers.get(key)
       if (!handler) throw new Error(`Missing registered Main handler: ${key}`)
-      return await handler({ sender } as unknown as IpcMainInvokeEvent, ...values)
+      return await handler({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values)
     },
     on(key: string, listener: (...values: unknown[]) => void) {
       const listeners = bridge.listeners.get(key) ?? new Set(); listeners.add(listener); bridge.listeners.set(key, listeners)
@@ -182,7 +183,7 @@ beforeEach(async () => {
       if (channel === SESSION_EVENT_CHANNEL) wire.push(value)
       for (const listener of bridge.listeners.get(channel) ?? []) listener({}, value)
     } })
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     // Unrelated progress manager is an explicit empty API boundary; diagnostics still use real IPC.
     progressLoops: { subscribe: () => () => {}, start: async () => {}, list: () => [], pauseTarget: async () => {} } as never,
     configStore: { get: async () => config } as unknown as ConfigStore,

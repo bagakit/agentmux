@@ -1,7 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { IpcMainInvokeEvent } from 'electron'
 import { registerSearchIpc } from '../src/main/search-ipc'
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
@@ -19,10 +18,8 @@ it('reads original Provider text through public RPC and the actual Renderer brid
  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } }); cleanups.push(() => rpc.dispose())
  const handlers = new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>()
  const sender = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false }), event = { sender } as unknown as IpcMainInvokeEvent
- const ipc = registerSearchIpc({ handle: (channel, handler) => { handlers.set(channel, handler as (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) },
-  trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, sender)), query: (input, signal) => rpc.call('app.search', input, { signal }) })
+ const ipc = registerSearchIpc({ handle: (channel, handler) => { handlers.set(channel, handler as (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) }, query: (input, signal) => rpc.call('app.search', input, { signal }) })
  cleanups.push(async () => ipc.dispose())
- expect(() => handlers.get('search:query')!({ sender: {} } as IpcMainInvokeEvent, 'foreign', {})).toThrow('Untrusted original global search query sender')
  const transport = vi.fn<AgentMuxPreloadApi['search']['query']>(async (input, context) => {
   const token = crypto.randomUUID(), pending = handlers.get('search:query')!(event, token, input)
   const release = context?.onAbort?.(() => handlers.get('search:cancel')!(event, token))
@@ -60,8 +57,7 @@ it('releases Desktop search ownership while the original exact source discovery 
  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } }); cleanups.push(() => rpc.dispose())
  const handlers = new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>()
  const sender = Object.assign(new EventEmitter(), { id: 2, isDestroyed: () => false }), event = { sender } as unknown as IpcMainInvokeEvent
- const ipc = registerSearchIpc({ handle: (channel, handler) => { handlers.set(channel, handler as (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) },
-  trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, sender)), query: (input, signal) => rpc.call('app.search', input, { signal }) })
+ const ipc = registerSearchIpc({ handle: (channel, handler) => { handlers.set(channel, handler as (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) }, query: (input, signal) => rpc.call('app.search', input, { signal }) })
  cleanups.push(async () => ipc.dispose())
  const read = createRendererSearchRead(async (input, context) => {
   const token = crypto.randomUUID(), pending = handlers.get('search:query')!(event, token, input)

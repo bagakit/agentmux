@@ -12,7 +12,6 @@ const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const pane = 'apps/desktop/src/renderer/src/components/BrowserPane.tsx'
 const managerTest = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const paneTest = 'apps/desktop/test/browser-demonstration-wiring.test.tsx'
-const trustTest = 'apps/desktop/test/ipc-sender-trust.test.ts'
 const selection = 'apps/desktop/src/main/browser-selection-script.ts'
 const selectionTest = 'apps/desktop/test/browser-selection-script.test.ts'
 const assets = 'apps/desktop/src/main/browser-task-assets.ts'
@@ -44,13 +43,13 @@ const cases = [
   ['selection-inspection-token-reused', manager, 'const inspectionToken = randomUUID()', "const inspectionToken = 'd5868e9f-b372-4f2d-8c45-df0b46dd76e1'", managerTest],
   ['synthetic-task-actions-accepted', pane, "async function taskAction(event: MouseEvent<HTMLButtonElement>, action: () => Promise<unknown>): Promise<void> {\n    if (event.nativeEvent.isTrusted !== true) return", "async function taskAction(event: MouseEvent<HTMLButtonElement>, action: () => Promise<unknown>): Promise<void> {\n    if (false) return", paneTest],
   ['renderer-task-asset-disconnected', pane, 'asset={taskAsset}', 'asset={null}', paneTest],
-  ['untrusted-ipc-can-run-task', 'apps/desktop/src/main/ipc.ts', "    requireTrustedSender('browser:runTaskAsset', event)", '    void event', trustTest],
+
   ['selection-does-not-retain-actual-node', selection, 'if (retainTarget) state.selectedTarget = selected', 'if (false) state.selectedTarget = selected', selectionTest],
   ['selection-revision-proof-removed', selection, 'state.revision === ${revision} && state.selectedTarget instanceof Element', 'state.selectedTarget instanceof Element', selectionTest],
   ['selection-inspection-token-proof-removed', selection, 'state?.inspectionToken === ${JSON.stringify(inspectionToken)} && state.revision', 'state.revision', managerTest],
   ['selection-retained-node-not-released', selection, 'state.selectedTarget = null; if (settled)', 'if (settled)', selectionTest]
 ]
-const tests = [managerTest, paneTest, trustTest, selectionTest, assetsTest]
+const tests = [managerTest, paneTest, selectionTest, assetsTest]
 const inputs = [...new Set([manager, pane, selection, selectionTest, ...cases.map(([, file]) => file), ...tests,
   'apps/desktop/src/main/browser-demonstration-capture.ts', 'apps/desktop/src/main/browser-demonstration-recorder.ts',
   'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts'])]

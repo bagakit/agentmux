@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
 import {createHash} from 'node:crypto'
@@ -63,10 +64,10 @@ it('resource IPC/preload keeps the recorded target and trusted Executor on its o
  const sender=Object.assign(new EventEmitter(),{id:777,isDestroyed:()=>false,send:vi.fn()})
  let dispose:(()=>Promise<void>)|undefined
  try {
-  dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+  dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config,validate:(next:AppConfig)=>next,save:async(next:AppConfig)=>next} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
   const handler=preload.handlers.get('sessions:historyResource');expect(handler).toBeTypeOf('function')
-  preload.invoke.mockImplementation((channel:string,subject,request)=>{expect(channel).toBe('sessions:historyResource');return handler!({sender} as unknown as IpcMainInvokeEvent,subject,request)})
+  preload.invoke.mockImplementation((channel:string,subject,request)=>{expect(channel).toBe('sessions:historyResource');return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender} as unknown as IpcMainInvokeEvent,subject,request)})
   await expect(preload.api!.sessions.historyResource(control,resourceRequest)).resolves.toBe(resourceResponse)
   expect(client.sessionHistoryResource).toHaveBeenCalledExactlyOnceWith(control.agentSessionId,{...resourceRequest,commandOverride:_hygiene_fixturePath("synthetic/specific-codex"),args:['--config','model="specific"'],env:{CODEX_HOME:_hygiene_fixturePath("synthetic/specific-home")}})
   expect(client.connect).not.toHaveBeenCalled();expect(client.connectRuntime).not.toHaveBeenCalled();expect(client.writeAgent).not.toHaveBeenCalled()

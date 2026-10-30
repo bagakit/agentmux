@@ -25,7 +25,7 @@ const cases = resumed ? [
 ] : [
   ['renderer', null, 'candidate'], ['bridge', null, 'candidate'],
   ...['notify-original-mid-replaced', 'notify-action-id-reused', 'notify-refresh-replays', 'notify-recipient-mismatch'].map(name => ['renderer', name, 'mutation']),
-  ...['notifyHost', 'notifyMid', 'notifyTrust', 'notifyInspectMid'].map(name => ['bridge', name, 'mutation']),
+  ...['notifyHost', 'notifyMid', 'notifyInspectMid'].map(name => ['bridge', name, 'mutation']),
   ['renderer', null, 'restored'], ['bridge', null, 'restored']
 ]
 const sameFiles = async (files, scoped = false) => {

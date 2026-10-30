@@ -63,7 +63,7 @@ beforeEach(async () => {
   await openOwner()
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
   trusted = vi.fn()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: server.path,
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: server.path,
     secrets: { store: input => services.secrets.store(input), inspect: operationId => services.secrets.inspect(operationId) } })
   forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, input))
@@ -165,7 +165,7 @@ it('continues the original creation through current Host reads, explicit checks 
   await vi.waitFor(() => expect(stages()).toEqual({ authentication: 'ready', transport: 'ready', intake: 'ready', delivery: 'unknown' }))
   expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
   expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
-  expect(trusted.mock.calls.map(call => call[0])).toContain('connections:call')
+
   expect(calls.filter(call => call.method.startsWith('connection.room.') || call.method.startsWith('connection.binding.') || call.method.startsWith('connection.profile.'))).toEqual([])
   expect(api.connections.storeCredential).not.toHaveBeenCalled()
   expect(JSON.stringify(calls.filter(call => call.method === 'connection.enrollment.ls'))).not.toContain(privateCode); expect(JSON.stringify(calls)).not.toContain(credential)
@@ -184,7 +184,7 @@ it('continues an existing bot save in place and keeps accepted credentials separ
   expect(stages()).toEqual({ authentication: 'unknown', transport: 'unknown', intake: 'unknown', delivery: 'unknown' })
   expect(checks(saved.config.connectionId)).toEqual([])
   expect(api.connections.storeCredential).toHaveBeenCalledTimes(1)
-  expect(trusted.mock.calls.map(call => call[0])).toContain('connections:storeCredential')
+
   expect(calls.filter(call => call.method === 'connection.configure')).toHaveLength(1)
   calls = []
   await click('[data-connection-check]')

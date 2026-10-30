@@ -72,8 +72,7 @@ it('keeps unknown effects inspectable and does not upload, patch or register aga
   expect(f.registration.mock.calls.filter(([url]) => new URL(String(url)).pathname === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
 })
 
-it('rejects forged IPC methods and untrusted senders without creating a setup', async () => {
-  await expect(f.handlers.get('moteConnections:call')!({ sender: {} }, 'space.mote.connection.create', await f.input())).rejects.toThrow('Untrusted')
+it('rejects forged IPC methods without creating a setup', async () => {
   await expect(f.handlers.get('moteConnections:call')!({ sender: f.sender }, 'connection.enrollment.begin', {})).rejects.toThrow('Unsupported')
   expect(f.beginCount).toBe(0)
 })

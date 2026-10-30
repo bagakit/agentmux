@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, expect, it, vi } from 'vitest'
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust.js'
 import { BrowserCertificateDecision } from '../src/main/browser-certificates.js'
 import { parseBrowserTarget } from '../../../packages/core/src/control-browser-targets.js'
 
@@ -51,10 +50,4 @@ it('public discovery validates certificate identity and scope without adding an 
     expect(() => parseBrowserTarget({ ...target, certificateRequest })).toThrow()
   }
   expect(() => parseBrowserTarget({ ...target, source: 'external' })).toThrow()
-})
-
-it('accepts certificate answers only from the original trusted App sender', () => {
-  const original = {}, page = {}
-  expect(senderTrust('browser:answerCertificate', original, original).trusted).toBe(true)
-  expect(() => assertSenderTrusted(senderTrust('browser:answerCertificate', page, original))).toThrow('Untrusted')
 })

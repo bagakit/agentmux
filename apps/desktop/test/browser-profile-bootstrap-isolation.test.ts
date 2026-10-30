@@ -1,4 +1,5 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -37,14 +38,14 @@ it.each(['json', 'schema', 'io'] as const)('keeps host IPC available on actual o
   const runtimeDispose = vi.spyOn(runtime, 'dispose')
   const sender = Object.assign(new EventEmitter(), { id: 731, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   let startupError: unknown = null
-  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { dispose: async () => {} } as never }).catch(error => { startupError = error; return null })
   expect(startupError, 'Browser Profile failure must not abort host IPC availability').toBeNull()
   expect(dispose).toBeTypeOf('function')
   const invoke = async (channel: string, ...values: unknown[]) => {
     const handler = fixture.handlers.get(channel); expect(handler, `Missing actual production handler ${channel}`).toBeTypeOf('function')
-    return await handler!({ sender } as IpcMainInvokeEvent, ...values)
+    return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as IpcMainInvokeEvent, ...values)
   }
   try {
     expect(await invoke('config:get')).toEqual(config)
@@ -88,17 +89,17 @@ it('does not wait for an unconfirmed Profile read to expose healthy host APIs', 
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const runtimeDispose = vi.spyOn(runtime, 'dispose'), sender = Object.assign(new EventEmitter(), { id: 734, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   let dispose: (() => Promise<void>) | null = null, bootstrapError: unknown = null
-  const started = registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const started = registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { dispose: async () => {} } as never }).then(value => { dispose = value }).catch(error => { bootstrapError = error })
   try {
     // This is a proof deadline for a protected assertion, never a product timeout/death policy.
     await vi.waitFor(() => expect(dispose, 'Pending Browser-only metadata must not hold the host bootstrap').toBeTypeOf('function'), { timeout: 750 })
     expect(bootstrapError).toBeNull(); expect(runtimeDispose).not.toHaveBeenCalled()
-    const handler = fixture.handlers.get('config:get')!; expect(await handler({ sender } as IpcMainInvokeEvent)).toEqual(config)
+    const handler = fixture.handlers.get('config:get')!; expect(await handler({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as IpcMainInvokeEvent)).toEqual(config)
     const list = fixture.handlers.get('browser:listProfiles')!; expect(list).toBeTypeOf('function')
     let settled = false
-    const requested = Promise.resolve(list({ sender } as IpcMainInvokeEvent)).then(result => { settled = true; return result })
+    const requested = Promise.resolve(list({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as IpcMainInvokeEvent)).then(result => { settled = true; return result })
     await new Promise(done => setTimeout(done, 15)); expect(settled).toBe(false); expect(read).toHaveBeenCalledTimes(1)
     allowRead(); expect((await requested as { id: string }[]).map(value => value.id)).toEqual([id]); expect(await readFile(path, 'utf8')).toBe(valid)
     expect(runtimeDispose).not.toHaveBeenCalled()

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -95,7 +96,7 @@ async function fixture(startupFailure = false) {
   const archive = new ClientIncidentArchive(join(root, 'archive')); await archive.flush()
   const sender = Object.assign(new EventEmitter(), { id: 1, isDestroyed: () => false, isLoadingMainFrame: () => false,
     send: vi.fn(), mainFrame: {}, session: { flushStorageData: vi.fn() } })
-  const args = { initialConfig: config,
+  const args = { appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), id: 1, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, clientIncidents: archive, configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next },
     scratchTopics: { setNameAudit: () => {} }, workspaceFiles: { read: vi.fn(), listFiles: async () => [], dispose: async () => {} },
@@ -337,7 +338,8 @@ it('releases the early diagnostic subscription when the original Runtime commit 
   const original = Object.assign(new Error('private-runtime-commit-failure'), { code: 'EIO' }), release = vi.fn()
   const runtime = { setTerminalViewColors() {}, prepare: async () => ({ runtimeBindings: new Map() }),
     commit: () => { throw original }, observeCoreEvents: () => release }
-  const args = { window: { webContents: {} }, initialConfig: structuredClone(DEFAULT_CONFIG), runtime,
+  const sender = {}
+  const args = { appDocumentSources: testAppDocumentSources(sender), window: { webContents: sender }, initialConfig: structuredClone(DEFAULT_CONFIG), runtime,
     clientIncidents: archive, scratchTopics: { setNameAudit() {} } } as unknown as Parameters<typeof registerIpc>[0]
   await expect(registerIpc(args)).rejects.toBe(original)
   expect(release).toHaveBeenCalledOnce()

@@ -89,7 +89,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       },
       watchConnectionMetadata: async (_target, handlers) => rpc.subscribe('connection.metadata.watch', {}, handlers)
     }
-    registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: vi.fn(), runtime, metadata: { publish() {}, observation() {} } })
+    registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  runtime, metadata: { publish() {}, observation() {} } })
     vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
     calls = []; settings.mockReset()
     forward = async (method, params, target) => {

@@ -20,7 +20,6 @@ import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
 import { ScreenCapture } from '../src/main/screen-capture'
 import { getDesktopNativeUiOwner, getNativeDesktopOwner, resolvedNativeDesktopOptions } from '../src/main/native-desktop-owner'
 import { readPastedImage } from '../src/main/pasted-image-read'
-import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 import { browserPngFromBytes } from '../src/main/browser-image'
 
 const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6V8AAAAASUVORK5CYII=', 'base64')
@@ -44,10 +43,9 @@ async function fixture() {
   walk(source)
   expect(calls).toHaveLength(1)
   const code = ts.transpileModule(calls[0]!.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-  new Function('registerNativeDesktopIpc', 'app', 'getDesktopNativeUiOwner', 'handleWithEvent', 'requireTrustedSender', 'screenCapture', code)(
+  new Function('registerNativeDesktopIpc', 'app', 'getDesktopNativeUiOwner', 'handleWithEvent', 'screenCapture', code)(
     registerNativeDesktopIpc, { getPath: () => home }, native,
     (channel: string, handler: (...args: any[]) => any) => { handlers.set(channel, handler) },
-    (channel: string, event: any) => assertSenderTrusted(senderTrust(channel as any, event.sender, trusted)),
     new ScreenCapture({ home, native, edit: vi.fn(), reportIssue: vi.fn() }))
   handlers.set('ui:readPastedImage', (_event, path: string) => readPastedImage(home, path))
   bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => handlers.get(channel)!({ sender: trusted }, ...args))
@@ -98,11 +96,5 @@ describe('existing preload and Main consumers of the native desktop owner', () =
     expect(bridge.native.captureScreenshot).not.toHaveBeenCalled()
     bridge.native.writeClipboardImage.mockRejectedValueOnce(error)
     await expect(f.api.writeClipboardImage(browserPngFromBytes(bytes))).rejects.toBe(error)
-  })
-
-  it.each(['ui:captureScreenshot', 'ui:readClipboardText', 'ui:writeClipboardText', 'ui:writeClipboardImage'])('rejects a page sender before %s starts any native operation', async channel => {
-    const f = await fixture()
-    await expect(Promise.resolve().then(() => f.handlers.get(channel)!({ sender: {} }, 'untrusted'))).rejects.toThrow('Untrusted')
-    expect(f.native).not.toHaveBeenCalled()
   })
 })

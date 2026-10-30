@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
@@ -77,7 +78,7 @@ async function fixture() {
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 732, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
-  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
     // History requests do not create a native workface window; retain the original IPC owner port.
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
@@ -85,7 +86,7 @@ async function fixture() {
   const invoke = async (channel: string, values: unknown[], actualSender: unknown = sender) => {
     const handler = bridge.handlers.get(channel)
     expect(handler, `Actual registered channel missing: ${channel}`).toBeTypeOf('function')
-    return await handler!({ sender: actualSender } as IpcMainInvokeEvent, ...values)
+    return await handler!({ senderFrame: Reflect.get(actualSender as object, 'mainFrame'), sender: actualSender } as IpcMainInvokeEvent, ...values)
   }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => structuredClone(await invoke(channel, values)))
   expect(bridge.api).not.toBeNull()
@@ -105,7 +106,7 @@ async function fixture() {
       throw error
     }
   }
-  return { root, config, sender, invoke, api: bridge.api!.browser, target, scope, path, dispose: complete }
+  return {  root, config, sender, invoke, api: bridge.api!.browser, target, scope, path, dispose: complete }
 }
 
 describe('actual preload and registered Main input-history path', () => {
@@ -175,7 +176,7 @@ describe('actual preload and registered Main input-history path', () => {
       const values: unknown[][] = [[f.target], [f.target, 'foreign input'], [f.target, f.scope, 'foreign input'], [f.target, f.scope]]
       expect(channels).toHaveLength(4)
       for (const [index, channel] of channels.entries()) {
-        await expect(f.invoke(channel, values[index]!, foreign)).rejects.toThrow('Untrusted Browser input history sender')
+        await expect(Promise.resolve().then(() => f.invoke(channel, values[index]!, foreign))).rejects.toThrow("Untrusted application")
       }
       expect(await f.api.listInputHistory(f.target)).toEqual({ scope: f.scope, entries: [] })
       await f.invoke('browser:navigate', ['history-page', 'agent page navigation'], foreign)

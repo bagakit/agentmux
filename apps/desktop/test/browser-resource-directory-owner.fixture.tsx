@@ -51,8 +51,7 @@ async function fixture(graph = savedGraph()) {
   const spatialState = { read: vi.fn<() => Promise<{ graph: AgentMuxSpatialGraph } | null>>(async () => ({ graph })) }
   const browserProfiles = { initialize: vi.fn() }, app = { getAppMetrics: vi.fn(() => views.map(view => ({ pid: view.webContents.id, creationTime: 100 }))) }
   const ports = { browsers: manager, spatialState, browserProfiles, app, externalBridge: bridge, coldBrowserTargets, browserResourceLocations,
-    config: {}, workspace: vi.fn((_config, id) => { if (id !== 'workspace') throw new Error('Wrong original workspace') }),
-    requireTrustedSender: vi.fn((_channel, event) => { if (event !== trusted) throw new Error('Wrong source') }) }
+    config: {}, workspace: vi.fn((_config, id) => { if (id !== 'workspace') throw new Error('Wrong original workspace') }) }
   const list = handler('browser:listTargets', ports)
   return { directory, manager, views, partition, bridge, spatialState, browserProfiles, app, list }
 }
@@ -137,7 +136,7 @@ it('uses original external load membership rather than ready or mutable persiste
   const failed = new ExternalBrowserBridge(path); bridges.push(failed); await failed.ready()
   expect(failed.list()).toEqual([]); expect(failed.warning).toBeDefined()
   const list = handler('browser:listTargets', { browsers: f.manager, spatialState: f.spatialState, app: f.app, config: {},
-    externalBridge: failed, coldBrowserTargets, browserResourceLocations, requireTrustedSender: vi.fn(), workspace: vi.fn() })
+    externalBridge: failed, coldBrowserTargets, browserResourceLocations,  workspace: vi.fn() })
   const result = parseBrowserTargetsResult(await list(trusted))
   expect(result.coverage).toBe('partial'); expect(failed.membershipCoverage).toBe('partial'); expect(result.targets).toHaveLength(2); expect(result.warning).toContain('Shared Browser membership')
   // Exercise the original save owner only, without adding grants or opening the loopback transport.

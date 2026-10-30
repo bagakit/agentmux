@@ -14,7 +14,7 @@ app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(null)
     await fs.mkdir(path.join(app.getPath('home'), '.agentmux'), { recursive: true })
-    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority, AgentMuxControlServer, senderTrust, assertSenderTrusted } = require(path.join(path.dirname(html), 'editor-native.cjs'))
+    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority, AgentMuxControlServer, assertAppDocumentSender, isAppDocumentSender } = require(path.join(path.dirname(html), 'editor-native.cjs'))
     const builtinRoot = path.join(directory, 'builtin'), userRoot = starter ? path.join(app.getPath('home'), '.agentmux', 'avatars') : path.join(directory, 'avatars')
     await fs.cp(originalBuiltin, builtinRoot, { recursive: true })
     // Existing face editing probes now use a real declared user collection. The
@@ -92,9 +92,10 @@ app.whenReady().then(async () => {
       }
       for (const [channel, method] of [['moteAvatars:createSeries', 'space.mote.avatar.series.create'], ['moteAvatars:revealSeries', 'space.mote.avatar.series.reveal']]) {
         ipcMain.handle(channel, async (event, input) => {
-          const trust = senderTrust(channel, event.sender, win.webContents)
-          result.ipcTrust.push({ channel, trusted: trust.trusted, sender: event.sender.id, original: win.webContents.id })
-          assertSenderTrusted(trust)
+          const sources = { current: { mode: 'prod', filePath: html }, loading: null }
+          const trusted = isAppDocumentSender(event, win.webContents, sources)
+          result.ipcTrust.push({ channel, trusted, sender: event.sender.id, original: win.webContents.id })
+          assertAppDocumentSender(event, win.webContents, sources)
           return control.call(method, input)
         })
       }

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -88,12 +89,12 @@ async function fixture(kind: 'direct' | 'signed' = 'direct') {
   await mkdir(join(bridge.directory, 'notes'), { recursive: true })
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn() })
-  closes.push(await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  closes.push(await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime: controller, applicationAccess: {} as never, workbenchWindows: { setNativeOwner: () => () => {} } as never, progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles }))
   bridge.invoke.mockImplementation((channel: string, subject: unknown, request: unknown) => {
     const handler = bridge.handlers.get(channel); if (!handler) throw new Error('Original IPC handler missing: ' + channel)
-    return handler({ sender } as unknown as IpcMainInvokeEvent, subject, request)
+    return handler({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, subject, request)
   })
   await bridge.api!.notesStorage.inspect()
   const wire = await client.readAgentConversation({ hostId: 'local', agentSessionId: session.agentSessionId, limit: 10 }), accepted = consumeConversationWindowPage(wire)

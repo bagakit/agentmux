@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
@@ -54,13 +55,13 @@ it('registered bookmark IPC and Store report a byte-budget rejection without fal
     await writeFile(join(root, 'Numeric.webloc'), emitWebloc('placeholder').replace('placeholder', 'https://example.invalid/?a=&#38;b=&#x4E2D;&#x1F642;'))
     await writeFile(join(root, 'Large.webloc'), emitWebloc('https://example.invalid/large'))
     await truncate(join(root, 'Large.webloc'), BOOKMARK_FILE_MAX_BYTES + 1)
-    dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: {} as never, workspaceFiles: files })
     bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
       const handler = bridge.handlers.get(channel)
       expect(handler, `Missing registered handler: ${channel}`).toBeTypeOf('function')
-      return structuredClone(await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values))
+      return structuredClone(await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values))
     })
     expect(bridge.api).not.toBeNull()
     expect(await bridge.api!.files.readBookmark(workspace.id, 'Numeric.webloc')).toEqual({ url: 'https://example.invalid/?a=&b=中🙂', binary: false })

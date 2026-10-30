@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
     const privateWorkspace = { id: '__scratch__', hostId: 'local', path: join(privateRoot,'topics'), name: 'Topics', kind: 'folder' as const }
     if (surveyInitial) await fs.mkdir(privateWorkspace.path,{recursive:true})
     const config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: surveyInitial ? [privateWorkspace] : [] }
-    dispose = await registerIpc({ window, runtime: controller, configStore: { get: async () => config } as never,
+    dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window, runtime: controller, configStore: { get: async () => config } as never,
       progressLoops: { subscribe: () => () => {} } as never, scratchTopics: {} as never,
       workspaceFiles: { dispose: async () => {} } as never })
     await window.loadFile(html, surveyInitial ? { query: { survey: '1', workspace:privateWorkspace.path, ...(previewFailure ? {'preview-failure':'1'} : {}) } } : {}); if(surveyInitial)window.showInactive();else window.show(); if(!mediaOnly){app.focus({ steal: true }); window.focus()}

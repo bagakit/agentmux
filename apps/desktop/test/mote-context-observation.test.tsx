@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -10,7 +11,7 @@ import type { BrowserWindow } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { AgentMuxRpcServiceOptions } from '../../../packages/core/src/public-rpc-service'
 
-const fixture = vi.hoisted(() => ({ root: '', socket: '', generation: 1, loading: false, active: false,
+const fixture = vi.hoisted(() => ({  root: '', socket: '', generation: 1, loading: false, active: false,
   ports: null as AgentMuxRpcServiceOptions | null,
   coreClients: null as AgentMuxRpcServiceOptions['coreClients'] | null,
   coreJournal: null as import('../../../packages/core/src/delivery-attempt-store').DeliveryAttemptStore | null,
@@ -107,11 +108,11 @@ async function deliver(request: AgentMuxControlRequest) {
     const result = await useAppStore.getState().executeControl(request)
     if (!fixture.active || fixture.root !== root) return
     fixture.replies.push(structuredClone(result))
-    respond?.({ sender }, { requestId: request.requestId, ok: true, result: structuredClone(result) })
+    respond?.({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender }, { requestId: request.requestId, ok: true, result: structuredClone(result) })
   } catch (error) {
     if (!fixture.active || fixture.root !== root) return
     const e = error as { code?: string; message?: string }
-    respond?.({ sender }, { requestId: request.requestId, ok: false,
+    respond?.({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender }, { requestId: request.requestId, ok: false,
       error: { code: e.code ?? 'CONTROL_FAILED', message: e.message ?? 'Original private failure' } })
   }
 }
@@ -131,7 +132,7 @@ async function main() {
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     rpcClients: () => fixture.coreClients?.() ?? [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation }
   const config = useAppStore.getState().config!
-  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
     runtime: runtime as never, configStore: { get: async () => config } as never,
     scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as never,
     workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), write: vi.fn(), dispose: async () => {} } as never,

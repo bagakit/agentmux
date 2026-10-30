@@ -188,7 +188,7 @@ function mainPorts(manager: BrowserViewManager, graph = savedGraph()) {
 describe('cold Browser ownership through the original Main owner', () => {
   it('discovers thirty original cold identities through the public target handler without a native page or fictitious navigation', async () => {
     const { manager, views } = fixture(), ports = mainPorts(manager, savedGraph(30))
-    const list = ipcFunction('browser:listTargets', { ...ports, requireTrustedSender: vi.fn(), workspace: vi.fn(),
+    const list = ipcFunction('browser:listTargets', { ...ports,  workspace: vi.fn(),
       browsers: manager, app: { getAppMetrics: () => [] }, externalBridge: { membershipCoverage: 'complete', list: () => [] }, coldBrowserTargets, browserResourceLocations })
     const { targets }: { targets: AgentMuxBrowserTarget[] } = await list({})
     expect(views).toHaveLength(0); expect(targets).toHaveLength(30)
@@ -201,7 +201,7 @@ describe('cold Browser ownership through the original Main owner', () => {
     const { manager, views } = fixture(), ports = mainPorts(manager, savedGraph(30))
     await manager.create('live-page', 'https://fixture.invalid/live', 'workspace', 'original')
     ports.spatialState.read.mockRejectedValueOnce(new Error('Saved source temporarily unavailable'))
-    const list = ipcFunction('browser:listTargets', { ...ports, requireTrustedSender: vi.fn(), workspace: vi.fn(),
+    const list = ipcFunction('browser:listTargets', { ...ports,  workspace: vi.fn(),
       browsers: manager, app: { getAppMetrics: () => [] }, externalBridge: { membershipCoverage: 'complete', list: () => [] }, coldBrowserTargets, browserResourceLocations })
     const before = manager.resourceTargets(null)
     const result = await list({})
@@ -211,8 +211,8 @@ describe('cold Browser ownership through the original Main owner', () => {
   })
   it('reads retained operation and history through their original IPC consumers without acquiring a cold page', async () => {
     const { manager, views } = fixture(), ports = mainPorts(manager)
-    const get = ipcFunction('browser:getOperation', { ...ports, requireTrustedSender: vi.fn(), browsers: manager })
-    const history = ipcFunction('browser:listOperationHistory', { ...ports, requireTrustedSender: vi.fn(), browsers: manager })
+    const get = ipcFunction('browser:getOperation', { ...ports,  browsers: manager })
+    const history = ipcFunction('browser:listOperationHistory', { ...ports,  browsers: manager })
     expect(await get({}, 'unobserved-original-operation')).toBeNull()
     expect(await history({})).toEqual([])
     expect(ports.spatialState.read).not.toHaveBeenCalled(); expect(ports.browserProfiles.initialize).not.toHaveBeenCalled()
@@ -334,7 +334,7 @@ describe('cold Browser ownership through the original Main owner', () => {
     const { manager, views } = fixture(), ports = mainPorts(manager)
     const run = vi.spyOn(manager, 'runScript').mockResolvedValue({ result: 'actual-page-result', outcome: { kind: 'completed' } } as never)
     const external = { has: vi.fn(() => false), runScript: vi.fn() }, trust = vi.fn()
-    const mainHandler = ipcFunction('browser:runScript', { ...ports, requireTrustedSender: trust, externalBrowsers: external,
+    const mainHandler = ipcFunction('browser:runScript', { ...ports,  externalBrowsers: external,
       externalBridge: { require: vi.fn(() => ({ workspaceId: 'workspace' })) }, workspace: vi.fn(), browsers: manager,
       browserRunResult, browserOperationAlreadyExistsError })
     // The Main carrier is plain data. Consume the production Renderer decoder before asserting

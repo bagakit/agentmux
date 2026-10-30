@@ -5,6 +5,7 @@ import { localRuntimeConnector } from './local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterAll, expect, vi } from 'vitest'
 import { AgentMuxError, AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '@agentmux/core'
 import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
@@ -99,7 +100,7 @@ afterAll(async () => {
 
 export const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'old-run' } }
 
-export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[] }) {
+export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[] }, options?: { filesWorkspace?: boolean }) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
   const previousInitializations = new Set(bridge.notesInitializations)
   isolateCoreFixtureEnvironment(actual ? dirname(actual.client.agentMessageQueuePath()) : root)
@@ -129,10 +130,13 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = actual?.config ?? { ...structuredClone(DEFAULT_CONFIG), executors: {
     private: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/codex"), args: [], env: {}, injectAgentMuxGuide: false }
-  } }
+  }, ...(options?.filesWorkspace ? { workspaces: [{ id: 'private-files', hostId: 'local', path: root, name: 'Private', kind: 'folder' as const }] } : {}) }
   const flush = vi.fn(() => {})
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
+  const appFilePath = join(root, 'renderer/index.html')
+  const mainFrame = { url: pathToFileURL(appFilePath).href, detached: false, isDestroyed: () => false }
   const sender = Object.assign(new EventEmitter(), { id: 771, isDestroyed: () => false, isLoadingMainFrame: () => false,
+    mainFrame, getURL: () => mainFrame.url,
     send: vi.fn((channel: string, value: unknown) => {
       for (const listener of bridge.listeners.get(channel) ?? []) listener({}, structuredClone(value))
     }),
@@ -150,9 +154,8 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
     try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
     if (failures.length) throw new AggregateError(failures, 'Private IPC owner cleanup failed')
   })()
-  try { release = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: appFilePath }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
-    progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
     workbenchWindows: { setNativeOwner: () => () => {} } as never, applicationAccess: {} as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
   catch (error) {
@@ -162,7 +165,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
-    return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...structuredClone(values))
+    return await handler!({ sender, senderFrame: sender.mainFrame } as unknown as IpcMainInvokeEvent, ...structuredClone(values))
   })
   expect(bridge.api).not.toBeNull()
   return { client, sender, flush, pauseTarget, dispose, runtime }

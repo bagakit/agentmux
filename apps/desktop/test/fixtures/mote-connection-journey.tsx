@@ -79,8 +79,8 @@ export async function moteConnectionJourney() {
     callConnectionHost: async (_target, method, params) => client.call(method, params),
     watchConnectionMetadata: async (_target, handlers) => client.subscribe('connection.metadata.watch', {}, handlers)
   }
-  registerMotePreferencesIpc({ socketPath: server.path, runtime, handleWithEvent, assertTrusted })
-  registerConnectorIpc({ runtime, handleWithEvent, assertTrusted, metadata: { publish() {}, observation() {} } })
+  registerMotePreferencesIpc({ socketPath: server.path, runtime, handleWithEvent })
+  registerConnectorIpc({ runtime, handleWithEvent,  metadata: { publish() {}, observation() {} } })
   vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
   const forwardRead = async (input: Parameters<typeof api.motePreferences.read>[0], target?: import('../../src/shared/contracts').ConnectionHostingTarget) => await handlers.get('motePreferences:read')!({ sender: trusted }, input, target)
   const forwardSave = async (input: MoteConnectionPreferencesSaveParams, target?: import('../../src/shared/contracts').ConnectionHostingTarget) => await handlers.get('motePreferences:save')!({ sender: trusted }, input, target)

@@ -2,6 +2,7 @@ const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => awai
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -43,7 +44,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
       fixture.invokes.push({ channel, values })
       const handler = fixture.handlers.get(channel)
       if (!handler) throw new Error(`No registered Main handler: ${channel}`)
-      return await handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
+      return await handler({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
     },
     on(channel: string, listener: (...values: unknown[]) => void) {
       const listeners = fixture.listeners.get(channel) ?? new Set()
@@ -159,7 +160,7 @@ beforeEach(async () => {
     observeInputOccupation: () => () => {}, observeCoreEvents: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     runtimeBindings: () => new Map(), endpointWarningSnapshot: () => [], reportBindingSaveFailure: () => {}, providerCatalog: (options?: { observation: true }) => options ? { catalog: [], warnings: [] } : [], sessionHistorySources: async (options?: { observation: true }) => options ? { sources: [], warnings: [] } : [], inspectInput: async () => null, notifyInputOccupation: async () => {}, snapshot, submitPrompt: submit, stop, recover
   } as unknown as RuntimeController
-  dispose = await registerIpc({ progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { validate: (next: unknown) => next, save: async (next: unknown) => next, get: async () => ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }) } as unknown as ConfigStore,
     scratchTopics: { listTopics: async () => [], setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })

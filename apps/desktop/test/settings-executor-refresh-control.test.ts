@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
@@ -88,12 +89,12 @@ async function registered() {
     async () => { throw new Error('Refresh cannot deliver progress input') }, undefined,
     async () => { throw new Error('Refresh cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn(async () => {}) } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   expect(ipc.execute).toBeTypeOf('function'); expect(ipc.handlers.get('executors:detect')).toBeTypeOf('function')
-  return { root, config, executable, directory, clients, runtime, prepare, sender, dispose, execute: ipc.execute!,
-    native: (executorId: unknown, hostId: unknown) => ipc.handlers.get('executors:detect')!({ sender } as unknown as IpcMainInvokeEvent, executorId, hostId),
+  return {  root, config, executable, directory, clients, runtime, prepare, sender, dispose, execute: ipc.execute!,
+    native: (executorId: unknown, hostId: unknown) => ipc.handlers.get('executors:detect')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, executorId, hostId),
     bytes: () => readFile(store.filePath, 'utf8') }
 }
 
@@ -149,7 +150,7 @@ describe('Executor Refresh reaches the registered Main configuration owner', () 
     const pending = f.execute({ ...envelope, executorId: 'first', hostId: 'local' })
     try {
       const changed: AppConfig = { ...f.config, executors: { ...f.config.executors, first: { ...f.config.executors.first!, command: f.directory } } }
-      await ipc.handlers.get('config:save')!({ sender: f.sender } as unknown as IpcMainInvokeEvent, changed, f.config)
+      await ipc.handlers.get('config:save')!({ senderFrame: Reflect.get(f.sender as object, 'mainFrame'), sender: f.sender } as unknown as IpcMainInvokeEvent, changed, f.config)
       release()
       const observed = await pending
       expect(observed, JSON.stringify(observed)).toMatchObject({ input: { executorId: 'first', command: f.executable }, executable: f.executable, availability: 'available' })

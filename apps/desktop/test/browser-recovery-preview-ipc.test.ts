@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -90,7 +91,7 @@ async function fixture() {
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 632, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
-  const stop = await registerIpc({ initialConfig: config,
+  const stop = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, applicationAccess: {} as never,
     configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,
@@ -100,7 +101,7 @@ async function fixture() {
   const invoke = async (channel: string, values: unknown[], source: unknown = sender) => {
     const handler = bridge.handlers.get(channel)
     expect(handler, `Missing production handler ${channel}`).toBeTypeOf('function')
-    return await handler!({ sender: source } as IpcMainInvokeEvent, ...values)
+    return await handler!({ senderFrame: Reflect.get(source as object, 'mainFrame'), sender: source } as IpcMainInvokeEvent, ...values)
   }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => structuredClone(await invoke(channel, values)))
   const api = bridge.api!.browser, profiles = await api.listProfiles(), defaultProfile = profiles.find(value => value.isDefault)!
@@ -111,7 +112,7 @@ async function fixture() {
   const dispose = async () => { await stop(); await bridge.previews!.dispose() }
   const path = (actual = scope) => join(root, 'browser-recovery-previews', createHash('sha256').update(actual.profileId!).digest('hex'),
     createHash('sha256').update(actual.browserId).digest('hex') + '.json')
-  return { root, sender, invoke, api, scope, manager, acquire, setGraph, spatialRead, path, previews: bridge.previews!, dispose }
+  return {  root, sender, invoke, api, scope, manager, acquire, setGraph, spatialRead, path, previews: bridge.previews!, dispose }
 }
 
 describe('actual preload and registered Main recovery-preview read', () => {

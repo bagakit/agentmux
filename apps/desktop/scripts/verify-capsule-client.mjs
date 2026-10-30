@@ -9,9 +9,6 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const test = 'apps/desktop/test/capsule-client.test.ts'
 const mutations = [
-  { id: 'sender-guard-lost', file: 'apps/desktop/src/main/ipc.ts', raw: true,
-    from: "    requireTrustedSender('capsules:call', event)", to: '    void event',
-    assertion: 'rejects untrusted App senders before any Host call' },
   { id: 'original-host-delegation-lost', file: 'apps/desktop/src/main/capsule-ipc.ts',
     from: "const result = await callOriginalCore<CapsuleMethod>('local', capsuleMethod, params, {\n    transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }\n  })",
     to: ("const result = {config:{revision:1,contentRoot:'" + new URL('file:///').pathname + "fixture/capsules',defaultStorageMode:'managed',defaultMode:'isolated',defaultTheme:'follow'}}"),

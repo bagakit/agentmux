@@ -67,7 +67,7 @@ beforeEach(async () => {
       return await rpc.subscribe('connection.metadata.watch', {}, handlers)
     }
   }
-  registration = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted,
+  registration = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
     runtime, metadata: { publish() {}, observation() {} } })
   vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
   forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M], target?: typeof hostingTarget): Promise<ConnectionResultMap[M]> => {
@@ -241,7 +241,7 @@ it('the real Settings task follows native scan and phone confirmation, then expl
   expect(dom.container.textContent).not.toContain(USER); expect(dom.container.textContent).not.toContain(TENANT)
   expectNoSetupWrites(); await unchanged(saved)
   expect(await forward('connection.service.get', {})).toEqual(off.service)
-  expect(trusted.mock.calls.map(value => value[0])).toContain('connections:call')
+
   const safe = await forward('connection.setup.ls', { connectionId: saved.connection.config.connectionId })
   for (const value of [USER, TENANT, TOKEN, FLOW, SECRET]) {
     expect(JSON.stringify(safe)).not.toContain(value)

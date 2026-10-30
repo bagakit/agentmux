@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { act } from 'react'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -115,7 +116,7 @@ async function fixture() {
   const { EventEmitter } = await import('node:events')
   const sender = Object.assign(new EventEmitter(), { id: 752, isDestroyed: () => false, send: (channel: string, ...values: unknown[]) => { bridge.events.emit(channel, {}, ...values) }, mainFrame: { framesInSubtree: [] } })
   const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(bridge.profile, 'application-access.sqlite')); closes.push(() => applicationAccess.dispose())
-  const releaseMain = await registerIpc({ initialConfig: config, applicationAccess,
+  const releaseMain = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, applicationAccess,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: AppConfig) => value, save: async (value: AppConfig) => value } as never,
@@ -160,7 +161,7 @@ async function fixture() {
   const select = async (id: string) => { await act(async () => {
     const select = container.querySelector<HTMLSelectElement>('[aria-label="Connector hosting Host"]')!; select.value = 'host:' + id; select.dispatchEvent(new Event('change', { bubbles: true }))
   }); await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).not.toContain('Reading the original Host identity…'); expect(container.querySelector('[data-connection-hosting]')?.textContent).toContain(id) }) }
-  return { a, b, runtime, sender, targets, config, mount, select, mainFallback, nativeCalls, loseSave: () => { lostSave = true }, loseCredential: () => { lostCredential = true }, holdMetadata: () => { heldMetadata = true }, metadataStarted: () => metadataStarted, releaseMetadata, holdList: () => { heldList = true }, listStarted: () => listStarted, releaseList, nativeName: (value: string) => { nativeName = value }, replaceAfterOwnerInspection: () => { replaceAfterOwnerInspection = true } }
+  return {  a, b, runtime, sender, targets, config, mount, select, mainFallback, nativeCalls, loseSave: () => { lostSave = true }, loseCredential: () => { lostCredential = true }, holdMetadata: () => { heldMetadata = true }, metadataStarted: () => metadataStarted, releaseMetadata, holdList: () => { heldList = true }, listStarted: () => listStarted, releaseList, nativeName: (value: string) => { nativeName = value }, replaceAfterOwnerInspection: () => { replaceAfterOwnerInspection = true } }
 }
 async function click(selector: string) { await vi.waitFor(async () => { await act(async () => {}); const button = container.querySelector<HTMLButtonElement>(selector); expect(button).toBeDefined(); expect(button).not.toBeNull(); expect(button!.disabled).not.toBe(true) }); await act(async () => container.querySelector<HTMLElement>(selector)!.click()) }
 async function clickText(text: string) { await vi.waitFor(async () => { await act(async () => {}); const button = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === text); expect(button).toBeDefined(); expect(button!.disabled).not.toBe(true) }); await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === text)!.click()) }

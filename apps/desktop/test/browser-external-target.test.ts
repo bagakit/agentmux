@@ -577,7 +577,6 @@ async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: 
     return new Function(...Object.keys(dependencies), output)(...Object.values(dependencies))
   }
   const frame = {}; const config = { browser: { agentAutomation: true } }
-  const requireTrustedSender = vi.fn((_channel: string, event: unknown) => { if (event !== frame) throw new Error('Untrusted Source frame') })
   const workspace = (_config: unknown, id: string) => { if (id !== 'fixture-workspace') throw new Error('Unknown original Source Workspace'); return { id } }
   const getterSource = ast('../src/main/browser-view-manager.ts')
   const methods = select(getterSource, node => ts.isMethodDeclaration(node) && ['getOperation', 'stopOperationById'].includes(node.name.getText(getterSource)))
@@ -593,7 +592,7 @@ async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: 
       !!node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]) && node.arguments[0].text === channel)
     expect(nodes, `Original Main registration must be unique: ${channel}`).toHaveLength(1)
     const call = nodes[0] as import('typescript').CallExpression
-    callbacks.set(channel, compiled(`return ${call.arguments[1]!.getText(main)};`, { requireTrustedSender, config, workspace,
+    callbacks.set(channel, compiled(`return ${call.arguments[1]!.getText(main)};`, {  config, workspace,
       browsers, externalBrowsers: o.page, externalBridge: f.bridge, app: { getAppMetrics: () => [] },
       spatialState: { read: async () => ({ graph: { tabs: [], regions: [], resources: {} } }) }, coldBrowserTargets, browserResourceLocations,
       browserRunResult, browserOperationAlreadyExistsError, ensureBrowser: async () => { throw new Error('Unexpected embedded Browser acquisition') } }))
@@ -623,7 +622,7 @@ async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: 
   const execute = compiled(`return async request => { ${branches.map(node => node.getText(store)).join('\n')}\nthrow new Error('No original Browser branch'); };`, {
     api, requireActive: () => {}, get: () => ({ sessions: [] })
   }) as (request: import('../../../packages/core/src/control.js').AgentMuxControlRequest) => Promise<import('../../../packages/core/src/control.js').AgentMuxControlResult>
-  return { execute, requireTrustedSender, browsers }
+  return { execute,  browsers }
 }
 
 // The actual executable CLI and public service delegate to this fixture's production
@@ -866,7 +865,6 @@ describe('external page owner uses the existing program and journal', () => {
       expect(f.bridge.list()).toHaveLength(2)
       expect(f.api.tabs.create).not.toHaveBeenCalled(); expect(f.api.tabs.update).not.toHaveBeenCalled(); expect(f.api.windows.update).not.toHaveBeenCalled()
       expect(cli.seen).toEqual(['browser.targets', 'browser.run', 'browser.stop', 'browser.operation', 'browser.targets', 'browser.run', 'browser.stop'])
-      expect(cli.desktop.requireTrustedSender.mock.calls.map(([channel]) => channel)).toEqual(['browser:listTargets', 'browser:runScript', 'browser:stopOperationById', 'browser:getOperation', 'browser:listTargets', 'browser:runScript', 'browser:stopOperationById'])
       expect(cli.desktop.browsers.runScript).not.toHaveBeenCalled(); expect(cli.desktop.browsers.stopOperationById).toHaveBeenCalledExactlyOnceWith('public-other-continues')
     } finally { release.dispose(); await cli.stop() }
     await Promise.all(o.journalSaves.mock.results.map(result => result.value))

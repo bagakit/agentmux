@@ -1,4 +1,3 @@
-import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
@@ -10,6 +9,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
+const ipcConsumerSmoke = process.argv.includes('--ipc-consumer-smoke')
 const requireDesktop = createRequire(join(desktop, 'package.json'))
 const output = join(root, '.tmp/workbench-startup-observation', ("attempt-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(output, { recursive: true })
@@ -19,7 +19,7 @@ const { build } = await import(pathToFileURL(requireDesktop.resolve('vite')).hre
 const { resolveConfig } = await import(pathToFileURL(requireDesktop.resolve('electron-vite')).href)
 const execute = promisify(execFile)
 const tracked = ['src/main/workbench-startup-capture.ts', 'src/main/crash-capture.ts', 'src/main/crash-log.ts',
-  'src/main/index.ts', 'src/main/ipc.ts', 'src/main/ipc-sender-trust.ts', 'src/main/crash-log-access.ts',
+  'src/main/index.ts', 'src/main/ipc.ts', 'src/main/ipc-sender-trust.ts', 'src/main/workbench-document-sources.ts', 'src/main/theme-bootstrap.ts', 'src/main/crash-log-access.ts',
   'src/main/client-observation.ts', 'src/main/window-security.ts', 'src/main/top-frame-navigation.ts',
   'src/preload/index.ts', 'src/shared/contracts.ts', 'src/shared/workbench-startup-failure.ts',
   'src/renderer/index.html', 'src/renderer/src/startup-entry.ts', 'src/renderer/src/lib/renderer-startup-capture.ts',
@@ -63,29 +63,38 @@ import { join } from 'node:path'
 import { CrashLog } from ${JSON.stringify(join(desktop, 'src/main/crash-log.ts'))}
 import { registerWorkbenchStartupCapture } from ${JSON.stringify(join(desktop, 'src/main/workbench-startup-capture.ts'))}
 import { topFrameOrigin, type TopFrameOrigin } from ${JSON.stringify(join(desktop, 'src/main/top-frame-navigation.ts'))}
-import { assertSenderTrusted, senderTrust } from ${JSON.stringify(join(desktop, 'src/main/ipc-sender-trust.ts'))}
+import { assertAppDocumentSender } from ${JSON.stringify(join(desktop, 'src/main/ipc-sender-trust.ts'))}
+import { WorkbenchDocumentSources } from ${JSON.stringify(join(desktop, 'src/main/workbench-document-sources.ts'))}
+import { registerThemeBootstrap } from ${JSON.stringify(join(desktop, 'src/main/theme-bootstrap.ts'))}
+import { mintObjectId } from '@agentmux/core/object-id'
 import { readLoadedPackageIdentity } from ${JSON.stringify(join(desktop, 'src/main/client-observation.ts'))}
 export async function wire(window: BrowserWindow, directory: string, sinkFailure: boolean) {
   let updateReady: { token: string; resolve: () => void } | null = null
   let appOrigin: TopFrameOrigin
+  const appDocuments = new WorkbenchDocumentSources()
+  const committed = (_event: unknown, url: string) => appDocuments.committed(url)
+  window.webContents.on('did-navigate', committed)
+  const disposeTheme = registerThemeBootstrap(ipcMain, window, () => ({ terminalTheme: 'graphite' }), () => true)
   const startupAttemptId = randomUUID()
   const packageIdentity = await readLoadedPackageIdentity(join(directory, 'package-identity.json'))
   const crashLog = new CrashLog(join(directory, 'user-data/crash-log.ndjson'))
   if (sinkFailure) crashLog.append = async () => { throw Object.assign(new Error('Controlled ENOSPC diagnostic sink'), { code: 'ENOSPC' }) }
   const startupCapture = ${capture}
   const args = { window, onRendererStartupFailure: (input: unknown) => startupCapture.recordRenderer(input) }
-  const requireTrustedSender = (channel: 'ui:recordStartupFailure', event: Electron.IpcMainInvokeEvent) =>
-    assertSenderTrusted(senderTrust(channel, event.sender, window.webContents))
-  ipcMain.handle('ui:recordStartupFailure', ${rendererHandler})
+  const recordStartupFailure = ${rendererHandler}
+  ipcMain.handle('ui:recordStartupFailure', (event, input) => {
+    assertAppDocumentSender(event, window.webContents, appDocuments.read())
+    return recordStartupFailure(event, input)
+  })
   const readyTokens: string[] = []
   ipcMain.handle('ui:rendererUpdateReady', (event, token: string) => {
-    assertSenderTrusted(senderTrust('ui:rendererUpdateReady', event.sender, window.webContents))
+    assertAppDocumentSender(event, window.webContents, appDocuments.read())
     readyTokens.push(token); (${ready})(token)
   })
   const probeQuery = undefined
   const loadPackagedRenderer = ${loader}
   return { load: loadPackagedRenderer, capture: startupCapture, readyTokens, dispose() {
-    startupCapture.dispose(); ipcMain.removeHandler('ui:recordStartupFailure'); ipcMain.removeHandler('ui:rendererUpdateReady')
+    startupCapture.dispose(); disposeTheme(); window.webContents.removeListener('did-navigate', committed); ipcMain.removeHandler('ui:recordStartupFailure'); ipcMain.removeHandler('ui:rendererUpdateReady')
   } }
 }
 `)
@@ -93,7 +102,7 @@ const callerPatterns = [
   ['src/main/index.ts', /const startupCapture = registerWorkbenchStartupCapture\(/],
   ['src/main/index.ts', /onRendererStartupFailure: failure => startupCapture\.recordRenderer\(failure\)/],
   ['src/main/index.ts', /startupCapture\.ready\(token\); updateReady\.resolve\(\)/],
-  ['src/main/ipc.ts', /requireTrustedSender\('ui:recordStartupFailure', event\)/],
+
   ['src/preload/index.ts', /recordStartupFailure: input => ipcRenderer\.invoke\('ui:recordStartupFailure', input\)/],
   ['src/renderer/index.html', /src="\/src\/startup-entry\.ts"/],
   ['src/renderer/src/startup-entry.ts', /load: \(\) => import\('\.\/main'\)/],
@@ -193,7 +202,7 @@ result.semanticOracle='healthy original Ready and private log discovery';await f
 const sourceCommit = (await execute('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim()
 const sourceTree = (await execute('git', ['rev-parse', 'HEAD^{tree}'], { cwd: root })).stdout.trim()
 async function run(name, ownerDirectory, renderer, mode) {
-  const directory = await mkdtemp(_hygiene_fixturePath("private/tmp/amx-t005-"))
+  const directory = await mkdtemp(join(tmpdir(), 'amx-startup-capture-'))
   const preserved = join(output, name)
   await mkdir(preserved, { recursive: true })
   await mkdir(join(ownerDirectory, '../preload'), { recursive: true })
@@ -252,6 +261,17 @@ assert.equal(green[2].cli.result.path, green[2].rpc.path)
 assert.deepEqual(green[3].records, [], 'Failed sink must not claim persisted original cause')
 const sinkLog = await readFile(join(output, 'candidate-sink/electron.log'), 'utf8')
 assert.ok(sinkLog.includes('ORIGINAL_RENDERER_SINK_FAILURE_T005') && sinkLog.includes('ENOSPC'), 'Original cause and controlled sink errno must remain independently visible')
+
+if (ipcConsumerSmoke) {
+  for (const [path, source] of originals) assert.equal(await readFile(path, 'utf8'), source, 'Selected source changed: ' + path)
+  for (const [path, sha] of consumed) assert.equal(hash(await readFile(path)), sha, 'Consumed source changed: ' + path)
+  await writeFile(join(output, 'ipc-consumer-smoke.json'), JSON.stringify({ schema: 'agentmux.workbench-startup-ipc-consumer-smoke.v1', passed: true,
+    sourceCommit, sourceTree, sourceSHA256: [...originals].map(([path, source]) => ({ path, sha256: hash(source) })),
+    consumedSources: [...consumed].map(([path, sha256]) => ({ path, sha256 })), beforeExtracts, preloadSHA256: hash(realPreload),
+    green, callers, boundary: 'Actual original capture/loader/ready and shared document admission on four private hidden Electron scenarios; no full historical suite or new capture behavior claim.' }, null, 2) + '\n')
+  console.log(JSON.stringify({ passed: true, green: green.length, receipt: join(output, 'ipc-consumer-smoke.json') }))
+  process.exit(0)
+}
 
 const preloadMutant = { kind: 'missing-preload-capture', path: 'src/main/workbench-startup-capture.ts',
   before: "  deps.contents.on('preload-error', onPreloadError)", after: '  // counterfactual: original preload capture removed' }

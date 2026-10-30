@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -22,7 +23,6 @@ import {
   type AgentSessionUserMessage
 } from '@agentmux/core'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
-import { assertManualPromptSenderTrusted } from '../src/main/ipc-sender-trust'
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -84,7 +84,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     invoke: (channel: string, ...args: unknown[]) => {
       const handler = bridge.handlers.get(channel)
       if (!handler) throw new Error(`No IPC handler registered for: ${channel}`)
-      const event = { sender: bridge.lastSender }
+      const event = { senderFrame: Reflect.get(bridge.lastSender as object, 'mainFrame'), sender: bridge.lastSender }
       return handler(event, ...args)
     },
     on: vi.fn(),
@@ -270,7 +270,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
       save: async () => {}
     } as unknown as Parameters<typeof registerIpc>[0]['configStore']
 
-    disposeIpc = await registerIpc({ initialConfig: await configStore.get(),
+    disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources((Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window']).webContents), initialConfig: await configStore.get(),
       window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'],
       configStore,
       runtime,
@@ -546,7 +546,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
     domContainer.remove()
   })
 
-  it('Main IPC sender trust rejects untrusted sender claiming authorHuman, but allows plain unknown submit', async () => {
+  it('Main IPC sender trust rejects untrusted sender claiming authorHuman, including plain unknown submit', async () => {
     const condition = {
       expectedRun: { runId: RUN_ID },
       afterSubmissionId: null
@@ -556,7 +556,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
     pauseTarget.mockClear()
     bridge.lastSender = fakeUntrustedSender
     await expect(
-      bridge.api!.sessions.submitPrompt(
+      Promise.resolve().then(() => bridge.api!.sessions.submitPrompt(
         { kind: 'agent', hostId: 'local', agentSessionId: SESSION_ID, run: { runId: RUN_ID } },
         'Spoofed human prompt',
         'spoof-op-1',
@@ -564,15 +564,15 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
         undefined,
         { allowUncertainTurn: true },
         true // authorHuman: true from untrusted sender
-      )
-    ).rejects.toThrow('Untrusted manual prompt sender')
+      ))
+    ).rejects.toThrow("Untrusted application")
     expect(pauseTarget).not.toHaveBeenCalled()
     expect(writes).toEqual([])
     expect((await new AgentMuxFileAgentSessionStore(storeFile).loadTimeline(SESSION_ID)).items).toEqual([])
 
-    // Untrusted sender for ordinary unknown submit: MUST NOT BE BLOCKED
+    // Ordinary payloads also belong to the original App document.
     await expect(
-      bridge.api!.sessions.submitPrompt(
+      Promise.resolve().then(() => bridge.api!.sessions.submitPrompt(
         { kind: 'agent', hostId: 'local', agentSessionId: SESSION_ID, run: { runId: RUN_ID } },
         'Normal submit from untrusted sender',
         'untrusted-ordinary-op-1',
@@ -580,8 +580,8 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
         undefined,
         { allowUncertainTurn: true },
         false // no authorHuman claim
-      )
-    ).resolves.not.toThrow()
+      ))
+    ).rejects.toThrow("Untrusted application")
   })
 
   it('Agent conflict preserves Agent author and does not upgrade to human', async () => {
@@ -793,12 +793,5 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
     const timeline = await new AgentMuxFileAgentSessionStore(storeFile).loadTimeline(SESSION_ID)
     expect(projectSessionUserMessages({ agentSessionId: SESSION_ID, timeline }).map(message => message.author))
       .toEqual([{ kind: 'unknown' }])
-  })
-
-  it('assertManualPromptSenderTrusted throws on untrusted sender and succeeds on trusted sender', () => {
-    const trusted = { id: 'win' }
-    const untrusted = { id: 'bad' }
-    expect(() => assertManualPromptSenderTrusted(trusted, trusted)).not.toThrow()
-    expect(() => assertManualPromptSenderTrusted(untrusted, trusted)).toThrow('Untrusted manual prompt sender')
   })
 })

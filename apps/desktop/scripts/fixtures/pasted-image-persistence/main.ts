@@ -51,7 +51,7 @@ async function run() {
     }
     return await handler(event, ...args)
   })
-  dispose = await registerIpc({ window, workbenchWindows: windows, runtime, configStore: store, initialConfig: config,
+  dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(root, 'renderer/index.html') }, loading: null }), window, workbenchWindows: windows, runtime, configStore: store, initialConfig: config,
     applicationAccess, scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never })
   await window.loadFile(join(root, 'renderer/index.html'))
   const evaluate = (expression: string) => window.webContents.executeJavaScript(expression)

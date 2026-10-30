@@ -57,7 +57,7 @@ async function originalWait(automatic = false) {
   const rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting').mockImplementation(async (target, ref) => unwrapSessionInputOperationResult(structuredClone(await sessionInputOperationResult(() => controller.rejoinInputWaiting(target, ref)))))
   const stop = vi.spyOn(api.sessions, 'stopInputWaiting').mockImplementation(async (target, ref, id) => unwrapSessionInputOperationResult(structuredClone(await sessionInputOperationResult(() => controller.stopInputWaiting(target, ref, id)))))
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), hostingTarget = { hostId: 'local', runtimeId: 'original-runtime' }
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: vi.fn(), metadata: { publish() {}, observation() {} }, runtime: {
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  metadata: { publish() {}, observation() {} }, runtime: {
     connectionHostingTarget: async () => hostingTarget, callConnectionHost: async (target, method, params) => {
       expect(target).toEqual(hostingTarget); return rpc.call(method, params)
     }, watchConnectionMetadata: async (_target, handlers) => rpc.subscribe('connection.metadata.watch', {}, handlers)

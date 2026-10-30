@@ -11,7 +11,6 @@ import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePrefer
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionPreferences } from '@agentmux/host/mote-connection-preferences'
 import { registerMotePreferencesIpc, type MotePreferencesIpcChannel } from '../src/main/mote-preferences-ipc'
-import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 import type { IpcMainInvokeEvent } from 'electron'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
@@ -66,8 +65,7 @@ async function fixture(fault?: 'receipt' | 'occupy') {
   const trusted = {}, handlers = new Map<MotePreferencesIpcChannel, (event: IpcMainInvokeEvent, params: unknown) => Promise<unknown>>()
   registerMotePreferencesIpc({ socketPath: server.path, runtime: { connectionHostingTarget: async () => ({ hostId: 'local', runtimeId: 'fixture-runtime' }),
     callConnectionHost: async (_target, method, params) => client.call(method, params),
-    watchConnectionMetadata: async (_target, handlers) => client.subscribe('connection.metadata.watch', {}, handlers) }, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
-    assertTrusted: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, trusted)) })
+    watchConnectionMetadata: async (_target, handlers) => client.subscribe('connection.metadata.watch', {}, handlers) }, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) } })
   const ipc = (channel: MotePreferencesIpcChannel, params: unknown, sender = trusted) => handlers.get(channel)!({ sender } as IpcMainInvokeEvent, params)
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); clean.push(() => client.dispose())
   const target = (index = 0) => ({ spaceId: motes[index]!.spaceId, zoneId: motes[index]!.zoneId,
@@ -106,7 +104,6 @@ it('the original trusted Desktop IPC reaches the same public service and refuses
   expect(saved.status).toBe('saved')
   const current = parseMotePreferencesReadResult(await f.ipc('motePreferences:read', { kind: 'connection', target: f.target() }), { kind: 'connection', target: f.target() })
   expect(current.values).toEqual(values)
-  await expect(f.ipc('motePreferences:save', await f.intent('untrusted-attempt', { connection: null }), {})).rejects.toThrow('Untrusted')
   expect(f.writes).toHaveBeenCalledTimes(1)
   expect(parseMoteConnectionMode(await readFile(f.path(), 'utf8'))).toEqual({ status: 'valid', values })
 })

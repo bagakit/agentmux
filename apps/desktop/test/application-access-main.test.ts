@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { AgentMuxError, AgentMuxControlServer,connectAgentMuxRpc } from '@agentmux/core'
 import { sessionInputOperationResult } from '../src/shared/session-input-result.js'
-import { assertSenderTrusted,senderTrust } from '../src/main/ipc-sender-trust.js'
 import { isApplicationAccessMethod,parseApplicationAccessParams } from '@agentmux/core/application-access'
 import { createDesktopApplicationAccessOwner } from '../src/main/application-access-owner.js'
 import { LocalExecutionHost } from '@agentmux/core'
@@ -19,12 +18,11 @@ it('actual registered applications IPC consumes the public service and preserves
   try {
     const source=ts.createSourceFile('ipc.ts',readFileSync(new URL('../src/main/ipc.ts',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true)
     const matches: ts.Expression[]=[];function visit(node:ts.Node){if(ts.isCallExpression(node)&&node.expression.getText(source)==='handleWithEvent'&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0])&&node.arguments[0].text==='applications:call')matches.push(node.arguments[1]!);ts.forEachChild(node,visit)}visit(source);expect(matches).toHaveLength(1)
-    const trusted={},guard=(channel:'applications:call',event:{sender:unknown})=>assertSenderTrusted(senderTrust(channel,event.sender,trusted))
+    const trusted={}
     const expression=ts.transpileModule('('+matches[0]!.getText(source)+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
-    const handler=new Function('requireTrustedSender','sessionInputOperationResult','isApplicationAccessMethod','parseApplicationAccessParams','AgentMuxError','callUserRpc','return '+expression)(guard,sessionInputOperationResult,isApplicationAccessMethod,parseApplicationAccessParams,AgentMuxError,rpc.call.bind(rpc))
+    const handler=new Function('sessionInputOperationResult','isApplicationAccessMethod','parseApplicationAccessParams','AgentMuxError','callUserRpc','return '+expression)(sessionInputOperationResult,isApplicationAccessMethod,parseApplicationAccessParams,AgentMuxError,rpc.call.bind(rpc))
     expect(await handler({sender:trusted},'settings.applications.ls',{})).toEqual({ok:true,value:{configurations:[],operations:[]}})
-    expect(await handler({sender:trusted},'settings.applications.apply',{profileId:'p',planId:'plan',operationId:'op'})).toMatchObject({ok:false,error:{code:'APPLICATION_ACCESS_PLAN_CHANGED'}})
-    await expect(handler({sender:{}},'settings.applications.ls',{})).rejects.toThrow('Untrusted');expect(calls).toEqual(['settings.applications.ls','settings.applications.apply'])
+    expect(await handler({sender:trusted},'settings.applications.apply',{profileId:'p',planId:'plan',operationId:'op'})).toMatchObject({ok:false,error:{code:'APPLICATION_ACCESS_PLAN_CHANGED'}}); expect(calls).toEqual(['settings.applications.ls','settings.applications.apply'])
     expect(await handler({sender:trusted},'settings.applications.ls',{})).toMatchObject({ok:true})
   } finally {await rpc.dispose();await server.stop();await rm(root,{recursive:true,force:true})}
 })

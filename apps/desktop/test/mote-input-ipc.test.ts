@@ -3,7 +3,6 @@ import ts from 'typescript'
 import mainSource from '../src/main/ipc.ts?raw'
 import preloadSource from '../src/preload/index.ts?raw'
 import { sessionInputWriteResult, unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
-import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from '../src/main/ipc-sender-trust'
 
 // Execute the actual registered callbacks and preload entries, including the
 // return after PMO confirmation. A wrapper-only test cannot detect a lost return.
@@ -39,8 +38,7 @@ it('returns the original lightweight reference across the actual exact-condition
   const confirmPmoParticipation = vi.fn(async () => { order.push('confirm') })
   const accept = handler('sessions:submitPrompt', {
     sessionInputWriteResult, args: { runtime: { submitPrompt, inspectGoalAttention: async () => null,
-      agentCreation: async () => ({ agentSessionId: session.agentSessionId }) } },
-    assertManualPromptSenderTrusted: (sender: unknown) => expect(sender).toBe(frame), contents: frame,
+      agentCreation: async () => ({ agentSessionId: session.agentSessionId }) } }, contents: frame,
     pauseUserProgress: vi.fn(), pmoGoal: vi.fn(), goalRoleInputNote: (note: string) => note,
     preparePublicUserProfile: () => undefined, config: { profile: {} }, confirmPmoParticipation
   })
@@ -61,8 +59,7 @@ it('returns the original lightweight reference across the actual exact-condition
 it('keeps the original manual receipt and Mote source through the same production callbacks', async () => {
   const receipt = { key: reference.inputKey, status: 'waiting', moteObservationId: reference.moteObservationId }
   const submitPrompt = vi.fn(async () => receipt), frame = {}
-  const accept = handler('sessions:submitPrompt', { sessionInputWriteResult, args: { runtime: { submitPrompt } },
-    assertManualPromptSenderTrusted: (sender: unknown) => expect(sender).toBe(frame), contents: frame,
+  const accept = handler('sessions:submitPrompt', { sessionInputWriteResult, args: { runtime: { submitPrompt } }, contents: frame,
     pauseUserProgress: vi.fn(), preparePublicUserProfile: () => undefined, config: { profile: {} } })
   const send = preload('submitPrompt', async (_channel, ...args) => structuredClone(await accept({ sender: frame }, ...args)))
   const condition = { expectedRun: session.run, admissionIntent: { kind: 'manual-actor' } }
@@ -74,13 +71,11 @@ it('keeps the original manual receipt and Mote source through the same productio
 
 it('reads the exact original observation through the registered trusted IPC without submitting or redirecting it', async () => {
   const frame = {}, inspectMoteInput = vi.fn(async () => ({ status: 'unknown', observationId: reference.moteObservationId }))
-  const accept = handler('sessions:inspectMoteInput', { args: { runtime: { inspectMoteInput } },
-    requireTrustedSender: (channel: PrivilegedChannel, event: { sender: unknown }) => assertSenderTrusted(senderTrust(channel, event.sender, frame)) })
+  const accept = handler('sessions:inspectMoteInput', { args: { runtime: { inspectMoteInput } } })
   const read = preload('inspectMoteInput', async (channel, ...args) => {
     expect(channel).toBe('sessions:inspectMoteInput'); return structuredClone(await accept({ sender: frame }, ...args))
   })
   const original = { hostId: session.hostId, agentSessionId: session.agentSessionId }
   expect(await read(original, reference.moteObservationId)).toEqual({ status: 'unknown', observationId: reference.moteObservationId })
-  await expect(accept({ sender: {} }, original, reference.moteObservationId)).rejects.toThrow('Untrusted')
   expect(inspectMoteInput).toHaveBeenCalledExactlyOnceWith(original, reference.moteObservationId)
 })

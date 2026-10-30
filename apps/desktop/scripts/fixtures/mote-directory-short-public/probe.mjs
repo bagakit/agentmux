@@ -109,7 +109,7 @@ export async function probePublishedPublic({ repository, evidence, mainRef } = {
     }
     visit(parsed); assert.deepEqual([...found].sort(), [...channels].sort()); assert.equal(statements.length, channels.length + 1)
     const handlers = join(privateRoot, 'actual-ipc-handlers.cjs'), content = ts.transpileModule(statements.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
-    await writeFile(handlers, 'module.exports=ports=>{const {handle,handleWithEvent,args,config,configOwner,workspace,spatialState,files,FileReadOwner,spatialCatalog,requireTrustedSender,app,sessionSnapshotPayload,configWithRuntimeBindings,sessionInputWriteResult,assertManualPromptSenderTrusted,observeWorkbenchStorageAuthority,requireWorkbenchStorageAuthority,pauseUserProgress,notebookStore,refreshSettingsExecutor}=ports;\n' + content + '\nreturn{publicFiles}}')
+    await writeFile(handlers, 'module.exports=ports=>{const {handle,handleWithEvent,args,config,configOwner,workspace,spatialState,files,FileReadOwner,spatialCatalog,app,sessionSnapshotPayload,configWithRuntimeBindings,sessionInputWriteResult,observeWorkbenchStorageAuthority,requireWorkbenchStorageAuthority,pauseUserProgress,notebookStore,refreshSettingsExecutor}=ports;\n' + content + '\nreturn{publicFiles}}')
     receipt.actualIpcStatements = { source: relative(source, ipcFile), sha256: hash(ipcSource), channels, compiledStatementsSha256: hash(content) }
     const { build: viteBuild } = await import(require.resolve('vite'))
     const out = join(privateRoot, 'renderer')

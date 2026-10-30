@@ -2,13 +2,12 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import { BrowserOperationJournal, BrowserOperationFileStore } from '../../../src/main/browser-operation-journal'
-import { BrowserInputContextCaptures, BrowserInputContextCaptureFiles } from '../../../src/main/browser-input-context-capture'
-import { registerBrowserInputContextIpc } from '../../../src/main/browser-input-context-ipc'
-import { senderTrust, assertSenderTrusted } from '../../../src/main/ipc-sender-trust'
+import { createBrowserInputContextPorts, registerBrowserInputContextIpc } from '../../../src/main/browser-input-context-ipc'
+import { assertAppDocumentSender } from '../../../src/main/ipc-sender-trust'
 import { runBrowserInputContextCaptureProvider } from '../../../../../packages/core/test/fixtures/browser-input-context-capture-provider.mjs'
 import * as coreApi from '../../../../../packages/core/src/index'
 import { AgentMuxControlServer } from '../../../../../packages/core/src/public-rpc-server'
@@ -43,12 +42,16 @@ async function run() {
       rememberedSchemes: async () => ({}), rememberScheme: async () => { throw new Error('No external application permission is used') },
       openExternal: () => { throw new Error('No external application is opened') }
     }, journal)
-  const captures = new BrowserInputContextCaptures({ hostId: 'local', source: id => browsers.inputContext(id, 'local'),
-    files: new BrowserInputContextCaptureFiles(join(directory, 'captures')) })
-  registerBrowserInputContextIpc({ captures, handle: (channel, handler) => ipcMain.handle(channel, handler),
-    trust: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, window.webContents)) })
+  const appSource = { mode: 'prod' as const, filePath: join(directory, 'workbench.html') }
+  const { captures, readSelectionImage } = createBrowserInputContextPorts({ hostId: 'local', home: directory,
+    directory: join(directory, 'captures'), browsers, createFromBuffer: bytes => nativeImage.createFromBuffer(bytes) })
+  registerBrowserInputContextIpc({ captures, readSelectionImage, handle: (channel, handler) => ipcMain.handle(channel, (event, ...values) => {
+    assertAppDocumentSender(event, window.webContents, { current: appSource, loading: null })
+    return handler(event, ...values)
+  }) })
   try {
-    await window.loadURL('data:text/html,<!doctype html><title>Private Workbench</title>')
+    await writeFile(appSource.filePath, '<!doctype html><title>Private Workbench</title>')
+    await window.loadFile(appSource.filePath)
     const initial = await browsers.create('original-browser', originalUrl, 'capture-workspace')
     browsers.setBounds('original-browser', { x: 0, y: 0, width: 800, height: 600 })
     const program = browsers.runScript('original-browser', "await waitForElement('Continue proof'); return 'observed';",

@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { execFile } from 'node:child_process'
@@ -77,7 +78,7 @@ async function registered(onRendererStartupFailure?: (input: unknown) => boolean
     async () => { throw new Error('Host diagnostic cannot deliver progress input') }, undefined,
     async () => { throw new Error('Host diagnostic cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as unknown as ScratchTopics,
     workspaceFiles: new WorkspaceFiles(id => runtime.executionHost(id)),
     ...(onRendererStartupFailure ? { onRendererStartupFailure } : {}) })
@@ -90,9 +91,9 @@ async function registered(onRendererStartupFailure?: (input: unknown) => boolean
     expect(sender.send.mock.calls.some(([channel]) => channel === 'spatial:changed')).toBe(true)
   })
   // The registered Notes reader joins its real startup reconciliation before measuring diagnostics-only traffic.
-  await ipc.handlers.get('notesStorage:inspect')!({ sender } as unknown as IpcMainInvokeEvent)
-  return { config, runtime, prepare, commit, attach, sender, dispose, execute,
-    root, native: () => native({ sender } as unknown as IpcMainInvokeEvent),
+  await ipc.handlers.get('notesStorage:inspect')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent)
+  return {  config, runtime, prepare, commit, attach, sender, dispose, execute,
+    root, native: () => native({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent),
     bytes: () => readFile(store.filePath, 'utf8') }
 }
 
@@ -234,8 +235,8 @@ describe('registered Main crash log diagnostics share one fixed-path owner', () 
     expect(handler).toBeTypeOf('function')
     const failure = { attemptId: 'original-loader-token', event: 'renderer-import-error',
       error: { name: 'Error', message: 'ORIGINAL_BOOTSTRAP_IMPORT_PRIVATE_BODY' } }
-    expect(() => handler({ sender: {} } as IpcMainInvokeEvent, failure)).toThrow('Untrusted Workbench startup diagnostic sender')
-    expect(handler({ sender: f.sender, senderFrame: {} } as unknown as IpcMainInvokeEvent, failure)).toBe(false)
+    expect(() => handler({ senderFrame: Reflect.get({} as object, 'mainFrame'), sender: {} } as IpcMainInvokeEvent, failure)).toThrow("Untrusted application")
+    expect(() => handler({ sender: f.sender, senderFrame: {} } as unknown as IpcMainInvokeEvent, failure)).toThrow('Untrusted application')
     expect(handler({ sender: f.sender, senderFrame: f.sender.mainFrame } as unknown as IpcMainInvokeEvent,
       { ...failure, attemptId: 'old-loader-token' })).toBe(false)
     const socket = join(f.root, 'startup-control.sock'), server = new core.AgentMuxControlServer({ execute: f.execute }, socket)

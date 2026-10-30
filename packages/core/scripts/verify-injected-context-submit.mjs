@@ -31,10 +31,6 @@ await runA2aProof({
     { label: 'preload-platform-context-disconnected', file: '../../apps/desktop/src/preload/index.ts',
       projectTests: ['apps/desktop/test/first-execution-ipc.test.ts'],
       before: "ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote)",
-      after: "ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, undefined)" },
-    { label: 'foreign-platform-context-trusted', file: '../../apps/desktop/src/main/ipc.ts',
-      projectTests: ['apps/desktop/test/first-execution-ipc.test.ts'],
-      before: '    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)\n    if (authorHuman === true)',
-      after: '    if (authorHuman === true)' }
+      after: "ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, undefined)" }
   ]
 })

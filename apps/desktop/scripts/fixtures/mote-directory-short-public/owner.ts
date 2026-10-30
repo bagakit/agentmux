@@ -21,7 +21,7 @@ import { observeClientRpcSnapshot } from '../../../src/main/rpc-client-observati
 import { scratchIdentityContext } from '../../../src/main/scratch-topic-directories'
 import { retainDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_IDENTITY_PATH } from '../../../src/main/scratch-directory-identity.mjs'
 import { migrateTopicDirectories } from '../../migrate-topic-directories.mjs'
-import { assertManualPromptSenderTrusted, senderTrust, assertSenderTrusted } from '../../../src/main/ipc-sender-trust'
+import { assertAppDocumentSender, isAppDocumentSender } from '../../../src/main/ipc-sender-trust'
 import { configWithRuntimeBindings } from '../../../src/main/runtime-config-transaction'
 import { sessionSnapshotPayload } from '../../../src/main/session-snapshot-payload'
 import { sessionInputWriteResult } from '../../../src/shared/session-input-result'
@@ -142,7 +142,7 @@ export async function runPublicOwner(input: { html: string; privateRoot: string;
       sendRequest: request => { result.bridgeRequests.push(request); win!.webContents.send('agentmux:control-request', request) },
       sendCancellation: cancellation => win!.webContents.send('agentmux:control-cancel', cancellation) })
     ipcMain.on('control:response', (event, response) => {
-      if (!senderTrust('control:response', event.sender, win!.webContents).trusted || !response || typeof response.requestId !== 'string') return
+      if (!isAppDocumentSender(event, win!.webContents, { current: { mode: 'prod', filePath: input.html }, loading: null }) || !response || typeof response.requestId !== 'string') return
       result.acceptedResponses.push(response); bridge.accept(response)
     })
     const handlers = require(input.handlers)
@@ -155,12 +155,13 @@ export async function runPublicOwner(input: { html: string; privateRoot: string;
       })
       pendingIpc.add(operation); operation.then(() => pendingIpc.delete(operation), () => pendingIpc.delete(operation)); return operation
     }
-    const ports = { handle: (channel: string, fn: (...values: any[]) => any) => ipcMain.handle(channel, (_event, ...values) => invoke(channel, fn, values)),
-      handleWithEvent: (channel: string, fn: (...values: any[]) => any) => ipcMain.handle(channel, (event, ...values) => invoke(channel, fn, values, event)),
+    const ports = { handle: (channel: string, fn: (...values: any[]) => any) => ipcMain.handle(channel, (event, ...values) => {
+      assertAppDocumentSender(event, win!.webContents, { current: { mode: 'prod', filePath: input.html }, loading: null }); return invoke(channel, fn, values) }),
+      handleWithEvent: (channel: string, fn: (...values: any[]) => any) => ipcMain.handle(channel, (event, ...values) => {
+        assertAppDocumentSender(event, win!.webContents, { current: { mode: 'prod', filePath: input.html }, loading: null }); return invoke(channel, fn, values, event) }),
       args: { runtime, scratchTopics: topics, window: win }, config, configOwner, workspace: (current: AppConfig, wid: string) => { const value = current.workspaces.find(one => one.id === wid); assert.ok(value); return value },
       spatialState, files, FileReadOwner, spatialCatalog, notebookStore: new AgentMuxNotebookStore(), app, sessionSnapshotPayload, configWithRuntimeBindings, refreshSettingsExecutor,
-      sessionInputWriteResult, assertManualPromptSenderTrusted, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority,
-      requireTrustedSender: (channel: any, event: any) => assertSenderTrusted(senderTrust(channel, event.sender, win!.webContents)),
+      sessionInputWriteResult, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority,
       pauseUserProgress: () => { /* No progress loop is configured in this private proof. */ } }
     const publicFiles = handlers(ports).publicFiles
     ipcMain.handle('config:get', () => config)

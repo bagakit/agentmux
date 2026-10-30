@@ -91,7 +91,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   } }
   const flush = vi.fn(() => {})
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
-  const mainFrame = { url: pathToFileURL(join(root, 'renderer', 'index.html')).href, parent: null, framesInSubtree: [] }
+  const mainFrame = { detached: false, isDestroyed: () => false, url: pathToFileURL(join(root, 'renderer', 'index.html')).href, parent: null, framesInSubtree: [] }
   const sender = Object.assign(new EventEmitter(), { id: 771, mainFrame, getURL: () => mainFrame.url,
     isDestroyed: () => false, isLoadingMainFrame: () => false,
     send: vi.fn((channel: string, value: unknown) => {
@@ -99,13 +99,13 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
     }),
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
-  try { release = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(root, 'renderer', 'index.html') }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
   catch (error) {
-    await bridge.handlers.get('notesStorage:inspect')?.({ sender }).catch(() => {})
+    await bridge.handlers.get('notesStorage:inspect')?.({ sender, senderFrame: mainFrame }).catch(() => {})
     await rm(root, { recursive: true, force: true }); throw error
   }
   await bridge.handlers.get('notesStorage:inspect')!({ sender, senderFrame: mainFrame })

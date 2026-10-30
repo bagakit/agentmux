@@ -9,7 +9,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { NodeCapsuleOwner } from '../../../packages/capsule/src/node'
 import { callCapsuleFromApp } from '../src/main/capsule-ipc'
-import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 import { sessionInputOperationResult } from '../src/shared/session-input-result'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 
@@ -37,9 +36,7 @@ function handler(callOriginalCore: Parameters<typeof callCapsuleFromApp>[0]) {
   }
   visit(source); expect(expressions).toHaveLength(1)
   const compiled = ts.transpileModule(`(${expressions[0]})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  const requireTrustedSender = (channel: 'capsules:call', event: { sender: object }) => assertSenderTrusted(senderTrust(channel, event.sender, trusted))
-  return new Function('requireTrustedSender', 'sessionInputOperationResult', 'callCapsuleFromApp', 'args', `return ${compiled}`)(
-    requireTrustedSender, sessionInputOperationResult, callCapsuleFromApp, { runtime: { callOriginalCore } }) as (event: { sender: object }, method: unknown, params: unknown) => Promise<unknown>
+  return new Function( 'sessionInputOperationResult', 'callCapsuleFromApp', 'args', `return ${compiled}`)( sessionInputOperationResult, callCapsuleFromApp, { runtime: { callOriginalCore } }) as (event: { sender: object }, method: unknown, params: unknown) => Promise<unknown>
 }
 function mount(callOriginalCore: Parameters<typeof callCapsuleFromApp>[0]) {
   const execute = handler(callOriginalCore)
@@ -82,14 +79,6 @@ it('routes actual Renderer/preload/Main IPC through the original public Host own
   const restored = await NodeCapsuleOwner.open({ stateDirectory: join(root, 'capsules') })
   closes.push(() => restored.close())
   expect((await restored.call('capsule.config.inspect', {})).config).toEqual(changed.config)
-})
-
-it('rejects untrusted App senders before any Host call', async () => {
-  const call = vi.fn(async () => ({ capsules: [], issues: [] }))
-  mount(call as never); sender = intruder
-  const failure = await api.capsules.call('capsule.ls', {}).then(() => null, error => error)
-  expect(failure).toMatchObject({ message: 'Untrusted Capsule page management sender' })
-  expect(call).not.toHaveBeenCalled()
 })
 
 it('delegates each original Capsule call to the exact original Host once', async () => {

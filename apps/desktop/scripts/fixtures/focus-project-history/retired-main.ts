@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
     win=new BrowserWindow({width:1440,height:920,show:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false,preload}})
     const registerHandle=ipcMain.handle.bind(ipcMain)
     ipcMain.handle=(channel,listener)=>registerHandle(channel,(event,...args)=>{if(['sessions:historySources','sessions:historyPage','sessions:timeline'].includes(channel))output.ipc.push({channel,args});return listener(event,...args)})
-    dispose=await registerIpc({window:win,runtime:controller,configStore:{get:async()=>config} as never,progressLoops:{subscribe:()=>()=>{}} as never,scratchTopics:{} as never,workspaceFiles:{dispose:async()=>{}} as never})
+    dispose=await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }),window:win,runtime:controller,configStore:{get:async()=>config} as never,progressLoops:{subscribe:()=>()=>{}} as never,scratchTopics:{} as never,workspaceFiles:{dispose:async()=>{}} as never})
     win.webContents.on('console-message',(_event,level,message)=>{if(level>=2)process.stderr.write(`Renderer: ${message}\n`)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await until('retiredSourceReady && !!document.querySelector("[aria-label=\\"View input records\\"]")')

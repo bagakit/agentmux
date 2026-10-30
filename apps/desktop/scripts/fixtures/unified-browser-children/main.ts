@@ -13,10 +13,11 @@ import { projectBrowserControlResult } from '../../../src/main/browser-completio
 import { browserResourceLocations } from '../../../src/main/browser-resource-directory'
 import { coldBrowserTargets } from '../../../src/main/browser-cold-descriptor'
 import { browserRunResult, unwrapBrowserRunResult } from '../../../src/shared/browser-run-result'
-import { senderTrust, assertSenderTrusted } from '../../../src/main/ipc-sender-trust'
+import { assertAppDocumentSender } from '../../../src/main/ipc-sender-trust'
 
 const home = process.env.AGENTMUX_CHILD_HOME!, out = process.env.AGENTMUX_CHILD_OUT!, assets = process.env.AGENTMUX_CHILD_ASSETS!
 assert.ok(home && out && assets, 'This fixture needs its own explicit private namespace')
+const appSource = { mode: 'prod' as const, filePath: join(home, 'workbench.html') }
 const workspaceId = 'child-proof-workspace'
 const receipt: any = { schema: 'agentmux.unified-browser-children.native.v1', passed: false, pid: process.pid,
   cases: [], requests: [], calls: [], publicCalls: [], cli: [], events: [], cleanup: [], originalCallbacks: [], constructionFailures: [],
@@ -187,10 +188,10 @@ async function publicConsumers() {
   const consumed = JSON.parse(await readFile(join(assets, 'consumers.json'), 'utf8'))
   const context: Record<string, any> = {
     handleWithEvent: (channel: string, handler: (...args: any[]) => unknown) => ipcMain.handle(channel, (event, ...args) => {
+      assertAppDocumentSender(event, rootWindow!.webContents, { current: appSource, loading: null })
       receipt.calls.push({ channel, senderId: event.sender.id, frame: event.senderFrame?.url })
       return handler(event, ...args)
     }),
-    requireTrustedSender: (channel: any, event: any) => assertSenderTrusted(senderTrust(channel, event.sender, rootWindow!.webContents)),
     workspace: (_config: unknown, id: string) => { assert.equal(id, workspaceId) },
     config: { browser: { agentAutomation: true } }, app, browsers: manager,
     externalBridge: { list: () => [], membershipCoverage: 'complete' },
@@ -308,7 +309,8 @@ async function run() {
   await checkpoint('before-private-root-window')
   rootWindow = new BrowserWindow({ width: 900, height: 650, show: false, webPreferences: { preload: join(assets, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
   await checkpoint('private-root-created')
-  await rootWindow.loadURL('data:text/html,<title>Private unified Browser owner proof</title>')
+  await writeFile(appSource.filePath, '<!doctype html><title>Private unified Browser owner proof</title>')
+  await rootWindow.loadFile(appSource.filePath)
   await checkpoint('private-root-document-loaded')
   const send = rootWindow.webContents.send.bind(rootWindow.webContents)
   rootWindow.webContents.send = (channel, ...args) => { if (channel === 'agentmux:browser-event') receipt.events.push(args[0]); send(channel, ...args) }

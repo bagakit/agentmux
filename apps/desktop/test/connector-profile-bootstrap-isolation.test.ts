@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -77,7 +78,7 @@ async function registered(root: string, profile: 'default' | 'a' | 'b') {
   vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
   const sender = Object.assign(new EventEmitter(), { id: 783, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const host = new LocalExecutionHost(), files = new WorkspaceFiles(() => host)
-  const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: typeof config) => value, save: async (value: typeof config) => { config = value; return value } } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: files })

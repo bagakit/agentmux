@@ -31,7 +31,7 @@ beforeEach(async () => {
   await server.start()
   calls = []; network = []; trusted.mockClear()
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted,
+  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
     socketPath: server.path, secrets: services.secrets })
   vi.spyOn(api.connections, 'call').mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, input))
@@ -82,7 +82,7 @@ it('discovers Lark from Conversation Channels, Overview and search and opens its
   await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.enrollment.ls')).toBe(true))
   expect(calls.some(call => call.method === 'connection.ls')).toBe(true)
   await vi.waitFor(() => expect(calls.some(call => call.method === 'connection.service.get')).toBe(true))
-  expect(trusted.mock.calls.some(call => call[0] === 'connections:call')).toBe(true)
+
   for (const query of ['Agent 对话', 'Connector', '飞书', 'Lark']) {
     await input('Search settings', query)
     const choices = dom.container.querySelectorAll('nav [data-settings-target="lark"]')

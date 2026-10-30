@@ -51,7 +51,7 @@ beforeEach(async () => {
     watchConnectionMetadata: (target, handlers) => { expect(target).toEqual(hostingTarget); return rpc.subscribe('connection.metadata.watch', {}, handlers) }
   }
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
-  const sender = {}, ipc = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: (_channel, event) => expect(event.sender).toBe(sender), runtime, metadata: { publish() {}, observation() {} } })
+  const sender = {}, ipc = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  runtime, metadata: { publish() {}, observation() {} } })
   cleanup.push(ipc.dispose)
   vi.spyOn(api.connections, 'call').mockImplementation(async (method, params, target) => unwrapSessionInputOperationResult(await handlers.get('connections:call')!({ sender }, method, params, target)))
   vi.spyOn(api.connections, 'storeCredential').mockImplementation(async (input, target) => handlers.get('connections:storeCredential')!({ sender }, input, target))

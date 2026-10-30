@@ -37,7 +37,7 @@ const blocks = [
   { name: "program-load-before-read", path: owner, tests: ownerTests, pattern: "observes the original navigation load", edits: [["await this.navigate(binding, attached, url, active.controller.signal)", "await attached.sendCommand('Page.navigate', { url })"]] },
   { name: "program-stop-original-grant", path: owner, tests: ownerTests, pattern: "stops the original operation", edits: [["this.bridge.stopSharing(active.binding.id)", "void active.binding.id"]] },
   { name: "main-original-external-route", path: 'apps/desktop/src/main/ipc.ts', tests: mainTests, pattern: "routes the chosen original external", edits: [["if (externalBrowsers.has(id)) {", "if (false) {"]] },
-  { name: "main-original-sender", path: 'apps/desktop/src/main/ipc.ts', tests: mainTests, pattern: "sends no owner action", edits: [["requireTrustedSender('browser:runScript', event)", "void event"]] },
+
   { name: "public-targets-verb", path: 'packages/core/src/agentmux-cli-commands.ts', tests: cliTests, pattern: "discovers an explicitly shared target", edits: [["command('browser.targets',", "command('browser.missing-targets',"]] },
   { name: 'public-rpc-targets-owner', path: 'packages/core/src/public-rpc.ts', tests: cliTests, pattern: 'discovers an explicitly shared target', edits: [["'browser.targets': 'browser.targets'", "'browser.targets': 'browser.history'"]] },
   { name: 'public-rpc-targets-result', path: 'packages/core/src/control-codec.ts', tests: cliTests, pattern: 'routes typed SDK discovery', edits: [['result: parseBrowserTargetsResult(result)', 'result: result as any']] },

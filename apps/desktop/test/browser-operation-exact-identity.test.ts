@@ -121,7 +121,7 @@ describe('Browser operation exact identity public forwarding', () => {
       const path = join(directory, 'operations.sqlite'), first = new BrowserOperationJournal(new BrowserOperationFileStore(path))
       await first.start({ ...input, id }); await first.finish(id, 'completed')
       const journal = new BrowserOperationJournal(new BrowserOperationFileStore(path)), record = await journal.get(id)
-      const ports = { browsers: { getOperation: vi.fn((key: string) => journal.get(key)), runScript: vi.fn() }, ensureBrowser: vi.fn(), config: { browser: { agentAutomation: true } }, requireTrustedSender: vi.fn(),
+      const ports = { browsers: { getOperation: vi.fn((key: string) => journal.get(key)), runScript: vi.fn() }, ensureBrowser: vi.fn(), config: { browser: { agentAutomation: true } },
         browserRunResult, browserOperationAlreadyExistsError, workspace: vi.fn(), externalBridge: { require: vi.fn() }, externalBrowsers: { has: vi.fn(() => false), runScript: vi.fn() } }
       const request = admitted(id)
       expect(request).toMatchObject({ operationId: id })

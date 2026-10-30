@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -14,7 +15,7 @@ import type { WorkspaceFiles } from '../src/main/workspace-files'
 // Use the existing Git IPC suites' ordinary Electron boundary substitutes.
 // The actual preload, registered Main handler, GitService and Git process run;
 // unrelated Browser/Control owners are isolated, without starting user services.
-const fixture = vi.hoisted(() => ({ path: '', api: undefined as unknown as AgentMuxPreloadApi,
+const fixture = vi.hoisted(() => ({  path: '', api: undefined as unknown as AgentMuxPreloadApi,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   invokes: [] as Array<{ channel: string; values: unknown[] }>,
   sender: { id: 1, isDestroyed: () => false, send: vi.fn(), on: vi.fn(), once: vi.fn(), off: vi.fn(), session: { flushStorageData: vi.fn() } } }))
@@ -27,7 +28,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   ipcRenderer: { async invoke(channel: string, ...values: unknown[]) {
     fixture.invokes.push({ channel, values }); const handler = fixture.handlers.get(channel)
     if (!handler) throw new Error(`Missing registered Main handler: ${channel}`)
-    return await handler({ sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
+    return await handler({ senderFrame: Reflect.get(fixture.sender as object, 'mainFrame'), sender: fixture.sender } as unknown as IpcMainInvokeEvent, ...values)
   }, on: vi.fn(), off: vi.fn(), send: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isAsyncEncryptionAvailable: async () => false } }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
@@ -63,7 +64,7 @@ beforeEach(async () => {
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {},
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     executionHost: (id: string) => { expect(id).toBe('original-host'); return host } } as unknown as RuntimeController
-  dispose = await registerIpc({ initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
+  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }) } as unknown as ConfigStore,

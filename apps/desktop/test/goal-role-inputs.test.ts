@@ -47,12 +47,11 @@ function registeredHandler(channel: string) {
   visit(source); expect(found).toHaveLength(1)
   return ts.transpileModule(`(${found[0]!.arguments[1]!.getText(source)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 }
-const trusted = (actual: object, expected: object) => { if (actual !== expected) throw new Error('Untrusted sender') }
 function promptHandler(runtime: RuntimeController, dispatch: GoalDispatchInputOwner, sender: object, goals?: ReturnType<typeof openDemandStore>) {
   const expression = registeredHandler('sessions:submitPrompt')
-  const names = ['sessionInputWriteResult', 'assertManualPromptSenderTrusted', 'pauseUserProgress', 'args', 'contents', 'pmoGoal', 'goalPmoOperation', 'goalRoleInputNote', 'AgentMuxError', 'assertGoalDispatchReference', 'goalDispatchInputs', 'confirmedPmoSource']
+  const names = ['sessionInputWriteResult', 'pauseUserProgress', 'args', 'contents', 'pmoGoal', 'goalPmoOperation', 'goalRoleInputNote', 'AgentMuxError', 'assertGoalDispatchReference', 'goalDispatchInputs', 'confirmedPmoSource']
   const outside = () => { throw new Error('PMO creation provenance is outside this finite Start fixture') }
-  return new Function(...names, `return ${expression}`)(sessionInputWriteResult, trusted, vi.fn(), { runtime, window: { webContents: sender } }, sender,
+  return new Function(...names, `return ${expression}`)(sessionInputWriteResult, vi.fn(), { runtime, window: { webContents: sender } }, sender,
     goals ? async (intent: { goalId: string }) => { const goal = await goals.get(intent.goalId); expect(goal).not.toBeNull(); return goal } : outside,
     goalPmoOperation, goalRoleInputNote, AgentMuxError, assertGoalDispatchReference, dispatch,
     // Participation persistence is tested by its business owner; this input proof observes Core records.
@@ -109,8 +108,8 @@ it.each(['fresh', 'reuse'] as const)('actual Renderer PMO %s producer reaches re
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { fixture: { providerId: 'traex', label: 'Fixture', command: process.execPath, args: [], env: {}, injectAgentMuxGuide: false } },
     workspaces: [{ id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'scratch' }] }
   const sender = { isDestroyed: () => false }, submit = promptHandler(runtime, new GoalDispatchInputOwner(goals, runtime), sender, goals)
-  const launch = new Function('sessionAgentLaunchResult', 'assertManualPromptSenderTrusted', 'pmoGoal', 'goalPmoOperation', 'args', 'contents', 'config', 'confirmedPmoSource', 'AgentMuxError', `return ${registeredHandler('sessions:launchAgent')}`)(
-    sessionAgentLaunchResult, trusted, async (intent: { goalId: string }) => { expect(intent.goalId).toBe(goal.id) }, goalPmoOperation, { runtime, window: { webContents: sender } }, sender, config, async () => {}, AgentMuxError)
+  const launch = new Function('sessionAgentLaunchResult', 'pmoGoal', 'goalPmoOperation', 'args', 'contents', 'config', 'confirmedPmoSource', 'AgentMuxError', `return ${registeredHandler('sessions:launchAgent')}`)(
+    sessionAgentLaunchResult, async (intent: { goalId: string }) => { expect(intent.goalId).toBe(goal.id) }, goalPmoOperation, { runtime, window: { webContents: sender } }, sender, config, async () => {}, AgentMuxError)
   bridge.invoke.mockImplementation(async (channel, ...args) => {
     if (channel === 'sessions:launchAgent') return launch({ sender }, ...structuredClone(args))
     if (channel === 'sessions:submitPrompt') return submit({ sender }, ...structuredClone(args))

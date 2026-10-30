@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { injectedContextCore } from './helpers/injected-context-core'
 import { startDirectGoal, retryDirectGoal, directGoalRequest } from '../src/renderer/src/lib/goals-direct-pmo'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -21,7 +22,7 @@ import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shar
 import { ConfigStore } from '../src/main/config-store'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
+const bridge = vi.hoisted(() => ({  api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
   storagePath: '', controlOptions: null as any,
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
@@ -180,20 +181,20 @@ beforeEach(async () => {
     args = structuredClone(args)
     const response = args[0]
     if (corruptReply && response?.ok && response.result?.operation === 'continuous-progress.observeInput') response.result.control.run.runId = 'wrong-run'
-    const send = () => { for (const fn of bridge.main.get(channel) ?? []) fn({ sender: bridge.sender }, ...args) }
+    const send = () => { for (const fn of bridge.main.get(channel) ?? []) fn({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender }, ...args) }
     if (response?.ok && response.result?.operation === 'continuous-progress.observeInput' && afterInputObservation) {
       const once = afterInputObservation; afterInputObservation = undefined; void once().then(send)
     } else send()
   }
   const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(bridge.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, progressLoops: manager, demands, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: expect.getState().currentTestName?.startsWith('Mote new-chat origin:')
       ? new MoteOriginWorkspaceFiles(() => ({ kind: 'local' }) as never)
       : { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
+    return handler!({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender } as IpcMainInvokeEvent, ...values)
   })
   window.localStorage.clear()
   useAppStore.setState({ ...initial, loading: true, restoredWorkbench: null, tabs: {}, layouts: {}, sessions: [],
@@ -1157,7 +1158,7 @@ it('origin Supervisor first-default real NewGoal PMO creation consumes exact Cor
   await expect(api.demands.reconcilePmoCreation({ goalId, creationOperationId: 'different-goal-create' }, 'local', reservedId, createOperationId)).rejects.toThrow('exact original')
   const intent = { goalId, creationOperationId: original.creationOrigin!.operationId }, before = structuredClone(saved)
   const foreign = bridge.handlers.get('demands:reconcilePmoCreation')!
-  await expect(foreign({ sender: { id: -1 } }, intent, 'local', reservedId, createOperationId)).rejects.toThrow('Untrusted')
+  await expect(Promise.resolve().then(() => foreign({ senderFrame: Reflect.get({ id: -1 } as object, 'mainFrame'), sender: { id: -1 } }, intent, 'local', reservedId, createOperationId))).rejects.toThrow("Untrusted application")
   expect((await demands.get(goalId))!.participations).toEqual(before.participations)
   } finally { release?.(); await pending; delayed.mockRestore() }
 })

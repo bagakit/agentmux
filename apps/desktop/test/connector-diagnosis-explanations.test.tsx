@@ -40,7 +40,7 @@ async function consumer() {
   vi.spyOn(hosted, 'connect').mockRejectedValue(Error('Only startup observation is controlled'))
   const controller = new RuntimeController(f.store, async () => hosted); closes.push(() => controller.dispose()); controller.commit(await controller.prepare(composerConfig))
   const hostingTarget = { hostId: 'local', runtimeId: 'original-image-runtime' }, handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), trusted = vi.fn()
-  registerConnectorIpc({ handleWithEvent: (method, handler) => handlers.set(method, handler), assertTrusted: trusted, runtime: controller, metadata: { publish() {}, observation() {} } })
+  registerConnectorIpc({ handleWithEvent: (method, handler) => handlers.set(method, handler),  runtime: controller, metadata: { publish() {}, observation() {} } })
   const calls: Array<{ method: string; input: any; target: any }> = []; let failInspect = false, held: Promise<void> | undefined, release = () => {}
   closes.push(() => release())
   vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, target) => {
@@ -52,7 +52,7 @@ async function consumer() {
   })
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
   useAppStore.setState({ connectorRoomIntents: {}, agentComposerDrafts: { 'original-agent': 'Keep the original diagnosis draft' } })
-  const unchanged = () => { expect(starts).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original diagnosis draft'); expect(calls.every(call => JSON.stringify(call.target) === JSON.stringify(hostingTarget))).toBe(true); expect(trusted).toHaveBeenCalled() }
+  const unchanged = () => { expect(starts).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original diagnosis draft'); expect(calls.every(call => JSON.stringify(call.target) === JSON.stringify(hostingTarget))).toBe(true);  }
   return { ...f, hostingTarget, calls, unchanged, mount: (binding: RoomBinding = f.binding) => dom.render(<ConnectorDeliveryDetails binding={binding} hostingTarget={hostingTarget} />),
     failInspect: () => { failInspect = true }, hold: () => { held = new Promise<void>(resolve => { release = resolve }) }, release: () => { held = undefined; release() } }
 }

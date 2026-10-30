@@ -17,7 +17,6 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { browserColdDescriptor } from '../src/main/browser-cold-descriptor.js'
 import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
 import { nameChangeRequests, unknownNameContext, desktopNameContext } from '../src/main/name-change-audit.js'
-import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust.js'
 
 const native = await vi.hoisted(async () => (await import('./helpers/browser-resource-directory-ports')).directoryNativePorts())
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View,
@@ -138,8 +137,7 @@ it('exact public Browser restore returns one current native row without catalog 
   })
   const mainExecute = ipcFunction('executeControl', { nameChangeRequests, unknownNameContext, executeControlOwner: (request: any, signal: AbortSignal) => bridge.execute(request, signal) })
   const trustedContents = (manager as any).window.webContents
-  const requireTrustedSender = (channel: any, event: any) => assertSenderTrusted(senderTrust(channel, event.sender, trustedContents))
-  const resume = ipcFunction('browser:restoreResource', { ensureBrowser, browsers: manager, controlBridge: bridge, nameChangeRequests, requireTrustedSender, AgentMuxError,
+  const resume = ipcFunction('browser:restoreResource', { ensureBrowser, browsers: manager, controlBridge: bridge, nameChangeRequests,  AgentMuxError,
     app: { getAppMetrics: forbidden('metrics') } })
   const registrations = new Map<string, (...args: any[]) => Promise<any>>()
   const handleWithEvent = ipcFunction('handleWithEvent', { channels: [], ipcMain: { handle: (channel: string, listener: (...args: any[]) => Promise<any>) => registrations.set(channel, listener) },
@@ -225,7 +223,6 @@ it('exact public Browser restore returns one current native row without catalog 
     expect((manager as any).entries.get(original.id).workspaceId).toBe('workspace')
     expect(useAppStore.getState().tabs).toBe(beforeTabs); expect(useAppStore.getState().layouts).toBe(beforeLayouts)
     expect({ activeWorkspaceId: useAppStore.getState().activeWorkspaceId, mainSurface: useAppStore.getState().mainSurface, retainedSpatialFocus: useAppStore.getState().retainedSpatialFocus }).toEqual(beforeWorkface)
-    await expect(registered({ sender: {} }, original.id, 'not-admitted')).rejects.toThrow(/Untrusted/)
     expect(counters.ensure).toBe(2)
     const actionHelp = await cli('help', ['browser', 'restore', '--help'])
     expect(actionHelp.code).toBe(0); expect(actionHelp.stdout).toContain('one current native target'); expect(actionHelp.stdout).toContain('unknown reply')

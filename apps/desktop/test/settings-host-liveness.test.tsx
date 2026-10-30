@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { act } from 'react'
 import { EventEmitter } from 'node:events'
@@ -268,7 +269,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
   const sender = Object.assign(new EventEmitter(), { id: 992, isDestroyed: () => false, mainFrame: { framesInSubtree: [] },
     send: (channel: string, value: unknown) => { if (channel === CONFIG_CHANGED_CHANNEL) publications.push(value as AppConfig) } })
   ipc.handlers.clear()
-  const dispose = await registerIpc({ initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: disk, runtime, progressLoops: progress, scratchTopics: {} as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   try {
@@ -282,7 +283,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
     const next = { ...config, hosts: operation === 'delete' ? [config.hosts[0]!] : config.hosts.map(host =>
       host.id === protectedHost.id ? { ...host, label: 'Changed while referenced' } : host) }
     expect(facts).toHaveLength(1)
-    await expect(handler!({ sender } as unknown as IpcMainInvokeEvent, next, expected)).rejects.toThrow('Stop sessions on ssh-protected')
+    await expect(handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, next, expected)).rejects.toThrow('Stop sessions on ssh-protected')
     expect(prepare).toHaveBeenCalledTimes(1); expect(guard).toHaveBeenCalledTimes(1)
     expect(client.connect).toHaveBeenCalledTimes(1); expect(client.listRuns).toHaveBeenCalledTimes(1)
     expect(await readFile(disk.filePath, 'utf8')).toBe(before); expect(expected).toEqual(config)

@@ -1,3 +1,4 @@
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -169,7 +170,7 @@ describe('Browser settings share the sole typed Main owner', () => {
     // The durable private file is already initialized; no default global Topics bootstrap is part of this owner oracle.
     vi.spyOn(f.store, 'get').mockResolvedValue(f.config)
     ipc.handlers.clear(); ipc.execute = undefined; ipc.remember = undefined
-    const dispose = await registerIpc({ initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
       configStore: f.store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     try {
@@ -181,13 +182,13 @@ describe('Browser settings share the sole typed Main owner', () => {
         { scheme: 'alpha', choice: 'deny' }, { scheme: 'neighbor', choice: 'allow' }, { scheme: '__proto__', choice: 'deny' }
       ] })
       await ipc.remember!('alpha', 'allow'); const bytes = await f.bytes(), publications = sender.send.mock.calls.length
-      await expect(handler!({ sender } as unknown as IpcMainInvokeEvent, 'alpha', 'deny')).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
+      await expect(handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, 'alpha', 'deny')).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
       expect(await f.bytes()).toBe(bytes); expect(sender.send).toHaveBeenCalledTimes(publications)
-      await expect(handler!({ sender } as unknown as IpcMainInvokeEvent, 'alpha', undefined)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+      await expect(handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, 'alpha', undefined)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
       await expect(ipc.execute!({ ...envelope, operation: 'settings.browser.links.forget', scheme: 'alpha' })).resolves.toEqual({ operation: 'settings.browser.links.forget', scheme: 'alpha', changed: true })
       expect(JSON.parse(await f.bytes()).browser.appLinkSchemes).toEqual(Object.fromEntries([['neighbor', 'allow'], ['__proto__', 'deny']]))
       expect(sender.send).toHaveBeenCalledTimes(publications + 1)
-      await handler!({ sender } as unknown as IpcMainInvokeEvent, '__proto__', 'deny')
+      await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, '__proto__', 'deny')
       expect(JSON.parse(await f.bytes()).browser.appLinkSchemes).toEqual({ neighbor: 'allow' })
       expect(sender.send).toHaveBeenCalledTimes(publications + 2)
     } finally { await dispose(); await progressLoops.stop() }

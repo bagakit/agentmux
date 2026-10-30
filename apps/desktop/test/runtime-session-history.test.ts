@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
 import {expect,it,vi} from 'vitest'
@@ -55,14 +56,14 @@ it('actual preload/registered IPC/RuntimeController use trusted exact durable Ex
  client.connect.mockRejectedValue(new Error('synthetic Runtime is temporarily unavailable'))
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:77,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
   const handler=preload.handlers.get('sessions:historyPage')
   expect(handler).toBeTypeOf('function')
   preload.invoke.mockImplementation((channel:string,subject:AgentSessionControl,options)=>{
-   expect(channel).toBe('sessions:historyPage');return handler!({sender} as unknown as IpcMainInvokeEvent,subject,options)
+   expect(channel).toBe('sessions:historyPage');return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender} as unknown as IpcMainInvokeEvent,subject,options)
   })
   expect(preload.api).not.toBeNull()
   await expect(preload.api!.sessions.historyPage(control,{cursor:'native-opaque',limit:30})).resolves.toBe(page)
@@ -84,11 +85,11 @@ it('actual snapshot IPC preserves separate observation steps and the unverified 
  vi.spyOn(controller,'endpointWarningSnapshot').mockReturnValue([reading,catalog,runtime])
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:78,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config,save:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
   workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
-  preload.invoke.mockImplementation((channel:string,...args:unknown[])=>preload.handlers.get(channel)!({sender},...args))
+  preload.invoke.mockImplementation((channel:string,...args:unknown[])=>preload.handlers.get(channel)!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender},...args))
   const snapshot=await preload.api!.sessions.snapshot()
   expect(snapshot.runtimeEndpointWarnings).toEqual([reading,catalog,{...runtime,availability:'unverified',message:'Runtime was omitted from the read cut'}])
  }finally{await dispose()}
@@ -103,18 +104,18 @@ it('actual preload and IPC distinguish partial History observations from strict 
  Object.assign(other,{runtimeOwnerIdentity:()=>({availability:'connected'})})
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:79,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
   workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
-  preload.invoke.mockImplementation((channel:string,...args:unknown[])=>preload.handlers.get(channel)!({sender},...args))
+  preload.invoke.mockImplementation((channel:string,...args:unknown[])=>preload.handlers.get(channel)!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender},...args))
   const observed=await preload.api!.sessions.historySources({observation:true})
   expect(observed.sources.map(source=>[source.hostId,source.agentSessionId])).toEqual([[control.hostId,control.agentSessionId]])
   expect(observed.warnings).toEqual([expect.objectContaining({hostId:'other',scope:'observation',message:failure.message})])
   expect(preload.invoke).toHaveBeenLastCalledWith('sessions:historySources',{observation:true})
   await expect(preload.api!.sessions.historySources()).rejects.toBe(failure)
   expect(preload.invoke).toHaveBeenLastCalledWith('sessions:historySources')
-  await expect(preload.handlers.get('sessions:historySources')!({sender},{observation:true,hostId:'guessed'})).rejects.toThrow('exact observation mode')
+  await expect(preload.handlers.get('sessions:historySources')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender},{observation:true,hostId:'guessed'})).rejects.toThrow('exact observation mode')
   expect(client.connect).not.toHaveBeenCalled();expect(other.connect).not.toHaveBeenCalled()
   await controller.write(control,'still healthy exact input','user')
   expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({agentSessionId:control.agentSessionId,expectedRun:control.run,data:'still healthy exact input',source:'user'})
@@ -126,7 +127,7 @@ it('actual preload and IPC distinguish partial History observations from strict 
   expect(preload.invoke).toHaveBeenLastCalledWith('providers:list',{observation:true})
   await expect(preload.api!.providers.list()).resolves.toEqual(providerRead.catalog)
   expect(preload.invoke).toHaveBeenLastCalledWith('providers:list')
-  await expect(preload.handlers.get('providers:list')!({sender},{observation:false})).rejects.toThrow('exact observation mode')
+  await expect(preload.handlers.get('providers:list')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender},{observation:false})).rejects.toThrow('exact observation mode')
  }finally{await dispose()}
 })
 
@@ -183,7 +184,7 @@ it('actual trusted IPC/preload observation owns its token, filters other notices
  const {controller,client,config}=await owner()
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:88,isDestroyed:()=>false,send:vi.fn((channel:string,payload:unknown)=>preload.receivers.get(channel)?.({},payload))})
- const disposeIpc=await registerIpc({ initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const disposeIpc=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  let deliver!:(event:unknown)=>void
  let ready!:(handle:AgentSessionHistoryObservationHandle)=>void
@@ -191,7 +192,7 @@ it('actual trusted IPC/preload observation owns its token, filters other notices
  const calls:Array<{channel:string,args:unknown[]}>=[]
  preload.invoke.mockImplementation(async(channel:string,...args:unknown[])=>{
   calls.push({channel,args});const handler=preload.handlers.get(channel);expect(handler).toBeTypeOf('function')
-  return handler!({sender} as unknown as IpcMainInvokeEvent,...args)
+  return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender} as unknown as IpcMainInvokeEvent,...args)
  })
  try{
   const receive=vi.fn(),abort=new AbortController()
@@ -209,7 +210,7 @@ it('actual trusted IPC/preload observation owns its token, filters other notices
   expect(receive).toHaveBeenCalledTimes(0)
   deliver(notice);expect(receive).toHaveBeenCalledExactlyOnceWith(notice)
   const observeHandler=preload.handlers.get('sessions:observeHistory')!
-  await expect(observeHandler({sender:Object.assign(new EventEmitter(),{id:999,isDestroyed:()=>false})},'foreign',control)).rejects.toThrow('Untrusted history observation sender')
+  await expect(Promise.resolve().then(() => observeHandler({ senderFrame: Reflect.get(Object.assign(new EventEmitter(),{id:999,isDestroyed:()=>false}) as object, 'mainFrame'),sender:Object.assign(new EventEmitter(),{id:999,isDestroyed:()=>false})},'foreign',control))).rejects.toThrow("Untrusted application")
   expect(client.observeSessionHistory).toHaveBeenCalledTimes(1)
   const rejected=pending.catch(error=>error)
   const disposeHandle=vi.fn()

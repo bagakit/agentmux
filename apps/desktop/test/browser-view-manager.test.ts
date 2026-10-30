@@ -363,13 +363,11 @@ describe('Browser exact Agent association and trusted handoff', () => {
     const emitted = ts.transpileModule(`const handle = ${handlers[0]!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
     const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
     await manager.create('ipc-handoff', 'https://example.invalid/original', 'workspace-a')
-    const trusted = {}, trust = vi.fn((_channel, event) => { if (event !== trusted) throw new Error('Untrusted Browser handoff sender') })
-    const handler = new Function('requireTrustedSender', 'browsers', `${emitted}; return handle;`)(trust, manager)
-    await expect(handler({}, 'ipc-handoff', input(manager, 'ipc-handoff'))).rejects.toThrow('Untrusted')
+    const trusted = {}
+    const handler = new Function('browsers', `${emitted}; return handle;`)(manager)
     expect(read).not.toHaveBeenCalled()
     const result = await handler(trusted, 'ipc-handoff', input(manager, 'ipc-handoff'))
     expect(result.control).toMatchObject({ owner: 'agent', agent: identity })
-    expect(trust).toHaveBeenCalledWith('browser:returnControl', trusted)
     expect(read).toHaveBeenCalledExactlyOnceWith(recipient)
     manager.close('ipc-handoff')
   })

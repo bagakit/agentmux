@@ -159,7 +159,7 @@ function runHandler(ports: Record<string, unknown>) {
 }
 function publicPorts() {
   const browsers = { getOperation: vi.fn<BrowserOperationJournal['get']>(async () => null), runScript: vi.fn(async () => report) }
-  return { browsers, config: { browser: { agentAutomation: true } }, requireTrustedSender: vi.fn(), ensureBrowser: vi.fn(async () => {}),
+  return { browsers, config: { browser: { agentAutomation: true } },  ensureBrowser: vi.fn(async () => {}),
     browserRunResult, browserOperationAlreadyExistsError, workspace: vi.fn(), externalBridge: { require: vi.fn(() => ({ workspaceId: 'workspace' })) },
     externalBrowsers: { has: vi.fn(() => false), runScript: vi.fn(async () => report) } }
 }
@@ -171,15 +171,12 @@ describe('Browser operation identity public admission', () => {
     expect(ports.browsers.getOperation).toHaveBeenCalledExactlyOnceWith('retained')
     expect(ports.ensureBrowser).not.toHaveBeenCalled(); expect(ports.browsers.runScript).not.toHaveBeenCalled(); expect(ports.externalBrowsers.runScript).not.toHaveBeenCalled()
   })
-  it('keeps trusted/automation admission before observation and preserves fresh embedded/external operations', async () => {
+  it('keeps automation admission before observation and preserves fresh embedded/external operations', async () => {
     const ports = publicPorts(), handle = runHandler(ports)
     ports.config.browser.agentAutomation = false
     expect(await handle({}, 'original-page', 'return 1', undefined, 'fresh')).toMatchObject({ ok: false, error: { code: 'BROWSER_AUTOMATION_DISABLED' } })
     expect(ports.browsers.getOperation).not.toHaveBeenCalled(); expect(ports.ensureBrowser).not.toHaveBeenCalled()
     ports.config.browser.agentAutomation = true
-    ports.requireTrustedSender.mockImplementationOnce(() => { throw Object.assign(new Error('Untrusted sender'), { code: 'CONTROL_PERMISSION_DENIED' }) })
-    await expect(handle({}, 'original-page', 'return 1', undefined, 'fresh')).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-    expect(ports.browsers.getOperation).not.toHaveBeenCalled()
     expect(unwrapBrowserRunResult(await handle({}, 'original-page', 'return 1', undefined, 'fresh'))).toEqual(report)
     expect(ports.browsers.runScript).toHaveBeenCalledExactlyOnceWith('original-page', 'return 1', undefined, undefined, 'fresh')
     expect(ports.ensureBrowser).toHaveBeenCalledExactlyOnceWith('original-page')

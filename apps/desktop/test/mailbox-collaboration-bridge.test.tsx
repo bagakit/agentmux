@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -51,11 +52,11 @@ it('the original Mailbox consumes actual Renderer, preload, IPC, configured Core
   const config = structuredClone(DEFAULT_CONFIG), sender = Object.assign(new EventEmitter(), { id: 97, isDestroyed: () => false, send: vi.fn() })
   let dispose: (() => Promise<void>) | undefined, unmount: (() => void) | undefined, container: HTMLDivElement | undefined
   try {
-    dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
       configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as never,
       progressLoops: { subscribe: () => () => {} } as never, scratchTopics: { setNameAudit: vi.fn() } as never,
       workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as never })
-    bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => { const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function'); return handler!({ sender } as unknown as IpcMainInvokeEvent, ...args) })
+    bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => { const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function'); return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args) })
     const reference: SessionHistoryReference = { hostId: 'private-host', agentSessionId: 'owner-agent' }
     const original = await client.listDispatches({ participantSessionId: reference.agentSessionId, limit: 1 })
     await expect(bridge.api!.sessions.dispatches(reference, { limit: 1 })).resolves.toEqual({ ...original, hostId: reference.hostId })

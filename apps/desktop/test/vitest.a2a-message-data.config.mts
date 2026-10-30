@@ -12,7 +12,6 @@ const mutations: Record<string, [string, string, string]> = {
   originalResponseHost: ['src/renderer/src/components/DesktopClientUiProvider.tsx', 'if (result.hostId !== reference.hostId)', 'if (false)'],
   notifyHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).notifyMessages(', "this.configuredClient('replacement-host').notifyMessages("],
   notifyMid: ['src/main/runtime-controller.ts', 'messageIds: [messageId]', "messageIds: ['replacement-mid']"],
-  notifyTrust: ['src/main/ipc.ts', "handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {\n    assertManualPromptSenderTrusted(event.sender, contents)", "handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {\n    void event"],
   notifyInspectMid: ['src/main/runtime-controller.ts', '!notice.messageIds.includes(messageId)', 'false'],
   notifyInspectHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).inspectMessageNotification(', "this.configuredClient('replacement-host').inspectMessageNotification("],
   notifyInspectReplay: ['src/main/runtime-controller.ts', '.inspectMessageNotification({ operationId })', '.notifyMessages({ operationId, messageIds: [messageId] })'],
@@ -25,12 +24,10 @@ const mutations: Record<string, [string, string, string]> = {
   eventHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).listMessageEvents(', "this.configuredClient('replacement-host').listMessageEvents("],
   eventWindow: ['src/main/runtime-controller.ts', '.listMessageEvents({ ...options, participantSessionId: reference.agentSessionId })', '.listMessageEvents({ participantSessionId: reference.agentSessionId })'],
   eventPreload: ['src/preload/index.ts', "ipcRenderer.invoke('sessions:messageEvents', session, options)", "ipcRenderer.invoke('sessions:messages', session, options)"],
-  eventTrust: ['src/main/ipc.ts', "requireTrustedSender('sessions:messageEvents', event)", 'void event'],
   spawnParticipant: ['src/main/runtime-controller.ts', '.listAgentSpawns({ ...options, participantSessionId: reference.agentSessionId })', ".listAgentSpawns({ ...options, participantSessionId: 'other' })"],
   spawnHost: ['src/main/runtime-controller.ts', 'this.configuredClient(reference.hostId).listAgentSpawns(', "this.configuredClient('replacement-host').listAgentSpawns("],
   spawnQuery: ['src/main/runtime-controller.ts', '.listAgentSpawns({ ...options, participantSessionId: reference.agentSessionId })', ".listAgentSpawns({ direction: 'creator', participantSessionId: reference.agentSessionId })"],
   spawnPreload: ['src/preload/index.ts', "ipcRenderer.invoke('sessions:spawns', session, options)", "ipcRenderer.invoke('sessions:messages', session, options)"],
-  spawnTrust: ['src/main/ipc.ts', "requireTrustedSender('sessions:spawns', event)", 'void event']
 }
 const applied: Array<{ file: string; original: string; changed: string }> = []
 const sources: Record<string, string> = {}

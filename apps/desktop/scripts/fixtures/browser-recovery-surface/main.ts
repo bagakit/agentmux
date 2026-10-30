@@ -153,7 +153,7 @@ app.whenReady().then(async () => {
   access = createDesktopApplicationAccessOwner(runtime, join(home, 'applications.sqlite'))
   progress = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(home, 'progress.json')),
     async () => { throw new Error('No progress input is allowed') }, undefined, async () => { throw new Error('No Agent observation is allowed') })
-  dispose = await registerIpc({ window: win, workbenchWindows: windows, runtime, configStore, initialConfig: config,
+  dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window: win, workbenchWindows: windows, runtime, configStore, initialConfig: config,
     scratchTopics, applicationAccess: access, progressLoops: progress })
   await win.loadFile(html); rendererLoaded = true
   await until(() => evaluate('Boolean(globalThis.recoveryProof)') as Promise<boolean>, 'actual Renderer entry')

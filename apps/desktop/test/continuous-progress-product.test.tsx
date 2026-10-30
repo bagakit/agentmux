@@ -2,6 +2,7 @@ const { fixtureEpoch: _batchFixtureEpoch } = await vi.hoisted(async () => await 
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
@@ -18,7 +19,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
+const bridge = vi.hoisted(() => ({  api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
   storagePath: '',
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
@@ -138,18 +139,18 @@ beforeEach(async () => {
   }
   bridge.reply = (channel, ...args) => {
     args = structuredClone(args)
-    const send = () => { for (const fn of bridge.main.get(channel) ?? []) fn({ sender: bridge.sender }, ...args) }
+    const send = () => { for (const fn of bridge.main.get(channel) ?? []) fn({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender }, ...args) }
     send()
   }
   const configStore = new ConfigStore(join(directory, 'config.json')); config = await configStore.save(config)
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(bridge.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime, configStore,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     applicationAccess: {} as Parameters<typeof registerIpc>[0]['applicationAccess'],
     scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
+    return handler!({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender } as IpcMainInvokeEvent, ...values)
   })
   window.localStorage.clear()
   useAppStore.setState({ ...initial, loading: true, restoredWorkbench: null, tabs: {}, layouts: {}, sessions: [],

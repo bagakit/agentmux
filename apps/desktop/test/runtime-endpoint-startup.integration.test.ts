@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
@@ -98,9 +99,9 @@ async function ipc(scope: Awaited<ReturnType<typeof setup>>) {
     } })
   bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)
+    return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args)
   })
-  const registration = registerIpc({ initialConfig: await scope.configStore.get(), window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  const registration = registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await scope.configStore.get(), window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
     runtime: scope.controller, configStore: scope.configStore, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn().mockResolvedValue([]) } as never,
     progressLoops: { subscribe: () => () => {} } as never, workspaceFiles: { dispose: async () => {} } as never })
   // A still-pending remote connect must not delay actual IPC registration. The latch stays closed.

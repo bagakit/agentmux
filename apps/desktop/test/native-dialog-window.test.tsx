@@ -18,13 +18,14 @@ const bridge = vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', fals
   invoke: vi.fn(), open: vi.fn(), save: vi.fn(), confirm: vi.fn()
 }) })
 vi.mock('electron', () => ({
-  nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => bridge.directory || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false },
+  nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { getPath: () => bridge.directory || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false, once: vi.fn() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_key: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.assign(window, { agentmux: api }) } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn(), removeListener: vi.fn(), sendSync: vi.fn() },
   webFrame: { getZoomFactor: () => 1 }, clipboard: {}, nativeImage: {}, shell: {}, session: {}, safeStorage: {},
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
   dialog: { showOpenDialog: bridge.open, showSaveDialog: bridge.save, showMessageBox: bridge.confirm }, Menu: {}, webContents: {}
 }))
 // The actual Main registration is retained. No test starts the person's IPC endpoint or connectors.
@@ -55,7 +56,7 @@ import { composerSession } from './helpers/composer-dom-fixture'
 
 let id = 1000
 class Contents extends EventEmitter {
-  id = ++id; mainFrame = { url: _tailFixtureFileUrl("private/index.html"), framesInSubtree: [] }
+  id = ++id; mainFrame = { url: _tailFixtureFileUrl("private/index.html"), detached: false, isDestroyed: () => false, framesInSubtree: [] }
   getURL = () => this.mainFrame.url
   isDestroyed = () => false
   setBackgroundThrottling = vi.fn()
@@ -125,14 +126,14 @@ async function fixture() {
   // A dialog-route fixture must not run an unrelated migration against the person's Notes directory.
   vi.spyOn(NotesStorageOwner.prototype, 'initialize').mockResolvedValue(undefined as never)
   const saveConfig = vi.fn(async (value: unknown) => value)
-  const dispose = await registerIpc({ initialConfig: config, window: main as unknown as BrowserWindow, workbenchWindows: owner,
+  const dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: _tailFixturePath('private/index.html') }, loading: null }), initialConfig: config, window: main as unknown as BrowserWindow, workbenchWindows: owner,
     runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: saveConfig } as never,
     progressLoops: { subscribe: () => () => {} } as never, scratchTopics: new ScratchTopics(),
     workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
   const invoke = async (channel: string, values: unknown[], sender: unknown = main.webContents) => {
     const handler = bridge.handlers.get(channel)
     expect(handler, `Actual Main channel missing: ${channel}`).toBeTypeOf('function')
-    return await handler!({ ...event, sender } as IpcMainInvokeEvent, ...values)
+    return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), ...event, sender } as IpcMainInvokeEvent, ...values)
   }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => structuredClone(await invoke(channel, values)))
   cleanups.push(async () => { try { await dispose() } finally { owner.dispose(); await rm(directory, { recursive: true, force: true }) } })
@@ -273,7 +274,7 @@ describe('native dialogs use their actual workface Window through the original s
     expect(paths).toHaveLength(5)
     for (const path of paths) {
       await expect(path.run()).rejects.toThrow('no longer current')
-      await expect(f.invoke(path.channel, path.values, { id: f.main.webContents.id })).rejects.toThrow('Untrusted')
+      await expect(Promise.resolve().then(() => f.invoke(path.channel, path.values, { id: f.main.webContents.id }))).rejects.toThrow("Untrusted application")
     }
     expect(bridge.open).not.toHaveBeenCalled(); expect(bridge.save).not.toHaveBeenCalled(); expect(bridge.confirm).not.toHaveBeenCalled()
     bridge.open.mockResolvedValueOnce({ canceled: false, filePaths: [_tailFixturePath("private/original-file.txt")] })

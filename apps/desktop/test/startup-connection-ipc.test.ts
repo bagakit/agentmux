@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
 import { afterAll, expect, it, vi } from 'vitest'
 import { rm } from 'node:fs/promises'
@@ -57,15 +58,15 @@ it('actual preload reads the cached Main connection cut before Renderer startup 
   const config = structuredClone(DEFAULT_CONFIG)
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
       runtime: controller, applicationAccess: {} as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
       configStore: { get: async () => config, validate: (value: typeof config) => value, save: async (value: typeof config) => value } as never,
       scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
     // Settle the unrelated bootstrap writer before the private fixture is removed.
-    await bridge.handlers.get('notesStorage:inspect')!({ sender })
+    await bridge.handlers.get('notesStorage:inspect')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender })
     bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
       const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-      return structuredClone(await handler!({ sender }, ...args))
+      return structuredClone(await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender }, ...args))
     })
     await expect(bridge.api!.sessions.endpointWarnings()).resolves.toEqual(original)
     publish({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' }, evidence: { source: 'agentmux', observedAt: 2 } })

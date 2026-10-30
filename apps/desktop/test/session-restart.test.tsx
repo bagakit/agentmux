@@ -12,7 +12,6 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useSessionRestart } from '../src/renderer/src/components/SessionRestart'
-import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 import { withStopTimeout, sessionRestartTimeoutError } from '../src/shared/session-stop-timeout'
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
 
@@ -107,12 +106,6 @@ it('rejects an unrelated original-operation receipt without adopting its replace
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('another original Session, Run or operation')
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(confirm().textContent).toBe('Check restart')
-})
-
-it('admits the actual trusted restart sender and refuses a lookalike without granting authority', () => {
-  const frame = { id: 'original-workbench' }
-  expect(() => assertSenderTrusted(senderTrust('sessions:restart', frame, frame))).not.toThrow()
-  expect(() => assertSenderTrusted(senderTrust('sessions:restart', { id: frame.id }, frame))).toThrow('Untrusted original Agent Session restart sender')
 })
 
 it('releases a stalled restart observer without cancelling or pretending to complete the underlying action', async () => {

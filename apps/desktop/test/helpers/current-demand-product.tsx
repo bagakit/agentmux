@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./app-document-fixture"
 import { injectedContextCore } from './injected-context-core'
 import { startDirectGoal, retryDirectGoal, directGoalRequest } from '../../src/renderer/src/lib/goals-direct-pmo'
 import { useLauncherState } from '../../src/renderer/src/lib/launcher-state'
@@ -24,7 +25,7 @@ import { WorkbenchWindowStore } from '../../src/main/workbench-window-store'
 import { AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import type { WorkspaceFiles } from '../../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
+const bridge = vi.hoisted(() => ({  api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
   storagePath: '', listenerPackagePath: '', controlOptions: null as any,
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
@@ -200,14 +201,14 @@ beforeEach(async () => {
     send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
   bridge.deliver = (channel, ...args) => { for (const fn of bridge.renderer.get(channel) ?? []) fn({}, ...args) }
   bridge.reply = (channel, ...args) => {
-    for (const fn of bridge.main.get(channel) ?? []) fn({ sender: bridge.sender }, ...structuredClone(args))
+    for (const fn of bridge.main.get(channel) ?? []) fn({ senderFrame: Reflect.get(bridge.sender as object, 'mainFrame'), sender: bridge.sender }, ...structuredClone(args))
   }
   const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
   config = await fixtureConfigStore.save(config)
   const mainWindow = Object.assign(new EventEmitter(), { id: 71, setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false }) as unknown as BrowserWindow
   workbenchWindows = new WorkbenchWindows(mainWindow, new WorkbenchWindowStore(join(directory, 'windows.json')), () => [])
   applicationAccess = new AgentMuxApplicationAccessOwner({ path: join(directory, 'application-access.sqlite'), resolveHost: async () => { throw new Error('Application access is outside this Goal fixture') } })
-  disposeIpc = await registerIpc({ initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
+  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources((mainWindow).webContents), initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
     runtime, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {

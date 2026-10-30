@@ -11,7 +11,7 @@ import { BrowserProfileManager } from '../../../src/main/browser-profile-manager
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
-import { senderTrust, assertSenderTrusted } from '../../../src/main/ipc-sender-trust'
+import { assertAppDocumentSender } from '../../../src/main/ipc-sender-trust'
 import { NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../../../src/shared/contracts'
 
 const privateRoot = process.env.AGENTMUX_HISTORY_PRIVATE_ROOT!, output = process.env.AGENTMUX_HISTORY_NATIVE_OUT!
@@ -154,7 +154,7 @@ async function run(): Promise<void> {
   const scopeFor = (value: any) => { const s = value.kind === 'browser' ? manager.inputHistoryScope(value.browserId, value.profileId) : { workspaceId: value.workspaceId, profileId: profiles.defaultProfileId() }; assert.equal(s.workspaceId, workspaceId); profiles.resolvePartition(s.profileId); return s }
   for (const method of ['listInputHistory', 'recordInputHistory', 'removeInputHistory', 'clearInputHistory']) {
     ipcMain.handle('browser:' + method, async (event, value, ...args) => {
-      assertSenderTrusted(senderTrust(('browser:' + method) as any, event.sender, window.webContents))
+      assertAppDocumentSender(event, window.webContents, { current: { mode: 'prod', filePath: join(compiledRoot, 'index.html') }, loading: null })
       const s = scopeFor(value), row: any = { method, senderWebContentsId: event.sender.id, target: value, scope: s, args, at: Date.now() }; receipt.calls.push(row)
       const result = method === 'listInputHistory' ? await history.list(s) : method === 'recordInputHistory' ? await history.record(s, args[0]) : (() => { assert.deepEqual(args[0], s); return method === 'removeInputHistory' ? history.remove(s, args[1]) : history.clear(s) })()
       row.result = await result
@@ -163,7 +163,7 @@ async function run(): Promise<void> {
     })
   }
   ipcMain.handle('ui:publishNativeOverlays', async (event, regions) => {
-    assertSenderTrusted(senderTrust('ui:publishNativeOverlays', event.sender, window.webContents))
+    assertAppDocumentSender(event, window.webContents, { current: { mode: 'prod', filePath: join(compiledRoot, 'index.html') }, loading: null })
     const result = await overlays.update(regions)
     receipt.actualNativeInput.push({ kind: 'overlay-publication', regions, result, at: Date.now(), pageOwner: manager.nativeOwner(browserId)?.bounds,
       actualLayers: window.contentView.children.map(view => ({ bounds: view.getBounds(), visible: view.getVisible(), webContentsId: (view as any).webContents?.id })) })

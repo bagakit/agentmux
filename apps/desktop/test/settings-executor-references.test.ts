@@ -1,5 +1,6 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -329,13 +330,13 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     const progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root, 'loops.json')),
       async () => 'unknown', undefined, async () => { throw new Error('No automatic loop is admitted in the Executor reference fixture') })
     ipc.handlers.clear()
-    const dispose = await registerIpc({ initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
       configStore: disk, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     const invoke = async (channel: string, ...values: unknown[]) => {
       const handler = ipc.handlers.get(channel)
       expect(handler).toBeTypeOf('function')
-      const result = await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+      const result = await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values)
       return channel === 'sessions:launchAgent' ? unwrapSessionAgentLaunchResult(result as SessionAgentLaunchResult) : result
     }
     try {
@@ -367,7 +368,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
         const release = await reserve(...values)
         return () => {
           release()
-          const current = ipc.handlers.get('config:get')!({ sender } as unknown as IpcMainInvokeEvent) as AppConfig
+          const current = ipc.handlers.get('config:get')!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent) as AppConfig
           releasedWith.push(current)
           releaseLaunches.push(invoke('sessions:launchAgent', { executorId: 'spare', hostId: 'local', workspacePath: root })
             .then(value => ({ value }), error => ({ error })))
