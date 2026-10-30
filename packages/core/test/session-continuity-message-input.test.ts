@@ -314,3 +314,130 @@ it('keeps the healthy resumed Run when input receipt persistence fails and repai
     expect(h.started).toHaveLength(1); expect(core.kernel.start).not.toHaveBeenCalled(); expect(core.kernel.input).not.toHaveBeenCalled()
   } finally { await reader?.dispose(); await h.close() }
 })
+
+it.each([false, true])('durable native gate continues only its frozen original plan (changed preparation=%s)', async changed => {
+  const h = await fixture({ nativeDelivery: true, oldRunning: true, intent: 'native-conversation' })
+  try {
+    const queue = h.core.messageQueue, originalGate = queue.authorizeInputDispatch.bind(queue)
+    vi.spyOn(queue, 'authorizeInputDispatch').mockImplementationOnce(async (...args: unknown[]) => { await originalGate(...args); throw Error('Native gate committed before original claim') })
+    await h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context); await settleWaiting(h.core)
+    const before = (await h.client.inspectAgentInput({ key: h.saved.key }))!
+    expect(before).toMatchObject({ status: 'unknown', admission: null, control: { handoff: { carrier: { kind: 'native', plan: { kind: 'native-rpc', threadId: 'native-original' } } } } })
+    expect(h.nativeSend).not.toHaveBeenCalled()
+    vi.spyOn(h.provider, 'planPromptInput').mockImplementation(() => { throw Error('Original native carrier cannot be reselected') })
+    if (changed) {
+      const prepare = h.nativePrepare.getMockImplementation()!
+      h.nativePrepare.mockImplementation(async (...args) => { const next = await prepare(...args); return { ...next, plan: { ...next.plan, actorId: 'different-native-actor' } } })
+    }
+    await h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context); await settleWaiting(h.core)
+    const after = await h.client.inspectAgentInput({ key: h.saved.key })
+    expect(after, JSON.stringify(after)).toMatchObject({ key: before.key, ref: before.ref, control: before.control, status: changed ? 'unknown' : 'admitted' })
+    expect(h.nativeSend).toHaveBeenCalledTimes(changed ? 0 : 1)
+    expect(h.core.kernel.input).not.toHaveBeenCalled(); expect(h.started).toEqual([])
+    await h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context); await settleWaiting(h.core)
+    expect(h.nativeSend).toHaveBeenCalledTimes(changed ? 0 : 1)
+  } finally { await h.close() }
+})
+
+it('durable launch gate first uses only its original retained prepared Start and never a replacement carrier', async () => {
+  const h = await fixture()
+  try {
+    const queue = h.core.messageQueue, originalGate = queue.authorizeInputDispatch.bind(queue)
+    vi.spyOn(queue, 'authorizeInputDispatch').mockImplementationOnce(async (...args: unknown[]) => { await originalGate(...args); throw Error('Launch gate committed before original claim') })
+    await h.client.ensureAgentContinuity(h.request, h.context)
+    const before = (await h.client.inspectAgentInput({ key: h.saved.key }))!
+    expect(before).toMatchObject({ status: 'unknown', admission: null, control: { handoff: { carrier: { kind: 'launch', lifecycleOperationId: h.op()!.messageInput!.lifecycleOperationId } } } })
+    const carrier = before.control.handoff!.carrier
+    expect(carrier.kind).toBe('launch'); if (carrier.kind !== 'launch') throw Error('Original launch pointer missing')
+    expect(Object.keys(carrier).sort()).toEqual(['kind', 'lifecycleOperationId', 'reservationId'])
+    const reservation = (await h.store.loadResumeCorrelation('recipient', carrier.lifecycleOperationId))!
+    expect(reservation.reservationId).toBe(carrier.reservationId)
+    expect(h.started).toEqual([])
+    await h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context); await settleWaiting(h.core)
+    expect(await h.client.inspectAgentInput({ key: h.saved.key })).toMatchObject({ status: 'launch-carried', key: before.key, ref: before.ref, control: before.control })
+    expect(h.started).toHaveLength(1)
+    expect(h.started[0].operationKey).toBe(carrier.lifecycleOperationId)
+    expect(h.started[0].args).toContain(h.op()!.messageInput!.prompt)
+    expect(h.core.kernel.input).not.toHaveBeenCalled()
+    await h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context); await settleWaiting(h.core)
+    expect(h.started).toHaveLength(1)
+  } finally { await h.close() }
+})
+
+it.each(['revoke', 'cancel'] as const)('a held remote launch author read leaves another Session journal/input usable and late %s cannot Start', async action => {
+  const h = await fixture()
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  let entered!: () => void
+  const atRead = new Promise<void>(resolve => { entered = resolve })
+  let afterGate = false, stoppedAtRead = false
+  let running: Promise<unknown> | undefined
+  try {
+    const original = (await h.store.readMetadata('recipient'))!
+    await h.store.compareAndSwap(null, { ...original, agentSessionId: 'independent', run: { runId: 'independent-run' }, nativeHandle: { kind: 'provider', providerId: 'grok', sessionId: 'independent-native' } })
+    await h.core.registry.load('local')
+    const status = h.core.kernel.status.bind(h.core.kernel)
+    h.core.kernel.status = vi.fn(async (id: string) => id === 'independent-run' ? h.run(id) : await status(id))
+    vi.spyOn(h.provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
+    const gate = h.core.messageQueue.authorizeInputDispatch.bind(h.core.messageQueue)
+    vi.spyOn(h.core.messageQueue, 'authorizeInputDispatch').mockImplementation(async (...args: unknown[]) => { afterGate = true; return await gate(...args) })
+    const author = h.context.externalAuthor.assertCurrent.getMockImplementation()!
+    h.context.externalAuthor.assertCurrent.mockImplementation(async () => {
+      if (afterGate && !stoppedAtRead) { stoppedAtRead = true; entered(); await held }
+      return await author()
+    })
+    running = h.client.ensureAgentContinuity(h.request, h.context)
+    await atRead
+    let persisted = false
+    const independent = h.client.submitAgentPrompt({ agentSessionId: 'independent', expectedRun: { runId: 'independent-run' },
+      operationId: 'independent-local-author', prompt: 'Independent input while foreign author is held', authorHuman: true,
+      execution: 'immediate', admissionIntent: { kind: 'manual-actor' } }).then(() => { persisted = true })
+    await vi.waitFor(() => expect(persisted, 'another Session must retain original input without waiting for foreign authority').toBe(true), { timeout: 1500 })
+    await independent
+    await vi.waitFor(() => expect(h.core.kernel.input, 'another Session normal input must progress').toHaveBeenCalledOnce(), { timeout: 1500 })
+    if (action === 'revoke') h.revoke()
+    else await h.client.stopAgentInputWaiting({ ref: h.saved.ref, cancelOperationId: 'stop-exact-author-observation' })
+    if (action === 'cancel') {
+      await vi.waitFor(async () => expect((await h.client.inspectAgentInput({ key: h.saved.key }))?.status).toBe('not-applied'), { timeout: 1500 })
+      expect(h.started).toEqual([])
+    }
+    release(); await running; running = undefined
+    expect(h.started).toEqual([])
+    expect(await h.client.inspectAgentInput({ key: h.saved.key })).toMatchObject({ status: 'not-applied' })
+  } finally { release(); await running?.catch(() => {}); await h.close() }
+}, 25_000)
+
+it.each(['native', 'launch'] as const)('the live %s gate writer excludes a second Session claim callback before any effect', async mode => {
+  const h = await fixture(mode === 'native' ? { nativeDelivery: true, oldRunning: true, intent: 'native-conversation' } : {})
+  let enter!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { enter = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  const gate = h.core.messageQueue.authorizeInputDispatch.bind(h.core.messageQueue)
+  vi.spyOn(h.core.messageQueue, 'authorizeInputDispatch').mockImplementationOnce(async (...args: unknown[]) => { const link = await gate(...args); enter(); await held; return link })
+  let running: Promise<unknown> | undefined
+  try {
+    running = mode === 'native' ? h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context) : h.client.ensureAgentContinuity(h.request, h.context)
+    await entered
+    let anotherClaim = false
+    await expect(h.store.withPromptSubmission('recipient', async () => { anotherClaim = true })).rejects.toMatchObject({ code: 'AGENT_PROMPT_SUBMISSION_BUSY' })
+    expect(anotherClaim).toBe(false); expect(h.nativeSend).not.toHaveBeenCalled(); expect(h.started).toEqual([])
+  } finally { release(); await running?.catch(() => {}); await settleWaiting(h.core); await h.close() }
+})
+
+it.each(['missing', 'different'] as const)('an unavailable or %s original launch reservation preserves its gate without another Start', async state => {
+  const h = await fixture()
+  try {
+    const gate = h.core.messageQueue.authorizeInputDispatch.bind(h.core.messageQueue)
+    vi.spyOn(h.core.messageQueue, 'authorizeInputDispatch').mockImplementationOnce(async (...args: unknown[]) => { await gate(...args); throw Error('Original prepared launch gate retained before claim') })
+    await h.client.ensureAgentContinuity(h.request, h.context)
+    const before = (await h.client.inspectAgentInput({ key: h.saved.key }))!
+    expect(before).toMatchObject({ status: 'unknown', admission: null, control: { handoff: { carrier: { kind: 'launch' } } } })
+    const load = h.store.loadResumeCorrelation.bind(h.store)
+    vi.spyOn(h.store, 'loadResumeCorrelation').mockImplementation(async (...args) => {
+      const original = await load(...args)
+      return state === 'missing' || !original ? null : { ...original, reservationId: 'different-original-reservation' }
+    })
+    await h.client.rejoinAgentInputWaiting({ ref: h.saved.ref }, h.context); await settleWaiting(h.core)
+    expect(await h.client.inspectAgentInput({ key: h.saved.key })).toMatchObject({ key: before.key, ref: before.ref, control: before.control, status: 'unknown', admission: null })
+    expect(h.started).toEqual([]); expect(h.nativeSend).not.toHaveBeenCalled(); expect(h.core.kernel.input).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})

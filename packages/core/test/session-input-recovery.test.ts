@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import { defineRun } from '@ctxmux/sdk'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -116,10 +117,17 @@ async function fixture() {
   const resume = async () => {
     const inner = client as any
     inner.connected = true
-    inner.kernel.start = vi.fn(async () => { currentRun = 'resumed-recipient-' + ++serial; return { ...run(currentRun), pid: 1234 } })
+    inner.kernel.start = vi.fn(async (request: { program: string; args: string[]; operationKey: string }) => {
+      currentRun = 'resumed-recipient-' + ++serial
+      return { ...run(currentRun), pid: 1234, program: request.program, args: request.args, lifecycleOperationId: request.operationKey }
+    })
+    inner.kernel.creationRuntimeIdentity = () => ({ runtimeId: 'private-runtime', instanceId: 'private-runtime', buildIdentity: 'controlled', protocolVersion: 1 })
+    inner.kernel.prepareStart = (request: { program: string; args: string[]; cwd: string; env: Record<string, string> }) => defineRun(request.program, request)
+    inner.kernel.startPrepared = async (request: { program: string; args: string[] }, operationKey: string) => inner.kernel.start({ ...request, operationKey })
+    inner.kernel.inspectCreation = async () => null
     inner.kernel.list = async () => [run(currentRun)]
     inner.hookServer.isRunning = () => true
-    inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+    inner.hookServer.createBinding = (_session: string, _provider: string, bindingId: string) => ({ bindingId, endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
     inner.ensureManagedHooks = async () => {}
     inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
     const providers = Reflect.get(client, 'providers') as AgentProviderRegistry, builtin = providers.get('codex')
