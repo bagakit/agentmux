@@ -142,7 +142,9 @@ only that exact weak read: it durably freezes the confirmed prefix and an explic
 gap, then lets the same original body continue through current input authorization. This is an
 action, not a read or permission grant. The authenticated frozen recipient can use it without
 bot administration; an unassigned audience association cannot. context-ended reports this local
-action separately from the current Core receipt. Repeating the same action or an older source
+action separately from the current Core receipt. This local result does not wait for strong body
+advancement or a Core read; an unavailable Core observation retains the original input facts.
+Use connection ingress inspect separately for the current Core receipt. Repeating the same action or an older source
 cannot cancel a later observation, regenerate a frozen quote or create another input. A received
 source joins or ensures its original preparation revision and never cancels a later read.
 Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
