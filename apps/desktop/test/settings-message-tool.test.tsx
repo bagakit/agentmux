@@ -38,12 +38,12 @@ it('the mounted local and global manuals expose the same actual Message Tool ges
   expect(save).not.toHaveBeenCalled()
 })
 
-it('groups the five independent Message Tool modules across the real catalog, Overview, navigation and search', async () => {
+it('groups the four independent Message Tool modules across the real catalog, Overview, navigation and search', async () => {
   const groups = settingsNavGroups('')
   const messageTool = groups.find(group => group.id === 'message-tool')!
   expect(messageTool.title).toBe('Message Tool')
-  expect(messageTool.items.map(item => item.title)).toEqual(['User Input', 'A2A', 'Automation', 'Prompts', 'amux Protocols'])
-  expect(messageTool.items.map(item => item.id)).toEqual(['message-tool', 'a2a', 'automation', 'prompts', 'amux-protocols'])
+  expect(messageTool.items.map(item => item.title)).toEqual(['User Input', 'A2A', 'Automation', 'Prompts'])
+  expect(messageTool.items.map(item => item.id)).toEqual(['message-tool', 'a2a', 'automation', 'prompts'])
   expect(groups.filter(group => group.id !== 'message-tool').flatMap(group => group.items).some(item => item.id === 'prompts')).toBe(false)
   expect(groups.find(group => group.id === 'preferences')!.items.some(item => item.id === 'notifications')).toBe(true)
   const save = vi.spyOn(api.config, 'save')

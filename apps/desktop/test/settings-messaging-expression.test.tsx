@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
+import { AmuxProtocolReference } from '../src/renderer/src/components/documentation/AmuxProtocolReference'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -84,7 +85,7 @@ it('InApp reads saved input and appearance preferences beside shared message exa
   expect(page().querySelector('[data-inapp-appearance-summary]')!.textContent).toContain('Light appearance')
   expect(page().querySelectorAll('[data-example-view="activity"] .log-turn')).toHaveLength(2)
   expect(page().querySelector('[data-example-view="terminal"]')!.textContent).toContain('Summarize the proposed changes.')
-  for (const [label, destination] of [['Open User Input', 'message-tool'], ['Open Appearance', 'appearance'], ['Open Keyboard shortcuts', 'keyboard-shortcuts'], ['Open amux Protocols', 'amux-protocols']]) {
+  for (const [label, destination] of [['Open User Input', 'message-tool'], ['Open Appearance', 'appearance'], ['Open Keyboard shortcuts', 'keyboard-shortcuts']]) {
     await clickText(label!)
     expect(page().dataset.settingsPage).toBe(destination)
     await dom.click('[data-settings-target="inapp-conversation"]')
@@ -97,10 +98,10 @@ it('InApp reads saved input and appearance preferences beside shared message exa
 it('Protocols pairs each exact original wire with its original shared reader after explicit expansion', async () => {
   const { AGENTMUX_PROTOCOL_CATALOG } = await import('@agentmux/core/agent-message-render')
   const save = saveOwner(), open = vi.spyOn(api.ui, 'openObjectLink')
-  await dom.render(<SettingsPanel initialSection="amux-protocols" onClose={() => {}} />)
-  expect(page().querySelector('[data-protocol-example]')).toBeNull()
-  await clickText('View first example')
-  const first = page().querySelector<HTMLDetailsElement>('.amux-protocols__row')!
+  await dom.render(<AmuxProtocolReference active />)
+  expect(dom.container.querySelector('[data-protocol-example]')).toBeNull()
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'View first example')!.click())
+  const first = dom.container.querySelector<HTMLDetailsElement>('.amux-protocols__row')!
   await act(async () => first.dispatchEvent(new Event('toggle')))
   expect(first.open).toBe(true)
   const comparisons = [...first.querySelectorAll('.amux-protocols__comparison')]

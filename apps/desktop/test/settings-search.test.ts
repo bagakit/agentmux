@@ -56,7 +56,7 @@ describe('设置搜索', () => {
     // 对用户彻底无用。这里要求一个只属于某一节的词只命中那一节。
     const all = visibleSettingsSections('')
     expect(all.length, '空查询应返回全部 section').toBeGreaterThan(1)
-    expect(visibleSettingsSections('tmux').map((section) => section.id)).toEqual(['general', 'amux-protocols'])
+    expect(visibleSettingsSections('tmux').map((section) => section.id)).toEqual(['general'])
     expect(visibleSettingsSections('worktree').map((section) => section.id)).toEqual(['hosts'])
     expect(visibleSettingsSections('copy').map(section => section.id)).toEqual(['general', 'capsule'])
     for (const keyword of ['clipboard', 'tilde', '~', 'absolute']) {

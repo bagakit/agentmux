@@ -1,3 +1,4 @@
+import { DocumentationTestOwner } from './helpers/documentation-owner'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -192,7 +193,7 @@ describe('Conversation Channels settings', () => {
     const agentDrafts = useAppStore.getState().agentComposerDrafts
     const viewModes = { 'agent-1': 'activity', 'agent-2': 'terminal' } as const
     useAppStore.setState({ viewModes })
-    await dom.render(<Shell section="inapp-conversation" />)
+    await dom.render(<DocumentationTestOwner><Shell section="inapp-conversation" /></DocumentationTestOwner>)
     const native = dom.container.querySelector<HTMLElement>('[data-settings-pane="inapp-conversation"]')!
     expect(native).not.toBeNull()
     expect(native.querySelector('[data-message-tool-settings], .settings-devices-pane, input, [role="switch"], [data-settings-save-bar]')).toBeNull()
@@ -223,10 +224,13 @@ describe('Conversation Channels settings', () => {
     expect(shortcuts.querySelectorAll('[data-binding-id]').length).toBeGreaterThan(0)
     expect(shortcuts.querySelector('[data-settings-save-bar]')).toBeNull()
     await dom.click('[data-settings-target="inapp-conversation"]')
-    const protocols = await navigate('Open amux Protocols', 'amux-protocols')
+    const documentation = [...native.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open amux Protocols')!
+    await act(async () => { documentation.focus(); documentation.click() })
+    const protocols = document.querySelector<HTMLElement>('.documentation-dialog')!
     expect(protocols.querySelector('[aria-label="amux protocol reference"]')).not.toBeNull()
     expect(protocols.querySelector('[data-settings-save-bar]')).toBeNull()
-    await dom.click('[data-settings-target="inapp-conversation"]')
+    expect(native.hidden).toBe(false)
+    await act(async () => protocols.querySelector<HTMLButtonElement>('[aria-label="Close documentation"]')!.click())
     expect(await navigate('Open User Input', 'message-tool')).toBe(input)
     expect(input.querySelector('[aria-label="Commands prefix"]')).toBe(command)
     expect(command.value).toBe('!'); expect(layout.checked).toBe(true); expect(input.scrollTop).toBe(137)

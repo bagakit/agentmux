@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
+import { AmuxProtocolReference } from '../src/renderer/src/components/documentation/AmuxProtocolReference'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -106,7 +107,7 @@ it('General links open the original recovery and Host owners without saving its 
 it('InApp destinations retain the original page owners without saving configuration', async () => {
   const save = saveOwner()
   await dom.render(<SettingsPanel initialSection="inapp-conversation" onClose={() => {}} />)
-  for (const [label, destination] of [['Open User Input', 'message-tool'], ['Open Appearance', 'appearance'], ['Open Keyboard shortcuts', 'keyboard-shortcuts'], ['Open amux Protocols', 'amux-protocols']]) {
+  for (const [label, destination] of [['Open User Input', 'message-tool'], ['Open Appearance', 'appearance'], ['Open Keyboard shortcuts', 'keyboard-shortcuts']]) {
     await clickText(label!)
     expect(page().dataset.settingsPage).toBe(destination)
     await dom.click('[data-settings-target="inapp-conversation"]')
@@ -135,11 +136,11 @@ it('shortcut contexts and chord queries compose from every original registry bin
 it('opens the first protocol example explicitly through the shared reader and keeps wire content exact', async () => {
   const save = saveOwner()
   const openObject = vi.spyOn(api.ui, 'openObjectLink')
-  await dom.render(<SettingsPanel initialSection="amux-protocols" onClose={() => {}} />)
-  const first = page().querySelector<HTMLDetailsElement>('.amux-protocols__row')!
+  await dom.render(<AmuxProtocolReference active />)
+  const first = dom.container.querySelector<HTMLDetailsElement>('.amux-protocols__row')!
   expect(first.open).toBe(false)
-  expect(page().querySelector('[data-protocol-example]')).toBeNull()
-  await clickText('View first example')
+  expect(dom.container.querySelector('[data-protocol-example]')).toBeNull()
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'View first example')!.click())
   await act(async () => first.dispatchEvent(new Event('toggle')))
   expect(first.open).toBe(true)
   expect(document.activeElement).toBe(first.querySelector('summary'))
