@@ -1,5 +1,5 @@
 import { connectionDiagnosisSourceCodes, type ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
-import type { ConnectionObservation } from './connections-contract.js'
+import type { ConnectionObservation, ConnectionReceiverObservation } from './connections-contract.js'
 import type { RoomBindingScope } from './room-binding-contract.js'
 import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDeliveryObservation } from './connection-delivery-contract.js'
 import type { AgentInputSubmissionReceipt, AgentInputWaitReason } from './agent-input-wait.js'
@@ -46,7 +46,7 @@ export type ConnectionDiagnosisIntake = {
 export type ConnectionGroupDiagnosis = {
   target: ConnectionDiagnosisTarget; window: ConnectionDiagnosisWindow; limit: number
   adapterService: ConnectionDiagnosisReading<{ adapterId: string; enabled: boolean; revision: number }>
-  connection: ConnectionDiagnosisReading<{ revision: number; enabled: boolean } & ConnectionObservation>
+  connection: ConnectionDiagnosisReading<{ revision: number; enabled: boolean; receiver?: ConnectionReceiverObservation } & ConnectionObservation>
   binding: ConnectionDiagnosisReading<{ state: 'active' | 'paused' | 'detached'; currentRevision: number | null; scope: RoomBindingScope; activeInputGrants: number; activeAnswerGrants: number; activePermissionGrants: number }>
   outgoing: ConnectionDiagnosisReading<{
     after: string | null; afterContent: string | null; next: string | null; deliveries: ConnectionDiagnosisDelivery[]

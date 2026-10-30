@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import type { ConnectionConfig, ConnectionObservation, ConnectionRecord } from './connections-contract.js'
+import type { ConnectionConfig, ConnectionObservation, ConnectionRecord, ConnectionReceiverObservation } from './connections-contract.js'
 
 const fail = (): never => { throw new AgentMuxError('Connection data is malformed or belongs to another original object.', 'INVALID_CONNECTION_DATA') }
 function object(value: unknown, fields: string[]): Record<string, unknown> {
@@ -27,12 +27,22 @@ export function parseConnectionObservation(value: unknown): ConnectionObservatio
   return { authentication: stage(p.authentication), transport: stage(p.transport), intake: stage(p.intake), delivery: stage(p.delivery) }
 }
 export function parseConnectionRecord(value: unknown): ConnectionRecord {
-  const p = object(value, ['config', 'revision', 'observation', 'initialSetup', 'capabilities'])
+  const p = object(value, ['config', 'revision', 'observation', 'initialSetup', 'capabilities', 'receiver'])
   const initial = p.initialSetup === undefined ? undefined : object(p.initialSetup, ['state'])
   if (initial && !['incomplete', 'complete', 'unconfirmed'].includes(initial.state as string)) fail()
   const support = p.capabilities === undefined ? undefined : object(p.capabilities, ['roomDiscovery', 'roomCreation', 'roomLink'])
   if (support && [support.roomDiscovery, support.roomCreation, support.roomLink].some(value => typeof value !== 'boolean')) fail()
   return { config: parseConnectionConfig(p.config), revision: revision(p.revision), observation: parseConnectionObservation(p.observation),
+    ...(p.receiver === undefined ? {} : { receiver: parseConnectionReceiverObservation(p.receiver) }),
     ...(support ? { capabilities: { roomDiscovery: support.roomDiscovery as boolean, roomCreation: support.roomCreation as boolean, roomLink: support.roomLink as boolean } } : {}),
     ...(initial ? { initialSetup: { state: initial.state as NonNullable<ConnectionRecord['initialSetup']>['state'] } } : {}) }
+}
+export function parseConnectionReceiverObservation(value: unknown): ConnectionReceiverObservation {
+  const p = object(value, ['ref', 'state', 'reason', 'nextAttemptAt'])
+  if (!['starting', 'ready', 'recovering', 'ended'].includes(p.state as string) ||
+      p.reason !== undefined && !['native-rejected', 'native-unavailable', 'sdk-ended', 'check-failed'].includes(p.reason as string) ||
+      p.nextAttemptAt !== undefined && (!Number.isSafeInteger(p.nextAttemptAt) || (p.nextAttemptAt as number) < 0)) fail()
+  return { ref: identity(p.ref), state: p.state as ConnectionReceiverObservation['state'],
+    ...(p.reason === undefined ? {} : { reason: p.reason as NonNullable<ConnectionReceiverObservation['reason']> }),
+    ...(p.nextAttemptAt === undefined ? {} : { nextAttemptAt: p.nextAttemptAt as number }) }
 }

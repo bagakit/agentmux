@@ -64,7 +64,7 @@ export class ConnectionHost implements ConnectionPort {
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
   delivery?: import('@agentmux/core/connections').ConnectionDeliveryPort
   ingress?: import('@agentmux/core/connections').ConnectionIngressReadPort
-  receiverObservation?: ((connectionId: string, revision: number) => Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'> | null) | undefined
+  receiverObservation?: ((connectionId: string, revision: number) => (Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'> & { receiver?: import('@agentmux/core/connections').ConnectionReceiverObservation }) | null) | undefined
   readonly database: DatabaseSync
   private readonly adapters: Map<string, ConnectionAdapter>
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
@@ -142,7 +142,9 @@ export class ConnectionHost implements ConnectionPort {
     const row = this.database.prepare('SELECT config_json, revision FROM connection_configuration WHERE connection_id = ?').get(connectionId)
     if (!row) return null
     const config = parseConnectionConfig(JSON.parse(row.config_json as string)), revision = Number(row.revision), observed = this.observations.get(connectionId)
-    let observation = !config.enabled ? disabled() : { ...(observed?.revision === revision ? observed.value : unknown()), ...(includeReceiver ? this.receiverObservation?.(connectionId, revision) : {}) }
+    const live = includeReceiver && config.enabled ? this.receiverObservation?.(connectionId, revision) : null
+    const { receiver, ...stages } = live ?? {}
+    let observation = !config.enabled ? disabled() : { ...(observed?.revision === revision ? observed.value : unknown()), ...stages }
     if (config.enabled && includeReceiver) {
       try { if (!this.automaticTrafficEnabled(config.adapterId)) observation = { ...observation, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
       catch { observation = { ...observation, transport: { state: 'unknown', reason: 'check-failed' }, intake: { state: 'unknown', reason: 'check-failed' }, delivery: { state: 'unknown', reason: 'check-failed' } } }
@@ -154,7 +156,7 @@ export class ConnectionHost implements ConnectionPort {
     }
     const adapter = this.adapters.get(config.adapterId)
     const capabilities = adapter ? { roomDiscovery: !!adapter.roomDiscovery, roomCreation: !!adapter.rooms, roomLink: !!adapter.roomDiscovery?.createLink } : undefined
-    return parseConnectionRecord({ config, revision, observation, ...(initialSetup ? { initialSetup } : {}), ...(capabilities ? { capabilities } : {}) })
+    return parseConnectionRecord({ config, revision, observation, ...(receiver ? { receiver } : {}), ...(initialSetup ? { initialSetup } : {}), ...(capabilities ? { capabilities } : {}) })
   }
   /** Synchronous exact configuration read for owners joining this same database transaction. */
   readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId, false)) }

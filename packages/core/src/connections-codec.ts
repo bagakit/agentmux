@@ -7,7 +7,7 @@ import { parseConnectionDiagnosisInput, parseConnectionDiagnosis } from './conne
 import { CONNECTION_SETUP_RPC_METHODS, isConnectionSetupMethod, parseConnectionSetupParams, parseConnectionSetupResult } from './connection-setup-codec.js'
 import { CONNECTION_SERVICE_RPC_METHODS, isConnectionServiceMethod, parseConnectionServiceParams, parseConnectionServiceResult } from './connection-service-codec.js'
 import { parseConnectionConfig, parseConnectionRecord } from './connection-record-codec.js'
-export { parseConnectionConfig, parseConnectionRecord, parseConnectionObservation } from './connection-record-codec.js'
+export { parseConnectionConfig, parseConnectionRecord, parseConnectionObservation, parseConnectionReceiverObservation } from './connection-record-codec.js'
 import { CONNECTION_PROFILE_RPC_METHODS, isConnectionProfileMethod, parseConnectionProfileParams, parseConnectionProfileResult } from './connection-profile-codec.js'
 import { CONNECTION_ENROLLMENT_RPC_METHODS, isConnectionEnrollmentMethod, parseConnectionEnrollmentParams, parseConnectionEnrollmentResult } from './connection-enrollment-codec.js'
 import { CONNECTION_DELIVERY_RPC_METHODS, isConnectionDeliveryMethod, parseConnectionDeliveryParams, parseConnectionDeliveryResult } from './connection-delivery-codec.js'

@@ -17,10 +17,19 @@ export type ConnectionObservation = {
   intake: ConnectionStage
   delivery: ConnectionStage
 }
+/** Current native receiver consumer, separate from durable intake, input and publication receipts. */
+export type ConnectionReceiverObservation = {
+  ref: string
+  state: 'starting' | 'ready' | 'recovering' | 'ended'
+  reason?: 'native-rejected' | 'native-unavailable' | 'sdk-ended' | 'check-failed'
+  /** An original native/Host schedule, not a last-heartbeat or delivery timestamp. */
+  nextAttemptAt?: number
+}
 export type ConnectionRecord = {
   config: ConnectionConfig
   revision: number
   observation: ConnectionObservation
+  receiver?: ConnectionReceiverObservation
   /** Original registered adapter implementations, not native permission or readiness. Absent means unknown. */
   capabilities?: { roomDiscovery: boolean; roomCreation: boolean; roomLink: boolean }
   /** The matching managed initial flow's recorded outcome, distinct from current platform readiness. */

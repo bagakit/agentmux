@@ -1,5 +1,5 @@
 import { parseConnectionDeliveryObservation, parseConnectionDeliverySourceObservation } from './connection-delivery-codec.js'
-import { parseConnectionObservation } from './connection-record-codec.js'
+import { parseConnectionObservation, parseConnectionReceiverObservation } from './connection-record-codec.js'
 import { parseConnectionServiceState } from './connection-service-codec.js'
 import { AgentMuxError } from './errors.js'
 import { parseIngressContextObservation } from './ingress-codec.js'
@@ -73,8 +73,9 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
     return { adapterId: state.adapterId, enabled: state.enabled, revision: state.revision }
   })
   const connection = reading(p.connection, value => {
-    const c = object(value, ['revision', 'enabled', 'authentication', 'transport', 'intake', 'delivery'])
-    return { revision: count(c.revision, 1), enabled: bool(c.enabled), ...parseConnectionObservation({ authentication: c.authentication, transport: c.transport, intake: c.intake, delivery: c.delivery }) }
+    const c = object(value, ['revision', 'enabled', 'authentication', 'transport', 'intake', 'delivery', 'receiver'])
+    return { revision: count(c.revision, 1), enabled: bool(c.enabled), ...parseConnectionObservation({ authentication: c.authentication, transport: c.transport, intake: c.intake, delivery: c.delivery }),
+      ...(c.receiver === undefined ? {} : { receiver: parseConnectionReceiverObservation(c.receiver) }) }
   })
   const binding = reading(p.binding, value => {
     const b = object(value, ['state', 'currentRevision', 'scope', 'activeInputGrants', 'activeAnswerGrants', 'activePermissionGrants'])

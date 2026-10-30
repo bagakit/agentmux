@@ -101,7 +101,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
   const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target) && recordMatches(delivery.reference, target, ['native', 'captured'].includes(delivery.reference.source.kind) ? b?.sourceFrontier?.sourceHostId : target.executionHostId)) && (outgoing.value.coverage?.gaps.every(gap => gapMatches(gap, target, b?.sourceFrontier?.sourceHostId)) ?? true)
   return { target: { ...target }, window: { ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}), ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }, limit: groupWindowLimit,
     adapterService,
-    connection: { value: sameConnection ? { revision: c.revision, enabled: c.config.enabled,
+    connection: { value: sameConnection ? { revision: c.revision, enabled: c.config.enabled, ...(c.receiver ? { receiver: { ...c.receiver } } : {}),
       authentication: { state: c.observation.authentication.state, ...(c.observation.authentication.reason ? { reason: c.observation.authentication.reason } : {}) },
       transport: { state: c.observation.transport.state, ...(c.observation.transport.reason ? { reason: c.observation.transport.reason } : {}) },
       intake: { state: c.observation.intake.state, ...(c.observation.intake.reason ? { reason: c.observation.intake.reason } : {}) },

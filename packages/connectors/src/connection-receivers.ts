@@ -1,5 +1,5 @@
-import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionObservation, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord } from '@agentmux/core/connections'
+import { AgentMuxError, mintObjectId } from '@agentmux/core'
+import { parseConnectionObservation, parseConnectionReceiverObservation, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord, type ConnectionReceiverObservation } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
 import type { DurableIngressHost } from './durable-ingress.js'
@@ -8,7 +8,14 @@ import type { ChannelMetadataSubject } from '@agentmux/core/connections'
 
 /** Private transport proof is owned by the registered adapter, never accepted through public RPC. */
 export type ConnectionTransportEvent = { raw: string; transportProof?: unknown }
-export type ConnectionIngressReceiver = { close(): void; observation(): ConnectionObservation; closed?: AbortSignal }
+export type ConnectionReceiverEnd = { automatic: boolean; reason: NonNullable<ConnectionReceiverObservation['reason']>; retryAt?: number }
+export type ConnectionIngressReceiver = {
+  close(): void
+  observation(): ConnectionObservation
+  /** Ends only when this SDK consumer cannot continue by itself; active SDK retry is not closure. */
+  closed: AbortSignal
+  lifecycle(): Omit<ConnectionReceiverObservation, 'ref'>
+}
 export interface ConnectionIngressTransport {
   start(input: {
     config: ConnectionConfig
@@ -20,8 +27,8 @@ export interface ConnectionIngressTransport {
     receive(input: ConnectionTransportEvent, acknowledge: () => void | Promise<void>): ReturnType<DurableIngressHost['receive']>
   }): Promise<ConnectionIngressReceiver>
 }
-type Lane = { record: ConnectionRecord; abort: AbortController; receiver?: ConnectionIngressReceiver; opening: boolean; failed?: 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'check-failed'; recoveryFailed?: boolean; dispatchFailures: Set<string>; rechecks?: Iterator<string>; after?: string }
-type ReceiverObservation = Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'>
+type Lane = { record: ConnectionRecord; abort: AbortController; ref: string; receiver?: ConnectionIngressReceiver; opening: boolean; failed?: 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'check-failed'; recoveryFailed?: boolean; dispatchFailures: Set<string>; rechecks?: Iterator<string>; after?: string }
+type ReceiverObservation = Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'> & { receiver?: ConnectionReceiverObservation }
 const RECOVERY_BATCH = 25
 
 /** Own only registered transport lifetimes. Durable intake and original Core queues retain their facts. */
@@ -57,7 +64,12 @@ export class ConnectionReceivers {
         try { if (!this.connections.automaticTrafficEnabled(lane.record.config.adapterId)) { this.release(lane); this.lanes.delete(id) } }
         catch { /* Unknown policy retains this reader; every new admission checks its original owner. */ }
       }
-      for (const [id, lane] of this.lanes) if (lane.receiver?.closed?.aborted) { this.release(lane); this.lanes.delete(id) }
+      for (const lane of this.lanes.values()) if (lane.receiver?.closed.aborted) {
+        const end = lane.receiver.closed.reason as ConnectionReceiverEnd | undefined
+        if (end?.automatic === true && (end.retryAt ?? 0) <= Date.now()) {
+          lane.receiver.close(); delete lane.receiver
+        }
+      }
       for (const record of connections) {
         const adapter = this.connections.registeredAdapter(record.config.adapterId)
         if (!record.config.enabled || !adapter?.ingress || !adapter.transport) continue
@@ -65,7 +77,7 @@ export class ConnectionReceivers {
         catch { continue } // No new lane or recovery admission without the original policy.
         let lane = this.lanes.get(record.config.connectionId)
         if (!lane) {
-          lane = { record, abort: new AbortController(), opening: false, dispatchFailures: new Set() }
+          lane = { record, abort: new AbortController(), ref: mintObjectId(), opening: false, dispatchFailures: new Set() }
           this.lanes.set(record.config.connectionId, lane)
         }
         if (!lane.receiver && !lane.opening) void this.start(lane, adapter.transport)
@@ -99,6 +111,7 @@ export class ConnectionReceivers {
     return current?.config.enabled === true && current.revision === lane.record.revision
   }
   private async start(lane: Lane, transport: ConnectionIngressTransport): Promise<void> {
+    lane.ref = mintObjectId()
     lane.opening = true
     try {
       let credential: string | null
@@ -149,7 +162,8 @@ export class ConnectionReceivers {
     if (!lane.receiver) return { authentication: lane.failed && lane.failed !== 'check-failed' ? { state: 'unavailable', reason: lane.failed } : { state: 'unknown', reason: 'not-tested' }, transport: lane.failed ? { state: 'unavailable', reason: lane.failed } : { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' } }
     try {
       const { authentication, transport, intake } = parseConnectionObservation(lane.receiver.observation())
-      return { authentication, transport, intake: lane.recoveryFailed || lane.dispatchFailures.size ? { state: 'unknown', reason: 'check-failed' } : intake }
+      const receiver = parseConnectionReceiverObservation({ ref: lane.ref, ...lane.receiver.lifecycle() })
+      return { authentication, transport, intake: lane.recoveryFailed || lane.dispatchFailures.size ? { state: 'unknown', reason: 'check-failed' } : intake, receiver }
     } catch { return { authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'check-failed' }, intake: { state: 'unknown', reason: 'not-started' } } }
   }
   private release(lane: Lane): void {

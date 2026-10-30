@@ -4,7 +4,7 @@ import { Readable } from 'node:stream'
 import { Client, WSClient, EventDispatcher, AppType, LoggerLevel, defaultHttpInstance, DefaultCache, type HttpInstance, type HttpRequestOptions, type Logger } from '@larksuiteoapi/node-sdk'
 import { CONNECTION_API_LIMITS, parseConnectionConfig, type ConnectionConfig, type ConnectionObservation } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '../../connection-host.js'
-import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../../connection-receivers.js'
+import type { ConnectionIngressTransport, ConnectionIngressReceiver, ConnectionReceiverEnd } from '../../connection-receivers.js'
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
 import { FEISHU_MESSAGE_EVENT, feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
 import { feishuParentAddressing } from './reply.js'
@@ -31,6 +31,10 @@ const sameConfig = (left: ConnectionConfig, right: ConnectionConfig) => JSON.str
 const muted = () => undefined
 // SDK logs can include credentials, connection tickets and complete platform bodies. No SDK argument leaves this sink.
 const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: muted, trace: muted }
+// Adapter-local native observation policy, aligned with the SDK's 15s endpoint-discovery budget.
+// Neither value is a platform pong SLA, an Agent timeout or a business-input deadline.
+const RECEIVER_HANDSHAKE_MS = 15_000
+const RECEIVER_PONG_SECONDS = 15
 const questionAnswerRefusals: Readonly<Record<string, string>> = {
   INGRESS_QUESTION_ANSWER_INVALID: 'Answer not sent. Choose one option or enter text for every question, then submit.',
   INGRESS_ACTION_UNSUPPORTED: 'Answer not accepted. Open the original conversation to continue.',
@@ -76,7 +80,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     if (config.adapterId !== this.adapterId) feishuFailure('FEISHU_APPLICATION_INVALID')
     this.application(config)
   }
-  private http(receiverSignal?: AbortSignal): HttpInstance {
+  private http(receiverSignal?: AbortSignal, endpoint?: (value: unknown) => void): HttpInstance {
     const transport: HttpInstance = this.options.http ?? defaultHttpInstance as unknown as HttpInstance
     const http = Object.create(transport) as HttpInstance
     http.request = async <T, R = T, D = unknown>(input: HttpRequestOptions<D> & { signal?: AbortSignal }): Promise<R> => {
@@ -107,8 +111,10 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
               } }
           }
         }
+        if (input.url?.endsWith('/callback/ws/endpoint')) endpoint?.(undefined)
         const result = await transport.request<T, R, D>(request)
         if (input.url?.endsWith('/callback/ws/endpoint')) {
+          endpoint?.(result)
           const response = result as { code?: unknown; data?: { URL?: unknown } }
           if (response.code === 0) {
             if (typeof response.data?.URL !== 'string') feishuFailure('FEISHU_TRANSPORT_INVALID')
@@ -195,13 +201,36 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     const key = applicationKey(config)
     if (owners.has(key)) feishuFailure('FEISHU_RECEIVER_ALREADY_OWNED')
     const receiver: ReceiverState = { config, signal, closed: false, botOpenId: '', ws: null, observed: false }
+    const ended = new AbortController()
+    let endpointResult: { reason?: ConnectionReceiverEnd['reason'] } | undefined
+    let nativeRetryInterval: number | undefined
+    const endpoint = (value: unknown) => {
+      endpointResult = undefined
+      if (!value || typeof value !== 'object') return
+      const result = value as { code?: unknown; data?: { ClientConfig?: { ReconnectInterval?: unknown } } }
+      if (typeof result.code !== 'number') return
+      if ([403, 514, 1000040350].includes(result.code)) endpointResult = { reason: 'native-rejected' }
+      else if ([1, 1000040343].includes(result.code)) endpointResult = { reason: 'native-unavailable' }
+      else if (result.code === 0) {
+        const interval = result.data?.ClientConfig?.ReconnectInterval
+        if (typeof interval === 'number' && interval >= 0 && Number.isSafeInteger(interval * 1000)) nativeRetryInterval = interval * 1000
+        endpointResult = {}
+      }
+    }
     owners.set(key, receiver)
-    const close = () => {
+    const finish = (end: ConnectionReceiverEnd) => {
       if (receiver.closed) return
       receiver.closed = true
       signal.removeEventListener('abort', close)
       try { receiver.ws?.close({ force: true }) } catch { /* Only this application's transport is released. */ }
       if (owners.get(key) === receiver) owners.delete(key)
+      ended.abort(end)
+    }
+    const close = () => finish({ automatic: false, reason: 'sdk-ended' })
+    const terminal = () => {
+      const reason = endpointResult?.reason ?? 'sdk-ended'
+      finish({ automatic: reason !== 'native-rejected', reason,
+        ...(reason === 'native-rejected' || nativeRetryInterval === undefined ? {} : { retryAt: Date.now() + nativeRetryInterval }) })
     }
     signal.addEventListener('abort', close, { once: true })
     try {
@@ -243,16 +272,28 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         catch { return feishuFailure('FEISHU_RECEIVE_FAILED') }
         finally { this.witnesses.delete(witness) }
       }
-      receiver.ws = new WSClient({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, httpInstance: this.http(signal), logger: safeLogger, loggerLevel: LoggerLevel.error })
+      receiver.ws = new WSClient({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`,
+        httpInstance: this.http(signal, endpoint), logger: safeLogger, loggerLevel: LoggerLevel.error,
+        wsConfig: { pingTimeout: RECEIVER_PONG_SECONDS }, handshakeTimeoutMs: RECEIVER_HANDSHAKE_MS,
+        onError: terminal })
       await receiver.ws.start({ eventDispatcher: dispatcher })
-      if (!this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
-      if (receiver.ws.getConnectionStatus().state === 'idle') feishuFailure('FEISHU_SDK_START_UNCONFIRMED')
+      if (!ended.signal.aborted && !this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
+      if (!ended.signal.aborted && receiver.ws.getConnectionStatus().state === 'idle') feishuFailure('FEISHU_SDK_START_UNCONFIRMED')
       return {
-        close,
+        close, closed: ended.signal,
+        lifecycle: () => {
+          if (ended.signal.aborted) {
+            const end = ended.signal.reason as ConnectionReceiverEnd
+            return { state: 'ended', reason: end.reason, ...(end.retryAt === undefined ? {} : { nextAttemptAt: end.retryAt }) }
+          }
+          const status = receiver.ws!.getConnectionStatus()
+          return { state: status.state === 'connected' ? 'ready' : status.state === 'reconnecting' ? 'recovering' : 'starting',
+            ...(status.nextConnectTime === undefined ? {} : { nextAttemptAt: status.nextConnectTime }) }
+        },
         observation: () => {
           const active = this.current(receiver), state = receiver.ws?.getConnectionStatus().state, connected = state === 'connected'
           return { authentication: active ? { state: 'ready' } : { state: 'unknown', reason: 'not-tested' },
-            transport: receiver.closed ? { state: 'disabled' } : active && connected ? { state: 'ready' } : state === 'failed' ? { state: 'unavailable', reason: 'check-failed' } : { state: 'unknown', reason: 'not-started' },
+            transport: receiver.closed ? signal.aborted ? { state: 'disabled' } : { state: 'unavailable', reason: 'check-failed' } : active && connected ? { state: 'ready' } : state === 'failed' ? { state: 'unavailable', reason: 'check-failed' } : { state: 'unknown', reason: 'not-started' },
             intake: active && connected && receiver.observed ? { state: 'ready' } : { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }
         }
       }

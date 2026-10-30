@@ -3,7 +3,7 @@ import { GatewayIntentBits, type GatewayDispatchPayload, type APIMessage, type A
 import type { ConnectionConfig, ConnectionObservation } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '../../connection-host.js'
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
-import type { ConnectionIngressReceiver, ConnectionIngressTransport } from '../../connection-receivers.js'
+import type { ConnectionIngressReceiver, ConnectionIngressTransport, ConnectionReceiverEnd } from '../../connection-receivers.js'
 import type { ChannelStoragePort } from '../../channel-storage.js'
 import { DiscordClients, type DiscordHttpOptions } from './client.js'
 import { DiscordPublicationAdapter } from './publication.js'
@@ -94,12 +94,14 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
       retrieveSessionInfo: id => sessions.has(id) ? sessions.get(id)! : (() => { const saved = readSession(id); sessions.set(id, saved); return saved })(),
       updateSessionInfo: (id, info) => { sessions.set(id, info); if (info === null && !receiver.closed && !signal.aborted) saveSession(id, null) },
       identifyProperties: { os: process.platform, browser: 'AgentMux', device: 'AgentMux' } })
-    const close = () => {
+    const finish = (end: ConnectionReceiverEnd) => {
       if (receiver.closed) return
       receiver.closed = true; signal.removeEventListener('abort', close)
       void Promise.resolve(manager.destroy()).catch(() => {})
       if (owners.get(key) === receiver) { owners.delete(key); this.stores.delete(key) }
+      failed.abort(end)
     }
+    const close = () => finish({ automatic: false, reason: 'sdk-ended' })
     signal.addEventListener('abort', close, { once: true })
     manager.on(WebSocketShardEvents.Closed, () => { receiver.socketFailed = true })
     manager.on(WebSocketShardEvents.Error, () => { receiver.socketFailed = true })
@@ -143,11 +145,14 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
         }
         receiver.socketFailed = false
         if (originalSession) saveSession(shard, { ...originalSession, sequence: payload.s })
-      }).catch(() => { receiver.socketFailed = true; close(); failed.abort() })
+      }).catch(() => { receiver.socketFailed = true; finish({ automatic: true, reason: 'check-failed' }) })
       tails.set(shard, work)
     })
     try { await manager.connect() } catch { close(); return discordFailure('DISCORD_RECEIVER_UNAVAILABLE') }
-    return { close, closed: failed.signal, observation: () => ({ authentication: { state: 'ready' }, transport: { state: receiver.closed ? 'disabled' : receiver.socketFailed ? 'unknown' : 'ready', ...(receiver.socketFailed ? { reason: 'check-failed' as const } : {}) },
+    return { close, closed: failed.signal,
+      lifecycle: () => receiver.closed ? { state: 'ended', reason: (failed.signal.reason as ConnectionReceiverEnd).reason }
+        : { state: receiver.socketFailed ? 'recovering' : 'ready' },
+      observation: () => ({ authentication: { state: 'ready' }, transport: { state: receiver.closed ? 'disabled' : receiver.socketFailed ? 'unknown' : 'ready', ...(receiver.socketFailed ? { reason: 'check-failed' as const } : {}) },
       intake: receiver.cursorFailed || receiver.socketFailed || receiver.callbackFailure ? { state: 'unknown', reason: 'check-failed' } : receiver.observed ? { state: 'ready' } : { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }
   }
 }
