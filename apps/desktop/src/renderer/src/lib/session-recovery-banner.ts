@@ -3,11 +3,16 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { currentRunRecoveryOperation } from './continuity-presentation'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
-export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; description?: string; detail: string; surfaceDetail?: string; actionLabel?: string; actionDetail?: string; diagnostic?: string } | null {
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown' | 'connecting'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; description?: string; detail: string; surfaceDetail?: string; actionLabel?: string; actionDetail?: string; diagnostic?: string } | null {
   if (session?.kind !== 'agent' || session.processState !== 'running') return null
   const frontend = session.terminalFrontend
   if (!frontend || frontend.run.runId !== session.control.run.runId) return null
   const initialization = frontend.initialization
+  if (initialization?.phase === 'ready' && frontend.state === 'starting') return {
+    kind: 'connecting', fullPage: false, phase: 'parked', title: 'Terminal connection pending',
+    detail: 'The original conversation has opened. Its terminal connection is not confirmed yet. Your Session, draft and existing input paths are kept.',
+    ...(initialization.failure?.message ? { diagnostic: initialization.failure.message } : {})
+  }
   if (initialization && initialization.phase !== 'ready') {
     // Presentation consumes the original actor's typed observation. A slow/unknown
     // bootstrap cannot cover an already attached, usable terminal.

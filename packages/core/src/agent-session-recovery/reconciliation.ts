@@ -160,7 +160,10 @@ export class AgentSessionRecoveryReconciler {
     const retained = controlled ? Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
       operation.launchInput.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(operation.launchInput.state)) : []
     const initial = (controlled || input?.delivery === 'post-launch') && input?.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(input.state)
-    if (!initial && !retained.length) return
+    // Empty creation still has a Provider-confirmed native identity. Publishing
+    // that identity lets a later real first input address its original object.
+    const needsIdentity = controlled && !session.nativeHandle
+    if (!initial && !retained.length && !needsIdentity) return
     const key = JSON.stringify([session.agentSessionId, session.run, session.nativeActor?.actorId ?? null, initial ? input?.key : null, retained.map(value => value.operationId)])
     if (this.initialInputContinuations.has(key)) return
     const work = (async () => {

@@ -321,7 +321,7 @@ export function SessionPane({
   }, [historyReturnContext, selectOwnRegion])
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   const frontendNotice = sessionFrontendPresentation(session)
-  const recoverableFrontendNotice = frontendNotice && frontendNotice.kind !== 'unknown' ? frontendNotice : null
+  const recoverableFrontendNotice = frontendNotice && frontendNotice.kind !== 'unknown' && frontendNotice.kind !== 'connecting' ? frontendNotice : null
   const frontendSurface = frontendNotice?.fullPage === true
   const needsSessionSurface = pendingAgentRestore || frontendSurface
   const [retainedOutputKey, setRetainedOutputKey] = useState<string | null>(null)
@@ -1049,14 +1049,16 @@ export function SessionPane({
     restore: continuityNotice.remedy.kind === 'refresh' ? 'Re-read original checks again without restarting the Agent or resending messages.' : 'Recovery remains a separate explicit action.'
   } }} /> : null
   const frontendObservationCause = originalReadError?.source === activitySourceKey ? originalReadError.message
-    : session.kind === 'agent' ? session.terminalFrontend?.message ?? frontendNotice?.detail : frontendNotice?.detail
-  const frontendObservationNotice = frontendNotice?.kind === 'unknown' ? <ServiceWindowNotice
+    : frontendNotice?.diagnostic ?? (session.kind === 'agent' ? session.terminalFrontend?.message ?? frontendNotice?.detail : frontendNotice?.detail)
+  const frontendObservationNotice = frontendNotice?.kind === 'unknown' || frontendNotice?.kind === 'connecting' ? <ServiceWindowNotice
     title={frontendNotice.title}
     disclosure={{ scope: JSON.stringify(['frontend-observation', session.control.hostId, session.id, session.control.run.runId]),
       id: 'frontend-observation', cause: frontendObservationCause ?? frontendNotice.detail, visible }}
     notice={{ kind: 'indeterminate', notice: {
       step: frontendObservationCause ?? frontendNotice.title,
-      mode: 'The last Run observation is running. Existing terminal and input paths are retained; the frontend connection state is unknown.',
+      mode: frontendNotice.kind === 'connecting'
+        ? 'The original Run is running. Existing input paths are retained while its terminal connects.'
+        : 'The last Run observation is running. Existing terminal and input paths are retained; the frontend connection state is unknown.',
       restore: frontendNotice.detail
     } }}
     actions={projectionPolicy.allowsRecovery ? <button type="button" className="small-button" disabled={refreshing}

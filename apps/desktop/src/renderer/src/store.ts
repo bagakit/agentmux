@@ -1,4 +1,5 @@
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
+import { initialNativeComposerBinding } from './lib/initial-native-composer-binding'
 import { editComposerInputImages, restoreComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
 import { isBackgroundLocalAgentOpen } from '@agentmux/core/spatial-graph'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
@@ -763,12 +764,14 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   // This is the direct user's new producer contract, not a recovered queue tag
   // or an inference from authorHuman, current predecessor or the message body.
   const recipient = options?.browserRecipient ?? options?.browserInput?.control
-  return origin === 'manual' && session?.kind === 'agent' && session.processState === 'running' &&
+  const direct = origin === 'manual' && session?.kind === 'agent' && session.processState === 'running' &&
     (!recipient || recipient.hostId === session.control.hostId &&
       recipient.agentSessionId === session.control.agentSessionId && recipient.run.runId === session.control.run.runId) &&
     !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch &&
     (options?.execution === undefined || options.execution === 'immediate')
-    ? { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: 'manual-actor' } } : undefined
+  if (!direct || session?.kind !== 'agent') return
+  return initialNativeComposerBinding(session) ??
+    { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: 'manual-actor' } }
 }
 
 /** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
