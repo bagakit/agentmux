@@ -11,6 +11,8 @@ import { parseMotePreferencesReadInput, parseMoteDefaultConversation, sameMotePr
 import type { FileReadResource } from './public-rpc-files.js'
 import type { MoteDialogueIdentity, MoteMainSnapshot } from './mote-dialogue.js'
 import { normalizeAgentContinuityOperation, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
+import { parseMoteMainEntrySource, type MoteMainEntrySource } from './mote-main-entry-source.js'
+import type { AgentMuxRunRef } from './types.js'
 
 export type MoteDialogueLink = {
   sequence: number
@@ -41,16 +43,21 @@ export type MoteDialogueInputRoute = {
 export type MoteDialogueInputSubmit = { target: MotePreferencesTarget; expectedRoleRevision: string; input: AgentInputSubmit;
   recovery?: { operationId: string; /** Explicit original recovery reconciliation only; ordinary repeats remain reads. */ reconcile?: true } }
 export type MoteDialogueInputRead = { target: MotePreferencesTarget; operationId: string }
+export type MoteDialogueRecoveryRequest = MoteMainEntrySource & { expectedRun: AgentMuxRunRef; operationId: string }
+export type MoteDialogueRecoveryInspection = { operation: AgentMuxContinuityOperation | null }
 export type MoteDialogueInputInspection = { route: MoteDialogueInputRoute | null; record: AgentPromptSubmissionRecord | null; input: AgentInputSubmissionReceipt | null;
   /** The exact original retained operation, not a reconstructed recovery result or acceptance. */
   recovery?: AgentMuxContinuityOperation | null }
 /** Exact-condition receipt reference for clients; it grants no controlled waiting or replay contract. */
 export type MoteDialogueInputReference = { inputKey: Extract<AgentPromptInputKey,{kind:'prompt'}>; record: AgentPromptSubmissionRecord;
   outcome: 'admitted' | 'terminal-confirmed'; moteObservationId?: string }
-export type MoteDialogueParamsMap = { 'space.mote.dialogue.read': MoteDialogueRead; 'space.mote.dialogue.link': MoteDialogueWrite; 'space.mote.dialogue.input.submit': MoteDialogueInputSubmit; 'space.mote.dialogue.input.inspect': MoteDialogueInputRead }
-export type MoteDialogueResultMap = { 'space.mote.dialogue.read': MoteDialoguePage; 'space.mote.dialogue.link': MoteDialogueReceipt; 'space.mote.dialogue.input.submit': MoteDialogueInputInspection; 'space.mote.dialogue.input.inspect': MoteDialogueInputInspection }
+export type MoteDialogueParamsMap = { 'space.mote.dialogue.read': MoteDialogueRead; 'space.mote.dialogue.link': MoteDialogueWrite; 'space.mote.dialogue.input.submit': MoteDialogueInputSubmit; 'space.mote.dialogue.input.inspect': MoteDialogueInputRead;
+  'space.mote.dialogue.recovery.ensure': MoteDialogueRecoveryRequest; 'space.mote.dialogue.recovery.inspect': MoteDialogueRecoveryRequest }
+export type MoteDialogueResultMap = { 'space.mote.dialogue.read': MoteDialoguePage; 'space.mote.dialogue.link': MoteDialogueReceipt; 'space.mote.dialogue.input.submit': MoteDialogueInputInspection; 'space.mote.dialogue.input.inspect': MoteDialogueInputInspection;
+  'space.mote.dialogue.recovery.ensure': MoteDialogueRecoveryInspection; 'space.mote.dialogue.recovery.inspect': MoteDialogueRecoveryInspection }
 export type MoteDialogueMethod = keyof MoteDialogueParamsMap
-export const MOTE_DIALOGUE_METHODS = { 'space.mote.dialogue.read': 'short', 'space.mote.dialogue.link': 'long', 'space.mote.dialogue.input.submit': 'long', 'space.mote.dialogue.input.inspect': 'short' } as const
+export const MOTE_DIALOGUE_METHODS = { 'space.mote.dialogue.read': 'short', 'space.mote.dialogue.link': 'long', 'space.mote.dialogue.input.submit': 'long', 'space.mote.dialogue.input.inspect': 'short',
+  'space.mote.dialogue.recovery.ensure': 'long', 'space.mote.dialogue.recovery.inspect': 'short' } as const
 export function isMoteDialogueMethod(method: unknown): method is MoteDialogueMethod { return typeof method === 'string' && Object.hasOwn(MOTE_DIALOGUE_METHODS, method) }
 export type MoteDialogueCallContext = { caller?: { hostId: string; agentSessionId: string }; signal?: AbortSignal; assertCurrent?(): Promise<void> }
 export interface MoteDialoguePort {
@@ -90,6 +97,14 @@ export function parseMoteDialogueLink(value: unknown, code: 'CONTROL_PROTOCOL_ER
   return p as MoteDialogueLink
 }
 export function parseMoteDialogueParams<M extends MoteDialogueMethod>(method:M,value:unknown):MoteDialogueParamsMap[M] {
+  if (method === 'space.mote.dialogue.recovery.ensure' || method === 'space.mote.dialogue.recovery.inspect') {
+    const p = rpcRecord(value, ['target','expectedRoleRevision','reference','expectedRun','operationId'])
+    parseMoteMainEntrySource({ target:p.target, expectedRoleRevision:p.expectedRoleRevision, reference:p.reference })
+    text(p.operationId, 'INVALID_CONTROL_REQUEST')
+    const run = rpcRecord(p.expectedRun, ['runId'])
+    text(run.runId, 'INVALID_CONTROL_REQUEST')
+    return p as MoteDialogueParamsMap[M]
+  }
   if (method === 'space.mote.dialogue.input.submit' || method === 'space.mote.dialogue.input.inspect') {
     const p = rpcRecord(value, method === 'space.mote.dialogue.input.submit' ? ['target','expectedRoleRevision','input','recovery'] : ['target','operationId'])
     parseMotePreferencesReadInput({kind:'quick',target:p.target})
@@ -128,6 +143,16 @@ export function parseMoteDialogueParams<M extends MoteDialogueMethod>(method:M,v
   return p as MoteDialogueParamsMap[M]
 }
 export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,value:unknown,input:MoteDialogueParamsMap[M]):MoteDialogueResultMap[M]{
+  if (method === 'space.mote.dialogue.recovery.ensure' || method === 'space.mote.dialogue.recovery.inspect') {
+    const p = rpcRecord(value, ['operation'], 'CONTROL_PROTOCOL_ERROR'), query = input as MoteDialogueRecoveryRequest
+    if (p.operation !== null) {
+      const op = normalizeAgentContinuityOperation(p.operation)
+      if (op.agentSessionId !== query.reference.sessionId || !dequal(op.previousRun, query.expectedRun) ||
+          method === 'space.mote.dialogue.recovery.inspect' && op.operationId !== query.operationId ||
+          op.moteMainEntry && op.operationId === query.operationId && !dequal(op.moteMainEntry, { target:query.target, expectedRoleRevision:query.expectedRoleRevision, reference:query.reference })) return fail('CONTROL_PROTOCOL_ERROR')
+    }
+    return p as MoteDialogueResultMap[M]
+  }
   if (method === 'space.mote.dialogue.input.submit' || method === 'space.mote.dialogue.input.inspect') {
     const p = rpcRecord(value, ['route','record','input','recovery'], 'CONTROL_PROTOCOL_ERROR')
     if (p.route === null) { if (method !== 'space.mote.dialogue.input.inspect' || p.record !== null || p.input !== null || p.recovery !== undefined) return fail('CONTROL_PROTOCOL_ERROR') }

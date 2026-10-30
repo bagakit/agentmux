@@ -846,12 +846,13 @@ export function ActivityView({
   ) : null
 
   const renderReadingHeader = (tools: ReactNode, rulerContent?: ReactNode): JSX.Element => {
+    const moteInitialReading = moteConversation && !hasReadContent && !emptyReadFailed && !earlierReadPending && initialReadPending
     const header = <div key="reading-header" className="activity-feed__reading-header" data-has-ruler={rulerContent ? 'true' : undefined}>
-      {rulerContent ?? emptyReadStatus}
+      {rulerContent ?? (moteInitialReading ? null : emptyReadStatus)}
       {readingEntry}
       {!rulerContent ? <div className="reading-find__floating-trigger">{tools}</div> : null}
     </div>
-    return moteConversation ? <details className="mote-conversation__reading-tools"><summary>阅读与来源</summary>{header}</details> : header
+    return moteConversation ? <>{moteInitialReading ? <div className="activity-feed__reading-header" data-mote-initial-reading>{emptyReadStatus}</div> : null}<details className="mote-conversation__reading-tools"><summary>阅读与来源</summary>{header}</details></> : header
   }
 
   const renderSurface = (content: (findTrigger: ReactNode) => JSX.Element): JSX.Element => {

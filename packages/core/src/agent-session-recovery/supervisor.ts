@@ -23,6 +23,7 @@ const sameRun = (a: AgentMuxRunRef, b: AgentMuxRunRef) => a.runId === b.runId
 const terminal = (phase: AgentMuxContinuitySupervision['phase']) => ['settled', 'cancelled', 'paused'].includes(phase)
 const reobservableReasons = ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'operation-unconfirmed', 'original-operation-unconfirmed']
 const operationInput = (op: AgentMuxContinuityOperation): AgentMuxAgentContinuityInput => ({ agentSessionId: op.agentSessionId,
+  ...(op.moteMainEntry ? { moteMainEntry: structuredClone(op.moteMainEntry) } : {}),
   operationId: op.operationId, ...(op.standingIntent ? { standingIntent: op.standingIntent } : {}), expectedRun: op.previousRun, trigger: op.trigger, policy: op.policy,
   ...(op.timingOverride ? { timingOverride: op.timingOverride } : {}), ...(op.trigger === 'input' && op.launchInput ? { input: op.launchInput.input } : {}),
   ...(op.trigger === 'input' && op.messageInput ? { messageInputRef: structuredClone(op.messageInput.ref) } : {}) })

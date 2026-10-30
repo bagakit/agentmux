@@ -16,6 +16,7 @@ import { validateAgentInputWaitRef, type AgentInputCallContext } from '../agent-
 import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
+import { parseMoteMainEntrySource } from '../mote-main-entry-source.js'
 import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
 import { normalizeAgentContinuityPolicy, parseAgentContinuityTrigger, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control-contract.js'
@@ -113,6 +114,9 @@ export class AgentSessionRecoveryService {
   async ensureAgentContinuity(
     input: AgentMuxAgentContinuityInput, context?: AgentInputCallContext
   ): Promise<AgentMuxAgentContinuityResult> {
+    if (input.moteMainEntry) input = { ...input, moteMainEntry: parseMoteMainEntrySource(input.moteMainEntry) }
+    if (input.moteMainEntry && (input.trigger !== 'manual' || input.input || input.messageInputRef || input.standingIntent || input.moteMainEntry.reference.sessionId !== input.agentSessionId))
+      throw new AgentMuxError('A Mote main entry restores the original Session without input or another source.', 'INVALID_CONTROL_REQUEST')
     if ('inputContextSource' in input || 'inputContextCaptureProof' in input || input.input &&
         ('inputContextSource' in input.input || 'inputContextCaptureProof' in input.input || 'promptWire' in input.input)) throw new AgentMuxError('Recovery producer facts are supplied only by the original Host.', 'INVALID_INPUT_CONTEXT_CAPTURE')
     if (input.input?.inputContextCapture !== undefined && input.input.inputContext !== undefined) throw new AgentMuxError('A recovery input retains one original capture reference.', 'INVALID_INPUT_CONTEXT_CAPTURE')

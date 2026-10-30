@@ -159,6 +159,7 @@ export async function performAgentContinuity(
           const root = value.continuityOperations?.[rootId]
           if (!root?.supervision) throw new AgentMuxError('The original frontend recovery owner changed.', 'AGENT_CONTINUITY_SUPERSEDED')
           const observer: AgentMuxContinuityOperation = { operationId: input.operationId, agentSessionId: input.agentSessionId,
+            ...(input.moteMainEntry ? { moteMainEntry: structuredClone(input.moteMainEntry) } : {}),
             trigger: input.trigger!, policy: structuredClone(root.policy), intentOperationId: rootId, previousRun: { ...input.expectedRun },
             ...(root.nativeTarget ? { nativeTarget: structuredClone(root.nativeTarget) } : {}), admittedAt: observedAt, observedAt,
             rechecks: 0, kind: 'pending', reason: 'recovery-supervised', evidence: structuredClone(retained.evidence) }
@@ -226,6 +227,7 @@ export async function performAgentContinuity(
     throw new AgentMuxError('A continuity operation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
   }
   if (prior && !isDeepStrictEqual(prior.standingIntent, input.standingIntent)) throw new AgentMuxError('The original recovery has a different standing source.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
+  if (prior && !isDeepStrictEqual(prior.moteMainEntry, input.moteMainEntry)) throw new AgentMuxError('The original recovery has a different Mote main admission.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
   const standing = input.standingIntent
   const assertStanding = (intent: import('../types.js').AgentFuturePromptIntent | null | undefined, session: AgentMuxStoredAgentSession) => {
     if (!standing) return
@@ -236,6 +238,7 @@ export async function performAgentContinuity(
   const now = Date.now(), policy = prior?.policy ?? normalizeAgentContinuityPolicy(input.policy)
   let receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
     operationId: input.operationId, agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
+    ...(input.moteMainEntry ? { moteMainEntry: structuredClone(input.moteMainEntry) } : {}),
     ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), ...(standing ? { standingIntent: { ...standing } } : {}), policy,
     previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
     kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown', observedAt: now, message: 'Not yet observed.' }

@@ -22,6 +22,7 @@ import type { AgentMuxContinuityControlReceipt } from './control-contract.js'
 import { validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
 import { AgentMuxError } from '../errors.js'
+import { parseMoteMainEntrySource, type MoteMainEntrySource } from '../mote-main-entry-source.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
 export type AgentMuxContinuityPolicy = {
@@ -229,6 +230,7 @@ export type AgentMuxContinuitySupervision = {
 }
 
 export type AgentMuxContinuityOperation = {
+  moteMainEntry?: MoteMainEntrySource
   standingIntent?: AgentStandingIntentReference
   operationId: string
   agentSessionId: string
@@ -340,6 +342,11 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
         !Number.isSafeInteger(fact.observedAt) || fact.observedAt < 0)))) throw new TypeError('Invalid original recovery supervision.')
   if (supervision?.controlOperations !== undefined) parseAgentContinuityControlReceipts(supervision.controlOperations, op.agentSessionId, op.operationId)
   if (op.standingIntent) parseStandingIntentReference(op.standingIntent)
+  if (op.moteMainEntry) {
+    const source = parseMoteMainEntrySource(op.moteMainEntry, 'CONTROL_PROTOCOL_ERROR')
+    if (source.reference.sessionId !== op.agentSessionId || op.trigger !== 'manual' || op.launchInput || op.messageInput)
+      throw new TypeError('The original Mote entry restores its exact Session without input.')
+  }
   if (op.launchInput) {
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
     if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')
@@ -419,6 +426,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
 }
 
 export type AgentMuxAgentContinuityInput = {
+  moteMainEntry?: MoteMainEntrySource
   standingIntent?: AgentStandingIntentReference
   agentSessionId: string
   expectedRun: AgentMuxRunRef

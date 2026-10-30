@@ -327,6 +327,11 @@ export function SessionPane({
     })
   }, [historyReturnContext, selectOwnRegion])
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
+  // Original conversation records do not require a live CLI. Qualify this
+  // Mote source by its original main links, never by a member/name/array order.
+  const moteHistoryReading = Boolean(moteOwner && session?.kind === 'agent' &&
+    mainSources.has(JSON.stringify([session.control.hostId,session.control.agentSessionId])))
+  const canReadConversation = !pendingAgentRestore || moteHistoryReading
   const frontendNotice = sessionFrontendPresentation(session)
   const recoverableFrontendNotice = frontendNotice && frontendNotice.kind !== 'unknown' && frontendNotice.kind !== 'connecting' ? frontendNotice : null
   const frontendSurface = frontendNotice?.fullPage === true
@@ -347,7 +352,7 @@ export function SessionPane({
     return intent?.itemRef.agentSessionId === sessionId && intent.itemRef.hostId === executionHostId ? intent : null
   })
   // One fact/observation owner, with demand from every actually visible reading stage.
-  const activityDemand = !pendingAgentRestore &&
+  const activityDemand = canReadConversation &&
     (visible && (viewMode !== 'terminal' || historyOpen) || presentations.some(target => target.visible !== false && (viewMode !== 'terminal' || presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!))))
   const {
     messages: userMessages,
@@ -1109,7 +1114,7 @@ export function SessionPane({
         : 'The saved Session is retained. Its process state is not yet confirmed.'))
   } : null
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
-  const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
+  const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && canReadConversation
   const activityRevealPending = revealRequest?.displayId === null
   const conversationReading = session.kind === 'agent' ? {
     reference: session.control, identity: activitySourceKey, nativeSourceFacts, enabled: visible && !parked && (activityShown || activityRevealPending),
@@ -1207,13 +1212,13 @@ export function SessionPane({
       takeoverSurface={takeoverAt(presentationOrigin(target), target.visible !== false, workbenchSessionStageHostId(target, linkOrigin.regionId!))}
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
-      activity={{ ...activityProps, onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, presentationOrigin(target))), renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && !pendingAgentRestore}
-      recovery={pendingAgentRestore ? cloneElement(restoreSurface, { visible: target.visible !== false && !parked, supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), details: { ...restoreSurface.props.details, content: retainedDetailsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) } }) : undefined}
+      activity={{ ...activityProps, onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, presentationOrigin(target))), renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && canReadConversation}
+      recovery={pendingAgentRestore && !moteHistoryReading ? cloneElement(restoreSurface, { visible: target.visible !== false && !parked, supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), details: { ...restoreSurface.props.details, content: retainedDetailsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) } }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
       {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
-        visible={target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore} {...(tabName ? { tabName } : {})} /> } : {})}
+        visible={target.visible !== false && viewMode !== 'terminal' && canReadConversation} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <section
       ref={surfaceRef}
@@ -1235,9 +1240,9 @@ export function SessionPane({
       <div ref={bodyRef} className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || needsSessionSurface || terminalLifetime.current.opened ? (
-            <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore)}
+            <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && canReadConversation)}
               ref={element => { if (element && !pendingAgentRestore && (!frontendSurface || readingRetainedOutput) && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
-              inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore} style={{ height: '100%' }}>
+              inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && canReadConversation} style={{ height: '100%' }}>
             {frontendSurface && !readingRetainedOutput ? restoreSurface : null}
             {pendingAgentRestore && !readingRetainedOutput ? (inlineHistory ? null :
               restoreSurface
