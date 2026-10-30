@@ -87,11 +87,12 @@ it('commits every required original speech and explicit skip with the same sourc
 
 it('native failure at frontier persistence rolls back all selected effects and skips, preserving the original cut', () => {
   const owner = store()
+  const priorDecisions = owner.database.prepare('SELECT * FROM connector_publication_decision').all()
   owner.database.exec("CREATE TRIGGER reject_frontier BEFORE UPDATE ON connector_publication_frontier BEGIN SELECT RAISE(ABORT, 'fixture storage failure'); END")
   expect(() => commit(owner, boundary, checkpoint(), page([speech('reply-a'), { id: 'input-a', kind: 'user-message', contentParts: [] }]), () => true))
     .toThrowError(/could not confirm the original page/)
   expect(owner.list(boundary)).toEqual([])
-  expect(owner.database.prepare('SELECT * FROM connector_publication_decision').all()).toEqual([])
+  expect(owner.database.prepare('SELECT * FROM connector_publication_decision').all()).toEqual(priorDecisions)
   expect(owner.checkpoint(boundary, 'host-a')).toEqual(checkpoint())
   owner.database.exec('DROP TRIGGER reject_frontier')
   commit(owner, boundary, checkpoint(), page([speech('reply-a')]), () => true)
