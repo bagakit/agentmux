@@ -45,7 +45,7 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
   const kinds = new Set(authors), human = operation.speaker ? operation.speaker.kind === 'human' : !!authors?.length && authors.every(kind => kind === 'human')
   const input = human && p.kind === 'speech' ? p.inputSubmission : undefined
   const inputStatus = input ? ({ waiting: 'Saved · waiting for Agent', stopped: 'Saved · delivery stopped',
-    'terminal-confirmed': 'Sent to Agent · acceptance not confirmed', admitted: 'Accepted by Agent',
+    'terminal-confirmed': 'Sent to Agent · acceptance not confirmed', 'launch-carried': 'Included in Agent resume · acceptance not confirmed', admitted: 'Accepted by Agent',
     'not-applied': 'Not delivered to Agent', unknown: 'Saved · delivery to Agent unconfirmed' }[input.status]
     + (input.observation === 'rejoin-needed' ? '\nReconnect this input in AgentMux' : '')) : undefined
   const relayTitle = authors ? (human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'

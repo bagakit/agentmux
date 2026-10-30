@@ -26,7 +26,7 @@ const key = (operationId: string) => createHash('sha256').update(operationId).di
 function inputStatus(payload: Extract<PublicationPayload, { kind: 'speech' }>): string | undefined {
   const input = payload.inputSubmission
   return input ? ({ waiting: 'Saved · waiting for Agent', stopped: 'Saved · delivery stopped', 'terminal-confirmed': 'Sent to Agent · acceptance not confirmed',
-    admitted: 'Accepted by Agent', 'not-applied': 'Not delivered to Agent', unknown: 'Saved · delivery to Agent unconfirmed' }[input.status])
+    'launch-carried': 'Included in Agent resume · acceptance not confirmed', admitted: 'Accepted by Agent', 'not-applied': 'Not delivered to Agent', unknown: 'Saved · delivery to Agent unconfirmed' }[input.status])
     + (input.observation === 'rejoin-needed' ? '\nReconnect this input in AgentMux' : '') : undefined
 }
 function speechCard(payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker: FeishuRoleSpeaker,
