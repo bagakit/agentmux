@@ -36,7 +36,7 @@ const guard = " &&\n              !(control?.onlyIfUnclaimed && control.required
 const variants = [{ name: 'candidate', count: plainOnly ? 1 : 9 },
   { name: 'old-unknown-guard', from: guard, to: '', target: 'plain cwd', count: 1 },
   { name: 'skip-frontend-prejoin', file: 'codex-managed-frontend.ts',
-    from: "const joined = await connection.request('thread/resume', { threadId: target.sessionId, excludeTurns: false })",
+    from: "const joined = await connection.request('thread/resume', { threadId: target.sessionId, excludeTurns: true })",
     to: 'const joined = loaded', target: 'plain cwd', count: 1 },
   { name: 'skip-frontend-authorization', file: 'codex-managed-frontend.ts',
     from: '  await context.assertCurrent()\n  let result:', to: '  /* Cancelled preparation incorrectly dispatches control. */\n  let result:',
@@ -48,6 +48,7 @@ const variants = [{ name: 'candidate', count: plainOnly ? 1 : 9 },
   { name: 'grant-question-exception', from: 'control?.onlyIfUnclaimed && control.requiredNativeSource', to: 'control?.requiredNativeSource',
     target: 'refuses ordinary-question', count: 1 }]
 const receipt = { schema: 'agentmux.native-initial-input-proof.v1', passed: false, sourceStable: false, userRuntimeTouched: false,
+  scope: 'Historical old-first-dispatch wrapper and old unknown-source Core to candidate Core on the same retained identity; fresh candidate startup is a separate qualification.',
   native: process.env.AGENTMUX_TEST_CODEX_EXECUTABLE ?? join(homedir(), '.codex/packages/app-server-daemon/releases', `0.163.0-${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-apple-darwin/bin/codex`), results: [] }
 const save = () => writeFile(join(attempt, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 async function bundle(options, variant) {
@@ -78,7 +79,7 @@ async function bundle(options, variant) {
         }
         await bind(entry); return { path: entry, external: true }
       })
-      if (variant?.from) plugin.onLoad({ filter: /(?:prompt-submission|codex-managed-frontend)\.ts$/ }, async args => {
+      if (variant?.from) plugin.onLoad({ filter: /(?:prompt-submission|codex-managed-frontend|codex-managed-run)\.ts$/ }, async args => {
         if (!args.path.endsWith('/' + (variant.file ?? 'prompt-submission.ts'))) return null
         const source = await readFile(args.path, 'utf8')
         assert.equal(source.split(variant.from).length, 2, 'Unique owning mutation anchor: ' + variant.name)
@@ -98,8 +99,12 @@ try {
   await promisify(execFile)('cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', join(root, 'packages/core/native/native-socket-peer.c'),
     '-o', join(dist, 'native-socket-peer-darwin')], { maxBuffer: 1024 * 1024 })
   receipt.nativeProcessHelper = sha(await readFile(join(dist, 'native-socket-peer-darwin')))
+  const historicalWrapper = { name: 'historical-old-first-dispatch', file: 'codex-managed-run.ts',
+    from: 'await joinCodexNativeFrontend({ request: (method, params) => connection.request(method, params, { retainPending: true }) }, target, assertCurrent)',
+    to: '/* Historical wrapper dispatched its first TUI before same-object join. */' }
   for (const name of ['codex-managed-run', 'control-endpoint-listener-worker']) await bundle({
-    entryPoints: [join(root, 'packages/core/src', name === 'codex-managed-run' ? 'providers/' + name + '.ts' : name + '.ts')], outfile: join(dist, name + '.js') })
+    entryPoints: [join(root, 'packages/core/src', name === 'codex-managed-run' ? 'providers/' + name + '.ts' : name + '.ts')], outfile: join(dist, name + '.js') },
+    name === 'codex-managed-run' ? historicalWrapper : undefined)
   const source = ['export * from "./packages/core/src/index.ts"',
     'export { AgentPromptSubmissionCoordinator } from "./packages/core/src/prompt-submission.ts"',
     'export { AgentMuxAgentSessionRegistry } from "./packages/core/src/agent-session-registry.ts"',
@@ -124,8 +129,8 @@ process.stdout.write(JSON.stringify({owner:owner.ownerIdentity(),socketPath:owne
     await bundle({ stdin: { contents: source, resolveDir: root, loader: 'ts' }, outfile: file }, variant)
     const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', 'packages/core/test/native-initial-input.config.mts',
       '--reporter=default', '--reporter=json', '--outputFile=' + report]
-    if (plainOnly) args.push('-t', 'plain cwd')
-    else if (variant.target) args.push('-t', variant.target)
+    if (variant.target) args.push('-t', variant.target)
+    else if (plainOnly) args.push('-t', 'plain cwd')
     const result = await new Promise((yes, no) => {
       const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, AGENTMUX_TEST_OWNER_ENTRY: owner,
         AGENTMUX_NATIVE_INITIAL_ENTRY: pathToFileURL(file).href, AGENTMUX_TEST_CODEX_EXECUTABLE: receipt.native, AGENTMUX_PRIVATE_INITIAL_CANDIDATE: pathToFileURL(file).href,

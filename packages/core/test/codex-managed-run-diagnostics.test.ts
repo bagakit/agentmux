@@ -8,7 +8,8 @@ import { runCodexManaged } from '../src/providers/codex-managed-run.js'
 const boundary = vi.hoisted(() => ({ spawn: vi.fn(), listeners: vi.fn(), publish: vi.fn(), handlers: undefined as any }))
 vi.mock('node:child_process', () => ({ spawn: boundary.spawn }))
 vi.mock('../src/agent-native-process.js', () => ({ nativeProcessTcpListeners: boundary.listeners }))
-vi.mock('../src/providers/codex-managed-frontend.js', () => ({
+vi.mock('../src/providers/codex-managed-frontend.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/providers/codex-managed-frontend.js')>(),
   CODEX_NATIVE_TOKEN_ENV: 'AGENTMUX_CODEX_ACTOR_TOKEN',
   CODEX_ACTOR_ID_ENV: 'AGENTMUX_CODEX_ACTOR_ID', CODEX_ACTOR_LIFECYCLE_ENV: 'AGENTMUX_CODEX_ACTOR_LIFECYCLE',
   openCodexFrontendControl: async (_token: string, _identity: unknown, handlers: unknown) => {
@@ -17,7 +18,7 @@ vi.mock('../src/providers/codex-managed-frontend.js', () => ({
   }
 }))
 vi.mock('../src/providers/codex-native-rpc.js', () => ({ connectCodexNativeActor: async () => ({
-  request: async (method: string) => method === 'account/read' ? { account: null, requiresOpenaiAuth: false } : ({ thread: { id: 'original-native', sessionId: 'original-session', canAcceptDirectInput: true }, cwd: process.cwd() }), dispose() {}
+  request: async (method: string) => method === 'account/read' ? { account: null, requiresOpenaiAuth: false } : ({ thread: { id: 'original-native', sessionId: 'original-session', canAcceptDirectInput: true }, cwd: process.cwd() }), dispose() {}, isConnected: () => true
 }) }))
 
 class Child extends EventEmitter {

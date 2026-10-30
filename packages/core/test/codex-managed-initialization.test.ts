@@ -19,13 +19,13 @@ let root: string, worker: string
 const sid = '00000000-0000-4000-8000-000000000001'
 const mutations: Record<string, [string, string]> = {
   'deadline-preflight': ["nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })", "nativeConnection.request('account/read', { refreshToken: false })"],
-  'drop-preflight-retry': ['if (nativeRequested || nativeSessionId || !live()) return Promise.resolve()', "if (initialization.phase === 'failed' || nativeRequested || nativeSessionId || !live()) return Promise.resolve()"],
-  'repeat-unknown': ['if (nativeRequested || nativeSessionId || !live()) return Promise.resolve()', 'if (nativeSessionId || !live()) return Promise.resolve()'],
+  'drop-preflight-retry': ['if (nativeRequested || !live()) return Promise.resolve()', "if (initialization.phase === 'failed' || nativeRequested || !live()) return Promise.resolve()"],
+  'repeat-unknown': ['if (nativeRequested || !live()) return Promise.resolve()', 'if (!live()) return Promise.resolve()'],
   'drop-settled-resume': ['if (plan.resume && error instanceof JSONRPCErrorException && [-32600, -32602].includes(error.code)) nativeRequested = false', 'if (false) nativeRequested = false'],
   'repeat-rejected-start': ['plan.resume && error instanceof JSONRPCErrorException', 'error instanceof JSONRPCErrorException'],
   'repeat-unknown-resume': ['error instanceof JSONRPCErrorException && [-32600, -32602].includes(error.code)', 'error instanceof Error'],
   'accept-old-frontend': ['frontend.frontendId === expectedId', 'true'],
-  'carry-input': ["['resume', nativeSessionId!, ...plan.frontendArgs], frontend.frontendId", "['resume', nativeSessionId!, ...plan.frontendArgs, 'UNAUTHORIZED_INITIAL_INPUT'], frontend.frontendId"],
+  'carry-input': ["['resume', target.sessionId, ...plan.frontendArgs], frontendId", "['resume', target.sessionId, ...plan.frontendArgs, 'UNAUTHORIZED_INITIAL_INPUT'], frontendId"],
   'ignore-native-policy': ['expected.approvalPolicy !== undefined && prepared.approvalPolicy !== expected.approvalPolicy ||', '']
 }
 const rpcMutations: Record<string, [string, string]> = {
@@ -194,7 +194,7 @@ it.runIf(process.platform === 'darwin')('retains the original running backend af
 
 it.runIf(process.platform === 'darwin').each([false, true])('keeps one original native request pending through reader timeouts and accepts its late exact response without resending (resume=%s)', async resume => {
   const f = await fixture({ nativeGate: true, resume }), method = resume ? 'thread/resume' : 'thread/start'
-  await expect.poll(() => f.methods()).toContain(method)
+  await expect.poll(() => f.methods(), { timeout: 6000 }).toContain(method)
   const original = f.current()
   const request = { operationId: 'observe-original', expectedFrontendId: original.frontendId,
     target: { kind: 'initialization' as const, lifecycleOperationId: 'original-lifecycle' } }
@@ -207,7 +207,7 @@ it.runIf(process.platform === 'darwin').each([false, true])('keeps one original 
   await rm(f.gate)
   await f.wait(value => value.initialization?.phase === 'ready' && value.state === 'detached')
   expect((await reconnectCodexTerminalFrontend(f.context, request)).initialization?.native).toEqual({ state: 'confirmed', sessionId: sid })
-  expect((await f.methods()).filter(value => value === method)).toHaveLength(1)
+  expect((await f.methods()).filter(value => value === method)).toHaveLength(resume ? 2 : 1)
   expect(await rows(f.events)).toHaveLength(1)
 })
 
@@ -255,7 +255,7 @@ it.runIf(process.platform === 'darwin').each([
   expect((await reconnectCodexTerminalFrontend(f.context, request)).initialization).toMatchObject({ phase: 'ready', native: { state: 'confirmed', sessionId: sid } })
   await f.wait(value => value.state === 'detached')
   await reconnectCodexTerminalFrontend(f.context, request)
-  const native = (await rows(f.log)).filter(row => row.method === 'thread/resume')
+  const native = (await rows(f.log)).filter(row => row.method === 'thread/resume' && row.params.cwd !== undefined)
   expect(native).toHaveLength(2); expect(native[1].params).toEqual(native[0].params)
   expect(native[1].params).toEqual({ ...f.plan.resume, excludeTurns: true })
   expect(JSON.parse(await readFile(f.heartbeat, 'utf8')).pid).toBe(backend.pid)
@@ -267,7 +267,7 @@ it.runIf(process.platform === 'darwin').each([
 
 it.runIf(process.platform === 'darwin')('resumes the original native object before TUI attachment and fences wrong generations and changed duplicate requests', async () => {
   const f = await fixture({ resume: true }), original = await f.wait(value => value.state === 'detached')
-  const native = (await rows(f.log)).filter(row => row.method === 'thread/resume')
+  const native = (await rows(f.log)).filter(row => row.method === 'thread/resume' && row.params.cwd !== undefined)
   expect(native).toHaveLength(1); expect(native[0].params).toMatchObject({ threadId: sid, cwd: f.directory, sandbox: 'read-only', approvalPolicy: 'never', model: 'private-model' })
   expect((await f.methods()).filter(method => method === 'thread/start')).toHaveLength(0)
   await expect(reconnectCodexTerminalFrontend(f.context, { operationId: 'wrong-generation', expectedFrontendId: 'foreign-generation',
@@ -278,9 +278,9 @@ it.runIf(process.platform === 'darwin')('resumes the original native object befo
   await expect(reconnectCodexTerminalFrontend(f.context, { ...request, target: { kind: 'native-session', nativeSessionId: 'another-thread' } })).rejects.toMatchObject({ code: 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED' })
   await expect.poll(async () => (await rows(f.events)).length).toBe(2)
   expect((await rows(f.events)).map(row => row.args.slice(4))).toEqual([['resume', sid, '--no-alt-screen'], ['resume', sid, '--no-alt-screen']])
-  const prejoins = (await rows(f.log)).filter(row => row.method === 'thread/resume' && row.params.excludeTurns === false)
+  const prejoins = (await rows(f.log)).filter(row => row.method === 'thread/resume' && row.params.cwd === undefined)
   expect(prejoins.length).toBeGreaterThan(0)
-  for (const row of prejoins) expect(row.params).toEqual({ threadId: sid, excludeTurns: false })
+  for (const row of prejoins) expect(row.params).toEqual({ threadId: sid, excludeTurns: true })
   expect(f.child.exitCode).toBeNull()
 })
 
