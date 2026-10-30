@@ -747,7 +747,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     } catch { /* The original Run remains unknown, never inferred dead from an input error. */ }
     return result
   }
-  /** Continue the exact saved wait or confirmed-not-applied attempt; unknown effects are read only. */
+  /** Ensure this owner's original custody only; explicit Core controls stay at Core. */
   async rejoin(value: ConnectionIngressRejoinInput, context: RoomBindingCallContext): Promise<import('@agentmux/core/connections').ConnectionIngressRejoinResult> {
     const input = parseIngressParams('connection.ingress.rejoin', value)
     await context.assertCurrent?.()
@@ -783,7 +783,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
           const actions = JSON.parse(String(row.rejoin_json)) as Record<string, { actor: RoomBindingCallContext['actor']; action: ConnectionIngressRejoinAction }>
           const prior = actions[input.operationId]!
           if (prior.action.outcome === 'pending') {
-            prior.action = { ...prior.action, outcome: 'handed-off', inputRef: inspection.inputReceipt!.ref }
+            prior.action = { ...prior.action, outcome: 'handed-off', inputRef: { key: inspection.inputReceipt!.key, waitGeneration: 1 } }
             this.database.prepare('UPDATE connection_ingress_message SET rejoin_json=? WHERE ingress_id=?').run(JSON.stringify(actions), input.ingressId)
           }
           return prior.action

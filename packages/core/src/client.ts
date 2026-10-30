@@ -119,7 +119,7 @@ import {
   type DurableAgentMuxMessage,
   type AgentMuxMessageEnvelope
 } from './agent-global-message-queue.js'
-import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
+import { sessionSemanticResumeSourceRuns, originalInputResumeEnvironment } from './agent-session-resume-sources.js'
 import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 import { agentInputSubmissionStatus, agentInputJournalKey, agentInputDeliveryKey, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputSubmissionReceipt,
@@ -7334,7 +7334,7 @@ export class AgentMuxClient {
       if (!original.input) throw new AgentMuxError('The retained message has no original controlled input contract. Inspect its original claim; it cannot be submitted again.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       await this.assertInputWaitingAuthor(original.input.intent, input.caller)
       const receipt = (await this.inspectAgentInput({ key: original.input.intent.key }, input.caller))!
-      void this.rejoinAgentInputWaiting({ ref: receipt.ref, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
+      void this.rejoinAgentInputWaiting({ ref: { key: original.input.intent.key, waitGeneration: 1 }, scope: 'wake-only', ...(input.caller ? { caller: input.caller } : {}) }, context).catch(error => {
         this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
           message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: receipt.key.expectedRun } })
       })
@@ -7355,15 +7355,22 @@ export class AgentMuxClient {
     if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, admissionIntent)
     authority = this.inputCallAuthority(authority, context)
     const recipient = await this.currentStoredAgentSession(input.agentSessionId)
-    if (!sameRun(recipient.run, expectedRun)) throw new AgentMuxError('The original message Run changed before saving.', 'STALE_AGENT_SESSION')
+    const recovered = !sameRun(recipient.run, expectedRun) && admissionIntent.kind !== 'exact-condition' && envelope.sender.kind === 'external'
+      ? originalInputResumeEnvironment(recipient, expectedRun.runId) : undefined
+    if (!sameRun(recipient.run, expectedRun) && !recovered) throw new AgentMuxError('The original message Run changed and its original input environment is unconfirmed. Its retained request was not retargeted.', 'STALE_AGENT_SESSION')
     const key = { kind: 'message' as const, agentSessionId: input.agentSessionId, expectedRun, messageId: envelope.messageId }
-    const originalAdmission = admissionIntent.kind !== 'exact-condition' ? await this.inspectAgentPromptSubmission(key) : undefined
+    const claimKeys = recovered ? recovered.runs.map(runId => ({ ...key, expectedRun: { runId } })) : [key]
+    const claimsAbsent = async () => {
+      for (const alias of claimKeys) if (await this.inspectAgentPromptSubmission(alias)) return false
+      return true
+    }
+    const originalAdmission = admissionIntent.kind !== 'exact-condition' ? !await claimsAbsent() : false
     const queued = await this.messageQueue.append({ ...envelope,
       sourceChannel, ...(sourceDevice ? { sourceDevice } : {}),
       ...(admissionIntent.kind !== 'exact-condition' ? { admissionIntent } : {}),
       ...(input.execution === undefined ? {} : { execution: input.execution }) },
-      admissionIntent.kind !== 'exact-condition' && !originalAdmission ? { inputEnvironment: this.inputSavedEnvironment(recipient),
-        originalClaimAbsent: async () => !await this.inspectAgentPromptSubmission(key) } : undefined)
+      admissionIntent.kind !== 'exact-condition' && !originalAdmission ? { inputEnvironment: recovered?.environment ?? this.inputSavedEnvironment(recipient),
+        originalClaimAbsent: claimsAbsent } : undefined)
     if (admissionIntent.kind === 'exact-condition' && queued.promptCondition &&
         !isDeepStrictEqual(queued.promptCondition, admissionIntent.condition)) throw new AgentMuxError(
       'The caller condition conflicts with the original saved message condition.', 'AGENT_PROMPT_OPERATION_CONFLICT')
