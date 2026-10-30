@@ -21,7 +21,7 @@ it('moves stale lanes behind actionable and recent work without reordering ties 
   const selected = ids.map((id, index) => {const status = {...base.status, state: id === 'working' ? 'working' as const : id === 'attention' ? 'waiting' as const : 'done' as const, source: 'native-hook' as const, observedAt: now}; return {...base, id, workspacePath: workspaces[index]!.path, hostId: 'local', status, semanticStatus: {...status, stateEnteredAt: id === 'unknown' ? undefined : now - (id === 'stale' ? day + 1 : id === 'exact-day' ? day : 1)}}})
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
   try {
-    useAppStore.setState({config: {...config, workspaces}, sessions: selected, timelines: {}, agentNames: {}, tabs: {}, agentFocus: {execution: {sessionId: 'stale', history: []}, pmo: {sessionId: null}}})
+    useAppStore.setState({mainSurface: 'agents', focusView: 'list', config: {...config, workspaces}, sessions: selected, timelines: {}, agentNames: {}, tabs: {}, agentFocus: {execution: {sessionId: 'stale', history: []}, pmo: {sessionId: null}}})
     await act(async () => root.render(createElement(GlobalFocusSurface)))
     const order = () => [...element.querySelectorAll<HTMLElement>('.focus-project-lanes__row')].map(row => row.dataset.projectId)
     expect(order()).toEqual(['attention', 'working', 'recent-a', 'recent-b', 'exact-day', 'stale', 'unknown'])
