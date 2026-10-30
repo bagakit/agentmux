@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { agentPromptNotApplied, validateAgentLaunchPromptInputPlan } from '../src/agent-prompt-condition.js'
 import { agentInputSubmissionStatus, type AgentInputSubmissionReceipt, type AgentInputWaitControl } from '../src/agent-input-wait.js'
@@ -12,6 +12,7 @@ import { moteInputObservationId, parseMoteInputObservation } from '../src/mote-i
 import { moteInputNoticeWire, parseMoteInputNotice } from '../src/mote-input-notice.js'
 import type { AgentLaunchPromptInputPlan, AgentMuxStoredAgentSession, AgentPromptSubmissionRecord } from '../src/types.js'
 import { fixturePath } from './helpers/fixture-values.js'
+import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from '../src/agent-native-locator.js'
 
 const key = { kind: 'message' as const, agentSessionId: 'recipient', expectedRun: { runId: 'original-run' }, messageId: 'original-message' }
 const ref = { key, waitGeneration: 1 }
@@ -43,6 +44,43 @@ function session(record = claim()): AgentMuxStoredAgentSession {
     hookBindingId: 'original-binding', hookToken: 'fixture-hook-token', createdAt: 1, updatedAt: 10,
     nativeHandle: structuredClone(plan.nativeTarget), promptCompletionAdmission: record.admission }
 }
+
+it('browser locator decodes the original launch receipt without Node globals', () => {
+  const values = ['/tmp/native-session.jsonl', 'C:\\fixture\\native-session.jsonl', 'relative/native-session.jsonl'].map(transcriptPath => {
+    const value = JSON.parse(JSON.stringify(receipt('launch-carried')))
+    value.admission.admission.launch.plan.nativeTarget.transcriptPath = transcriptPath
+    value.admission.admission.intent.plan.nativeTarget.transcriptPath = transcriptPath
+    return value
+  })
+  const originalProcess = globalThis.process, originalBuffer = globalThis.Buffer
+  const decoded: unknown[] = []
+  try {
+    Object.assign(globalThis, { process: undefined, Buffer: undefined })
+    for (const value of values) {
+      try { decoded.push(parseAgentInputSubmissionReceipt(value)) } catch (error) { decoded.push(error) }
+    }
+  } finally { Object.assign(globalThis, { process: originalProcess, Buffer: originalBuffer }) }
+  expect(decoded[0]).toEqual(values[0])
+  expect(decoded[1]).toEqual(values[1])
+  expect(decoded[2]).toBeInstanceOf(Error)
+})
+
+it('browser locator preserves the execution Host native absolute-path decision', () => {
+  for (const path of ['/tmp/native-session.jsonl', 'relative/native-session.jsonl', 'C:\\fixture\\native-session.jsonl', '\\\\server\\share']) {
+    expect(Boolean(normalizeNativeTranscriptPath(path)), path).toBe(isAbsolute(path))
+  }
+})
+
+it('browser locator keeps UTF-8 session identity limits without Buffer', () => {
+  const previous = globalThis.Buffer
+  let values: Array<string | undefined>
+  try {
+    Object.assign(globalThis, { Buffer: undefined })
+    values = [normalizeNativeSessionId('界'.repeat(170)), normalizeNativeSessionId('界'.repeat(171)),
+      normalizeNativeSessionId('🙂'.repeat(128)), normalizeNativeSessionId('🙂'.repeat(129))]
+  } finally { Object.assign(globalThis, { Buffer: previous }) }
+  expect(values).toEqual(['界'.repeat(170), undefined, '🙂'.repeat(128), undefined])
+})
 
 it.each(['claimed', 'unknown', 'not-applied', 'launch-carried'] as const)('preserves the original message receipt for %s without claiming native admission', outcome => {
   const value = receipt(outcome), expected = outcome === 'claimed' ? 'unknown' : outcome
