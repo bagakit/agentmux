@@ -31,6 +31,7 @@ export function createMoteDialogueCapture() {
     unconfirm() { unknown = true },
     facts: () => ({ target, page, maintenance }),
     rpc(method: string, input: any) {
+      if (method === 'space.state') return { state: { graph: { resources: {} } } }
       if (method === 'space.mote.dialogue.read') { if (unknown) throw Error('原主对话读取暂不可用；保留上次确认的角色、原工作与草稿。'); return structuredClone(page) }
       if (method === 'message.dispatch.read') { if (input.hostId !== hostId || input.sourceMessageId !== work.origin.messageId) throw Error('Wrong original work source'); return structuredClone(dispatch) }
       if (method === 'space.mote.preferences.read') return { kind: 'quick', target, status: 'ready', source: { resource: file, result: { status: 'read', document } }, defaults,

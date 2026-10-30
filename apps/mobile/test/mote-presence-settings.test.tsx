@@ -83,7 +83,7 @@ it('actual Mobile Profile settings save default30min presence through the origin
   expect(saves).toHaveLength(1)
   expect(saves[0]![1]).toMatchObject({ kind: 'quick', target: f.target, baseline: { document: f.document, defaults: f.savedDefaults }, values: { presence: { enabled: true, intervalMs: 420000 } } })
   expect(view.element.querySelector('[data-mote-maintenance-status]')?.textContent).toBe('原心跳安排已暂停')
-  expect(f.rpc.mock.calls.every(([method]) => ['space.ls', 'space.mote.preferences.read', 'space.mote.preferences.save'].includes(method))).toBe(true)
+  expect(f.rpc.mock.calls.every(([method]) => ['space.ls', 'space.mote.preferences.read', 'space.mote.preferences.save', 'space.mote.dialogue.read', 'space.state'].includes(method))).toBe(true)
   expect(f.f.submit).not.toHaveBeenCalled()
 })
 

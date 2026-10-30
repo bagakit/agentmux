@@ -1,0 +1,16 @@
+const assert = require('node:assert/strict')
+module.exports = async ({ read, until, resize, tap, button, capture, result }) => {
+  await button('Mote', '.mobile-navigation')
+  await until('!!document.querySelector("[data-mote-discussion]")')
+  await tap('.mobile-session-identity.mobile-mote-heading', 'Open original Mote Profile')
+  await until('document.querySelector(".mobile-mote-setup")?.innerText.includes("新建并轮转 Main Agent")')
+  await resize(320,760); await read('mobileProductScene.setAppearance("light")')
+  await read('document.querySelector(".mobile-sheet").scrollTop=0')
+  await capture('11-mobile-main-setup-320-light')
+  await resize(768,920); await capture('12-mobile-main-setup-768-light')
+  const values=await read('[...document.querySelectorAll(".mobile-mote-setup button")].map(n=>({label:n.textContent,rect:n.getBoundingClientRect().toJSON()}))')
+  assert.ok(values.length>=3)
+  assert.ok(values.every(item=>item.rect.height>=44))
+  assert.equal(await read('mobileProductScene.facts().calls.filter(call=>["agent.open","space.mote.dialogue.setup.advance"].includes(call.method)).length'),0,'Viewing Main setup does not create or replace an Agent')
+  result.operations.push({action:'main-setup-original-owner-read-only-view',values})
+}
