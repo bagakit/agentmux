@@ -112,6 +112,18 @@ the exact Connection's adapterService policy (adapterId, enabled and revision),
 transport, binding scope/grant counts and newest application/group intake with original Core
 outcome/waiting reasons, including receiver aliases. Outgoing diagnosis reads the newest five
 original delivery operations, retaining independent unknown effects and source gaps.
+For one exact binding, add --activity to request its separate retained-record activity window.
+The default diagnosis does not read this window. The result states the examined/included range
+and whether more records exist; filtering never fills it from older or different bindings.
+These are messages recorded here under the original shared boundary, not platform history totals
+or a complete member directory. receivedAt is first local durable custody; receiptObservedAt
+is the original platform confirmation observation, not the platform send time. Missing historical
+times remain unknown, and later inspection does not refresh the confirmation time. Keep the
+latest original pending/unknown result rather than substituting an older confirmed message.
+Actor counts expose only scoped equality keys, with no raw member identity or body. A client
+may match an already-authorized member through connectionDiagnosisActorKey; the key grants no
+membership, permissions or administration. Read actual members, profiles and effective Agent
+access through their original owners. Activity reads do not send, retry or recover anything.
 Follow a discovered ingressId with connection ingress inspect --ingress ID to read the exact
 original intake and Core receipt. Managed callers may read their own frozen Host/Session/Binding
 targets without owning the bot enrollment or having created the binding. An unassigned action
