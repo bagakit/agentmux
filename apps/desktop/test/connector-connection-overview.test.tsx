@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 import * as core from '../../../packages/core/src/index.js'
-import { fixture, closes } from '../../../packages/connectors/test/fixtures/publication-source-owner.js'
+import { fixture, closes, append, native } from '../../../packages/connectors/test/fixtures/publication-source-owner.js'
 import { context } from '../../../packages/connectors/test/fixtures/room-binding.js'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { registerConnectorIpc } from '../src/main/connector-ipc'
@@ -43,13 +43,30 @@ async function consumer() {
   return { ...f, session, calls, unchanged, report, weakPolicy: () => { weakPolicy = true }, mount: () => dom.render(<SettingsNavigation.Provider value={{open:()=>{},openToolkit:()=>{},openHost:()=>{},openChannel:()=>{},channelPresentation:settingsCatalog.channelPresentation,channelEntries:settingsCatalog.channelEntries,openMoteLark:()=>{},chooseAgent:()=>{}}}><AgentConnectorDialog mode="details" original={{ name: 'Original Agent', session, target: { executionHostId: f.binding.executionHostId, agentSessionId: f.binding.agentSessionId }, hostingTarget: host, connectionId: f.binding.connectionId, bindingId: f.binding.bindingId }} onClose={() => {}} returnFocus={() => null} /></SettingsNavigation.Provider>) }
 }
 
-it('keeps receiving online and actually wakes original sync through the mounted dialog, IPC, Main, Hosted and Host', async () => {
+it('keeps receiving online and actually wakes original sync from visible Diagnostics through IPC, Main, Hosted and Host', async () => {
   const f = await consumer(), changes = f.port.changes.bind(f.port)
+  const publication = f.services.publication!
+  clearInterval(Reflect.get(publication, 'timer')) // Existing automatic recovery has its own unchanged public proof.
+  f.remote.controls.messageResponse = attempt => String(attempt.body.content).includes('Keep this unknown effect') ? { code: 230049, status: 200 } : undefined
+  await append(f, native('diagnostic-old-unknown', [{ type: 'text', text: 'Keep this unknown effect' }]))
+  publication.refresh()
+  const originalUnknown = () => publication.store.list(f.binding).find(row => row.payload.kind === 'speech' && row.payload.text === 'Keep this unknown effect')
+  await wait(() => expect(originalUnknown()?.state).toBe('unknown'))
+  await wait(() => expect(Reflect.get(publication, 'lanes').get(f.binding.bindingId)?.work).toBeUndefined())
+  const unknown = structuredClone(originalUnknown()!), beforeBinding = (await f.services.connections.bindings!.inspect({ bindingId: f.binding.bindingId, revision: f.binding.revision })).binding
+  const nativeCut = publication.store.retainedCheckpoint(f.binding)!.frontier.cuts.filter(value => value.kind === 'native'), originalReads: unknown[] = []
   let fault = true
-  vi.spyOn(f.port, 'changes').mockImplementation((...args) => fault ? Promise.reject(new core.AgentMuxError('Controlled source contention', 'AGENT_SESSION_HISTORY_BUSY')) : changes(...args))
-  f.services.publication!.refresh()
+  vi.spyOn(f.port, 'changes').mockImplementation((...args) => { originalReads.push(structuredClone(args[0].checkpoint)); return fault ? Promise.reject(new core.AgentMuxError('Controlled source contention', 'AGENT_SESSION_HISTORY_BUSY')) : changes(...args) })
+  await append(f, native('diagnostic-recovered-reply', [{ type: 'text', text: 'Reply recovered at its diagnostic direction' }]))
+  publication.refresh()
   await wait(async () => expect((await f.report()).outgoing.value?.sourceObservation?.code).toBe('AGENT_SESSION_HISTORY_BUSY'))
-  const recover = vi.spyOn(f.services.publication!, 'recoverSource')
+  await wait(() => expect(Reflect.get(publication, 'lanes').get(f.binding.bindingId)?.work).toBeUndefined())
+  const cut = publication.store.retainedCheckpoint(f.binding)
+  expect(cut!.frontier.cuts.filter(value => value.kind === 'native')).toEqual(nativeCut)
+  const recover = vi.spyOn(publication, 'recoverSource')
+  let release = () => {}; const held = new Promise<void>(resolve => { release = resolve }); closes.push(() => release())
+  const implementation = vi.mocked(api.connections.call).getMockImplementation()!
+  vi.mocked(api.connections.call).mockImplementation(async (method, input, owner) => { const result = await implementation(method, input, owner); if (method === 'connection.delivery.source.recover') await held; return result })
   f.weakPolicy()
   await f.mount()
   await wait(() => expect(document.querySelector('[data-connection-panel="overview"] h3')?.textContent).toBe('Receiving online'))
@@ -59,17 +76,33 @@ it('keeps receiving online and actually wakes original sync through the mounted 
   expect(overview.querySelectorAll('.primary-button')).toHaveLength(1)
   const diagnostic = document.querySelector<HTMLElement>('[data-connection-panel="diagnostics"]')!
   expect(diagnostic.hidden).toBe(true)
+  await click('Diagnostics'); expect(diagnostic.hidden).toBe(false); expect(overview.hidden).toBe(true)
+  const sourceAction = () => diagnostic.querySelector<HTMLButtonElement>('[data-direction="outgoing"] [data-source-recovery-action="recover"]')
+  expect(sourceAction(), 'visible Diagnostics must expose original source recovery at the outgoing failure').not.toBeNull()
+  expect(diagnostic.querySelector('[data-direction="outgoing"]')?.textContent).not.toContain('Check read result')
+  expect(publication.store.retainedCheckpoint(f.binding)).toEqual(cut)
+  const readStart = originalReads.length
   fault = false
-  await click('Try sync now')
-  await wait(() => expect(recover).toHaveBeenCalledOnce())
+  await act(async () => sourceAction()!.click())
+  await wait(() => expect(recover, 'visible Diagnostics must invoke original source recovery, not merely read diagnostics').toHaveBeenCalledOnce())
   expect(recover.mock.calls[0]![0]).toEqual({ connectionId: f.binding.connectionId, bindingId: f.binding.bindingId, bindingRevision: f.binding.revision })
   expect(f.calls.filter(row => row.method === 'connection.delivery.source.recover')).toHaveLength(1)
+  expect(sourceAction()!.disabled).toBe(true)
+  await click('Members'); await click('Overview'); expect(overview.textContent).toContain('Requesting…')
+  await click('Diagnostics'); expect(document.querySelector('[data-connection-panel="diagnostics"]')).toBe(diagnostic)
+  expect(sourceAction()!.textContent).toBe('Requesting…')
+  release(); await act(async () => { await held })
   await wait(async () => expect((await f.report()).outgoing.value?.sourceObservation?.state).toBe('ready'))
-  await click('Diagnostics'); expect(diagnostic.hidden).toBe(false)
+  await wait(() => expect(publication.store.list(f.binding).some(row => row.payload.kind === 'speech' && row.payload.text === 'Reply recovered at its diagnostic direction' && row.state === 'confirmed')).toBe(true))
+  expect(originalReads[readStart]).toEqual(cut)
+  expect(publication.store.inspect(unknown.operationId)).toEqual(unknown)
+  expect(f.remote.attempts.filter(row => String(row.body.content).includes('Keep this unknown effect'))).toHaveLength(1)
+  expect((await f.services.connections.bindings!.inspect({ bindingId: f.binding.bindingId, revision: f.binding.revision })).binding).toEqual(beforeBinding)
+  expect(f.calls.some(row => ['connection.binding.pause', 'connection.binding.resume', 'connection.bind'].includes(row.method))).toBe(false)
   await click('Members'); await click('Overview')
   expect(document.querySelector('[data-connection-panel="diagnostics"]')).toBe(diagnostic)
   expect(overview.hidden).toBe(false)
-  f.unchanged(); facts({ calls: f.calls, realSourceRecover: true, sameOriginalScope: recover.mock.calls[0]![0], sameDiagnosticPanel: true, noAgentLifecycleWrites: true })
+  f.unchanged(); facts({ calls: f.calls, realSourceRecover: true, clickedVisibleDiagnosticDirection: true, sameOriginalScope: recover.mock.calls[0]![0], sameDiagnosticPanel: true, resumedFromOriginalCut: true, unknownEffectUnchanged: unknown.operationId, noBindingScopeChanges: true, noAgentLifecycleWrites: true })
 })
 
 it('preserves current policy and original scheduled progress across typed counterexamples', async () => {
