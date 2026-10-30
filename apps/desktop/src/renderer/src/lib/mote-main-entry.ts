@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { parseMoteDialogueResult, type MoteDialogueRecoveryRequest } from '@agentmux/core/mote-dialogue'
+import { parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialogueRecoveryRequest } from '@agentmux/core/mote-dialogue'
 import { useMoteDialogueView } from './mote-dialogue-view'
 import type { MoteWorkfaceScope } from './mote-workface'
 import { useAppStore } from '../store'
@@ -69,14 +69,13 @@ export function useMoteMainEntry({ scope, entryToken, active }: { scope:MoteWork
     if (session?.kind !== 'agent') { setState({ status:'unconfirmed', issue:'原主 Agent 的执行引用尚未读到；保留原对话与原工作面。' }); return }
     const source = { target, expectedRoleRevision:main.roleRevision, reference:main.current }, expectedRun = { ...session.control.run }
     const original = session.continuity
-    if (original && original.previousRun.runId === expectedRun.runId && (original.kind === 'starting' ||
-      ['runtime-unverified','provider-unverified','operation-unconfirmed','original-operation-unconfirmed'].includes(original.reason))) {
+    if (original && original.previousRun.runId === expectedRun.runId && unconfirmedMoteMainEntryOperation(original) && sameMoteMainEntrySource(original.moteMainEntry, source)) {
       const request = { ...source, ...original.moteMainEntry, expectedRun, operationId:original.operationId }
       retained.current = { key, request }; void observe(key,request,true); return
     }
     // The original continuity map owns this key across remounts and clients.
     const t = source.target, r = source.reference
-    const frozen = JSON.stringify([t.spaceId,t.zoneId,t.expectedResource.hostId,t.expectedResource.workspaceId,t.expectedResource.workspacePath,
+    const frozen = JSON.stringify([entryToken,t.spaceId,t.zoneId,t.expectedResource.hostId,t.expectedResource.workspaceId,t.expectedResource.workspacePath,
       source.expectedRoleRevision,r.hostId,r.sessionId,r.displayWorkspaceId,r.groupId,r.tabId,r.regionId,expectedRun.runId])
     retained.current = { key, request:{ ...source,expectedRun,operationId:'' } }
     void crypto.subtle.digest('SHA-256',new TextEncoder().encode(frozen)).then(hash => {
