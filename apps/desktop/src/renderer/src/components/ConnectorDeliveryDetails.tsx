@@ -14,6 +14,7 @@ import { ConnectorDeliveryRetryControl } from './ConnectorDeliveryRetryControl'
 import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 
 const LoadingIcon = semanticIconComponent('status.loading')
+const receiptTitle = (kind: string) => kind === 'binding-notice' ? 'Connection notice' : kind === 'permission' ? 'Permission request' : kind === 'query-feedback' ? 'Message status update' : 'Conversation message'
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
 export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, onMembers, actions, details, active = true, showConfiguration = true }: { binding: RoomBinding; connection?: ConnectionRecord | undefined; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void; actions?: Partial<Record<ConnectorProblemAction['kind'], () => void>>; active?: boolean; details?: ReactNode; showConfiguration?: boolean }) {
   const latest = useConnectorGroupDiagnosis([binding], 0, active, null, hostingTarget, [binding])
@@ -97,6 +98,14 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
   const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value
   const sectionIssue = (name: string, section: { issue: string | null; retained?: true } | undefined) => section?.issue ? <p className="agent-connector-note" role="status">{name} observation unconfirmed{section.retained ? '; earlier observed facts are kept.' : '.'}</p> : null
   const readFailed = !!visible && [visible.service, visible.adapterService, visible.connection, visible.binding, visible.outgoing, visible.incoming].some(section => section.issue)
+  const originalFacts = original?.value ? deliveryFacts(original.value) : null
+  const originalReceipt = original ? <div key={original.value?.operationId ?? 'unavailable-original'} ref={selectedReceipt} tabIndex={-1} className="agent-connector-receipt" data-selected-delivery={original.value?.operationId}>
+        {original.issue && original.value ? <small role="status">Original receipt observation unconfirmed; earlier result retained.</small> : null}
+        <p className="agent-connector-note" role="status">{original.value ? receiptTitle(originalFacts!.kind) + (original.issue ? ' · Earlier queue: ' : ' · Queue: ') + original.value.state + ' · Platform receipt: ' + (originalFacts!.receipt ?? 'Not recorded') : 'Original receipt unavailable; no retry was sent.'}</p>
+        {original.value ? <><code>{original.value.operationId}</code>{originalFacts?.platformMessageId ? <code>{originalFacts.platformMessageId}</code> : null}<ConnectorDeliveryRetryControl key={key + original.value.operationId} delivery={original.value} binding={binding} hostingTarget={hostingTarget} onObserve={value => {
+          if (accepts()) setDetail(previous => previous?.key === key && previous.request === original.request ? { ...previous, value, issue: false } : previous)
+        }} /></> : null}
+      </div> : null
   return <section className="agent-connector-fields connector-delivery-details" aria-busy={pending || checked?.checking} aria-label="Group delivery" data-connection-section="activity" tabIndex={-1}>
     {showConfiguration && configuration ? <div className="connector-group-details__configuration"><span>{checked?.report?.binding.issue ? 'Last observed sync' : 'Group sync'} · <strong>{configuration.state === 'paused' ? 'Paused' : configuration.state === 'detached' ? 'Disconnected' : 'Enabled'}</strong></span><span>Sharing · <strong>{configuration.scope.publication === 'future-shared-conversation' ? 'Complete conversation' : 'Agent replies only'}</strong></span></div> : null}
     <div className="agent-connector-section-title"><div><h3>Message activity</h3>{checked?.checkedAt ? <small className="agent-connector-checked">Checked <time dateTime={new Date(checked.checkedAt).toISOString()}>{new Date(checked.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div><button className="agent-connector-text-action" aria-busy={checked?.checking} disabled={checked?.checking} onClick={latest.check}>{checked?.checking ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button></div>
@@ -136,15 +145,9 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
       <section ref={node => { originalSections.current.receipts = node }} className="connector-delivery-details__section" data-receipt-section="receipts" tabIndex={-1} aria-label="Platform delivery details">
       <h4>Platform delivery receipts</h4>
       <p className="agent-connector-note">Outgoing window: up to 5 receipts · has next: {String(outgoing?.next !== null && outgoing?.next !== undefined)}. These pages are not the complete group history.</p>
-      {outgoing?.deliveries.map(delivery => <div className="agent-connector-receipt" key={delivery.operationId}><span>{delivery.kind === 'binding-notice' ? 'Connection notice' : delivery.kind === 'permission' ? 'Permission request' : delivery.kind === 'query-feedback' ? 'Message status update' : 'Conversation message'} · Queue: {delivery.state} · Platform receipt: {delivery.receipt ?? 'Not recorded'}</span><code>{delivery.operationId}</code>{delivery.platformMessageId ? <code>{delivery.platformMessageId}</code> : null}<button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button></div>)}
+      {outgoing?.deliveries.map(delivery => original?.value?.operationId === delivery.operationId ? originalReceipt : <div className="agent-connector-receipt" key={delivery.operationId}><span>{receiptTitle(delivery.kind)} · Queue: {delivery.state} · Platform receipt: {delivery.receipt ?? 'Not recorded'}</span><code>{delivery.operationId}</code>{delivery.platformMessageId ? <code>{delivery.platformMessageId}</code> : null}<button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button></div>)}
       {outgoing?.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ after: outgoing.next! })}>Earlier receipts</button> : null}
-      {original ? <div ref={selectedReceipt} tabIndex={-1} className="agent-connector-receipt" data-selected-delivery={original.value?.operationId}>
-        {original.issue && original.value ? <small role="status">Original receipt observation unconfirmed; earlier result retained.</small> : null}
-        <p className="agent-connector-note" role="status">{original.value ? (original.issue ? 'Earlier original queue: ' : 'Original queue: ') + original.value.state + ' · Platform receipt: ' + (deliveryFacts(original.value).receipt ?? 'Not recorded') : 'Original receipt unavailable; no retry was sent.'}</p>
-        {original.value ? <><code>{original.value.operationId}</code><ConnectorDeliveryRetryControl key={key + original.value.operationId} delivery={original.value} binding={binding} hostingTarget={hostingTarget} onObserve={value => {
-          if (accepts()) setDetail(previous => previous?.key === key && previous.request === original.request ? { ...previous, value, issue: false } : previous)
-        }} /></> : null}
-      </div> : null}
+      {original && !outgoing?.deliveries.some(delivery => delivery.operationId === original.value?.operationId) ? originalReceipt : null}
       <button className="small-button" disabled={pending} onClick={() => void inspect()}>Latest receipts</button>
       </section>
       <section ref={node => { originalSections.current.content = node }} className="connector-delivery-details__section" data-receipt-section="content" tabIndex={-1} aria-label="Conversation content details">
