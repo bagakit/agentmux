@@ -256,7 +256,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     }
     signal.addEventListener('abort', close, { once: true })
     try {
-      receiver.botOpenId = await this.withClient(config, credential, client => this.bot(client), signal)
+      receiver.botOpenId = await this.withReadClient(config, credential, client => this.bot(client), signal)
       if (!this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
       const dispatcher = new EventDispatcher({ logger: safeLogger, loggerLevel: LoggerLevel.error, cache: new DefaultCache() })
       dispatcher.unregister('app_ticket')
