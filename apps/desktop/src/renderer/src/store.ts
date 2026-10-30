@@ -1,3 +1,4 @@
+import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
 import { initialNativeComposerBinding } from './lib/initial-native-composer-binding'
 import { editComposerInputImages, restoreComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
@@ -129,7 +130,7 @@ import { clampFocusTimelineHeight, FOCUS_TIMELINE_HEIGHT_DEFAULT } from './lib/f
 import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from './lib/focus-timeline-name-width'
 import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRulerPreferences } from './lib/focus-timeline-ruler'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
-import type { GitDiffDescriptor, GitCommitSnapshot, GitHistoryResult, GitCommitDetailsResult } from '../../shared/git-contracts'
+import type { GitCommitSnapshot, GitHistoryResult, GitCommitDetailsResult } from '../../shared/git-contracts'
 import { confirmedSteerDelivery, reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
@@ -362,7 +363,6 @@ import {
   addWorkbenchRegion,
   createWorkbenchTab,
   documentKey,
-  gitDiffIdentity,
   findWorkbenchRegion,
   focusWorkbenchTabRegion,
   inheritedTopicIdForNewTab,
@@ -890,7 +890,7 @@ export type LauncherExecutionSource = WorkbenchProjectionSelection | {
   resourceWorkspaceId: string
 }
 
-export type AppState = {
+export type AppState = GitReadingActions & {
   runtimeOwnershipWarnings: string[] | undefined
   runtimeEndpointWarnings: RuntimeEndpointWarning[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
@@ -1363,12 +1363,6 @@ export type AppState = {
   openFileDiff(path: string, workspaceId?: string): Promise<void>
   /** Explicit file navigation from an external control, through the original document owner. */
   openFileAndReveal(path: string, tabGroupId?: string, location?: { line: number; column?: number }, workspaceId?: string, navigationSignal?: AbortSignal): Promise<boolean>
-  openBranchDiff(workspaceId: string, comparison: GitDiffDescriptor): void
-  openGitWorkbench(workspaceId: string, snapshot: GitCommitSnapshot): { tabId: string; regionId: string }
-  openGitHistory(workspaceId: string, scope: Pick<GitCommitSnapshot, 'hostId' | 'repoPath'>, reference?: string | null, locate?: GitCommitSnapshot): { tabId: string; regionId: string }
-  selectGitHistoryReference(regionId: string, reference: string | null): void
-  selectGitFile(regionId: string, file: { path: string; origPath: string | null } | null): void
-  selectGitCommit(regionId: string, snapshot: GitCommitSnapshot): void
   loadBranchDiff(regionId: string): Promise<void>
   /** Release a budgeted Git Diff payload; its durable Region and fixed descriptor stay intact. */
   releaseBranchDiff(regionId: string): void
@@ -7607,63 +7601,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
   },
-  openGitWorkbench(workspaceId, snapshot) {
-    return openGitReading(workspaceId, { kind: 'commit', snapshot })
-  },
-  openGitHistory(workspaceId, scope, reference, locate) {
-    const opened = openGitReading(workspaceId, { kind: 'history', scope, ...(reference !== undefined ? { reference } : {}), ...(locate ? { locate } : {}) })
-    set({ workspaceTool: 'git', workspaceGitView: 'history', toolsOpen: true })
-    return opened
-  },
-  selectGitHistoryReference(regionId, reference) {
-    const found = findWorkbenchRegion(get().tabs, regionId)
-    if (found?.surface.kind !== 'git' || !found.surface.history || found.surface.history.reference === reference) return
-    const { tab, surface } = found
-    set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
-      [regionId]: { ...surface, history: { ...surface.history!, reference } } } } } }))
-  },
-  selectGitFile(regionId, file) {
-    const found = findWorkbenchRegion(get().tabs, regionId)
-    if (found?.surface.kind !== 'git' || !found.surface.selection) return
-    const { tab, surface } = found
-    get().releaseBranchDiff(regionId)
-    const { file: _previousFile, ...fixed } = surface
-    set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
-      [regionId]: { ...fixed, ...(file ? { file } : {}) } } } } }))
-  },
-  selectGitCommit(regionId, snapshot) {
-    const found = findWorkbenchRegion(get().tabs, regionId)
-    if (found?.surface.kind !== 'git' || found.surface.scope.hostId !== snapshot.hostId ||
-        found.surface.scope.repoPath !== snapshot.repoPath) return
-    const { tab, surface } = found
-    get().releaseBranchDiff(regionId)
-    const { file: _previousFile, ...fixed } = surface
-    set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
-      [regionId]: { ...fixed, selection: { commitOid: snapshot.commitOid, parentOid: snapshot.parentOid } } } } } }))
-  },
-  openBranchDiff(workspaceId, comparison) {
-    const state = get()
-    if (!state.config?.workspaces.some((workspace) => workspace.id === workspaceId)) return
-    const id = gitDiffIdentity(workspaceId, comparison)
-    const existing = Object.values(state.tabs).flatMap((tab) => workbenchSurfaces(tab).flatMap((surface) => (
-      surface.kind === 'git-diff' && gitDiffIdentity(surface.workspaceId, surface.comparison) === id
-        ? [{ tab, surface }] : []
-    )))[0]
-    const tabId = existing?.tab.id ?? mintObjectId()
-    const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
-    const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
-    const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
-    if (!nextLayout) { get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate',
-      event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: groupId, workspaceId } } }); return }
-    const tab = existing
-      ? focusWorkbenchTabRegion(existing.tab, existing.surface.regionId)
-      : createWorkbenchTab(tabId, { kind: 'git-diff', regionId: newRegionId(), workspaceId, comparison })
-    set((current) => ({
-      activeWorkspaceId: workspaceId, mainSurface: 'workbench',
-      tabs: { ...current.tabs, [tabId]: tab }, layouts: { ...current.layouts, [workspaceId]: nextLayout }
-    }))
-    get().focusRegion(workspaceId, tabId, tab.layout.activeRegionId, 'navigation', groupId)
-  },
+  ...createGitReadingActions({
+    get, set,
+    focusRegion: (workspaceId, tabId, regionId, groupId) => get().focusRegion(workspaceId, tabId, regionId, 'navigation', groupId),
+    releaseBranchDiff: regionId => get().releaseBranchDiff(regionId),
+    reportUnavailableGroup: (workspaceId, groupId) => get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate',
+      event: { source: 'spatial', key: mintObjectId(), object: { kind: 'tab-group', id: groupId, workspaceId } } })
+  }),
   async loadBranchDiff(regionId) {
     const surface = findWorkbenchRegion(get().tabs, regionId)?.surface
     if (surface?.kind === 'git' && surface.selection && surface.file) {
@@ -12537,46 +12481,6 @@ export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'
   await requestWorkbenchStorageFlush()
 }
 
-
-/** Presentation belongs to Desktop. Fixed commits retain their own identity; repository browsing
- * has one reusable Region. Neither navigation changes the configured resource nor Agent cwd. */
-function openGitReading(workspaceId: string, target:
-  | { kind: 'commit'; snapshot: GitCommitSnapshot }
-  | { kind: 'history'; scope: Pick<GitCommitSnapshot, 'hostId' | 'repoPath'>; reference?: string | null; locate?: GitCommitSnapshot }
-): { tabId: string; regionId: string } {
-  const state = useAppStore.getState()
-  const scope = target.kind === 'commit' ? target.snapshot : target.scope
-  const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
-  if (!workspace || workspace.hostId !== scope.hostId) throw new Error('The original Git workspace is unavailable.')
-  const existing = Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface =>
-    surface.kind === 'git' && surface.workspaceId === workspaceId && surface.scope.hostId === scope.hostId &&
-    surface.scope.repoPath === scope.repoPath && surface.scope.workspacePath === workspace.path &&
-    (target.kind === 'history' ? Boolean(surface.history) || !surface.selection
-      : !surface.history && surface.selection?.commitOid === target.snapshot.commitOid && surface.selection.parentOid === target.snapshot.parentOid)
-      ? [{ tab, surface }] : []))[0]
-  const tabId = existing?.tab.id ?? mintObjectId(), regionId = existing?.surface.regionId ?? newRegionId()
-  const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
-  const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
-  const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
-  if (!nextLayout) throw new Error('The original Git Tab Group is unavailable.')
-  const selected = target.kind === 'commit' ? target.snapshot : target.locate
-  const selection = selected ? { commitOid: selected.commitOid, parentOid: selected.parentOid } : existing?.surface.selection ?? null
-  const sameSelection = existing?.surface.selection?.commitOid === selection?.commitOid && existing?.surface.selection?.parentOid === selection?.parentOid
-  if (existing && !sameSelection) state.releaseBranchDiff(regionId)
-  const surface = { kind: 'git' as const, regionId, workspaceId,
-    scope: { hostId: scope.hostId, repoPath: scope.repoPath, workspacePath: workspace.path }, selection,
-    ...(target.kind === 'history' ? { history: {
-      reference: target.reference === undefined ? existing?.surface.history?.reference ?? null : target.reference,
-      ...(target.locate ? { focusOid: target.locate.commitOid } : {})
-    } } : {}),
-    ...(sameSelection && existing?.surface.file ? { file: existing.surface.file } : {}) }
-  const tab = existing ? focusWorkbenchTabRegion({ ...existing.tab, regions: { ...existing.tab.regions, [regionId]: surface } }, regionId)
-    : createWorkbenchTab(tabId, surface)
-  useAppStore.setState(current => ({ activeWorkspaceId: workspaceId, mainSurface: 'workbench',
-    tabs: { ...current.tabs, [tabId]: tab }, layouts: { ...current.layouts, [workspaceId]: nextLayout } }))
-  state.focusRegion(workspaceId, tabId, regionId, 'navigation', groupId)
-  return { tabId, regionId }
-}
 
 /** Flush only the original client presentation owner. Failure retains the current canvas and a retry. */
 export async function saveNoteCanvasPresentation(scope: NoteCanvasScope, patch?: Partial<NoteCanvasLayout>): Promise<void> {
