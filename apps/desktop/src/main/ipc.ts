@@ -247,7 +247,8 @@ import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-
 import { APP_LINK_SCHEME_CHOICES, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
-import { assertManualPromptSenderTrusted, assertSenderTrusted, assertToolkitSenderTrusted, senderTrust, type PrivilegedChannel } from './ipc-sender-trust.js'
+import { assertAppDocumentSender, isAppDocumentSender } from './ipc-sender-trust.js'
+import type { AppDocumentSources } from './workbench-document-sources.js'
 import { executeCrashLogControl, requestCrashLogReveal } from './crash-log-access.js'
 import { FileObservationRegistry } from './file-observation-registry.js'
 import { runOwnerDisposals } from './owner-disposal.js'
@@ -288,6 +289,7 @@ export async function openExternalFromRenderer(
 
 export async function registerIpc(args: {
   window: BrowserWindow
+  appDocumentSources(): AppDocumentSources
   workbenchWindows: WorkbenchWindows
   configStore: ConfigStore
   initialConfig: AppConfig
@@ -610,9 +612,9 @@ export async function registerIpc(args: {
   const closeMetrics = () => metrics.dispose()
   contents.once('destroyed', closeMetrics)
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
-    // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
-    // 留在这里。requestId 的形状检查不是发送者关切，也留在 shell——不塞进纯判据里。
-    if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, contents).trusted) return
+    // The original App document owns replies. A refused reply cannot affect another
+    // request or revoke the healthy bridge; request identity remains the bridge owner’s concern.
+    if (!isAppDocumentSender(event, contents, args.appDocumentSources())) return
     if (!response || typeof response.requestId !== 'string') return
     controlBridge.accept(response)
   }
@@ -691,61 +693,46 @@ export async function registerIpc(args: {
     listener: (...values: TArgs) => Promise<TResult> | TResult
   ): void => {
     channels.push(channel)
-    ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
-      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: mintObjectId()
-    }, () => listener(...values)))
+    ipcMain.handle(channel, (event, ...values: TArgs) => {
+      assertAppDocumentSender(event, contents, args.appDocumentSources())
+      return nameChangeRequests.run({
+        context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: mintObjectId()
+      }, () => listener(...values))
+    })
   }
-  /**
-   * 同上，但把 `event` 透传给 listener——需要校验发送者、或需要 `sender.id` 的那些频道用它。
-   *
-   * 存在的理由只有一个：注册与「登记到 `channels` 以便拆除」必须是同一次调用。此前这些频道直接写裸的
-   * `ipcMain.handle`，于是每个都要手工在前面配一句 `channels.push('同一个字面量')`——同一个名字两个
-   * 写入点。漏掉那一句的后果不是少个频道：handler 注册了但 `dispose` 时不会 `removeHandler`，下一个
-   * 窗口跑 `registerIpc` 时 Electron 直接抛 "Attempted to register a second handler for 'X'"。
-   * 而 `ipc-parity` 那道门是按 `ipcMain.handle` 的调用来数的，对「少了一句 push」完全隐身
-   * （实测：删掉 `browser:selectElement` 那句 push，ipc-parity + preload-consumption 10 条全绿，
-   * tsc 也 exit 0）。收成一次调用之后，这个漏点在构造上不存在。
-   */
+  /** The same root-document admission, retaining the native event for domain-owned resources. */
   const handleWithEvent = <TArgs extends unknown[], TResult>(
     channel: string,
     listener: (event: IpcMainInvokeEvent, ...values: TArgs) => Promise<TResult> | TResult
   ): void => {
     channels.push(channel)
-    ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
-      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: mintObjectId()
-    }, () => listener(event, ...values)))
+    ipcMain.handle(channel, (event, ...values: TArgs) => {
+      assertAppDocumentSender(event, contents, args.appDocumentSources())
+      return nameChangeRequests.run({
+        context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: mintObjectId()
+      }, () => listener(event, ...values))
+    })
   }
-  /**
-   * 特权频道的发送者卫兵——不可信就抛。判据（身份比对 + 拒绝措辞）在纯的 `senderTrust` 里，处置（抛）
-   * 在纯的 `assertSenderTrusted` 里，所以这个适配器体就是**一次转发表达式**：既没有可翻极性的比较符，
-   * 也没有可插早退的语句位。每个会抛的特权 handler 第一句都调它。控制响应频道不走这里（它要静默返回）。
-   */
-  const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
-    assertSenderTrusted(senderTrust(channel, event.sender, contents))
   handleWithEvent('clientIncidents:open', event => {
-    requireTrustedSender('clientIncidents:open', event)
     return incidentIpc?.open(event) ?? null
   })
   handleWithEvent('clientIncidents:report', (event, token: string, report: unknown) => {
-    requireTrustedSender('clientIncidents:report', event)
     return incidentIpc?.report(event, token, report) ?? { accepted: false }
   })
-  registerLoadedIdentityIpc({ handleWithEvent, assertTrusted: requireTrustedSender, package: args.loadedPackage ?? null,
+  registerLoadedIdentityIpc({ handleWithEvent, package: args.loadedPackage ?? null,
     renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null })
-  registerBrowserInputContextIpc({ handle: handleWithEvent, trust: requireTrustedSender, ...browserInputContextPorts })
+  registerBrowserInputContextIpc({ handle: handleWithEvent, ...browserInputContextPorts })
 
   const acceptWorkbenchWindow = (event: Electron.IpcMainEvent, response: import('../shared/workbench-windows.js').WorkbenchWindowResponse) => args.workbenchWindows.accept(event, response)
   ipcMain.on(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow)
   handleWithEvent('ui:workbenchWindowsReady', event => {
-    requireTrustedSender('ui:workbenchWindowsReady', event)
     return args.workbenchWindows.rendererReady(event)
   })
   handleWithEvent('ui:workbenchWindowsCall', (event, method: import('@agentmux/core/control').AppWindowMethod, input: unknown) => {
-    requireTrustedSender('ui:workbenchWindowsCall', event)
     return callUserRpc(method, input as never)
   })
 
-  registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })
+  registerDeviceManagementIpc({ handleWithEvent })
 
   const resolveInputHistoryScope = (target: BrowserInputHistoryTarget): BrowserInputHistoryScope => {
     let scope: BrowserInputHistoryScope
@@ -774,38 +761,31 @@ export async function registerIpc(args: {
     finally { await client.dispose() }
   }
   handleWithEvent('applications:call', async (event, method: unknown, value: unknown) => {
-    requireTrustedSender('applications:call', event)
     return sessionInputOperationResult(async () => {
       if (!isApplicationAccessMethod(method)) throw new AgentMuxError('Unsupported application access method.', 'INVALID_APPLICATION_ACCESS')
       return callUserRpc(method, parseApplicationAccessParams(method,value))
     })
   })
   handleWithEvent('capsules:call', async (event, method: unknown, value: unknown) => {
-    requireTrustedSender('capsules:call', event)
     return sessionInputOperationResult(() => callCapsuleFromApp(args.runtime.callOriginalCore.bind(args.runtime), method, value))
   })
   handleWithEvent('capsules:reply', async (event, value: unknown) => {
-    requireTrustedSender('capsules:reply', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('The original App main frame must confirm this answer.')
     return sessionInputOperationResult(() => capsuleReplies.confirm(value))
   })
   registerAgentLearningIpc({ handle: handleWithEvent, contents, runtime: args.runtime, authority: agentLearningAuthority })
-  handleWithEvent('capsule:document', async (event, action: unknown, value: unknown) =>
-    await sessionInputOperationResult(() => capsuleDocuments.call(event, action, value)))
-  const conversationReads = registerConversationReadIpc({ handle: handleWithEvent, trust: requireTrustedSender,
+  const disposeCapsuleDocument = capsuleDocuments.register(ipcMain)
+  const conversationReads = registerConversationReadIpc({ handle: handleWithEvent,
     connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
-  const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent, trust: requireTrustedSender,
+  const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
   const creationTrustPorts = { savedHost: (id: string) => config.hosts.find(host => host.id === id), call: callUserRpc }
   handleWithEvent('hosts:creationTrust', async (event, input: HostConfig) => {
-    requireTrustedSender('hosts:creationTrust', event)
     return readHostCreationTrust(input, creationTrustPorts)
   })
   handleWithEvent('hosts:trustCreationSource', async (event, input: HostConfig, expected: import('../shared/contracts.js').HostCreationTrustSnapshot) => {
-    requireTrustedSender('hosts:trustCreationSource', event)
     return approveHostCreationTrust(input, expected, creationTrustPorts)
   })
   handle('hosts:upgradeCheck', async (input: HostConfig) => await hostUpgrades.check(input))
@@ -814,7 +794,6 @@ export async function registerIpc(args: {
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
   handleWithEvent('ui:exportTheme', async (event, document: unknown, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('ui:exportTheme', event)
     const parent = args.workbenchWindows.windowForDocument(scope)
     return await exportThemeFile(document, {
       chooseFile: async filename => {
@@ -826,7 +805,6 @@ export async function registerIpc(args: {
     })
   })
   handleWithEvent('ui:chooseFiles', async (event, input: { defaultPath?: string } | undefined, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('ui:chooseFiles', event)
     const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), {
       properties: ['openFile', 'multiSelections'],
       ...(input?.defaultPath ? { defaultPath: input.defaultPath } : {})
@@ -835,7 +813,6 @@ export async function registerIpc(args: {
     return selection.filePaths
   })
   handleWithEvent('ui:chooseDirectory', async (event, input: { defaultPath?: string } | undefined, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('ui:chooseDirectory', event)
     const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), {
       properties: ['openDirectory'],
       ...(input?.defaultPath ? { defaultPath: resolveToolkitWorkspacePath(input.defaultPath, app.getPath('home')) } : {})
@@ -847,7 +824,6 @@ export async function registerIpc(args: {
     return item.hostId === 'local' ? await projectAppearance(item.repoPath ?? item.path) : { kind: item.repoPath ? 'repository' : 'directory', icon: null }
   })
   handleWithEvent('workspaces:chooseLocalFolder', async (event, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('workspaces:chooseLocalFolder', event)
     const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), { properties: ['openDirectory'] })
     const path = selection.filePaths[0]
     if (selection.canceled || !path) return null
@@ -857,7 +833,6 @@ export async function registerIpc(args: {
   // 只剩一个转发表达式，没有可以插早退的语句位置。文本守卫看不见这里的早退——插一句
   // `return null`，重绑对用户永久失效而 2 条断言全绿（见 rebindLocalFolder 的注释）。
   handleWithEvent('workspaces:rebindLocalFolder', async (event, workspaceId: string, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('workspaces:rebindLocalFolder', event)
     const result = await rebindLocalFolder(workspaceId, config, {
       chooseDirectory: async (defaultPath) =>
         await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), { properties: ['openDirectory'], defaultPath }),
@@ -991,11 +966,9 @@ export async function registerIpc(args: {
   )
   const conversationLandmarks = new ConversationLandmarkStore()
   handleWithEvent('conversationLandmarks:list', (event, input: import('@agentmux/core/conversation').ConversationLandmarkQuery) => sessionObservationResult(async () => {
-    requireTrustedSender('conversationLandmarks:list', event)
     return conversationLandmarks.list(input)
   }))
   handleWithEvent('conversationLandmarks:apply', (event, input: import('@agentmux/core/conversation').ConversationLandmarkWrite) => sessionObservationResult(async () => {
-    requireTrustedSender('conversationLandmarks:apply', event)
     return conversationLandmarks.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') })
   }))
   const titleWorkspace = (resource: import('@agentmux/core').NoteResource) => {
@@ -1027,38 +1000,31 @@ export async function registerIpc(args: {
   const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces: config.workspaces, complete: true }), target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: notebookStore.readHistory.bind(notebookStore), operation: notebookStore.readHistoryOperation.bind(notebookStore), lease: notebookStore.runWithWriteLease.bind(notebookStore), delete: async (resource, input, context) => { const owner = titleWorkspace(resource); return owner ? notesStorageOwner.write(owner, input, actual => sharedFileDeletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original shared deletion resource changed.' } } })
   noteSharedBlocks = new NoteSharedBlockOwner({ undo: sharedUndo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: notebookStore.readHistoryOperation.bind(notebookStore), withWriteLease: notebookStore.runWithWriteLease.bind(notebookStore) })
   handleWithEvent('files:shareUndoPublic', async (event, input: import('@agentmux/core').FileShareUndoParams) => {
-    requireTrustedSender('files:shareUndoPublic', event)
     const params = parseFileShareUndoParams(input)
     return parseFileShareUndoResult(await publicFiles.undoShare(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
   handleWithEvent('files:sharePublic', async (event, input: import('@agentmux/core').FileShareParams) => {
-    requireTrustedSender('files:sharePublic', event)
     const params = parseFileShareParams(input)
     return parseFileShareResult(await publicFiles.share(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
   handleWithEvent('files:inspectSharePublic', async (event, input: import('@agentmux/core').FileShareInspectParams) => {
-    requireTrustedSender('files:inspectSharePublic', event)
     const params = parseFileShareInspectParams(input)
     return parseFileShareInspectResult(await publicFiles.inspectShare(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
-  handleWithEvent('files:importPublic', async (event, input: import('@agentmux/core/files').FileImportParams) => { requireTrustedSender('files:importPublic', event); return publicFiles.import(input) })
-  handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
+  handleWithEvent('files:importPublic', async (event, input: import('@agentmux/core/files').FileImportParams) => { return publicFiles.import(input) })
+  handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
-    requireTrustedSender('files:readPublic', event)
     return await publicFiles.read(input)
   })
   handleWithEvent('files:historyPublic', async (event, input: import('@agentmux/core').FileHistoryParams) => {
-    requireTrustedSender('files:historyPublic', event)
     const params = parseFileHistoryParams(input)
     return parseFileHistoryResult(await publicFiles.history(params), params)
   })
   handleWithEvent('files:restorePublic', async (event, input: import('@agentmux/core').FileRestoreParams) => {
-    requireTrustedSender('files:restorePublic', event)
     const params = parseFileRestoreParams(input)
     return parseFileRestoreResult(await publicFiles.restore(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
   handleWithEvent('files:undoPublic', async (event, input: import('@agentmux/core').FileUndoParams) => {
-    requireTrustedSender('files:undoPublic', event)
     const params = parseFileUndoParams(input)
     return parseFileUndoResult(await publicFiles.undo(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
@@ -1067,53 +1033,33 @@ export async function registerIpc(args: {
     await files.readPreview(workspace(config, workspaceId), path, options)
   )
   handleWithEvent('files:readPreviewResource', async (event, request: import('../shared/workspace-file-preview').WorkspacePreviewResourceRequest) => {
-    requireTrustedSender('files:readPreviewResource', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('File preview resources require the original application frame.')
     return await previewResources.read(request)
   })
   handleWithEvent('files:cancelPreviewResource', async (event, id: string) => {
-    requireTrustedSender('files:cancelPreviewResource', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('File preview resources require the original application frame.')
     previewResources.cancel(id)
   })
   handleWithEvent('files:openHtmlPreview', async (event, workspaceId: string, path: string, content: string) => {
-    requireTrustedSender('files:openHtmlPreview', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('HTML preview requires the original application frame.')
     return await htmlPreviews.open(workspace(config, workspaceId), path, content)
   })
   handleWithEvent('files:releaseHtmlPreview', async (event, id: string) => {
-    requireTrustedSender('files:releaseHtmlPreview', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('HTML preview requires the original application frame.')
     htmlPreviews.release(id)
   })
   handleWithEvent('files:renderDiagram', async (event, request: import('../shared/file-diagram').FileDiagramRequest) => {
-    requireTrustedSender('files:renderDiagram', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
     return await diagramPreviews.render(request)
   })
   handleWithEvent('files:cancelDiagram', async (event, id: string) => {
-    requireTrustedSender('files:cancelDiagram', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
     diagramPreviews.cancel(id)
   })
   handleWithEvent('files:build', async (event, workspaceId: string, request: import('../shared/file-build').FileBuildRequest) => {
-    requireTrustedSender('files:build', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     return await builds.start(workspace(config, workspaceId), request)
   })
   handleWithEvent('files:inspectBuild', async (event, id: string) => {
-    requireTrustedSender('files:inspectBuild', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     return builds.inspect(id)
   })
   handleWithEvent('files:cancelBuild', async (event, id: string) => {
-    requireTrustedSender('files:cancelBuild', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     return await builds.cancel(id)
   })
   handleWithEvent('files:releaseBuild', async (event, id: string) => {
-    requireTrustedSender('files:releaseBuild', event)
-    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     await builds.release(id)
   })
   handle('files:readBookmark', async (workspaceId: string, path: string) => {
@@ -1128,7 +1074,7 @@ export async function registerIpc(args: {
   })
   handleWithEvent('files:write', async (event, workspaceId: string, input: WorkspaceFileWriteInput) =>
     notesStorageOwner.write(workspace(config, workspaceId), input, actual => noteFileWriter.write(actual, input,
-      Object.is(event.sender, contents) ? { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } } : undefined))
+      { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }))
   )
   handle('files:observe', async (workspaceId: string, path: string) => {
     const key = `${workspaceId}\0${path}`
@@ -1208,28 +1154,23 @@ export async function registerIpc(args: {
     return { ...agent, hostId }
   }
   handleWithEvent('goals:handoffDiscussion', async (event, input: import('@agentmux/host/goal-discussion-bindings').GoalDiscussionHandoff) => {
-    requireTrustedSender('goals:handoffDiscussion', event)
     return handoffGoalDiscussion(input, { spatial: spatialState,
       goal: async goalId => (await args.runtime.callOriginalCore('local', 'goal.inspect', { goalId },
         { principal: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } })).goal,
       agent: originalDiscussionAgent })
   })
   handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
-    requireTrustedSender('goals:execute', event)
     return executeGoal(parseAgentMuxControlRequest(request))
   })
   handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue']) => {
-    requireTrustedSender('demands:delegation', event)
     if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
     return callUserRpc(method, parseGoalDelegationParams(method, input))
   })
   handle('demands:list', async () => readDesktopGoals(args.runtime))
-  handleWithEvent('demands:inspectDispatch', async (event, reference: GoalDispatchReference) => {
-    requireTrustedSender('demands:inspectDispatch', event); assertGoalDispatchReference(reference)
+  handleWithEvent('demands:inspectDispatch', async (event, reference: GoalDispatchReference) => { assertGoalDispatchReference(reference)
     return (await callUserRpc('goal.inspect', { goalId: reference.goalId })).goal?.dispatches?.find(item => item.operationId === reference.operationId) ?? null
   })
-  handleWithEvent('demands:reconcileDispatch', async (event, reference: GoalDispatchReference) => {
-    requireTrustedSender('demands:reconcileDispatch', event); assertGoalDispatchReference(reference)
+  handleWithEvent('demands:reconcileDispatch', async (event, reference: GoalDispatchReference) => { assertGoalDispatchReference(reference)
     return reconcileDesktopGoalDispatch(args.runtime, reference)
   })
   const pmoGoal = async (intent: GoalPmoIntent) => {
@@ -1246,56 +1187,46 @@ export async function registerIpc(args: {
       hostId: control.hostId, agentSessionId: control.agentSessionId, expectedRun: control.run, operationId, evidence })
   }
   handleWithEvent('demands:reconcilePmoCreation', async (event, intent: GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string) => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     const created = await args.runtime.agentCreation(hostId, agentSessionId)
     if (created.kind === 'retired-agent' || !created.creation?.createdRun) throw new AgentMuxError('The original PMO creation Run is unconfirmed. Its Goal and source operation are retained.', 'CONTROL_UNAVAILABLE')
     return confirmPmoParticipation(intent, { kind: 'agent', hostId, agentSessionId, run: created.creation.createdRun }, createOperationId, 'creation-input')
   })
   handleWithEvent('demands:reconcilePmoInput', async (event, intent: GoalPmoIntent, session: AgentSessionControl, operationId: string) => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return confirmPmoParticipation(intent, session, operationId, 'prompt-input')
   })
   const disposeToolkitIpc = registerToolkitIpc(toolkit, (channel, handler) => handleWithEvent(channel, (event, ...values) => {
-    assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
     return handler(event, ...values)
   }))
 
   registerPerformanceCaptureIpc(metrics, (channel, handler) => handleWithEvent(channel, (event, input) => {
-    assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
     return handler(event, input)
   }))
   if (args.performanceHeap) registerHeapSnapshotFileIpc(args.performanceHeap, args.window, currentRendererCaptureTarget,
     (channel, handler) => handleWithEvent(channel, (event, input) => {
-      assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
       return handler(event, input)
     }))
 
-  handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
-  handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { requireTrustedSender('notesStorage:change', event); return notesStorageOwner.change(input) })
+  handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { await notesStorageReady; return notesStorageOwner.inspect(operationId) })
+  handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { return notesStorageOwner.change(input) })
   const disposeNotebook = notebookStore.subscribe(observation => {
     if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notebook:changed', observation)
   })
   const notebookActor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
   handleWithEvent('notebook:resolve', async (event, input: import('../shared/notebook-observation').NotebookResolveRequest) => {
-    requireTrustedSender('notebook:resolve', event)
     return notebookObservation.requests.resolve(event.sender, input)
   })
   handleWithEvent('notebook:graph', async (event, input: import('../shared/notebook-observation').NotebookGraphRequest) => {
-    requireTrustedSender('notebook:graph', event)
     return notebookObservation.requests.graph(event.sender, input)
   })
   handleWithEvent('notebook:content', async (event, input: import('../shared/notebook-observation').NotebookContentRequest) => {
-    requireTrustedSender('notebook:content', event)
     return notebookObservation.requests.content(event.sender, input)
   })
   handleWithEvent('notebook:cancelObservation', (event, requestId: string) => {
-    requireTrustedSender('notebook:cancelObservation', event)
     notebookObservation.requests.cancel(event.sender, requestId)
   })
-  handleWithEvent('notebook:actor', async event => { requireTrustedSender('notebook:actor', event); return notebookActor })
-  handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); await notesStorageReady; return notebookStore.read() })
+  handleWithEvent('notebook:actor', async event => { return notebookActor })
+  handleWithEvent('notebook:read', async event => { await notesStorageReady; return notebookStore.read() })
   handleWithEvent('notebook:apply', async (event, input: NotebookWrite) => {
-    requireTrustedSender('notebook:apply', event)
     return notebookStore.apply(input, notebookActor)
   })
   const moteAvatarSources = new MoteAvatarSeriesOwner({ userRoot: join(homedir(), '.agentmux', 'avatars'), builtinRoot: join(app.getAppPath(), 'resources', 'avatar-series') })
@@ -1305,27 +1236,21 @@ export async function registerIpc(args: {
     if (error) throw Object.assign(new Error('The avatar folder could not be opened. Its created files are retained. ' + error), { code: 'AVATAR_SERIES_REVEAL_FAILED' })
   })
   handleWithEvent('moteAvatars:list', async event => {
-    requireTrustedSender('moteAvatars:list', event)
     return moteAvatars.call('space.mote.avatar.list', {})
   })
   handleWithEvent('moteAvatars:preview', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.preview']) => {
-    requireTrustedSender('moteAvatars:preview', event)
     return moteAvatars.call('space.mote.avatar.preview', params)
   })
   handleWithEvent('moteAvatars:read', async (event, params: MoteAvatarWriteParameterMap['space.mote.avatar.read']) => {
-    requireTrustedSender('moteAvatars:read', event)
     return moteAvatars.call('space.mote.avatar.read', params)
   })
   handleWithEvent('moteAvatars:createSeries', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.series.create']) => {
-    requireTrustedSender('moteAvatars:createSeries', event)
     return moteAvatars.call('space.mote.avatar.series.create', params)
   })
   handleWithEvent('moteAvatars:revealSeries', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.series.reveal']) => {
-    requireTrustedSender('moteAvatars:revealSeries', event)
     return moteAvatars.call('space.mote.avatar.series.reveal', params)
   })
   handleWithEvent('moteAvatars:save', async (event, params: MoteAvatarWriteParameterMap['space.mote.avatar.save']) => {
-    requireTrustedSender('moteAvatars:save', event)
     return moteAvatars.call('space.mote.avatar.save', params)
   })
   const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
@@ -1338,33 +1263,26 @@ export async function registerIpc(args: {
     return { hostId: workspace(config, target.workspaceId).hostId,
       directoryPath: await topicKnowledge.topicAppearanceDirectory(target.workspaceId, target.topicId, target.objectKey) }
   })
-  handleWithEvent('spaceObjects:appearance', async (event, target: SpaceObjectImageTarget) => {
-    requireTrustedSender('spaceObjects:appearance', event); return spaceObjectImages.appearance(target)
+  handleWithEvent('spaceObjects:appearance', async (event, target: SpaceObjectImageTarget) => { return spaceObjectImages.appearance(target)
   })
-  handleWithEvent('spaceObjects:previewAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => {
-    requireTrustedSender('spaceObjects:previewAvatar', event); return spaceObjectImages.preview(target, input)
+  handleWithEvent('spaceObjects:previewAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => { return spaceObjectImages.preview(target, input)
   })
-  handleWithEvent('spaceObjects:saveAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => {
-    requireTrustedSender('spaceObjects:saveAvatar', event); return spaceObjectImages.save(target, input)
+  handleWithEvent('spaceObjects:saveAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => { return spaceObjectImages.save(target, input)
   })
-  handleWithEvent('spaceObjects:readAvatar', async (event, target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => {
-    requireTrustedSender('spaceObjects:readAvatar', event); return spaceObjectImages.read(target, ref)
+  handleWithEvent('spaceObjects:readAvatar', async (event, target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => { return spaceObjectImages.read(target, ref)
   })
   handleWithEvent('topics:call', async (event, method: import('@agentmux/core').TopicMethod, params: import('@agentmux/core').TopicParams<import('@agentmux/core').TopicMethod>) => {
-    requireTrustedSender('topics:call', event)
     return args.runtime.callOriginalCore('local', method, params as never, { transport: 'unix' })
   })
   const disposeSpatial = spatialState.subscribe(state => {
     if(!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('spatial:changed',state)
   })
-  handleWithEvent('spatial:read',async event=>{requireTrustedSender('spatial:read',event);return spatialState.readForLayout()})
+  handleWithEvent('spatial:read',async event=>{return spatialState.readForLayout()})
   handleWithEvent('spatial:openAgent', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'agent.open'>) => {
-    requireTrustedSender('spatial:openAgent', event)
     return await callUserRpc('agent.open', input)
   })
-  handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{requireTrustedSender('spatial:commit',event);return spatialState.commit(input)})
+  handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{return spatialState.commit(input)})
   handleWithEvent('spatial:renameLabel', async (event, input: import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation) => {
-    requireTrustedSender('spatial:renameLabel', event)
     if (!input || Object.keys(input).some(key => !['operationId', 'target', 'value', 'source', 'expectedNameRevision'].includes(key)) ||
         !input.target || !['agent-session', 'tab', 'zone'].includes(input.target.kind)) throw new Error('An exact supported label mutation is required.')
     const current = await spatialState.readForLayout()
@@ -1391,20 +1309,16 @@ export async function registerIpc(args: {
         cwd: onlySession?.session.workspacePath ?? zone?.directoryPath ?? onlyRegion?.execution?.cwd ?? null } })
   })
   handleWithEvent('spatial:retainLabels', async (event, values: { target: import('@agentmux/core/spatial-graph').AgentMuxNameTarget; value: string }[]) => {
-    requireTrustedSender('spatial:retainLabels', event)
     if (!Array.isArray(values) || values.some(value => !value?.target || !['agent-session', 'tab', 'zone'].includes(value.target.kind))) throw new Error('Only observed original display names may be retained.')
     return spatialState.retainDisplayLabels(values)
   })
-  handleWithEvent('spatial:nameHistory', async (event, input: { target?: import('@agentmux/core/spatial-graph').AgentMuxNameTarget; afterId?: string; limit?: number } = {}) => {
-    requireTrustedSender('spatial:nameHistory', event); return spatialState.queryNameChanges(input)
+  handleWithEvent('spatial:nameHistory', async (event, input: { target?: import('@agentmux/core/spatial-graph').AgentMuxNameTarget; afterId?: string; limit?: number } = {}) => { return spatialState.queryNameChanges(input)
   })
   handleWithEvent('spatial:confirmNameCommit', async (event, operationId: string) => {
-    requireTrustedSender('spatial:confirmNameCommit', event)
     if (typeof operationId !== 'string' || !operationId) throw new Error('An exact original name operation is required.')
     return spatialState.confirmNameCommit(operationId)
   })
   handleWithEvent('ui:requestStorageFlush', async (event) => {
-    requireTrustedSender('ui:requestStorageFlush', event)
     requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(contents.session, {
       userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
     }))
@@ -1412,23 +1326,18 @@ export async function registerIpc(args: {
     contents.session.flushStorageData()
   })
   handleWithEvent('ui:recordStartupFailure', (event, input: unknown) => {
-    requireTrustedSender('ui:recordStartupFailure', event)
-    if (event.senderFrame !== contents.mainFrame) return false
     return args.onRendererStartupFailure?.(input) ?? false
   })
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
-    requireTrustedSender('ui:rendererUpdateReady', event)
     args.onRendererUpdateReady?.(token)
   })
   handleWithEvent('ui:openObjectLink', (event, rawUrl: string) => {
-    requireTrustedSender('ui:openObjectLink', event)
     if (!args.spatialLinks) throw new Error('Object link navigation is unavailable in this window. The original workface and Agents are kept; retry the exact link in the main Desktop window.')
     args.spatialLinks.receive(rawUrl)
   })
-  handleWithEvent('ui:inspectDefaultBrowser', event => { requireTrustedSender('ui:inspectDefaultBrowser', event); return inspectDefaultBrowser() })
-  handleWithEvent('ui:openDefaultBrowserSettings', event => { requireTrustedSender('ui:openDefaultBrowserSettings', event); return openDefaultBrowserSettings() })
+  handleWithEvent('ui:inspectDefaultBrowser', event => { return inspectDefaultBrowser() })
+  handleWithEvent('ui:openDefaultBrowserSettings', event => { return openDefaultBrowserSettings() })
   handleWithEvent('ui:spatialLinksReady', event => {
-    requireTrustedSender('ui:spatialLinksReady', event)
     args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => contents.send('ui:spatialLinkIssue', message),
       async (capsuleId, operationId, signal) => await args.runtime.callOriginalCore('local', 'capsule.open', { capsuleId, operationId },
         { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
@@ -1450,20 +1359,17 @@ export async function registerIpc(args: {
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
     capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue })
   registerNativeDesktopIpc({ capture: () => screenCapture.capture(true), native: getDesktopNativeUiOwner,
-    handle: handleWithEvent, trust: requireTrustedSender })
+    handle: handleWithEvent,})
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
   })
   handleWithEvent('ui:nativeBrowserVisibility', (event, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('ui:nativeBrowserVisibility', event)
     return nativeChrome.visibility(scope)
   })
   handleWithEvent('ui:publishNativeOverlays', async (event, regions: NativeOverlayRegion[], scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('ui:publishNativeOverlays', event)
     return await nativeChrome.update(regions, scope)
   })
   handleWithEvent('ui:listAgentSkills', async (event, sessionId: string) => {
-    requireTrustedSender('ui:listAgentSkills', event)
     const session = await args.runtime.resolveSession(sessionId, config)
     if (!session || session.kind !== 'agent') throw new Error('Agent session is unavailable')
     if (session.hostId !== 'local') throw new Error('Skill discovery is available for local Agents.')
@@ -1472,7 +1378,6 @@ export async function registerIpc(args: {
     return await discoverAgentSkills({ catalog, workspacePath: session.workspacePath, home: app.getPath('home') })
   })
   handleWithEvent('ui:listWorkspaceSkills', async (event, workspaceId: string, providerId: string) => {
-    requireTrustedSender('ui:listWorkspaceSkills', event)
     const workspace = config.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || workspace.hostId !== 'local') throw new Error('Workspace skill discovery is available for local workspaces.')
     const catalog = (await args.runtime.providerCatalog()).find((item) => item.id === providerId)
@@ -1480,7 +1385,6 @@ export async function registerIpc(args: {
     return await discoverAgentSkills({ catalog, workspacePath: workspace.path, home: app.getPath('home') })
   })
   handleWithEvent('ui:retainInputImage', async (event, input: { session: AgentSessionControl; bytes: Uint8Array; mimeType: string }) => {
-    requireTrustedSender('ui:retainInputImage', event)
     const bytes = Buffer.from(input.bytes)
     const identity = parseFileUploadIdentity({ hostId: input.session.hostId, agentSessionId: input.session.agentSessionId, expectedRun: { runId: input.session.run.runId },
       operationId: mintObjectId(), name: 'image', mimeType: input.mimeType, byteLength: bytes.length, revision: fileUploadRevision(bytes) })
@@ -1490,24 +1394,20 @@ export async function registerIpc(args: {
     } catch { return { upload: identity, observation: 'unavailable' } }
   })
   handleWithEvent('ui:savePastedImage', async (event, input: { bytes: Uint8Array; extension: string }) => {
-    requireTrustedSender('ui:savePastedImage', event)
     // A CLI Agent reads images from disk, so a paste becomes a file it can open. The renderer supplies
     // bytes only — never a destination — so it cannot aim this write anywhere.
     return (await savePastedImage(app.getPath('home'), input)).path
   })
   handle('ui:readPastedImage', (path: string) => readPastedImage(app.getPath('home'), path))
   handleWithEvent('ui:revealCrashLog', async (event) => {
-    requireTrustedSender('ui:revealCrashLog', event)
     return await requestCrashLogReveal()
   })
   handleWithEvent('ui:notifyAgentAttention', async (event, input: AgentAttentionNotifyInput) => {
-    requireTrustedSender('ui:notifyAgentAttention', event)
     // The renderer decided this deserves attention, which dwell mode to use, and whether the user asked
     // for a sound; main only delivers, and says so honestly when it cannot present in that mode.
     return notifier.notify(input)
   })
   handleWithEvent('ui:setAgentAttentionCount', (event, count: number) => {
-    requireTrustedSender('ui:setAgentAttentionCount', event)
     if (!Number.isSafeInteger(count) || count < 0) throw new TypeError('Agent attention count must be a nonnegative safe integer.')
     if (process.platform !== 'darwin' || !app.dock) return false
     app.dock.setBadge(count === 0 ? '' : String(count))
@@ -1552,10 +1452,8 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
     let capturedLauncher: Awaited<ReturnType<typeof captureGoalDiscussionLauncherLaunch>> = null
     try {
-      if (input.agentMuxNote !== undefined || input.launcher !== undefined || input.toolWorkspace !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
       capturedLauncher = await captureGoalDiscussionLauncherLaunch(input, { spatial: spatialState, workspaces: config.workspaces })
       if (goalPmo) {
-        assertManualPromptSenderTrusted(event.sender, contents)
         await pmoGoal(goalPmo)
         if (goalPmo.creationOperationId !== undefined && input.createOperationId !== await goalPmoOperation(goalPmo, 'create')) throw new AgentMuxError('The original PMO creation operation changed.', 'CONTROL_REQUEST_CONFLICT')
       }
@@ -1592,32 +1490,25 @@ export async function registerIpc(args: {
   handle('sessions:dispatches', (session: import('../shared/contracts.js').SessionHistoryReference, options?: import('../shared/contracts.js').SessionDispatchPageOptions) => args.runtime.sessionDispatches(session, options))
   handle('sessions:dispatch', (session: import('../shared/contracts.js').SessionHistoryReference, sourceMessageId: string) => args.runtime.sessionDispatch(session, sourceMessageId))
   handleWithEvent('sessions:messages', async (event, session: import('../shared/contracts.js').SessionHistoryReference, options: import('../shared/contracts.js').SessionMessagePageOptions) => {
-    requireTrustedSender('sessions:messages', event)
     return await args.runtime.sessionMessages(session, options)
   })
   handleWithEvent('sessions:message', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, notificationId?: string) => {
-    requireTrustedSender('sessions:message', event)
     return await args.runtime.sessionMessage(session, messageId, notificationId)
   })
   handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.notifySessionMessage(session, messageId, operationId)
   })
   handleWithEvent('sessions:inspectMessageNotification', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.inspectSessionMessageNotification(session, messageId, operationId)
   })
   handleWithEvent('sessions:messageEvents', async (event, session: import('../shared/contracts.js').SessionHistoryReference, options?: import('../shared/contracts.js').SessionMessageEventsOptions) => {
-    requireTrustedSender('sessions:messageEvents', event)
     return await args.runtime.sessionMessageEvents(session, options)
   })
   handleWithEvent('sessions:spawns', async (event, session: import('../shared/contracts.js').SessionHistoryReference, options: import('../shared/contracts.js').SessionSpawnPageOptions) => {
-    requireTrustedSender('sessions:spawns', event)
     return await args.runtime.sessionSpawns(session, options)
   })
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handleWithEvent('sessions:continueCreation', async (event, input: import('@agentmux/core').AgentMuxCreationContinueParams) => {
-    requireTrustedSender('sessions:continueCreation', event)
     return await args.runtime.continueAgentCreation(input)
   })
   handle('sessions:resolveCreationSessionId', async (hostId: string, createOperationId: string) => args.runtime.resolveCreationSessionId(hostId, createOperationId))
@@ -1632,16 +1523,14 @@ export async function registerIpc(args: {
   handle('sessions:historyPage', async (session: import('../shared/contracts.js').SessionHistoryReference, options?: SessionHistoryPageOptions) => (
     args.runtime.sessionHistoryPage(session, options, config)
   ))
-  const searchReads = registerSearchIpc({ handle: handleWithEvent, trust: requireTrustedSender,
+  const searchReads = registerSearchIpc({ handle: handleWithEvent,
     query: (input, signal) => callUserRpc('app.search', input, { signal }) })
   const historyReads = new SessionHistoryReadOwners()
   handleWithEvent('sessions:readHistory', (event, token: string, reference: import('../shared/contracts.js').SessionHistoryReference,
     options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>) => {
-    requireTrustedSender('sessions:readHistory', event)
     return sessionInputOperationResult(() => historyReads.read(event.sender, token, signal => args.runtime.readSessionHistory(reference, options, signal)))
   })
   handleWithEvent('sessions:cancelHistoryRead', (event, token: string) => {
-    requireTrustedSender('sessions:cancelHistoryRead', event)
     historyReads.cancel(event.sender.id, token)
   })
   handle('sessions:historyResource', async (session: import('../shared/contracts.js').SessionHistoryReference, input: import('@agentmux/core').AgentSessionHistoryResourceRequest) =>
@@ -1649,13 +1538,11 @@ export async function registerIpc(args: {
   const historyObservations = new SessionHistoryObservationOwners((reference, listener, signal) =>
     args.runtime.observeSessionHistory(reference, listener, config, signal))
   handleWithEvent('sessions:observeHistory', async (event, token: string, session: import('../shared/contracts.js').SessionHistoryReference) => {
-    requireTrustedSender('sessions:observeHistory', event)
     return await historyObservations.acquire(event.sender, token, session, observation => {
       if (!event.sender.isDestroyed()) event.sender.send(SESSION_HISTORY_OBSERVATION_CHANNEL, { token, observation })
     })
   })
   handleWithEvent('sessions:releaseHistoryObservation', (event, token: string) => {
-    requireTrustedSender('sessions:releaseHistoryObservation', event)
     historyObservations.release(event.sender.id, token)
   })
   handleWithEvent('sessions:attach', async (event, session: SessionControl, afterSequence: number = 0) => sessionObservationResult(async () => {
@@ -1679,41 +1566,32 @@ export async function registerIpc(args: {
   const progressTargetMatches = (loop: ContinuousProgressTarget, target: ContinuousProgressTarget): boolean =>
     loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
   handleWithEvent('schedule:list', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => {
-    requireTrustedSender('schedule:list', event)
     return callUserRpc('schedule.list', input)
   })
   handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect'], ownerHostId?: string) => {
-    requireTrustedSender('schedule:inspect', event)
     return ownerHostId === undefined ? callUserRpc('schedule.inspect', input)
       : args.runtime.callOriginalCore(ownerHostId, 'schedule.inspect', input, { transport: 'unix' })
   })
   handleWithEvent('schedule:create', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => {
-    requireTrustedSender('schedule:create', event)
     return callUserRpc('schedule.create', input)
   })
   handleWithEvent('schedule:pause', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => {
-    requireTrustedSender('schedule:pause', event)
     return callUserRpc('schedule.pause', input)
   })
   handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume'], ownerHostId?: string) => {
-    requireTrustedSender('schedule:resume', event)
     return ownerHostId === undefined ? callUserRpc('schedule.resume', input)
       : args.runtime.callOriginalCore(ownerHostId, 'schedule.resume', input, { transport: 'unix' })
   })
   handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
-    requireTrustedSender('schedule:cancel', event)
     return callUserRpc('schedule.cancel', input)
   })
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
-    requireTrustedSender('continuousProgress:list', event)
     return (await callUserRpc('agent.progress.list', { target })).loops
   })
   handleWithEvent('continuousProgress:goals', async (event, goalId: string) => {
-    requireTrustedSender('continuousProgress:goals', event)
     return (await callUserRpc('goal.inspect', { goalId })).goalContinuations
   })
   handleWithEvent('continuousProgress:goalAction', async (event, goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedRevision: number, operationId: string) => {
-    requireTrustedSender('continuousProgress:goalAction', event)
     return (await callUserRpc('goal.continuation-action', { goalId, loopId, action, expectedRevision, operationId })).continuation
   })
   // Continuous terminal typing is one editing intent; the design forbids turning every key into
@@ -1732,18 +1610,15 @@ export async function registerIpc(args: {
     }
   }
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
-    requireTrustedSender('continuousProgress:create', event)
     if (taskSource?.kind === 'goal') throw new AgentMuxError('Goal continuation requires its original explicit Goal Start.', 'INVALID_CONTROL_REQUEST')
     endInputBursts(target)
     return (await callUserRpc('agent.progress.create', { target, intervalMs, prompt, ...(taskSource ? { taskSource } : {}), operationId: mintObjectId() })).loop
   })
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => {
-    requireTrustedSender('continuousProgress:action', event)
     endInputBursts(target)
     return (await callUserRpc('agent.progress.action', { target, loopId, action, expectedLoop, operationId })).loop
   })
   handleWithEvent('continuousProgress:update', async (event, input: import('../shared/continuous-progress').ProgressUpdateRequest): Promise<import('../shared/continuous-progress').ProgressUpdateResult> => {
-    requireTrustedSender('continuousProgress:update', event)
     endInputBursts(input.target)
     try { return { ok: true, loop: (await callUserRpc('agent.progress.update', input)).loop } }
     catch (error) {
@@ -1768,11 +1643,9 @@ export async function registerIpc(args: {
     if (lastInputAt === undefined || now - lastInputAt >= TYPING_BURST_GAP_MS) pauseUserProgress(session, 'Paused for your terminal input.')
   }
   handleWithEvent('continuousProgress:pauseForInput', async (event, control: AgentSessionControl) => {
-    requireTrustedSender('continuousProgress:pauseForInput', event)
     await pauseAutomaticInput(control)
   })
   handleWithEvent('sessions:inputOccupation', async (event, control: AgentSessionControl) => {
-    requireTrustedSender('sessions:inputOccupation', event)
     await pauseAutomaticInput(control)
   })
   handleWithEvent('sessions:write', async (event, session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
@@ -1786,7 +1659,6 @@ export async function registerIpc(args: {
       inputSender(event)))
   })
   handleWithEvent('sessions:recordDeliveryFailure', async (event, input: DeliveryAttempt) => {
-    requireTrustedSender('sessions:recordDeliveryFailure', event)
     const record = parseDeliveryAttempt(input)
     if (record.source !== 'client' || record.observation !== undefined || record.reporter !== undefined) {
       throw new AgentMuxError('Client reports cannot author Core Input or authenticated identity.', 'CONTROL_PERMISSION_DENIED')
@@ -1812,24 +1684,18 @@ export async function registerIpc(args: {
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
     let submission: Awaited<ReturnType<RuntimeController['submitPrompt']>> = undefined
-    if (choice?.moteMain || inputContextCapture !== undefined || inputImages !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if ('admissionIntent' in condition) {
-      assertManualPromptSenderTrusted(event.sender, contents)
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
       pauseUserProgress(session, 'Paused for your message.')
       return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, authorHuman === true ? preparePublicUserProfile(config.profile) : undefined)
     }
     if (goalPmo) {
-      assertManualPromptSenderTrusted(event.sender, contents)
       await pmoGoal(goalPmo)
       if (goalPmo.creationOperationId !== undefined && operationId !== await goalPmoOperation(goalPmo, 'discussion')) throw new AgentMuxError('The original PMO discussion operation changed.', 'CONTROL_REQUEST_CONFLICT')
     }
-    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if (authorHuman === true) {
-      assertManualPromptSenderTrusted(event.sender, contents)
       effectiveAuthorHuman = true
     }
-    if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if (goalPmo || goalDispatch || goalContinuation) {
       const goalId = goalPmo?.goalId ?? goalDispatch?.goalId ?? goalContinuation!.goalId
       const original = await args.runtime.inspectGoalAttention({ hostId: session.hostId, supervisorAgentSessionId: session.agentSessionId,
@@ -1838,7 +1704,6 @@ export async function registerIpc(args: {
         agentSessionId: session.agentSessionId, runId: session.run.runId, source: { kind: goalPmo ? 'goal-discussion' : goalContinuation ? 'goal-native-continuation' : 'goal-start', operationId } }, original)
     }
     if (goalDispatch || goalContinuation) {
-      assertManualPromptSenderTrusted(event.sender, contents)
       const goalId = goalDispatch?.goalId ?? goalContinuation!.goalId
       if (goalPmo || goalDispatch && goalDispatch.operationId !== operationId) throw new AgentMuxError('The original Goal Start operation changed.', 'CONTROL_REQUEST_CONFLICT')
       const goal = await callUserRpc('goal.inspect', { goalId })
@@ -1859,28 +1724,22 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
     input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.replyQuestion(session, input, config)
   })
   handleWithEvent('sessions:inputMailbox', async (event, session: import('../shared/contracts.js').SessionHistoryReference,
     options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>) => {
-    requireTrustedSender('sessions:inputMailbox', event)
     return await args.runtime.inputMailbox(session, options)
   })
   handleWithEvent('sessions:inspectMoteInput', async (event, session: import('../shared/contracts.js').SessionHistoryReference, observationId: string) => {
-    requireTrustedSender('sessions:inspectMoteInput',event)
     return await args.runtime.inspectMoteInput(session,observationId)
   })
   handleWithEvent('sessions:inspectInput', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.inspectInput(session, key)
   }))
   handleWithEvent('sessions:stopInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) => sessionInputOperationResult(async () => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.stopInputWaiting(session, ref, cancelOperationId)
   }))
   handleWithEvent('sessions:rejoinInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef) => sessionInputOperationResult(async () => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.rejoinInputWaiting(session, ref)
   }))
   handleWithEvent('sessions:respondInteraction', async (
@@ -1889,7 +1748,6 @@ export async function registerIpc(args: {
     response: AgentMuxInteractionResponse,
     intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & {moteSource?:import('@agentmux/core').AgentInputMoteSource}
   ) => {
-    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.respondInteraction(session, response, intent)
   })
   handle('sessions:inspectInteraction', async (session: AgentSessionControl, operationId: string) => await args.runtime.inspectInteraction(session, operationId))
@@ -1904,7 +1762,6 @@ export async function registerIpc(args: {
   handle('sessions:reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
     sessionReopenResult(() => args.runtime.reopenRetiredSession(reference, expectedRetiredAt, operationId, config)))
   handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) => {
-    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote)
   })
   handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you interrupted the Agent.'); await args.runtime.interrupt(session) })
@@ -1914,9 +1771,8 @@ export async function registerIpc(args: {
   handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
   handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { if (request?.moteMain) assertManualPromptSenderTrusted(event.sender, contents); return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
+  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
   handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
-    requireTrustedSender('sessions:restart', event)
     if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
     return await sessionObservationResult(() => args.runtime.restartSession(session, config, operationId, observeOnly))
   })
@@ -1928,11 +1784,9 @@ export async function registerIpc(args: {
     await forgetBrowserAppLink(configOwner, scheme, expected)
   })
   handleWithEvent('browser:listRetainedUploads', async event => {
-    requireTrustedSender('browser:listRetainedUploads', event)
     return await browserUploads.retained()
   })
   handleWithEvent('browser:discardRetainedUpload', async (event, selectionId: string, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
-    requireTrustedSender('browser:discardRetainedUpload', event)
     const parent = args.workbenchWindows.windowForDocument(scope)
     return await browserUploads.confirmDiscardSelection(selectionId, async selection => {
       if (parent.isDestroyed()) return false
@@ -1944,7 +1798,6 @@ export async function registerIpc(args: {
     })
   })
   handleWithEvent('browser:listTargets', async (event, workspaceId?: string) => {
-    requireTrustedSender('browser:listTargets', event)
     if (workspaceId !== undefined) workspace(config, workspaceId)
     let identities: Map<number, number> | null = null
     try { identities = new Map(app.getAppMetrics().map(process => [process.pid, process.creationTime])) } catch { /* Process ownership remains unknown; catalog membership is separate. */ }
@@ -1967,18 +1820,15 @@ export async function registerIpc(args: {
     return { targets, coverage, ...(warnings.length ? { warning: warnings.join(' ') } : {}) }
   })
   handleWithEvent('browser:createExternalPairing', async (event, workspaceId: string) => {
-    requireTrustedSender('browser:createExternalPairing', event)
     workspace(config, workspaceId)
     return await externalBridge.createPairing(workspaceId)
   })
   handleWithEvent('browser:revealExternalExtension', async event => {
-    requireTrustedSender('browser:revealExternalExtension', event)
     const directory = join(app.getAppPath(), 'browser-extension')
     const error = await shell.openPath(directory)
     if (error) throw new Error(`The Browser extension folder could not be opened: ${error}`)
   })
   handleWithEvent('browser:stopSharingExternal', (event, id: string) => {
-    requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
   handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport, capsuleId?: string, capsuleOpenOperationId?: string) => {
@@ -2001,7 +1851,6 @@ export async function registerIpc(args: {
       : await browsers.reload(id)
   })
   handleWithEvent('browser:getRecoveryPreview', async (event, id: string): Promise<BrowserRecoveryPreviewReadResult> => {
-    requireTrustedSender('browser:getRecoveryPreview', event)
     try {
       const scope = await resolveRecoveryPreviewScope(id)
       if (!scope) return {
@@ -2013,21 +1862,17 @@ export async function registerIpc(args: {
     }
   })
   handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
-    requireTrustedSender('browser:switchProfile', event)
     await ensureBrowser(id)
     return await browsers.switchProfile(id, profileId)
   })
   handleWithEvent('browser:listProfiles', async (event) => {
-    requireTrustedSender('browser:listProfiles', event)
     await browserProfiles.initialize()
     return browserProfiles.listProfiles()
   })
   handleWithEvent('browser:createProfile', async (event, label: string) => {
-    requireTrustedSender('browser:createProfile', event)
     return await browserProfiles.createProfile(label)
   })
   handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
-    requireTrustedSender('browser:deleteProfile', event)
     if (browsers.usesProfile(profileId)) {
       throw new Error('Browser Profile is still used by an open Browser')
     }
@@ -2036,30 +1881,24 @@ export async function registerIpc(args: {
     if (cleared.status === 'unavailable') console.warn('Browser Profile was deleted; its historical preview cleanup is unconfirmed:', cleared.warning)
   })
   handleWithEvent('browser:detectProfileImportSources', async (event) => {
-    requireTrustedSender('browser:detectProfileImportSources', event)
     return await browserProfiles.detectImportSources()
   })
   handleWithEvent('browser:importProfile', async (event, sourceToken: string, label: string) => {
-    requireTrustedSender('browser:importProfile', event)
     return await browserProfiles.importProfile(sourceToken, label)
   })
   handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
-    requireTrustedSender('browser:listInputHistory', event)
     const scope = resolveInputHistoryScope(target)
     return scope.profileId === null ? { scope, entries: [] } : await browserInputHistory.list(scope)
   })
   handleWithEvent('browser:recordInputHistory', async (event, target: BrowserInputHistoryTarget, text: string) => {
-    requireTrustedSender('browser:recordInputHistory', event)
     const scope = resolveInputHistoryScope(target)
     return scope.profileId === null ? { scope, entries: [], outcome: 'private' } : await browserInputHistory.record(scope, text)
   })
   handleWithEvent('browser:removeInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string) => {
-    requireTrustedSender('browser:removeInputHistory', event)
     const actual = requireInputHistoryScope(target, scope)
     return actual.profileId === null ? { scope: actual, entries: [] } : await browserInputHistory.remove(actual, text)
   })
   handleWithEvent('browser:clearInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope) => {
-    requireTrustedSender('browser:clearInputHistory', event)
     const actual = requireInputHistoryScope(target, scope)
     return actual.profileId === null ? { scope: actual, entries: [] } : await browserInputHistory.clear(actual)
   })
@@ -2083,7 +1922,6 @@ export async function registerIpc(args: {
     operationId?: string,
     caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>
   ) => {
-    requireTrustedSender('browser:runScript', event)
     return browserRunResult(async () => {
       if (config.browser.agentAutomation !== true) {
         // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
@@ -2110,34 +1948,27 @@ export async function registerIpc(args: {
     })
   })
   handleWithEvent('browser:setOperatorAvatar', async (event, input: Parameters<import('../shared/contracts.js').AgentMuxDesktopApi['browser']['setOperatorAvatar']>[0]) => {
-    requireTrustedSender('browser:setOperatorAvatar', event)
     return await browsers.setOperatorAvatar(input)
   })
   handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
-    requireTrustedSender('browser:checkOutcomeFields', event)
     if (config.browser.agentAutomation !== true) throw new Error('Browser automation is off. Turn it on in Settings › Browser.')
     await ensureBrowser(id)
     return await browsers.checkOutcomeFields(id, input, 'human')
   })
   handleWithEvent('browser:verifyOutcome', async (event, id: string, operationId: string) => {
-    requireTrustedSender('browser:verifyOutcome', event)
     await ensureBrowser(id)
     return await browsers.verifyOutcome(id, operationId)
   })
   handleWithEvent('browser:listOperationHistory', async (event) => {
-    requireTrustedSender('browser:listOperationHistory', event)
     return await browsers.listOperationHistory()
   })
   handleWithEvent('browser:getOperation', async (event, operationId: string) => {
-    requireTrustedSender('browser:getOperation', event)
     return await browsers.getOperation(operationId)
   })
   handleWithEvent('browser:getStepEvidence', async (event, operationId: string, sequence: number) => {
-    requireTrustedSender('browser:getStepEvidence', event)
     return await browsers.getStepEvidence(operationId, sequence)
   })
   handleWithEvent('browser:readStepResult', async (event, operationId: string, sequence: number, options?: BrowserResultReadOptions) => {
-    requireTrustedSender('browser:readStepResult', event)
     const operation = await browserOperationJournal.get(operationId)
     if (operation && externalBrowsers.has(operation.browserId)) return await externalBrowsers.readStepResult(operationId, sequence, options)
     return await browsers.readStepResult(operationId, sequence, options)
@@ -2146,23 +1977,18 @@ export async function registerIpc(args: {
   // 而这条是**停下**驱动。开关关掉之后仍然能停掉一个正在跑的操作，否则用户一旦关掉总开关就再也
   // 停不了手上这一个——把一道拒绝新动作的闸变成了一次能力损失。
   handleWithEvent('browser:stopOperationById', async (event, operationId: string) => {
-    requireTrustedSender('browser:stopOperationById', event)
     return await externalBrowsers.stopOperationById(operationId) ?? await browsers.stopOperationById(operationId)
   })
   handleWithEvent('browser:replayPlan', async (event, operationId: string) => {
-    requireTrustedSender('browser:replayPlan', event)
     return await browsers.replayPlan(operationId)
   })
   handleWithEvent('browser:takeControl', async (event, id: string) => {
-    requireTrustedSender('browser:takeControl', event)
     return browsers.takeControl(id)
   })
   handleWithEvent('browser:returnControl', async (event, id: string, input?: import('../shared/contracts.js').BrowserControlHandoff) => {
-    requireTrustedSender('browser:returnControl', event)
     return input === undefined ? browsers.returnControl(id) : await browsers.returnControl(id, input)
   })
   handleWithEvent('browser:runReplay', async (event, id: string, plan: import('../shared/browser-operation.js').BrowserReplayPlan, operator?: import('../shared/browser-operation.js').BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>) => {
-    requireTrustedSender('browser:runReplay', event)
     if (config.browser.agentAutomation !== true) {
       throw Object.assign(new Error('Agent browser automation is off. Turn it on in Settings › Browser.'), { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode })
     }
@@ -2170,31 +1996,25 @@ export async function registerIpc(args: {
     return await browsers.runReplay(id, plan, operator, caller)
   })
   handleWithEvent('browser:selectElement', async (event, id: string) => {
-    requireTrustedSender('browser:selectElement', event)
     await ensureBrowser(id)
     return await browsers.selectElement(id)
   })
   handleWithEvent('browser:startDemonstration', async (event, id: string) => {
-    requireTrustedSender('browser:startDemonstration', event)
     await ensureBrowser(id)
     return await browsers.startDemonstration(id)
   })
   handleWithEvent('browser:stopDemonstration', async (event, id: string) => {
-    requireTrustedSender('browser:stopDemonstration', event)
     return await browsers.stopDemonstration(id)
   })
   handleWithEvent('browser:getDemonstration', async (event, id: string) => {
-    requireTrustedSender('browser:getDemonstration', event)
     await ensureBrowser(id)
     return await browsers.getDemonstration(id)
   })
   handleWithEvent('browser:getTaskAssets', async (event, id: string) => {
-    requireTrustedSender('browser:getTaskAssets', event)
     await ensureBrowser(id)
     return await browsers.getTaskAssets(id)
   })
   handleWithEvent('browser:controlTask', async (event, request: unknown) => {
-    requireTrustedSender('browser:controlTask', event)
     return await executeBrowserTaskControl(request, {
       getTaskAssets: async id => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
       getOperation: id => browsers.getOperation(id),
@@ -2205,55 +2025,44 @@ export async function registerIpc(args: {
     }, config.browser.agentAutomation === true)
   })
   handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
-    requireTrustedSender('browser:importTaskAsset', event)
     await ensureBrowser(id)
     return await browsers.importTaskAsset(id, name)
   })
   handleWithEvent('browser:saveTaskAssetDraft', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
-    requireTrustedSender('browser:saveTaskAssetDraft', event)
     await ensureBrowser(id)
     return await browsers.saveTaskAssetDraft(id, assetId, revision, content)
   })
   handleWithEvent('browser:saveTaskAssetVersion', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
-    requireTrustedSender('browser:saveTaskAssetVersion', event)
     await ensureBrowser(id)
     return await browsers.saveTaskAssetVersion(id, assetId, revision, content)
   })
   handleWithEvent('browser:locateTaskAssetStep', async (event, id: string, assetId: string, revision: number, stepId: string) => {
-    requireTrustedSender('browser:locateTaskAssetStep', event)
     await ensureBrowser(id)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
   })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
-    requireTrustedSender('browser:runTaskBatch', event)
     if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
     await ensureBrowser(input.browserId)
     return await browsers.runTaskBatch(input)
   })
   handleWithEvent('browser:stopTaskBatch', async (event, id: string, batchId: string) => {
-    requireTrustedSender('browser:stopTaskBatch', event)
     return await browsers.stopTaskBatch(id, batchId)
   })
   handleWithEvent('browser:runTaskAsset', async (event, input: BrowserTaskAssetRunInput) => {
-    requireTrustedSender('browser:runTaskAsset', event)
     if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
     await ensureBrowser(input.browserId)
     return await browsers.runTaskAsset(input)
   })
   handleWithEvent('browser:stopTaskAsset', async (event, id: string, runId: string) => {
-    requireTrustedSender('browser:stopTaskAsset', event)
     return await browsers.stopTaskAsset(id, runId)
   })
   handleWithEvent('browser:answerAppLink', async (event, id: string, allow: boolean, remember: boolean) => {
-    requireTrustedSender('browser:answerAppLink', event)
     return await browsers.answerAppLink(id, allow, remember)
   })
   handleWithEvent('browser:answerCertificate', (event, id: string, input: Parameters<BrowserViewManager['answerCertificate']>[1]) => {
-    requireTrustedSender('browser:answerCertificate', event)
     return browsers.answerCertificate(id, input)
   })
   handleWithEvent('browser:cancelElementSelection', async (event, id: string) => {
-    requireTrustedSender('browser:cancelElementSelection', event)
     await browsers.cancelElementSelection(id)
   })
   handleWithEvent('browser:setAnnotationMarkers', async (
@@ -2262,36 +2071,29 @@ export async function registerIpc(args: {
     navigationId: string,
     markers: BrowserAnnotationMarker[]
   ) => {
-    requireTrustedSender('browser:setAnnotationMarkers', event)
     await browsers.setAnnotationMarkers(id, navigationId, markers)
   })
   handleWithEvent('browser:registerPresentation', async (event, input: {
     browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry; window?: import('../shared/workbench-windows.js').WorkbenchWindowDocument
   }) => {
-    requireTrustedSender('browser:registerPresentation', event)
     const sender = event.sender, frame = event.senderFrame
     const originalDocument = frame ? { processId: frame.processId, frameToken: frame.frameToken } : null
     await browsers.prepareForConsumption(input.browserId)
     return browsers.registerPresentation(sender, frame, input, originalDocument)
   })
   handleWithEvent('browser:updatePresentation', (event, leaseId: string, geometry: BrowserPresentationGeometry) => {
-    requireTrustedSender('browser:updatePresentation', event)
     browsers.updatePresentation(event.sender, event.senderFrame, leaseId, geometry)
   })
   handleWithEvent('browser:removePresentation', (event, leaseId: string) => {
-    requireTrustedSender('browser:removePresentation', event)
     browsers.removePresentation(event.sender, event.senderFrame, leaseId)
   })
   handleWithEvent('browser:armPresentationCapture', (event, leaseId: string) => {
-    requireTrustedSender('browser:armPresentationCapture', event)
     return browsers.armPresentationCapture(event.sender, event.senderFrame, leaseId)
   })
   handleWithEvent('browser:ackPresentationCapture', (event, captureId: string, ack: BrowserPresentationCaptureAck) => {
-    requireTrustedSender('browser:ackPresentationCapture', event)
     return browsers.ackPresentationCapture(event.sender, event.senderFrame, captureId, ack)
   })
   handleWithEvent('browser:activatePresentation', async (event, leaseId: string, activation: BrowserPresentationActivation) => {
-    requireTrustedSender('browser:activatePresentation', event)
     const receipt = await browsers.activatePresentation(event.sender, event.senderFrame, leaseId, activation)
     if (receipt.outcome === 'selected' || receipt.outcome === 'input-dispatched') {
       try { await nativeChrome.refresh(browsers.presentationWindowForLease(event.sender, event.senderFrame, leaseId)) }
@@ -2312,7 +2114,6 @@ export async function registerIpc(args: {
     workspace: value => verifiedBrowserWorkspace(config.workspaces, value)
   })
   handleWithEvent('browser:restoreResource', async (event, id: string, controlRequestId?: string) => {
-    requireTrustedSender('browser:restoreResource', event)
     const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
       request => request.operation === 'browser.restore' && request.browserId === id)
     return await nameChangeRequests.run(admitted, async () => {
@@ -2347,13 +2148,13 @@ export async function registerIpc(args: {
   })
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
-  channelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime,
+  channelMetadata = registerConnectorIpc({ handleWithEvent, runtime: args.runtime,
     metadata: { publish: (watchId, change) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_CHANGED_CHANNEL, { watchId, change }) },
       observation: (watchId, state) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_OBSERVATION_CHANNEL, { watchId, state }) } } })
-  registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
-  registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
-  registerMoteDialogueIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
-  registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
+  registerMoteChatIpc({ handleWithEvent, runtime: args.runtime })
+  registerMoteConnectionIpc({ handleWithEvent, runtime: args.runtime })
+  registerMoteDialogueIpc({ handleWithEvent, runtime: args.runtime })
+  registerMotePreferencesIpc({ handleWithEvent, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
   const executionBindingReaders = new ExecutionBindingReaders(bindingId => executionBindings.inspect(bindingId))
   const executionBindings = new AgentExecutionBindingService(join(app.getPath('userData'), 'execution-bindings'), {
     onObservation: inspection => executionBindingReaders.publish(inspection),
@@ -2366,7 +2167,7 @@ export async function registerIpc(args: {
       return { runtimeId: identity.runtimeId, client }
     }
   })
-  registerExecutionBindingIpc({ handle: handleWithEvent, assertTrusted: requireTrustedSender, bindings: executionBindings, readers: executionBindingReaders })
+  registerExecutionBindingIpc({ handle: handleWithEvent, bindings: executionBindings, readers: executionBindingReaders })
   // Rejoin only retained tool readers. Startup never creates or restores an Agent.
   void executionBindings.restoreReaders().catch(error => console.warn('Original tool execution observation is unavailable:', error))
   const control = new AgentMuxControlServer({
@@ -2458,7 +2259,6 @@ export async function registerIpc(args: {
   const screenshotShortcut = registerScreenshotShortcut({ platform: process.platform, shortcuts: globalShortcut,
     request: () => { void globalScreenshot.run().catch(reportScreenshotIssue) } })
   handleWithEvent('ui:screenshotShortcutStatus', event => {
-    requireTrustedSender('ui:screenshotShortcutStatus', event)
     return screenshotShortcut.status
   })
   return async () => {
@@ -2500,6 +2300,7 @@ export async function registerIpc(args: {
       { owner: 'browsers', dispose: () => browsers.dispose() },
       { owner: 'browser-feedback-preferences', dispose: disposeBrowserFeedbackPreferences },
       { owner: 'capsule-appearance', dispose: () => { disposeCapsuleAppearance(); nativeTheme.removeListener('updated', updateCapsuleThemes); browsers.capsuleDocumentReady = undefined } },
+      { owner: 'capsule-document-ipc', dispose: disposeCapsuleDocument },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },

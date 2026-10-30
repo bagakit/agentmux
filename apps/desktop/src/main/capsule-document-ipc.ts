@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
-import type { IpcMainInvokeEvent, WebContents } from 'electron'
+import type { IpcMain, IpcMainInvokeEvent, WebContents } from 'electron'
+import { sessionInputOperationResult } from '../shared/session-input-result.js'
 import { AgentMuxError } from '@agentmux/core'
 import type { CapsulePort, CapsuleRecord } from '@agentmux/core/capsule'
 import type { BrowserViewManager } from './browser-view-manager.js'
@@ -37,6 +38,11 @@ export function capsuleDocumentIpc(options: {
   }
   const projectedTheme = (record: CapsuleRecord) => record.theme === 'follow' ? options.theme() : null
   return {
+    register(ipc: Pick<IpcMain, 'handle' | 'removeHandler'>): () => void {
+      ipc.handle('capsule:document', (event, action: unknown, value: unknown) =>
+        sessionInputOperationResult(() => this.call(event, action, value)))
+      return () => ipc.removeHandler('capsule:document')
+    },
     async call(event: IpcMainInvokeEvent, actionValue: unknown, value: unknown) {
       const { action, params } = parameters(actionValue, value)
       const record = await admit(event.sender, event.senderFrame)

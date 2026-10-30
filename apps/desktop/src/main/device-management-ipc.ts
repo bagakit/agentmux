@@ -9,7 +9,6 @@ type DeviceCall = <M extends DeviceMethod>(method: M, params: AgentMuxRpcParams<
 /** The trusted Desktop borrows the original Host device methods. */
 export function registerDeviceManagementIpc(options: {
   handleWithEvent(channel: string, handler: (event: IpcMainInvokeEvent, params: unknown) => Promise<unknown>): void
-  assertTrusted(channel: DeviceManagementIpcChannel, event: IpcMainInvokeEvent): void
   socketPath?: string
   connect?: typeof connectAgentMuxRpc
 }): void {
@@ -23,7 +22,6 @@ export function registerDeviceManagementIpc(options: {
   // No Renderer principal/confirmation claim and no second parameter validator/dispatcher.
   const register = <M extends DeviceMethod>(channel: DeviceManagementIpcChannel, method: M) => {
     options.handleWithEvent(channel, async (event, params) => {
-      options.assertTrusted(channel, event)
       return await call(method, params as AgentMuxRpcParams<M>)
     })
   }

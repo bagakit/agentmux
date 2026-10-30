@@ -46,7 +46,8 @@ import { reportQuitDisposalFailure } from './quit-disposal-failure.js'
 import { SpatialLinkIngress } from './spatial-link-ingress.js'
 import { WebFileIngress, registerSystemWebFileEvents } from './web-file-ingress.js'
 import { WebUrlIngress, receiveDesktopUrl, receiveDesktopUrlArguments } from './web-url-ingress.js'
-import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
+import { topFrameOrigin, type TopFrameNavigationEvent } from './top-frame-navigation.js'
+import { WorkbenchDocumentSources } from './workbench-document-sources.js'
 import { windowSecurityWebPreferences } from './window-security.js'
 import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
@@ -218,23 +219,20 @@ function startPrimaryInstance(): void {
     if (persistedGeometry?.maximized) window.maximize()
     window.webContents.setWindowOpenHandler(details => windows.windowOpen(details, target => { void shell.openExternal(target) }))
     window.webContents.on('did-create-window', (child, details) => windows.createdWindow(child, details))
-    // 顶帧的导航闸。preload 把特权桥 `agentmux` 无条件挂到 window（src/preload/index.ts:238），且每次
-    // 导航后 preload 会重新执行；应用的 CSP 只是自家 index.html 里的 <meta>，不跟着导航走。所以只要顶帧
-    // 被导航到应用之外的文档（Chromium 默认把「往顶帧拖入一个文件」变成一次 file:/// 导航），那个文档就
-    // 继承了这座桥、且没有 CSP。这道闸把顶帧钉在应用来源上：判据是纯函数（top-frame-navigation.ts），
-    // 这里只负责在被拒时 preventDefault，把导航掐死。
-    //
-    // 「应用来源」从窗口**实际加载内容的同一处**派生，不另手抄 URL：dev 用 ELECTRON_RENDERER_URL，
-    // prod 用下面 loadFile 的同一个 packagedRendererPath（见 :201）。两者二选一，与加载分支同构。
+    // Navigation and ordinary IPC share sources named by this loader. Keep the serving
+    // document and one requested load distinct; a Renderer ready failure cannot revoke either.
     const packagedRendererPath = join(import.meta.dirname, '../renderer/index.html')
     let appOrigin = topFrameOrigin({
       rendererDevServerUrl: process.env.ELECTRON_RENDERER_URL,
       packagedRendererFilePath: packagedRendererPath
     })
-    const guardTopFrameNavigation = topFrameNavigationGuard(() => appOrigin)
-    // will-redirect 与 will-navigate 用同一判据：一次被服务端 30x 或 meta refresh 重定向到应用外的目标，
-    // 危害与直接导航过去完全一样，只守 will-navigate 会漏掉重定向链的落点。popup/新窗口不在这里——那条
-    // 由上面的 setWindowOpenHandler 一律 deny 覆盖（:153），不重复。
+    const appDocuments = new WorkbenchDocumentSources()
+    const commitAppDocument = (_event: unknown, url: string) => appDocuments.committed(url)
+    window.webContents.on('did-navigate', commitAppDocument)
+    const guardTopFrameNavigation = (event: TopFrameNavigationEvent): void => {
+      if (event.isMainFrame && !appDocuments.allows(event.url)) event.preventDefault()
+    }
+    // Redirects use the same source boundary; Workbench child creation keeps its own owner.
     window.webContents.on('will-navigate', guardTopFrameNavigation)
     window.webContents.on('will-redirect', guardTopFrameNavigation)
     const fileEditingProbeControl = new WorkspaceFileEditingProbeControl()
@@ -279,12 +277,17 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles,
+    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })
     reportStartupStage('after-ipc')
-    if (process.env.ELECTRON_RENDERER_URL) { reportStartupStage('before-load-url'); await window.loadURL(process.env.ELECTRON_RENDERER_URL); reportStartupStage('after-load-url') }
+    if (process.env.ELECTRON_RENDERER_URL) {
+      reportStartupStage('before-load-url')
+      const finish = appDocuments.begin(appOrigin)
+      try { await window.loadURL(process.env.ELECTRON_RENDERER_URL) } finally { finish() }
+      reportStartupStage('after-load-url')
+    }
     else {
       rendererUpdates?.dispose()
       const probeQuery = process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
@@ -300,7 +303,9 @@ function startPrimaryInstance(): void {
           timer = setTimeout(() => reject(new Error('Interface did not load or respond')), 20_000)
         })
         appOrigin = topFrameOrigin({ rendererDevServerUrl: undefined, packagedRendererFilePath: file })
-        try { await Promise.all([window.loadFile(file, { query: { ...probeQuery, 'renderer-update': token } }), ready]) }
+        const finish = appDocuments.begin(appOrigin)
+        const navigation = window.loadFile(file, { query: { ...probeQuery, 'renderer-update': token } }).finally(finish)
+        try { await Promise.all([navigation, ready]) }
         finally { clearTimeout(timer); updateReady = null }
       }
       rendererUpdates = new RendererUpdates({

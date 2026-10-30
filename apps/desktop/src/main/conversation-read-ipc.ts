@@ -7,7 +7,6 @@ import { SessionHistoryReadOwners } from './session-history-read'
 
 type Ports = {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
-  trust(channel: 'conversation:inspect' | 'conversation:changes' | 'conversation:release' | 'conversation:watch' | 'conversation:cancel', event: IpcMainInvokeEvent): void
   connect(): Promise<AgentMuxRpcClient>
 }
 
@@ -21,22 +20,17 @@ export function registerConversationReadIpc(ports: Ports) {
     finally { await client.dispose() }
   }
   ports.handle('conversation:inspect', (event, token: string, input: ConversationTimelineReadInput) => {
-    ports.trust('conversation:inspect', event)
     return sessionInputOperationResult(() => reads.read(event.sender, token, signal => invoke('agent.conversation.inspect', input, signal)))
   })
   ports.handle('conversation:changes', (event, token: string, input: ConversationChangesInput) => {
-    ports.trust('conversation:changes', event)
     return sessionInputOperationResult(() => reads.read(event.sender, token, signal => invoke('agent.conversation.changes', input, signal)))
   })
   ports.handle('conversation:release', (event, input: ConversationViewReleaseInput) => {
-    ports.trust('conversation:release', event)
     return sessionInputOperationResult(() => invoke('agent.conversation.release', input))
   })
-  ports.handle('conversation:cancel', (event, token: string) => {
-    ports.trust('conversation:cancel', event); reads.cancel(event.sender.id, token)
+  ports.handle('conversation:cancel', (event, token: string) => { reads.cancel(event.sender.id, token)
   })
   ports.handle('conversation:watch', (event, token: string, input: ConversationWatchInput) => {
-    ports.trust('conversation:watch', event)
     return sessionInputOperationResult(() => new Promise<ConversationWatchOpening>((resolve, reject) => {
       let opened = false
       void reads.read(event.sender, token, async signal => {

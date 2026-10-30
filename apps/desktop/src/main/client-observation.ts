@@ -17,12 +17,10 @@ export async function readLoadedPackageIdentity(path: string): Promise<DesktopPa
 /** The same loaded owners as app.inspect, without scanning the workbench or current disk package. */
 export function registerLoadedIdentityIpc(owner: {
   handleWithEvent(channel: string, handler: (event: IpcMainInvokeEvent) => DesktopLoadedIdentity): void
-  assertTrusted(channel: 'ui:readLoadedIdentity', event: IpcMainInvokeEvent): void
   package: DesktopPackageIdentity | null
   renderer(): DesktopLoadedRenderer | null
 }): void {
   owner.handleWithEvent('ui:readLoadedIdentity', event => {
-    owner.assertTrusted('ui:readLoadedIdentity', event)
     const p = owner.package, r = owner.renderer()
     return {
       package: p ? { schema: p.schema, sourceCommit: p.sourceCommit, sourceTree: p.sourceTree, appVersion: p.appVersion, platform: p.platform, arch: p.arch } : null,

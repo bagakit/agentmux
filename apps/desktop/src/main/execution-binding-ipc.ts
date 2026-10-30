@@ -5,7 +5,6 @@ export type ExecutionBindingChannel = 'sessions:executionBinding' | 'sessions:re
 /** Observe or explicitly rejoin the original binding. Agent/helper creation is not exposed. */
 export function registerExecutionBindingIpc(args: {
   handle(channel: ExecutionBindingChannel, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown): void
-  assertTrusted(channel: ExecutionBindingChannel, event: IpcMainInvokeEvent): void
   bindings: Pick<AgentExecutionBindingService, 'inspect' | 'rejoin'>
   readers: ExecutionBindingReaders
 }): void {
@@ -14,19 +13,15 @@ export function registerExecutionBindingIpc(args: {
     return value
   }
   args.handle('sessions:executionBinding', (event, bindingId) => {
-    args.assertTrusted('sessions:executionBinding', event)
     return args.bindings.inspect(id(bindingId))
   })
   args.handle('sessions:rejoinExecutionBinding', (event, bindingId) => {
-    args.assertTrusted('sessions:rejoinExecutionBinding', event)
     return args.bindings.rejoin(id(bindingId))
   })
   args.handle('sessions:observeExecutionBinding', (event, bindingId, watchId) => {
-    args.assertTrusted('sessions:observeExecutionBinding', event)
     return args.readers.observe(event.sender, id(watchId), id(bindingId))
   })
   args.handle('sessions:releaseExecutionBinding', (event, watchId) => {
-    args.assertTrusted('sessions:releaseExecutionBinding', event)
     args.readers.release(event.sender, id(watchId))
   })
 }

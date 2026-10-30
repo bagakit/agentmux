@@ -3,7 +3,6 @@ import { isAgentLearningMethod, parseAgentLearningParams } from '@agentmux/core/
 import { sessionInputOperationResult } from '../shared/session-input-result.js'
 import type { AgentLearningAuthority } from './agent-learning-authority.js'
 import type { RuntimeController } from './runtime-controller.js'
-import { assertSenderTrusted, senderTrust } from './ipc-sender-trust.js'
 
 /** Original App transport boundary; only its actual main-frame action opens a live confirmation. */
 function createAgentLearningIpc(options: {
@@ -35,11 +34,9 @@ export function registerAgentLearningIpc(options: {
 }): void {
   const ipc = createAgentLearningIpc({ mainFrame: () => options.contents.mainFrame, runtime: options.runtime, authority: options.authority })
   options.handle('agentLearning:call', (event, method, value) => {
-    assertSenderTrusted(senderTrust('agentLearning:call', event.sender, options.contents))
     return ipc.call(method, value)
   })
   options.handle('agentLearning:confirm', (event, value) => {
-    assertSenderTrusted(senderTrust('agentLearning:confirm', event.sender, options.contents))
     return ipc.confirm(event.senderFrame, value)
   })
 }
