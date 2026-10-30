@@ -739,7 +739,7 @@ export class DurableAgentMuxMessageQueue {
     if (next.deliveryKey !== undefined) {
       if (next.state !== 'dispatch-authorized' || next.deliveryKey.attemptId !== next.retry?.attemptId ||
           next.deliveryKey.expectedRun.runId !== ref.key.expectedRun.runId && !this.canBindResumedInput(current.intent)) throw new AgentMuxError(
-        'Only an original human or external manual input can freeze delivery to its confirmed resumed Session.', 'INVALID_AGENT_INPUT_CONTROL')
+        'Only an original human or external directed input can freeze delivery to its confirmed resumed Session.', 'INVALID_AGENT_INPUT_CONTROL')
       const key = validateAgentInputDeliveryKey(ref.key, next.deliveryKey)
       const deliveryId = agentInputJournalKey(key), ownerId = agentInputJournalKey(ref.key)
       const existing = this.db.prepare('SELECT input_id FROM input_delivery_bindings WHERE delivery_id=?').get(deliveryId)
@@ -942,8 +942,7 @@ export class DurableAgentMuxMessageQueue {
 
   /** Structural journal eligibility, not a grant: Core checks the current author and recovery target. */
   private canBindResumedInput(intent: AgentInputJournalIntent): boolean {
-    if (intent.admissionIntent.kind !== 'manual-actor') return false
-    return intent.source.kind === 'prompt' ? intent.source.authorHuman === true
+    return intent.source.kind === 'prompt' ? intent.admissionIntent.kind === 'manual-actor' && intent.source.authorHuman === true
       : this.message(intent.source.messageId)?.envelope.sender.kind === 'external'
   }
 
@@ -958,7 +957,7 @@ export class DurableAgentMuxMessageQueue {
       const deliveryKey = delivery && !isDeepStrictEqual(delivery.key, ref.key) ? validateAgentInputDeliveryKey(ref.key, delivery.key) : undefined
       if (deliveryKey && (deliveryKey.attemptId !== current.control.retry?.attemptId ||
           deliveryKey.expectedRun.runId !== ref.key.expectedRun.runId && !this.canBindResumedInput(current.intent))) throw new AgentMuxError(
-        'Only the original human or external manual input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
+        'Only the original human or external directed input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
       if (delivery) {
         await delivery.assertTarget()
         signal?.throwIfAborted()

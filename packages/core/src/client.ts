@@ -189,7 +189,8 @@ import {
 } from './agent-session-registry.js'
 import { type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './agent-session-recovery/continuity-contract.js'
 import { type AgentMuxContinuityControlInput, type AgentMuxContinuityControlResult } from './agent-session-recovery/control-contract.js'
-import type { AgentMuxContinuityLaunchInput } from './agent-session-recovery/continuity-contract.js'
+import type { AgentMuxContinuityLaunchInput, AgentMuxContinuityMessageInput } from './agent-session-recovery/continuity-contract.js'
+import { normalizePromptInputIntent } from './prompt-submission-record.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller, type AgentManagedHookInspection, type AgentManagedHookPlan } from './managed-hook-installer.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
@@ -1132,7 +1133,7 @@ export class AgentMuxClient {
         observeHookRestoreFailure: (...args) => this.observeHookRestoreFailure(...args),
         agentEnvironment: (...args) => this.agentEnvironment(...args)
       },
-      input: { continueInitialInput: (...args) => this.continueInitialInput(...args), inspectAgentPromptSubmission: (...args) => this.inspectAgentPromptSubmission(...args), submitAgentPrompt: (...args) => this.submitAgentPrompt(...args), deliverPostLaunchPrompt: (...args) => this.deliverPostLaunchPrompt(...args), recordAcceptedInput: (...args) => this.recordAcceptedInput(...args), recordPromptMessageAfterSideEffect: (...args) => this.recordPromptMessageAfterSideEffect(...args), readCapturedPromptProducer: (...args) => this.readCapturedPromptProducer(...args), resolveMessageAuthor: (...args) => this.resolveMessageAuthor(...args) },
+      input: { prepareContinuityMessage: (...args) => this.prepareContinuityMessage(...args), claimContinuityMessage: (...args) => this.claimContinuityMessage(...args), settleContinuityMessage: (...args) => this.settleContinuityMessage(...args), continueInitialInput: (...args) => this.continueInitialInput(...args), inspectAgentPromptSubmission: (...args) => this.inspectAgentPromptSubmission(...args), submitAgentPrompt: (...args) => this.submitAgentPrompt(...args), deliverPostLaunchPrompt: (...args) => this.deliverPostLaunchPrompt(...args), recordAcceptedInput: (...args) => this.recordAcceptedInput(...args), recordPromptMessageAfterSideEffect: (...args) => this.recordPromptMessageAfterSideEffect(...args), readCapturedPromptProducer: (...args) => this.readCapturedPromptProducer(...args), resolveMessageAuthor: (...args) => this.resolveMessageAuthor(...args) },
       terminal: {
         ensureTerminalFrontendObservation: (...args) => this.ensureTerminalFrontendObservation(...args),
         readFrontendObservation: agentSessionId => this.terminalFrontendWatches.get(agentSessionId)?.frontend,
@@ -5741,8 +5742,156 @@ export class AgentMuxClient {
   }
 
   async ensureAgentContinuity(
-    input: AgentMuxAgentContinuityInput, context?: Pick<AgentInputCallContext, 'inputContextSource' | 'captureReader' | 'requestSignal'>
-  ): Promise<AgentMuxAgentContinuityResult> { return await this.recovery.ensureAgentContinuity(input, context) }
+    input: AgentMuxAgentContinuityInput, context?: AgentInputCallContext
+  ): Promise<AgentMuxAgentContinuityResult> {
+    if (input.messageInputRef) {
+      const ref = validateAgentInputWaitRef(input.messageInputRef)
+      safeId(input.operationId, 'Agent continuity operation id')
+      if (input.input || input.trigger !== 'input' || ref.key.kind !== 'message' ||
+          ref.key.agentSessionId !== input.agentSessionId || !sameRun(ref.key.expectedRun, input.expectedRun)) throw new AgentMuxError(
+        'Recovery must address this exact original message and Session Run.', 'INVALID_AGENT_CONTINUITY')
+      // Rejoin through the original input owner so a persisted identity never
+      // becomes authority. Already claimed inputs remain observation-only.
+      const resumed = await this.rejoinAgentInputWaiting({ ref }, context)
+      input = { ...input, messageInputRef: resumed.ref }
+    }
+    return await this.recovery.ensureAgentContinuity(input, context)
+  }
+
+  /** Freeze an already saved message; recovery never creates a second authored prompt. */
+  private async prepareContinuityMessage(ref: AgentInputWaitRef, lifecycleOperationId: string): Promise<AgentMuxContinuityMessageInput> {
+    ref = validateAgentInputWaitRef(ref)
+    const saved = await this.messageQueue.inspectInput({ key: ref.key })
+    if (!saved || ref.key.kind !== 'message' || saved.intent.source.kind !== 'message' ||
+        !isDeepStrictEqual(saved.control.ref, ref)) throw new AgentMuxError(
+      'Recovery requires the exact original saved message and waiting generation.', 'AGENT_INPUT_READ_UNCONFIRMED')
+    const admissionIntent = saved.intent.admissionIntent
+    if (admissionIntent.kind === 'native-conversation' && (saved.intent.environment.nativeHandle?.kind !== 'provider' ||
+        admissionIntent.source.providerId !== saved.intent.environment.nativeHandle.providerId ||
+        admissionIntent.source.nativeSessionId !== saved.intent.environment.nativeHandle.sessionId)) throw new AgentMuxError(
+      'The selected native input does not address this original recoverable conversation. Its input is retained.', 'AGENT_PROMPT_SOURCE_CHANGED')
+    const original = await this.messageQueue.readByOperationId(saved.intent.source.originalControlOperationId)
+    if (!original || original.envelope.messageId !== ref.key.messageId ||
+        original.envelope.recipientSessionId !== ref.key.agentSessionId || original.envelope.recipientRunId !== ref.key.expectedRun.runId ||
+        typeof saved.intent.source.promptWire !== 'string') throw new AgentMuxError(
+      'The original message recipe is unavailable. Its saved input is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
+    const key = agentInputDeliveryKey(saved.control)
+    if (key.kind !== 'message' || !sameRun(key.expectedRun, ref.key.expectedRun)) throw new AgentMuxError(
+      'The original message already has a different Run delivery.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const prior = await this.inspectAgentPromptSubmission(key), claim = prior?.admission
+    if (claim) {
+      if (claim.transport !== 'launch' || claim.launch.plan.lifecycleOperationId !== lifecycleOperationId || !claim.intent?.message ||
+          !isDeepStrictEqual(claim.inputDispatch?.ref, ref)) throw new AgentMuxError(
+        'The original message already belongs to another input operation.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      return { ref, key, admissionIntent, lifecycleOperationId, prompt: claim.intent.prompt, message: claim.intent.message, plan: claim.launch.plan }
+    }
+    const envelope = original.envelope, context = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
+    const userContent = context?.input.prompt ?? (saved.intent.source.representation === undefined && envelope.channelQuote
+      ? saved.intent.source.promptWire : renderAgentMuxMessageEnvelope(envelope))
+    return { ref, key, admissionIntent, lifecycleOperationId, prompt: saved.intent.source.promptWire, message: {
+      userContent, ...(saved.intent.source.representation?.reminder ? { systemContext: saved.intent.source.representation.reminder } : {}),
+      ...(envelope.sender.kind === 'external' ? { authorExternal: structuredClone(envelope.sender) }
+        : envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : { authorHuman: true }),
+      sourceChannel: original.sourceChannel ?? 'agent-message', ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {})
+    } }
+  }
+
+  /** The original journal gate wins before Start; no bytes or new-Run key are invented. */
+  private async claimContinuityMessage(recipe: AgentMuxContinuityMessageInput, plan: import('./types.js').AgentLaunchPromptInputPlan): Promise<void> {
+    const { ref, key } = recipe
+    const frozen = await this.prepareContinuityMessage(ref, recipe.lifecycleOperationId)
+    if (!isDeepStrictEqual(frozen.key, key) || !isDeepStrictEqual(frozen.admissionIntent, recipe.admissionIntent) || recipe.lifecycleOperationId !== plan.lifecycleOperationId || frozen.prompt !== recipe.prompt ||
+        !isDeepStrictEqual(frozen.message, recipe.message) || frozen.plan && !isDeepStrictEqual(frozen.plan, plan)) throw new AgentMuxError(
+      'The original recovery message recipe changed before Start.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const prior = await this.inspectAgentPromptSubmission(key)
+    // A durable claim may have reached Start already. Only lifecycle reconciliation can observe it.
+    if (prior) throw new AgentMuxError('The original launch claim is already present; inspect its original Start.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    const context = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
+    if (!context || !isDeepStrictEqual(context.ref, ref) || context.controller.signal.aborted) throw new AgentMuxError(
+      'The original message requires its current author owner before recovery dispatch.', 'EXTERNAL_AUTHOR_REQUIRED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    const saved = (await this.messageQueue.inspectInput({ key: ref.key }))!
+    const assertTarget = (session: AgentMuxAgentSession) => {
+      if (!sameRun(session.run, key.expectedRun) || saved.intent.environment.providerId !== session.providerId ||
+          saved.intent.environment.executorId !== session.executorId ||
+          !matchesProviderNativeSessionTarget(saved.intent.environment.nativeHandle, plan.nativeTarget) ||
+          !matchesProviderNativeSessionTarget(plan.nativeTarget, session.nativeHandle)) throw new AgentMuxError(
+        'The original message recovery target changed before Start.', 'AGENT_PROMPT_SOURCE_CHANGED')
+    }
+    const intent = normalizePromptInputIntent({ run: key.expectedRun, ownerInstanceId: this.kernel.identity().daemonInstanceId,
+      prompt: recipe.prompt, message: recipe.message, plan, execution: 'immediate', admissionIntent: saved.intent.admissionIntent })
+    const beforeClaim = async () => {
+      try {
+        await context.authority?.assertCurrent()
+        context.controller.signal.throwIfAborted()
+        assertTarget(await this.currentStoredAgentSession(key.agentSessionId))
+      } catch (error) {
+        throw new AgentMuxError(error instanceof Error ? error.message : String(error),
+          error instanceof AgentMuxError ? error.code : 'AGENT_PROMPT_PREPARATION_FAILED', undefined,
+          { disposition: 'not_applied', confirmedInputBytes: 0 })
+      }
+    }
+    await beforeClaim()
+    const inputDispatch = await this.messageQueue.authorizeInputDispatch(ref, context.controller.signal, { key,
+      claimsAbsent: async () => !await this.inspectAgentPromptSubmission(key),
+      assertTarget: beforeClaim })
+    if (!inputDispatch) throw new AgentMuxError('The original waiting generation stopped before dispatch.', 'AGENT_INPUT_WAIT_STOPPED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    await this.updateExactAgentSession(key.agentSessionId, key.expectedRun, current => {
+      assertTarget(current)
+      const { terminalPromptSubmission: _terminal, ...original } = current
+      return { ...original, promptCompletionAdmission: {
+        inputKey: key, inputDispatch, submissionId: agentPromptInputId(key), operationId: agentPromptInputId(key),
+        intent, transport: 'launch', acknowledged: false, launch: { plan, outcome: 'claimed' }
+      }, updatedAt: Math.max(current.updatedAt, Date.now()) }
+    }, undefined, context.authority?.binding)
+    context.controller.abort()
+    await this.recordAcceptedInput(key, Date.now())
+    try { await context.authority?.assertCurrent() }
+    catch (error) {
+      // This invocation owns the newly persisted claim and has not returned to
+      // the lifecycle Start caller. There cannot yet be a process side effect.
+      await this.settleContinuityMessage({ ...recipe, plan }, { outcome: 'not-applied' })
+      throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'AGENT_PROMPT_INPUT_NOT_APPLIED',
+        undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    }
+  }
+
+  /** Settle only the original admission from the exact Runtime Start receipt. */
+  private async settleContinuityMessage(recipe: AgentMuxContinuityMessageInput,
+    result: { outcome: 'launch-carried'; run: AgentMuxRunRef } | { outcome: 'not-applied' | 'unknown' }): Promise<void> {
+    const key = recipe.key, prior = await this.inspectAgentPromptSubmission(key), claim = prior?.admission
+    if (!prior || claim?.transport !== 'launch' || !recipe.plan || !isDeepStrictEqual(claim.launch.plan, recipe.plan) ||
+        !isDeepStrictEqual(claim.inputDispatch?.ref, recipe.ref) || claim.intent?.prompt !== recipe.prompt ||
+        !isDeepStrictEqual(claim.intent.message, recipe.message) || !isDeepStrictEqual(claim.intent.admissionIntent, recipe.admissionIntent)) throw new AgentMuxError(
+      'The exact original launch input claim is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    if (claim.launch.outcome === 'launch-carried' || claim.launch.outcome === 'not-applied') {
+      if (claim.launch.outcome !== result.outcome || result.outcome === 'launch-carried' &&
+          !sameRun(claim.launch.receipt!.run, result.run)) throw new AgentMuxError(
+        'The original launch input already has another settled receipt.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    } else if (claim.launch.outcome !== result.outcome) {
+      const next: import('./types.js').AgentPromptSubmissionRecord = { ...prior, admission: { ...claim, acknowledged: result.outcome === 'launch-carried',
+        ...(result.outcome === 'not-applied' ? { notApplied: true } : {}), launch: result.outcome === 'launch-carried'
+          ? { plan: claim.launch.plan, outcome: result.outcome, receipt: { kind: 'runtime-launch' as const,
+            operationId: recipe.lifecycleOperationId, run: result.run, observedAt: Date.now() } }
+          : { plan: claim.launch.plan, outcome: result.outcome } } }
+      await this.store.settlePromptAdmission(prior, next)
+    }
+    if (result.outcome === 'launch-carried') await this.recordLaunchMessageDelivery(key)
+    try {
+      const receipt = await this.inspectAgentInput({ key: recipe.ref.key })
+      if (receipt) await this.publishInputReceipt(receipt)
+    } catch (error) { this.publishInputConversationFailure(key, error) }
+  }
+
+  /** Queue projection failure cannot undo an exact durable launch receipt. Rejoin repairs this same record. */
+  private async recordLaunchMessageDelivery(key: AgentPromptInputKey): Promise<void> {
+    if (key.kind !== 'message') return
+    try { await this.messageQueue.recordDelivery(key.messageId, 'delivered') }
+    catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_INPUT_RECORDING_UNCONFIRMED',
+        message: `The original launch receipt is confirmed; message delivery bookkeeping is unconfirmed. Rejoin the original input to repair it: ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun } })
+    }
+  }
 
   /** Change the original durable intent; never stop its Run or replay its pending input. */
   async controlAgentContinuity(value: AgentMuxContinuityControlInput,
@@ -6264,7 +6413,7 @@ export class AgentMuxClient {
     if (input.caller) await this.assertInputWaitingAuthor(saved.intent, input.caller)
     const admission = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
     const status = agentInputSubmissionStatus(saved.control, admission)
-    const settled = status === 'admitted' || status === 'terminal-confirmed' || status === 'not-applied'
+    const settled = status === 'admitted' || status === 'terminal-confirmed' || status === 'launch-carried' || status === 'not-applied'
     const receipt = await this.messageQueue.stopInputWaiting(ref, input.cancelOperationId, Boolean(settled), admission !== null)
     const waiting = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
     if (waiting && isDeepStrictEqual(waiting.ref, ref) && receipt.outcome !== 'stale-generation') {
@@ -6304,7 +6453,10 @@ export class AgentMuxClient {
     if (!isDeepStrictEqual(ref, saved.control.ref)) return (await this.inspectAgentInput({ key: ref.key }))!
     const prior = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
     const refused = prior && agentInputSubmissionStatus(saved.control, prior) === 'not-applied'
-    if ((prior || saved.control.state === 'dispatch-authorized') && !refused) return (await this.inspectAgentInput({ key: ref.key }))!
+    if ((prior || saved.control.state === 'dispatch-authorized') && !refused) {
+      if (prior?.admission?.transport === 'launch' && prior.admission.launch.outcome === 'launch-carried') await this.recordLaunchMessageDelivery(prior.admission.inputKey!)
+      return (await this.inspectAgentInput({ key: ref.key }))!
+    }
     const prompt = await this.inputWaitingPrompt(saved.intent, input.caller, context)
     const active = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
     if (active?.active && isDeepStrictEqual(active.ref, ref)) return (await this.inspectAgentInput({ key: ref.key }))!
@@ -6418,8 +6570,11 @@ export class AgentMuxClient {
     const expected = intent.environment
     // External continuation requires a live authenticated original author or recipient.
     // Persisted attribution never restores this permission on startup.
-    const eligible = this.isRetainedHumanInput(intent) || recipientContinuation && intent.source.kind === 'message' && intent.admissionIntent.kind === 'manual-actor'
-    return eligible && expected.providerId === session.providerId && expected.executorId === session.executorId &&
+    const target = intent.admissionIntent
+    const eligible = this.isRetainedHumanInput(intent) || recipientContinuation && intent.source.kind === 'message'
+    const sameSelectedSource = target.kind !== 'native-conversation' || session.nativeHandle?.kind === 'provider' &&
+      target.source.providerId === session.nativeHandle.providerId && target.source.nativeSessionId === session.nativeHandle.sessionId
+    return eligible && sameSelectedSource && expected.providerId === session.providerId && expected.executorId === session.executorId &&
       matchesProviderNativeSessionTarget(expected.nativeHandle, session.nativeHandle) &&
       sessionSemanticResumeSourceRuns(session).includes(intent.key.expectedRun.runId)
   }

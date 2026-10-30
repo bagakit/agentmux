@@ -24,7 +24,8 @@ const terminal = (phase: AgentMuxContinuitySupervision['phase']) => ['settled', 
 const reobservableReasons = ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'operation-unconfirmed', 'original-operation-unconfirmed']
 const operationInput = (op: AgentMuxContinuityOperation): AgentMuxAgentContinuityInput => ({ agentSessionId: op.agentSessionId,
   operationId: op.operationId, expectedRun: op.previousRun, trigger: op.trigger, policy: op.policy,
-  ...(op.timingOverride ? { timingOverride: op.timingOverride } : {}), ...(op.trigger === 'input' && op.launchInput ? { input: op.launchInput.input } : {}) })
+  ...(op.timingOverride ? { timingOverride: op.timingOverride } : {}), ...(op.trigger === 'input' && op.launchInput ? { input: op.launchInput.input } : {}),
+  ...(op.trigger === 'input' && op.messageInput ? { messageInputRef: structuredClone(op.messageInput.ref) } : {}) })
 
 /** One scheduling and serialization owner; all business facts stay in the original SessionStore. */
 export class AgentSessionContinuitySupervisor {
@@ -76,9 +77,9 @@ export class AgentSessionContinuitySupervisor {
     const manualFrontend = input.trigger === 'manual' && session.nativeActor?.frontendControl
     const requested = session.continuityOperations?.[input.operationId]
     const observer = manualFrontend && requested?.kind === 'pending' && requested.reason === 'recovery-supervised' &&
-      requested.intentOperationId && !requested.supervision && !requested.newRun && !requested.frontendReconnect && !requested.launchInput
+      requested.intentOperationId && !requested.supervision && !requested.newRun && !requested.frontendReconnect && !requested.launchInput && !requested.messageInput
       ? requested : undefined
-    if (!input.trigger || input.input || input.trigger === 'input' || input.trigger === 'manual' && !manualFrontend || requested && !observer ||
+    if (!input.trigger || input.input || input.messageInputRef || input.trigger === 'input' || input.trigger === 'manual' && !manualFrontend || requested && !observer ||
       session.hostId !== 'local' || !sameRun(session.run, input.expectedRun)) return
     const pointer = session.continuity
     let rootId = observer?.intentOperationId ?? pointer?.intentOperationId ?? pointer?.operationId
@@ -113,7 +114,7 @@ export class AgentSessionContinuitySupervisor {
     if (input.trigger === 'startup' && input.policy?.activeRecovery !== 'manual' &&
       root.kind === 'pending' && root.reason === 'active-manual' && root.policy.activeRecovery === 'manual' &&
       supervision.phase === 'paused' && supervision.attemptCount === 0 && active.operationId === root.operationId &&
-      !root.newRun && !root.frontendReconnect && !root.launchInput) return
+      !root.newRun && !root.frontendReconnect && !root.launchInput && !root.messageInput) return
     // A new application startup may retry a fully reconciled failed frontend.
     // It never resets this intent's durable counter or abandons an unknown action.
     if (input.trigger === 'startup' && supervision.phase === 'paused' && supervision.reason === 'frontend-retry-budget-exhausted' &&
@@ -125,14 +126,14 @@ export class AgentSessionContinuitySupervisor {
   completedRuntimeRestartIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput,
     observedRun: CtxmuxAdapterRun | undefined, root: AgentMuxContinuityOperation, active: AgentMuxContinuityOperation): boolean {
     const supervision = root.supervision
-    return Boolean(input.trigger === 'startup' && !input.input && !session.continuityOperations?.[input.operationId] &&
+    return Boolean(input.trigger === 'startup' && !input.input && !input.messageInputRef && !session.continuityOperations?.[input.operationId] &&
       session.hostId === 'local' && sameRun(session.run, input.expectedRun) &&
       root.agentSessionId === session.agentSessionId && active.agentSessionId === session.agentSessionId &&
       !root.intentOperationId && (active.operationId === root.operationId || active.intentOperationId === root.operationId) &&
       supervision && supervision.activeAttemptOperationId === active.operationId &&
       !['cancelled', 'settled'].includes(supervision.phase) && !supervision.cancellation &&
       !root.action && !active.action && active.kind === 'resumed' && active.newRun && sameRun(active.newRun, session.run) &&
-      !root.launchInput && !active.launchInput && root.nativeTarget &&
+      !root.launchInput && !active.launchInput && !root.messageInput && !active.messageInput && root.nativeTarget &&
       matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle) &&
       matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) &&
       active.nativeTarget?.kind === 'provider' && active.nativeTarget.providerId === session.providerId &&

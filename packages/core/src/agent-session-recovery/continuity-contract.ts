@@ -14,9 +14,11 @@ import type {
   AgentMessageChannel,
   AgentOperationDevice
 } from '../types.js'
+import type { AgentLaunchPromptInputPlan } from '../types.js'
+import { validateAgentInputWaitRef, type AgentInputWaitRef } from '../agent-input-wait.js'
 import { parseAgentContinuityControlReceipts } from './control-contract.js'
 import type { AgentMuxContinuityControlReceipt } from './control-contract.js'
-import { validateAgentPromptInputKey, type AgentPromptInputKey } from '../agent-prompt-condition.js'
+import { validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
 import { AgentMuxError } from '../errors.js'
 
@@ -158,6 +160,38 @@ export type AgentMuxContinuityLaunchInput = {
   receipt?: { kind: 'runtime-launch'; operationId: string; run: AgentMuxRunRef; observedAt: number }
 }
 
+/** Frozen recipe for an already owned message. Its original input admission owns every outcome. */
+export type AgentMuxContinuityMessageInput = {
+  ref: AgentInputWaitRef
+  /** Original owner claim key, including only an explicitly authorized retry attempt. */
+  key: Extract<AgentPromptInputKey, { kind: 'message' }>
+  admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>
+  prompt: string
+  message: AgentPromptMessageContent
+  lifecycleOperationId: string
+  plan?: AgentLaunchPromptInputPlan
+}
+
+export function normalizeAgentContinuityMessageInput(value: unknown): AgentMuxContinuityMessageInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).some(key => !['ref', 'key', 'admissionIntent', 'prompt', 'message', 'lifecycleOperationId', 'plan'].includes(key))) throw new TypeError('Invalid original continuity message recipe.')
+  const input = value as AgentMuxContinuityMessageInput
+  const ref = validateAgentInputWaitRef(input.ref)
+  const key = validateAgentPromptInputKey(input.key)
+  const admissionIntent = validateAgentPromptAdmissionIntent(input.admissionIntent)
+  if (ref.key.kind !== 'message' || key.kind !== 'message' || key.agentSessionId !== ref.key.agentSessionId ||
+      key.expectedRun.runId !== ref.key.expectedRun.runId || key.messageId !== ref.key.messageId ||
+      admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== key.expectedRun.runId ||
+      typeof input.prompt !== 'string' || !input.prompt.trim() ||
+      typeof input.lifecycleOperationId !== 'string' || !input.lifecycleOperationId || !input.message ||
+      typeof input.message !== 'object' || Array.isArray(input.message)) throw new TypeError('Invalid original continuity message recipe.')
+  const plan = input.plan === undefined ? undefined : validateAgentLaunchPromptInputPlan(input.plan)
+  if (plan && (plan.lifecycleOperationId !== input.lifecycleOperationId || admissionIntent.kind === 'native-conversation')) throw new TypeError('Continuity message launch changed its original operation or native input intent.')
+  return { ref, key, admissionIntent, prompt: input.prompt, lifecycleOperationId: input.lifecycleOperationId,
+    message: { ...structuredClone(input.message), ...browserInputContextFields(input.message), ...agentInputContextCaptureProofFields(input.message) },
+    ...(plan ? { plan } : {}) }
+}
+
 export type AgentMuxContinuityContextEvidence = {
   source: 'native-hook'
   run: AgentMuxRunRef
@@ -233,6 +267,7 @@ export type AgentMuxContinuityOperation = {
   recoveryInputs?: { reminder: string; continuation: string }
   previousInput?: AgentMuxContinuityPreviousInput
   launchInput?: AgentMuxContinuityLaunchInput
+  messageInput?: AgentMuxContinuityMessageInput
   recoveryDelivery?: AgentMuxContinuityInputDelivery
   /** Same-Run frontend action; exact original operation and output boundary survive lost replies. */
   frontendReconnect?: { previousFrontendId: string; outputAfterByte: number; frontendId?: string; operationId?: string }
@@ -306,6 +341,15 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
     if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')
   }
+  if (op.messageInput) {
+    const message = normalizeAgentContinuityMessageInput(op.messageInput)
+    if (op.launchInput || trigger !== 'input' || op.action || op.intentOperationId ||
+        message.ref.key.agentSessionId !== op.agentSessionId || message.ref.key.expectedRun.runId !== op.previousRun.runId ||
+        message.admissionIntent.kind === 'native-conversation' && (message.admissionIntent.source.providerId !== op.nativeTarget?.providerId ||
+          message.admissionIntent.source.nativeSessionId !== op.nativeTarget?.sessionId) ||
+        message.plan && (message.plan.nativeTarget.providerId !== op.nativeTarget?.providerId ||
+          message.plan.nativeTarget.sessionId !== op.nativeTarget?.sessionId)) throw new TypeError('Continuity message changed its original input or native target.')
+  }
   const interruption = op.interruption
   if (interruption && (!['provider', 'unsupported'].includes(interruption.support) ||
       !['interrupted', 'not-interrupted', 'unknown'].includes(interruption.state) ||
@@ -377,6 +421,8 @@ export type AgentMuxAgentContinuityInput = {
   operationId: string
   trigger?: AgentMuxContinuityTrigger
   input?: AgentMuxContinuityInputRequest
+  /** Existing message owner; mutually exclusive with a fresh continuity input. */
+  messageInputRef?: AgentInputWaitRef
   policy?: Partial<AgentMuxContinuityPolicy>
   /** A saved host-authored timing overrides ordinary automatic admission only. */
   timingOverride?: 'startup' | 'on-open'

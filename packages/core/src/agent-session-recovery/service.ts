@@ -11,7 +11,7 @@ import { parseBrowserInputContext, parseBrowserInputContextSource } from '../bro
 import { parseAgentInputContextCaptureReference } from '../agent-input-context-capture.js'
 import { resolveAgentInputContextCapture, type ResolvedAgentInputContextCapture } from '../agent-input-context-capture-resolve.js'
 import { type AgentCapabilityBinding } from '../agent-capability.js'
-import { type AgentInputCallContext } from '../agent-input-wait.js'
+import { validateAgentInputWaitRef, type AgentInputCallContext } from '../agent-input-wait.js'
 import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
@@ -110,11 +110,18 @@ export class AgentSessionRecoveryService {
   }
 
   async ensureAgentContinuity(
-    input: AgentMuxAgentContinuityInput, context?: Pick<AgentInputCallContext, 'inputContextSource' | 'captureReader' | 'requestSignal'>
+    input: AgentMuxAgentContinuityInput, context?: AgentInputCallContext
   ): Promise<AgentMuxAgentContinuityResult> {
     if ('inputContextSource' in input || 'inputContextCaptureProof' in input || input.input &&
         ('inputContextSource' in input.input || 'inputContextCaptureProof' in input.input || 'promptWire' in input.input)) throw new AgentMuxError('Recovery producer facts are supplied only by the original Host.', 'INVALID_INPUT_CONTEXT_CAPTURE')
     if (input.input?.inputContextCapture !== undefined && input.input.inputContext !== undefined) throw new AgentMuxError('A recovery input retains one original capture reference.', 'INVALID_INPUT_CONTEXT_CAPTURE')
+    if (input.messageInputRef !== undefined) {
+      const ref = validateAgentInputWaitRef(input.messageInputRef)
+      if (input.input !== undefined || input.trigger !== 'input' || ref.key.kind !== 'message' ||
+          ref.key.agentSessionId !== input.agentSessionId || !sameRun(ref.key.expectedRun, input.expectedRun)) throw new AgentMuxError(
+        'An existing recovery message must retain its original Session, Run and input trigger, without another authored input.', 'INVALID_AGENT_INPUT_CONTROL')
+      input = { ...input, messageInputRef: ref }
+    }
     input = { ...input, trigger: input.trigger === undefined ? 'manual' : parseAgentContinuityTrigger(input.trigger), expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
       ...(input.input.inputContextCapture === undefined ? {} : { inputContextCapture: parseAgentInputContextCaptureReference(input.input.inputContextCapture) }),
       ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) } } : {}) }

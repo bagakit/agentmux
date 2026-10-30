@@ -44,7 +44,7 @@ export function parseMoteInputNotice(wire: string): MoteInputNotice | null {
     const value: unknown = JSON.parse(wire)
     if (!object(value) || value.schema !== 'agentmux.mote-input-notice.v1' || !text(value.observationId)
       || !['input', 'result'].some(phase => phase === value.phase) || !text(value.memberAgentSessionId)
-      || !['unconfirmed', 'waiting', 'terminal-confirmed', 'admitted', 'stopped', 'not-applied', 'interaction-confirmed'].some(input => input === value.input)
+      || !['unconfirmed', 'waiting', 'terminal-confirmed', 'admitted', 'launch-carried', 'stopped', 'not-applied', 'interaction-confirmed'].some(input => input === value.input)
       || !object(value.origin) || !object(value.read) || value.read.method !== 'agent.input.observation' || !object(value.read.params)
       || value.read.params.agentSessionId !== value.memberAgentSessionId || value.read.params.observationId !== value.observationId) return null
     const source = parseAgentInputMoteSource(value.source)

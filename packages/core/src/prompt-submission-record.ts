@@ -6,7 +6,7 @@ import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } 
 import { AgentMuxError } from './errors.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { agentInputDeliveryKey, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef } from './agent-input-wait.js'
-import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptInputId, validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { dequal } from 'dequal'
@@ -89,6 +89,8 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
   if (parsed.launch && (parsed.launch.delivery !== 'launch' || parsed.launch.state !== 'launch-carried' ||
       parsed.launch.key?.agentSessionId !== parsed.agentSessionId || parsed.launch.key.expectedRun.runId !== run.runId || parsed.admission || parsed.terminalPromptSubmission)) throw new AgentMuxError('Original launch input changed its carrier.', 'INVALID_AGENT_SESSION_STORE')
   if (!parsed.launch && !parsed.admission && !parsed.terminalPromptSubmission) throw new AgentMuxError('Original prompt record is empty.', 'INVALID_AGENT_SESSION_STORE')
+  if (parsed.admission?.transport === 'launch' && parsed.terminalPromptSubmission) throw new AgentMuxError(
+    'A Runtime launch input cannot also claim terminal submission.', 'INVALID_AGENT_SESSION_STORE')
   if (parsed.admission && parsed.terminalPromptSubmission && parsed.admission.submissionId !== parsed.terminalPromptSubmission.submissionId) throw new AgentMuxError(
     'Original prompt phases name different logical inputs.', 'INVALID_AGENT_SESSION_STORE')
   const inputKey = parsed.admission?.inputKey
@@ -207,8 +209,33 @@ export function terminalPromptSubmission(
 export function normalizePromptCompletionAdmission(value: unknown): NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']> {
   const admission = record(value, 'promptCompletionAdmission')
   const transport = (() => {
+    if (admission.transport === 'launch') {
+      if (['startByte', 'endByte', 'chunks', 'native', 'frameRefresh', 'uncertainTurn', 'outputCursorBytes', 'completionId', 'futureIntent'].some(key => admission[key] !== undefined)) throw new AgentMuxError(
+        'Runtime launch admission cannot contain PTY, turn or native acceptance facts.', 'INVALID_AGENT_SESSION_STORE')
+      const launch = record(admission.launch, 'Runtime launch input admission'), plan = validateAgentLaunchPromptInputPlan(launch.plan)
+      const intent = normalizePromptInputIntent(admission.intent), key = validateAgentPromptInputKey(admission.inputKey)
+      if (Object.keys(launch).some(key => !['plan', 'outcome', 'receipt'].includes(key)) || key.kind !== 'message' ||
+          admission.submissionId !== agentPromptInputId(key) || admission.operationId !== admission.submissionId || !admission.inputDispatch ||
+          intent.message === undefined || intent.run.runId !== key.expectedRun.runId || intent.execution !== 'immediate' ||
+          !intent.admissionIntent || !['manual-actor', 'session-conversation'].includes(intent.admissionIntent.kind) ||
+          !dequal(intent.plan, plan) || !['claimed', 'launch-carried', 'not-applied', 'unknown'].includes(String(launch.outcome)) ||
+          (launch.outcome === 'launch-carried') !== (admission.acknowledged === true) ||
+          (launch.outcome === 'not-applied') !== (admission.notApplied === true)) throw new AgentMuxError(
+        'Invalid Runtime launch admission outcome or original input.', 'INVALID_AGENT_SESSION_STORE')
+      if (launch.outcome === 'launch-carried') {
+        const receipt = record(launch.receipt, 'Runtime launch receipt'), run = runRef(receipt.run)
+        if (Object.keys(receipt).some(key => !['kind', 'operationId', 'run', 'observedAt'].includes(key)) ||
+            receipt.kind !== 'runtime-launch' || receipt.operationId !== plan.lifecycleOperationId || run.runId === key.expectedRun.runId) throw new AgentMuxError(
+          'Runtime launch receipt changed its original operation or successor Run.', 'INVALID_AGENT_SESSION_STORE')
+        return { transport: 'launch' as const, launch: { plan, outcome: 'launch-carried' as const,
+          receipt: { kind: 'runtime-launch' as const, operationId: plan.lifecycleOperationId, run,
+            observedAt: timestamp(receipt.observedAt, 'Runtime launch receipt observation') } } }
+      }
+      if (launch.receipt !== undefined) throw new AgentMuxError('An unconfirmed Runtime launch cannot claim a Run receipt.', 'INVALID_AGENT_SESSION_STORE')
+      return { transport: 'launch' as const, launch: { plan, outcome: launch.outcome as 'claimed' | 'not-applied' | 'unknown' } }
+    }
     if (admission.transport === 'native') {
-      if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined || admission.chunks !== undefined) {
+      if (admission.startByte !== undefined || admission.endByte !== undefined || admission.frameRefresh !== undefined || admission.uncertainTurn !== undefined || admission.chunks !== undefined || admission.launch !== undefined) {
         throw new AgentMuxError('Native admission cannot contain PTY input facts.', 'INVALID_AGENT_SESSION_STORE')
       }
       const native = record(admission.native, 'native input admission'), plan = nativePromptPlan(native.plan)
@@ -225,8 +252,8 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
         ...(native.queuedSubmissionId === undefined ? {} : { queuedSubmissionId: string(native.queuedSubmissionId, 'native queued submission') }),
         ...(native.errorCode === undefined ? {} : { errorCode: (() => { if (!Number.isSafeInteger(native.errorCode)) throw new AgentMuxError('Invalid native error code.', 'INVALID_AGENT_SESSION_STORE'); return Number(native.errorCode) })() }) } }
     }
-    if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined ||
-        admission.intent !== undefined && normalizePromptInputIntent(admission.intent).plan.kind === 'native-rpc') throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
+    if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined || admission.launch !== undefined ||
+        admission.intent !== undefined && ['native-rpc', 'runtime-launch'].includes(normalizePromptInputIntent(admission.intent).plan.kind)) throw new AgentMuxError('Invalid prompt transport.', 'INVALID_AGENT_SESSION_STORE')
     const startByte = timestamp(admission.startByte, 'promptCompletionAdmission.startByte')
     const endByte = positiveInteger(admission.endByte, 'promptCompletionAdmission.endByte')
     if (endByte <= startByte) throw new AgentMuxError('Invalid prompt input range.', 'INVALID_AGENT_SESSION_STORE')
@@ -296,7 +323,7 @@ export function normalizePromptInputIntent(value: unknown): NonNullable<NonNulla
     }
     return value
   }
-  let input: AgentPromptInputPlan | import('./types.js').AgentNativePromptInputPlan
+  let input: AgentPromptInputPlan | import('./types.js').AgentNativePromptInputPlan | import('./types.js').AgentLaunchPromptInputPlan
   if (plan.kind === 'single-phase') input = { kind: plan.kind, data: bytes(plan.data) }
   else if (plan.kind === 'render-then-submit') input = {
     kind: plan.kind, payload: bytes(plan.payload), renderedText: bytes(plan.renderedText), submit: bytes(plan.submit),
@@ -307,6 +334,7 @@ export function normalizePromptInputIntent(value: unknown): NonNullable<NonNulla
     })() })
   }
   else if (plan.kind === 'native-rpc') input = nativePromptPlan(plan)
+  else if (plan.kind === 'runtime-launch') input = validateAgentLaunchPromptInputPlan(plan)
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
   return { run: originalRun, ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
     prompt: bytes(source.prompt), plan: input,

@@ -600,7 +600,7 @@ export class AgentMuxRpcService {
       }
       const original = selected.session // owner() read the original durable inventory, including its exact Run.
       const prior = original.continuityOperations?.[request.requestId]
-      if (prior?.action === 'restart' || prior?.launchInput) throw new AgentMuxError('The original operation belongs to another lifecycle or input request.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
+      if (prior?.action === 'restart' || prior?.launchInput || prior?.messageInput) throw new AgentMuxError('The original operation belongs to another lifecycle or input request.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
       const restored = await selected.client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: prior?.previousRun ?? original.run,
         operationId: request.requestId, trigger: 'manual' })
       if (restored.kind !== 'resumed' && restored.kind !== 'reattachable') throw new AgentMuxError(

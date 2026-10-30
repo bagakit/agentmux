@@ -12,13 +12,16 @@ import type { AgentMuxStoredAgentSession } from './types.js'
 export function assertPreparedResumeBinding(prepared: PreparedRun, session: AgentMuxStoredAgentSession | undefined,
   operationId: string, code = 'INVALID_AGENT_SESSION_STORE'): void {
   const { request } = decodePreparedRun(prepared, code), env = request.env, continuity = session?.continuity
-  const launch = continuity?.restartLaunch ?? continuity?.launchInput?.launchPlan
+  const messagePlan = continuity?.messageInput?.plan
+  const launch = continuity?.restartLaunch ?? continuity?.launchInput?.launchPlan ?? messagePlan
   if (!session || prepared.createOperationId !== operationId || request.cwd !== session.workspacePath ||
       !session.capabilityHash || !env.AGENTMUX_AGENT_CAPABILITY || hashAgentCapability(env.AGENTMUX_AGENT_CAPABILITY) !== session.capabilityHash ||
       !session.hookToken || env.AGENTMUX_HOOK_TOKEN !== session.hookToken || session.hookBindingId !== hookBindingIdentity(operationId) ||
       env.AGENTMUX_AGENT_SESSION_ID !== session.agentSessionId || env.AGENTMUX_PROVIDER_ID !== session.providerId || env.AGENTMUX_EXECUTOR_ID !== session.executorId ||
       !continuity || continuity.previousRun.runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
       !matchesProviderNativeSessionTarget(continuity.nativeTarget, session.nativeHandle) ||
+      (messagePlan && (messagePlan.lifecycleOperationId !== operationId ||
+        !matchesProviderNativeSessionTarget(messagePlan.nativeTarget, continuity.nativeTarget))) ||
       (launch && (launch.program !== request.program || launch.argsDigest !== createHash('sha256').update(JSON.stringify(request.args)).digest('base64url')))) {
     throw new AgentMuxError('The original Start does not match its prepared Agent binding. Its Run and original operation were preserved.', code)
   }
@@ -28,7 +31,7 @@ export function assertPreparedResumeBinding(prepared: PreparedRun, session: Agen
 export type ResumeResolutionRequest = Pick<AgentMuxAgentContinuityInput,
   'agentSessionId' | 'expectedRun' | 'operationId' | 'args' | 'env' | 'commandOverride' | 'cols' | 'rows'> & { trigger: 'manual' }
 export function resumeResolutionRequest(input: AgentMuxAgentContinuityInput): ResumeResolutionRequest {
-  if (input.trigger !== 'manual' || input.input !== undefined || input.timingOverride !== undefined) throw new AgentMuxError(
+  if (input.trigger !== 'manual' || input.input !== undefined || input.messageInputRef !== undefined || input.timingOverride !== undefined) throw new AgentMuxError(
     'Continuing an unknown Start needs a new explicit manual request without input. The original request and inputs were kept.', 'AGENT_RESUME_RESOLUTION_REQUIRED')
   const value: Record<string, unknown> = { agentSessionId: input.agentSessionId, expectedRun: { ...input.expectedRun }, operationId: input.operationId, trigger: 'manual' }
   for (const field of ['args', 'env', 'commandOverride', 'cols', 'rows'] as const) if (input[field] !== undefined) value[field] = structuredClone(input[field])

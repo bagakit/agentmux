@@ -402,7 +402,7 @@ export class AgentPromptSubmissionCoordinator {
           if (control?.onlyIfUnclaimed && original) throw new AgentMuxError(
             'The original deferred input already has a claim. Inspect its exact receipt; this owner will not replay it.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
           const originalAdmission = original?.admission
-          if (originalAdmission && (originalAdmission.transport === 'native' || current.promptCompletionAdmission?.submissionId !== submissionId)) {
+          if (originalAdmission && (originalAdmission.transport === 'native' || originalAdmission.transport === 'launch' || current.promptCompletionAdmission?.submissionId !== submissionId)) {
             const intent = originalAdmission.intent
             if (!intent || !originalAdmission.inputKey) throw new AgentMuxError(
               'The original input identity is unconfirmed; its historical claim cannot be replaced.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
@@ -430,7 +430,7 @@ export class AgentPromptSubmissionCoordinator {
               throw new AgentMuxError('A later prompt admission has replaced this message\'s original condition. Its delivery is unknown; your message and the current Run are kept.',
                 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
             }
-            const nativePredecessor = previous?.transport === 'native' || previous?.intent?.plan.kind === 'native-rpc'
+            const nativePredecessor = previous?.transport === 'native' || previous?.transport === 'launch' || previous?.intent?.plan.kind === 'native-rpc'
             // This private producer admits a different platform input through the
             // original Provider's idle queue. It cannot replay the unknown input;
             // its exact source, condition and idle fences are still checked below.
@@ -469,7 +469,7 @@ export class AgentPromptSubmissionCoordinator {
               })
               // The old Core is excluded, but Native may still own its request. Join that exact
               // request; a fresh cursor or a changed Provider plan cannot replace it.
-              if (previous.transport === 'native' || previous.intent.plan.kind === 'native-rpc') throw new AgentMuxError('The original Native admission cannot be replayed through a terminal.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+              if (previous.transport === 'native' || previous.transport === 'launch' || previous.intent.plan.kind === 'native-rpc' || previous.intent.plan.kind === 'runtime-launch') throw new AgentMuxError('The original Native admission cannot be replayed through a terminal.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
               try {
                 if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
                 await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
@@ -636,7 +636,7 @@ export class AgentPromptSubmissionCoordinator {
         await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
           assertInteraction(stored)
           const admission = stored.promptCompletionAdmission
-          if (admission?.transport === 'native' || admission?.submissionId !== submissionId ||
+          if (admission?.transport === 'native' || admission?.transport === 'launch' || admission?.submissionId !== submissionId ||
               !isDeepStrictEqual(admission.inputKey, inputKey)) throw new AgentMuxError(
             'The original terminal input claim changed before dispatch.', 'STALE_AGENT_SESSION')
           return stored
@@ -649,7 +649,7 @@ export class AgentPromptSubmissionCoordinator {
           try {
             await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
               const admission = stored.promptCompletionAdmission, phases = stored.terminalPromptSubmission
-              if (!admission || admission.transport === 'native' || !isDeepStrictEqual(admission, newClaim!.admission) ||
+              if (!admission || admission.transport === 'native' || admission.transport === 'launch' || !isDeepStrictEqual(admission, newClaim!.admission) ||
                   !isDeepStrictEqual(phases, newClaim!.terminal)) {
                 throw new AgentMuxError('The original no-input claim is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
               }
@@ -945,8 +945,8 @@ export class AgentPromptSubmissionCoordinator {
       let uncertainTurn = false
       const current = await claimSession(session.agentSessionId, session.run, (stored) => {
         const admitted = stored.promptCompletionAdmission
-        if (admitted?.transport === 'native' && (admitted.submissionId === submissionId || !manual && !admitted.acknowledged && !agentPromptNotApplied(stored))) throw new AgentMuxError('A Native admission cannot be interpreted as PTY bytes.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
-        if (admitted && admitted.transport !== 'native' && (admitted.operationId === operationId || admitted.submissionId === submissionId)) {
+        if ((admitted?.transport === 'native' || admitted?.transport === 'launch') && (admitted.submissionId === submissionId || !manual && !admitted.acknowledged && !agentPromptNotApplied(stored))) throw new AgentMuxError('A Native admission cannot be interpreted as PTY bytes.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+        if (admitted && admitted.transport !== 'native' && admitted.transport !== 'launch' && (admitted.operationId === operationId || admitted.submissionId === submissionId)) {
           if (admitted.operationId !== operationId ||
             admitted.endByte - admitted.startByte !== Buffer.byteLength(plan.data)) {
             throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -956,7 +956,7 @@ export class AgentPromptSubmissionCoordinator {
           return stored
         }
         assertAdmission(stored)
-        const incomplete = admitted !== undefined && admitted.transport !== 'native' && (run.acceptedInputBytes === null || run.acceptedInputBytes < admitted.endByte)
+        const incomplete = admitted !== undefined && admitted.transport !== 'native' && admitted.transport !== 'launch' && (run.acceptedInputBytes === null || run.acceptedInputBytes < admitted.endByte)
         const replaceableClaim = admitted?.notApplied === true
         if (incomplete && !replaceableClaim) {
           throw new AgentMuxError('Another Agent prompt operation is incomplete for this Run.', 'AGENT_PROMPT_SUBMISSION_BUSY')
@@ -964,11 +964,11 @@ export class AgentPromptSubmissionCoordinator {
         uncertainTurn = assertTurnBoundary(stored, admitted !== undefined)
         const claimed = claimInput(stored, operationId, expectedByte, expectedByte + Buffer.byteLength(plan.data), uncertainTurn)
         const phase = terminalPromptInputPhase(session.run.runId, intent.ownerInstanceId, operationId, expectedByte, plan.data)
-        if (phase.chunks && claimed.promptCompletionAdmission?.transport !== 'native') claimed.promptCompletionAdmission = {
+        if (phase.chunks && claimed.promptCompletionAdmission?.transport !== 'native' && claimed.promptCompletionAdmission?.transport !== 'launch') claimed.promptCompletionAdmission = {
           ...claimed.promptCompletionAdmission!, chunks: phase.chunks }
         return claimed
       })
-      const admitted = current.promptCompletionAdmission?.transport !== 'native' && current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
+      const admitted = current.promptCompletionAdmission?.transport !== 'native' && current.promptCompletionAdmission?.transport !== 'launch' && current.promptCompletionAdmission?.operationId === operationId ? current.promptCompletionAdmission : undefined
       cancelConsumedNativeReadiness(current)
       if (uncertainTurn) await this.publishDeliveryDegrade(session, {
         state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
@@ -1569,7 +1569,7 @@ export class AgentPromptSubmissionCoordinator {
         data: bytes ? bytes.subarray(range.startByte - phase.inputByteRange.startByte, range.endByte - phase.inputByteRange.startByte) : data
       }, phaseName, beforeInput, diagnostic).catch((error: unknown) => {
         const admission = current.promptCompletionAdmission
-        const prefix = admission?.transport !== 'native' && admission ? range.startByte - admission.startByte : 0
+        const prefix = admission?.transport !== 'native' && admission?.transport !== 'launch' && admission ? range.startByte - admission.startByte : 0
         if (!phase.chunks || prefix <= 0 || !(error instanceof AgentMuxError) || error.controlFailure?.disposition !== 'not_applied') throw error
         // That receipt refuses only the next chunk, never the already applied
         // logical-input prefix. Keep the original command facts in its cause.

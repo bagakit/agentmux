@@ -143,9 +143,11 @@ export class AgentMuxHostedRuntimeService {
     if (!this.externalInputAuthority) return undefined
     let author: import('./agent-global-message-queue.js').AgentMuxMessageEnvelope['sender'] | undefined
     if (invocation.method === 'submitAgentMessage') author = invocation.args[0]?.envelope?.sender
-    else if (invocation.method === 'rejoinAgentInputWaiting' && invocation.args[0]?.ref?.key?.kind === 'message') {
+    else if (invocation.method === 'rejoinAgentInputWaiting' && invocation.args[0]?.ref?.key?.kind === 'message' ||
+        invocation.method === 'ensureAgentContinuity' && invocation.args[0]?.messageInputRef?.key?.kind === 'message') {
       // The original Core journal supplies retained attribution. Local input does not borrow connector authority.
-      const receipt = await this.client.inspectAgentInput({ key: invocation.args[0].ref.key })
+      const ref = invocation.method === 'ensureAgentContinuity' ? invocation.args[0].messageInputRef! : invocation.args[0].ref
+      const receipt = await this.client.inspectAgentInput({ key: ref.key })
       if (receipt?.originalControlOperationId) author = (await this.client.readMessage({ operationId: receipt.originalControlOperationId }))?.envelope.sender
     }
     if (author?.kind !== 'external') return undefined
@@ -374,7 +376,7 @@ export class AgentMuxHostedRuntimeService {
       value = attached.value
     } else {
       const operation = this.client[invocation.method] as (...args: unknown[]) => unknown
-      const externalAuthor = controlledInput ? await this.externalAuthor(invocation) : undefined
+      const externalAuthor = controlledInput || invocation.method === 'ensureAgentContinuity' ? await this.externalAuthor(invocation) : undefined
       const action = invocation.method === 'respondAgentInteraction' ? invocation.args[0].externalAction : undefined
       const externalAction = action === undefined ? undefined : (() => {
         const identity = parseAgentExternalInteractionAuthor(action), port = this.externalInputAuthority
@@ -401,7 +403,8 @@ export class AgentMuxHostedRuntimeService {
         : (invocation.method === 'readAgentInputMailbox' || invocation.method === 'readAgentInputChanges' || invocation.method === 'readAgentInputResource') ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
-        ...(invocation.method === 'ensureAgentContinuity' && this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {})
+        ...(invocation.method === 'ensureAgentContinuity' && this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {}),
+        ...(externalAuthor ? { externalAuthor } : {})
       }] : controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),

@@ -172,7 +172,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
       const code = nullable(row.code, value => member(value, moteChatDiagnosisCodes)), codeRecorded = bool(row.codeRecorded)
       const preparation = member(row.preparation, ['not-admitted', 'reserved', 'prepared', 'creation-dispatched', 'ready', 'other-route'] as const)
       const observation = member(i.observation, ['not-started', 'observed', 'unavailable'] as const)
-      const status = nullable(i.status, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown'] as const))
+      const status = nullable(i.status, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'launch-carried', 'not-applied', 'unknown'] as const))
       const controlState = nullable(i.controlState, value => member(value, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized'] as const))
       const receiptObservation = nullable(i.receiptObservation, value => member(value, ['owned', 'rejoin-needed', 'closed'] as const))
       const preparationReason = nullable(i.preparationReason, value => member(value, ['context-compaction', 'native-busy'] as const))
@@ -184,7 +184,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
         if (r.exitCode !== null && (!Number.isSafeInteger(r.exitCode) || state !== 'exited')) fail()
         return { target, state, exitCode: r.exitCode as number | null }
       })
-      if (runtime !== null && status !== 'waiting' && status !== 'terminal-confirmed' && status !== 'admitted') fail()
+      if (runtime !== null && status !== 'waiting' && status !== 'terminal-confirmed' && status !== 'admitted' && status !== 'launch-carried') fail()
       let waiting: ConnectionDiagnosisIntake['waiting']
       try { waiting = parseConnectionDiagnosisWaiting(i.waiting) } catch { return fail() }
       if (code !== null && !codeRecorded || status !== null && (observation !== 'observed' || preparation === 'other-route')) fail()
@@ -192,7 +192,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
         : controlState === null || receiptObservation === null) fail()
       if (status === 'waiting' && (controlState !== 'enabled' || receiptObservation === 'closed') ||
           status === 'stopped' && controlState !== 'stopped-before-dispatch' ||
-          (status === 'admitted' || status === 'not-applied' || status === 'terminal-confirmed') && controlState !== 'dispatch-authorized' ||
+          (status === 'admitted' || status === 'launch-carried' || status === 'not-applied' || status === 'terminal-confirmed') && controlState !== 'dispatch-authorized' ||
           status !== null && status !== 'waiting' && receiptObservation !== 'closed') fail()
       if ((preparationReason !== null || failureCode !== null) && waiting === null) fail()
       if (preparationReason !== null && failureCode !== null) fail()

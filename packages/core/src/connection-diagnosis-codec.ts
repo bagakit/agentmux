@@ -110,7 +110,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
         return { state, ...(r.code === undefined ? {} : { code: member(r.code, connectionDiagnosisRecordingCodes) }) }
       })
       const waiting = parseConnectionDiagnosisWaiting(i.waiting)
-      const coreStatus = nullable(i.coreStatus, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown', 'saved', 'bytes-accepted', 'hook-written', 'acp-acknowledged'] as const))
+      const coreStatus = nullable(i.coreStatus, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'launch-carried', 'admitted', 'not-applied', 'unknown', 'saved', 'bytes-accepted', 'hook-written', 'acp-acknowledged'] as const))
       if ((rowScope !== 'current-binding' || inputOperationId === null) && (coreStatus !== null || waiting !== null || i.nativeAdoption !== null)) return fail()
       if (i.context !== undefined && (rowScope !== 'current-binding' || inputOperationId === null || i.kind !== 'message')) return fail()
       return { ingressId: id(i.ingressId), sourceConnectionId: id(i.sourceConnectionId), kind: member(i.kind, ['message', 'action'] as const), state: member(i.state, ['received', 'refused', 'claimed'] as const), code: nullable(i.code, value => member(value, connectionDiagnosisIntakeCodes)), codeRecorded: bool(i.codeRecorded), bindingId, bindingRevision, targetConnectionId, scope: rowScope, inputOperationId, recording, coreStatus, waiting, coreObservation: member(i.coreObservation, ['not-started', 'observed', 'unavailable'] as const), nativeAdoption: nullable(i.nativeAdoption, value => member(value, ['unknown'] as const)), ...(i.context === undefined ? {} : { context: parseIngressContextObservation(i.context) }) }

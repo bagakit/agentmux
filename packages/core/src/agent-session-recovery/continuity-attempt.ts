@@ -18,7 +18,7 @@ import { sameRun } from '../agent-session-identity.js'
 import { AgentMuxError } from '../errors.js'
 import { executorUnavailableError } from '../executable-probe.js'
 import { agentLifecycleOperationIdentity } from '../agent-session-store.js'
-import { normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
+import { normalizeAgentContinuityMessageInput, normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { decideAgentSessionContinuity, agentContinuityAdmission } from './continuity-policy.js'
 import type { AgentCapabilitySnapshot, AgentMuxRun, AgentMuxStoredAgentSession } from '../types.js'
 import { safeId, terminalEnvironment } from '../agent-runtime-helpers.js'
@@ -27,7 +27,7 @@ import type { AgentSessionRecoveryPorts } from './ports.js'
 type AgentContinuityAttemptContext = {
   ports: AgentSessionRecoveryPorts
   supervisor: Pick<AgentSessionContinuitySupervisor, 'retainedAutomaticIntent' | 'completedRuntimeRestartIntent' | 'observe' | 'schedule'>
-  lifecycle: Pick<AgentSessionRunLifecycle, 'buildResumePlan' | 'resumeAgentRun' | 'completePreparedResume' | 'resolvePreparedResume'>
+  lifecycle: Pick<AgentSessionRunLifecycle, 'buildResumePlan' | 'resumeAgentRun' | 'completePreparedResume' | 'resolvePreparedResume' | 'settleContinuityMessageInput'>
   reconciler: AgentSessionRecoveryReconciler
   signal: AbortSignal
 }
@@ -76,7 +76,7 @@ export async function performAgentContinuity(
       resumeResolutionDigest(resumeResolutionRequest(input)) !== requested.resolution.requestDigest) throw new AgentMuxError(
     'The original manual resolution request changed. Keep its exact operation and execution intent.', 'AGENT_RESUME_RESOLUTION_CONFLICT')
   if (requested?.action === 'restart') {
-    if (input.input) throw new AgentMuxError('An explicit restart has no authored input. Keep its original operation and submit new input separately.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    if (input.input || input.messageInputRef) throw new AgentMuxError('An explicit restart has no authored input. Keep its original operation and submit new input separately.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (!sameRun(requested.previousRun, input.expectedRun)) throw new AgentMuxError('A restart observation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
     if (requested.kind === 'unavailable' && requested.errorCode === AGENT_TERMINAL_HANDSHAKE_FAILED && requested.newRun) {
       throw new AgentMuxError(requested.error ?? 'The original restart replacement exited during startup.', requested.errorCode)
@@ -94,7 +94,7 @@ export async function performAgentContinuity(
     }
   }
   if (reservation?.kind === 'resume' && reservation.preparedSession && !reservation.restart &&
-      (reservation.resolution || input.trigger === 'manual' && !input.input &&
+      (reservation.resolution || input.trigger === 'manual' && !input.input && !input.messageInputRef &&
         input.operationId !== reservation.preparedSession.continuity?.operationId)) {
     return await lifecycle.resolvePreparedResume(input, reservation)
   }
@@ -102,7 +102,7 @@ export async function performAgentContinuity(
     throw new AgentMuxError('This operation belongs to the original restart. Inspect that operation; its Session and all original receipts are retained.',
       'AGENT_CONTINUITY_SUPERSEDED')
   }
-  const restart = requested?.action === 'restart' ? requested : !input.input && reservation?.kind === 'resume' && reservation.restart &&
+  const restart = requested?.action === 'restart' ? requested : !input.input && !input.messageInputRef && reservation?.kind === 'resume' && reservation.restart &&
     sameRun(reservation.expectedRun, input.expectedRun)
     ? current?.continuityOperations?.[reservation.restart.request.operationId] : undefined
   let runningObserver = false
@@ -219,6 +219,8 @@ export async function performAgentContinuity(
     if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input))) throw new AgentMuxError(
       'This original recovery operation has another frozen input. Its original body and Run are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   }
+  if (input.messageInputRef && prior && (!prior.messageInput || !isDeepStrictEqual(prior.messageInput.ref, input.messageInputRef))) throw new AgentMuxError(
+    'This original recovery operation has another message input owner. Its original key and generation are retained.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   if (prior && !sameRun(prior.previousRun, input.expectedRun)) {
     throw new AgentMuxError('A continuity operation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
   }
@@ -257,6 +259,13 @@ export async function performAgentContinuity(
   // succeeded yet. A retry reads this same request rather than inventing one.
   if (!prior && input.input && current) receipt.launchInput = prepareContinuityLaunchInput(receipt,
     ports.providers.providers.get(current.providerId).catalog, agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource, captured)!
+  if (!prior && input.messageInputRef && current) {
+    const lifecycleOperationId = agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId)
+    const recipe = normalizeAgentContinuityMessageInput(await ports.input.prepareContinuityMessage(input.messageInputRef, lifecycleOperationId))
+    if (!isDeepStrictEqual(recipe.ref, input.messageInputRef) || recipe.lifecycleOperationId !== lifecycleOperationId || recipe.plan) throw new AgentMuxError(
+      'The original recovery message preparation changed its owner or acquired a launch before dispatch.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    receipt.messageInput = recipe
+  }
   receipt.observedAt = now
   delete receipt.nextActionAt
   const originalLaunch = (value: AgentMuxStoredAgentSession) => {
@@ -265,6 +274,15 @@ export async function performAgentContinuity(
       'This original recovery input already has another frozen body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     return saved && (['launch-carried', 'terminal-confirmed', 'native-admitted', 'not-applied'].includes(saved.state) ||
       receipt.launchInput?.state === 'prepared' && saved.state !== 'prepared') ? saved : receipt.launchInput ?? saved
+  }
+  const originalMessage = (value: AgentMuxStoredAgentSession) => {
+    const saved = value.continuityOperations?.[receipt.operationId]?.messageInput, next = receipt.messageInput
+    if (saved && next) {
+      const { plan: savedPlan, ...savedRecipe } = saved, { plan: nextPlan, ...nextRecipe } = next
+      if (!isDeepStrictEqual(savedRecipe, nextRecipe) || savedPlan && nextPlan && !isDeepStrictEqual(savedPlan, nextPlan)) throw new AgentMuxError(
+        'This original recovery message already has another frozen input or launch.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    }
+    return saved?.plan ? saved : next ?? saved
   }
   const resumedFacts = (value: AgentMuxStoredAgentSession) => {
     const saved = value.continuityOperations?.[receipt.operationId]
@@ -329,10 +347,12 @@ export async function performAgentContinuity(
           continuity: { ...structuredClone(receipt), ...resumedFacts(value), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
             ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
             ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
+            ...(originalMessage(value) ? { messageInput: originalMessage(value)! } : {}),
             ...(supervision ? { supervision } : {}) },
           continuityOperations: { ...value.continuityOperations, [receipt.operationId]: { ...structuredClone(receipt), ...resumedFacts(value),
             ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
             ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
+            ...(originalMessage(value) ? { messageInput: originalMessage(value)! } : {}),
             ...(supervision ? { supervision } : {}) } } }
         })
         ports.events.publishSession(current)
@@ -351,6 +371,7 @@ export async function performAgentContinuity(
     }
     if (current?.continuityOperations?.[receipt.operationId]?.recoveryDelivery) receipt.recoveryDelivery = structuredClone(current.continuityOperations[receipt.operationId]!.recoveryDelivery!)
     if (current?.continuityOperations?.[receipt.operationId]?.launchInput) receipt.launchInput = structuredClone(current.continuityOperations[receipt.operationId]!.launchInput!)
+    if (current?.continuityOperations?.[receipt.operationId]?.messageInput) receipt.messageInput = structuredClone(current.continuityOperations[receipt.operationId]!.messageInput!)
     if (current?.continuityOperations?.[receipt.operationId]?.supervision) receipt.supervision = structuredClone(current.continuityOperations[receipt.operationId]!.supervision!)
     if (current) Object.assign(receipt, structuredClone(resumedFacts(current)))
     supervisor.schedule(input, receipt)
@@ -374,6 +395,7 @@ export async function performAgentContinuity(
       ...(nextActionAt === undefined ? {} : { nextActionAt }) })
   if (current && !sameRun(current.run, input.expectedRun)) {
     if (prior?.newRun && sameRun(prior.newRun, current.run) && prior.kind === 'resumed') {
+      await lifecycle.settleContinuityMessageInput(receipt, { outcome: 'launch-carried', run: current.run })
       if (prior.launchInput?.delivery === 'post-launch' && !['terminal-confirmed', 'native-admitted'].includes(prior.launchInput.state)) {
         current = await reconciler.settleContinuityPostLaunchInput(current, input.operationId)
       }
@@ -480,6 +502,7 @@ export async function performAgentContinuity(
       } else input = executor.source === 'sdk' ? { ...originalInput, ...structuredClone(executor.options) } : originalInput
       const oldInput = current?.promptCompletionAdmission
       receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
+        : oldInput.transport === 'launch' ? 'unknown'
         : oldInput.acknowledged ? oldInput.transport === 'native' ? oldInput.native.outcome === 'admitted' ? 'native-admitted' : 'unknown' : 'terminal-confirmed' : 'unknown',
         ...(oldInput?.inputKey ? { key: structuredClone(oldInput.inputKey) } : {}) }
       // Restore the original conversation independently of any new automatic input.
@@ -492,7 +515,8 @@ export async function performAgentContinuity(
       const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
         agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input, inputContextSource, captured)
       if (launchInput) receipt.launchInput = launchInput
-      const originalPrompt = receipt.launchInput?.prompt ?? ''
+      const originalPrompt = receipt.launchInput?.prompt ?? (catalog!.promptDelivery === 'post-launch-only' ||
+        receipt.messageInput?.admissionIntent.kind === 'native-conversation' ? '' : receipt.messageInput?.prompt) ?? ''
       const { plan } = lifecycle.buildResumePlan(current, input, originalPrompt || undefined)
       launchExecutable = plan.command
       capabilityContext = { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) }
@@ -699,8 +723,10 @@ export async function performAgentContinuity(
     const frozen = value.continuityOperations?.[receipt.operationId]?.launchInput
     if (frozen && receipt.launchInput && !isDeepStrictEqual(frozen.input, receipt.launchInput.input)) throw new AgentMuxError(
       'The original recovery input was already frozen with another body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-    return { ...retainExecutor(value), continuity: structuredClone(receipt),
-      continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }
+    const messageInput = originalMessage(value)
+    const original = { ...structuredClone(receipt), ...(messageInput ? { messageInput } : {}) }
+    return { ...retainExecutor(value), continuity: original,
+      continuityOperations: { ...value.continuityOperations, [receipt.operationId]: original } }
   })
   try {
     const session = await lifecycle.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId,

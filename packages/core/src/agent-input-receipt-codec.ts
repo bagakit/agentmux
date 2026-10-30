@@ -47,6 +47,8 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   }
   const admission = p.admission === null ? null : parsePromptSubmissionRecord(p.admission)
   const deliveryKey = agentInputDeliveryKey(control as AgentInputSubmissionReceipt['control'])
+  // A launch receipt names a successor Run inside its result. Its input record
+  // and dispatch gate still address the original message and original Run.
   if (admission && (admission.agentSessionId !== key.agentSessionId || admission.run.runId !== deliveryKey.expectedRun.runId ||
       admission.admission?.inputKey && !dequal(admission.admission.inputKey, deliveryKey) ||
       (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(deliveryKey))) wireFail()

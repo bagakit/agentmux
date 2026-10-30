@@ -1212,6 +1212,15 @@ export type AgentNativePromptInputPlan = Readonly<{
   { operation?: 'steer'; expectedTurnId: string }
 )>
 
+/** Original controlled input carried by one prepared Runtime Start, not a native acceptance. */
+export type AgentLaunchPromptInputPlan = Readonly<{
+  kind: 'runtime-launch'
+  lifecycleOperationId: string
+  nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  program: string
+  argsDigest: string
+}>
+
 /** Original creation facts survive explicit retirement without becoming an active Session. */
 export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
   ({ kind: 'retired-agent' } & import('./agent-session-store.js').AgentMuxRetiredAgentSession)
@@ -1271,7 +1280,7 @@ export type AgentMuxAgentSession = {
       run: AgentMuxRunRef
       ownerInstanceId: string
       prompt: string
-      plan: AgentPromptInputPlan | AgentNativePromptInputPlan
+      plan: AgentPromptInputPlan | AgentNativePromptInputPlan | AgentLaunchPromptInputPlan
       execution?: AgentPromptExecution
       admissionIntent?: import('./agent-prompt-condition.js').AgentPromptAdmissionIntent
       /** Producer facts frozen with the first wire; tags in user text never establish these. */
@@ -1283,9 +1292,14 @@ export type AgentMuxAgentSession = {
     notApplied?: boolean
     uncertainTurn?: boolean
   } & (
-    { transport?: 'pty'; startByte: number; endByte: number; chunks?: AgentTerminalInputChunkState[]; native?: never } |
+    { transport?: 'pty'; startByte: number; endByte: number; chunks?: AgentTerminalInputChunkState[]; native?: never; launch?: never } |
     { transport: 'native'; startByte?: never; endByte?: never; chunks?: never;
-      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; queuedSubmissionId?: string; errorCode?: number } }
+      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; queuedSubmissionId?: string; errorCode?: number }; launch?: never } |
+    { transport: 'launch'; startByte?: never; endByte?: never; chunks?: never; native?: never;
+      launch: { plan: AgentLaunchPromptInputPlan } & (
+        { outcome: 'claimed' | 'not-applied' | 'unknown'; receipt?: never } |
+        { outcome: 'launch-carried'; receipt: { kind: 'runtime-launch'; operationId: string; run: AgentMuxRunRef; observedAt: number } }
+      ) }
   )
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState

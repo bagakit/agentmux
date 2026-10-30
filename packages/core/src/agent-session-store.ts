@@ -336,28 +336,31 @@ function promptRecordId(value: AgentPromptSubmissionRecord): string {
 
 
 function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord): void {
-  const { acknowledged: _ack, notApplied: _notApplied, native: _native, ...originalClaim } = expected.admission ?? {}
-  const { acknowledged: _nextAck, notApplied: _nextNotApplied, native: _nextNative, ...nextClaim } = next.admission ?? {}
+  const { acknowledged: _ack, notApplied: _notApplied, native: _native, launch: _launch, ...originalClaim } = expected.admission ?? {}
+  const { acknowledged: _nextAck, notApplied: _nextNotApplied, native: _nextNative, launch: _nextLaunch, ...nextClaim } = next.admission ?? {}
+  const original = expected.admission, settled = next.admission
+  const samePlan = original?.transport === 'native' && settled?.transport === 'native'
+    ? isDeepStrictEqual(original.native.plan, settled.native.plan)
+    : original?.transport === 'launch' && settled?.transport === 'launch' && isDeepStrictEqual(original.launch.plan, settled.launch.plan)
   if (expected.agentSessionId !== next.agentSessionId || expected.run.runId !== next.run.runId || promptRecordId(expected) !== promptRecordId(next) ||
-      expected.admission?.transport !== 'native' || next.admission?.transport !== 'native' ||
-      !isDeepStrictEqual(originalClaim, nextClaim) ||
-      !isDeepStrictEqual(expected.admission.native.plan, next.admission.native.plan) ||
+      !samePlan || !isDeepStrictEqual(originalClaim, nextClaim) ||
       !isDeepStrictEqual(expected.terminalPromptSubmission, next.terminalPromptSubmission)) {
-    throw new AgentMuxError('Native receipt changed its original claim.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    throw new AgentMuxError('Input receipt changed its original claim.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   }
-  if (expected.admission.native.outcome === 'admitted' || expected.admission.native.outcome === 'not-applied') {
-    if (!isDeepStrictEqual(expected, next)) throw new AgentMuxError('The original Native terminal receipt cannot be changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+  const outcome = original?.transport === 'native' ? original.native.outcome : original?.transport === 'launch' ? original.launch.outcome : undefined
+  if (outcome === 'admitted' || outcome === 'launch-carried' || outcome === 'not-applied') {
+    if (!isDeepStrictEqual(expected, next)) throw new AgentMuxError('The original final input receipt cannot be changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   }
   parsePromptSubmissionRecord(next)
 }
 
-/** Routine Session writes cannot rebind or restart an already claimed Native key. */
+/** Routine Session writes cannot rebind or settle an already claimed native or launch input. */
 function assertPromptRecordWrite(original: AgentPromptSubmissionRecord | undefined, next: AgentPromptSubmissionRecord, receipt = false): void {
   if (!original || isDeepStrictEqual(original, next)) return
   if (original.launch || next.launch) throw new AgentMuxError('An original Runtime launch input cannot be replaced by another carrier or body.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-  if (original.admission?.transport !== 'native' && next.admission?.transport !== 'native') return
-  if (!receipt || next.admission?.native?.outcome === 'claimed') throw new AgentMuxError(
-    'The original Native input record can only be changed by its exact receipt owner.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+  if (!['native', 'launch'].includes(original.admission?.transport ?? 'pty') && !['native', 'launch'].includes(next.admission?.transport ?? 'pty')) return
+  if (!receipt || next.admission?.native?.outcome === 'claimed' || next.admission?.launch?.outcome === 'claimed') throw new AgentMuxError(
+    'The original input record can only be changed by its exact receipt owner.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   assertPromptSettlement(original, next)
 }
 
@@ -2464,7 +2467,15 @@ function claimedReopenReservation(current: AgentMuxLifecycleReservation | undefi
 function preserveContinuityOperations(previous: AgentMuxStoredAgentSession | undefined, next: AgentMuxStoredAgentSession, originalId?: string): AgentMuxStoredAgentSession {
   if (!previous?.continuityOperations || !next.continuity?.newRun || next.continuity.newRun.runId !== next.run.runId) return next
   const previousRoot = previous.continuityOperations[next.continuity.operationId]
-  const continuity = previousRoot?.supervision ? { ...next.continuity, supervision: structuredClone(previousRoot.supervision) } : next.continuity
+  let continuity = previousRoot?.supervision ? { ...next.continuity, supervision: structuredClone(previousRoot.supervision) } : next.continuity
+  if (previousRoot?.messageInput) {
+    const { plan, ...original } = previousRoot.messageInput
+    const { plan: candidatePlan, ...candidate } = continuity.messageInput ?? {}
+    if (continuity.messageInput && (!isDeepStrictEqual(original, candidate) || plan && candidatePlan && !isDeepStrictEqual(plan, candidatePlan))) throw new AgentMuxError(
+      'Resume commit changed its original message recipe.', 'INVALID_AGENT_SESSION_STORE')
+    const retainedPlan = plan ?? candidatePlan
+    continuity = { ...continuity, messageInput: { ...original, ...(retainedPlan ? { plan: retainedPlan } : {}) } }
+  }
   return { ...next, continuity, continuityOperations: { ...next.continuityOperations, ...previous.continuityOperations,
     ...(originalId && next.continuityOperations?.[originalId] ? { [originalId]: next.continuityOperations[originalId] } : {}),
     [continuity.operationId]: continuity },
@@ -2531,6 +2542,7 @@ function assertLifecycleCommit(
       key => !isDeepStrictEqual(next[key as keyof AgentMuxStoredAgentSession], prepared[key as keyof AgentMuxStoredAgentSession])) ||
       original && (!operation || operation.operationId !== original.operationId || operation.requestDigest !== original.requestDigest || operation.action !== original.action ||
         !isDeepStrictEqual(operation.restartLaunch, original.restartLaunch) ||
+        !isDeepStrictEqual(operation.messageInput, original.messageInput) ||
         !isDeepStrictEqual(operation.previousRun, original.previousRun) || !isDeepStrictEqual(operation.nativeTarget, original.nativeTarget) ||
         original.launchInput && ['input', 'prompt', 'message', 'digest', 'delivery', 'lifecycleOperationId', 'launchPlan'].some(
           key => !isDeepStrictEqual(operation.launchInput?.[key as keyof NonNullable<typeof operation.launchInput>], original.launchInput![key as keyof NonNullable<typeof original.launchInput>])))) {

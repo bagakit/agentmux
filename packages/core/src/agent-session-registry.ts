@@ -431,6 +431,7 @@ export class AgentMuxAgentSessionRegistry {
       operation.operationId === frozen.operationId && sameRun(operation.previousRun, reservation.expectedRun) &&
       operation.newRun && sameRun(operation.newRun, session.run) && !sameRun(session.run, reservation.expectedRun) &&
       isDeepStrictEqual(operation.launchInput?.launchPlan, frozen.launchInput?.launchPlan) &&
+      isDeepStrictEqual(operation.messageInput, frozen.messageInput) &&
       isDeepStrictEqual(operation.launchInput?.input, frozen.launchInput?.input) && operation.requestDigest === frozen.requestDigest)
   }
 

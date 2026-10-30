@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
-import type { AgentMuxAgentSession, AgentMuxRunRef } from './types.js'
+import type { AgentLaunchPromptInputPlan, AgentMuxAgentSession, AgentMuxRunRef } from './types.js'
+import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent-native-locator.js'
 
 /** Capture once before the first possibly executing RPC; retain with the sending intent. */
 export type AgentPromptCondition = {
@@ -59,6 +60,24 @@ export function validateAgentPromptInputKey(value: unknown): AgentPromptInputKey
     throw new AgentMuxError('The original input identity is invalid.', 'INVALID_AGENT_PROMPT')
   }
   return structuredClone(v)
+}
+
+/** Shared by the original input claim and its continuity recipe; neither grants Start authority. */
+export function validateAgentLaunchPromptInputPlan(value: unknown): AgentLaunchPromptInputPlan {
+  const plan = value as AgentLaunchPromptInputPlan | undefined
+  const target = plan?.nativeTarget
+  const providerId = normalizeNativeSessionId(target?.providerId), sessionId = normalizeNativeSessionId(target?.sessionId)
+  const transcriptPath = target?.transcriptPath === undefined ? undefined : normalizeNativeTranscriptPath(target.transcriptPath)
+  if (!plan || plan.kind !== 'runtime-launch' ||
+      Object.keys(plan).some(key => !['kind', 'lifecycleOperationId', 'nativeTarget', 'program', 'argsDigest'].includes(key)) ||
+      !inputIdentity(plan.lifecycleOperationId) || !inputIdentity(plan.argsDigest) ||
+      typeof plan.program !== 'string' || !plan.program.trim() || /[\0\r\n]/u.test(plan.program) ||
+      !target || target.kind !== 'provider' || !providerId || !sessionId ||
+      Object.keys(target).some(key => !['kind', 'providerId', 'sessionId', 'transcriptPath'].includes(key)) ||
+      target.transcriptPath !== undefined && !transcriptPath) throw new AgentMuxError(
+    'The original Runtime launch input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  return { kind: 'runtime-launch', lifecycleOperationId: plan.lifecycleOperationId, program: plan.program, argsDigest: plan.argsDigest,
+    nativeTarget: { kind: 'provider', providerId, sessionId, ...(transcriptPath === undefined ? {} : { transcriptPath }) } }
 }
 
 export function validateAgentPromptAdmissionIntent(value: unknown): AgentPromptAdmissionIntent {
@@ -123,6 +142,10 @@ export function agentPromptNotApplied(
   const submission = session.terminalPromptSubmission
   if (admission.transport === 'native') {
     return admission.native?.outcome === 'not-applied' && admission.intent.plan.kind === 'native-rpc' && !submission
+      ? { submissionId: admission.submissionId, run: { ...session.run } } : undefined
+  }
+  if (admission.transport === 'launch') {
+    return admission.launch.outcome === 'not-applied' && admission.intent.plan.kind === 'runtime-launch' && !submission
       ? { submissionId: admission.submissionId, run: { ...session.run } } : undefined
   }
   if (admission.intent.plan.kind === 'single-phase') {

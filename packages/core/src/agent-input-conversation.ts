@@ -17,7 +17,7 @@ export function parseAgentInputJournalCut(value: unknown): AgentInputJournalCut 
 
 export function parseAgentInputSubmissionObservation(value: unknown): AgentInputSubmissionObservation {
   const p = rpcRecord(value, ['status', 'observation'], 'INVALID_AGENT_INPUT_READ')
-  if (!['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown'].includes(p.status as string) ||
+  if (!['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'launch-carried', 'not-applied', 'unknown'].includes(p.status as string) ||
       !['owned', 'rejoin-needed', 'closed'].includes(p.observation as string)) throw new AgentMuxError(
     'The original input observation is invalid.', 'INVALID_AGENT_INPUT_READ')
   return { status: p.status as AgentInputSubmissionObservation['status'], observation: p.observation as AgentInputSubmissionObservation['observation'] }

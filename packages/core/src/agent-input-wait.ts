@@ -114,7 +114,7 @@ export type AgentInputSubmissionReceipt = {
   persistence: 'confirmed'
   control: AgentInputWaitControl
   admission: AgentPromptSubmissionRecord | null
-  status: 'waiting' | 'stopped' | 'terminal-confirmed' | 'admitted' | 'not-applied' | 'unknown'
+  status: 'waiting' | 'stopped' | 'terminal-confirmed' | 'admitted' | 'launch-carried' | 'not-applied' | 'unknown'
   observation: 'owned' | 'rejoin-needed' | 'closed'
 }
 /** Interpret the original owner receipt once for SDK and strict wire decoding.
@@ -135,6 +135,8 @@ export function agentInputSubmissionStatus(control: AgentInputWaitControl, admis
     claim.inputKey.expectedRun.runId === deliveryKey.expectedRun.runId &&
     agentPromptInputId(claim.inputKey) === agentPromptInputId(deliveryKey)
   if (linked && claim) {
+    if (claim.transport === 'launch') return claim.launch.outcome === 'launch-carried' && claim.acknowledged ? 'launch-carried'
+      : claim.launch.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
     if (claim.transport === 'native') return claim.native.outcome === 'admitted' && claim.acknowledged ? 'admitted'
       : claim.native.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
     const phases = admission?.terminalPromptSubmission, plan = claim.intent?.plan

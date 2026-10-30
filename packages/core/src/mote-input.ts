@@ -56,7 +56,7 @@ export type MoteInputObservation = {
   sourceStatus: 'pending' | 'confirmed' | 'unavailable' | 'self'
   issue: string | null
   input:
-    'unconfirmed' | 'waiting' | 'terminal-confirmed' | 'admitted' | 'stopped' | 'not-applied' | 'interaction-confirmed'
+    'unconfirmed' | 'waiting' | 'terminal-confirmed' | 'admitted' | 'launch-carried' | 'stopped' | 'not-applied' | 'interaction-confirmed'
   confirmedQuestion?: {
     source: { providerId: string; nativeSessionId: string }
     turnId: string
@@ -170,6 +170,7 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
       'waiting',
       'terminal-confirmed',
       'admitted',
+      'launch-carried',
       'stopped',
       'not-applied',
       'interaction-confirmed'

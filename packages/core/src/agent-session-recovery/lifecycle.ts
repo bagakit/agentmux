@@ -22,7 +22,7 @@ import { AgentMuxError } from '../errors.js'
 import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityRunEvidence, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
-import type { AgentCapabilitySnapshot, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
+import type { AgentCapabilitySnapshot, AgentLaunchPromptInputPlan, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
 import { agentCreationIntentDigest } from '../agent-creation-authority.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput, AgentMuxAgentResumeOperationInput } from './resume-contract.js'
 import { runRef, safeId, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from '../agent-runtime-helpers.js'
@@ -360,6 +360,22 @@ export class AgentSessionRunLifecycle {
     return { plan, deferredResumePrompt }
   }
 
+  /** Only the original input owner stores the launch outcome; observation failure keeps the Run usable. */
+  async settleContinuityMessageInput(operation: AgentMuxContinuityOperation,
+    result: { outcome: 'launch-carried'; run: AgentMuxRunRef } | { outcome: 'not-applied' | 'unknown' }): Promise<void> {
+    if (!operation.messageInput?.plan) return
+    try {
+      await this.ports.input.settleContinuityMessage(operation.messageInput, result)
+      if (operation.errorCode === 'AGENT_CONTINUITY_MESSAGE_RECEIPT_UNCONFIRMED') { delete operation.errorCode; delete operation.error }
+    } catch (error) {
+      operation.errorCode = 'AGENT_CONTINUITY_MESSAGE_RECEIPT_UNCONFIRMED'
+      operation.error = `The original message launch receipt is unconfirmed. Its input key and recovery operation are retained; inspect this same operation. ${error instanceof Error ? error.message : String(error)}`
+      this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: operation.agentSessionId,
+        code: operation.errorCode, message: operation.error,
+        evidence: { source: 'agentmux', observedAt: Date.now(), run: result.outcome === 'launch-carried' ? result.run : operation.previousRun } })
+    }
+  }
+
   async resumeAgentRun(
     input: AgentMuxAgentResumeOperationInput,
     expectedRun?: AgentMuxRunRef,
@@ -378,10 +394,14 @@ export class AgentSessionRunLifecycle {
     }
     if (resolutionHandoff && continuity) continuity = { ...continuity, kind: 'starting', reason: 'explicit-request' }
     const frozenInput = continuity?.launchInput
+    const frozenMessage = continuity?.messageInput
+    let messageInLaunch = Boolean(frozenMessage && frozenMessage.admissionIntent.kind !== 'native-conversation' && previous &&
+      this.ports.providers.providers.get(previous.providerId).catalog.promptDelivery !== 'post-launch-only')
     const composed = frozenInput ? { text: frozenInput.prompt, systemContext: frozenInput.message.systemContext }
+      : messageInLaunch ? { text: frozenMessage!.prompt, systemContext: frozenMessage!.message.systemContext }
       : composeAgentResumePrompt(input.prompt, input.agentMuxNote)
-    const prompt = composed.text || undefined
-    const message: AgentPromptMessageContent = frozenInput?.message ?? {
+    let prompt = composed.text || undefined
+    const message: AgentPromptMessageContent = frozenInput?.message ?? frozenMessage?.message ?? {
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
       ...(input.prompt?.trim() ? { userContent: input.prompt } : {})
     }
@@ -389,6 +409,8 @@ export class AgentSessionRunLifecycle {
       restartReservation ? 'restart' : reopening ? 'reopen' : 'resume', input.agentSessionId,
       safeId(input.operationId, 'Agent resume operation id')
     )
+    if (frozenMessage && frozenMessage.lifecycleOperationId !== lifecycleOperationId) throw new AgentMuxError(
+      'The recovery message belongs to another original lifecycle operation.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (!knownCapability) await this.ports.runtime.prepareExecutionEnvironment?.()
     let reservation = resolutionHandoff?.reservation ?? restartReservation ?? (reopening
       ? await this.ports.sessions.registry.reserveReopen(input.agentSessionId, reopening.expectedRetiredAt, lifecycleOperationId, input.operationId)
@@ -478,7 +500,8 @@ export class AgentSessionRunLifecycle {
         : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: 'resume', ...(prompt === undefined ? {} : { prompt }) })
       if (managedLaunch) plan = managedLaunch.plan
       if (managedLaunch?.promptDelivery === 'post-launch' && prompt) {
-        deferredResumePrompt = prompt
+        deferredResumePrompt = frozenMessage ? '' : prompt
+        if (frozenMessage) { messageInLaunch = false; prompt = undefined }
         if (continuity?.launchInput) {
           if (continuity.launchInput.state !== 'prepared' || continuity.launchInput.key || continuity.launchInput.launchPlan) throw new AgentMuxError(
             'The original input delivery plan was already dispatched or frozen. Its original receipt is retained.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -487,6 +510,8 @@ export class AgentSessionRunLifecycle {
           continuity.launchInput.delivery = 'post-launch'
         }
       }
+      if (frozenMessage?.plan && !messageInLaunch) throw new AgentMuxError(
+        'The original message launch cannot change to a different input transport.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const withoutPreviousNativeActor = { ...current }
       delete (withoutPreviousNativeActor as Partial<AgentMuxStoredAgentSession>).nativeActor
       const nativeSession = { ...withoutPreviousNativeActor, ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}) }
@@ -579,6 +604,13 @@ export class AgentSessionRunLifecycle {
           continuity.restartLaunch = identity
         }
         if (continuity.launchInput) continuity.launchInput.launchPlan = identity
+        if (continuity.messageInput && messageInLaunch) {
+          const messagePlan: AgentLaunchPromptInputPlan = { kind: 'runtime-launch', lifecycleOperationId,
+            nativeTarget: structuredClone(current.nativeHandle), ...identity }
+          if (continuity.messageInput.plan && !isDeepStrictEqual(continuity.messageInput.plan, messagePlan)) throw new AgentMuxError(
+            'The original message launch arguments or native target changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+          continuity.messageInput.plan = messagePlan
+        }
         continuity.evidence = ended
         const prepared = { ...nativeSession, continuity,
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
@@ -592,6 +624,16 @@ export class AgentSessionRunLifecycle {
           'The complete original resume dispatch was not durably retained. No Start was dispatched.', 'AGENT_RESUME_UNCONFIRMED')
         this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
+      if (continuity?.messageInput?.plan) {
+        try { await this.ports.input.claimContinuityMessage(continuity.messageInput, continuity.messageInput.plan) }
+        catch (error) {
+          if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
+            preserveUnconfirmedRun = true
+            await this.settleContinuityMessageInput(continuity, { outcome: 'unknown' })
+          }
+          throw error
+        }
+      }
       launchAttempted = true
       const run = await (dispatch
         ? this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, lifecycleOperationId, dispatch.runtime)
@@ -600,6 +642,7 @@ export class AgentSessionRunLifecycle {
           error.creationFailure.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
           preserveUnconfirmedRun = true
+          if (continuity) await this.settleContinuityMessageInput(continuity, { outcome: 'unknown' })
           const failure = new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
             reopening ? 'AGENT_REOPEN_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null },
             error instanceof AgentMuxError ? error.logId : undefined, { operationId: lifecycleOperationId, disposition: 'unknown' },
@@ -607,6 +650,7 @@ export class AgentSessionRunLifecycle {
           Object.defineProperty(failure, 'cause', { value: error })
           throw failure
         }
+        if (continuity) await this.settleContinuityMessageInput(continuity, { outcome: 'not-applied' })
         if (restartReservation && reservation.kind === 'resume') {
           const failure = { code: error.code, message: error.message, observedAt: Date.now() }
           reservation = await this.ports.sessions.registry.recordRestartStartNotApplied(reservation, failure)
@@ -625,6 +669,7 @@ export class AgentSessionRunLifecycle {
         }
         throw error
       })
+      if (continuity) await this.settleContinuityMessageInput(continuity, { outcome: 'launch-carried', run: runRef(run.runId) })
       this.ports.events.publishExecutableCheckFailure(provider.label, current.agentSessionId, lifecycleOperationId, originalExecutable, capability, run)
       const nativeBindingObservedAt = Date.now()
       const next: AgentMuxStoredAgentSession = {
@@ -827,6 +872,9 @@ export class AgentSessionRunLifecycle {
       this.ports.events.publishSession(readySession)
       await this.ports.events.publishCurrentRunState(readySession)
       if (preserveUnconfirmedRun) return this.ports.events.projectSession(readySession)
+      // The existing message owner either received this launch or remains waiting
+      // for its ordinary post-launch rejoin. Recovery never submits a second input.
+      if (continuity?.messageInput) return this.ports.events.projectSession(readySession)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
       let promptConfirmed = false
@@ -891,7 +939,7 @@ export class AgentSessionRunLifecycle {
         reason: 'operation-unconfirmed', evidence: { kind: 'run-unknown', observedAt: Date.now(),
           message: continuity.error ?? 'The original prepared Start and explicit resolution are retained. Retry the same manual operation.' }, continuity: structuredClone(continuity) }
     }
-    if (input.input !== undefined || input.timingOverride !== undefined) throw new AgentMuxError(
+    if (input.input !== undefined || input.messageInputRef !== undefined || input.timingOverride !== undefined) throw new AgentMuxError(
       'An unknown Start resolution cannot consume a new prompt or timing override. Preserve that input for its own operation.', 'AGENT_RESUME_RESOLUTION_REQUIRED')
     try {
       // A retained Run needs no fence. A new manual request still retains its safe relation to that exact original Start.
@@ -1012,6 +1060,12 @@ export class AgentSessionRunLifecycle {
           launched.launchPlan.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url'))) {
         throw new AgentMuxError('The original resume launch arguments are unconfirmed. The original Run and input are kept.', 'CONTINUITY_OPERATION_MISMATCH')
       }
+      const messagePlan = next.continuity.messageInput?.plan
+      if (messagePlan && (messagePlan.lifecycleOperationId !== reservation.operationId || messagePlan.program !== run.program ||
+          messagePlan.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url') ||
+          !matchesProviderNativeSessionTarget(messagePlan.nativeTarget, prepared.nativeHandle))) throw new AgentMuxError(
+        'The original message launch arguments or native target are unconfirmed. No input was repeated.', 'CONTINUITY_OPERATION_MISMATCH')
+      await this.settleContinuityMessageInput(next.continuity, { outcome: 'launch-carried', run: next.run })
       bindContinuityLaunchInput(next.continuity, next.run)
       const recoveryDelivery = createContinuityInputDelivery(next.continuity)
       if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery

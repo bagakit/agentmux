@@ -80,7 +80,7 @@ export function parsePendingMessage(value: unknown): AgentMuxPendingMessage {
   if (source.inputWait !== undefined) {
     const wait = rpcRecord(source.inputWait, ['ref', 'status', 'observation', 'controlState', 'stop']), ref = validateAgentInputWaitRef(wait.ref)
     if (ref.key.kind !== 'prompt' || ref.key.submissionId !== source.pendingId || ref.key.expectedRun.runId !== source.runId || source.editable ||
-        !['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown'].includes(wait.status as string) ||
+        !['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'launch-carried', 'not-applied', 'unknown'].includes(wait.status as string) ||
         !['owned', 'rejoin-needed', 'closed'].includes(wait.observation as string) ||
         !['enabled', 'stopped-before-dispatch', 'dispatch-authorized'].includes(wait.controlState as string)) throw new AgentMuxError('Pending Core input projection is invalid.', 'CONTROL_PROTOCOL_ERROR')
     if (wait.stop !== undefined) {

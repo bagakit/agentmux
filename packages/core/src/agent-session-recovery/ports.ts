@@ -3,7 +3,9 @@ import { type AgentTerminalFrontend } from '../agent-terminal-frontend.js'
 import { type AgentExecutableProbeContext } from '../executable-probe.js'
 import { AgentProviderRegistry, type AgentProvider } from '../agent-provider.js'
 import { type AgentCapabilityBinding } from '../agent-capability.js'
-import { type AgentInputSubmissionReceipt, type AgentInputCallContext } from '../agent-input-wait.js'
+import { type AgentInputSubmissionReceipt, type AgentInputCallContext, type AgentInputWaitRef } from '../agent-input-wait.js'
+import type { AgentMuxContinuityMessageInput } from './continuity-contract.js'
+import type { AgentLaunchPromptInputPlan } from '../types.js'
 import { AgentMuxClientEventPublisher } from '../client-event-publisher.js'
 import { type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from '../screen-evidence.js'
@@ -84,6 +86,10 @@ export type AgentSessionRecoveryPorts = {
   ): Record<string, string>;
   };
   input: {
+    prepareContinuityMessage(ref: AgentInputWaitRef, lifecycleOperationId: string): Promise<AgentMuxContinuityMessageInput>;
+    claimContinuityMessage(recipe: AgentMuxContinuityMessageInput, plan: AgentLaunchPromptInputPlan): Promise<void>;
+    settleContinuityMessage(recipe: AgentMuxContinuityMessageInput, result:
+      { outcome: 'launch-carried'; run: AgentMuxRunRef } | { outcome: 'not-applied' | 'unknown' }): Promise<void>;
     continueInitialInput(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
     assertCurrent?: () => Promise<void>): Promise<AgentMuxStoredAgentSession>;
     inspectAgentPromptSubmission(key: AgentPromptInputKey): Promise<import('../types.js').AgentPromptSubmissionRecord | null>;
