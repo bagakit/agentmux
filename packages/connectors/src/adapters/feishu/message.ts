@@ -62,7 +62,7 @@ export function feishuTextBody(content: string): string {
   return value.text
 }
 
-/** Inbound post at-nodes reference mention keys, not the outbound user-id namespace. */
+/** Inbound post at-nodes reference mention keys, not the outbound user-id namespace. Images retain an explicit unread position. */
 function postBody(content: string, mentions: FeishuMessageEvent['event']['message']['mentions'], botOpenId: string): { body: string; mentioned: boolean } {
   const parsed = object(JSON.parse(content))
   let post = parsed
@@ -79,12 +79,12 @@ function postBody(content: string, mentions: FeishuMessageEvent['event']['messag
     if (byKey.has(mention.key)) feishuFailure('FEISHU_CONTENT_INVALID')
     byKey.set(mention.key, mention)
   }
-  let mentioned = false
+  let mentioned = false, imageOrdinal = 0
   const paragraphs = post.content.map(paragraph => {
     if (!Array.isArray(paragraph)) feishuFailure('FEISHU_CONTENT_INVALID')
     return paragraph.map(value => {
       const node = object(value)
-      const fields = node.tag === 'text' ? ['tag', 'text', 'style', 'un_escape'] : node.tag === 'a' ? ['tag', 'text', 'href', 'style'] : node.tag === 'at' ? ['tag', 'user_id', 'user_name', 'style'] : []
+      const fields = node.tag === 'text' ? ['tag', 'text', 'style', 'un_escape'] : node.tag === 'a' ? ['tag', 'text', 'href', 'style'] : node.tag === 'at' ? ['tag', 'user_id', 'user_name', 'style'] : node.tag === 'img' ? ['tag', 'image_key', 'width', 'height', 'style'] : []
       if (!fields.length || Object.keys(node).some(key => !fields.includes(key)) || node.style !== undefined && (!Array.isArray(node.style) || node.style.some(style => !['bold', 'underline', 'lineThrough', 'italic'].includes(style)))) feishuFailure('FEISHU_CONTENT_INVALID')
       if (node.tag === 'text') {
         if (typeof node.text !== 'string' || node.un_escape !== undefined && node.un_escape !== false) feishuFailure('FEISHU_CONTENT_INVALID')
@@ -93,6 +93,10 @@ function postBody(content: string, mentions: FeishuMessageEvent['event']['messag
       if (node.tag === 'a') {
         if (typeof node.text !== 'string' || typeof node.href !== 'string' || !node.href) feishuFailure('FEISHU_CONTENT_INVALID')
         return `[${node.text}](${node.href})`
+      }
+      if (node.tag === 'img') {
+        const imageKey = feishuIdentity(node.image_key)
+        return `[Image ${++imageOrdinal} not read; original Feishu resource ${JSON.stringify(imageKey)}]`
       }
       const key = feishuIdentity(node.user_id), target = byKey.get(key)
       if (node.user_name !== undefined && typeof node.user_name !== 'string' || target?.name !== undefined && typeof target.name !== 'string') feishuFailure('FEISHU_CONTENT_INVALID')
