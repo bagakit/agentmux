@@ -192,6 +192,8 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 
 限制类改动按 [RED-LINES《时限与容量必须守真实边界》](../../RED-LINES.md#时限与容量必须守真实边界)验证依据与影响范围。测试从正常业务规模和保护的不变量选择输入，分别证明正常使用、真实越界或故障、其他健康能力以及原身份恢复；覆盖触发后的重试、取消和回执未知时，不能重新种入数据或换身份代签恢复。仅导入实现常量再断言第 `N + 1` 项拒绝，或把常量改大后测试仍绿，只能证明实现遵循自己的选择，不能证明该限制合理。拒绝分支的变异与资源成本检查仍保留，但不代替这些行为证据；按本次受影响的 owner 和消费者选场景，不增加全仓扫描或无关验收。
 
+默认测试必须自带可移植输入，不读取忽略的个人 Tracker 或要求原仓某条旧 Git 对象。Tracker/Git 守卫以临时目录、真实自建 Git commits 验证原 scanner 和 CLI 的正反行为；本机实际任务资料另用 `node scripts/audit-tracker-test-targets.mjs --root <repository>` 显式审计。它只检查已推进任务的无守卫 Vitest 点名目标，不代签完整 gate；缺资料或空扫描报告未确认，退出码 2，存在缺失目标退出码 1，完成且无缺失才为 0。
+
 扫描式契约测试必须先证明扫描有收获（如 `expect(found.size).toBeGreaterThan(0)`），再从来源反推约束，不维护与来源一起漂移的手写清单。豁免按具体选择器点名，不能全局放行某个数值。
 
 切片扫描还须证明起止锚点都存在（各自 `expect(index).toBeGreaterThan(-1)`），并断言切出来的内容确实是目标片段。`indexOf` 返回 `-1` 时，`slice` 可能产出空串，让每条 `not.toContain` 恒真。守护来源：[sliced-scan-surface-not-empty.test.ts](../../apps/desktop/test/sliced-scan-surface-not-empty.test.ts)。
