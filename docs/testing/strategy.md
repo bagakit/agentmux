@@ -50,7 +50,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | natural terminal retire | public CtxMux status 证明 Run 已 terminal 后只退休语义绑定，不伪造 Stop 成功 |
 | Codex terminal handshake | fake + real Codex 发出 terminal query；Core 只回复 flags 0 并持久化可恢复 Input receipt |
 | Prompt readiness epoch | Core 的 [screen evidence](../../packages/core/src/screen-evidence.ts) 经 [terminalContinuationSteps](../../packages/core/src/terminal-continuation.ts) 消费公开 continuation、ordered bytes 与 Resize。证明 active composer、精确 Run 的 epoch/CAS 和投递边界；历史文本或 handshake 不能伪造 composer。Gap、checkpoint 不可用或观察未知不得猜成 ready，也不得禁用健康 Agent 的原生终端；结构化能力受限时保留服务窗说明。 |
-| prompt crash recovery | payload 与 submit 各自使用确定性 operation id；Provider 分离实际 transport payload 与 TUI rendered logical text，只有当前 screen/cursor 的 composer 精确等于 renderedText 且 output 越过写入前 boundary 才发送 CR；bracketed paste 只由明确 Provider 选择，局部更新不要求重画 marker，历史同文、丢失 receipt 或进程 crash 都不能造成重复 payload/CR |
+| prompt crash recovery | 按[输入环境合同](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)分别验证人工当前终端、原生输入及原冻结计划：存在 payload／submit 的路径各自使用确定性 operation id，已确认阶段不重发，未知阶段只核对原受据；重启、历史同文和丢失 receipt 不得新增 payload/CR。终端展示观察只证明所选协议明确保证的事实，不作为人工当前终端的通用准入条件。 |
 | typed Agent interaction | Core 验证 exact Session/Run/request/option，拒绝未知、重复或不完整 response；ACP delivery 与 semantic settlement、Native recoverable Input claim 分开证明。普通 Prompt 在 pending interaction 期间受限，原生 `writeAgent` 输入仍可用，不能把 typed response 路径变成对健康终端的封锁。accepted/unknown 不等于批准，不自动重放。 |
 | terminal color capability | packed consumer 在父环境显式设置 `NO_COLOR=1`，真实 daemon/PTY child 仍观察到 `TERM=xterm-256color`、`COLORTERM=truecolor` 且 `NO_COLOR` 不存在 |
 | Terminal appearance query | Desktop Main 在 Renderer 未 attach 时识别完整及跨 chunk OSC 10/11 query，等待 Core 发布 ready Agent Session 后才经 Core → CtxMux Input 回复当前 shared palette，不能与 Core Terminal handshake 竞争 Input cursor；Renderer replay handler 消费旧 query 而不重复注入 |
@@ -202,6 +202,14 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 
 纯文档任务核对来源、有效链接、冲突与语义保全；职责重组或硬约束改写需独立评审。没有实现变更时不制造代码变异或产品调用者证据；混合任务的代码部分仍过原验收。规范见[文档事实与维护](../guides/document-truth-and-maintenance.md)。
 
+
+## Provider 输入边界回归
+
+行为真值只归[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)；本节规定如何验证，不另定义输入许可或 Provider 能力。
+
+- 通用 Core 回归从实际注册表取得 Provider 定义，验证集合非空，使用原终端编码和公共输入提交／查询 owner。对可选原生准备贡献注入失败后，核对原操作的准确目标、key、等待原因和未认领事实，确认没有转写终端或重放；再验证同一健康 Run 的独立人工输入可用，错 Run 仍拒绝。Runtime 字节端口与 Provider 协议端口的夹具边界明确记录。
+- Provider 自身的准入条件以其受支持协议逐项举证。构造附带观察缺失、但必要事实仍由准确原协议确认的正例，以及目标、权限或冻结对象真实变化的反例；通过实际消费者核对原操作、接纳与未知结果。移除真实能力隔离或对象核验后，对应业务断言必须变红。
+- 注册表驱动测试证明通用 Core 隔离边界；注入的原生端口不证明该 Provider 的真实 CLI 已有此能力。原生协议、版本与真实输入回执仍各自取得同源证据，不能从一种队列或一种终端计划推广到所有 Provider；缺少协议资格如实保持未知或未支持，不为取得绿灯增加隐藏输入通路。
 
 ## 工作面键盘与地址验证
 
