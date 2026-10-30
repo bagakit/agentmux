@@ -228,7 +228,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       const messageFacts = ({ eventId: _eventId, ...facts }: VerifiedIngressMessage) => facts
       if (originalMessage && !equal(messageFacts(JSON.parse(String(originalMessage.event_json))), messageFacts(event))) fail('INGRESS_MESSAGE_CONFLICT')
       const ingress = originalMessage ? this.read(String(originalMessage.ingress_id))! : parseConnectionIngressRecord({
-        ingressId: mintObjectId(), connectionId: input.connectionId, application: current.config.application,
+        ingressId: mintObjectId(), receivedAt: Date.now(), connectionId: input.connectionId, application: current.config.application,
         eventId: event.eventId, externalMessageId: event.messageId, externalConversationId: event.externalConversationId, actor: event.actor, body: event.body, ...(event.conversationKind === undefined ? {} : { conversationKind: event.conversationKind }),
         ...(event.conversationKind === 'group' ? { group: { target: this.freezeGroup(current.config.application, event.externalConversationId) } } : {}),
         ...(event.unsupportedContent ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'received' })

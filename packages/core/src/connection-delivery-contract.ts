@@ -69,6 +69,8 @@ export type ConnectionDelivery = {
   mapping?: ConnectionDeliveryMapping
   reason?: ConnectionDeliveryReason
   receipt?: ConnectionDeliveryReceipt
+  /** Local time the original message confirmation receipt was recorded, not platform send time. */
+  receiptObservedAt?: number
   retrySource?: ConnectionDeliveryRetrySource
   lastContinuation?: ConnectionDeliveryContinuation
   wait?: ConnectionDeliveryWait

@@ -33,6 +33,8 @@ export type ConnectionIngressAddressing = { replyToMessageId: string } & (
 export type ConnectionIngressMessage = {
   kind?: never
   ingressId: string
+  /** Local first durable custody of this unique native message, not Core dispatch time. */
+  receivedAt?: number
   /** Original authenticated receiver configuration, retained even when the Binding uses another local alias. */
   connectionId: string
   application: ConnectionApplication

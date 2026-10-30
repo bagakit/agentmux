@@ -2,6 +2,7 @@ import type { ConnectionDiagnosisTarget } from './connection-diagnosis-contract.
 import { sha256 } from '@noble/hashes/sha2.js'
 import type { ConversationCheckpoint } from './conversation-changes.js'
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
+import type { ConnectionActor } from './connections-contract.js'
 import { conversationRecordId, type ConversationContentRef, type ConversationSourceRef } from './conversation-stream.js'
 
 /** Original Core reader codes admitted at the cross-Session diagnostic edge. Never exception text. */
@@ -41,6 +42,10 @@ export function connectionDiagnosisEventKey(record: ConversationItemRef, event: 
 export function connectionDiagnosisGapKey(target: ConnectionDiagnosisTarget, originalGapId: string): string {
   return hash(['gap', [target.executionHostId, target.agentSessionId, target.bindingId, target.bindingRevision,
     target.connectionId, target.domain, target.appId, target.externalConversationId], originalGapId])
+}
+/** Equality with already-authorized members only; never an actor identity or access grant. */
+export function connectionDiagnosisActorKey(target: ConnectionDiagnosisTarget, actor: ConnectionActor): string {
+  return hash(['actor', target, actor])
 }
 function hash(value: unknown): string {
   const encoded = JSON.stringify(['connection-diagnosis-v1', value], (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)

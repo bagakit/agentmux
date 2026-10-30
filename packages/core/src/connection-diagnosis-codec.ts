@@ -3,7 +3,7 @@ import { parseConnectionObservation, parseConnectionReceiverObservation } from '
 import { parseConnectionServiceState } from './connection-service-codec.js'
 import { AgentMuxError } from './errors.js'
 import { parseIngressContextObservation } from './ingress-codec.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisIntake, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, connectionActivityWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisIntake, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis, type ConnectionGroupActivity } from './connection-diagnosis-contract.js'
 
 function fail(): never { throw new AgentMuxError('The bounded connection diagnosis is malformed or belongs to another target.', 'INVALID_CONNECTION_DIAGNOSIS') }
 function object(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -35,11 +35,12 @@ function reading<T>(value: unknown, parse: (value: unknown) => T): ConnectionDia
   return { value: nullable(p.value, parse), issue }
 }
 export function parseConnectionDiagnosisInput(value: unknown): ConnectionDiagnosisInput {
-  const p = object(value, ['executionHostId', 'agentSessionId', 'bindingId', 'bindingRevision', 'afterBindingId', 'after', 'afterContent', 'beforeIngressId'])
+  const p = object(value, ['executionHostId', 'agentSessionId', 'bindingId', 'bindingRevision', 'afterBindingId', 'after', 'afterContent', 'beforeIngressId', 'activity'])
   const result: ConnectionDiagnosisInput = { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId) }
   for (const key of ['bindingId', 'afterBindingId', 'beforeIngressId'] as const) if (p[key] !== undefined) result[key] = id(p[key])
   for (const key of ['after', 'afterContent'] as const) if (p[key] !== undefined) result[key] = text(p[key])
   if (p.bindingRevision !== undefined) result.bindingRevision = count(p.bindingRevision, 1)
+  if (p.activity !== undefined) { if (p.activity !== true || !result.bindingId) return fail(); result.activity = true }
   if (!result.bindingId && ['bindingRevision', 'after', 'afterContent', 'beforeIngressId'].some(key => p[key] !== undefined) || result.bindingId && result.afterBindingId) return fail()
   return result
 }
@@ -60,8 +61,38 @@ function sourceGap(value: unknown) {
   return { gapKey: fingerprint(g.gapKey), reason: member(g.reason, ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const),
     code, codeRecorded, association: association(g.association), sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
 }
+function activity(value: unknown): ConnectionGroupActivity {
+  const p = object(value, ['limit', 'incoming', 'outgoing'])
+  if (p.limit !== connectionActivityWindowLimit) return fail()
+  const window = (p: Record<string, unknown>) => {
+    const examined = count(p.examined), included = count(p.included)
+    if (examined > connectionActivityWindowLimit || included > examined) return fail()
+    return { examined, included, more: bool(p.more) }
+  }
+  const incoming = reading(p.incoming, value => {
+    const p = object(value, ['examined', 'included', 'more', 'latest', 'actors']), w = window(p)
+    const actors = array(p.actors, value => { const a = object(value, ['actorKey', 'messages']); return { actorKey: fingerprint(a.actorKey), messages: count(a.messages, 1) } }, connectionActivityWindowLimit)
+    if (new Set(actors.map(a => a.actorKey)).size !== actors.length || actors.reduce((sum, a) => sum + a.messages, 0) !== w.included) return fail()
+    const latest = nullable(p.latest, value => { const p = object(value, ['ingressId', 'state', 'receivedAt']); return { ingressId: id(p.ingressId), state: member(p.state, ['received', 'refused', 'claimed'] as const), receivedAt: nullable(p.receivedAt, count) } })
+    if ((w.included === 0) !== (latest === null)) return fail()
+    return { ...w, latest, actors }
+  })
+  const outgoing = reading(p.outgoing, value => {
+    const p = object(value, ['examined', 'included', 'more', 'latest']), w = window(p)
+    const latest = nullable(p.latest, value => {
+      const p = object(value, ['operationId', 'state', 'receipt', 'receiptObservedAt']), receipt = nullable(p.receipt, value => member(value, ['confirmed', 'unknown', 'not-applied'] as const))
+      const receiptObservedAt = nullable(p.receiptObservedAt, count)
+      if (receiptObservedAt !== null && receipt !== 'confirmed') return fail()
+      return { operationId: id(p.operationId), state: member(p.state, ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const), receipt, receiptObservedAt }
+    })
+    if ((w.included === 0) !== (latest === null)) return fail()
+    return { ...w, latest }
+  })
+  return { limit: connectionActivityWindowLimit, incoming, outgoing }
+}
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
-  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'publicationRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
+  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming', 'activity']), t = object(p.target, ['bindingId', 'bindingRevision', 'publicationRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
+  if ((p.activity !== undefined) !== (request.activity === true)) return fail()
   const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), publicationRevision: count(t.publicationRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
   if (target.publicationRevision > target.bindingRevision) return fail()
   if (target.executionHostId !== request.executionHostId || target.agentSessionId !== request.agentSessionId || request.bindingId && target.bindingId !== request.bindingId || request.bindingRevision && target.bindingRevision !== request.bindingRevision || p.limit !== connectionDiagnosisWindowLimit) return fail()
@@ -119,7 +150,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
     if (new Set(rows.map(row => row.ingressId)).size !== rows.length) return fail()
     return { beforeIngressId: nullable(page.beforeIngressId, id), next: nullable(page.next, id), rows }
   })
-  return { target, window: { ...(request.after ? { after: request.after } : {}), ...(request.afterContent ? { afterContent: request.afterContent } : {}), ...(request.beforeIngressId ? { beforeIngressId: request.beforeIngressId } : {}) }, limit: connectionDiagnosisWindowLimit, adapterService, connection, binding, outgoing, incoming }
+  return { target, window: { ...(request.after ? { after: request.after } : {}), ...(request.afterContent ? { afterContent: request.afterContent } : {}), ...(request.beforeIngressId ? { beforeIngressId: request.beforeIngressId } : {}) }, limit: connectionDiagnosisWindowLimit, adapterService, connection, binding, outgoing, incoming, ...(p.activity === undefined ? {} : { activity: activity(p.activity) }) }
 }
 export function parseConnectionDiagnosis(value: unknown, input: ConnectionDiagnosisInput): ConnectionDiagnosis {
   const p = object(value, ['target', 'service', 'groups']), target = parseConnectionDiagnosisInput(p.target)

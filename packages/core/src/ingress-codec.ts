@@ -73,7 +73,8 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
     if (!/^[a-f0-9]{64}$/u.test(text(input.intentDigest)) || author.connectionId !== base.connectionId || !equal(author.actor, base.actor) || author.externalConversationId !== base.externalConversationId || author.sourceMessageId !== base.sourceMessageId || author.actionRef !== base.actionRef) fail()
     return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(input.operationId), intentDigest: text(input.intentDigest), author, ...(input.responseKind === 'question' ? { responseKind: 'question' as const } : {}) } }
   }
-  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing', 'group'])
+  const p = object(value, ['ingressId', 'receivedAt', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing', 'group'])
+  if (p.receivedAt !== undefined && (!Number.isSafeInteger(p.receivedAt) || Number(p.receivedAt) < 0)) fail()
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
   const application = { domain: text(app.domain), appId: text(app.appId) }
   if (!equal(actor.application, application) || typeof p.body !== 'string' || p.state !== 'received' && p.state !== 'refused' && p.state !== 'claimed') fail()
@@ -94,7 +95,7 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
       group = { target, ...(recording ? { recording } : {}), ...(g.recorded === undefined ? {} : { recorded: parseExternalConversationReceipt(g.recorded, { agentSessionId: target.agentSessionId, ingressId: base.ingressId, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}) }) }) }
     }
   }
-  const projected = { ...base, ...(group === undefined ? {} : { group }) }
+  const projected = { ...base, ...(p.receivedAt === undefined ? {} : { receivedAt: p.receivedAt as number }), ...(group === undefined ? {} : { group }) }
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...projected, state: 'refused', code: text(p.code) } }
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received', ...(p.code === undefined ? {} : { code: text(p.code) }) } }
   if (p.code !== undefined) fail()

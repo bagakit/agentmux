@@ -5,11 +5,26 @@ import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDelivery
 import type { AgentInputSubmissionReceipt, AgentInputWaitReason } from './agent-input-wait.js'
 
 export const connectionDiagnosisWindowLimit = 5
+/** A requested activity snapshot, not the diagnostic receipt page or a lifetime count. */
+export const connectionActivityWindowLimit = 50
 export type ConnectionDiagnosisWindow = { after?: string; afterContent?: string; beforeIngressId?: string }
 export type ConnectionDiagnosisInput = ConnectionDiagnosisWindow & {
   executionHostId: string; agentSessionId: string; bindingId?: string; bindingRevision?: number; afterBindingId?: string
+  activity?: true
 }
 export type ConnectionDiagnosisReading<T> = { value: T | null; issue: 'read-unavailable' | 'target-unconfirmed' | null; retained?: true }
+export type ConnectionGroupActivity = {
+  limit: number
+  incoming: ConnectionDiagnosisReading<{
+    examined: number; included: number; more: boolean
+    latest: { ingressId: string; state: 'received' | 'refused' | 'claimed'; receivedAt: number | null } | null
+    actors: Array<{ actorKey: string; messages: number }>
+  }>
+  outgoing: ConnectionDiagnosisReading<{
+    examined: number; included: number; more: boolean
+    latest: { operationId: string; state: ConnectionDelivery['state']; receipt: NonNullable<ConnectionDelivery['receipt']>['state'] | null; receiptObservedAt: number | null } | null
+  }>
+}
 export type ConnectionDiagnosisTarget = {
   bindingId: string; bindingRevision: number; publicationRevision: number; connectionId: string; domain: string; appId: string
   externalConversationId: string; executionHostId: string; agentSessionId: string
@@ -45,6 +60,7 @@ export type ConnectionDiagnosisIntake = {
 }
 export type ConnectionGroupDiagnosis = {
   target: ConnectionDiagnosisTarget; window: ConnectionDiagnosisWindow; limit: number
+  activity?: ConnectionGroupActivity
   adapterService: ConnectionDiagnosisReading<{ adapterId: string; enabled: boolean; revision: number }>
   connection: ConnectionDiagnosisReading<{ revision: number; enabled: boolean; receiver?: ConnectionReceiverObservation } & ConnectionObservation>
   binding: ConnectionDiagnosisReading<{ state: 'active' | 'paused' | 'detached'; currentRevision: number | null; scope: RoomBindingScope; activeInputGrants: number; activeAnswerGrants: number; activePermissionGrants: number }>

@@ -1642,7 +1642,7 @@ export class PublicationStore {
         throw new AgentMuxError('The platform did not confirm the original exact message mapping.', 'PUBLICATION_RECEIPT_CONFLICT')
       const { reason: _reason, ...retained } = original
       let settled: PublicationOperation = result.state === 'confirmed'
-        ? { ...retained, state: 'confirmed', mapping: result.mapping, receipt: result }
+        ? { ...retained, state: 'confirmed', mapping: result.mapping, receipt: result, receiptObservedAt: Date.now() }
         : { ...retained, state: result.state, reason: result.reason, receipt: result }
       if (result.state === 'not-applied' && result.reason === 'rate-limited') {
         const observed = publicationRateLimitObservation(attempt, advice, original.rateLimitScopes)

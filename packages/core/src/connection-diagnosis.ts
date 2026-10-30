@@ -1,4 +1,4 @@
-import { connectionDiagnosisGapKey, connectionDiagnosisEventKey, connectionDiagnosisRecordKey, connectionDiagnosisSourceKey, connectionDiagnosisPartKey } from './connection-diagnosis-source.js'
+import { connectionDiagnosisGapKey, connectionDiagnosisEventKey, connectionDiagnosisRecordKey, connectionDiagnosisSourceKey, connectionDiagnosisPartKey, connectionDiagnosisActorKey } from './connection-diagnosis-source.js'
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
 import type { ConnectionDeliveryGap } from './connection-delivery-contract.js'
 import type { ConnectionDelivery } from './connection-delivery-contract.js'
@@ -6,7 +6,7 @@ import type { ConnectionIngressRecord } from './ingress-contract.js'
 import { roomPublicationReference, sameRoomPublication, type RoomBinding } from './room-binding-contract.js'
 import type { ConnectionPort } from './connections-contract.js'
 import { parseConnectionServiceResult } from './connection-service-codec.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, connectionActivityWindowLimit, type ConnectionGroupActivity, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
 
 export const groupWindowLimit = connectionDiagnosisWindowLimit
 export function groupTarget(binding: RoomBinding) {
@@ -53,7 +53,7 @@ const intakeCode = (value?: string) => intakeCodes.find(code => code === value) 
 const recordingCode = (value?: string) => connectionDiagnosisRecordingCodes.find(code => code === value)
 
 /** One explicit bounded local window. None of these original read ports dispatches an effect. */
-async function readGroup(owner: ConnectionPort, target: GroupTarget, window: GroupWindow = {}): Promise<ConnectionGroupDiagnosis> {
+async function readGroup(owner: ConnectionPort, target: GroupTarget, window: GroupWindow = {}, activity = false): Promise<ConnectionGroupDiagnosis> {
   const [connection, binding, outgoing, incoming] = await Promise.all([
     reading(() => owner.inspect({ connectionId: target.connectionId })),
     reading(() => owner.bindings!.inspect({ bindingId: target.bindingId })),
@@ -119,8 +119,48 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       coverage: outgoing.value!.coverage ? { state: outgoing.value!.coverage.state, nextContent: outgoing.value!.coverage.nextContent,
         gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapKey: connectionDiagnosisGapKey(target, gap.gapId), reason: gap.reason, association: association({ hostId: b?.sourceFrontier?.sourceHostId ?? target.executionHostId, agentSessionId: target.agentSessionId }, gap), code: connectionDiagnosisSourceCodes.find(code => code === gap.code) ?? null, codeRecorded: gap.code !== undefined, sourceKind: (gap.source ?? (gap.record ?? gap.part?.record)?.source)?.kind ?? null })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
       issue: outgoing.issue ?? (scopedOutgoing ? null : 'target-unconfirmed' as const) },
-    incoming: { value: incoming.value && incoming.value.ingresses.every(row => ingressMatches(row, target)) ? { beforeIngressId: window.beforeIngressId ?? null, next: incoming.value.nextBeforeIngressId, rows: intake } : null, issue: incoming.issue ?? (incoming.value?.ingresses.every(row => ingressMatches(row, target)) ? null : 'target-unconfirmed' as const) }
+    incoming: { value: incoming.value && incoming.value.ingresses.every(row => ingressMatches(row, target)) ? { beforeIngressId: window.beforeIngressId ?? null, next: incoming.value.nextBeforeIngressId, rows: intake } : null, issue: incoming.issue ?? (incoming.value?.ingresses.every(row => ingressMatches(row, target)) ? null : 'target-unconfirmed' as const) },
+    ...(activity ? { activity: await readActivity(owner, target, sameBinding ? b : null) } : {})
   }
+}
+
+/** One opt-in retained-record window. It never reads Core inputs, native history, or past the window to fill filtered results. */
+async function readActivity(owner: ConnectionPort, target: GroupTarget, binding: RoomBinding | null): Promise<ConnectionGroupActivity> {
+  if (!binding) return { limit: connectionActivityWindowLimit, incoming: { value: null, issue: 'target-unconfirmed' }, outgoing: { value: null, issue: 'target-unconfirmed' } }
+  const revisions = new Map<number, Promise<boolean>>()
+  async function originalRevision(revision: number): Promise<boolean> {
+    if (revision === binding!.revision) return true
+    let read = revisions.get(revision)
+    if (!read) { read = owner.bindings!.inspect({ bindingId: binding!.bindingId, revision }).then(value => !!value.binding && sameRoomPublication(value.binding, binding!)); revisions.set(revision, read) }
+    return read
+  }
+  const [incoming, outgoing] = await Promise.all([
+    reading(async () => {
+      const page = await owner.ingress!.listAudience!({ application: binding.application, externalConversationId: binding.externalConversationId, limit: connectionActivityWindowLimit })
+      const included: Array<Extract<ConnectionIngressRecord, { kind?: never }>> = []
+      for (const row of page.ingresses) {
+        if (row.kind === 'action' || !ingressMatches(row, target)) continue
+        const frozen = row.group?.target
+        if (!frozen || frozen.bindingId !== target.bindingId || frozen.connectionId !== target.connectionId || frozen.hostId !== target.executionHostId || frozen.agentSessionId !== target.agentSessionId || !await originalRevision(frozen.bindingRevision)) continue
+        if (row.input && (row.input.hostId !== target.executionHostId || row.input.agentSessionId !== target.agentSessionId || row.input.author.bindingId !== target.bindingId || row.input.author.connectionId !== target.connectionId || !await originalRevision(row.input.author.bindingRevision))) continue
+        included.push(row)
+      }
+      const actors = new Map<string, number>()
+      for (const row of included) { const key = connectionDiagnosisActorKey(target, row.actor); actors.set(key, (actors.get(key) ?? 0) + 1) }
+      const latest = included[0]
+      return { examined: page.ingresses.length, included: included.length, more: page.nextBeforeIngressId !== null,
+        latest: latest ? { ingressId: latest.ingressId, state: latest.state, receivedAt: latest.receivedAt ?? null } : null,
+        actors: [...actors].map(([actorKey, messages]) => ({ actorKey, messages })) }
+    }),
+    reading(async () => {
+      const page = await owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.publicationRevision, limit: connectionActivityWindowLimit, order: 'newest' })
+      const included = page.deliveries.filter(row => deliveryMatches(row, target) && row.effect === 'upsert' && ['native', 'captured'].includes(row.reference.source.kind) && recordMatches(row.reference, target, binding.sourceFrontier?.sourceHostId))
+      const latest = included[0]
+      return { examined: page.deliveries.length, included: included.length, more: page.next !== null,
+        latest: latest ? { operationId: latest.operationId, state: latest.state, receipt: latest.receipt?.state ?? null, receiptObservedAt: latest.receipt?.state === 'confirmed' ? latest.receiptObservedAt ?? null : null } : null }
+    })
+  ])
+  return { limit: connectionActivityWindowLimit, incoming, outgoing }
 }
 
 /** Read original local owners directly; only this projection, never their private DTOs, crosses the diagnostic edge. */
@@ -137,7 +177,7 @@ export async function readConnectionDiagnosis(owner: ConnectionPort, input: Conn
   const before = input.afterBindingId ? sorted.findIndex(binding => binding.bindingId === input.afterBindingId) : -1
   if (input.afterBindingId && before < 0) return { target: { ...input }, service, groups: { value: null, issue: 'target-unconfirmed' } }
   const selected = sorted.slice(before + 1, before + 1 + groupWindowLimit)
-  const items = await Promise.all(selected.map(binding => readGroup(owner, groupTarget(binding), input)))
+  const items = await Promise.all(selected.map(binding => readGroup(owner, groupTarget(binding), input, input.activity === true)))
   return { target: { ...input }, service, groups: { value: { items, nextBindingId: sorted.length > before + 1 + selected.length ? selected.at(-1)!.bindingId : null }, issue: null } }
 }
 /** Keep explicitly labelled earlier observations after a local read failure, never under another target or page. */
