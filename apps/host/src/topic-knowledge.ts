@@ -415,7 +415,7 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
       }
       case 'topic.category.rename': {
         const category = await this.readCategory(p.categoryId as string), content = await boundedFile(join(category.directoryPath, 'category.md'), 65536)
-        const updated = content.replace(/^#\s+.+$/mu, `# ${(p.title as string).trim()}`)
+        const updated = content.replace(/^#\s+.+$/mu, () => `# ${(p.title as string).trim()}`)
         await this.save(category.directoryPath, 'category.md', updated, p.expectedRevision as string)
         const renamed = await this.readCategory(category.categoryId)
         await this.spatialPort().ensureCategory(renamed)

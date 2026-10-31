@@ -18,6 +18,21 @@ const resource = (value: unknown): SpatialJson => JSON.parse(JSON.stringify(valu
 const emptyGraph = (): AgentMuxSpatialGraph => ({ spaces: [], zones: [], bindings: [], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {} })
 function error(message: string, code: string): never { throw new AgentMuxError(message, code) }
 
+/** Classifying content cannot replace its original Core identity, even if SOUL is missing. */
+function assertKnowledgeTopicIdentity(graph: AgentMuxSpatialGraph, workspace: WorkspaceRecord, topic: ScratchTopicSnapshot): void {
+  const contentId = topicContentSpaceId(workspace, topic)
+  const original = graph.resources['zone:' + topicContentZoneId(workspace, topic)]
+  if (graph.spaces.some(space => space.spaceId === contentId && space.kind === 'mote') ||
+    original && typeof original === 'object' && !Array.isArray(original) && original.contentKind === 'mote')
+    error('The original Core identity belongs to a Mote. Its workface and content are retained; inspect its original identity before changing its classification.', 'TOPIC_TARGET_IS_MOTE')
+  if (original !== undefined && (!original || typeof original !== 'object' || Array.isArray(original) ||
+    original.contentKind !== undefined && original.contentKind !== 'topic' ||
+    original.topicId !== undefined && original.topicId !== topic.id ||
+    original.workspaceId !== undefined && original.workspaceId !== workspace.id ||
+    original.spaceId !== undefined && original.spaceId !== contentId))
+    error('The original content identity contradicts this Topic. Inspect its original identity; its workface and content are retained.', 'TOPIC_IDENTITY_UNCONFIRMED')
+}
+
 export function registerTopicCategory(graph: AgentMuxSpatialGraph, category: TopicCategory): void {
   const fact = categorySpaceFact(category)
   const index = graph.spaces.findIndex(space => space.spaceId === category.spaceId)
@@ -122,15 +137,7 @@ export class TopicSpatialOwner implements TopicSpatialPort {
     const category = categoryId ? (await this.ports.categories()).find(category => category.categoryId === categoryId) : await this.ports.ensureDefaultCategory()
     if (!category || category.readError) error('The exact Topic Category is unavailable. Original content is retained.', 'TOPIC_CATEGORY_UNAVAILABLE')
     const current = await this.ports.state.read(), graph = structuredClone(current?.graph ?? emptyGraph())
-    const original = graph.resources['zone:' + topicContentZoneId(this.ports.workspace(), topic)]
-    if (graph.spaces.some(space => space.kind === 'mote' && space.topicId === topic.id) ||
-      original && typeof original === 'object' && !Array.isArray(original) && original.contentKind === 'mote')
-      error('The original Core identity belongs to a Mote. Its workface and content are retained.', 'TOPIC_TARGET_IS_MOTE')
-    if (original !== undefined && (!original || typeof original !== 'object' || Array.isArray(original) ||
-      original.contentKind !== undefined && original.contentKind !== 'topic' ||
-      original.topicId !== undefined && original.topicId !== topic.id ||
-      original.workspaceId !== undefined && original.workspaceId !== this.ports.workspace().id))
-      error('The original content identity contradicts this Topic. Inspect its original identity; its workface and content are retained.', 'TOPIC_IDENTITY_UNCONFIRMED')
+    assertKnowledgeTopicIdentity(graph, this.ports.workspace(), topic)
     registerKnowledgeTopic(graph, this.ports.workspace(), topic, category)
     if (JSON.stringify(graph) !== JSON.stringify(current?.graph)) await this.ports.state.commit({ expectedRevision: current?.revision ?? 0, graph, allowEntityRemoval: true })
     return this.inspect(topic)
@@ -142,6 +149,7 @@ export class TopicSpatialOwner implements TopicSpatialPort {
     if (!topic || !isKnowledgeTopic(topic)) error('An exact ordinary Topic is required; the existing object is retained.', 'TOPIC_TARGET_UNKNOWN')
     if (topic.readError || !category || category.readError) error('Topic or Category content is unavailable. Its original membership is retained.', 'TOPIC_CONTENT_UNAVAILABLE')
     const zoneId = topicContentZoneId(this.ports.workspace(), topic), graph = structuredClone(state?.graph ?? emptyGraph())
+    assertKnowledgeTopicIdentity(graph, this.ports.workspace(), topic)
     const categoryIds = new Set([...categories, ...categoriesFromSpatial(graph)].map(category => category.spaceId))
     const previousCategorySpaceIds = graph.bindings.filter(binding => binding.zoneId === zoneId && categoryIds.has(binding.spaceId)).map(binding => binding.spaceId)
     registerKnowledgeTopic(graph, this.ports.workspace(), topic, category)
