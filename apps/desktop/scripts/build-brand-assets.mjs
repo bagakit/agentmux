@@ -85,6 +85,7 @@ async function main() {
   await resizeTo(128, outRendererIcon)
   await resizeTo(512, outBotIcon)
   await buildIcns()
+  await resizeTo(1024, join(repositoryRoot, 'apps/mobile/ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png'))
   const relSource = relative(desktopRoot, sourceIcon)
   const relResources = relative(desktopRoot, resourcesDir)
   process.stdout.write(`brand assets derived from ${relSource} -> ${relResources}/{icon.png, icon-128.png, icon-512.png, icon.icns}\n`)

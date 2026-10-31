@@ -37,7 +37,7 @@ import { getDeviceWorkface, type Navigation } from './recovery/device-workface'
 import { MobileRecoveryPanel } from './recovery/MobileRecoveryPanel'
 import { exportNativeWorkfaceFile } from './platform/native/workface-file'
 
-import brandIcon from './assets/dragon.png'
+import { BrandIcon } from '@agentmux/client-ui/components/BrandIcon'
 import { MobileIdentity, type MobileObjectIdentity } from './navigation/MobileIdentity'
 import { MobilePrimaryNavigation } from './navigation/MobilePrimaryNavigation'
 import type { MobileSpatialContext } from './navigation/MobileSpatialNavigation'
@@ -548,7 +548,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       </div> : <>
         {workspaceVisible && showSession ? <IconButton className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></IconButton> : <span className="mobile-header-spacer" />}
         {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
-          : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
+          : <div className="mobile-brand"><BrandIcon icon={hostAppearance.appIcon} className="mobile-brand-icon" size={24} /><span>AgentMux</span></div>}
         {showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />{terminalToggle}<IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
@@ -564,7 +564,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" onClick={() => setSheet('team')}>团队{team?.members.some(member => member.request) ? ' · 需要你' : ''}</button>
     </nav> : null}
     <main className="mobile-main" tabIndex={-1}>
-      {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
+      {!workspaceVisible && <section className="mobile-connect-page"><BrandIcon icon={hostAppearance.appIcon} className="mobile-connect-dragon" size={150} alt="AgentMux" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
         <MobileNotice owner={client} identity={[connection.state,connection.issue]} className="mobile-spatial-notice">{connection.message}</MobileNotice>{connectionPanel}
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><ThemeObjectConnectionIcon size={16} />连接详情</button>
@@ -613,7 +613,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartDone.current = false; chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
         </div>}
         {welcomeVisible && moteTarget && objectIdentity && !historyVisible && <MobileMoteConversationStart key={JSON.stringify(moteTarget)} client={client} target={moteTarget} identity={{ ...objectIdentity, mote: { ...objectIdentity.mote!, appearance: team?.appearance ?? objectIdentity.mote?.appearance } }}
-          platform={platform} visible={exposed && conversationVisible} mode={moteStart?.mode ?? 'start'} dialogue={moteDialogue} automatic={moteStart?.automatic}
+          platform={platform} visible={exposed && conversationVisible} appIcon={hostAppearance.appIcon} mode={moteStart?.mode ?? 'start'} dialogue={moteDialogue} automatic={moteStart?.automatic}
           onAutomaticConsumed={id => setMoteStart(current => current?.automatic?.decision.queryOperationId === id ? { spaceId: current.spaceId, mode: current.mode } : current)}
           memberName={reference => { const member = team?.members.find(member => member.hostId === reference.hostId && member.sessionId === reference.sessionId); return member && member.name !== member.sessionId ? member.name : undefined }}
           onConfigure={() => openProfile(objectIdentity)} onBound={() => { teamReading.refresh(); moteDialogue.refresh() }}

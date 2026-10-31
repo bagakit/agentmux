@@ -6,7 +6,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import { MoteMainActions, type MoteStartActions } from './MoteMainActions'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
-import brandArt from '../../../../brand/icon-source.png'
+import { BrandIcon } from './BrandIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { useAppStore } from '../store'
 import { useLauncherState } from '../lib/launcher-state'
@@ -86,7 +86,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
       mode={state.reading && !state.reading.issue ? mode : 'unconfirmed'}
       portrait={<SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
         avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={active} />}
-      brand={<img src={brandArt} alt="" />}
+      brand={<BrandIcon size={128} />}
       actions={<button type="button" className="mote-start__settings" onClick={onConfigure} aria-label="Mote 快捷配置">设置</button>}
       composer={<AgentComposer value={draft} disabled={false} active={active} placeholder="写下你想聊的事…"
         onChange={value => { edits.current++; useLauncherState.getState().setDraft(key, 'prompt', value) }}

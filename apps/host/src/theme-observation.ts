@@ -4,8 +4,10 @@ import type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort, 
 import { AgentMuxError } from '@agentmux/core'
 import type { AppAppearanceId, TerminalThemeId } from '@agentmux/client-ui/theme'
 import { terminalPalette } from '@agentmux/client-ui/theme'
+import { DEFAULT_APP_ICON, isAppIconId } from '@agentmux/client-ui/app-icon-catalog'
 import { isDeepStrictEqual } from 'node:util'
-export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown> } }
+/** A brand choice may be newer than this client; it must not invalidate the independently readable theme. */
+export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown>; appIcon?: unknown } }
 export type ThemeConfigurationReader = {
   inspect<T>(capture: (current: ThemeConfiguration) => T): Promise<T>
   subscribe(listener: (saved: ThemeConfiguration, previous: ThemeConfiguration) => void, onFailure?: (error: Error) => void): () => void
@@ -16,18 +18,23 @@ function projection(config: ThemeConfiguration) {
   const custom = config.appearance.customThemes ?? {}
   const catalog = getThemeCatalog(Object.hasOwn(custom, requested) ? { [requested]: custom[requested] } : {})
   const selected = catalog.items.find(item => item.id === requested) ?? catalog.items[0]!
+  const appIcon = config.appearance.appIcon
   return {
     values: { themeId: selected.id, appAppearance: config.appearance.appAppearance ?? 'dark', theme: selected.value,
+      // Keep unsupported string identities. Other malformed JSON becomes an explicit unsupported value, not a replacement default.
+      appIcon: appIcon === undefined ? DEFAULT_APP_ICON : typeof appIcon === 'string' ? appIcon : null,
       terminalTheme: config.appearance.terminalTheme,
       ...(config.appearance.terminalTheme === 'workspace' ? {} : { terminalPalette: terminalPalette(config.appearance.terminalTheme) }) } as AgentMuxControlSettingsResourceFields,
-    issues: [...catalog.issues.filter(issue => issue.id === requested), ...(selected.id === requested ? [] : [
+    issues: [...catalog.issues.filter(issue => issue.id === requested), ...(appIcon === undefined || isAppIconId(appIcon) ? [] : [
+      { id: 'app-icon', message: 'The selected App icon is unsupported. Clients retain their last confirmed brand; choose an App icon in Appearance.' }
+    ]), ...(selected.id === requested ? [] : [
       { id: requested, message: 'Selected theme is unavailable. Graphite remains usable; choose or import a valid theme in Appearance.' }
     ])]
   }
 }
 function relevantChanged(next: ThemeConfiguration, previous: ThemeConfiguration): boolean {
   const a = next.appearance, b = previous.appearance
-  if (a.themeId !== b.themeId || a.appAppearance !== b.appAppearance || a.terminalTheme !== b.terminalTheme) return true
+  if (a.themeId !== b.themeId || a.appAppearance !== b.appAppearance || a.terminalTheme !== b.terminalTheme || !isDeepStrictEqual(a.appIcon, b.appIcon)) return true
   const id = a.themeId ?? DEFAULT_THEME_ID
   return !isDeepStrictEqual(a.customThemes?.[id], b.customThemes?.[id])
 }

@@ -14,7 +14,8 @@ import { MobileMoteStartPortrait } from './MobileMoteStartPortrait'
 import { MobileMoteMainActions, type MobileMoteMainStartState, type MobileMoteStartQuery } from './MobileMoteMainActions'
 import type { MobileMoteDialogue } from '../conversation/MobileMoteConversation'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
-import brandIcon from '../assets/dragon.png'
+import { BrandIcon } from '@agentmux/client-ui/components/BrandIcon'
+import type { AppIconId } from '@agentmux/client-ui/app-icon-catalog'
 
 type AutomaticQuery = import('../conversation/mote-main-input').MobileMoteRolloverQuery
 function AutomaticStart({ state, query, begin }: { state: MobileMoteMainStartState; query: AutomaticQuery | undefined; begin(state: MobileMoteMainStartState, query: AutomaticQuery): void }) {
@@ -46,8 +47,9 @@ export function mobileMoteStartHistory(links: readonly MoteDialogueLink[], membe
 }
 
 /** Welcome is a view over the existing Device draft and Core setup intent, never a new input queue. */
-export function MobileMoteConversationStart({ client, target, identity, platform, visible, mode = 'start', dialogue, onConfigure, onBound, onOpenMain, onOpenPeriod, automatic, onAutomaticConsumed, memberName }: {
+export function MobileMoteConversationStart({ client, target, identity, platform, visible, appIcon, mode = 'start', dialogue, onConfigure, onBound, onOpenMain, onOpenPeriod, automatic, onAutomaticConsumed, memberName }: {
   client: AgentMuxHostedClient | null; target: MotePreferencesTarget; identity: MobileObjectIdentity; platform: ClientUiPlatform; visible: boolean
+  appIcon?: AppIconId | undefined
   memberName?: ((reference: MoteDefaultConversation) => string | undefined) | undefined
   automatic?: AutomaticQuery | undefined; onAutomaticConsumed?(operationId: string): void
   mode?: 'start' | 'new'; dialogue: MobileMoteDialogue; onConfigure(): void; onBound(): void
@@ -103,7 +105,7 @@ export function MobileMoteConversationStart({ client, target, identity, platform
     renderStart={state => <ClientUiProvider platform={platform}><MoteConversationStart name={identity.mote?.name ?? identity.name}
       mode={state.reading?.dialogue.main.status === 'ready' && state.reading.preferences.status === 'ready' ? mode : 'unconfirmed'} active={visible}
       portrait={<MobileMoteStartPortrait identity={identity} client={client} visible={visible} />}
-      brand={<img src={brandIcon} alt="" />}
+      brand={<BrandIcon icon={appIcon} />}
       composer={<AgentComposer value={draft} disabled={false} active={visible} placeholder="写下你想聊的事…"
         onChange={body => { edits.current++; local.drafts.set(key, body); redraw(value => value + 1); void local.save().then(() => redraw(value => value + 1)) }}
         {...(state.ready && !state.busy && !starting && visible && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => { void begin(state) } } : {})} />}

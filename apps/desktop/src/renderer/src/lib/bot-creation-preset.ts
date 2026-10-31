@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import iconUrl from '../../../../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
+import type { AppIconId } from '@agentmux/client-ui/app-icon-catalog'
 import type { ConnectionEnrollmentPreset, ConnectionSetupInitialPublication } from '@agentmux/core/connections'
 
 export const initialBotPublication: ConnectionSetupInitialPublication = { version: '1.0.0', notes: 'Enable AMUX conversations.' }
@@ -8,8 +9,8 @@ export const initialBotPublication: ConnectionSetupInitialPublication = { versio
 export const generatedBotName = () => 'AMUX-' + mintObjectId().toUpperCase()
 
 /** The Desktop supplies its own public asset; the common protocol receives explicit PNG bytes. */
-export async function desktopBotCreationPreset(name: string): Promise<ConnectionEnrollmentPreset> {
-  const response = await fetch(iconUrl)
+export async function desktopBotCreationPreset(name: string, icon?: AppIconId): Promise<ConnectionEnrollmentPreset> {
+  const response = await fetch(appIconUrl(icon))
   if (!response.ok) throw new Error('The bot image could not be loaded. Your bot details are kept.')
   const bytes = new Uint8Array(await response.arrayBuffer())
   // The shared public codec validates the PNG, size and dimensions before admission.

@@ -194,7 +194,7 @@ export function useBotEnrollment(active: boolean, hostingTarget: ConnectionHosti
     let input: ConnectionEnrollmentBeginInput | null = null
     let occurrence = selectionEpoch.current
     try {
-      const frozen = prepared?.preset ?? preset ?? await desktopBotCreationPreset(name)
+      const frozen = prepared?.preset ?? preset ?? await desktopBotCreationPreset(name, useAppStore.getState().config?.appearance.appIcon)
       if (current !== epoch.current || currentOwner.current !== ownerKey || intent !== draft.current) return
       input = prepared ?? { operationId: mintObjectId(), connectionId: mintObjectId(), adapterId: issuer!.adapterId, domain: issuer!.domain, label: name, preset: frozen, initialPublication: initialBotPublication }
       occurrence = ++selectionEpoch.current
