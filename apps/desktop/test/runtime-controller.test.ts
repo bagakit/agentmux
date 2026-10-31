@@ -915,6 +915,46 @@ describe('RuntimeController configuration transaction', () => {
     await controller.dispose()
   })
 
+  it('does not replace an SSH owner when dormant Tailcat credentials are edited', async () => {
+    const controller = await configuredController()
+    controller.commit(await controller.prepare({ ...localConfig, hosts: [...localConfig.hosts, remoteHost] }))
+    const original = runtimeFixture.FakeClient.instances[1]!
+    try {
+      const next: AppConfig = { ...localConfig, hosts: [...localConfig.hosts, { ...remoteHost, transport: 'ssh',
+        tailcat: { address: 'tcFixture_-0123', keyFile: 'saved-client' } }] }
+      const preparation = await controller.prepare(next)
+      expect(preparation.hosts).toEqual([])
+      expect(preparation.reservedHostIds).toEqual([])
+      expect(runtimeFixture.FakeClient.instances).toHaveLength(2)
+      controller.commit(preparation)
+      expect(original.dispose).not.toHaveBeenCalled()
+    } finally { await controller.dispose() }
+  })
+
+  it('does not reserve or replace a live owner when only its Tailcat listener changes', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    client.agentSessions.mockReturnValue([{ ...agentStatusFixture().session, run: { runId: 'healthy-agent' } }])
+    const control: SessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'healthy-agent' } }
+    try {
+      for (const enabled of [true, false]) {
+        const next: AppConfig = { ...localConfig, hosts: [{ ...localConfig.hosts[0]!, kind: 'local', id: 'local',
+          tailcat: { enabled, keyFile: 'saved-server', allowedClients: ['nodekey:fixture'] } }] }
+        const preparation = await controller.prepare(next)
+        expect(preparation.hosts).toEqual([])
+        expect(preparation.reservedHostIds).toEqual([])
+        expect(runtimeFixture.FakeClient.instances).toHaveLength(1)
+        await controller.write(control, enabled ? 'While enabling' : 'While disabling', 'user')
+        controller.commit(preparation)
+        expect(client.dispose).not.toHaveBeenCalled()
+        expect(client.stopAgent).not.toHaveBeenCalled(); expect(client.stopTerminal).not.toHaveBeenCalled()
+      }
+      expect(client.writeAgent.mock.calls.map(([operation]) => operation)).toEqual([
+        { agentSessionId: 'agent-1', expectedRun: { runId: 'healthy-agent' }, data: 'While enabling', source: 'user' },
+        { agentSessionId: 'agent-1', expectedRun: { runId: 'healthy-agent' }, data: 'While disabling', source: 'user' }
+      ])
+    } finally { await controller.dispose() }
+  })
+
   it('releases the quit reservation when owner cleanup fails so a healthy host is not fenced forever', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances.at(-1)!

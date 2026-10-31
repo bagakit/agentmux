@@ -39,3 +39,16 @@ it('the actual Desktop rejection and original error presenter retain the exact f
     expect(presentError(rejected)).toContain(message)
   }
 })
+
+
+it('the original Desktop writer durably preserves Tailcat selection, credentials and the independent local listener switch', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'hc-tailcat-')); roots.push(directory)
+  const path = join(directory, 'config.json'), store = new ConfigStore(path)
+  const hosts = [{ id: 'local' as const, kind: 'local' as const, label: 'Original local',
+    tailcat: { enabled: false, keyFile: 'saved-server', allowedClients: ['nodekey:fixture'] } },
+    { id: 'tailcat-original', kind: 'ssh' as const, label: 'Other Mac', hostname: '', user: 'retained-ssh-user', remoteCommand: '/retained/amux', runtimeId: 'original-runtime',
+      transport: 'tailcat' as const, tailcat: { address: 'tcfixturecredential', keyFile: 'saved-client' } }]
+  await store.save({ ...DEFAULT_CONFIG, hosts })
+  expect((await store.get()).hosts).toEqual(hosts)
+  expect(JSON.parse(await readFile(path, 'utf8')).hosts).toEqual(hosts)
+})
