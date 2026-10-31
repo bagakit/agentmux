@@ -8,7 +8,7 @@ import { parseStoredGeometry, type WindowGeometry } from './window-geometry.js'
  * Durable store for the window's last size/position/maximized state, kept in Electron userData beside
  * the config so a restart reopens the window where the user left it instead of at the fixed literal.
  *
- * This is main-owned presentation state, deliberately separate from the renderer's localStorage
+ * This is main-owned presentation state, deliberately separate from the Renderer's user projection
  * layout record: the window is created before any renderer exists, so its geometry cannot come from
  * the renderer's persistence.
  */

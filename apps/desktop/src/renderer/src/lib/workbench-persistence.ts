@@ -207,7 +207,7 @@ export type PersistedTabRepair = {
  *
  * 引用稳定（干净的 Tab 原样返回同一个对象）只是省一次分配：本函数也跑在 zustand 的 `partialize` 上，
  * 即每一次写入，而绝大多数写入的记录本就干净。**它不是一个可依赖的合同**——今天没有任何消费者
- * 按引用比较这张 Tab（`partialize` 的产物直接序列化进 localStorage），所以别让后来人以为「引用变了」
+ * 按引用比较这张 Tab（`partialize` 的产物序列化进宿主用户状态文档），所以别让后来人以为「引用变了」
  * 本身就是回归。见 `clampSplitTreeRatios` 的同一段说明。
  */
 function normalizePersistedTab(tab: WorkbenchTab): WorkbenchTab {
@@ -255,7 +255,7 @@ function normalizePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
  *
  * 这是 {@link reconcilePersistedTab} 在工作区这一层的对偶，两者存在的理由逐字相同：
  * `assertGroupInvariant`（workbench-layout.ts）是无条件 throw 的生产断言，而 `removeTab` 在
- * **两个持久化入口**上都会被调用（`keepTabsInLayout`，见其两个调用点）。localStorage 里的内容是
+ * **两个持久化入口**上都会被调用（`keepTabsInLayout`，见其两个调用点）。用户状态文档里的内容是
  * 用户数据，那道断言是本轮才装上的，所以磁盘上完全可能已经躺着一个漂移的布局。
  *
  * 实测过的爆法（探针；不是推理）——树 `[main | main-2]`、`groups` 多一条 off-tree 的 `floating`：
@@ -334,7 +334,7 @@ function reconcilePersistedLayout(layout: WorkspaceLayout): WorkspaceLayout {
  *
  * 为什么这一步必须存在：`assertRegionInvariant`（workbench-tabs.ts）是无条件 throw 的生产断言，
  * 而 `removeWorkbenchRegion` 在两个持久化入口上都会被调用（`sessionOnlyTab` 与 `restoreTab`）。
- * localStorage 里的内容是**用户数据**：这道断言是本轮才装上的，此前发货的版本没有任何 reducer 守着
+ * 用户状态文档里的内容是**用户数据**：这道断言是本轮才装上的，此前发货的版本没有任何 reducer 守着
  * 这条不变量，所以磁盘上完全可能已经躺着一张漂移的 Tab。若不先抢救，那条断言会在
  *   - `restorePersistedWorkbench`（启动恢复）→ 启动路径抛出，整个 Workbench 落回空白；
  *   - `projectPersistedWorkbench`（zustand `partialize`，**每次写入都跑**）→ 在 `set()` 里抛出，

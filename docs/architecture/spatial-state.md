@@ -24,13 +24,25 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 ### 如何提交与合并
 
-仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 后，偏好文件不再保存第二份实体或布局快照。UI 偏好与草稿仍由客户端持有。
+仅当 Core 文档不存在时，Desktop 才可导入旧 Workbench。文档一旦存在，其 revision 即为权威，旧客户端副本不能覆盖它。Desktop 经受信 preload port 读写同一文档；Core ACK 后，偏好文件不再保存第二份实体或布局快照。UI 偏好与草稿由 Desktop 宿主文件持有，具体链路见下节。
 
 不相交编辑保留双方增量；重叠编辑保留本地可见、未保存工作。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
 
 `DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 不再私有修补选择。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
 
 Topic 创建和新讨论 Tab 使用 [`originalTopicAddress`](../../apps/desktop/src/shared/space-addresses.ts) 写入原内容身份，Category 地址只用于导航。还原时，同一 Core Zone 资源中已确认的内容身份优先于客户端 Tab 描述，分类移动不改写它。带首句的创建先提交原 Launcher 工作面，再由 Host 注册该 Topic，避免客户端自己的待保存布局与注册争用同一图的 revision；失败仍保留原 Launcher 和草稿。
+
+### Desktop 用户数据与保存回执
+
+Desktop 的 `workbench-user-state.json` 位于同一应用 `userData` 根，由应用生命周期内唯一的 [`WorkbenchUserStateStore`](../../apps/desktop/src/main/workbench-user-state.ts) 持有。受信 preload 端口只操作这一私有文档，不向公共 RPC 暴露草稿正文或任意路径写入。Renderer 的批处理写入器保留最新用户投影，Main 沿 `durableWriteFile` 完成文件与目录同步后返回包含路径、摘要、字节数和确认时间的原写入回执。
+
+主 Workbench 投影和固定 `desktopFragments` 共用原 Renderer root 缓存及同一批处理写入器。片段包含 Launcher 草稿与原请求、Agent 书签、Mote 浮层偏好、头像原保存请求和全局巡查 operation 引用，不新增任意 KV 或路径接口。片段缺席才交接原来源，显式空值防止已退休的旧请求复活；损坏或读取未知时保留原字节和用户在等待期间的编辑。需要先保留原请求的业务动作显式等待准确用户文档 ACK，再沿原业务 owner 执行，不以同步 setter 接受输入代签持久保存。
+
+首次读取只在宿主文档确认不存在时导入既有 Web Storage 字节；原子导入与普通写入共用同一宿主队列。新的宿主文档存在后只读取原文件，读取失败保留原数据。旧内容仅在准确写入确认后清理。普通读取、目录存在和相同摘要都不产生新的写入确认；历史 `lastConfirmedWrite` 与当前读取分别表达。
+
+显式保存与受控退出调用 [`checkpointSpatialWorkbench`](../../apps/desktop/src/renderer/src/store.ts) 捕获当前空间结构，再提交当前用户投影，等待两个原 owner。空间观察器与其初始化 owner 同寿命，Runtime 启动失败不撤销空间保存，旧初始化的清理也不释放新 owner。公共空间操作的 `clientStateWritten` 表示客户端用户投影写入，`diskDurability` 仍须覆盖本次空间与用户数据；字段不绑定某个浏览器 API。
+
+共同数据分类、失败边界和重启验收归[用户数据与本地持久化](../design/behavior/persistence.md)。
 
 ### 缺失资源与 Host 能力
 

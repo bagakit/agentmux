@@ -91,7 +91,7 @@ export async function executeWorkspaceAgentOrder(ports: Ports, request: Request)
   try { save = await ports.save() } catch (error) { save = { layoutApplied: false, clientStateWritten: false,
     storageFlushRequested: false, diskDurability: 'unconfirmed', reason: error instanceof Error ? error.message : String(error) } }
   // This preference is in the client batch. A Core topology commit cannot acknowledge
-  // Chromium's separate localStorage flush, which returns no filesystem receipt.
+  // the client user-document writer and its exact native receipt.
   save = { ...save, diskDurability: 'unconfirmed' }
   const issues = save.reason ? [{ step: 'save', code: 'AGENT_ORDER_SAVE_UNCONFIRMED', message: save.reason,
     recovery: 'The applied preference is retained. Inspect this exact Workspace before another change.' }] : []

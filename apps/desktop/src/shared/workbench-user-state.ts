@@ -25,4 +25,3 @@ export type WorkbenchUserStateObservation = {
   /** Historical metadata only; a later successful write retains the latest diagnosis. */
   lastFailure: WorkbenchUserStateFailure | null
 }
-
