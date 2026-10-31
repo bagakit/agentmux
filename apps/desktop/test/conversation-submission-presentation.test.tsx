@@ -10,8 +10,6 @@ import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-m
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
-import messageStyles from '../../../packages/client-ui/src/styles/conversation-message.css?raw'
-import disclosureStyles from '../../../packages/client-ui/src/styles/conversation-message-disclosure.css?raw'
 
 const sid = 'submission-presentation-session', source = { providerId: 'codex', nativeSessionId: 'original-source' }
 const ref = { hostId: 'source-owner', agentSessionId: sid, source: { kind: 'native' as const, ...source, recordId: 'native-input' } }
@@ -20,21 +18,21 @@ const page = (read = true): AgentSessionHistoryPage => ({ agentSessionId: sid, s
   items: read ? [{ id: ref.source.recordId, kind: 'user-message', startedAt: _historyFixtureEpoch(0, 0, 5), contentParts: [{ kind: 'text', text: original }] }] : [], nextCursor: null })
 const submission = (id = 'original-input', exact = true, status: AgentTimelineItem['status'] = 'complete'): AgentTimelineItem => ({
   id, agentSessionId: sid, kind: 'user_message', source: 'user', status, createdAt: _historyFixtureEpoch(0, 0, 2), updatedAt: _historyFixtureEpoch(0, 0, 3),
-  title: 'Original submission', content: original, sourceChannel: 'message-tool', sourceDevice: { deviceId: 'original-device', hostId: 'sender-host', name: 'Original device' },
+  title: 'Original submission', content: original,
+  inputRef: { kind: 'prompt', agentSessionId: sid, expectedRun: { runId: 'original-run' }, submissionId: id },
+  inputSubmission: { status: status === 'failed' ? 'unknown' : status === 'streaming' ? 'waiting' : 'terminal-confirmed', observation: 'closed' },
+  sourceChannel: 'message-tool', sourceDevice: { deviceId: 'original-device', hostId: 'sender-host', name: 'Original device' },
   ...(exact ? { conversation: { sameEvent: ref } } : {})
 })
 const snapshot = (items: AgentTimelineItem[]) => ({ agentSessionId: sid, sourceHostId: ref.hostId, revision: 1, items })
 const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
   renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
-let host: HTMLDivElement, root: Root, stylesheet: HTMLStyleElement
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); stylesheet = document.createElement('style'); stylesheet.textContent = disclosureStyles + '\n' + messageStyles; document.head.append(stylesheet); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); stylesheet.remove(); getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+let host: HTMLDivElement, root: Root
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const render = (body: ReactNode) => act(async () => root.render(<ClientUiProvider platform={platform}>{body}</ClientUiProvider>))
 const paragraphs = (node: Element) => [...node.querySelectorAll('p')].map(p => p.textContent).join('\n\n')
 const openDetails = async (node: HTMLDetailsElement) => act(async () => { node.open = true; node.dispatchEvent(new Event('toggle')) })
-const matchingStyleRules = (node: Element) => [...stylesheet.textContent!.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].flatMap(([, selector, body]) => {
-  try { return node.matches(selector!.trim()) ? [body!] : [] } catch { return [] }
-}).join('\n')
 it.each(['shared', 'desktop'])('uses native primary and each exact submission fact in actual %s with full original Copy/details', async surface => {
   const t = snapshot([submission(), submission('failed-attempt', true, 'failed')]), copy = vi.spyOn(platform, 'copyText')
   await render(surface === 'shared' ? <ConversationView sessionId={sid} executionHostId="selected-route" page={page()} timeline={t} />
@@ -49,16 +47,14 @@ it.each(['shared', 'desktop'])('uses native primary and each exact submission fa
     expect(entry.dataset.nativeReadable).toBe('true')
     expect(entry.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
     const summary = entry.querySelector('summary')!
-    expect(summary.textContent).toContain('消息发送'); expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
+    expect(summary.textContent).toContain('消息输入'); expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
     expect(summary.textContent).not.toContain('Original device'); expect(summary.textContent).not.toContain('Message Tool')
     expect(summary.textContent).not.toContain('source-owner'); expect(summary.querySelector('.log-turn__body')).toBeNull()
     const preview = summary.querySelector<HTMLElement>('.message-disclosure__preview')!
     expect(preview.textContent).toBe(original.replace(/\s+/gu, ' ').trim())
-    expect(getComputedStyle(preview).whiteSpace).toBe('nowrap'); expect(getComputedStyle(preview).textOverflow).toBe('ellipsis')
-    expect(getComputedStyle(preview).overflow).toBe('hidden')
   }
-  expect(entries[0]!.querySelector('summary')!.textContent).toContain('已进入对话')
-  expect(entries[1]!.dataset.status).toBe('failed'); expect(entries[1]!.querySelector('summary')!.textContent).toContain('提交失败')
+  expect(entries[0]!.querySelector('summary')!.textContent).toContain('Agent 接收未确认')
+  expect(entries[1]!.dataset.status).toBe('failed'); expect(entries[1]!.querySelector('summary')!.textContent).toContain('送达 Agent 未确认')
   expect(entries[1]!.querySelector('summary')!.textContent).not.toContain('已进入对话')
   await openDetails(entries[0]!.querySelector<HTMLDetailsElement>('details')!); expect(entries[0]!.textContent).toContain('original-input'); expect(entries[0]!.textContent).toContain('source-owner')
   expect(entries[0]!.textContent).toContain('不是原生接纳或执行完成时间')
@@ -79,132 +75,89 @@ it.each(['shared', 'desktop'])('uses native primary and each exact submission fa
 it('does not turn a streaming submission record into confirmed adoption or success', async () => {
   await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([submission('unconfirmed-submit', true, 'streaming')])} />)
   const metadata = host.querySelector('[data-submission-record]')!
-  expect(metadata.textContent).toContain('提交未确认')
-  expect(metadata.textContent).not.toContain('提交已记录')
+  expect(metadata.textContent).toContain('已保存 · 等待 Agent')
+  expect(metadata.textContent).not.toContain('已送入终端')
   expect(metadata.textContent).not.toContain('已采用'); expect(metadata.textContent).not.toContain('已进入对话')
   expect(metadata.getAttribute('data-status')).toBe('streaming')
 })
-it.each(['shared', 'desktop'])('keeps an exactly related empty native body in the preview stage in %s', async surface => {
+
+function capturedCard(id: string): HTMLElement {
+  const key = conversationMessageSourceKey(sid, { kind: 'captured', recordId: id })
+  return [...host.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]')].find(node => node.dataset.messageSourceKey === key)!
+}
+it.each(['shared', 'desktop'])('uses one original message card when the exactly related native body is empty in %s', async surface => {
   const emptyNative: AgentSessionHistoryPage = { ...page(), items: page().items.map(item => ({ ...item, contentParts: [] })) }
   const t = snapshot([submission('native-empty-input')])
   await render(surface === 'shared' ? <ConversationView sessionId={sid} executionHostId="selected-route" page={emptyNative} timeline={t} />
     : <ActivityView sessionId={sid} executionHostId="selected-route" nativeHistoryPage={emptyNative} timelineSnapshot={t} items={t.items} capability="complete-events" />)
-  const entry = host.querySelector<HTMLElement>('[data-submission-record]')!, detail = entry.querySelector<HTMLDetailsElement>('details')!
-  expect(entry.dataset.nativeReadable).toBe('false'); expect(detail.open).toBe(false)
-  const summary = detail.querySelector('summary')!, preview = summary.querySelector<HTMLElement>('.message-disclosure__preview')!
-  expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).toContain('提交已记录')
-  expect(summary.textContent).not.toContain('已进入对话'); expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
-  expect(preview.textContent).toBe(original.replace(/\s+/gu, ' ').trim())
-  expect(matchingStyleRules(preview)).toMatch(/-webkit-line-clamp:\s*2\s*;/u)
-  expect(getComputedStyle(preview).whiteSpace).not.toBe('nowrap'); expect(entry.querySelector('.log-turn__body')).toBeNull()
-  await openDetails(detail); expect(paragraphs(entry.querySelector('.log-turn__body')!)).toBe(original)
-  expect(entry.querySelector('[aria-label="Copy message"]')).not.toBeNull(); expect(entry.querySelector('[aria-label="Message details"]')).not.toBeNull()
+  const card = capturedCard('native-empty-input')
+  expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(original)
+  expect(host.querySelectorAll('.log-turn')).toHaveLength(1)
+  expect(card.textContent).toContain('Agent 接收未确认')
+  expect(card.querySelector('[aria-label="Copy message"]')).not.toBeNull()
+  const native = host.querySelector<HTMLDetailsElement>('[data-original-contribution]')!
+  expect(native).not.toBeNull(); expect(native.open).toBe(false)
+  await openDetails(native)
+  const raw = [...native.querySelectorAll<HTMLDetailsElement>('details')].find(node => node.firstElementChild?.textContent === 'Original record JSON')!
+  await openDetails(raw)
+  expect(JSON.parse(raw.querySelector('pre')!.textContent!).contentParts).toEqual([])
 })
-it.each(['shared', 'desktop'])('keeps independent originals but only one full bubble until the send record is opened in %s', async surface => {
+it.each(['shared', 'desktop'])('keeps unassociated originals as independently readable cards in %s', async surface => {
   const t = snapshot([submission('same-text', false)]), copy = vi.spyOn(platform, 'copyText')
-  await render(surface === 'shared' ? <ConversationView sessionId={sid} page={page()} timeline={t} /> : <ActivityView sessionId={sid} items={t.items} nativeHistoryPage={page()} timelineSnapshot={t} capability="complete-events" />)
+  await render(surface === 'shared' ? <ConversationView sessionId={sid} page={page()} timeline={t} />
+    : <ActivityView sessionId={sid} items={t.items} nativeHistoryPage={page()} timelineSnapshot={t} capability="complete-events" />)
   expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
-  const row = host.querySelector<HTMLElement>('[data-submission-id="same-text"]')!
-  expect(row).not.toBeNull()
-  const detail = row.querySelector<HTMLDetailsElement>('.message-disclosure')!
-  expect(detail.open).toBe(false)
-  const summary = detail.querySelector('summary')!, preview = summary.querySelector<HTMLElement>('.message-disclosure__preview')!
-  expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).not.toContain('Original device'); expect(summary.textContent).not.toContain('Message Tool')
-  expect(summary.textContent).toContain('提交已记录'); expect(summary.textContent).not.toContain('已进入对话')
-  expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
-  expect(preview.textContent).toBe(original.replace(/\s+/gu, ' ').trim())
-  // happy-dom drops vendor clamp declarations from CSSOM. Bind the loaded
-  // production rule to this real preview; browser review proves physical lines.
-  expect(matchingStyleRules(preview)).toMatch(/-webkit-line-clamp:\s*2\s*;/u)
-  expect(getComputedStyle(preview).overflow).toBe('hidden')
-  expect(row.querySelector('.log-turn')).toBeNull()
-  expect([...host.querySelectorAll('.log-turn__body')].map(paragraphs)).toEqual([original])
-  expect(host.querySelector('.conversation-submissions')).toBeNull()
-  const key = row.dataset.messageSourceKey, reference = row.dataset.conversationItemRef
-  await openDetails(detail)
   expect([...host.querySelectorAll('.log-turn__body')].map(paragraphs)).toEqual([original, original])
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
+  const card = capturedCard('same-text'), key = card.dataset.messageSourceKey
+  expect(card.textContent).toContain('Agent 接收未确认')
+  await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copy.mock.calls.at(-1)?.[0]).toBe(original)
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
-  expect(row.textContent).toContain('same-text'); expect(row.textContent).toContain('Original device'); expect(row.textContent).toContain('Message Tool')
-  expect(row.dataset.messageSourceKey).toBe(key); expect(row.dataset.conversationItemRef).toBe(reference)
-  expect(host.textContent).not.toContain('已采用')
+  await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
+  expect(card.textContent).toContain('same-text'); expect(card.textContent).toContain('Original device'); expect(card.textContent).toContain('Message Tool')
+  expect(card.dataset.messageSourceKey).toBe(key); expect(host.textContent).not.toContain('已采用')
 })
-
-it('defaults to a compact send row without native content and keeps explicit choices across native availability', async () => {
-  const draw = (native: boolean) => <ConversationView sessionId={sid} page={page(native)} timeline={snapshot([submission('auto-default', false)])} />
-  await render(draw(false))
-  const detail = host.querySelector<HTMLDetailsElement>('[data-submission-id] details')!
-  expect(detail.open).toBe(false)
-  // Browsers emit toggle after the controlled open attribute is synchronized.
-  await act(async () => detail.dispatchEvent(new Event('toggle')))
-  await render(draw(true)); expect(detail.open).toBe(false)
-  await openDetails(detail); expect(detail.open).toBe(true)
-  await act(async () => { detail.open = false; detail.dispatchEvent(new Event('toggle')) })
-  await render(draw(false)); expect(detail.open).toBe(false)
-  await openDetails(detail); await render(draw(true)); expect(detail.open).toBe(true)
+it.each(['failed', 'streaming'] as const)('keeps the original %s input and actual phase visible without an outer send disclosure', async status => {
+  await render(<ConversationView sessionId={sid} page={page(false)} timeline={snapshot([submission('status-input', false, status)])} />)
+  const card = capturedCard('status-input')
+  expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(original)
+  expect(card.textContent).toContain(status === 'failed' ? '送达 Agent 未确认' : '已保存 · 等待 Agent')
+  expect(card.textContent).not.toContain('已进入对话')
+  expect(card.querySelector('[data-icon-animation]')).toBeNull()
 })
-
-it.each(['failed', 'streaming'] as const)('keeps the original %s submission state in the compact row and its complete input on expansion', async status => {
-  await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([submission('status-input', false, status)])} />)
-  const row = host.querySelector<HTMLElement>('[data-submission-id]')!
-  const detail = row.querySelector<HTMLDetailsElement>('details')!
-  expect(detail.open).toBe(false); expect(row.querySelector('.log-turn__body')).toBeNull()
-  expect(detail.querySelector('.message-disclosure__preview')?.textContent).toContain('Second paragraph.')
-  expect(row.textContent).toContain(status === 'failed' ? '提交失败' : '提交未确认')
-  expect(row.textContent).not.toContain('提交已记录'); expect(row.textContent).not.toContain('已采用'); expect(row.textContent).not.toContain('已进入对话')
-  expect(row.querySelector('[data-icon-animation]')).toBeNull()
-  await openDetails(detail); expect(paragraphs(row.querySelector('.log-turn__body')!)).toBe(original)
-})
-
-it('preserves full original recovery for a real native read failure while an unread exact target stays compact', async () => {
-  await render(<ConversationView sessionId={sid} page={page()} expandSubmissions timeline={snapshot([submission('retained-failure', false)])} />)
-  expect(host.querySelector<HTMLDetailsElement>('[data-submission-id] details')!.open).toBe(true)
-  expect(paragraphs(host.querySelector('[data-submission-id] .log-turn__body')!)).toBe(original)
-  const unread = submission('unread-input'); unread.conversation = { sameEvent: { ...ref, source: { ...ref.source, recordId: 'unread-target' } } }
-  await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([unread])} />)
-  expect(host.querySelector<HTMLDetailsElement>('[data-submission-id] details')!.open).toBe(false)
+it.each(['missing', 'unread'] as const)('keeps complete captured content and exact unknown when native is %s', async kind => {
+  await render(<ConversationView sessionId={sid} {...(kind === 'unread' ? { page: page(false) } : {})} timeline={snapshot([submission()])} />)
+  const card = capturedCard('original-input')
+  expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(original)
+  expect(card.textContent).toContain('Agent 接收未确认')
   expect(host.querySelector('[data-conversation-gap="CONVERSATION_ANCHOR_UNREAD"]')).not.toBeNull()
 })
-
-it('keeps the selected original DOM and opened choice until a later exact relation can be applied', async () => {
-  const draw = (exact: boolean) => <ConversationView sessionId={sid} executionHostId="selected-route" page={page()} timeline={snapshot([submission('late-input', exact)])} />
+it('keeps the selected original body and focus when an exact native contribution arrives', async () => {
+  const draw = (native: boolean) => <ConversationView sessionId={sid} page={page(native)} timeline={snapshot([submission('selected-input')])} />
   await render(draw(false))
-  const row = host.querySelector<HTMLElement>('[data-submission-id]')!, disclosure = row.querySelector<HTMLDetailsElement>('details')!
-  await openDetails(disclosure)
-  const body = row.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!, range = document.createRange()
-  range.setStart(text, 0); range.setEnd(text, 8); getSelection()!.addRange(range)
+  const card = capturedCard('selected-input'), body = card.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); getSelection()!.addRange(range)
+  const action = card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!; await act(async () => action.focus())
   await render(draw(true))
-  expect(host.querySelector('[data-submission-id] .log-turn__body')).toBe(body); expect(getSelection()!.toString()).toBe('Original')
-  expect(disclosure.open).toBe(true)
-  await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
-  expect(host.querySelector('[data-submission-id]')).toBeNull()
-  const contribution = host.querySelector<HTMLDetailsElement>('[data-original-contribution]')!
-  expect(contribution.open).toBe(true); expect(paragraphs(contribution.querySelector('.log-turn__body')!)).toBe(original)
-  expect(contribution.querySelector('[aria-label="Copy message"]')).not.toBeNull()
-  expect(host.querySelector('.conversation-submissions')).not.toBeNull()
+  expect(capturedCard('selected-input').querySelector('.log-turn__body')).toBe(body)
+  expect(getSelection()!.getRangeAt(0)).toBe(range); expect(document.activeElement).toBe(action)
 })
-
-it('a located send record opens its original body without another read and retains it after collapse', async () => {
-  const located = conversationMessageSourceKey(sid, { kind: 'captured', recordId: 'located-input' })
-  await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([submission('located-input', false)])} locatedMessageKey={located ?? null} />)
-  const row = host.querySelector<HTMLElement>('[data-submission-id]')!, detail = row.querySelector<HTMLDetailsElement>('details')!
-  expect(detail.open).toBe(true); expect(row.dataset.messageSourceKey).toBe(located)
-  const body = row.querySelector('.log-turn__body')!
-  await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([submission('located-input', false)])} />)
-  await act(async () => { detail.open = false; detail.dispatchEvent(new Event('toggle')) })
-  expect(row.querySelector('.log-turn__body')).toBe(body); expect(row.querySelector('[hidden]')).not.toBeNull()
+it('a located captured message reads its original body and exact source without another read', async () => {
+  const id = 'located-input', located = conversationMessageSourceKey(sid, { kind: 'captured', recordId: id })
+  await render(<ConversationView sessionId={sid} page={page(false)} timeline={snapshot([submission(id)])} locatedMessageKey={located} />)
+  const card = capturedCard(id)
+  expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(original)
+  expect(card.textContent).toContain('已定位此消息')
 })
 
 it('an accurately located submission keeps its original reader open at its captured identity after native adoption', async () => {
   const id = 'located-native-input', located = conversationMessageSourceKey(sid, { kind: 'captured', recordId: id })
   await render(<ConversationView sessionId={sid} executionHostId="selected-route" page={page()} timeline={snapshot([submission(id)])} locatedMessageKey={located ?? null} />)
   expect(host.querySelector('[data-submission-id]')).toBeNull()
-  const originalRecord = host.querySelector<HTMLDetailsElement>('[data-original-contribution]')!
-  expect(originalRecord.open).toBe(true); expect(originalRecord.dataset.messageSourceKey).toBe(located)
+  const originalRecord = host.querySelector<HTMLDetailsElement>('[data-submission-record] details')!
+  expect(originalRecord.open).toBe(true); expect(originalRecord.closest<HTMLElement>('[data-submission-record]')!.dataset.messageSourceKey).toBe(located)
   expect(paragraphs(originalRecord.querySelector('.log-turn__body')!)).toBe(original)
   expect(originalRecord.querySelector('[aria-label="Copy message"]')).not.toBeNull()
-  expect(host.querySelector<HTMLDetailsElement>('[data-submission-record] details')!.open).toBe(false)
+  expect(host.querySelector('[data-original-contribution]')).toBeNull()
 })
 
 it('retains a located native contribution owner and its Range after the locator leaves, including an explicit close', async () => {
@@ -212,58 +165,66 @@ it('retains a located native contribution owner and its Range after the locator 
   const t = snapshot([submission(id)]), nativePage = page()
   const draw = (locatedMessageKey: string | null) => <ConversationView sessionId={sid} executionHostId="selected-route" page={nativePage} timeline={t} locatedMessageKey={locatedMessageKey} />
   await render(draw(located ?? null))
-  const owner = host.querySelector<HTMLDetailsElement>('[data-original-contribution]')!, body = owner.querySelector('.log-turn__body')!
-  expect(owner.open).toBe(true); expect(owner.dataset.messageSourceKey).toBe(located)
+  const owner = host.querySelector<HTMLDetailsElement>('[data-submission-record] details')!, body = owner.querySelector('.log-turn__body')!
+  expect(owner.open).toBe(true); expect(owner.closest<HTMLElement>('[data-submission-record]')!.dataset.messageSourceKey).toBe(located)
   const text = body.querySelector('p')!.firstChild!, range = document.createRange()
   range.setStart(text, 0); range.setEnd(text, 8); getSelection()!.addRange(range)
   await act(async () => owner.focus())
   await render(draw(null))
-  expect(host.querySelector('[data-original-contribution]')).toBe(owner)
+  expect(host.querySelector('[data-submission-record] details')).toBe(owner)
   expect(owner.querySelector('.log-turn__body')).toBe(body); expect(owner.open).toBe(true)
   expect(getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Original'); expect(document.activeElement).toBe(owner)
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')); owner.open = false; owner.dispatchEvent(new Event('toggle')) })
   await render(draw(null))
-  expect(host.querySelector('[data-original-contribution]')).toBe(owner); expect(owner.open).toBe(false)
+  expect(host.querySelector('[data-submission-record] details')).toBe(owner); expect(owner.open).toBe(false)
   expect(owner.querySelector('.log-turn__body')).toBe(body); expect(document.activeElement).toBe(owner)
-  expect(host.querySelector<HTMLDetailsElement>('[data-submission-record] details')!.open).toBe(false)
+  expect(owner.open).toBe(false)
 })
 
-it.each(['independent', 'native'] as const)('only opening the %s original submission reads its attachment and full Copy keeps that original reference', async kind => {
-  const path = fixturePath('home/.agentmux/pasted/attachment.png'), content = `Original attached input\n\n@${path}`
+
+it.each(['independent', 'native'] as const)('reads the %s attachment only with its displayed original and copies the exact reference', async kind => {
+  const path = fixturePath('home/.agentmux/pasted/attachment.png'), content = `Original attached input
+
+@${path}`
   const input = { ...submission('resource-input', kind === 'native'), content }
   const read = vi.fn(async () => ({ dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg==' })), copy = vi.spyOn(platform, 'copyText')
   await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([input])} readPastedImage={read} />)
-  expect(read).not.toHaveBeenCalled()
-  const row = host.querySelector<HTMLElement>(kind === 'native' ? '[data-submission-record]' : '[data-submission-id]')!
-  await openDetails(row.querySelector<HTMLDetailsElement>('details')!)
-  expect(read).toHaveBeenCalledExactlyOnceWith(path); expect(row.querySelector('img')).not.toBeNull()
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
+  let card: HTMLElement
+  if (kind === 'native') {
+    expect(read).not.toHaveBeenCalled()
+    const entry = host.querySelector<HTMLElement>('[data-submission-record]')!
+    await openDetails(entry.querySelector<HTMLDetailsElement>('details')!); card = entry
+  } else card = capturedCard('resource-input')
+  expect(read).toHaveBeenCalledExactlyOnceWith(path); expect(card.querySelector('img')).not.toBeNull()
+  await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copy.mock.calls.at(-1)?.[0]).toBe(content)
 })
-it.each(['independent', 'native'] as const)('opening the %s send disclosure exposes a long original directly without another body fold', async kind => {
-  const content = 'Original long input.\n\n' + '完整原文保持可读。'.repeat(180) + '\n\nOriginal long input ending.'
-  expect(content.length).toBeGreaterThan(1200)
-  const input = { ...submission('long-original-input', kind === 'native'), content }, copy = vi.spyOn(platform, 'copyText')
+it('keeps an explicitly expanded long original after blur and exact coalescence, then respects its close', async () => {
+  const content = 'Original long input.\n\n' + 'Complete original prose remains available. '.repeat(40) + '\n\nOriginal long input ending.'
+  const input = { ...submission('long-original-input', false), content, authorHuman: true }
+  const draw = (linked: boolean) => <ConversationView sessionId={sid} page={page()} timeline={snapshot([{ ...input, ...(linked ? { conversation: { sameEvent: ref } } : {}) }])} />
+  await render(draw(false))
+  const card = capturedCard(input.id), detail = card.querySelector<HTMLDetailsElement>('.message-disclosure')!
+  expect(detail.open).toBe(false); await openDetails(detail)
+  expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(content.split('\n\n').map(paragraph => paragraph.trimEnd()).join('\n\n'))
+  await act(async () => (document.activeElement as HTMLElement)?.blur()); getSelection()?.removeAllRanges()
+  await render(draw(true))
+  const original = host.querySelector<HTMLDetailsElement>('[data-submission-record] details')!
+  expect(original.open).toBe(true)
+  expect(paragraphs(original.querySelector('.log-turn__body')!)).toBe(content.split('\n\n').map(paragraph => paragraph.trimEnd()).join('\n\n'))
+  expect(original.querySelector('.log-turn .message-disclosure')).toBeNull()
+  await act(async () => { original.open = false; original.dispatchEvent(new Event('toggle')) })
+  await render(draw(true)); expect(host.querySelector('[data-submission-record] details')).toBe(original); expect(original.open).toBe(false)
+})
+it('opens a related long original without another body fold and keeps exact Copy', async () => {
+  const content = 'Original long input.\n\n' + 'Complete original prose remains available. '.repeat(40)
+  const input = { ...submission('related-long-input'), content, authorHuman: true }, copy = vi.spyOn(platform, 'copyText')
   await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([input])} />)
-  const entry = host.querySelector<HTMLElement>(kind === 'native' ? '[data-submission-record]' : '[data-submission-id]')!, detail = entry.querySelector<HTMLDetailsElement>('details')!
-  expect(detail.open).toBe(false); expect(entry.querySelector('.log-turn__body')).toBeNull()
-  expect(entry.querySelector('.message-disclosure__preview')?.textContent).not.toContain('Original long input ending.')
-  await openDetails(detail)
-  const body = entry.querySelector<HTMLElement>('.log-turn__body')!
-  expect(paragraphs(body)).toBe(content); expect(body.closest('details:not([open]), [hidden], [inert]')).toBeNull()
+  const entry = host.querySelector<HTMLElement>('[data-submission-record]')!, detail = entry.querySelector<HTMLDetailsElement>('details')!
+  expect(detail.open).toBe(false); await openDetails(detail)
+  expect(paragraphs(entry.querySelector('.log-turn__body')!)).toBe(content.split('\n\n').map(paragraph => paragraph.trimEnd()).join('\n\n'))
   expect(entry.querySelector('.log-turn .message-disclosure')).toBeNull()
-  await act(async () => entry.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
-  expect(copy.mock.calls.at(-1)?.[0]).toBe(content)
-})
-it.each(['missing', 'empty'])('retains the sole captured body and accurate unknown when native is %s', async kind => {
-  await render(<ConversationView sessionId={sid} {...(kind === 'empty' ? { page: page(false) } : {})} timeline={snapshot([submission()])} />)
-  const row = host.querySelector<HTMLElement>('[data-submission-id]')!, detail = row.querySelector<HTMLDetailsElement>('details')!
-  expect(detail.open).toBe(false); expect(row.querySelector('.log-turn__body')).toBeNull()
-  expect(detail.querySelector('.message-disclosure__preview')?.textContent).toContain('Original input stays complete.')
-  await openDetails(detail)
-  expect(paragraphs(host.querySelector('.log-turn__body')!)).toBe(original)
-  expect(host.querySelector('.conversation-submissions')).toBeNull()
-  expect(host.querySelector('[data-conversation-gap="CONVERSATION_ANCHOR_UNREAD"]')).not.toBeNull()
+  await act(async () => entry.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click()); expect(copy.mock.calls.at(-1)?.[0]).toBe(content)
 })
 it('renders observations as ordinary provenance and keeps expanded body Range through a compact update', async () => {
   const item: AgentTimelineItem = { ...submission('reply', false), source: 'native-hook', kind: 'assistant_message', eventName: 'Stop' }
@@ -275,8 +236,7 @@ it('renders observations as ordinary provenance and keeps expanded body Range th
   await render(read(page()))
   expect(host.querySelector('[data-captured-reply-observation] .log-turn__body')).toBe(body); expect(getSelection()!.toString()).toBe('Original')
   expect(host.querySelector('[data-captured-reply-observation] .wf-tool-row')).toBeNull()
-  expect(host.querySelector('.log-turn__sender-kind')).toBeNull()
-  expect(host.querySelectorAll('[data-conversation-source-role="reply-observation"]')).toHaveLength(1)
+  expect(host.querySelectorAll('.conversation-reply-observation__controls [data-conversation-source-role="reply-observation"]')).toHaveLength(1)
   expect(host.querySelector('.conversation-reply-observation__notice')).toBeNull()
   expect(host.querySelector('[data-conversation-source-role]')!.getAttribute('title')).toContain('事件回报附带的回复文本快照')
   expect(host.querySelector('[data-captured-reply-observation] button[aria-expanded]')!.getAttribute('aria-expanded')).toBe('true')

@@ -13,7 +13,7 @@ const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { getSelection()?.removeAllRanges(); for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const flush = (assertion: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) }); assertion() }, { timeout: 8000 })
 
-it('the actual Reader through IPC renders an unassociated A2A send row and a distinct exact native-primary event', async () => {
+it('the actual Reader through IPC renders an unassociated A2A message card and a distinct exact native-primary event', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -40,20 +40,18 @@ it('the actual Reader through IPC renders an unassociated A2A send row and a dis
   closes.push(async () => { await act(async () => root.unmount()); host.remove() })
   await act(async () => root.render(<ActivityView {...activityReadingProps({ control: { hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, workspaceRoot: f.root })} />))
   await flush(() => expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(2))
-  const row = host.querySelector<HTMLElement>('[data-submission-id="original-message"]')!
-  expect(row, host.textContent).not.toBeNull(); expect(row.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
-  const summary = row.querySelector('summary')!
-  expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).not.toContain('original-sender'); expect(summary.textContent).not.toContain('Message Tool')
-  expect(summary.querySelector('.message-disclosure__preview')?.textContent).toContain('Original ending.')
-  expect(summary.textContent).toContain('提交已记录'); expect(row.querySelector('.log-turn')).toBeNull()
+  const row = host.querySelector<HTMLElement>('.log-turn[data-message-id="captured:original-message"]')!
+  expect(row, host.textContent).not.toBeNull()
+  expect(row.querySelector('.log-turn__body')?.textContent).toContain('Original ending.')
+  expect(row.querySelector('.conversation-submission-summary')?.textContent).toContain('原输入状态未确认')
+  expect(row.dataset.speakerRole).toBe('agent')
   const nativeCard = host.querySelector('[data-native-record-id="exact-native"]')!
   expect(nativeCard.querySelector('[data-submission-record]')).not.toBeNull()
   expect(nativeCard.querySelectorAll('[data-original-contribution]')).toHaveLength(0)
-  expect(nativeCard.querySelector('[data-submission-record] summary')?.textContent).toContain('已进入对话')
+  expect(nativeCard.querySelector('[data-submission-record] summary')?.textContent).toContain('原输入状态未确认')
   expect(nativeCard.querySelector('[data-submission-record] details[open]')).toBeNull()
   expect(host.querySelector('[data-submission-id="exact-message"]')).toBeNull()
   const originalRef = row.dataset.conversationItemRef, originalId = row.dataset.conversationEventId
-  await act(async () => { const detail = row.querySelector<HTMLDetailsElement>('details')!; detail.open = true; detail.dispatchEvent(new Event('toggle')) })
   expect(row.querySelector('.log-turn__body')?.textContent).toContain('Original ending.')
   await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copied).toHaveBeenLastCalledWith(body)

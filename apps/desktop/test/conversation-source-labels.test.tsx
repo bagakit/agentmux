@@ -48,10 +48,7 @@ it('equal text and bare IDs stay independent with explicit unconfirmed source re
  await render(<ConversationView sessionId={sid} executionHostId="remote-route" page={p} timeline={timeline([item])}/>)
  expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
  expect(labels(host)).toContain('native');expect(host.textContent).not.toContain('跨来源关联未确认');expect(host.textContent).toContain('对话记录')
- const submission = host.querySelector<HTMLDetailsElement>('[data-submission-id] .message-disclosure')!
- expect(submission.open).toBe(false)
- expect([...host.querySelectorAll('.log-turn__body')].map(n=>n.textContent)).toEqual(['Equal original input'])
- await act(async()=>{submission.open=true;submission.dispatchEvent(new Event('toggle'))})
+ expect(host.querySelector('[data-submission-id] .message-disclosure')).toBeNull()
  expect(labels(host)).toContain('user')
  expect([...host.querySelectorAll('.log-turn__body')].map(n=>n.textContent)).toEqual(['Equal original input','Equal original input'])
  expect(host.textContent).not.toContain('Terminal');expect(host.textContent).not.toContain('adopted')
