@@ -17,7 +17,7 @@ import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type
 
 import { BaseWindow, dialog, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, parseAmuxObjectLink, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
@@ -1761,6 +1761,16 @@ export class BrowserViewManager {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     this.requireHumanInput(entry)
+    if (/^amux:/iu.test(rawUrl.trim())) {
+      const target = parseAmuxObjectLink(rawUrl.trim()), storage = entry.storage
+      if (target.kind !== 'capsule' || !('capsule' in storage) || target.capsuleId !== storage.capsule.record.capsuleId) {
+        throw new Error('This object is not the original Capsule of this Browser. Its page and address are kept; open the object through its original owner.')
+      }
+      if (new URL(entry.view.webContents.getURL()).origin !== storage.capsuleOrigin) {
+        throw new Error('This Browser has left the original Capsule document. Its current page and entered address are kept; open the Capsule through its original owner.')
+      }
+      return this.snapshot(entry)
+    }
     const target = classifyBrowserTarget(resolveBrowserAddress(rawUrl))
     if (target.kind === 'hand-off') {
       // Classify the address interpretation, but hand off its exact original URI.

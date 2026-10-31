@@ -645,6 +645,9 @@ function BrowserPaneContent({
   function navigateAddress(submittedAddress: string): void {
     const target = submittedAddress.trim()
     if (!target) return
+    addressDraft.current.value = submittedAddress
+    addressDraft.current.edited = true
+    addressDraftEdited.current = true
     const failed = (cause: unknown) => setAddressError(`Page could not open: ${presentError(cause)}. Your input and page are kept; retry here.`)
     const settled = (pageAddress: string) => {
       if (addressDraft.current.value !== submittedAddress) return
@@ -655,6 +658,14 @@ function BrowserPaneContent({
     }
     // Object navigation belongs to its original owner, independently of this page's connection.
     if (/^amux:/iu.test(target)) {
+      if (target === tab.objectLink) {
+        void run(async () => {
+          const browser = await api.browser.navigate(tab.browserId, target)
+          settled(browser.objectLink ?? browser.url)
+          return browser
+        }, failed)
+        return
+      }
       void runCommand(async () => {
         await api.ui.openObjectLink(target)
         settled(observedPageAddress.current)
