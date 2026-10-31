@@ -30,6 +30,8 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 `DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 不再私有修补选择。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
 
+Topic 创建和新讨论 Tab 使用 [`originalTopicAddress`](../../apps/desktop/src/shared/space-addresses.ts) 写入原内容身份，Category 地址只用于导航。还原时，同一 Core Zone 资源中已确认的内容身份优先于客户端 Tab 描述，分类移动不改写它。带首句的创建先提交原 Launcher 工作面，再由 Host 注册该 Topic，避免客户端自己的待保存布局与注册争用同一图的 revision；失败仍保留原 Launcher 和草稿。
+
 ### 缺失资源与 Host 能力
 
 缺少 Host 资源元数据时如实报告，保 Core 身份与当前内容。资源来源和屏幕展示位置分别保留，不能用当前焦点补猜目录。空间管理复用既有 JSON-RPC 与远程传输；可移植 API 不以 OS 安装门禁判断可用性，随包 Native Runtime 的可用性是另一项 Host 能力。本页不为未验证 Host 的 Native surface 宣布完成。
