@@ -19,7 +19,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
   const topics = new ScratchTopics()
   async function reconcile(record: AgentMuxSpatialAgentOpenRecord, context: AgentMuxRpcCallContext, initialIssue?: unknown): Promise<AgentMuxSpaceMutationReport> {
     const report: AgentMuxSpaceMutationReport = { requestId: record.requestId, outcome: 'unknown', from: null, to: record.address,
-      agent: null, resource: null, save: { layoutApplied: true, localStorageWritten: false, storageFlushRequested: false,
+      agent: null, resource: null, save: { layoutApplied: true, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'confirmed', reason: null }, issues: initialIssue ? [issue(initialIssue)] : [] }
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -80,7 +80,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       const original = await client.inspectAgentCreation(agentSessionId)
       return { operation: 'agent.open', requestId: request.requestId, outcome: original.kind === 'retired-agent' ? 'retired' : 'unknown',
         from: null, to: null, agent: original.kind === 'agent' ? spatialAgentFact(original, execution.hostId) : null, resource: null,
-        save: { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'The original Core creation has no confirmed spatial association on this owner.' },
+        save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'The original Core creation has no confirmed spatial association on this owner.' },
         issues: [issue(new AgentMuxError('The original creation is retained, but its original spatial association is unobserved. Inspect that operation; no creation or input was repeated.', 'SPATIAL_CREATION_UNCONFIRMED'))] }
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_CREATION_UNKNOWN') throw error

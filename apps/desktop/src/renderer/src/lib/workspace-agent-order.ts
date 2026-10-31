@@ -88,7 +88,7 @@ export async function executeWorkspaceAgentOrder(ports: Ports, request: Request)
   const next = requested.length ? [...requested, ...before.filter(key => !available.has(key) && !requested.includes(key))] : []
   ports.set(displayWorkspaceId, next)
   let save: AgentMuxSpatialSave
-  try { save = await ports.save() } catch (error) { save = { layoutApplied: false, localStorageWritten: false,
+  try { save = await ports.save() } catch (error) { save = { layoutApplied: false, clientStateWritten: false,
     storageFlushRequested: false, diskDurability: 'unconfirmed', reason: error instanceof Error ? error.message : String(error) } }
   // This preference is in the client batch. A Core topology commit cannot acknowledge
   // Chromium's separate localStorage flush, which returns no filesystem receipt.

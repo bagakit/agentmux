@@ -641,7 +641,7 @@ export async function registerIpc(args: {
       if(state) {
         const next=await spatialState.bind(request.binding,request.operation==='space.unbind')
         return {operation:request.operation,requestId:request.requestId,binding:request.binding,catalog:spatialCatalog(next.graph),
-          outcome:request.operation==='space.bind'?'linked':'unlinked',save:{layoutApplied:true,localStorageWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
+          outcome:request.operation==='space.bind'?'linked':'unlinked',save:{layoutApplied:true,clientStateWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
       }
     }
 

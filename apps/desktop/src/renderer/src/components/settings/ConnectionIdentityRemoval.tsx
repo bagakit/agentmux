@@ -50,7 +50,7 @@ export function ConnectionIdentityRemoval({ record, readings, active, hostingTar
     flight.current = true; setBusy(true); setIssue(''); setNotRecorded(false)
     try {
       const retained = await retainBotTaskSelection(request.scope, { operationId: request.operationId, hostingTarget: originalHost })
-      if (!retained.localStorageWritten) throw new Error('The original removal request could not be saved. No removal was sent.')
+      if (!retained.clientStateWritten) throw new Error('The original removal request could not be saved. No removal was sent.')
       accept(await api.connections.call('connection.delete', { operationId: request.operationId, connectionId: request.scope.connectionId, expectedRevision: request.scope.expectedRevision }, originalHost), request.scope, originalHost)
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'CONNECTION_REVISION_CONFLICT') {

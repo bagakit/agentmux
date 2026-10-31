@@ -47,7 +47,7 @@ export function ConnectorDeliveryRetryControl({ delivery, binding, hostingTarget
         const inputKey = connectorRoomIntentKey(intent); saving.current = inputKey
         setSelected(inputKey)
         setLocalIssue(true)
-        void retainConnectorRoomIntent(intent).then(saved => { if (accepts(originalKey) && saving.current === inputKey) setLocalIssue(!saved.localStorageWritten) }, () => { if (accepts(originalKey) && saving.current === inputKey) setLocalIssue(true) })
+        void retainConnectorRoomIntent(intent).then(saved => { if (accepts(originalKey) && saving.current === inputKey) setLocalIssue(!saved.clientStateWritten) }, () => { if (accepts(originalKey) && saving.current === inputKey) setLocalIssue(true) })
       }
       let result: { delivery: ConnectionDelivery | null } | null = null
       let continuation: ConnectionDeliveryContinuation | undefined

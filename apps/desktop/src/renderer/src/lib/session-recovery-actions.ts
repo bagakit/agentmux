@@ -209,7 +209,7 @@ export async function analyzeWithRecoveryMote(source: RecoverySource, target: Re
     } })
   assertTarget()
   if (admitted === null) return (await inspectRecoveryRequest(source, 'analyze'))!
-  if (!admitted.localStorageWritten) throw new Error('The original recipient reference could not be written. Analysis has not been dispatched; keep and check that same intent.')
+  if (!admitted.clientStateWritten) throw new Error('The original recipient reference could not be written. Analysis has not been dispatched; keep and check that same intent.')
   // Read the Core delivery witness before admitting the original queue identity.
   const deliveredBefore = await readRecoveryDelivery(target, requestId)
   assertTarget()

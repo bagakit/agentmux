@@ -68,7 +68,7 @@ function issue(step: string, code: string, error: unknown): AgentMuxSpatialIssue
   return { step, code, message: error instanceof Error ? error.message : String(error),
     recovery: 'Inspect this request ID and its existing resources; do not repeat creation or send.' }
 }
-const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied, localStorageWritten: false,
+const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied, clientStateWritten: false,
   storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'No save has been observed by this read.' })
 
 /** Metadata only; every durable entity is indexed once, independent of display. */
@@ -608,7 +608,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
           [source.regionId]: { ...source, agentCreationRequestId: request.requestId } } } }
       } : {}) })
     const admitted = await ports.save(false)
-    if (!admitted.localStorageWritten) { report.save = admitted; failure('SPACE_INTENT_SAVE_FAILED', 'The request association could not be written; creation has not been dispatched.') }
+    if (!admitted.clientStateWritten) { report.save = admitted; failure('SPACE_INTENT_SAVE_FAILED', 'The request association could not be written; creation has not been dispatched.') }
     if (selfMove) {
       report.outcome = 'unchanged'; report.to = from!; report.save = { ...admitted, layoutApplied: true }
       if (request.focus) { ports.focus(from!); report.save = await ports.save(true) }
@@ -652,7 +652,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     ports.patch(placement)
     report.to = target.address
     report.save = await ports.save(true)
-    if (!report.save.localStorageWritten && binding.createAgent) return await fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
+    if (!report.save.clientStateWritten && binding.createAgent) return await fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
     if (request.focus) ports.focus(target.address)
     if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session') {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')

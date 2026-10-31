@@ -4422,15 +4422,15 @@ async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void
   }
 }
 async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxSpatialSave> {
-  let localStorageWritten = false, storageFlushRequested = false, reason: string | null = null
+  let clientStateWritten = false, storageFlushRequested = false, reason: string | null = null
   try {
     if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
     persistentWorkbenchStorage.flush()
-    localStorageWritten = true
+    clientStateWritten = true
     await requestWorkbenchStorageFlush()
     storageFlushRequested = true
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
-  return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
+  return { layoutApplied, clientStateWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
 }
 
 /** Explicit per-tool palette save; command configuration and Run identity are untouched. */
@@ -4523,7 +4523,7 @@ export async function retainBrowserAgentIntent(requestId: string, expected: NonN
   })
   if (!changed) throw new Error('The original Browser Agent intent changed. Inspect that same request; its Agent and page are kept.')
   const saved = await saveWorkbenchSelection(false)
-  if (!saved.localStorageWritten) throw new Error('The Browser Agent intent could not be saved. No further handoff or input was dispatched.')
+  if (!saved.clientStateWritten) throw new Error('The Browser Agent intent could not be saved. No further handoff or input was dispatched.')
 }
 /** Retain one unresolved exact reading-point input in the existing workbench draft writer. */
 export async function retainConversationLandmarkIntent(input: ConversationLandmarkWrite): Promise<AgentMuxSpatialSave> {
@@ -6582,7 +6582,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating' || observed.presentation.state === 'window') &&
             (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
       }, signal)
-      const save = navigationState === 'rejected' ? { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false,
+      const save = navigationState === 'rejected' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
       const selection = desktopSelection(get(), catalog)
       if (navigationState !== 'rejected' && (signal?.aborted || JSON.stringify(selection) !== JSON.stringify(expected))) {
@@ -6617,7 +6617,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().clearRegionCaretFocus(caretIntentNonce)
       }
       const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || (observed.presentation.state !== 'main-visible' && observed.presentation.state !== 'window' && observed.presentation.state !== 'floating') ||
-        inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || !save.localStorageWritten
+        inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || !save.clientStateWritten
       if (partial && navigationState !== 'rejected') {
         const notice = { step: 'presentation', code: 'DESKTOP_PRESENTATION_PARTIAL',
           message: `Main selection is kept. Presentation: ${observed.presentation.state}; input: ${inputOutcome}.`,

@@ -130,9 +130,9 @@ function MoteConnectionPanelBody({ hostingTarget, target, topicId, moteName, onR
     edited.current = true; flight.current = true; setLoading(false); setBusy(true); setIssue(''); setReviewed(false); setNewChoice(false); setAttempt({ input, receipt: null })
     try {
       const retained = await retainMoteConnectionSaveIntent({ input, hostingTarget: snapshot.hostingTarget, phase: 'not-dispatched' })
-      if (!retained.localStorageWritten) throw new Error('The original save input could not be retained. No request was sent.')
+      if (!retained.clientStateWritten) throw new Error('The original save input could not be retained. No request was sent.')
       const dispatch = await retainMoteConnectionSaveIntent({ input, hostingTarget: snapshot.hostingTarget, phase: 'may-have-dispatched' })
-      if (!dispatch.localStorageWritten) {
+      if (!dispatch.clientStateWritten) {
         await retainMoteConnectionSaveIntent({ input, hostingTarget: snapshot.hostingTarget, phase: 'not-dispatched' })
         throw new Error('The original dispatch input could not be retained. No request was sent.')
       }

@@ -173,7 +173,7 @@ export type AgentMuxSpaceBindingReport = {
 }
 export type AgentMuxSpatialSave = {
   layoutApplied: boolean
-  localStorageWritten: boolean
+  clientStateWritten: boolean
   storageFlushRequested: boolean
   /** Confirmed only by the filesystem owner after file and directory fsync. */
   diskDurability: 'unconfirmed' | 'confirmed'

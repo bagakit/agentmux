@@ -165,7 +165,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   const body = fields(source.result, ['navigation', 'presentation', 'input', 'floating', 'overlays', 'focus', 'partial', 'save', 'issues'], code)
   const nav = fields(body.navigation, ['state', 'requested', 'selection', 'expectedAgentSessionId'], code)
   const caret = fields(body.input, ['policy', 'outcome', 'before', 'after'], code)
-  const saved = fields(body.save, ['layoutApplied', 'localStorageWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
+  const saved = fields(body.save, ['layoutApplied', 'clientStateWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
   const result: Omit<AgentMuxDesktopFocusResult, 'operation'> = {
     navigation: { state: member(nav.state, ['applied', 'unchanged', 'rejected', 'unconfirmed'], 'Navigation', code),
       requested: parseDesktopFocusTarget(nav.requested, code), selection: selection(nav.selection, code),
@@ -173,7 +173,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
     presentation: presentation(body.presentation, code), input: { policy: member(caret.policy, ['preserve', 'target'], 'Input policy', code),
       outcome: member(caret.outcome, ['preserved', 'transferred', 'unavailable', 'unconfirmed'], 'Input outcome', code), before: input(caret.before, code), after: input(caret.after, code) },
     floating: floating(body.floating, code), overlays: overlays(body.overlays, code), focus: focus(body.focus, code), partial: boolean(body.partial, 'Partial', code),
-    save: { layoutApplied: boolean(saved.layoutApplied, 'Selection applied', code), localStorageWritten: boolean(saved.localStorageWritten, 'Local storage', code),
+    save: { layoutApplied: boolean(saved.layoutApplied, 'Selection applied', code), clientStateWritten: boolean(saved.clientStateWritten, 'Local storage', code),
       storageFlushRequested: boolean(saved.storageFlushRequested, 'Storage flush', code), diskDurability: member(saved.diskDurability, ['unconfirmed','confirmed'], 'Disk durability', code),
       reason: saved.reason === null ? null : text(saved.reason, 'Save reason', code) },
     issues: list(body.issues, value => {

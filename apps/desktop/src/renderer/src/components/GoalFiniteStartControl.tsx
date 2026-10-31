@@ -57,9 +57,9 @@ export function GoalFiniteStartControl({ demand, primary = false }: { demand: De
     if (!saved) return
     if (saved.phase === 'may-have-dispatched') { await inspect(saved.operationId); return }
     let persistence = await retainGoalFiniteStartIntent(saved)
-    if (!persistence.localStorageWritten) { setMessage('The task has not been submitted. Its selection is retained; restore workface saving before submitting.'); return }
+    if (!persistence.clientStateWritten) { setMessage('The task has not been submitted. Its selection is retained; restore workface saving before submitting.'); return }
     persistence = await retainGoalFiniteStartIntent({ ...saved, phase: 'may-have-dispatched' })
-    if (!persistence.localStorageWritten) { await retainGoalFiniteStartIntent(saved); setMessage('The request has not been submitted: saving its operation is unconfirmed. Restore saving before submitting.'); return }
+    if (!persistence.clientStateWritten) { await retainGoalFiniteStartIntent(saved); setMessage('The request has not been submitted: saving its operation is unconfirmed. Restore saving before submitting.'); return }
     try {
       await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: saved.operationId,
         operation: 'demand.start', demandId: saved.goalId, sessionId: saved.sessionId, expectedUpdatedAt: saved.expectedUpdatedAt })

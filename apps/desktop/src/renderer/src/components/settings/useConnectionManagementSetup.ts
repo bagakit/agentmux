@@ -106,7 +106,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     try {
       if (retainNewInput && retained) {
         const saved = await retained
-        if (!saved.localStorageWritten) {
+        if (!saved.clientStateWritten) {
           if (accepts()) { setReading(previous => ({ key, source, id, value: previous?.key === key && previous.source === source && previous.id === id ? previous.value : null, issue: 'This request has not been sent. Its original details are kept here; retry saving it before continuing.', absent: false, pending: false, localSaveFailed: true })); setDriving(false) }
           return
         }

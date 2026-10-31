@@ -83,7 +83,7 @@ export async function executeSurveyList(ports: Ports, request: Request): Promise
   const applied = request.organization === undefined ? before : { ...next, ungrouped: [...next.ungrouped, ...[...originals].filter(id => !requested.has(id))] }
   ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers })
   let save: AgentMuxSpatialSave
-  try { save = await ports.save() } catch (error) { save = { layoutApplied: false, localStorageWritten: false,
+  try { save = await ports.save() } catch (error) { save = { layoutApplied: false, clientStateWritten: false,
     storageFlushRequested: false, diskDurability: 'unconfirmed', reason: error instanceof Error ? error.message : String(error) } }
   // Core topology acknowledgements cannot confirm Chromium's separate preference flush.
   save = { ...save, diskDurability: 'unconfirmed' }

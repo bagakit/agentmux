@@ -16,10 +16,10 @@ export async function submitMoteChatIntent(input: MoteChatIntent): Promise<MoteC
   try {
     if (!dispatched) {
       const retained = await retainMoteChatIntent({ ...intent, phase: 'not-dispatched' })
-      if (!retained.localStorageWritten) throw Error('The original chat settings request could not be retained. No request was sent.')
+      if (!retained.clientStateWritten) throw Error('The original chat settings request could not be retained. No request was sent.')
     }
     const retained = await retainMoteChatIntent({ ...intent, phase: 'may-have-dispatched' })
-    if (!retained.localStorageWritten) throw Error('The original chat dispatch input could not be retained.')
+    if (!retained.clientStateWritten) throw Error('The original chat dispatch input could not be retained.')
     dispatched = true
     const operation = intent.method === 'space.mote.chat.configure'
       ? await api.moteChat.call(intent.method, intent.input, intent.hostingTarget) : await api.moteChat.call(intent.method, intent.input, intent.hostingTarget)

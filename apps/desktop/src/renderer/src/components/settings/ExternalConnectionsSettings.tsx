@@ -155,7 +155,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
         input = { operationId, expectedRevision: selected?.revision ?? null, connection: { connectionId, adapterId: selected?.config.adapterId ?? (discord ? 'discord' : 'feishu'), application: { domain, appId: appId.trim() }, label: label.trim() || `${platform(domain)} bot`, enabled, credentialRef: secret ? '' : selected?.config.credentialRef ?? '' } }
       }
       const retained = await retainManualConnectionIntent(draft(input))
-      if (!retained.localStorageWritten) throw new Error('The original application input could not be saved. No credential or application request was sent.')
+      if (!retained.clientStateWritten) throw new Error('The original application input could not be saved. No credential or application request was sent.')
       // Inspect the original intent before any explicit continuation. Never replace an unconfirmed save.
       const existing = await connections.call('connection.inspect', { operationId: input.operationId })
       let record: ConnectionRecord
@@ -167,7 +167,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
           input = { ...input, connection: { ...input.connection, credentialRef: credential.credentialRef } }
           setSecret('')
           const retained = await retainManualConnectionIntent(draft(input))
-          if (!retained.localStorageWritten) throw new Error('The credential is saved on the original Host, but this App could not retain its reference. No application save was sent. Check the same original save to continue.')
+          if (!retained.clientStateWritten) throw new Error('The credential is saved on the original Host, but this App could not retain its reference. No application save was sent. Check the same original save to continue.')
         }
         if (!input.connection.credentialRef) { setSaveAbsent(true); throw new Error('The original credential is not recorded. Provide the secret again and continue this same save.') }
         record = (await connections.call('connection.configure', input)).connection

@@ -106,11 +106,11 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
     creating.current = original.operationId; setBusy(true); setIssue(null)
     try {
       const retained = await retainGoalAgentCreationDraft(original)
-      if (!retained.localStorageWritten) { setIssue(`Creation has not been dispatched. Save the retained selection and create once: ${retained.reason ?? 'Save acknowledgement unavailable'}.`); return }
+      if (!retained.clientStateWritten) { setIssue(`Creation has not been dispatched. Save the retained selection and create once: ${retained.reason ?? 'Save acknowledgement unavailable'}.`); return }
       // Persist the uncertainty boundary before the first and only dispatch. Restoring this phase only inspects.
       const dispatching = { ...original, phase: 'may-have-dispatched' as const }
       const dispatchSaved = await retainGoalAgentCreationDraft(dispatching)
-      if (!dispatchSaved.localStorageWritten) {
+      if (!dispatchSaved.clientStateWritten) {
         await retainGoalAgentCreationDraft({ ...original, phase: 'not-dispatched' })
         setIssue('Creation has not been dispatched. Saving the original selection failed; retry its first creation.'); return
       }

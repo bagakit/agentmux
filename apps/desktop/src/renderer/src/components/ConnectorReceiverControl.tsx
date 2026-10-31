@@ -43,7 +43,7 @@ export function ConnectorReceiverControl({ binding, connection, observed, hostin
     flight.current = true; setBusy(true); setIssue('')
     try {
       if (action !== 'inspect') {
-        try { const saved = await retainConnectorRoomIntent({ ...intent, phase: 'may-have-dispatched' }); if (accepts(originalKey)) setLocalIssue(!saved.localStorageWritten) }
+        try { const saved = await retainConnectorRoomIntent({ ...intent, phase: 'may-have-dispatched' }); if (accepts(originalKey)) setLocalIssue(!saved.clientStateWritten) }
         catch { if (accepts(originalKey)) setLocalIssue(true) } // Local durability is not management authority.
       }
       const result = action === 'inspect'

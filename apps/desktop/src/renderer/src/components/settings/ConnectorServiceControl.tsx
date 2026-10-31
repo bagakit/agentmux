@@ -80,9 +80,9 @@ export function ConnectorServiceControl({ active, hostingTarget, platform }: { a
     writing.current.add(scope); setWrites([...writing.current]); choose({ needsCurrent: true, notice: '' })
     try {
       const retained = await retainConnectorServiceIntent({ input, hostingTarget: original, phase: 'not-dispatched' })
-      if (!retained.localStorageWritten) throw new Error('The original service request could not be saved. No request was sent.')
+      if (!retained.clientStateWritten) throw new Error('The original service request could not be saved. No request was sent.')
       const dispatch = await retainConnectorServiceIntent({ input, hostingTarget: original, phase: 'may-have-dispatched' })
-      if (!dispatch.localStorageWritten) {
+      if (!dispatch.clientStateWritten) {
         await retainConnectorServiceIntent({ input, hostingTarget: original, phase: 'not-dispatched' })
         throw new Error('The original dispatch input could not be saved. No request was sent.')
       }

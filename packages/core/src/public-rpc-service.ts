@@ -634,7 +634,7 @@ export class AgentMuxRpcService {
         const next = await this.spatial.bind(request.binding,request.operation === 'space.unbind')
         return {operation:request.operation,requestId:request.requestId,binding:request.binding,catalog:spatialCatalog(next.graph),
           outcome:JSON.stringify(state.graph) === JSON.stringify(next.graph) ? 'unchanged' : request.operation === 'space.bind' ? 'linked' : 'unlinked',
-          save:{layoutApplied:true,localStorageWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
+          save:{layoutApplied:true,clientStateWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
       }
     }
     let result: AgentMuxControlResult | undefined = request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get'
@@ -1912,7 +1912,7 @@ export class AgentMuxRpcService {
         const report = { override: changed.label?.value ?? null, changed: changed.changed,
           nameRevision: changed.label?.nameRevision ?? 0, record: changed.record,
           outcome: !changed.applied || changed.diskDurability !== 'confirmed' ? 'partial' as const : changed.changed ? 'renamed' as const : 'unchanged' as const,
-          save: { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false, diskDurability: changed.diskDurability,
+          save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: changed.diskDurability,
             reason: changed.issue ?? changed.record.reason } }
         return rpcControlResult(method, request.operation === 'agent.rename'
           ? { operation: request.operation, agentSessionId: request.agentSessionId, ...report }

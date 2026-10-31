@@ -254,10 +254,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       pick(id, request.hostingTarget)
       setIssue('')
       const saved = await retainMoteBotRequest({ ...request, phase: 'not-dispatched' })
-      if (!saved.localStorageWritten)
+      if (!saved.clientStateWritten)
         throw new Error('The original request could not be retained. Nothing was sent.')
       const dispatch = await retainMoteBotRequest({ ...request, phase: 'may-have-dispatched' })
-      if (!dispatch.localStorageWritten) {
+      if (!dispatch.clientStateWritten) {
         await retainMoteBotRequest({ ...request, phase: 'not-dispatched' })
         throw new Error('The dispatch request could not be retained. Nothing was sent.')
       }
@@ -275,7 +275,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
               request.input
             )
       const retired = await retireMoteBotRequest(request, result)
-      const retentionIssue = retired && !retired.localStorageWritten ? 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' : ''
+      const retentionIssue = retired && !retired.clientStateWritten ? 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' : ''
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         accept(result, request.hostingTarget)
         if (result.enrollmentOperationId) {
@@ -404,7 +404,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           const retained = useAppStore.getState().moteBotRequests[id]
           if (retained && !retained.inspectOnly) {
             const retired = await retireMoteBotRequest(retained, operation)
-            if (retired && !retired.localStorageWritten) retentionIssue = 'The original Host receipt is available. Its local saved view could not be retained.'
+            if (retired && !retired.clientStateWritten) retentionIssue = 'The original Host receipt is available. Its local saved view could not be retained.'
           }
           if (token !== lifetime.current || order !== occurrences.current.get(id)) return
           accept(operation, hostingTarget)

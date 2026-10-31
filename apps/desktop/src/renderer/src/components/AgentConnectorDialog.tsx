@@ -361,9 +361,9 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     if (recordedRepliesOnly(intent)) { await inspect(intent); return }
     if (retained?.phase === 'may-have-dispatched' && groupIntent(retained) && !explicitPending) { await inspect(retained); return }
     const saved = await retainConnectorRoomIntent({ ...intent, phase: 'not-dispatched' })
-    if (!saved.localStorageWritten) throw new Error('The original intent could not be saved. No request was sent; save this same intent before continuing.')
+    if (!saved.clientStateWritten) throw new Error('The original intent could not be saved. No request was sent; save this same intent before continuing.')
     const dispatch = await retainConnectorRoomIntent({ ...intent, phase: 'may-have-dispatched' })
-    if (!dispatch.localStorageWritten) {
+    if (!dispatch.clientStateWritten) {
       // This producer has not called the transport; only this positively known no-dispatch can reset its phase.
       await retainConnectorRoomIntent({ ...intent, phase: 'not-dispatched' })
       throw new Error('Saving the original dispatch intent failed. No request was sent.')

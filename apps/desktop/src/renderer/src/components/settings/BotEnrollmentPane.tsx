@@ -209,7 +209,7 @@ export function useBotEnrollment(active: boolean, hostingTarget: ConnectionHosti
       setPrivateView(null)
       setSelectedId(input.operationId)
       const saved = await retained
-      if (!saved.localStorageWritten) {
+      if (!saved.clientStateWritten) {
         setLocalSaveFailed(previous => new Set(previous).add(JSON.stringify([ownerKey, input!.operationId])))
         if (current === epoch.current && currentOwner.current === ownerKey) setIssue('This request has not been sent. Its original details are kept here; retry saving it before continuing.', saved.reason ?? undefined)
         return

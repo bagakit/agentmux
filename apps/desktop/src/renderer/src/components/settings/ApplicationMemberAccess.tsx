@@ -87,7 +87,7 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
         if (drafts[key]?.decision === 'rule' && sameMemberCapabilities(drafts[key]!.capabilities, request.input.capabilities)) drafts[key] = { ...drafts[key]!, baseline: result.grant }
         return { drafts, requests }
       }, true)
-      if (!saved?.localStorageWritten && current()) setIssue('The Host saved this access, but App saved view could not be retained. Check the same original result after reopening.')
+      if (!saved?.clientStateWritten && current()) setIssue('The Host saved this access, but App saved view could not be retained. Check the same original result after reopening.')
       if (current()) await read()
     }
   }
@@ -103,11 +103,11 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
           if (original && JSON.stringify(original) !== JSON.stringify(request)) throw new Error('The original member request changed. Inspect it without replacing its input.')
           return { ...previous, requests: { ...previous.requests, [request.input.operationId]: request } }
         }, true)
-        if (!saved?.localStorageWritten) throw new Error('This exact request could not be retained. It has not been sent.')
+        if (!saved?.clientStateWritten) throw new Error('This exact request could not be retained. It has not been sent.')
         if (!current()) return
         const frozen = { ...request, phase: 'may-have-dispatched' as const }
         const ready = await update(previous => ({ ...previous, requests: { ...previous.requests, [request.input.operationId]: frozen } }), true)
-        if (!ready?.localStorageWritten) throw new Error('Dispatch preparation could not be retained. Keep this original request and check its result.')
+        if (!ready?.clientStateWritten) throw new Error('Dispatch preparation could not be retained. Keep this original request and check its result.')
         if (!current()) return
         await accept(frozen, await source.call('connection.application.access.configure', frozen.input))
       } else await accept(request, (await source.call('connection.application.access.inspect', { operationId: request.input.operationId })).operation)
