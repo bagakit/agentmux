@@ -138,3 +138,29 @@ it('an actual public spatial mutation producer confirms both native owners with 
   expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts['original-region']).toBe('Original unsent draft')
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
 })
+
+
+it('the actual Store registers a best-effort unload callback that submits pending input to the native owner', async () => {
+  const registrations = vi.spyOn(window, 'addEventListener')
+  const f = await fixture()
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store')
+  await prepareRendererUpdate('quit')
+  const handler = registrations.mock.calls.find(call => call[0] === 'pagehide')?.[1]
+  expect(handler).toBeTypeOf('function')
+  // Use this exact registered callback on an isolated event target: earlier module
+  // instances in this test environment must not receive another instance's exit.
+  const events = new EventTarget()
+  events.addEventListener('pagehide', handler as EventListener)
+  const realSetTimeout = globalThis.setTimeout.bind(globalThis), realClearTimeout = globalThis.clearTimeout.bind(globalThis)
+  let deadline: ReturnType<typeof setTimeout> | undefined, entered = false, start!: () => void
+  const started = new Promise<void>(resolve => { start = resolve })
+  vi.mocked(f.api.ui.writeWorkbenchState).mockImplementation(value => { entered = true; start(); return f.user.write(value) })
+  vi.useFakeTimers()
+  try {
+    f.store.getState().setAgentComposerDraft('original-region', 'Pending input delivered by unload')
+    events.dispatchEvent(new Event('pagehide'))
+    await Promise.race([started, new Promise<void>(resolve => { deadline = realSetTimeout(resolve, 1000) })])
+    expect(entered).toBe(true)
+    expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts['original-region']).toBe('Pending input delivered by unload')
+  } finally { realClearTimeout(deadline); vi.useRealTimers() }
+})

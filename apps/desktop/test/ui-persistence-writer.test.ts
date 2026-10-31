@@ -368,9 +368,9 @@ describe('createWriteFencedStorage', () => {
   })
 })
 
-describe('store.ts wiring: the persist layer uses the batched writer with an unload flush', () => {
+describe('store.ts auxiliary fence and queue ownership guards', () => {
   // Actual Store behavior is covered by workbench-persistence-relevance.test.ts with private browser
-  // storage. These small source guards additionally pin the fence/queue ownership and unload wiring;
+  // storage. These small source guards additionally pin the fence/queue ownership;
   // they are not substitutes for the actual Store tests. Comments cannot supply a match.
   const here = dirname(fileURLToPath(import.meta.url))
   const storePath = join(here, '../src/renderer/src/store.ts')
@@ -388,11 +388,6 @@ describe('store.ts wiring: the persist layer uses the batched writer with an unl
     // (a synchronous write per layout change) is the regression this guards.
     expect(source).toContain('storage: workbenchWriteFence.storage')
     expect(source).toContain('createWriteFencedStorage(persistentWorkbenchStorage.storage)')
-  })
-
-  it('registers the unload trailing flush so a shutdown mid-drag keeps the last layout write', async () => {
-    const source = stripComments(await readFile(storePath, 'utf8'))
-    expect(source).toContain('registerUnloadFlush(() => persistentWorkbenchStorage.flush())')
   })
 
   it('persist 写入真的穿过那道写闸，且闸没有第二份手写实现', async () => {
