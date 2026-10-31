@@ -1,7 +1,11 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
+import { execFile } from 'node:child_process'
+import { ObjectCliProbe } from '../../../packages/core/test/helpers/object-cli-rpc'
+import { buildStoragePublicCli } from '../scripts/fixtures/durable-workbench-storage/build-public-cli.mjs'
 import { parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { spatialCatalog } from '../../../packages/core/src/spatial-graph'
@@ -9,6 +13,9 @@ import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-sta
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 import { composerConfig } from './helpers/composer-dom-fixture'
 
+let cliRoot: string, cli: string
+beforeAll(async () => { cliRoot = await mkdtemp(join(tmpdir(), 'amux-storage-cli-')); cli = await buildStoragePublicCli(join(cliRoot, 'agentmux.mjs')) }, 30000)
+afterAll(async () => { await rm(cliRoot, { recursive: true, force: true }) })
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
@@ -30,4 +37,18 @@ it('the public space receipt carries the acknowledged native user save through t
   const old = { ...report, save: { ...report.save, localStorageWritten: true } }
   delete (old.save as Partial<typeof old.save>).clientStateWritten
   expect(() => parseRpcControlResult('space.bind', old)).toThrow()
+  // The actual current source CLI uses its public RPC client and strict codec.
+  // Its private server returns the real file owners' receipt, with no lifecycle client.
+  const probe = new ObjectCliProbe(request => {
+    expect(request.method).toBe('space.bind')
+    return report
+  })
+  await probe.start()
+  try {
+    const result = await promisify(execFile)(process.execPath, [cli, 'space', 'bind', '--zone', zone.zoneId,
+      '--space', space.spaceId, '--operation-id', report.operationId], { env: probe.environment(), timeout: 15000 })
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, result: { save: { clientStateWritten: true, diskDurability: 'confirmed' } } })
+    expect(result.stdout).not.toContain('localStorageWritten')
+    expect(probe.requests).toHaveLength(1)
+  } finally { await probe.stop() }
 })

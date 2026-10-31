@@ -109,3 +109,20 @@ it('native user persistence waiting does not block an exactly bound healthy prom
     await prepareRendererUpdate('quit')
   }
 })
+
+it('unrelated Session output updates do not submit native user or spatial writes', async () => {
+  const f = await fixture()
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store')
+  await prepareRendererUpdate('quit')
+  vi.mocked(f.api.ui.writeWorkbenchState).mockClear()
+  vi.mocked(f.api.spatial.commit).mockClear()
+  const unrelated = Array.from({ length: 500 }, (_, index) => ({ ...f.session, id: 'unrelated-' + index,
+    control: { ...f.session.control, agentSessionId: 'unrelated-' + index } }))
+  for (let tick = 1; tick <= 100; tick++) {
+    f.store.setState({ sessions: [f.session, ...unrelated.map(session => ({ ...session, latestOutputBytes: tick }))] })
+  }
+  await new Promise(resolve => setTimeout(resolve, 450))
+  expect(f.api.ui.writeWorkbenchState).not.toHaveBeenCalled()
+  expect(f.api.spatial.commit).not.toHaveBeenCalled()
+  expect(f.store.getState().agentComposerDrafts['original-region']).toBe('Original unsent draft')
+})
