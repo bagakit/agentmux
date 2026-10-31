@@ -5,27 +5,16 @@ import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type TopicKnowledgeSource, type KnowledgeTopic } from '@agentmux/core/control'
 import { api } from './api'
 import { useAppStore } from '../store'
-import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
-import { desktopBindingsFromSpatial } from './desktop-spatial-state'
 import { parseNoteFile } from './note-knowledge'
 import { documentKey } from './workbench-tabs'
 
 /** Refresh only the original graph's Host descriptors and bindings, never clone a workface. */
 export async function refreshTopicSpatial(): Promise<void> {
-  const state = await api.spatial.read()
-  if (!state) throw new Error('The original spatial state is not confirmed. Existing workfaces remain available.')
-  useAppStore.setState({ topicCategories: categoriesFromSpatial(state.graph), spaceZoneBindings: desktopBindingsFromSpatial(state.graph, useAppStore.getState().config) })
+  await useAppStore.getState().refreshSpatialState()
 }
 export async function moveKnowledgeTopic(topic: KnowledgeTopic, categoryId: string): Promise<void> {
-  const result = await api.topics.call('topic.move', { topicId: topic.topicId, categoryId, expectedRevision: topic.spatialRevision })
+  await api.topics.call('topic.move', { topicId: topic.topicId, categoryId, expectedRevision: topic.spatialRevision })
   await refreshTopicSpatial()
-  const category = useAppStore.getState().topicCategories.find(category => category.categoryId === categoryId)
-  if (!category) throw new Error('The Topic transfer was saved; its Category description is still restoring. Refresh this Topic to inspect the result.')
-  useAppStore.setState(state => {
-    const choice = state.workbenchSpaceSelection
-    return choice?.topicId === topic.topicId && choice.zoneId === result.topic.zoneId && result.previousCategorySpaceIds.includes(choice.spaceId ?? '')
-      ? { workbenchSpaceSelection: { ...choice, spaceId: category.spaceId } } : state
-  })
 }
 /** Capture only the selected original resource. No terminal or conversation scraping. */
 export function selectedKnowledgeSources(workspaceId: string): { title: string; sources: TopicKnowledgeSource[] } | null {

@@ -10,6 +10,8 @@ import { projectWorkbenchProjection, resolveWorkbenchZone, sameWorkbenchProjecti
   type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
+import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
 
 export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey', recall: 'recall' } as const
 export const desktopSurface: Record<AgentMuxDesktopMainSurface, AgentMuxDesktopSurface> = {
@@ -28,6 +30,35 @@ export function mainRegionReference(choice: AgentMuxDesktopSpaceSelection | null
   return choice?.groupId && choice.tabId && choice.regionId ? {
     displayWorkspaceId: choice.workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId
   } : null
+}
+
+/** A confirmed classification change keeps the same selected Zone and exact occurrence. */
+export function reconcileWorkbenchSpaceSelection(choice: AgentMuxDesktopSpaceSelection | null,
+  before: AgentMuxSpatialGraph | null, after: AgentMuxSpatialGraph): AgentMuxDesktopSpaceSelection | null {
+  if (!choice?.spaceId || !choice.zoneId || !before || after.bindings.some(binding =>
+    binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) return choice
+  const source = categoriesFromSpatial(before).find(category => category.spaceId === choice.spaceId)
+  if (!source || source.readError || before.spaces.find(space => space.spaceId === source.spaceId)?.issue || !before.bindings.some(binding =>
+    binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) return choice
+  const originalZone = before.zones.find(zone => zone.zoneId === choice.zoneId)
+  const zone = after.zones.find(zone => zone.zoneId === choice.zoneId)
+  if (!originalZone || !zone || zone.issue || zone.kind === 'unknown' ||
+    originalZone.workspaceId !== zone.workspaceId || originalZone.hostId !== zone.hostId) return choice
+  const categories = categoriesFromSpatial(after)
+  if (after.bindings.some(binding => binding.zoneId === choice.zoneId && after.spaces.some(space =>
+    space.spaceId === binding.spaceId && space.kind === 'container' &&
+    (space.issue || !categories.some(category => category.spaceId === space.spaceId))))) return choice
+  const destinations = categories.filter(category => after.bindings.some(binding =>
+    binding.spaceId === category.spaceId && binding.zoneId === choice.zoneId))
+  if (destinations.length !== 1 || destinations[0]!.readError) return choice
+  if (choice.tabId) {
+    const exactOccurrence = (graph: AgentMuxSpatialGraph) => graph.tabs.some(tab =>
+      tab.tabId === choice.tabId && tab.zoneId === choice.zoneId && tab.regionIds.includes(choice.regionId ?? '')) &&
+      graph.regions.some(region => region.regionId === choice.regionId && region.tabId === choice.tabId) &&
+      graph.layouts[choice.workspaceId]?.groups.some(group => group.id === choice.groupId && group.tabOrder.includes(choice.tabId!))
+    if (!exactOccurrence(before) || !exactOccurrence(after)) return choice
+  } else if (choice.groupId || choice.regionId) return choice
+  return { ...choice, spaceId: destinations[0]!.spaceId }
 }
 export class DesktopFocusFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }
@@ -56,6 +87,16 @@ export function resolveWorkbenchOccurrenceSelection(state: DesktopSelectionState
   const sameUnboundOccurrence = choice?.spaceId === null && choice.zoneId === null &&
     choice.workspaceId === reference.workspaceId && choice.groupId === reference.groupId && choice.tabId === reference.tabId &&
     choice.regionId === (reference.regionId ?? state.tabs[reference.tabId]?.layout.activeRegionId)
+  if (choice?.spaceId && !sameSpace && choice.zoneId !== null && choice.zoneId === tab?.zoneId &&
+    choice.workspaceId === reference.workspaceId) {
+    // An unknown Category relationship does not revoke an exact local Zone position.
+    // Keep that parent reference unknown; do not choose another Category to focus a member.
+    const regionId = reference.regionId ?? state.tabs[reference.tabId]?.layout.activeRegionId
+    const exact = { displayWorkspaceId: reference.workspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: regionId ?? '' }
+    const locations = catalog.locations.filter(location => sameWorkbenchProjectionSelection(exact, location) && location.zoneId === choice.zoneId)
+    if (regionId && state.tabs[reference.tabId]?.regions[regionId] && workbenchProjectionLocationsMatchOwner(catalog, reference.tabId, locations))
+      return { ...choice, groupId: reference.groupId, tabId: reference.tabId, regionId }
+  }
   if (choice && !within && !sameUnboundOccurrence && intent === 'local') reject('SPACE_SCOPE_UNCONFIRMED',
     'This local position is not confirmed in the selected object. Its original workface and reference are kept.')
   const selected = resolveDesktopSpaceSelection(state, catalog, {
@@ -145,8 +186,16 @@ export function projectWorkbenchSpaceSelection(layout: WorkspaceLayout | undefin
   }
   const zone = catalog.zones.find(zone => zone.zoneId === choice.zoneId)
   if (!zone || !layout || (choice.spaceId !== null && !catalog.bindings.some(binding =>
-    binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId))) return { layout: null, confirmed: false,
-      issues: ['The selected object or its original Zone position is not confirmed. Its workface and exact reference are kept.'] }
+    binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId))) {
+    const reference = mainRegionReference(choice)
+    const retained = zone && layout && reference && catalog.tabs.some(tab => tab.tabId === reference.tabId && tab.zoneId === zone.zoneId)
+      ? projectWorkbenchProjection(layout, tabs, { entity: { kind: 'zone', zoneId: zone.zoneId },
+        presentationId: 'space-workbench', displayWorkspaceId: choice.workspaceId, catalog,
+        selection: [reference], onSelect: () => {} }, choice.groupId) : null
+    return { layout: retained?.layout ?? null, confirmed: false,
+      issues: ['The selected Category or its original Zone relationship is not confirmed. The original workface and exact reference are kept; refresh or choose its current Category.',
+        ...(retained?.issues ?? [])] }
+  }
   const members = catalog.tabs.filter(tab => tab.zoneId === choice.zoneId)
   if (!members.length && choice.tabId === null) {
     if (zone.kind === 'unknown') return { layout: null, confirmed: false,

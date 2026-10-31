@@ -115,7 +115,7 @@ import { executeWorkfaceFileOpen } from './lib/workface-file-open'
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
-import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
 import { captureDesktopInput, readDesktopPresentation, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
@@ -1247,6 +1247,7 @@ export type AppState = GitReadingActions & {
   reviewNameEdit(): Promise<void>
   reportWorkbenchSaveFailure(error: unknown, owner?: 'local-storage' | 'workbench'): void
   retryWorkbenchSave(): Promise<void>
+  refreshSpatialState(): Promise<void>
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
   activateWorkspaceSelection(result: WorkspaceSelectionResult, reveal?: boolean): void
@@ -5360,6 +5361,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Connection observations describe this wait; they do not need the Session
         // membership cut. Keep that cut buffered while the original loading surface
         // can explain the current Host's progress, including exact-boundary recovery.
+  async refreshSpatialState() {
+    const owner = coreSpatialPersistence
+    if (!owner) throw new Error('The original Core spatial owner is unavailable. Existing workfaces remain available; restore storage and refresh.')
+    await owner.refresh()
+  },
         if (event.endpointWarning !== undefined || event.endpointObservation) set(state => {
           const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
           const observation = event.endpointObservation
@@ -5707,7 +5713,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             }))
             return [id,{...tab,regions}]
           }))}
-          set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config)})
+          const workbenchSpaceSelection=reconcileWorkbenchSpaceSelection(current.workbenchSpaceSelection,baseline,saved.graph)
+          set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection})
           applyNameAcknowledgement(saved)
         }
         // Keep observation and local edit capture available even when the first storage read

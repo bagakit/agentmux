@@ -254,6 +254,8 @@ export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentM
 /** One client's pending edit and revision, with no resource or Session lifecycle. */
 export class DesktopSpatialPersistence {
   private state: AgentMuxSpatialState | null = null;
+  // Exact resource readers can observe ahead without consuming the UI's apply frontier.
+  private applied: AgentMuxSpatialState | null = null;
   private readConfirmed = false;
   private startup: { baseline: AgentMuxSpatialGraph; graph: AgentMuxSpatialGraph } | null = null;
   private pending: {
@@ -271,6 +273,7 @@ export class DesktopSpatialPersistence {
   }
   get removedEntities(): ReadonlySet<string> { return this.removed; }
   private apply: ((state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void) | null = null;
+  private acknowledgeName: ((state: AgentMuxSpatialState) => void) | undefined;
   private unsubscribe: (() => void) | null = null;
   constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void) { }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
@@ -310,7 +313,7 @@ export class DesktopSpatialPersistence {
       this.state = remote;
       this.readConfirmed = true;
       this.startup = null;
-      if (sameSpatialValue(graph, remote.graph)) this.apply?.(remote, startup.graph);
+      if (sameSpatialValue(graph, remote.graph)) this.publish(remote, startup.graph);
       else this.pending = { baseline: remote, graph };
     } else {
       const graph = startup.graph;
@@ -318,25 +321,39 @@ export class DesktopSpatialPersistence {
       this.state = next;
       this.readConfirmed = true;
       this.startup = null;
-      if (startup.graph === graph) this.apply?.(next, graph);
+      if (startup.graph === graph) this.publish(next, graph);
       else this.pending = { baseline: next, graph: reconcileSpatialGraphs(graph, startup.graph, next.graph) };
     }
   }
   connect(apply: (state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void, acknowledgeName?: (state: AgentMuxSpatialState) => void): () => void {
     this.apply = apply;
-    this.unsubscribe = this.port.onChange(state => {
-      // A pure read can arrive first at the same revision; only the producer ACK
-      // carries name durability, and it must reach its consumer despite rebase.
-      if (state.nameCommit) acknowledgeName?.(state);
-      if (this.state && state.revision <= this.state.revision)
-        return;
-      if (this.startup || this.pending || this.saving)
-        return; // flush reconciles from the original revision.
-      const baseline = this.state?.graph ?? null;
-      this.state = state;
-      apply(state, baseline);
-    });
-    return () => { this.unsubscribe?.(); this.unsubscribe = null; this.apply = null; };
+    this.applied = this.state;
+    this.acknowledgeName = acknowledgeName;
+    this.unsubscribe = this.port.onChange(state => this.observe(state));
+    return () => { this.unsubscribe?.(); this.unsubscribe = null; this.apply = null; this.acknowledgeName = undefined; };
+  }
+  /** Explicit refresh and subscription observations use the same revision and pending-edit owner. */
+  async refresh(): Promise<void> {
+    await this.flush();
+    const state = await this.port.read();
+    if (!state) throw new Error('The original Core spatial document is unconfirmed. Its workface and pending edits are retained; refresh the original owner.');
+    this.observe(state);
+  }
+  private observe(state: AgentMuxSpatialState): void {
+    // A pure read can arrive first at the same revision; only the producer ACK
+    // carries name durability, and it must reach its consumer despite rebase.
+    if (state.nameCommit) this.acknowledgeName?.(state);
+    if (this.state && state.revision < this.state.revision || this.applied && state.revision <= this.applied.revision)
+      return;
+    if (this.startup || this.pending || this.saving)
+      return; // flush reconciles from the original revision.
+    const baseline = this.applied?.graph ?? null;
+    this.state = state;
+    this.publish(state, baseline);
+  }
+  private publish(state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null): void {
+    this.applied = state;
+    this.apply?.(state, baseline);
   }
   stage(graph: AgentMuxSpatialGraph): void {
     if (!this.ready) {
@@ -346,9 +363,9 @@ export class DesktopSpatialPersistence {
     }
     // Compare with the latest intent: returning to the confirmed graph can undo
     // an in-flight edit, while repeating that edit should not enqueue another write.
-    if (sameSpatialValue(graph, this.pending?.graph ?? this.state!.graph))
+    if (sameSpatialValue(graph, this.pending?.graph ?? this.applied?.graph ?? this.state!.graph))
       return;
-    this.pending = { graph, baseline: this.state! };
+    this.pending = { graph, baseline: this.pending?.baseline ?? this.applied ?? this.state! };
     // Coalesce synchronous structural changes; this never opens a resource or Run.
     queueMicrotask(() => { void this.flush().catch(this.warn); });
   }
@@ -392,7 +409,7 @@ export class DesktopSpatialPersistence {
       for (const id of groupRemovals) this.removedProjectGroups.delete(id);
       if (this.pending === pending) {
         this.pending = null;
-        this.apply?.(next, local);
+        this.publish(next, local);
       }
       else if (this.pending) {
         // Later local edits were made against our in-flight graph. Preserve the
