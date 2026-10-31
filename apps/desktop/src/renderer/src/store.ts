@@ -121,7 +121,7 @@ import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, read
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
-import { directoryIdentity, topicSpatialAddress, workspaceZoneId, homeZoneId } from '../../shared/space-addresses'
+import { directoryIdentity, originalTopicAddress, topicSpatialAddress, workspaceZoneId, homeZoneId } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { observeAgentInputOccupation } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -8799,6 +8799,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let snapshot: ScratchTopicSnapshot
     let createdIdentity: { topicId: string; zoneId: string } | undefined
     try {
+      // The durable placeholder and Host registration write the same Core graph.
+      // Finish this original edit before the exact-revision registration; the
+      // navigation snapshot above still protects later user choices.
+      if (initialRequest) await coreSpatialPersistence?.flush()
       if (preset === 'mote') snapshot = await api.scratch.ensureMote(workspace.id, topicId)
       else {
         const result = await api.topics.call('topic.create', { topicId, title: knowledge?.title ?? 'New Topic', ...(knowledge?.categoryId ? { categoryId: knowledge.categoryId } : {}) })
@@ -8833,7 +8837,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const live = current.tabs[targetTab.id]
       if (!live || live.topicId !== topicId || live.regions[regionId] !== initialSurface) return current
       const groupId = tabGroupForTab(current.layouts[workspace.id], live.id)
-      return { tabs: { ...current.tabs, [live.id]: { ...live, space: address } },
+      return { tabs: { ...current.tabs, [live.id]: { ...live, space: originalTopicAddress(workspace, snapshot, current.spaceZoneBindings)! } },
         scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: { scope, revision: previous?.revision ?? 0,
           reading: previous?.reading ?? false, discoveryError: previous?.discoveryError ?? null, error: previous?.error ?? null, topics: topics.some(topic => topic.id === snapshot.id)
             ? topics.map(topic => topic.id === snapshot.id ? snapshot : topic) : [...topics, snapshot] } },
@@ -8925,11 +8929,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (options?.newTab) {
       const request = options.initialRequest
       const known = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(topic => topic.id === topicId)
-      const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
       const address = known ? topicSpatialAddress(state.config, known, state.spaceZoneBindings, state.topicCategories)
         : { spaceId: null, zoneId: null }
       if (!address) throw new Error('The Topic Category relationship is unconfirmed. Original workface is kept.')
-      const tab = { ...newLauncherTab(workspace.id, topicId), ...(address.spaceId && address.zoneId ? { space: { spaceId: address.spaceId, zoneId: address.zoneId } } : {}), ...(request ? { topicPreparation: 'mote' as const } : {}) }
+      const content = known ? originalTopicAddress(workspace, known, state.spaceZoneBindings) : null
+      const tab = { ...newLauncherTab(workspace.id, topicId), ...(content ? { space: content } : {}), ...(request ? { topicPreparation: 'mote' as const } : {}) }
       const regionId = tab.layout.activeRegionId, initialSurface = tab.regions[regionId]
       let groupId: string | undefined
       set(current => {
@@ -8967,7 +8971,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!address) throw new Error('The born Topic relationship is unconfirmed. Its Tab, Region and draft are retained.')
         if (snapshot.id !== topicId || snapshot.readError || tab.space && address.zoneId !== tab.space.zoneId) throw new Error('The confirmed Topic identity differs from its born owner. Its original Tab, Region and draft are retained.')
         set(current => current.tabs[tab.id]?.topicId === topicId && current.tabs[tab.id]?.regions[regionId] === initialSurface
-          ? { tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: address } } } : current)
+          ? { tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: originalTopicAddress(workspace, snapshot, current.spaceZoneBindings)! } } } : current)
         if (reveal && !options.signal?.aborted && fileNavigationSelection(get()) === bornSelection && get().tabs[tab.id]?.regions[regionId] === initialSurface) {
           const choice = selectObject(get(), snapshot, tab.id)
           set({ workbenchSpaceSelection: choice, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })
@@ -9082,7 +9086,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const live = current.tabs[pendingBorn.id]
         if (!live?.topicPreparation || live.space || live.topicId !== topicId || live.regions[pendingBorn.layout.activeRegionId] !== pendingRegion) return current
         const { topicPreparation: _prepared, ...prepared } = live
-        return { tabs: { ...current.tabs, [live.id]: { ...prepared, space: address } } }
+        return { tabs: { ...current.tabs, [live.id]: { ...prepared, space: originalTopicAddress(workspace, snapshot, current.spaceZoneBindings)! } } }
       })
     }
     if (!reveal && options?.tabId) {
@@ -9151,7 +9155,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null },
           retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
         : current
-      const tab = { ...newLauncherTab(workspace.id), topicId, space: address }
+      const tab = { ...newLauncherTab(workspace.id), topicId, space: originalTopicAddress(workspace, snapshot!, current.spaceZoneBindings)! }
       const nextLayout = addTabPlacement(layout, layout.activeGroupId, tab.id)
       if (!nextLayout) {
         placementFailed = true

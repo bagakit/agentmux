@@ -144,12 +144,12 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
     }
     const origin = fact.zoneId === null ? null : graph.resources[zoneKey(fact.zoneId)];
     const bindings = fact.zoneId === null ? [] : graph.bindings.filter(binding => binding.zoneId === fact.zoneId);
-    const sourceSpaceId = origin && typeof origin === 'object' && !Array.isArray(origin) && typeof origin.spaceId === 'string'
-      ? origin.spaceId : bindings.length === 1 ? bindings[0]!.spaceId : null;
+    const contentSpaceId = origin && typeof origin === 'object' && !Array.isArray(origin) && typeof origin.spaceId === 'string' ? origin.spaceId : null;
+    const sourceSpaceId = contentSpaceId ?? (bindings.length === 1 ? bindings[0]!.spaceId : null);
     const descriptor = metadata.space && typeof metadata.space === 'object' && !Array.isArray(metadata.space) ? metadata.space : null;
     // Core's exact Tab→Zone survives older host descriptors. Multiple display bindings
     // never select an arbitrary Space; the original resource context remains separate.
-    const space = fact.zoneId === null ? undefined : descriptor ? { ...descriptor, zoneId: fact.zoneId }
+    const space = fact.zoneId === null ? undefined : descriptor ? { ...descriptor, ...(contentSpaceId ? { spaceId: contentSpaceId } : {}), zoneId: fact.zoneId }
       : sourceSpaceId ? { spaceId: sourceSpaceId, zoneId: fact.zoneId } : undefined;
     // Unavailable host data is reported by the consumer, not fabricated here.
     tabs[fact.tabId] = { ...metadata, space, id: fact.tabId, workspaceId: fact.workspaceId, layout, regions,
