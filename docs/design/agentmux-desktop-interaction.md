@@ -26,6 +26,7 @@
 | 执行焦点、项目泳道、历史与时间音轨 | [Focus 执行上下文](behavior/focus-context.md) |
 | Map 的用途、空间地形、通信邻域与稳定阅读 | [Focus Map](behavior/collaboration-map.md) |
 | Session/Run/View、健康能力、重启和启动事实 | [Session、恢复与启动交付](behavior/session-recovery.md) |
+| 用户数据分类、唯一持久来源、保存确认与跨进程恢复 | [用户数据与本地持久化](behavior/persistence.md) |
 | 对话视图目标、当前与历史阅读、消息／过程／资源、答复及产品验收 | [对话视图 PRD](behavior/conversation-mode.md) |
 | Composer、Message Tools、草稿、队列、邮箱与持续推进 | [输入与邮箱](behavior/conversation-input.md) |
 | 交互模式与外部群聊的共同语义、状态与投递边界 | [共同对话协议与外部交流入口](behavior/conversation-mode.md#共同对话协议与外部交流入口) |

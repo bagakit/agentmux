@@ -2,6 +2,8 @@
 
 本文定义 AgentSession／Run 与持久工作面的恢复边界、恢复操作、故障服务窗及更新保全。Core 保语义会话与空间身份，ctxmux 保真实 Run，客户端恢复原展示并消费各 owner 的事实；模型定义见[空间词典](spaces-and-layout.md#统一概念与空间寻址)，阶段呈现见[同主题视觉](../presentation/session-recovery.md)。设计约束不代签当前候选或安装。
 
+全部需保全用户数据的分类、唯一持久来源、保存确认与跨进程验收沿[用户数据与本地持久化](persistence.md)；以下条款继续持有 Session 身份、工作面及恢复动作的特定责任。
+
 [返回交互合同](../agentmux-desktop-interaction.md)
 
 - [身份、持久工作面与运行归属](#身份持久工作面与运行归属)
