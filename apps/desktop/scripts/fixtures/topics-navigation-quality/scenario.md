@@ -28,3 +28,13 @@ The restored process also uses the original Focus navigation at 320px, then retu
 Space; the same file workface, topology and unsent work must remain. Focus has no execution
 contexts in this proof, but its borrowed original file workface remains visible beneath
 the scan area. This does not stand in for an Agent workface or its recovery.
+
+`verify-topic-scope-restart.mjs` reuses that runner with the scope scene. The first
+process adds a canonical File occurrence for the same research document inside
+hidden Topic1, while Topic0 keeps its original two Regions, 62% split and dirty
+document. Both processes click the real Files row and await the original
+`openFileAndReveal` result; the selected Category/Topic/Region, dirty document and
+other Topic's original occurrence must remain. The second process restores from
+the same private profile and Core file without seeding. Topic content identities
+remain distinct from Category display bindings. The scope scene adds no Agent
+or Session and does not claim Provider recovery or installation validation.
