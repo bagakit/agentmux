@@ -43,6 +43,7 @@ const ownedSources = [
   ...['entry.tsx', 'main.ts', 'preload.ts', 'bootstrap.cjs', 'index.html'].map(file => 'apps/desktop/scripts/fixtures/capsule-address/' + file),
   'apps/desktop/scripts/verify-capsule-address-native.mjs', 'apps/desktop/scripts/probe-process.mjs',
   'apps/desktop/scripts/fixtures/conversation-style-entry/environment.mjs', 'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs',
+  ...['src/index.ts', 'src/runtime-entry.ts', 'scripts/build.mjs', 'scripts/runtime-bundle.mjs'].map(file => 'packages/identity/' + file),
   ...['package.json', 'apps/desktop/package.json', 'apps/host/package.json', ...['core', 'client-ui', 'identity', 'layout', 'demand'].map(name => 'packages/' + name + '/package.json')], 'pnpm-lock.yaml'
 ]
 const bindings = async () => Object.fromEntries(await Promise.all(ownedSources.map(async file => [file, hash(await readFile(join(root, file)))])))
@@ -50,10 +51,32 @@ const sources = await bindings(), sourceDigest = hash(JSON.stringify(sources))
 const environmentIdentity = { node: process.version, platform: process.platform, arch: process.arch, nodeExecutable: process.execPath, electronExecutable: require('electron'),
   electron: require('electron/package.json').version, vite: require('vite/package.json').version,
   esbuild: createRequire(require.resolve('vite/package.json'))('esbuild/package.json').version }
+const nativeWorkspaceAliases = new Map()
+for (const name of ['capsule', 'relay', 'git', 'diagnostic-evidence', 'native-desktop']) {
+  const manifest = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8'))
+  for (const [key, value] of Object.entries(manifest.exports)) {
+    const target = typeof value === 'string' ? value : value.import
+    nativeWorkspaceAliases.set('@agentmux/' + name + (key === '.' ? '' : key.slice(1)), join(root, 'packages', name, target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/u, '.ts')))
+  }
+}
+const resolveAlias = path => { const alias = aliases.find(alias => alias.find.test(path)); return alias ? path.replace(alias.find, alias.replacement) : nativeWorkspaceAliases.get(path) ?? null }
+const capsuleRendererAliases = [...nativeWorkspaceAliases].filter(([name]) => name === '@agentmux/capsule' || name.startsWith('@agentmux/capsule/'))
+  .map(([name, replacement]) => ({ find: new RegExp('^' + name + '$'), replacement }))
 if (preflight) {
   for (const file of ['entry.tsx', 'main.ts', 'preload.ts']) await transform(await readFile(join(fixture, file), 'utf8'), { loader: file.endsWith('tsx') ? 'tsx' : 'ts', jsx: 'automatic' })
   assert.ok(ownedSources.length > 0)
-  console.log(JSON.stringify({ passed: true, scope: 'syntax-and-nonempty-inputs-only', sourceDigest, files: ownedSources.length }))
+  const capsuleExports = [...nativeWorkspaceAliases].filter(([name]) => name === '@agentmux/capsule' || name.startsWith('@agentmux/capsule/'))
+  assert.ok(capsuleExports.length > 0)
+  for (const [name, target] of capsuleExports) {
+    assert.equal(capsuleRendererAliases.find(alias => alias.find.test(name))?.replacement, target)
+    assert.equal(resolveAlias(name), target); assert.ok(target.startsWith(join(root, 'packages/capsule/src/')))
+    assert.ok((await readFile(target)).length > 0)
+  }
+  const generatedIdentity = resolveAlias('@agentmux/identity/runtime-source')
+  assert.equal(generatedIdentity, join(root, 'packages/identity/dist/runtime-source.js'))
+  assert.ok((await readFile(generatedIdentity)).length > 0, 'Build identity from the candidate root before preflight')
+  console.log(JSON.stringify({ passed: true, scope: 'syntax-nonempty-inputs-and-candidate-aliases-only', sourceDigest, files: ownedSources.length,
+    capsuleExports: Object.fromEntries(capsuleExports), generatedIdentity }))
   process.exit(0)
 }
 if (receiptOnly) {
@@ -97,6 +120,8 @@ const inputPackageManifests = new Set()
 async function bindInput(path, graph) {
   if (!path || path.includes('\0') || path.includes('?')) return
   path = resolve(root, path)
+  assert.ok(path.startsWith(root + '/') || path.includes('/node_modules/') || path === process.execPath,
+    'A consumed workspace source must belong to this exact candidate root: ' + path)
   let bytes
   try { bytes = await readFile(path) } catch (error) { if (error.code === 'ENOENT' || error.code === 'EISDIR') return; throw error }
   const digest = hash(bytes)
@@ -114,15 +139,6 @@ async function bindMetafile(result, graph) { assert.ok(Object.keys(result.metafi
 const server = createServer((_request, response) => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end('<!doctype html><title>Independent external page</title><style>body{background:#eff3f8;color:#283d59;font:20px system-ui;padding:48px}</style><h1>An external page</h1><p>This document is not the Capsule, even inside its retained isolated container.</p>') })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const externalUrl = `http://127.0.0.1:${server.address().port}/external`
-const nativeWorkspaceAliases = new Map()
-for (const name of ['capsule', 'relay', 'git', 'diagnostic-evidence', 'native-desktop']) {
-  const manifest = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8'))
-  for (const [key, value] of Object.entries(manifest.exports)) {
-    const target = typeof value === 'string' ? value : value.import
-    nativeWorkspaceAliases.set('@agentmux/' + name + (key === '.' ? '' : key.slice(1)), join(root, 'packages', name, target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/u, '.ts')))
-  }
-}
-const resolveAlias = path => { const alias = aliases.find(alias => alias.find.test(path)); return alias ? path.replace(alias.find, alias.replacement) : nativeWorkspaceAliases.get(path) ?? null }
 try {
   for (const path of ownedSources) await bindInput(path)
   for (const path of [process.execPath, require('electron'), require.resolve('electron'), require.resolve('electron/package.json'), require.resolve('vite/package.json'), createRequire(require.resolve('vite/package.json')).resolve('esbuild/package.json')]) await bindInput(path)
@@ -136,7 +152,7 @@ try {
   const rendererFiles = new Set()
   const buildRenderer = async () => {
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
-    resolve: { alias: [{ find: /^jsonc-parser$/, replacement: join(dirname(desktopRequire.resolve('jsonc-parser/package.json')), 'lib/esm/main.js') }, ...aliases] },
+    resolve: { alias: [...capsuleRendererAliases, { find: /^jsonc-parser$/, replacement: join(dirname(desktopRequire.resolve('jsonc-parser/package.json')), 'lib/esm/main.js') }, ...aliases] },
     define: { 'process.env.NODE_ENV': '"production"', __AGENTMUX_WEB_PREVIEW__: 'false' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'exact-production-capsule-address-inputs', enforce: 'pre',
       transform(bytes, id) { if (id.includes('?')) return; const path = relative(root, id); if (Object.hasOwn(sources, path)) { assert.equal(hash(bytes), sources[path]); report.loaded[path] = hash(bytes); rendererFiles.add(path) } },
