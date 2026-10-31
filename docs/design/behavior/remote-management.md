@@ -24,6 +24,14 @@ Remote 管理是独立、完整的产品主题；设置提供明确入口，以�
 
 发现、创建时的执行选择、工具权限、操作结果与原身份恢复必须通过 Core 公共 API、JSON-RPC／CLI 及真实客户端同源消费，按[公共能力贡献约定](../../guides/public-capability-contributions.md)在同一计划中判断复用与扩展。真实双 Host 验收须分别覆盖两端角色互换后的执行方向，证明各方向准确的文件与命令落点、独立授权边界、错误资源拒绝、回包丢失不重放，以及重启后原身份与工作面恢复；通用机制另用不同原生协议或触发形态验证。性能证据须绑定候选与实际网络条件，分别记录冷启动、复用连接的工具往返、大载荷吞吐、并发干扰和空闲成本，不用本机环回或主观流畅代签真实跨主机性能。本节定义目标，不声明实现或验收已完成；具体方法沿[测试策略](../../testing/strategy.md#任务验收与假绿防护)。
 
+## Tailcat 传输与本机接入
+
+Remote 的同一 Host 可选择 SSH、SSH 优先且 Tailcat 备选、或仅 Tailcat。现有 Host 默认使用 SSH；关闭 Tailcat 不启动其 CLI，不改写 SSH 命令或删除配置。传输选择不改变 Host、Runtime、Session、Run 或工作面身份。备选只用于建立通道，在发送业务请求后失去回执时保留原 operation ID 和未知结果，不能自动改路重放。
+
+Tailcat 通过官方 CLI 的双向 stdio 复用现有 JSON-RPC 和 Runtime 绑定。接收端必须已经安装并运行 AgentMux；本机接入开关只监听并将连接桥接到原 `amux system endpoint --stdio`，不安装远程核心。开关使用已保存的 server key（含 PSK 和固定 DERP region）及明确的非空 client public key allowlist；关闭只停止监听。发送端使用保存的 client key 和对方 `tc…` 地址。地址属于凭据，不进入日志、拓扑标签或公开示例。
+
+CLI 缺失、启动失败和监听观察未知必须可见并可重新检查；进程启动不代签已连接。Tailcat 失败不能撤销健康 SSH、Agent 或 Run。现有 Linux x64 headless Core 升级范围保持不变，Tailcat 接入不授予 Mac 远程安装、主动扫描或绕过安全策略的权限。
+
 ## 产品目标与主要任务
 
 Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；哪台机器上有哪些项目和 Agent；现在确认了什么、哪里尚未确认；下一步能沿哪个原对象安全完成。

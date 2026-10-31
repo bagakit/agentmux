@@ -1,7 +1,7 @@
 # system-endpoint
 
 <!-- amux:content -->
-Public methods use the same typed JSON-RPC service over Unix, HTTP, encrypted Relay or SSH.
+Public methods use the same typed JSON-RPC service over Unix, HTTP, encrypted Relay, SSH or Tailcat.
 Select one transport with amux --endpoint <descriptor> <object> <action>.
 Run system endpoint to discover the default without connecting.
 Endpoint, Host route and execution identity are separate:
@@ -26,5 +26,12 @@ system endpoint --inspect reads the owner publication observation through RPC.
 An RPC system.endpoint response reports connection=responded; this certifies that response only.
 SSH uses the remote amux system endpoint --stdio bridge and requires an existing remote service.
 The ssh URI may specify URI-encoded socket and command query parameters; system SSH owns aliases and credentials.
+Tailcat uses the same stdio bridge and requires AgentMux already running on the target.
+Use a saved client key name or absolute path, never an ephemeral key:
+  amux --endpoint 'tailcat:tcADDRESS_PLACEHOLDER?key=agentmux-client' agent ls
+Replace tcADDRESS_PLACEHOLDER with the private address returned by the target's listener.
+The address contains secret connection material; keep it out of logs and shared examples.
+Direct endpoint selection never falls back or replays an unknown operation.
+Remote Host settings can explicitly select SSH-first with Tailcat backup before dispatch.
 Managed Agent credentials come from AGENTMUX_AGENT_SESSION_ID and AGENTMUX_AGENT_CAPABILITY;
 the service verifies them. Environment SID hints and displayed text do not prove an author.
