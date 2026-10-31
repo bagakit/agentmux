@@ -440,6 +440,7 @@ import {
   createWriteFencedStorage,
   registerUnloadFlush
 } from './lib/persisted-ui-writer'
+import { createWorkbenchUserStorage, WORKBENCH_USER_STATE_KEY } from './lib/workbench-user-storage'
 import type { StartupAgentAvailability, StartupProgress } from './lib/startup-progress'
 
 type ViewMode = SessionViewMode
@@ -4405,8 +4406,13 @@ const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeI
   removeItem: () => undefined
 }
 
-function workbenchStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
-  return typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
+// The Web preview has its own browser host. Shipping Desktop always uses the
+// native file owner; Web Storage is read once only to preserve existing bytes.
+const nativeWorkbenchStorage = createWorkbenchUserStorage(api.ui, () => window.localStorage)
+function workbenchStorage() {
+  return __AGENTMUX_WEB_PREVIEW__
+    ? typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
+    : nativeWorkbenchStorage
 }
 
 // A failed hydration must not be followed by the initial `set(...)` overwriting the only durable
@@ -4420,19 +4426,21 @@ function workbenchStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 const persistentWorkbenchStorage = createBatchedPersistentStorage<PersistedAppState>({
   getItem: (name) => workbenchStorage().getItem(name),
   setItem: (name, value) => {
-    workbenchStorage().setItem(name, value)
-    requestWorkbenchStorageCommit()
+    const result = workbenchStorage().setItem(name, value)
+    if (__AGENTMUX_WEB_PREVIEW__) requestWorkbenchStorageCommit()
+    return result
   },
   removeItem: (name) => {
     const storage = workbenchStorage()
-    if (storage.getItem(name) === null) return
-    storage.removeItem(name)
-    requestWorkbenchStorageCommit()
+    if (__AGENTMUX_WEB_PREVIEW__ && storage.getItem(name) === null) return
+    const result = storage.removeItem(name)
+    if (__AGENTMUX_WEB_PREVIEW__) requestWorkbenchStorageCommit()
+    return result
   }
-})
+}, 400, error => useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage'))
 
-// The writer batches real presentation changes before this boundary. A visible localStorage value
-// is not a cross-process durability receipt; ask its existing platform owner to commit that batch.
+// The writer batches relevant user changes. Native writes return file/directory ACKs;
+// explicit checkpoints capture current inputs before asking the same owner to confirm.
 // Failure is advisory: retain the written state and retry on the next real storage mutation.
 // Temporary custody of original local bytes until the original Main owner confirms handoff.
 // It is not a second editable store; canonical presence, including {}, always wins.
@@ -4481,7 +4489,9 @@ async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void
   const request = includeSpatial ? ++spatialSaveRequest : ++localSaveRequest
   const current = () => request === (includeSpatial ? spatialSaveRequest : localSaveRequest)
   try {
-    if (includeSpatial) await coreSpatialPersistence?.flush()
+    if (includeSpatial) await checkpointSpatialWorkbench()
+    if (includeSpatial) await checkpointWorkbenchUserState()
+    else if (!__AGENTMUX_WEB_PREVIEW__) await persistentWorkbenchStorage.flush()
     await api.ui.requestStorageFlush()
     if (current() && failureRevision === workbenchSaveFailureRevision &&
         (includeSpatial || useAppStore.getState().workbenchSaveWarningOwner === 'local-storage')) {
@@ -4496,9 +4506,8 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
   let clientStateWritten = false, storageFlushRequested = false, reason: string | null = null
   try {
     if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
-    persistentWorkbenchStorage.flush()
-    clientStateWritten = true
     await requestWorkbenchStorageFlush()
+    clientStateWritten = true
     storageFlushRequested = true
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
   return { layoutApplied, clientStateWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
@@ -4513,7 +4522,7 @@ export async function saveToolkitPalette(toolId: string, theme: import('../../sh
   try {
     if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored. Your palette choice is kept.')
     const before = workbenchSaveRequest
-    persistentWorkbenchStorage.flush()
+    await persistentWorkbenchStorage.flush()
     // A local preference does not write Core topology. Await the exact platform
     // commit already requested by the original local writer; retry if no bytes changed.
     await (workbenchSaveRequest === before ? requestWorkbenchStorageFlush(false) : workbenchStorageCommit)
@@ -4800,6 +4809,11 @@ function agentDisplayOverride(names: Record<string, string>, sessionId: string):
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
 }
 let workbenchStorageCommit: Promise<void> = Promise.resolve()
+async function checkpointWorkbenchUserState(): Promise<void> {
+  await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, {
+    state: partializeAppState(useAppStore.getState()), version: 1
+  })
+}
 function requestWorkbenchStorageCommit(): void {
   workbenchStorageCommit = requestWorkbenchStorageFlush(false)
   void workbenchStorageCommit.catch(() => {})
@@ -4809,7 +4823,8 @@ async function flushWorkbenchPresentation(): Promise<void> {
   try {
     if (!workbenchWriteFence.isOpen()) throw new Error('Current workbench changes cannot be saved yet.')
     const requestBeforeFlush = workbenchSaveRequest
-    persistentWorkbenchStorage.flush()
+    const saving = persistentWorkbenchStorage.flush()
+    if (saving) void saving.catch(error => useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage'))
     // Writing a pending value already requests its platform commit once.
     if (workbenchSaveRequest === requestBeforeFlush) requestWorkbenchStorageCommit()
   } catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error) }
@@ -4823,7 +4838,7 @@ async function flushMessageWorkbench(explicitlyBound: boolean): Promise<void> {
   }
   if (!workbenchWriteFence.isOpen()) throw new Error(
     'Saved workbench storage is unavailable. Your execution intent is kept without dispatch.')
-  persistentWorkbenchStorage.flush()
+  await checkpointWorkbenchUserState()
   await api.ui.requestStorageFlush()
 }
 const workbenchWriteFence = createWriteFencedStorage(persistentWorkbenchStorage.storage)
@@ -4836,10 +4851,8 @@ function openPersistWrites(): void {
   useAppStore.setState(useAppStore.getState())
 }
 
-// Renderer-side trailing flush on unload: force any debounced layout write to disk now so a quit or
-// navigation mid-drag still keeps the last layout change. This complements the main process's
-// `session.flushStorageData()` on window close — this lands the debounced value into localStorage,
-// and main forces Chromium's async localStorage buffer to disk. A DOM-less environment gets a no-op.
+// Best-effort unload starts any remaining batch. Controlled quit/reload awaits
+// prepareRendererUpdate and the native owner ACK; unload alone is no durability proof.
 if (typeof window !== 'undefined') {
   registerUnloadFlush(() => persistentWorkbenchStorage.flush())
 }
@@ -12656,14 +12669,13 @@ export function initializeAgentInputOccupation(): () => void {
   })
 }
 
-/** Flush admitted draft/layout changes, then await their existing Chromium owner's request. */
+/** Capture current workfaces and await native spatial/user-document writers. */
 export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'): Promise<void> {
   // No writes have been admitted during cold hydration. Quitting must preserve that durable record,
   // without qualifying an empty loading projection as an original workbench.
   if (intent === 'quit' && !workbenchWriteFence.isOpen()) return
   if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')
   if (Object.values(useAppStore.getState().savingDocuments).some(Boolean)) throw new Error('A file save is in progress; retry the update after it completes.')
-  persistentWorkbenchStorage.flush()
   await requestWorkbenchStorageFlush()
 }
 

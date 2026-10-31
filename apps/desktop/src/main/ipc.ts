@@ -116,7 +116,8 @@ import { registerToolkitIpc } from './toolkit-ipc.js'
 import { registerDeviceManagementIpc } from './device-management-ipc.js'
 import { resolvePerformancePreferences } from '../shared/toolkit-preferences.js'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
-import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
+import { observeWorkbenchStorageAuthority } from './workbench-storage-authority.js'
+import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
 import { executeBrowserTaskControl } from './browser-task-control.js'
@@ -296,6 +297,7 @@ export async function registerIpc(args: {
   initialConfig: AppConfig
   runtime: RuntimeController
   applicationAccess: AgentMuxApplicationAccessOwner
+  workbenchUserState: WorkbenchUserStateStore
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -318,6 +320,7 @@ export async function registerIpc(args: {
   const capsuleReplies = new CapsuleReplyAuthority(capsuleClient, args.runtime)
   const agentLearningAuthority = new AgentLearningAuthority(args.runtime)
   const spatialState = new AgentMuxSpatialStateStore()
+  const workbenchUserState = args.workbenchUserState
   const nameAudit = new NameChangeAudit(spatialState)
   args.scratchTopics.setNameAudit(nameAudit)
   let config = args.initialConfig
@@ -1321,12 +1324,17 @@ export async function registerIpc(args: {
     if (typeof operationId !== 'string' || !operationId) throw new Error('An exact original name operation is required.')
     return spatialState.confirmNameCommit(operationId)
   })
-  handleWithEvent('ui:requestStorageFlush', async (event) => {
-    requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(contents.session, {
-      userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
-    }))
-    // Electron returns void: this requests flush without claiming a disk acknowledgement.
-    contents.session.flushStorageData()
+  handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
+  handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
+  handleWithEvent('ui:writeWorkbenchState', (_event, value: string) => workbenchUserState.write(value))
+  handleWithEvent('ui:requestStorageFlush', async () => {
+    // All Renderer batches await the real writer before this checkpoint. Reads
+    // share that owner's queue; Chromium directory presence is no save receipt.
+    const current = await workbenchUserState.read()
+    const observation = workbenchUserState.observe()
+    if (current === null || observation.contentDigest !== observation.lastConfirmedWrite?.contentDigest) {
+      throw new Error('The current Desktop user state has no matching writer acknowledgement. Original inputs are retained; retry saving through this owner.')
+    }
   })
   handleWithEvent('ui:recordStartupFailure', (event, input: unknown) => {
     return args.onRendererStartupFailure?.(input) ?? false

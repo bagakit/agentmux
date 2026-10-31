@@ -16,6 +16,7 @@ import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell } f
 import { resolveTheme } from '@agentmux/client-ui/theme'
 import { AgentMuxFileAgentSessionStore, prepareProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import { applicationMenuTemplate } from './application-menu.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
@@ -103,6 +104,8 @@ function startPrimaryInstance(): void {
   if (app.isPackaged && process.platform !== 'darwin') app.setAsDefaultProtocolClient('amux')
   const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
   const clientIncidents = new ClientIncidentArchive(join(app.getPath('userData'), 'client-incidents'))
+  // One application lifetime owns writes across Window/IPC reconstruction.
+  const workbenchUserState = new WorkbenchUserStateStore(join(app.getPath('userData'), 'workbench-user-state.json'))
   const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
   const appMemory = new AppMemoryEvidenceOwner(join(app.getPath('userData'), 'app-memory-evidence.json'))
   void app.whenReady().then(() => appMemory.start()).catch(error => console.error('Application memory observation failed:', error))
@@ -277,7 +280,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles,
+    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })

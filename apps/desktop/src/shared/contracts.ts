@@ -1787,7 +1787,11 @@ export type AgentMuxDesktopApi = {
     onNativeOverlayWarning(listener: (warning: string, modalId?: string) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     onNativeBrowserInput(listener: (input: import('./native-overlay').NativeBrowserInput) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     nativeOverlayFocus(document?: import('./workbench-windows').WorkbenchWindowDocument): boolean
-    /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
+    /** The fixed Main-owned Desktop user projection; no arbitrary path or key. */
+    readWorkbenchState(): Promise<string | null>
+    importWorkbenchState(value: string): Promise<string>
+    writeWorkbenchState(value: string): Promise<import('./workbench-user-state').WorkbenchUserStateReceipt | null>
+    /** Await the native user-state owner queue after Renderer batches settle. */
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
     workbenchWindows: {

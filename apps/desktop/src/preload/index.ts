@@ -440,6 +440,9 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
     },
+    readWorkbenchState: () => ipcRenderer.invoke('ui:readWorkbenchState'),
+    importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),
+    writeWorkbenchState: value => ipcRenderer.invoke('ui:writeWorkbenchState', value),
     requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     recordStartupFailure: input => ipcRenderer.invoke('ui:recordStartupFailure', input),

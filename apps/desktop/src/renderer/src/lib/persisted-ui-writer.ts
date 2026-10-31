@@ -4,11 +4,19 @@ import { createJSONStorage, type PersistStorage, type StorageValue } from 'zusta
 // replaces the immutable pending projection without postponing its save deadline.
 const DEFAULT_BATCH_MS = 400
 
-type SynchronousStateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+type StateStorage = {
+  getItem(name: string): string | null | Promise<string | null>
+  setItem(name: string, value: string): void | Promise<unknown>
+  removeItem(name: string): void | Promise<unknown>
+}
+const asynchronous = <T>(value: T | Promise<T>): value is Promise<T> =>
+  value !== null && typeof value === 'object' && typeof (value as Promise<T>).then === 'function'
 
 type FlushablePersistentStorage<State> = {
   storage: PersistStorage<State>
-  flush: () => void
+  flush: () => void | Promise<void>
+  checkpoint: (name: string, value: StorageValue<State>) => void | Promise<void>
+  pending: () => boolean
 }
 
 /** Own the original JSON boundary and latest immutable Zustand projection per key.
@@ -16,30 +24,63 @@ type FlushablePersistentStorage<State> = {
  * Ordinary unload flushes the latest input; abrupt exit cannot run that handler.
  */
 export function createBatchedPersistentStorage<State>(
-  base: SynchronousStateStorage,
-  delayMs: number = DEFAULT_BATCH_MS
+  base: StateStorage,
+  delayMs: number = DEFAULT_BATCH_MS,
+  onError?: (error: unknown) => void
 ): FlushablePersistentStorage<State> {
   const pending = new Map<string, StorageValue<State>>()
   // Input identity does not imply that its pending write has reached storage.
   const inputs = new Map<string, StorageValue<State>>()
+  const removals = new Map<string, number>()
   const jsonStorage = createJSONStorage<State>(() => base)!
   let timer: ReturnType<typeof setTimeout> | null = null
+  let flushing: Promise<void> | null = null
 
-  const writePending = (): void => {
-    timer = null
+  const writePending = (): void | Promise<void> => {
     for (const [name, value] of pending) {
+      if (removals.has(name)) continue
       const encoded = JSON.stringify(value)
-      if (base.getItem(name) !== encoded) base.setItem(name, encoded)
-      // Encoding, read or write failure leaves the original input available to retry.
-      pending.delete(name)
+      const finish = () => {
+        // An ACK belongs to its captured input; newer edits remain pending.
+        if (pending.get(name) === value) pending.delete(name)
+      }
+      const save = (current: string | null, confirm = false): void | Promise<void> => {
+        // A native read may observe an earlier replacement whose directory ACK
+        // failed. Let that owner reconfirm equal bytes through its write API.
+        if (current === encoded && !confirm) { finish(); return }
+        const result = base.setItem(name, encoded)
+        if (asynchronous(result)) return result.then(finish)
+        finish()
+      }
+      const current = base.getItem(name)
+      const result = asynchronous(current) ? current.then(value => save(value, true)) : save(current)
+      // Serial drain protects ordering across native IPC waits. Encoding, read,
+      // or durable write failure keeps the exact latest input available.
+      if (asynchronous(result)) return result.then(writePending)
     }
   }
-  const flush = (): void => {
+  const track = (result: Promise<void>): Promise<void> => {
+    const active = result.finally(() => { if (flushing === active) flushing = null })
+    flushing = active
+    return active
+  }
+  const flush = (): void | Promise<void> => {
     if (timer !== null) { clearTimeout(timer); timer = null }
-    writePending()
+    if (flushing) return flushing.then(() => flush())
+    const result = writePending()
+    return asynchronous(result) ? track(result) : result
   }
   const schedule = (): void => {
-    if (timer === null) timer = setTimeout(writePending, delayMs)
+    if (timer === null) timer = setTimeout(() => {
+      timer = null
+      try {
+        const result = flush()
+        if (asynchronous(result)) void result.catch(error => {
+          if (onError) onError(error)
+          else queueMicrotask(() => { throw error })
+        })
+      } catch (error) { if (onError) onError(error); else throw error }
+    }, delayMs)
   }
   const storage: PersistStorage<State> = {
     getItem: name => {
@@ -60,10 +101,38 @@ export function createBatchedPersistentStorage<State>(
       pending.delete(name)
       inputs.delete(name)
       if (pending.size === 0 && timer !== null) { clearTimeout(timer); timer = null }
-      base.removeItem(name)
+      // An already accepted write must settle before removal, otherwise its
+      // late ACK could resurrect a cleared document.
+      removals.set(name, (removals.get(name) ?? 0) + 1)
+      let released = false
+      const release = () => {
+        if (released) return
+        released = true
+        const remaining = removals.get(name)! - 1
+        if (remaining) removals.set(name, remaining)
+        else removals.delete(name)
+      }
+      const remove = (): void | Promise<void> => {
+        try {
+          const result = base.removeItem(name)
+          if (asynchronous(result)) return result.then(() => { release(); return writePending() }, error => { release(); throw error })
+          release()
+          return writePending()
+        } catch (error) { release(); throw error }
+      }
+      if (flushing) return track(flushing.then(remove, error => { release(); throw error }))
+      const result = remove()
+      return asynchronous(result) ? track(result) : result
     }
   }
-  return { storage, flush }
+  return { storage, flush, pending: () => pending.size > 0 || flushing !== null,
+    checkpoint(name, value) {
+      // Explicit save captures current inputs even when observation missed a
+      // mutation or the original native file was removed after an earlier ACK.
+      pending.set(name, value)
+      inputs.set(name, value)
+      return flush()
+    } }
 }
 
 /**
