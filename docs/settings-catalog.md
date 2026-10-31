@@ -38,7 +38,7 @@ GUI 偏好与 CLI 写入都经过唯一 [Main ConfigOwner](../apps/desktop/src/m
 | 页面 | 可修改内容与只读事实 | CLI 范围 | 保存与事实 owner |
 | --- | --- | --- | --- |
 | Themes（Appearance） | 内置只读目录与完整自定义主题；坏记录保留并具名诊断，内置编辑另存副本。 | `settings themes ls / inspect / create / update / delete`；选择沿 `settings set appearance.themeId <ID>`。create/update 接受同 ID 完整主题文件或原 value；inspect 的 document 可由 `settings themes inspect <ID> --output FILE` 原子新建文件（不覆盖现有文件）。update 的 expected 为完整原值或同 ID 原文档；delete 的 expected 可为坏记录的原始 JSON，活动主题删除原子回默认。 | [共享 schema](../packages/client-ui/src/theme/schema.ts)、[目录](../packages/client-ui/src/theme/catalog.ts)、[资源 owner](../apps/desktop/src/main/settings-themes-control.ts)、[配置写入边界](../apps/desktop/src/main/theme-config.ts) |
-| Appearance observation | 已提交的当前主题、明暗选择、显式终端配色与具名诊断的即时只读投影；手机使用本地系统明暗。 | `settings appearance watch` / `settings.appearance.watch` 沿现公开 stream 返回 initial 与有序 snapshot。取消只释放读者；断线保留最后已确认主题，重连重新取 initial。 | [通用 stream 合同](../packages/core/src/public-rpc-settings-observation.ts)、[原 Host owner 投影](../apps/host/src/theme-observation.ts)、[Mobile 消费](../apps/mobile/src/appearance/useHostAppearance.ts) |
+| Appearance observation | 已提交的 App 品牌图标、当前主题、明暗选择、显式终端配色与具名诊断的即时只读投影；手机使用本地系统明暗。 | `settings appearance watch` / `settings.appearance.watch` 沿现公开 stream 返回 initial 与有序 snapshot。取消只释放读者；断线保留最后已确认主题，重连重新取 initial。 | [通用 stream 合同](../packages/core/src/public-rpc-settings-observation.ts)、[原 Host owner 投影](../apps/host/src/theme-observation.ts)、[Mobile 消费](../apps/mobile/src/appearance/useHostAppearance.ts) |
 
 ## Agents
 

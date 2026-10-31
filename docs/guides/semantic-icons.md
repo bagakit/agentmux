@@ -2,6 +2,8 @@
 
 本指南面向开发受控 UI 的作者。产品约束归[语义图标呈现 SSOT](../design/presentation/shared-rules.md#语义图标密度与性能)，本文说明当前实现入口与操作步骤。Provider、项目等身份资产沿原身份 owner，不当作通用图标替换。
 
+App 品牌使用共享 `BrandIcon`，由宿主注入已保存的 `appearance.appIcon`；候选预览显式传入目录 ID。不要在业务页导入单份品牌 PNG、从主题推断品牌或借用 `ProjectIcon`。源图、派生位图与宿主适配的具体边界见[职责地图](../architecture/system-ownership.md#从哪一层接入)；品牌选择独立于本页的语义主题图标。
+
 ## 在设置中定制
 
 打开 **Settings → Appearance → Customize selected theme → Semantic icons**；也可在设置搜索 `icons` 或 `图标` 定位主题设置。按含义搜索并选择图标，使用 **Choose a drawing** 更换库中字形，或在 **Custom path asset** 输入有界路径；**Restore default drawing** 只还原当前语义项。线宽、端点和连接方式沿同一主题编辑。
