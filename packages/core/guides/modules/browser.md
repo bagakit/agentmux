@@ -23,6 +23,12 @@ Read only the matching local help:
   Keep a Capsule's amux://capsule/ID reference when copying or saving it, and use the
   original capsule open owner to resolve and display that page; do not send its object URI
   to a generic webpage navigation or system application handoff.
+  Submitting a Browser's own Capsule reference in its address field addresses that exact
+  Browser. Its owner checks the original Capsule binding, actual current document origin
+  and human input eligibility, then keeps the same route and document without reloading.
+  Another view of that Capsule does not make this exact request ambiguous. A stale field
+  cannot retarget an external document; a different object still uses its original owner,
+  and a global Capsule open with several existing views requires an exact destination.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
 - amux browser task --help: saved task versions and their run/stop/inspect journey.
 - amux browser open --help: open a new page only when needed.
