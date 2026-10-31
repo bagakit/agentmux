@@ -8,12 +8,18 @@ export default defineConfig({ ...base,
   cacheDir: resolve(root, '.tmp/workbench-user-storage-cache-' + (mutation ?? 'candidate')),
   plugins: [...base.plugins ?? [], { name: 'native-user-storage-consumer', enforce: 'pre', transform(source, id) {
     const file = relative(root, id.split('?')[0]!)
+    if (['apps/desktop/src/renderer/src/lib/desktop-user-state.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts'].includes(file)) return { code: source.replaceAll('__AGENTMUX_WEB_PREVIEW__', 'false'), map: null }
     if (file === 'apps/desktop/src/renderer/src/store.ts') {
       source = source.replaceAll('__AGENTMUX_WEB_PREVIEW__', 'false')
       if (mutation === 'disconnect-native') {
         const anchor = ': nativeWorkbenchStorage'
         if (source.split(anchor).length !== 2) throw Error('Missing native storage consumer mutation anchor')
-        source = source.replace(anchor, ': nonBrowserWorkbenchStorage')
+        source = source.replace(anchor, ': createBatchedPersistentStorage<PersistedAppState>(nonBrowserWorkbenchStorage)')
+      }
+      if (mutation === 'omit-client-save') {
+        const anchor = '    clientStateWritten = true'
+        if (source.split(anchor).length !== 2) throw Error('Missing native public save receipt mutation anchor')
+        source = source.replace(anchor, '    clientStateWritten = false')
       }
       return { code: source, map: null }
     }

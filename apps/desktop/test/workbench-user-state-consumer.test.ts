@@ -126,3 +126,14 @@ it('unrelated Session output updates do not submit native user or spatial writes
   expect(f.api.spatial.commit).not.toHaveBeenCalled()
   expect(f.store.getState().agentComposerDrafts['original-region']).toBe('Original unsent draft')
 })
+
+it('an actual public spatial mutation producer confirms both native owners with the client-state receipt', async () => {
+  const f = await fixture(), original = (await f.spatial.read())!.graph.bindings[0]!
+  const result = await f.store.getState().executeControl({ schemaVersion: 5, requestId: 'original-unbind', operation: 'space.unbind',
+    binding: { kind: 'zone-space', ...original } })
+  expect(result).toMatchObject({ operation: 'space.unbind', outcome: 'unlinked',
+    save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null } })
+  expect((await f.spatial.read())!.graph.bindings).not.toContainEqual(original)
+  expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts['original-region']).toBe('Original unsent draft')
+  expect(f.api.sessions.stop).not.toHaveBeenCalled()
+})
