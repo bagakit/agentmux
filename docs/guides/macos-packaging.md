@@ -29,6 +29,7 @@
 - **签名深度核验等待真实结果。** `codesign --verify --deep` 的耗时随候选内容增长，正式入口显示当前核验阶段，不以固定短时窗杀掉仍在进行的核验；终端可沿原方式中断本次打包。证书、身份和签名失败仍按原结果拒绝，其他原生查询的时窗不变。
 - **GUI 与 Node 模式分开。** GUI 启动沿原入口从环境副本移除 `ELECTRON_RUN_AS_NODE`；CLI 和 semantic Host 的有意 Node 模式保留。这里只调整 Electron 启动模式，不移除、改写或伪造 Agent 凭据与权限身份。
 - **退出检查只判断真实当前对象。** 进程 `admissions` 是历史，当前 `serving` 与准确 UID/PID/birth 才参与当前归属判断。历史条目仍在不等于进程仍活；未知模式也不能猜成 GUI 或后台。semantic namespace、GUI worker 和独立 Run 的范围沿原机制确认，不能从脚本名或命令行外观猜测后强杀。旧 GUI 在切换前重开时，刷新它的准确保存／退出观察，复用已准备好的候选。
+- **首次升级 Desktop 用户数据存储 owner。** 旧运行版本缺少 native 保存观察时，热安装会在退出前拒绝；Chromium 目录存在和 void flush 都不能补成写入回执。先经原 App 的正常退出保留其数据，再沿同一安装入口走已有 cold 路径，不强杀 GUI 或另开数据根。[安装事务](../../apps/desktop/scripts/package-macos.mjs)只切换应用目录；新 Renderer 读取原根中的旧数据，并由 Main 的一次性导入取得真实写入确认。缺少 outgoing 工作面观察的 cold 收据保持 `unknown`，不能证明原布局、草稿或 Session 已完整连续恢复；实际恢复仍按[持久化合同](../design/behavior/persistence.md#退出更新与恢复)核对。
 - **接口拒绝只解释该次操作。** Core `runtime.*` 的身份拒绝不等于 macOS 文件安装也被拒绝；但不能通过去掉凭据、换终端或代按确认来重做同一个被拒操作。依据用户已有安装授权和准确操作范围继续可执行步骤，不额外制造人工确认门。仅完成 App／Renderer 替换、保留旧 semantic Host 时，应分别报告这些结果，不能宣称 Core 服务已重载或 Native 已升级；正式安装器的 Host reload 路径仍以实际源码与回执为准。
 
 ## 记录耗时，不把经验变成额外验收
