@@ -120,10 +120,10 @@ const inputPackageManifests = new Set()
 async function bindInput(path, graph) {
   if (!path || path.includes('\0') || path.includes('?')) return
   path = resolve(root, path)
-  assert.ok(path.startsWith(root + '/') || path.includes('/node_modules/') || path === process.execPath,
-    'A consumed workspace source must belong to this exact candidate root: ' + path)
   let bytes
   try { bytes = await readFile(path) } catch (error) { if (error.code === 'ENOENT' || error.code === 'EISDIR') return; throw error }
+  assert.ok(path.startsWith(root + '/') || path.includes('/node_modules/') || path === process.execPath,
+    'A consumed workspace source must belong to this exact candidate root: ' + path)
   const digest = hash(bytes)
   if (Object.hasOwn(report.actualInputs, path)) assert.equal(report.actualInputs[path], digest, 'An actual input changed during build: ' + path)
   report.actualInputs[path] = digest
