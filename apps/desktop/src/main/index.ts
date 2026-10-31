@@ -58,7 +58,7 @@ const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop'
 
 // Development launches and packaged launches must address the same durable user-data root. Electron's
 // default path is derived from the app name and differs between a Vite dev process and the signed App;
-// without this explicit binding each mode creates a separate config, Workbench localStorage and
+// without this explicit binding each mode creates a separate config, Desktop user state and
 // Agent Session store, making a restart look like a clean install.
 app.setPath('userData', process.env.AGENTMUX_DESKTOP_USER_DATA ?? packagedUserDataPath)
 app.setName('AgentMux')
@@ -365,9 +365,7 @@ function startPrimaryInstance(): void {
           }
           check()
         })`)
-      const storage = await window.webContents.executeJavaScript(
-        "localStorage.getItem('agentmux-workbench-v1')"
-      ) as string | null
+      const storage = await workbenchUserState.read().catch(() => null)
       let spatialState: import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null = null
       let spatialUnavailable: { code: string; message: string } | null = null
       try { spatialState = await new AgentMuxSpatialStateStore().read() }
@@ -403,6 +401,7 @@ function startPrimaryInstance(): void {
         workbenchStructure,
         spatialState,
         spatialUnavailable,
+        userState: workbenchUserState.observe(),
         workbench: summarizeRecoveryStorage(storage, spatialState),
         sessions: summarizeRecoverySessionStore(sessionStore)
       }
