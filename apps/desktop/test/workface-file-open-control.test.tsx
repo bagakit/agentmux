@@ -206,7 +206,7 @@ describe.skipIf(restoring)('File open through compiled CLI and the actual File o
     expect(useAppStore.getState().documents[documentKey('resource', 'retained.md')]?.content).toBe('Still usable')
     expect(useAppStore.getState().workbenchSaveWarning).toContain('Private storage flush unavailable'); fixture!.noLifecycle()
   })
-  it('refuses escaping paths, unmatched display parents, multiple Space references and foreign canonical Zone before reading', async () => {
+  it('keeps exact path and display boundaries while preserving a foreign File occurrence', async () => {
     const before = protectedFacts()
     for (const path of [_hygiene_fixturePath("absolute.md"), '../escape.md', 'sub/../../escape.md']) expect(await open(path, 'resource', [], 1)).toMatchObject({ outcome: 'unknown', placement: { status: 'unconfirmed' } })
     expect(await open('file.md', 'resource', ['--display-workspace', 'display', '--group', 'missing-group'], 1)).toMatchObject({ outcome: 'unknown' })
@@ -214,7 +214,10 @@ describe.skipIf(restoring)('File open through compiled CLI and the actual File o
     await open('foreign.md'); const original = surface('foreign.md'), beforeForeign = useAppStore.getState().tabs[original.id]!
     useAppStore.setState(state => ({ tabs: { ...state.tabs, [original.id]: { ...beforeForeign, space: { spaceId: 'another-space', zoneId: 'another-zone' } } } }))
     const count = vi.mocked(api.files.read).mock.calls.length, foreign = useAppStore.getState().tabs[original.id]
-    expect(await open('foreign.md', 'resource', [], 1)).toMatchObject({ outcome: 'refused', issues: [{ code: 'SPACE_PARENT_MISMATCH' }] })
+    const scoped = await open('foreign.md')
+    expect(scoped).toMatchObject({ outcome: 'opened', data: { kind: 'text' }, placement: { status: 'created' }, issues: [] })
+    expect(scoped.placement.tabId).not.toBe(original.id)
+    expect(useAppStore.getState().tabs[scoped.placement.tabId!]!.space?.zoneId).toBe(zoneFor('resource').zoneId)
     expect(useAppStore.getState().tabs[original.id]).toBe(foreign); expect(api.files.read).toHaveBeenCalledTimes(count)
     const zone = zoneFor('resource'), space = fileCatalog().spaces.find(space => space.directoryPath === _hygiene_fixturePath("private/workface-display"))!
     useAppStore.setState({ spaceZoneBindings: { [zone.zoneId]: { workspaceId: 'resource', spaceId: fileCatalog().bindings.find(binding => binding.zoneId === zone.zoneId)!.spaceId,
