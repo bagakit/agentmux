@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -52,7 +53,7 @@ it('actual preload and registered Main IPC retain Workspace identity, raw PNG by
   const sender = Object.assign(new EventEmitter(), { id: 710, isDestroyed: () => false, send: vi.fn() })
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
+    dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: {} as never, workspaceFiles: files })
     bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {

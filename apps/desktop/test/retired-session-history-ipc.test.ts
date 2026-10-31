@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -60,7 +61,7 @@ it('reads retired source, native and captured content through actual preload/IPC
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
+    dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime: controller,
       configStore: { get: async () => config, validate: (next: AppConfig) => next, save: async (next: AppConfig) => next } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as never })
     bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => {

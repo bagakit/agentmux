@@ -2,7 +2,7 @@ import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { bridge, control, owningBridge } from './helpers/first-execution-ipc-bridge'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '@agentmux/core'
@@ -43,23 +43,55 @@ it('actual preload/registered IPC/Main pass one stable intent to Core continuity
   } finally { await dispose() }
 })
 
-it('actual flush bridge requests the owning Chromium session without calling the void result a disk acknowledgement', async () => {
-  const { flush, dispose } = await owningBridge()
+it('actual native save bridge requires a matching writer ACK and rejects a missing file despite Chromium directories', async () => {
+  const { flush, workbenchUserState, dispose } = await owningBridge()
+  const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Exact original native input' } }, version: 1 })
   try {
+    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
+    expect(await bridge.api!.ui.writeWorkbenchState(original)).toMatchObject({ diskDurability: 'confirmed' })
     await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
-    expect(flush).toHaveBeenCalledExactlyOnceWith()
-    expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith('ui:requestStorageFlush')
-    flush.mockImplementationOnce(() => { throw new Error('private flush request failure') })
-    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('private flush request failure')
+    expect(await readFile(workbenchUserState.path, 'utf8')).toBe(original)
+    await unlink(workbenchUserState.path)
+    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
+    await bridge.api!.ui.writeWorkbenchState(original)
+    await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
+    expect(flush).not.toHaveBeenCalled()
   } finally { await dispose() }
 })
 
-it('registered flush handler rejects a foreign sender before touching the owning Chromium storage', async () => {
-  const { flush, dispose } = await owningBridge()
+it('a readable native document or replacement cannot manufacture the original writer ACK', async () => {
+  const { workbenchUserState, dispose } = await owningBridge()
+  const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Readable original' } }, version: 1 })
+  const replaced = JSON.stringify({ state: { agentComposerDrafts: { original: 'Externally replaced input' } }, version: 1 })
   try {
-    const handler = bridge.handlers.get('ui:requestStorageFlush')
-    expect(handler).toBeTypeOf('function')
-    await expect(handler!({ sender: {} })).rejects.toThrow('Untrusted storage flush sender')
+    await writeFile(workbenchUserState.path, original)
+    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
+    const receipt = await bridge.api!.ui.writeWorkbenchState(original)
+    await writeFile(workbenchUserState.path, replaced)
+    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
+    expect(await bridge.api!.ui.readWorkbenchState()).toBe(replaced)
+    expect(workbenchUserState.observe().lastConfirmedWrite).toEqual(receipt)
+    await bridge.api!.ui.writeWorkbenchState(replaced)
+    await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
+  } finally { await dispose() }
+})
+
+it('registered native storage handlers reject foreign contents or frames before reaching the application owner', async () => {
+  const { flush, sender, workbenchUserState, dispose } = await owningBridge()
+  const reads = vi.spyOn(workbenchUserState, 'read'), writes = vi.spyOn(workbenchUserState, 'write')
+  const imports = vi.spyOn(workbenchUserState, 'importIfAbsent')
+  const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Foreign request' } }, version: 1 })
+  try {
+    for (const event of [{ sender: {}, senderFrame: sender.mainFrame }, { sender, senderFrame: { ...sender.mainFrame } }]) {
+      for (const channel of ['ui:readWorkbenchState', 'ui:importWorkbenchState', 'ui:writeWorkbenchState', 'ui:requestStorageFlush']) {
+        const handler = bridge.handlers.get(channel)
+        expect(handler).toBeTypeOf('function')
+        expect(() => handler!(event, original)).toThrow('Untrusted application main document sender')
+      }
+    }
+    expect(reads).not.toHaveBeenCalled()
+    expect(writes).not.toHaveBeenCalled()
+    expect(imports).not.toHaveBeenCalled()
     expect(flush).not.toHaveBeenCalled()
   } finally { await dispose() }
 })

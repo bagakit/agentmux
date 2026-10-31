@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -269,7 +270,7 @@ it.each(['change', 'delete'] as const)('registered Main owner rejects referenced
   const sender = Object.assign(new EventEmitter(), { id: 992, isDestroyed: () => false, mainFrame: { framesInSubtree: [] },
     send: (channel: string, value: unknown) => { if (channel === CONFIG_CHANGED_CHANNEL) publications.push(value as AppConfig) } })
   ipc.handlers.clear()
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await disk.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: disk, runtime, progressLoops: progress, scratchTopics: {} as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   try {

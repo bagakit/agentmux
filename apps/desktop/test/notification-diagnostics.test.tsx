@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
@@ -107,7 +108,7 @@ async function main() {
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {},
     rpcClients: () => [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation }
   const config = useAppStore.getState().config!
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
     workbenchWindows: { setNativeOwner: () => () => {} } as never,
     runtime: runtime as never, configStore: { get: async () => config } as never,

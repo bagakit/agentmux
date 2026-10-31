@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
@@ -38,7 +39,7 @@ it.each(['json', 'schema', 'io'] as const)('keeps host IPC available on actual o
   const runtimeDispose = vi.spyOn(runtime, 'dispose')
   const sender = Object.assign(new EventEmitter(), { id: 731, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   let startupError: unknown = null
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { dispose: async () => {} } as never }).catch(error => { startupError = error; return null })
   expect(startupError, 'Browser Profile failure must not abort host IPC availability').toBeNull()
@@ -89,7 +90,7 @@ it('does not wait for an unconfirmed Profile read to expose healthy host APIs', 
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const runtimeDispose = vi.spyOn(runtime, 'dispose'), sender = Object.assign(new EventEmitter(), { id: 734, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   let dispose: (() => Promise<void>) | null = null, bootstrapError: unknown = null
-  const started = registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const started = registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { dispose: async () => {} } as never }).then(value => { dispose = value }).catch(error => { bootstrapError = error })
   try {

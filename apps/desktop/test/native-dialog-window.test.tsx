@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { fixtureFileUrl as _tailFixtureFileUrl, fixturePath as _tailFixturePath } from "../../../test/fixture-values.mjs"
 import { EventEmitter } from 'node:events'
@@ -126,7 +127,7 @@ async function fixture() {
   // A dialog-route fixture must not run an unrelated migration against the person's Notes directory.
   vi.spyOn(NotesStorageOwner.prototype, 'initialize').mockResolvedValue(undefined as never)
   const saveConfig = vi.fn(async (value: unknown) => value)
-  const dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: _tailFixturePath('private/index.html') }, loading: null }), initialConfig: config, window: main as unknown as BrowserWindow, workbenchWindows: owner,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: () => ({ current: { mode: 'prod', filePath: _tailFixturePath('private/index.html') }, loading: null }), initialConfig: config, window: main as unknown as BrowserWindow, workbenchWindows: owner,
     runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: saveConfig } as never,
     progressLoops: { subscribe: () => () => {} } as never, scratchTopics: new ScratchTopics(),
     workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })

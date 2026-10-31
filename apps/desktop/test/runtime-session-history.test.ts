@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -56,7 +57,7 @@ it('actual preload/registered IPC/RuntimeController use trusted exact durable Ex
  client.connect.mockRejectedValue(new Error('synthetic Runtime is temporarily unavailable'))
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:77,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
  workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
@@ -85,7 +86,7 @@ it('actual snapshot IPC preserves separate observation steps and the unverified 
  vi.spyOn(controller,'endpointWarningSnapshot').mockReturnValue([reading,catalog,runtime])
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:78,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config,save:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
   workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
@@ -104,7 +105,7 @@ it('actual preload and IPC distinguish partial History observations from strict 
  Object.assign(other,{runtimeOwnerIdentity:()=>({availability:'connected'})})
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:79,isDestroyed:()=>false,send:vi.fn()})
- const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,
   workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  try{
@@ -184,7 +185,7 @@ it('actual trusted IPC/preload observation owns its token, filters other notices
  const {controller,client,config}=await owner()
  vi.spyOn(controller,'prepare').mockResolvedValue({hosts:[],removedHostIds:[],reservedHostIds:[],hostSignatures:new Map()})
  const sender=Object.assign(new EventEmitter(),{id:88,isDestroyed:()=>false,send:vi.fn((channel:string,payload:unknown)=>preload.receivers.get(channel)?.({},payload))})
- const disposeIpc=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+ const disposeIpc=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
  configStore:{get:async()=>config} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{dispose:async()=>{}} as unknown as WorkspaceFiles})
  let deliver!:(event:unknown)=>void
  let ready!:(handle:AgentSessionHistoryObservationHandle)=>void

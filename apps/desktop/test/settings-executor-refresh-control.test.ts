@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
@@ -89,7 +90,7 @@ async function registered() {
     async () => { throw new Error('Refresh cannot deliver progress input') }, undefined,
     async () => { throw new Error('Refresh cannot observe progress input') })
   ipc.handlers.clear(); ipc.execute = undefined
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     configStore: store, runtime, progressLoops, scratchTopics: { setNameAudit: vi.fn(), normalizeDirectoryIdentities: vi.fn(async () => {}) } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   expect(ipc.execute).toBeTypeOf('function'); expect(ipc.handlers.get('executors:detect')).toBeTypeOf('function')

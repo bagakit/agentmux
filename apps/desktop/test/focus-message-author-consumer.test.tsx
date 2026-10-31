@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureIso: _hygiene_fixtureIso } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -212,7 +213,7 @@ describe('Focus consumes accepted public message authors without inventing ident
     const runtime = new RuntimeController(store as never, localRuntimeConnector)
     runtime.commit({ hosts: [{ id: 'local', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-    disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources((Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window']).webContents), initialConfig: DEFAULT_CONFIG, window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'], runtime,
+    disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources((Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window']).webContents), initialConfig: DEFAULT_CONFIG, window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'], runtime,
       configStore: { get: async () => DEFAULT_CONFIG, validate: (config: AppConfig) => config, save: async () => {} } as unknown as Parameters<typeof registerIpc>[0]['configStore'],
       progressLoops: { pauseTarget: vi.fn().mockResolvedValue(undefined), subscribe: vi.fn(() => () => {}) } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'],
       scratchTopics: { ready: async () => {} } as unknown as Parameters<typeof registerIpc>[0]['scratchTopics'],

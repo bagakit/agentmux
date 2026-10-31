@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
@@ -91,7 +92,7 @@ async function fixture() {
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 632, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
-  const stop = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
+  const stop = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, applicationAccess: {} as never,
     configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,

@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -160,7 +161,7 @@ beforeEach(async () => {
     observeInputOccupation: () => () => {}, observeCoreEvents: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     runtimeBindings: () => new Map(), endpointWarningSnapshot: () => [], reportBindingSaveFailure: () => {}, providerCatalog: (options?: { observation: true }) => options ? { catalog: [], warnings: [] } : [], sessionHistorySources: async (options?: { observation: true }) => options ? { sources: [], warnings: [] } : [], inspectInput: async () => null, notifyInputOccupation: async () => {}, snapshot, submitPrompt: submit, stop, recover
   } as unknown as RuntimeController
-  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(fixture.sender), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }), window: { isDestroyed: () => false, setBackgroundColor: vi.fn(), webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { validate: (next: unknown) => next, save: async (next: unknown) => next, get: async () => ({ ...structuredClone(DEFAULT_CONFIG), notifications: { mode: 'off' } }) } as unknown as ConfigStore,
     scratchTopics: { listTopics: async () => [], setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })

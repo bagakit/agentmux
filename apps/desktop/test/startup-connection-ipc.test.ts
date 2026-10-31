@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
@@ -58,7 +59,7 @@ it('actual preload reads the cached Main connection cut before Renderer startup 
   const config = structuredClone(DEFAULT_CONFIG)
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
+    dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow,
       runtime: controller, applicationAccess: {} as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
       configStore: { get: async () => config, validate: (value: typeof config) => value, save: async (value: typeof config) => value } as never,
       scratchTopics: { setNameAudit: vi.fn() } as never, workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })

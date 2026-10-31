@@ -1,6 +1,7 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./app-document-fixture"
+import { testWorkbenchUserState } from './workbench-user-state-fixture'
 import { injectedContextCore } from './injected-context-core'
 import { startDirectGoal, retryDirectGoal, directGoalRequest } from '../../src/renderer/src/lib/goals-direct-pmo'
 import { useLauncherState } from '../../src/renderer/src/lib/launcher-state'
@@ -208,7 +209,7 @@ beforeEach(async () => {
   const mainWindow = Object.assign(new EventEmitter(), { id: 71, setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false }) as unknown as BrowserWindow
   workbenchWindows = new WorkbenchWindows(mainWindow, new WorkbenchWindowStore(join(directory, 'windows.json')), () => [])
   applicationAccess = new AgentMuxApplicationAccessOwner({ path: join(directory, 'application-access.sqlite'), resolveHost: async () => { throw new Error('Application access is outside this Goal fixture') } })
-  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources((mainWindow).webContents), initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
+  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources((mainWindow).webContents), initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
     runtime, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {

@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -64,7 +65,7 @@ beforeEach(async () => {
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {},
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     executionHost: (id: string) => { expect(id).toBe('original-host'); return host } } as unknown as RuntimeController
-  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
+  dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => ({ ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', hostId: 'original-host', path: root,
       name: 'Original project', kind: 'folder' }] }) } as unknown as ConfigStore,

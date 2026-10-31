@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -166,7 +167,7 @@ beforeAll(async () => {
   config = { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: { 'private-claude': { providerId: 'claude', label: 'Private reader', command: process.execPath, args: [cli], env: {}, injectAgentMuxGuide: false } },
     workspaces: ['alpha', 'beta'].map(id => ({ id, hostId: 'local', kind: 'folder' as const, name: id === 'alpha' ? 'Alpha' : 'Beta', path: join(directory, id) })) }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime: controller,
+  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime: controller,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never, scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
   bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => { const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function'); return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...args) })
   sourceCalls = vi.spyOn(api.sessions, 'historySources')

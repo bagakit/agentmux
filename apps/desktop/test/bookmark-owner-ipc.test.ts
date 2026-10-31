@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -64,7 +65,7 @@ it('forwards the exact current Capsule address through actual preload IPC after 
   bridge.ensure.mockReset().mockResolvedValue(snapshot); bridge.navigate.mockReset().mockResolvedValue(snapshot)
   let dispose: (() => Promise<void>) | undefined
   try {
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
+    dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
       window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
@@ -94,7 +95,7 @@ it('awaits the original object owner through actual preload IPC and retains its 
   const response = (): CapsuleOpenResult => ({ operationId, capsuleId: '23456789ABCD', endpoint: { status: 'available', url: 'http://127.0.0.1:49152/', port: 49152,
     instanceId: 'original-service', observedAt: Date.now() }, rendering: { status: 'unavailable', reason: 'The original native display is unconfirmed' } })
   try {
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
+    dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
       window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
@@ -139,7 +140,7 @@ it('registered bookmark IPC and Store report a byte-budget rejection without fal
     await writeFile(join(root, 'Numeric.webloc'), emitWebloc('placeholder').replace('placeholder', 'https://example.invalid/?a=&#38;b=&#x4E2D;&#x1F642;'))
     await writeFile(join(root, 'Large.webloc'), emitWebloc('https://example.invalid/large'))
     await truncate(join(root, 'Large.webloc'), BOOKMARK_FILE_MAX_BYTES + 1)
-    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+    dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
       configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
       scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never, workspaceFiles: files })
     bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {

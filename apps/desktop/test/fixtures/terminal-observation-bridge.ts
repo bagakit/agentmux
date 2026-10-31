@@ -1,4 +1,5 @@
 import { isolateCoreFixtureEnvironment } from '../helpers/isolate-core-environment'
+import { testWorkbenchUserState } from '../helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from '../helpers/local-runtime-connector.js'
@@ -99,7 +100,7 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
     }),
     session: { flushStorageData: flush, getStoragePath: () => root } })
   let release: () => Promise<void>
-  try { release = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(root, 'renderer', 'index.html') }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(root, 'renderer', 'index.html') }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,

@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -64,7 +65,7 @@ it('resource IPC/preload keeps the recorded target and trusted Executor on its o
  const sender=Object.assign(new EventEmitter(),{id:777,isDestroyed:()=>false,send:vi.fn()})
  let dispose:(()=>Promise<void>)|undefined
  try {
-  dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
+  dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config,window:{ setBackgroundColor: vi.fn(),webContents:sender,isDestroyed:()=>false} as unknown as BrowserWindow,runtime:controller,progressLoops:{subscribe:()=>()=>{}} as never,
   configStore:{get:async()=>config,validate:(next:AppConfig)=>next,save:async(next:AppConfig)=>next} as unknown as ConfigStore,scratchTopics:{setNameAudit:vi.fn()} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
   const handler=preload.handlers.get('sessions:historyResource');expect(handler).toBeTypeOf('function')
   preload.invoke.mockImplementation((channel:string,subject,request)=>{expect(channel).toBe('sessions:historyResource');return handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender} as unknown as IpcMainInvokeEvent,subject,request)})

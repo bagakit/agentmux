@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
@@ -102,7 +103,7 @@ async function owner() {
   const sender = Object.assign(new EventEmitter(), { id: 77, isDestroyed: () => destroyed, send: vi.fn() })
   let wireSender = sender
   const unexpectedFileAccess = () => { throw new Error('Remote Agent launch must not access workspace files.') }
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 88, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {} } as never, configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics,
     workspaceFiles: { read: unexpectedFileAccess, listFiles: unexpectedFileAccess, write: unexpectedFileAccess, dispose: async () => {} } as unknown as WorkspaceFiles })

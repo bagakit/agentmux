@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
@@ -94,7 +95,7 @@ async function fixture() {
   const submit = vi.spyOn(runtime, 'submitPrompt')
   const app = Object.assign(new EventEmitter(), { id: 810, mainFrame: { framesInSubtree: [] }, isDestroyed: () => false, send: vi.fn() })
   const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'workspace', hostId: 'local', name: 'Original project', path: directory, kind: 'folder' as const }] }
-  const disposeMain = await registerIpc({ appDocumentSources: testAppDocumentSources(app), window: { webContents: app, setBackgroundColor() {}, isDestroyed: () => false } as unknown as BrowserWindow,
+  const disposeMain = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(app), window: { webContents: app, setBackgroundColor() {}, isDestroyed: () => false } as unknown as BrowserWindow,
     initialConfig: config, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,
     runtime, scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {} } as never,
     workbenchWindows: { setNativeOwner: () => () => {} } as never, workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })

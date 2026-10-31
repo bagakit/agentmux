@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
@@ -152,7 +153,7 @@ beforeEach(async () => {
   originalProfileConfig = config
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
     session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => config, validate: (value: unknown) => value, save: async () => config } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {}, listFiles: async () => [] } as unknown as WorkspaceFiles })

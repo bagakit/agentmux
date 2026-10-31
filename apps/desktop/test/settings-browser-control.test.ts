@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -170,7 +171,7 @@ describe('Browser settings share the sole typed Main owner', () => {
     // The durable private file is already initialized; no default global Topics bootstrap is part of this owner oracle.
     vi.spyOn(f.store, 'get').mockResolvedValue(f.config)
     ipc.handlers.clear(); ipc.execute = undefined; ipc.remember = undefined
-    const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await f.store.get(), window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
       configStore: f.store, runtime, progressLoops, scratchTopics: {} as ScratchTopics,
       workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
     try {

@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -132,7 +133,7 @@ async function main() {
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     rpcClients: () => fixture.coreClients?.() ?? [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation }
   const config = useAppStore.getState().config!
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
     runtime: runtime as never, configStore: { get: async () => config } as never,
     scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as never,
     workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), write: vi.fn(), dispose: async () => {} } as never,

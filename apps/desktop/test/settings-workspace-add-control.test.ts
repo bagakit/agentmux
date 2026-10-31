@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -56,7 +57,7 @@ async function fixture() {
   const sender=Object.assign(new EventEmitter(),{id:932,isDestroyed:()=>false,mainFrame:{framesInSubtree:[]},
     send:vi.fn((channel:string,value:unknown)=>{if(channel===CONFIG_CHANGED_CHANNEL)publications.push(value as AppConfig)})})
   ipc.handlers.clear();ipc.execute=undefined
-  const dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(),window:{ setBackgroundColor: vi.fn(),isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow,
+  const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(),window:{ setBackgroundColor: vi.fn(),isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow,
     configStore:store,runtime,progressLoops,scratchTopics:{setNameAudit:vi.fn(),normalizeDirectoryIdentities:vi.fn().mockResolvedValue(undefined)} as unknown as ScratchTopics,workspaceFiles:{read:vi.fn(),listFiles:vi.fn(),dispose:async()=>{}} as unknown as WorkspaceFiles})
   prepare.mockClear();const save=vi.spyOn(store,'save')
   const invoke=async<T>(channel:string,...values:unknown[])=>{

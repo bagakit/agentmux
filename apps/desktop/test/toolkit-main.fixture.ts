@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { toolkitRuntime } from './helpers/toolkit-runtime.fixture.js'
@@ -140,7 +141,7 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
   })()
   cleanups.push(async()=>{await close()})
   await options.beforeRegister?.(directory)
-  dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{},windowForDocument:()=>({id:7})} as any,
+  dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{},windowForDocument:()=>({id:7})} as any,
     progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
   expect(owned.activation.spawned).toBe(true)
   expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)
@@ -157,7 +158,7 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
     sampler=new ProcessResourceSampler();runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector,undefined,sampler)
     // Reopen the actual durable stores and same private Native. Never recreate defaults or the daemon.
     store=new ConfigStore(join(directory,'config.json'));config=await store.get();sender=makeSender();detachRenderer=runtime.attach(sender as any)
-    dispose=await registerIpc({ appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{}} as any,
+    dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{}} as any,
       progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
     rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
     expect(await sdk.daemonInstance()).toBe(owned.activation.runtime.daemonInstanceId)

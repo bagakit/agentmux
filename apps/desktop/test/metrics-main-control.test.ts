@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -177,7 +178,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   const disposeRenderer = await useAppStore.getState().initialize()
   useAppStore.setState({ config, agentComposerDrafts: { 'healthy-session': 'preserved input' } })
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
-  const dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: await configStore.get(), window: { setBackgroundColor: vi.fn(), id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+  const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await configStore.get(), window: { setBackgroundColor: vi.fn(), id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     workbenchWindows: { setNativeOwner: () => () => {} } as never,
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
     scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {}, read: vi.fn(async () => { throw new Error('Unexpected file read in metrics fixture') }), listFiles: vi.fn(async () => { throw new Error('Unexpected file list in metrics fixture') }), write: vi.fn(async () => { throw new Error('Unexpected file write in metrics fixture') }) } as any })

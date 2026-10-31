@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -140,7 +141,7 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 9981, isDestroyed: () => destroyed, send: vi.fn(),
     session: { flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { isDestroyed: () => destroyed, setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { isDestroyed: () => destroyed, setBackgroundColor: vi.fn(), webContents: sender } as unknown as BrowserWindow, runtime,
     configStore: { validate: (next: AppConfig) => next, save: async (next: AppConfig) => (config = next), get: async () => config } as unknown as ConfigStore,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never,
     scratchTopics: topics, workspaceFiles: { dispose: async () => {}, read: vi.fn(), listFiles: vi.fn(), observe: async () => () => {} } as unknown as WorkspaceFiles })

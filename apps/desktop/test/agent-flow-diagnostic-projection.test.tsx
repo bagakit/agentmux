@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { gapFacts } from '../../../packages/core/test/helpers/output-gap.js'
@@ -183,7 +184,7 @@ beforeEach(async () => {
       if (channel === SESSION_EVENT_CHANNEL) wire.push(value)
       for (const listener of bridge.listeners.get(channel) ?? []) listener({}, value)
     } })
-  disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     // Unrelated progress manager is an explicit empty API boundary; diagnostics still use real IPC.
     progressLoops: { subscribe: () => () => {}, start: async () => {}, list: () => [], pauseTarget: async () => {} } as never,
     configStore: { get: async () => config } as unknown as ConfigStore,

@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -71,7 +72,7 @@ beforeEach(async () => {
   let config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [workspace] }
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {}, executionHost: () => host,
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {}, observeContinuousProgress: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, reportBindingSaveFailure: vi.fn(), rpcClients: () => [] } as unknown as RuntimeController
-  dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+  dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: value => value, save: async value => { config = value; return value } } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: files,

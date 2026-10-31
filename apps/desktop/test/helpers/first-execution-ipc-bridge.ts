@@ -16,6 +16,7 @@ import { ScratchTopics } from '../../src/main/scratch-topics'
 import { WorkspaceFiles } from '../../src/main/workspace-files'
 import { LocalExecutionHost } from '@agentmux/core'
 import { RuntimeController } from '../../src/main/runtime-controller'
+import { WorkbenchUserStateStore } from '../../src/main/workbench-user-state'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   directory: '', goals: new Map<string, { id: string }>(), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
@@ -132,6 +133,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
     private: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/codex"), args: [], env: {}, injectAgentMuxGuide: false }
   }, ...(options?.filesWorkspace ? { workspaces: [{ id: 'private-files', hostId: 'local', path: root, name: 'Private', kind: 'folder' as const }] } : {}) }
   const flush = vi.fn(() => {})
+  const workbenchUserState = new WorkbenchUserStateStore(join(root, 'workbench-user-state.json'))
   const pauseTarget = vi.fn().mockResolvedValue(undefined)
   const appFilePath = join(root, 'renderer/index.html')
   const mainFrame = { url: pathToFileURL(appFilePath).href, detached: false, isDestroyed: () => false }
@@ -154,7 +156,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
     try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
     if (failures.length) throw new AggregateError(failures, 'Private IPC owner cleanup failed')
   })()
-  try { release = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: appFilePath }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  try { release = await registerIpc({ workbenchUserState, appDocumentSources: () => ({ current: { mode: 'prod', filePath: appFilePath }, loading: null }), initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     workbenchWindows: { setNativeOwner: () => () => {} } as never, applicationAccess: {} as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
@@ -168,5 +170,5 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
     return await handler!({ sender, senderFrame: sender.mainFrame } as unknown as IpcMainInvokeEvent, ...structuredClone(values))
   })
   expect(bridge.api).not.toBeNull()
-  return { client, sender, flush, pauseTarget, dispose, runtime }
+  return { client, sender, flush, pauseTarget, dispose, runtime, workbenchUserState }
 }

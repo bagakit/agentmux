@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { act } from 'react'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -116,7 +117,7 @@ async function fixture() {
   const { EventEmitter } = await import('node:events')
   const sender = Object.assign(new EventEmitter(), { id: 752, isDestroyed: () => false, send: (channel: string, ...values: unknown[]) => { bridge.events.emit(channel, {}, ...values) }, mainFrame: { framesInSubtree: [] } })
   const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(bridge.profile, 'application-access.sqlite')); closes.push(() => applicationAccess.dispose())
-  const releaseMain = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config, applicationAccess,
+  const releaseMain = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, applicationAccess,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: AppConfig) => value, save: async (value: AppConfig) => value } as never,

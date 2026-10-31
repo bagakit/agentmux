@@ -1,3 +1,4 @@
+import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
@@ -270,7 +271,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
       save: async () => {}
     } as unknown as Parameters<typeof registerIpc>[0]['configStore']
 
-    disposeIpc = await registerIpc({ appDocumentSources: testAppDocumentSources((Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window']).webContents), initialConfig: await configStore.get(),
+    disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources((Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window']).webContents), initialConfig: await configStore.get(),
       window: Object.assign(fakeWindow, { setBackgroundColor: vi.fn() }) as unknown as Parameters<typeof registerIpc>[0]['window'],
       configStore,
       runtime,
