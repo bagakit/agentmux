@@ -268,7 +268,10 @@ describe('Main-owned Desktop user state', () => {
     const historical = new Promise<string>(resolve => { release = resolve })
     const owner = new WorkbenchUserStateStore(path, { read: (file, encoding) => file.endsWith('.failure.json') ? historical : readFile(file, encoding) })
     try {
-      await expect(owner.read()).resolves.toBe(original)
+      let settled = false
+      const reading = owner.read().then(value => { settled = true; return value })
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1000 })
+      await expect(reading).resolves.toBe(original)
       await expect(owner.write(value('Still usable'))).resolves.toMatchObject({ diskDurability: 'confirmed' })
       await expect(owner.write('malformed')).rejects.toThrow()
       const current = owner.observe().lastFailure

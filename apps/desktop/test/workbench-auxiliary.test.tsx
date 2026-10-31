@@ -51,6 +51,7 @@ async function fixture(importOld = false) {
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   disposers.push(await store.getState().initialize())
+  disposers.push(async () => { await document.persistent.flush().catch(() => {}) })
   await prepareRendererUpdate('quit')
   const holdWrites = (fail = false) => {
     const entered = barrier(), release = barrier()

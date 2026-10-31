@@ -15,6 +15,7 @@ const mutations = {
   'omit-progress-read': ['apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx', 'try { await initializeLauncherState() }', 'try { await Promise.resolve() }'],
   'unknown-is-absent': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "if (!ready.has(name)) throw new Error('Original ' + name + ' data is not yet readable. Current input and original bytes are retained.')", "if (!ready.has(name)) return null as DesktopFragmentValues[N]"],
   'drop-fragments': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "? { ...current, ...captured, ...(Object.hasOwn(current, 'desktopFragments') ? { desktopFragments: current.desktopFragments } : {}) }", '? captured']
+  ,'ignore-native-ack': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "throw new Error('Native Desktop write acknowledgement did not confirm the submitted document. Current input and original bytes are retained.')", 'return']
 } as const
 if (mutation && !Object.hasOwn(mutations, mutation)) throw new Error('Unknown auxiliary source mutation')
 export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/workbench-auxiliary-' + (mutation ?? 'candidate')),
