@@ -98,7 +98,7 @@ export async function probePublishedPublic({ repository, evidence, mainRef } = {
     const channels = ['scratch:listTopics', 'scratch:readTopic', 'scratch:ensureMote', 'spatial:read', 'spatial:commit', 'spatial:retainLabels',
       'files:readPublic', 'files:readDirectory', 'files:read', 'files:readPreview', 'sessions:snapshot', 'sessions:launchAgent',
       'sessions:creation', 'sessions:historySources', 'sessions:historyPage', 'notebook:read', 'sessions:attach', 'sessions:replay', 'sessions:refreshAttachment', 'sessions:detach',
-      'sessions:write', 'sessions:resize', 'sessions:recover', 'ui:requestStorageFlush', 'executors:detect']
+      'sessions:write', 'sessions:resize', 'sessions:recover', 'ui:readWorkbenchState', 'ui:importWorkbenchState', 'ui:writeWorkbenchState', 'ui:requestStorageFlush', 'executors:detect']
     function visit(node) {
       if (ts.isVariableStatement(node) && node.declarationList.declarations.some(one => one.name.getText(parsed) === 'publicFiles')) statements.push(node.getText(parsed))
       if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ['handle', 'handleWithEvent'].includes(node.expression.expression.getText(parsed)) &&
@@ -109,7 +109,7 @@ export async function probePublishedPublic({ repository, evidence, mainRef } = {
     }
     visit(parsed); assert.deepEqual([...found].sort(), [...channels].sort()); assert.equal(statements.length, channels.length + 1)
     const handlers = join(privateRoot, 'actual-ipc-handlers.cjs'), content = ts.transpileModule(statements.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
-    await writeFile(handlers, 'module.exports=ports=>{const {handle,handleWithEvent,args,config,configOwner,workspace,spatialState,files,FileReadOwner,spatialCatalog,app,sessionSnapshotPayload,configWithRuntimeBindings,sessionInputWriteResult,observeWorkbenchStorageAuthority,requireWorkbenchStorageAuthority,pauseUserProgress,notebookStore,refreshSettingsExecutor}=ports;\n' + content + '\nreturn{publicFiles}}')
+    await writeFile(handlers, 'module.exports=ports=>{const {handle,handleWithEvent,args,config,configOwner,workspace,spatialState,files,FileReadOwner,spatialCatalog,app,sessionSnapshotPayload,configWithRuntimeBindings,sessionInputWriteResult,workbenchUserState,pauseUserProgress,notebookStore,refreshSettingsExecutor}=ports;\n' + content + '\nreturn{publicFiles}}')
     receipt.actualIpcStatements = { source: relative(source, ipcFile), sha256: hash(ipcSource), channels, compiledStatementsSha256: hash(content) }
     const { build: viteBuild } = await import(require.resolve('vite'))
     const out = join(privateRoot, 'renderer')

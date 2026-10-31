@@ -1,14 +1,10 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { join } from 'node:path'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
-import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from '../src/main/workbench-storage-authority.js'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer.js'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
 import { api } from '../src/renderer/src/lib/api.js'
@@ -20,14 +16,12 @@ const initial = useAppStore.getState()
 const session = composerSession()
 const tab = createWorkbenchTab('original-view', { kind: 'agent', regionId: 'original-region', workspaceId: 'workspace', sessionId: session.id, phase: 'attached' })
 let dispose: () => void
-let temporary: string
 let container: HTMLDivElement
 let root: Root
 
 beforeEach(async () => {
   localStorage.clear()
   dispose = await useAppStore.getState().initialize()
-  temporary = await mkdtemp(_hygiene_fixturePath("tmp/amx-message-save-"))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ config: composerConfig, sessions: [session], loading: false, activeWorkspaceId: 'workspace',
     tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('pane', [tab.id]) }, agentSteerQueues: {}, agentSteerInFlight: {}, agentComposerDrafts: { [session.id]: 'Retained draft' },
@@ -38,7 +32,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); dispose()
   vi.restoreAllMocks(); useAppStore.setState(initial, true)
-  await rm(temporary, { recursive: true })
 })
 
 function entry(id: string, overrides: Partial<AgentSteerQueueEntry> = {}): AgentSteerQueueEntry {
@@ -46,11 +39,8 @@ function entry(id: string, overrides: Partial<AgentSteerQueueEntry> = {}): Agent
     promptCondition: { expectedRun: session.control.run, afterSubmissionId: null }, ...overrides }
 }
 async function missingStorage() {
-  await mkdir(join(temporary, 'Local Storage'))
-  const observed = await observeWorkbenchStorageAuthority({ getStoragePath: () => temporary }, { userData: temporary, sessionData: temporary })
-  expect(observed.localStorage).toBe('missing')
-  // Same product guard as the real IPC; no persistent user directory or Native is used.
-  return vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => requireWorkbenchStorageAuthority(observed))
+  // The real native failure is covered by the user-state consumer; isolate its advisory effect here.
+  return vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(new Error('Saving the workbench is unconfirmed. The original native writer is unavailable.'))
 }
 async function renderComposer() {
   await act(async () => root.render(<><AgentSessionComposer sessionId={session.id} /><GlobalSystemNotices /></>))
@@ -142,9 +132,7 @@ it('an unresolved host save cannot hold the bound explicit dispatch open', async
 })
 
 it('unconfirmed storage and synchronous writer failure remain advisory but visible for explicit dispatch', async () => {
-  const unconfirmed = await observeWorkbenchStorageAuthority({ getStoragePath: () => null }, { userData: temporary, sessionData: temporary })
-  expect(unconfirmed.localStorage).toBe('unconfirmed')
-  vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => requireWorkbenchStorageAuthority(unconfirmed))
+  vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(new Error('Saving the workbench is unconfirmed. The original native writer is unavailable.'))
   const first = entry('unconfirmed')
   useAppStore.setState({ agentSteerQueues: { [session.id]: [first] } })
   await useAppStore.getState().sendQueuedAgentSteer(session.id, first.operationId)

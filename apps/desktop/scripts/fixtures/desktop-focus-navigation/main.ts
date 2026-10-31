@@ -12,7 +12,7 @@ import { openDemandStore } from '@agentmux/demand'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { DesktopControlIpcBridge } from '../../../src/main/control-ipc-bridge'
 import { inspectDesktopClient } from '../../../src/main/client-observation'
-import { observeWorkbenchStorageAuthority } from '../../../src/main/workbench-storage-authority'
+import { observeLegacyChromiumStorage } from '../../../test/helpers/legacy-chromium-storage-observation'
 import { parseDesktopClientObservation } from '../../../src/shared/client-observation'
 import { ConfigOwner } from '../../../src/main/config-owner'
 import { WorktreeService } from '../../../src/main/worktree-service'
@@ -315,7 +315,7 @@ app.whenReady().then(async () => {
       ? inspectDesktopClient(request, { pid: process.pid,
         package: { schema: 'agentmux.package-identity.v1', sourceCommit, sourceTree, appVersion: 'private-proof', platform: process.platform, arch: process.arch },
         renderer: () => loadedRenderer, generation: () => runtime.rendererGeneration(win.webContents),
-        storage: () => observeWorkbenchStorageAuthority(win.webContents.session, { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') }),
+        storage: () => observeLegacyChromiumStorage(win.webContents.session, { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') }),
         runtimes: () => runtime.connectedRuntimeIdentities(), execute: input => bridge.execute(input) })
       : bridge.execute(request) })
     await server.start()

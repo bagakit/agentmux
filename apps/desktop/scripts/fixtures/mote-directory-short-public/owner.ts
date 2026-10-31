@@ -25,7 +25,7 @@ import { assertAppDocumentSender, isAppDocumentSender } from '../../../src/main/
 import { configWithRuntimeBindings } from '../../../src/main/runtime-config-transaction'
 import { sessionSnapshotPayload } from '../../../src/main/session-snapshot-payload'
 import { sessionInputWriteResult } from '../../../src/shared/session-input-result'
-import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from '../../../src/main/workbench-storage-authority'
+import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
 import type { AppConfig } from '../../../src/shared/contracts'
@@ -48,6 +48,7 @@ export async function runPublicOwner(input: { html: string; privateRoot: string;
       viewport: true, saveBookmark: true, more: true } } } : JSON.parse(await readFile(configFile, 'utf8'))
   const topics = new ScratchTopics(), store = new AgentMuxFileAgentSessionStore(join(privateRoot, 'state/sessions.json'))
   const spatialState = new AgentMuxSpatialStateStore(join(privateRoot, 'state/spatial.json'))
+  const workbenchUserState = new WorkbenchUserStateStore(join(privateRoot, 'state/workbench-user-state.json'))
   const files = new WorkspaceFiles(id => { assert.ok(runtime); return runtime.executionHost(id) })
   const result: any = { schema: 'agentmux.directory.published-public-phase.v1', passed: false, phase, pid: process.pid,
     typedRPC: [], sourceCLI: [], bridgeRequests: [], acceptedResponses: [], calls: [], userRunTouched: false }
@@ -161,7 +162,7 @@ export async function runPublicOwner(input: { html: string; privateRoot: string;
         assertAppDocumentSender(event, win!.webContents, { current: { mode: 'prod', filePath: input.html }, loading: null }); return invoke(channel, fn, values, event) }),
       args: { runtime, scratchTopics: topics, window: win }, config, configOwner, workspace: (current: AppConfig, wid: string) => { const value = current.workspaces.find(one => one.id === wid); assert.ok(value); return value },
       spatialState, files, FileReadOwner, spatialCatalog, notebookStore: new AgentMuxNotebookStore(), app, sessionSnapshotPayload, configWithRuntimeBindings, refreshSettingsExecutor,
-      sessionInputWriteResult, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority,
+      sessionInputWriteResult, workbenchUserState,
       pauseUserProgress: () => { /* No progress loop is configured in this private proof. */ } }
     const publicFiles = handlers(ports).publicFiles
     ipcMain.handle('config:get', () => config)

@@ -14,7 +14,7 @@ app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(null)
     await fs.mkdir(path.join(app.getPath('home'), '.agentmux'), { recursive: true })
-    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority, AgentMuxControlServer, assertAppDocumentSender, isAppDocumentSender } = require(path.join(path.dirname(html), 'editor-native.cjs'))
+    const { MoteAvatarSeriesOwner, MoteAvatarControl, createMoteAvatarWriter, ConfigStore, DEFAULT_CONFIG, ConfigOwner, ScratchTopics, directoryIdentity, CONFIG_CHANGED_CHANNEL, observeLegacyChromiumStorage, AgentMuxControlServer, assertAppDocumentSender, isAppDocumentSender } = require(path.join(path.dirname(html), 'editor-native.cjs'))
     const builtinRoot = path.join(directory, 'builtin'), userRoot = starter ? path.join(app.getPath('home'), '.agentmux', 'avatars') : path.join(directory, 'avatars')
     await fs.cp(originalBuiltin, builtinRoot, { recursive: true })
     // Existing face editing probes now use a real declared user collection. The
@@ -137,8 +137,7 @@ app.whenReady().then(async () => {
       return value
     })
     ipcMain.handle('ui:requestStorageFlush', async () => {
-      const authority = await observeWorkbenchStorageAuthority(win.webContents.session, { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') })
-      requireWorkbenchStorageAuthority(authority)
+      const authority = await observeLegacyChromiumStorage(win.webContents.session, { userData: app.getPath('userData'), sessionData: app.getPath('sessionData') })
       const interrupted = failFlushOnce || result.flushRequests.length + 1 === failFlushAt
       result.flushRequests.push({ authority, requested: !interrupted })
       if (interrupted) { failFlushOnce = false; failFlushAt = null; throw new Error('The real private storage flush request was interrupted by this fixture.') }

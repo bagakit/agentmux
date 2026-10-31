@@ -1,11 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { EventEmitter } from 'node:events'
-import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from '../src/main/workbench-storage-authority.js'
 import { prepareWindowWorkbenchForQuit, reportWorkbenchQuitFailure } from '../src/main/window-state-persistence.js'
 import { inspectDesktopClient } from '../src/main/client-observation.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
@@ -20,12 +17,7 @@ import { createRoot } from 'react-dom/client'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
 import { toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
-const roots: string[] = []
-afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
-async function fixture() {
-  const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-storage-owner-test-")); roots.push(root)
-  return { root, configured: { userData: root, sessionData: root }, session: { getStoragePath: () => root } }
-}
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
 async function initializeWorkbench() {
   const config = await api.config.get()
@@ -37,38 +29,6 @@ async function initializeWorkbench() {
   return await useAppStore.getState().initialize()
 }
 
-it('qualifies the actual persistent Session category, without assuming a particular LevelDB generation or disk ACK', async () => {
-  const f = await fixture(); await mkdir(join(f.root, 'Local Storage', 'leveldb'), { recursive: true })
-  const observed = await observeWorkbenchStorageAuthority(f.session, f.configured)
-  expect(observed).toEqual({ ...f.configured, directory: f.root, localStorage: 'present', detail: null })
-  expect(() => requireWorkbenchStorageAuthority(observed)).not.toThrow()
-})
-it('accepts an independent configured sessionData root when it is the actual window owner', async () => {
-  const f = await fixture(); const sessionData = join(f.root, 'session-data'); await mkdir(join(sessionData, 'Local Storage', 'leveldb'), { recursive: true })
-  const observed = await observeWorkbenchStorageAuthority({ getStoragePath: () => sessionData }, { userData: f.root, sessionData })
-  expect(observed).toEqual({ userData: f.root, sessionData, directory: sessionData, localStorage: 'present', detail: null })
-  expect(() => requireWorkbenchStorageAuthority(observed)).not.toThrow()
-})
-it('reports a missing category honestly and refuses a save transition while leaving files untouched', async () => {
-  const f = await fixture(); const sentinel = join(f.root, 'retained-original'); await writeFile(sentinel, 'original')
-  const observed = await observeWorkbenchStorageAuthority(f.session, f.configured)
-  expect(observed.localStorage).toBe('missing')
-  expect(() => requireWorkbenchStorageAuthority(observed)).toThrow('Saving the workbench is unconfirmed')
-  const { readFile } = await import('node:fs/promises'); expect(await readFile(sentinel, 'utf8')).toBe('original')
-})
-it('does not qualify a parent category after its database leaf has disappeared', async () => {
-  const f = await fixture(); await mkdir(join(f.root, 'Local Storage'))
-  const observed = await observeWorkbenchStorageAuthority(f.session, f.configured)
-  expect(observed.localStorage).toBe('missing')
-  expect(() => requireWorkbenchStorageAuthority(observed)).toThrow('Saving the workbench is unconfirmed')
-})
-it('does not substitute configured files for an unconfirmed, nonpersistent, or mismatched actual Session', async () => {
-  const f = await fixture(); await mkdir(join(f.root, 'Local Storage'))
-  for (const session of [{ getStoragePath: () => null }, { getStoragePath: () => { throw new Error('getter unavailable') } }, { getStoragePath: () => join(f.root, 'other') }]) {
-    const observed = await observeWorkbenchStorageAuthority(session, f.configured)
-    expect(observed.localStorage).toBe('unconfirmed'); expect(() => requireWorkbenchStorageAuthority(observed)).toThrow()
-  }
-})
 it('keeps the original nonempty workbench observable when local storage qualification rejects', async () => {
   const tab = createWorkbenchTab('tab', { kind: 'agent', regionId: 'region', workspaceId: 'workspace', sessionId: 'session', phase: 'attached' })
   const selection = { surface: 'space', mainSurface: 'workbench', focusView: null, space: null, goalId: null } as const
@@ -88,11 +48,11 @@ it('keeps the original nonempty workbench observable when local storage qualific
   expect(observed.workbench.tabs).toHaveLength(1); expect(observed.workbench).toEqual(workbench); expect(observed.main.storage).toBeUndefined()
 })
 it('refuses an outgoing UI update for unknown or missing storage before any exit authority, without path fallback', async () => {
-  const f = await fixture(); await mkdir(join(f.root, 'Local Storage', 'leveldb'), { recursive: true })
   expect(() => requireOutgoingWorkbenchStorage({ main: {} })).toThrow('existing interface and Runs were kept')
   for (const localStorage of ['missing', 'unconfirmed']) expect(() => requireOutgoingWorkbenchStorage({ main: { storage: { localStorage } } })).toThrow()
-  const storage = await observeWorkbenchStorageAuthority(f.session, f.configured)
-  expect(() => requireOutgoingWorkbenchStorage({ main: { storage } })).not.toThrow()
+  const root = _hygiene_fixturePath('private/legacy-storage')
+  const storage = { userData: root, sessionData: root, directory: root, localStorage: 'present', detail: null }
+  expect(() => requireOutgoingWorkbenchStorage({ main: { storage } })).toThrow('existing interface and Runs were kept')
 })
 it('awaits the actual renderer preparation, bounds a missing response, and allows a later retry', async () => {
   vi.useFakeTimers(); let resolve!: () => void
@@ -125,11 +85,12 @@ it('flushes the last actual Store draft before awaiting its host and retains it 
     useAppStore.setState({ agentComposerDrafts: { 'private-session': 'Last exact unsent draft' } })
     let completed = false
     const prepared = prepareRendererUpdate('quit').then(() => { completed = true })
+    await vi.waitFor(() => expect(host).toHaveBeenCalled())
     const encoded = localStorage.getItem('agentmux-workbench-v1')
     expect(encoded).not.toBeNull()
     const stored = JSON.parse(encoded!).state
     expect(stored.agentComposerDrafts).toEqual({ 'private-session': 'Last exact unsent draft' })
-    await vi.waitFor(() => expect(host).toHaveBeenCalled()); expect(completed).toBe(false)
+    expect(completed).toBe(false)
     release(); await prepared; expect(completed).toBe(true)
     host.mockRejectedValue(new Error('storage missing'))
     await expect(prepareRendererUpdate('quit')).rejects.toThrow('storage missing')

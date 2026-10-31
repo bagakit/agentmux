@@ -87,8 +87,12 @@ async function fixture() {
   const observation = {
     schema: 'agentmux.desktop-client-observation.v1',
     main: { pid: 201, package: identity, renderer: { kind: 'bundled', id: 'd'.repeat(64), identity: { shell: 'same-shell', ctxmux: 'same-native' } },
-      storage: { userData: root, sessionData: root, directory: root, localStorage: 'present', detail: null }, runtimes: [] },
+      storage: { userState: { path: join(root, 'workbench-user-state.json'), availability: 'present',
+        contentDigest: 'e'.repeat(64), sizeBytes: 1, diskDurability: 'unconfirmed', confirmedAt: null, lastFailure: null,
+        lastConfirmedWrite: { path: join(root, 'workbench-user-state.json'), contentDigest: 'e'.repeat(64), sizeBytes: 1,
+          diskDurability: 'confirmed', confirmedAt: 1 } }, spatialRevision: 1 }, runtimes: [] },
     workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
+      persistence: { userStatePending: false, userStateContentDigest: 'e'.repeat(64), spatial: { revision: 1, aligned: true } },
       focus: { executionSessionId: 'agent-session', pmoSessionId: null },
       survey: { collectedZoneIds: ['zone-missing', 'zone-a'],
         organization: { ungrouped: ['zone-a'], groups: [{ groupId: 'survey-group', name: 'Retained research', collapsed: true, zoneIds: ['zone-missing', 'closed-zone-slot'] }] },
@@ -119,9 +123,9 @@ async function fixture() {
   vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('Live signals are forbidden') })
   return { home, app, candidate }
 }
-async function install(f: Awaited<ReturnType<typeof fixture>>) {
+async function install(f: Awaited<ReturnType<typeof fixture>>, intent: 'ui-only' | 'full' = 'ui-only') {
   const { installApplication } = await import('../scripts/package-macos.mjs')
-  return installApplication(f.candidate, { intent: 'ui-only', homeDirectory: f.home,
+  return installApplication(f.candidate, { intent, homeDirectory: f.home,
     quit: async (_path: string, admissions: unknown[]) => { expect(io.pid).toBe(201); io.pid = 0; return { wasRunning: true, pids: [201], admissions } },
     launch: async () => { io.pid = 202; io.cutovers++; expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('c'.repeat(40)); return [202] }
   })
@@ -210,7 +214,7 @@ it.each(['legacy', 'opaque'] as const)('actual installation preserves %s auxilia
 it.each(['storage', 'focus', 'layout', 'Run'] as const)('actual installation keeps required %s strict beside opaque desktop observation', async field => {
   const f = await fixture()
   Object.assign(io.before!.workbench, { desktop: { provenance: 'unknown' } })
-  if (field === 'storage') Object.assign(io.before!.main.storage!, { localStorage: 'unqualified' })
+  if (field === 'storage') Object.assign(io.before!.main.storage!.userState!, { availability: 'unqualified' })
   if (field === 'focus') Object.assign(io.before!.workbench.focus, { executionSessionId: 14 })
   if (field === 'layout') Object.assign(io.before!.workbench.layouts.workspace!.root, { type: 'other' })
   if (field === 'Run') {
@@ -383,6 +387,27 @@ it('outgoing qualification failure preserves the observed snapshot without reque
   expect(error.transaction.ui.status).toBe('not-started')
   expect(error.transaction.ui.continuity).toEqual({ before: null, after: io.before })
   expect(io.pid).toBe(201); expect(io.cutovers).toBe(0)
+})
+
+it.each(['ui-only', 'full'] as const)('old-producer %s installation keeps the running App and reaches the original cold route after normal exit', async intent => {
+  const f = await fixture(), userData = join(f.home, 'Library/Application Support/AgentMux')
+  const original = join(userData, 'original-user-data'), bytes = 'PRIVATE retained old user bytes'
+  await mkdir(userData, { recursive: true }); await writeFile(original, bytes)
+  io.before!.main.storage = { userData, sessionData: userData, directory: userData, localStorage: 'present', detail: null }
+  delete io.before!.workbench.persistence
+  const error = await install(f, intent).catch(error => error)
+  expect(error.message).toContain("original application's normal Quit")
+  expect(error.transaction.ui.status).toBe('not-started')
+  expect(io.pid).toBe(201); expect(io.cutovers).toBe(0)
+  expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('a'.repeat(40))
+  expect(await readFile(original, 'utf8')).toBe(bytes)
+  // This is a new external observation after the original normal exit, never a forced Quit.
+  io.pid = 0
+  const result = await install(f, intent)
+  expect(result.ui.status).toBe('unknown')
+  expect(result.ui.reason).toContain('Without an outgoing workbench observation')
+  expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+  expect(await readFile(original, 'utf8')).toBe(bytes)
 })
 
 const rawTerminal = (observation = io.after!) => observation.workbench.tabs[0]!.regions[1]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'terminal' }>
