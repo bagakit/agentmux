@@ -4,6 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { HostCheckState } from '../../store'
 import { hostCheckLabel } from '../../lib/host-check'
+import { hostTransportLabel } from '../../lib/host-transport'
 import { HostIcon } from '../HostBadge'
 import '@xyflow/react/dist/base.css'
 
@@ -32,13 +33,13 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
     <button type="button" className="remote-host-node nodrag nopan" data-host-node={host.id} data-current-host={data.selected}
       data-check-state={check?.state ?? 'idle'} aria-pressed={data.selected} onClick={() => data.onSelect(host.id)}
       title={`${host.label} · ${host.id}`}>
-      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL ROUTE' : 'SSH HOST'}
+      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL ROUTE' : `${hostTransportLabel(host).toUpperCase()} HOST`}
         <span className="remote-host-node__selection" aria-hidden="true">{data.selected ? 'Selected' : null}</span></span>
       <strong>{host.label}</strong>
-      <span className="remote-host-node__address" title={host.kind === 'ssh' ? host.hostname : undefined}>{host.kind === 'local' ? 'Host-local execution' : host.hostname || 'Address required'}</span>
+      <span className="remote-host-node__address" title={host.kind === 'ssh' && host.transport !== 'tailcat' ? host.hostname : undefined}>{host.kind === 'local' ? 'Host-local execution' : host.transport === 'tailcat' ? 'Private Tailcat address' : host.hostname || 'Address required'}</span>
       <span className="remote-host-node__network" aria-label="Configured connection">
-        <span><small>{host.kind === 'ssh' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.user || 'SSH config' : 'Local route'}</code></span>
-        <span><small>{host.kind === 'ssh' ? 'PORT OVERRIDE' : 'NETWORK PORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.port ?? 'SSH config' : 'Not applicable'}</code></span>
+        <span><small>{host.kind === 'ssh' && host.transport !== 'tailcat' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Client key' : host.user || 'SSH config' : 'Local route'}</code></span>
+        <span><small>{host.kind === 'ssh' && host.transport !== 'tailcat' ? 'PORT OVERRIDE' : 'TRANSPORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Tailcat' : host.port ?? 'SSH config' : 'Not applicable'}</code></span>
       </span>
       <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Runtime</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect host'}</code></span>
       <span className="remote-host-node__link" data-route-network title={data.network ?? undefined}>{data.network ?? 'Network · read on demand'}</span></span>
@@ -71,7 +72,7 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     setScope(next)
   }
   const topologyKey = JSON.stringify(items.map(item => item.host.id))
-  const routeKey = JSON.stringify(items.map(item => [item.host.id, item.host.kind]))
+  const routeKey = JSON.stringify(items.map(item => [item.host.id, item.host.kind, item.host.kind === 'ssh' ? item.host.transport : undefined]))
   const firstNodes = useMemo(() => {
     const selected = items.findIndex(item => item.host.id === selectedId)
     const start = Math.max(0, Math.min(selected - 1, items.length - 3))
@@ -83,7 +84,7 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       position: { x: 310, y: index * 272 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
   ], [items, selectedId, onSelect])
   const edges = useMemo<Edge[]>(() => items.map(item => ({ id: `route:${item.host.id}`, source: 'entry', target: `host:${item.host.id}`,
-    type: 'smoothstep', label: item.host.kind === 'ssh' ? 'SSH' : 'Local', selectable: false,
+    type: 'smoothstep', label: hostTransportLabel(item.host), selectable: false,
     className: item.host.id === selectedId ? 'remote-route remote-route--selected' : 'remote-route',
     zIndex: item.host.id === selectedId ? 1 : 0 })), [routeKey, selectedId])
   const fit = useCallback(() => { void instance.current?.fitView({ padding: .12, maxZoom: 1 }) }, [])

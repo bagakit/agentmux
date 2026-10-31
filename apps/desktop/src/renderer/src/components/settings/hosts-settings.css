@@ -20,3 +20,19 @@
 .remote-management .settings-host-page { min-height: 34px; }
 .remote-management[data-remote-wide='false'] .settings-resource-editor { padding-bottom: var(--sp-5); }
 .remote-management[data-remote-wide='false'] .remote-overview__facts { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+
+.host-transport-field { display: grid; gap: var(--sp-2); margin-top: var(--sp-4); }
+.host-transport-field > span, .host-tailcat-address > label > span { color: var(--text-3); font-size: var(--fs-meta); }
+.host-connection-fields > [data-tailcat-client] { margin-top: var(--sp-4); }
+.host-transport-field select { width: 100%; min-height: 32px; padding: 5px 9px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-body); }
+.host-tailcat-listener { display: grid; gap: 12px; min-width: 0; }
+.host-tailcat-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.host-tailcat-toggle > span { display: grid; gap: 3px; }
+.host-tailcat-toggle strong { font-size: var(--fs-body); font-weight: 550; }
+.host-tailcat-toggle small { color: var(--text-3); font-size: 11px; line-height: 1.4; }
+.host-tailcat-toggle input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--green); }
+.host-tailcat-listener textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; padding: 7px 9px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--text); background: var(--surface-0); font: inherit; overflow-wrap: anywhere; }
+.host-tailcat-status, .host-tailcat-address { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.host-tailcat-status > span { flex: 1 1 180px; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
+.host-tailcat-address > label { display: grid; gap: 6px; flex: 1 1 200px; min-width: 0; }
+.host-tailcat-address > button { align-self: end; }

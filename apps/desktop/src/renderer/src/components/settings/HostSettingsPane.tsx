@@ -1,4 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { parseHostConfigurations } from '@agentmux/host/host-configuration'
+import { HostTailcatListenerFields } from './HostTailcatListenerFields'
+import { hostConnectionSummary } from '../../lib/host-transport'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
@@ -203,9 +206,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   async function save(nextHosts = hosts, nextWorkspaces = config.workspaces): Promise<boolean> {
     const submitted = resource.beginSave(Object.fromEntries(nextHosts.map((host) => [host.id, host])))
     const committed = await saveState.run(async () => {
-      if (nextHosts.some((host) => host.kind === 'ssh' && (!host.label.trim() || !host.hostname.trim()))) {
-        throw new Error('Every SSH host needs a name and hostname.')
-      }
+      const parsed = parseHostConfigurations(nextHosts)
+      if (!parsed.success) throw new Error(parsed.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(' · '))
       await onSave(nextHosts, nextWorkspaces, { hosts: orderedHosts(submitted.expected), workspaces: config.workspaces })
     })
     submitted.finish(committed ? submitted.value : undefined)
@@ -234,13 +236,13 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>}
-        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} SSH</small></div>
+        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
         {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find a host or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
         {wide ? <div className="remote-management__modes" aria-label="Host view">
           <button type="button" aria-label="Topology" aria-pressed={showTopology} onClick={() => setMode('topology')}><ThemeObjectTopologyIcon size={14} /><span>Topology</span></button>
           <button type="button" aria-label="List" aria-pressed={!showTopology} onClick={() => setMode('list')}><ThemeLayoutListIcon size={14} /><span>List</span></button>
         </div> : null}
-        <button className="small-button" data-add-host disabled={saving} onClick={addHost}><ThemeActionCreateHostIcon size={13} /> Add SSH host</button>
+        <button className="small-button" data-add-host disabled={saving} onClick={addHost}><ThemeActionCreateHostIcon size={13} /> Add host</button>
       </div>
       {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured hosts match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected host remains open' : ''}</p> : null}
       <div className="settings-resource-split remote-management__body">
@@ -254,7 +256,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             return {
               id: host.id, name: host.label,
               projectCount: projects,
-              detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local machine'}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
+              detail: `${hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
@@ -268,7 +270,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             <section className="host-settings-card" key={host.id} data-resource-editor={host.id} data-host-view={panel} tabIndex={-1}>
               <header className="settings-resource-editor__header">
                 <span className="host-card__icon"><HostIcon kind={host.kind} size={16} /></span>
-                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local machine'}</small></div>
+                <div><strong>{host.label}</strong><small>{hostConnectionSummary(host)}</small></div>
                 {check ? (
                   <span role="status" className={`check-pill check-pill--${check.state === 'error' ? check.result?.outcome ?? 'check-failed' : check.state}`}>
                     {check.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> :
@@ -276,7 +278,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                     {hostCheckLabel(check)}
                   </span>
                 ) : null}
-                {panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
+                {panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && host.transport !== 'tailcat' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><ThemeActionRemoveIcon size={14} /></button> : null}
               </header>
               <nav className="remote-detail-tabs" aria-label={`Sections for ${host.label}`}>
@@ -310,7 +312,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>Your local host</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div> : null}
+              ) : <HostTailcatListenerFields host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (wide || view === 'editor')} onChange={tailcat => setHosts(current => current.map(item => item.id === host.id && item.kind === 'local' ? { ...item, tailcat } : item))} /> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
@@ -329,7 +331,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             const committed = config.hosts.find(host => host.id === id)
             return draft?.kind === 'ssh' ? <div key={id}>
               <div hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
-                <HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
+                <div hidden={draft.transport === 'tailcat'} inert={draft.transport === 'tailcat'}><HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && draft.transport !== 'tailcat' && view === 'editor' && selectedId === id && panel === 'connection'} /></div>
+                {draft.transport === 'tailcat' ? <p className="field-hint">Core upgrades here require an existing Linux x64 headless service over SSH. Install and run AgentMux on the other Mac before connecting.</p> : null}
               </div>
               <div data-host-access={id} hidden={selectedId !== id || panel !== 'agents'} inert={selectedId !== id || panel !== 'agents'}>
                 <HostCreationTrustPanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'agents'} />
@@ -343,13 +346,13 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               connectionChanged={JSON.stringify(draft) !== JSON.stringify(committed)}
               active={active && selectedId === id && panel === 'projects'} hidden={selectedId !== id || panel !== 'projects'} onClose={onClose} />
           })}
-          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your hosts'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add an SSH host to reuse across your projects.'}</p></div> : null}
+          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your hosts'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add a remote host to reuse across your projects.'}</p></div> : null}
         </div>
       </div>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
       <ConfirmationDialog
         open={active && removeRequest !== null}
-        title="Remove SSH host?"
+        title="Remove remote host?"
         description={`This removes the host and ${config.workspaces.filter((workspace) => workspace.hostId === removeRequest?.id).length} linked workspace registrations. Remote files are not deleted.`}
         {...(removeRequest ? { subject: removeRequest.label } : {})}
         confirmLabel="Remove Host"
@@ -370,13 +373,22 @@ function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
   onChange: (patch: Partial<SshHostConfig>) => void
   onClear: (field: 'user' | 'port' | 'identityFile' | 'remoteCommand' | 'remoteSocketPath') => void
 }) {
+  const transport = host.transport ?? 'ssh'
   return (
     <div className="host-connection-fields">
       <div className="host-edit-grid host-edit-grid--basic">
         <label><span>Name</span><TextInput data-host-name value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
-        <label><span>Host or SSH alias</span><TextInput value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="devbox or dev.example.com" /></label>
+        <label><span>Host or SSH alias {transport === 'tailcat' ? <small>optional</small> : null}</span><TextInput value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="devbox or dev.example.com" /></label>
       </div>
-      <p className="settings-group-note">Use an alias from your SSH config, or a hostname. Connects to an existing AgentMux service; Test verifies this connection.</p>
+      <label className="host-transport-field"><span>Connection transport</span><select aria-label="Connection transport" value={transport} onChange={event => {
+        const next = event.target.value as NonNullable<SshHostConfig['transport']>
+        onChange({ transport: next, ...(next !== 'ssh' && host.tailcat === undefined ? { tailcat: { address: '', keyFile: '' } } : {}) })
+      }}><option value="ssh">SSH</option><option value="ssh-tailcat">SSH first, Tailcat backup</option><option value="tailcat">Tailcat only</option></select></label>
+      {transport !== 'ssh' ? <div className="host-edit-grid" data-tailcat-client>
+        <label className="host-edit-grid__wide"><span>Tailcat address <small>private credential</small></span><TextInput type="password" autoComplete="off" spellCheck={false} aria-label="Tailcat address" value={host.tailcat?.address ?? ''} onChange={event => onChange({ tailcat: { keyFile: host.tailcat?.keyFile ?? '', address: event.target.value } })} placeholder="tc…" /></label>
+        <label className="host-edit-grid__wide"><span>Client key file or name</span><TextInput aria-label="Tailcat client key" value={host.tailcat?.keyFile ?? ''} onChange={event => onChange({ tailcat: { address: host.tailcat?.address ?? '', keyFile: event.target.value } })} placeholder="agentmux-client" /></label>
+      </div> : null}
+      <p className="settings-group-note">{transport === 'ssh' ? 'Use an alias from your SSH config, or a hostname. ' : transport === 'ssh-tailcat' ? 'Try SSH first; use Tailcat when channel setup fails. ' : 'Connect using the other Host’s private Tailcat address and your saved client key. '}Connects to an existing AgentMux service; Test verifies this connection.</p>
       <details className="host-edit-disclosure" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
         <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ThemeNavigationDownIcon size={13} /></summary>
         <div className="host-edit-grid">
@@ -386,7 +398,7 @@ function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
         <label className="host-edit-grid__wide"><span>Service command <small>optional</small></span><TextInput value={host.remoteCommand ?? ''} onChange={(event) => event.target.value ? onChange({ remoteCommand: event.target.value }) : onClear('remoteCommand')} placeholder="Use the installed AgentMux service" /></label>
         <label className="host-edit-grid__wide"><span>Service socket path <small>optional; remote absolute path</small></span><TextInput value={host.remoteSocketPath ?? ''} onChange={(event) => event.target.value ? onChange({ remoteSocketPath: event.target.value }) : onClear('remoteSocketPath')} placeholder="Use the service's default socket" /></label>
         <label className="host-edit-grid__wide"><span>Bound Runtime ID</span><TextInput value={host.runtimeId ?? ''} readOnly placeholder="Confirmed on the first trusted connection" /></label>
-        <p className="field-hint host-edit-grid__wide">Connects to an existing service over SSH. Changing this connection keeps its Runtime binding; a different Runtime must be added as a separate host.</p>
+        <p className="field-hint host-edit-grid__wide">Connects to an existing service over {transport === 'ssh' ? 'SSH' : transport === 'ssh-tailcat' ? 'SSH or Tailcat' : 'Tailcat'}. Changing this connection keeps its Runtime binding; a different Runtime must be added as a separate host.</p>
         </div>
       </details>
     </div>

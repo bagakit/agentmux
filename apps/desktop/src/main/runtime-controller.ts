@@ -146,10 +146,11 @@ function observationWarning(hostId: string, step: string, error: unknown, connec
 
 function hostSignature({ label: _label, ...host }: HostConfig): string {
   if (host.kind === 'ssh') {
-    const { runtimeId: _runtimeId, ...route } = host
-    return JSON.stringify(route)
+    const { runtimeId: _runtimeId, transport, tailcat, ...route } = host
+    return JSON.stringify({ ...route, ...(transport === 'tailcat' || transport === 'ssh-tailcat' ? { transport, tailcat } : {}) })
   }
-  return JSON.stringify(host)
+  const { tailcat: _tailcat, ...execution } = host
+  return JSON.stringify(execution)
 }
 
 function signatures(config: AppConfig): Map<string, string> {

@@ -2214,6 +2214,7 @@ export async function registerIpc(args: {
     goalControl: (request, _name, originalContext) => executeGoal(request, originalContext),
     applicationAccess: args.applicationAccess,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
+    hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
     coreClients: () => args.runtime.rpcClients(),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),

@@ -92,6 +92,7 @@ async function ensureHost(storePath: string, socketPath: string, configuration?:
 async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAgentSessionStore, configuration?: { path: string; connectorDirectory: string }): Promise<DesktopRuntimeClient> {
   if (config.kind === 'ssh') return await connectSshAgentMux({ waitForReady: false,
     ...(config.runtimeId ? { expectedRuntimeId: config.runtimeId } : {}), target: { hostId: config.id,
+    ...(config.transport === undefined ? {} : { transport: config.transport }), ...(config.tailcat === undefined ? {} : { tailcat: config.tailcat }),
     hostname: config.hostname, ...(config.user ? { user: config.user } : {}),
     ...(config.port ? { port: config.port } : {}), ...(config.identityFile ? { identityFile: config.identityFile } : {}),
     ...(config.remoteCommand ? { remoteCommand: config.remoteCommand } : {}),
