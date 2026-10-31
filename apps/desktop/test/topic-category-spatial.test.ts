@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { TopicCategory } from '@agentmux/core/control'
@@ -15,14 +15,14 @@ import { SCRATCH_WORKSPACE_ID, scratchTopicStorageRoots } from '../src/shared/sc
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { categoriesFromSpatial, isKnowledgeTopicInBindings, topicContentZoneId, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
-const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 let worker: string
 beforeAll(async () => {
   worker = resolve('.local/topic-knowledge/spatial-restart-worker.mjs')
-  await build({ stdin: { contents: `import {AgentMuxSpatialStateStore} from './packages/core/src/spatial-state.ts'; console.log(JSON.stringify(await new AgentMuxSpatialStateStore(process.argv[2]).read()));`, resolveDir: process.cwd() },
-    outfile: worker, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
+  await mkdir(resolve('.local/topic-knowledge'), { recursive: true })
+  const entry = pathToFileURL(resolve('packages/core/dist/spatial-state.js')).href
+  await writeFile(worker, `import {AgentMuxSpatialStateStore} from ${JSON.stringify(entry)}; console.log(JSON.stringify(await new AgentMuxSpatialStateStore(process.argv[2]).read()));`)
 })
 function restartRead(path: string): Promise<any> {
   return new Promise((yes, no) => {
@@ -45,8 +45,9 @@ async function fixture() {
   const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   const chat = { ...createWorkbenchTab('original-chat', { regionId: 'original-thread', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'healthy-session' }), topicId: topic.id,
     space: { spaceId: directoryIdentity(workspace.hostId, topicPath), zoneId: topicContentZoneId(workspace, topic) } }
-  const global = createWorkbenchTab('global-browser', { regionId: 'global-region', kind: 'browser', workspaceId: workspace.id, browserId: 'healthy-browser', url: 'about:blank' })
-  const workbench = { config, sessions: [], tabs: { [chat.id]: chat, [global.id]: global }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [chat.id, global.id]) }, spaceZoneBindings: {}, spatialRequests: {} }
+  const global = createWorkbenchTab('global-browser', { regionId: 'global-region', kind: 'browser', workspaceId: workspace.id, browserId: 'healthy-browser', url: 'about:blank', viewport: 'responsive' })
+  const workbench = { config, sessions: [], tabs: { [chat.id]: chat, [global.id]: global }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [chat.id, global.id]) },
+    spaceZoneBindings: { [topicContentZoneId(workspace, mote)]: { spaceId: directoryIdentity(workspace.hostId, motePath), workspaceId: workspace.id, topicId: mote.id, contentKind: 'mote' as const, directoryPath: motePath } }, spatialRequests: {} }
   const graph = desktopSpatialGraph(workbench, [topic, mote])
   graph.regions[0]!.runId = 'healthy-run'; graph.regions[0]!.execution = { hostId: 'local', cwd: topicPath }
   graph.resources['tab:original-chat'] = { ...graph.resources['tab:original-chat'] as object, draft: 'Unsent draft', pin: true }

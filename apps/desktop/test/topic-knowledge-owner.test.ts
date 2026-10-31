@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxRpcService } from '@agentmux/core'
 import { connectAgentMuxRpc, type ExecutionHost } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import { ScratchTopics } from '../src/main/scratch-topics'
+import { ScratchTopics } from '@agentmux/host/mote-resources'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
@@ -138,6 +138,46 @@ describe('Topic knowledge content owner uses original files and Core membership'
     expect(await f.state.read()).toBeNull()
     expect(await readFile(join(scratchTopicPhysicalPath(f.workspace, topic), 'topic.md'), 'utf8')).toContain('# Retained')
   })
+  it('refuses a classification write over the original Core Mote when its SOUL file is missing', async () => {
+    const f = await fixture(), topicId = 'view:retained-mote'
+    const created = await f.owner.call('topic.create', { topicId, title: 'Original Mote' })
+    const target = await f.owner.call('topic.category.create', { categoryId: CATEGORY, title: 'Destination' })
+    const current = (await f.state.read())!, graph = structuredClone(current.graph)
+    const contentId = (graph.resources['zone:' + created.topic.zoneId] as { spaceId: string }).spaceId
+    graph.resources['zone:' + created.topic.zoneId] = { ...graph.resources['zone:' + created.topic.zoneId] as object, contentKind: 'mote' }
+    graph.spaces.push({ spaceId: contentId, kind: 'mote', topicId, hostId: 'local', directoryPath: created.topic.directoryPath, projectId: null, name: 'Original Mote' })
+    graph.bindings.push({ spaceId: contentId, zoneId: created.topic.zoneId })
+    await f.state.commit({ expectedRevision: current.revision, graph })
+    const before = (await f.state.read())!, bytes = await readFile(join(created.topic.directoryPath, 'topic.md'))
+    const topic = (await f.scratch.read(f.workspace, topicId))!
+    expect(topic.kind).toBe('topic')
+    expect(topic.readError).toBeUndefined()
+    await expect(f.spatial.ensureTopic(topic, CATEGORY)).rejects.toMatchObject({ code: 'TOPIC_TARGET_IS_MOTE' })
+    await expect(f.owner.call('topic.move', { topicId, categoryId: target.category.categoryId, expectedRevision: before.revision }))
+      .rejects.toMatchObject({ code: 'TOPIC_TARGET_IS_MOTE' })
+    expect(await f.state.read()).toEqual(before)
+    expect(await readFile(join(created.topic.directoryPath, 'topic.md'))).toEqual(bytes)
+    expect((await f.owner.call('topic.inspect', { topicId })).topic).toMatchObject({ contentKind: 'mote', zoneId: created.topic.zoneId })
+    expect(await f.owner.call('topic.knowledge.read', { topicId, entryId: CATEGORY })).toEqual({ entry: null })
+  })
+  it.each([
+    { contentKind: 'topic', topicId: 'view:another-topic', workspaceId: SCRATCH_WORKSPACE_ID },
+    { contentKind: 'topic', topicId: 'view:retained-topic', workspaceId: 'other-workspace' },
+    { contentKind: 'topic', topicId: 'view:retained-topic', workspaceId: SCRATCH_WORKSPACE_ID, spaceId: 'another-content-identity' },
+    { contentKind: 'note' }, [], 'unknown-resource'
+  ])('classification and creation preserve the same contradictory original identity: %j', async original => {
+    const f = await fixture(), topicId = 'view:retained-topic'
+    const created = await f.owner.call('topic.create', { topicId, title: 'Retained' })
+    await f.owner.call('topic.category.create', { categoryId: CATEGORY, title: 'Destination' })
+    const current = (await f.state.read())!, graph = structuredClone(current.graph)
+    graph.resources['zone:' + created.topic.zoneId] = original
+    await f.state.commit({ expectedRevision: current.revision, graph })
+    const before = (await f.state.read())!, topic = (await f.scratch.read(f.workspace, topicId))!
+    await expect(f.spatial.ensureTopic(topic, CATEGORY)).rejects.toMatchObject({ code: 'TOPIC_IDENTITY_UNCONFIRMED' })
+    await expect(f.owner.call('topic.move', { topicId, categoryId: CATEGORY, expectedRevision: before.revision }))
+      .rejects.toMatchObject({ code: 'TOPIC_IDENTITY_UNCONFIRMED' })
+    expect(await f.state.read()).toEqual(before)
+  })
   it.each([
     { contentKind: 'topic', topicId: 'view:foreign-owner', workspaceId: SCRATCH_WORKSPACE_ID },
     { contentKind: 'topic', topicId: 'view:foreign-resource', workspaceId: 'foreign-workspace' },
@@ -164,6 +204,15 @@ describe('Topic knowledge content owner uses original files and Core membership'
     expect(await readFile(join(first.category.directoryPath, 'category.md'), 'utf8')).toBe('# 学习\n')
     expect(source).toBe('# 工作\n')
     expect((await f.state.read())!.graph.spaces.find(space => space.spaceId === first.category.spaceId)?.name).toBe('学习')
+  })
+  it.each(['Literal $& title', 'Literal $` title', "Literal $' title", 'Literal $$ title'])('saves the exact literal category title: %s', async title => {
+    const f = await fixture(), first = await f.owner.call('topic.category.create', { categoryId: CATEGORY, title: 'Original' })
+    const body = '# Original\n\nKeep original context and references.\n'
+    await writeFile(join(first.category.directoryPath, 'category.md'), body)
+    const original = (await f.owner.call('topic.category.ls', {})).categories.find(category => category.categoryId === CATEGORY)!
+    const result = await f.owner.call('topic.category.rename', { categoryId: CATEGORY, title, expectedRevision: original.revision! })
+    expect(result.category).toMatchObject({ title, spaceId: first.category.spaceId, directoryPath: first.category.directoryPath })
+    expect(await readFile(join(first.category.directoryPath, 'category.md'), 'utf8')).toBe('# ' + title + '\n\nKeep original context and references.\n')
   })
   it('creates a Topic in 未分类, discovers only ordinary Topics and moves its original Zone', async () => {
     const f = await fixture()
