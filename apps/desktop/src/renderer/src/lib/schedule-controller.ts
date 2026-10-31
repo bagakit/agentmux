@@ -4,7 +4,7 @@ import type { ScheduleParamsMap } from '@agentmux/core'
 import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from './api'
-import { useLauncherState } from './launcher-state'
+import { useLauncherState, checkpointLauncherState, initializeLauncherState } from './launcher-state'
 import type { ScheduleRequest } from './schedule-draft'
 
 export type ScheduleQuery = ScheduleParamsMap['schedule.list']
@@ -104,10 +104,14 @@ export function useScheduleOperation(draftKey: string, accept: (record: Continuo
       useLauncherState.getState().setScheduleDraft(draftKey, { pending: undefined })
   }
   async function perform(request: ScheduleRequest): Promise<ContinuousProgressLoop | null> {
+    try { await initializeLauncherState() } catch (error) { setError(presentError(error)); return null }
+    if (!isCurrent()) return null
     const original = useLauncherState.getState().drafts[draftKey]?.schedule?.pending
-    if (flight.current?.key === draftKey || original && !sameRequest(original, request)) return null
+    if (flight.current?.key === draftKey) return null
+    if (original && !sameRequest(original, request)) { setError('An original arrangement request remains unconfirmed. Inspect that request before submitting another.'); return null }
     const token = { key: draftKey }; flight.current = token; setBusyKey(draftKey); setError(undefined); remember(request)
     try {
+      await checkpointLauncherState()
       const receipt = request.action === 'create' ? await api.schedule.create(request.params)
         : await api.schedule[request.action](request.params)
       validateScheduleRpcResult(`schedule.${request.action}`, receipt, request.params)

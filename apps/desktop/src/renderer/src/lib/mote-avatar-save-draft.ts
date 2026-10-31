@@ -1,6 +1,6 @@
 import { avatarSeriesCanonical } from '@agentmux/core/mote-avatar-series'
 import { parseMoteAvatarSave, parseMoteAvatarTarget, type MoteAvatarSave, type MoteAvatarTarget } from '@agentmux/core/mote-avatar-write'
-import { api } from './api'
+import { desktopUserFragments } from './desktop-user-state'
 
 /** Original submitted request only; saved choices and receipts stay with their native owners. */
 export function moteAvatarSaveDraftKey(target: MoteAvatarTarget): string {
@@ -9,8 +9,8 @@ export function moteAvatarSaveDraftKey(target: MoteAvatarTarget): string {
 }
 
 export function readMoteAvatarSaveDraft(target: MoteAvatarTarget): MoteAvatarSave | null {
-  const bytes = localStorage.getItem(moteAvatarSaveDraftKey(target))
-  if (bytes === null) return null
+  const bytes = desktopUserFragments.read('moteAvatarSaveDrafts')[moteAvatarSaveDraftKey(target)]
+  if (bytes === undefined) return null
   const request = parseMoteAvatarSave(JSON.parse(bytes))
   if (moteAvatarSaveDraftKey(request.target) !== moteAvatarSaveDraftKey(target)) throw new Error('The kept save request belongs to another Mote. Its original bytes are retained.')
   return request
@@ -31,29 +31,42 @@ async function withDraftLock(target: MoteAvatarTarget, work: () => Promise<void>
 
 export async function keepMoteAvatarSaveDraft(request: MoteAvatarSave): Promise<void> {
   parseMoteAvatarSave(request)
+  await initializeMoteAvatarDrafts()
   await withDraftLock(request.target, async () => {
     const existing = readMoteAvatarSaveDraft(request.target)
     if (existing && avatarSeriesCanonical(existing) !== avatarSeriesCanonical(request)) throw new Error('Another original save request is kept for this Mote. Inspect it before saving again.')
-    if (!existing) localStorage.setItem(moteAvatarSaveDraftKey(request.target), JSON.stringify(request))
-    // The IPC acknowledgement confirms the platform flush request, not a disk/fsync guarantee.
-    await api.ui.requestStorageFlush()
+    if (!existing) desktopUserFragments.write('moteAvatarSaveDrafts', { ...desktopUserFragments.read('moteAvatarSaveDrafts'),
+      [moteAvatarSaveDraftKey(request.target)]: JSON.stringify(request) })
+    await desktopUserFragments.checkpoint('moteAvatarSaveDrafts')
   })
 }
 
 /** Only called after a native refusal or acknowledged original publication. */
 export async function retireMoteAvatarSaveDraft(request: MoteAvatarSave): Promise<void> {
+  await initializeMoteAvatarDrafts()
   await withDraftLock(request.target, async () => {
-    const key = moteAvatarSaveDraftKey(request.target), bytes = localStorage.getItem(key)
-    if (bytes === null) return
+    const key = moteAvatarSaveDraftKey(request.target), previous = desktopUserFragments.read('moteAvatarSaveDrafts'), bytes = previous[key]
+    if (bytes === undefined) return
     const existing = readMoteAvatarSaveDraft(request.target)
     if (existing?.operationId !== request.operationId || avatarSeriesCanonical(existing) !== avatarSeriesCanonical(request)) throw new Error('Another original save request is kept. Its bytes are retained.')
     try {
-      localStorage.removeItem(key)
-      await api.ui.requestStorageFlush()
+      const next = { ...previous }; delete next[key]
+      desktopUserFragments.write('moteAvatarSaveDrafts', next)
+      await desktopUserFragments.checkpoint('moteAvatarSaveDrafts')
     } catch (cause) {
       // Restore the exact original bytes under the same lock; keep the request for read-only reconciliation.
-      localStorage.setItem(key, bytes)
+      desktopUserFragments.write('moteAvatarSaveDrafts', { ...desktopUserFragments.read('moteAvatarSaveDrafts'), [key]: bytes })
       throw cause
+    }
+  })
+}
+
+export async function initializeMoteAvatarDrafts(): Promise<void> {
+  await desktopUserFragments.load('moteAvatarSaveDrafts', entries => {
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new Error('Original avatar requests are unreadable.')
+    for (const [key, raw] of Object.entries(entries)) {
+      const request = parseMoteAvatarSave(JSON.parse(raw))
+      if (moteAvatarSaveDraftKey(request.target) !== key) throw new Error('An original avatar request belongs to another target. Its bytes are retained.')
     }
   })
 }

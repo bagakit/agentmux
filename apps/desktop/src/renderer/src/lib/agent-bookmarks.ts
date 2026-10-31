@@ -1,4 +1,4 @@
-import { api } from './api'
+import { desktopUserFragments } from './desktop-user-state'
 
 export const AGENT_BOOKMARK_STORAGE_KEY = 'agentmux.agent-bookmarks.v1'
 export type AgentBookmarkBounds = { x: number; y: number; width: number; height: number }
@@ -80,7 +80,7 @@ export function createAgentBookmarks(options: { storage: BookmarkStorage; flush(
     const detail = cause instanceof Error ? cause.message : String(cause)
     publish({ ...get(), persistenceIssue: { phase, message: phase === 'write'
       ? `Agent bookmarks could not be saved. This window keeps them; retry saving. ${detail}`
-      : `Agent bookmarks were written locally, but the storage flush request is unconfirmed. Retry saving. ${detail}` } })
+      : `Agent bookmarks could not be durably confirmed. This window keeps the original reading; retry saving. ${detail}` } })
   }
   function clearTimer() { clearTimeout(timer); timer = undefined }
   async function flush(): Promise<void> {
@@ -96,7 +96,6 @@ export function createAgentBookmarks(options: { storage: BookmarkStorage; flush(
     } catch (cause) { if (ownRequest === request && ownRevision === revision) issue('write', cause); return }
     const work = (async () => {
       try {
-        // This acknowledges a request to Chromium, never a disk/fsync receipt.
         await options.flush()
         if (ownRequest === request && ownRevision === revision && !dirty && get().persistenceIssue) publish({ ...get(), persistenceIssue: null })
       } catch (cause) { if (ownRequest === request && ownRevision === revision) issue('flush', cause) }
@@ -131,7 +130,7 @@ export function createAgentBookmarks(options: { storage: BookmarkStorage; flush(
         const bookmarks = restored.bookmarks.filter(item => !unreadEdits.has(item.key))
         for (const item of unreadEdits.values()) if (item) bookmarks.push(item)
         if (!restored.complete) { publish({ bookmarks, persistenceIssue: readIssue() }); return }
-        readConfirmed = true; unreadEdits.clear(); revision++; dirty = true
+        readConfirmed = true; dirty ||= unreadEdits.size > 0; unreadEdits.clear(); revision++
         publish({ bookmarks, persistenceIssue: null })
       } catch { publish({ ...get(), persistenceIssue: readIssue() }); return }
     }
@@ -164,6 +163,7 @@ export function createAgentBookmarks(options: { storage: BookmarkStorage; flush(
     },
     retry,
     flush,
+    pending: () => dirty || unreadEdits.size > 0 || inFlight !== undefined,
     startLifecycle(host: Window = window): () => void {
       if (lifecycle?.host === host) return lifecycle.dispose
       lifecycle?.dispose(); get()
@@ -184,8 +184,23 @@ export function createAgentBookmarks(options: { storage: BookmarkStorage; flush(
   return owner
 }
 
-export const agentBookmarks = createAgentBookmarks({
-  storage: { getItem: key => typeof window === 'undefined' ? null : window.localStorage.getItem(key),
-    setItem: (key, value) => { window.localStorage.setItem(key, value) } },
-  flush: () => api.ui.requestStorageFlush()
+const bookmarkOwner = createAgentBookmarks({
+  storage: { getItem: () => desktopUserFragments.read('agentBookmarks'),
+    setItem: (_key, value) => { desktopUserFragments.write('agentBookmarks', value) } },
+  flush: () => desktopUserFragments.checkpoint('agentBookmarks')
 })
+export const agentBookmarks = { ...bookmarkOwner,
+  async retry(): Promise<void> {
+    try { await initializeAgentBookmarks() }
+    catch { /* Its original read notice and unread edit overlay remain available. */ }
+  }
+}
+
+export async function initializeAgentBookmarks(): Promise<void> {
+  await desktopUserFragments.load('agentBookmarks', raw => {
+    if (!readBookmarks(raw).complete) throw new Error('Saved Agent bookmarks are incomplete. Original bytes are retained.')
+  })
+  // Reuses the existing precise unread-edit overlay, rather than replacing pins
+  // made while the canonical read was pending.
+  await bookmarkOwner.retry()
+}

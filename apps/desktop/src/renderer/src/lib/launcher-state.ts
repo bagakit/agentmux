@@ -5,6 +5,7 @@ import { EMPTY_LAUNCHER_NAMES, type LauncherNames, type LauncherNameField } from
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherProviderOptions } from './launcher-option-draft'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
+import { desktopUserFragments } from './desktop-user-state'
 
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
 export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
@@ -45,8 +46,13 @@ type LauncherState = {
 // their existing stores. A failed storage write preserves the in-memory input and is reported by the UI.
 let storageReadConfirmed = false
 let reportStorageIssue: (message: string) => void = () => {}
-export const useLauncherState = create<LauncherState>()(persist((set) => {
-  reportStorageIssue = message => { try { set({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
+const unreadUpdates: ((state: LauncherState) => Partial<LauncherState>)[] = []
+export const useLauncherState = create<LauncherState>()(persist((save) => {
+  const set: typeof save = (update, replace) => {
+    if (!storageReadConfirmed) unreadUpdates.push(typeof update === 'function' ? update : () => update)
+    return save(update, replace as false)
+  }
+  reportStorageIssue = message => { try { save({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
   return {
   persistenceIssue: null, sections: {}, drafts: {}, executors: {}, moteTopicId: null,
   setProgressUpdate(launcherId, request) {
@@ -145,19 +151,62 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
 }
 }, {
   name: 'agentmux-launcher',
+  skipHydration: !__AGENTMUX_WEB_PREVIEW__,
   storage: createJSONStorage(() => ({
-    // Access storage inside each operation: createJSONStorage must never swallow an unavailable getter.
-    getItem: key => typeof window === 'undefined' ? null : window.localStorage.getItem(key),
-    setItem: (key, value) => {
-      // Reading failure must never let an in-memory default overwrite the only durable record.
+    getItem: () => desktopUserFragments.read('launcher'),
+    setItem: (_key, value) => {
       if (!storageReadConfirmed) throw new Error('Saved Launcher state has not been read successfully')
-      if (typeof window !== 'undefined') window.localStorage.setItem(key, value)
+      desktopUserFragments.write('launcher', value)
     },
-    removeItem: key => { if (typeof window !== 'undefined') window.localStorage.removeItem(key) }
+    removeItem: () => desktopUserFragments.write('launcher', null)
   })),
+  merge: (persisted, current) => {
+    let restored = { ...current, ...persisted as Partial<LauncherState> }
+    for (const update of unreadUpdates) restored = { ...restored, ...update(restored) }
+    return restored
+  },
   onRehydrateStorage: () => { storageReadConfirmed = false; return (_state, error) => {
     if (error) reportStorageIssue('Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.')
-    else storageReadConfirmed = true
+    else {
+      storageReadConfirmed = true
+      // Replayed input must reach the same document cache before its unread
+      // overlay is released; a root-only checkpoint must include these edits.
+      if (unreadUpdates.length && _state) desktopUserFragments.write('launcher', JSON.stringify({ state: {
+        sections: _state.sections, drafts: _state.drafts, executors: _state.executors, moteTopicId: _state.moteTopicId
+      }, version: 0 }))
+      unreadUpdates.length = 0
+    }
   } },
   partialize: state => ({ sections: state.sections, drafts: state.drafts, executors: state.executors, moteTopicId: state.moteTopicId })
 }))
+
+
+/** Root hydration and explicit retries preserve edits made while original bytes were unknown. */
+let launcherHydration: Promise<void> | null = null
+export async function initializeLauncherState(): Promise<void> {
+  if (storageReadConfirmed) return
+  if (launcherHydration) return await launcherHydration
+  const work = (async () => { try {
+    await desktopUserFragments.load('launcher', raw => {
+      if (raw === null) return
+      const value = JSON.parse(raw)
+      if (!value || typeof value !== 'object' || !value.state || typeof value.state !== 'object' || Array.isArray(value.state) ||
+        typeof value.version !== 'number') throw new Error('Saved Launcher input is invalid. Original bytes are retained.')
+    })
+    await useLauncherState.persist.rehydrate()
+    if (!storageReadConfirmed) throw new Error('Saved Launcher input could not be restored.')
+  } catch (error) { reportStorageIssue('Saved Launcher input is unconfirmed. Current input and original requests remain available.'); throw error } })()
+  launcherHydration = work
+  try { await work } finally { if (launcherHydration === work) launcherHydration = null }
+}
+
+/** Memory setters do not acknowledge disk. Call this before their dependent business action. */
+export async function checkpointLauncherState(): Promise<void> {
+  await initializeLauncherState()
+  const state = useLauncherState.getState()
+  desktopUserFragments.write('launcher', JSON.stringify({ state: { sections: state.sections, drafts: state.drafts,
+    executors: state.executors, moteTopicId: state.moteTopicId }, version: 0 }))
+  await desktopUserFragments.checkpoint('launcher')
+}
+
+export const launcherUnreadEditsPending = () => unreadUpdates.length > 0

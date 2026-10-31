@@ -11,7 +11,7 @@ import { CalendarScheduleControl } from './CalendarScheduleControl'
 import { useAppStore } from '../store'
 import { resolveAutomationPreferences } from '../../../shared/automation-preferences'
 import type { ProgressUpdateRequest } from '../../../shared/continuous-progress'
-import { useLauncherState } from '../lib/launcher-state'
+import { useLauncherState, checkpointLauncherState, initializeLauncherState } from '../lib/launcher-state'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import '../styles/automation.css'
 
@@ -155,11 +155,22 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     if (patch.prompt !== undefined) setPrompt(patch.prompt)
     useLauncherState.getState().setProgressDraft(draftKey, { interval, prompt, ...patch, expectedLoop: editBasis.current })
   }
+  const configurationSave = useRef(false)
   async function saveConfiguration() {
-    if (busy) return
+    if (busy || configurationSave.current) return
+    configurationSave.current = true
+    try {
     setSaveNotice(undefined)
+    try { await initializeLauncherState() }
+    catch (error) { setSaveNotice(presentError(error)); return }
+    if (current.current !== target) return
+    const restoredPending = useLauncherState.getState().drafts[draftKey]?.progressUpdate
+    if (restoredPending && restoredPending.operationId !== pendingUpdate?.operationId) {
+      setSaveNotice('An original save request was restored. Inspect that request before retrying; your current draft is kept.')
+      return
+    }
     const captured = target, version = editVersion.current
-    const request: ProgressUpdateRequest | undefined = pendingUpdate ?? (loop ? {
+    const request: ProgressUpdateRequest | undefined = restoredPending ?? (loop ? {
       target, loopId: loop.loopId, expectedLoop: editBasis.current ?? loop,
       intervalMs: Number(interval) * 60_000, prompt, operationId: mintObjectId()
     } : undefined)
@@ -171,16 +182,16 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       }
       return
     }
-    if (!useLauncherState.getState().setProgressUpdate(draftKey, request)) {
-      // No remote call was made. A failed local write may still have updated Zustand memory.
-      if (!pendingUpdate) useLauncherState.getState().setProgressUpdate(draftKey, undefined)
-      setSaveNotice('The save request could not be retained on this device. Your draft is kept; retry when storage is available.')
+    useLauncherState.getState().setProgressUpdate(draftKey, request)
+    try { await checkpointLauncherState() }
+    catch {
+      setSaveNotice('The save request could not be retained on this device. Your original request and current draft are kept; retry when storage is available.')
       return
     }
     const saved = await run(() => api.continuousProgress.update(request), failure => {
       const code = (failure as { code?: string })?.code
       // Only an explicit first-attempt rejection proves this request was not applied.
-      if (!pendingUpdate && ['CONTROL_REQUEST_CONFLICT', 'INVALID_CONTROL_REQUEST', 'CONTROL_PERMISSION_DENIED'].includes(code ?? '')) {
+      if (!restoredPending && ['CONTROL_REQUEST_CONFLICT', 'INVALID_CONTROL_REQUEST', 'CONTROL_PERMISSION_DENIED'].includes(code ?? '')) {
         useLauncherState.getState().setProgressUpdate(draftKey, undefined)
         if (current.current === captured) setConflict(code === 'CONTROL_REQUEST_CONFLICT')
       }
@@ -194,6 +205,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     editBasis.current = saved; setConflict(false)
     if (editVersion.current === version && request.prompt === prompt && request.intervalMs === Number(interval) * 60_000) edited.current = false
     setSaveNotice('Changes saved. ' + (saved.status === 'paused' ? 'Continuous progress remains paused.' : 'The current check keeps its original settings.'))
+    } finally { configurationSave.current = false }
   }
   async function reviewLatest() {
     const captured = target

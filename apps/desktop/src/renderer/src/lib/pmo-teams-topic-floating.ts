@@ -12,9 +12,9 @@ import { type WorkbenchViewTarget, type WorkbenchViewTargets } from './workbench
 import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { showMoteConversation } from './mote-conversation-mode'
+import { desktopUserFragments } from './desktop-user-state'
 
 export const PMO_FLOATING_TAB_SLOT_PREFIX = 'mote-floating-tab-slot'
-const STORAGE_KEY = 'agentmux.leader-topic-floating.v1'
 
 export type PmoTeamsTopicFloatingSize = { width: number; height: number }
 export function resolvePmoTeamsTopicFloatingSize(preferred: PmoTeamsTopicFloatingSize | undefined,
@@ -70,6 +70,7 @@ function validReference(value: unknown): value is WorkbenchProjectionSelection {
 
 const CLOSED: PmoTeamsTopicFloatingState = { open: false, preview: false }
 let state: PmoTeamsTopicFloatingState | undefined
+const unreadPreferences: Partial<PmoTeamsTopicFloatingState>[] = []
 let conversationEntrySequence = 0
 function nextConversationEntry(): number { return ++conversationEntrySequence }
 /** Read the original mounted owner without initializing, opening or retargeting it. */
@@ -82,7 +83,7 @@ let returnFocus: { primary: HTMLElement | null; onReturnFocus?: (() => void) | u
 function readState(): PmoTeamsTopicFloatingState {
   if (typeof window === 'undefined') return CLOSED
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const raw = desktopUserFragments.read('moteFloating')
     if (raw === null) return CLOSED
     const value = JSON.parse(raw) as Partial<PmoTeamsTopicFloatingState>
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid Mote preferences')
@@ -105,6 +106,7 @@ function snapshot(): PmoTeamsTopicFloatingState {
 }
 function cancelClose(): void { clearTimeout(closeTimer); closeTimer = undefined }
 function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void {
+  if (persist && !desktopUserFragments.ready('moteFloating')) unreadPreferences.push(next)
   const current = snapshot()
   const explicitChoice = Object.hasOwn(next, 'focusChatTopicId') && Boolean(next.focusChatTopicId?.trim())
   const retryPreference = Boolean(current.preferenceIssue && (explicitChoice || Object.hasOwn(next, 'size')))
@@ -122,13 +124,24 @@ function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void
     resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && resolved.conversationIntent === current.conversationIntent && resolved.threadsEntry === current.threadsEntry && !retryPreference) return
   state = resolved
   if (persist && (resolved.open !== current.open || JSON.stringify(resolved.agentTarget) !== JSON.stringify(current.agentTarget) || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
-    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ open: resolved.open, agentTarget: resolved.agentTarget,
+    try { desktopUserFragments.write('moteFloating', JSON.stringify({ open: resolved.open, agentTarget: resolved.agentTarget,
       targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, targetAgent: resolved.targetAgent, reference: resolved.reference, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
       state = { ...resolved, preferenceIssue: undefined }
     } catch { state = { ...resolved, preferenceIssue: 'Mote preferences could not be saved. This window keeps your choice and size; select the Mote or resize again to retry.' } }
   }
   for (const listener of listeners) listener()
 }
+export async function initializeMoteFloatingPreferences(): Promise<void> {
+  await desktopUserFragments.load('moteFloating', raw => {
+    if (raw === null) return
+    const value = JSON.parse(raw)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Original Mote preferences are invalid. Their bytes are retained.')
+  })
+  state = readState()
+  for (const patch of unreadPreferences.splice(0)) update(patch)
+  for (const listener of listeners) listener()
+}
+export const moteFloatingUnreadEditsPending = () => unreadPreferences.length > 0
 function captureFocus(onReturnFocus?: () => void): void {
   const active = document.activeElement
   if (!returnFocus || onReturnFocus) returnFocus = {

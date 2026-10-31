@@ -32,7 +32,6 @@ createRoot(document.getElementById('root')!).render(
 
 // Main invokes this bounded checkpoint before a controlled presentation reload. No Run state crosses it.
 Object.assign(window, { agentmuxPrepareRendererUpdate: async (intent: 'reload' | 'quit' = 'reload') => {
-  void agentBookmarks.flush()
   await prepareRendererUpdate(intent)
 } })
 

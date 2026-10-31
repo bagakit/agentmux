@@ -91,7 +91,11 @@ import { openSystemUrlInSurvey } from './lib/survey-system-url'
 import { openSystemFileInSurvey } from './lib/survey-system-file'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
-import { useLauncherState } from './lib/launcher-state'
+import { useLauncherState, initializeLauncherState, checkpointLauncherState, launcherUnreadEditsPending } from './lib/launcher-state'
+import { initializeAgentBookmarks, agentBookmarks } from './lib/agent-bookmarks'
+import { initializeMoteAvatarDrafts } from './lib/mote-avatar-save-draft'
+import { initializeGlobalGoalPatrol } from './lib/global-goal-patrol-state'
+import { desktopUserDocument } from './lib/desktop-user-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
 import { warmLauncherId, warmTerminalForLauncher, type WarmTerminalCreation } from './lib/warm-terminal-preview'
@@ -171,7 +175,7 @@ import type { AgentCapabilities, AgentCatalogEntry, AgentMuxInteractionResponse,
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
-import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
+import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, initializeMoteFloatingPreferences, moteFloatingUnreadEditsPending } from './lib/pmo-teams-topic-floating'
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
   AgentLaunchResult,
@@ -440,7 +444,7 @@ import {
   createWriteFencedStorage,
   registerUnloadFlush
 } from './lib/persisted-ui-writer'
-import { createWorkbenchUserStorage, WORKBENCH_USER_STATE_KEY } from './lib/workbench-user-storage'
+import { WORKBENCH_USER_STATE_KEY } from './lib/workbench-user-storage'
 import type { StartupAgentAvailability, StartupProgress } from './lib/startup-progress'
 
 type ViewMode = SessionViewMode
@@ -4408,11 +4412,9 @@ const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeI
 
 // The Web preview has its own browser host. Shipping Desktop always uses the
 // native file owner; Web Storage is read once only to preserve existing bytes.
-const nativeWorkbenchStorage = createWorkbenchUserStorage(api.ui, () => window.localStorage)
+const nativeWorkbenchStorage = desktopUserDocument.persistent as ReturnType<typeof createBatchedPersistentStorage<PersistedAppState>>
 function workbenchStorage() {
-  return __AGENTMUX_WEB_PREVIEW__
-    ? typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
-    : nativeWorkbenchStorage
+  return typeof window === 'undefined' ? nonBrowserWorkbenchStorage : window.localStorage
 }
 
 // A failed hydration must not be followed by the initial `set(...)` overwriting the only durable
@@ -4423,7 +4425,7 @@ function workbenchStorage() {
 // 闸本身住在 lib 里（`createWriteFencedStorage`）：留在这个模块里时它是一个 `let` 加一行 `if`，
 // 于是「闸关着时写入真的被拦了吗」在测试里不可观测，只能靠扫源码文本判断那个名字还在——实测把
 // 那行 `if` 删掉，五个持久化测试文件 62 条全绿。这里剩下的只有转发，没有可以被掏空的判断。
-const persistentWorkbenchStorage = createBatchedPersistentStorage<PersistedAppState>({
+const persistentWorkbenchStorage = __AGENTMUX_WEB_PREVIEW__ ? createBatchedPersistentStorage<PersistedAppState>({
   getItem: (name) => workbenchStorage().getItem(name),
   setItem: (name, value) => {
     const result = workbenchStorage().setItem(name, value)
@@ -4437,7 +4439,7 @@ const persistentWorkbenchStorage = createBatchedPersistentStorage<PersistedAppSt
     if (__AGENTMUX_WEB_PREVIEW__) requestWorkbenchStorageCommit()
     return result
   }
-}, 400, error => useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage'))
+}, 400, error => useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage')) : nativeWorkbenchStorage
 
 // The writer batches relevant user changes. Native writes return file/directory ACKs;
 // explicit checkpoints capture current inputs before asking the same owner to confirm.
@@ -4810,9 +4812,17 @@ function agentDisplayOverride(names: Record<string, string>, sessionId: string):
 }
 let workbenchStorageCommit: Promise<void> = Promise.resolve()
 async function checkpointWorkbenchUserState(): Promise<void> {
+  if (launcherUnreadEditsPending()) await checkpointLauncherState()
+  if (moteFloatingUnreadEditsPending()) await initializeMoteFloatingPreferences()
+  await agentBookmarks.flush()
+  if (agentBookmarks.pending()) throw new Error('Current Agent bookmarks are not yet saved. Original reading and current input are retained.')
   await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, {
     state: partializeAppState(useAppStore.getState()), version: 1
   })
+}
+/** Pending edits outside a hydrated fragment are still user data, never an empty save queue. */
+export function auxiliaryUserDataPending(): boolean {
+  return launcherUnreadEditsPending() || moteFloatingUnreadEditsPending() || agentBookmarks.pending()
 }
 function requestWorkbenchStorageCommit(): void {
   workbenchStorageCommit = requestWorkbenchStorageFlush(false)
@@ -4854,7 +4864,12 @@ function openPersistWrites(): void {
 // Best-effort unload starts any remaining batch. Controlled quit/reload awaits
 // prepareRendererUpdate and the native owner ACK; unload alone is no durability proof.
 if (typeof window !== 'undefined') {
-  registerUnloadFlush(() => persistentWorkbenchStorage.flush())
+  registerUnloadFlush(() => {
+    try {
+      const saving = persistentWorkbenchStorage.flush()
+      if (saving) void saving.catch(error => useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage'))
+    } catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage') }
+  })
 }
 
 let persistHydrationPromise: Promise<void> | null = null
@@ -5591,6 +5606,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // subscriptions above intentionally start first so events arriving during this storage read
       // stay in the existing boot buffer instead of being missed.
       const persistWarning = await ensurePersistHydrated()
+      const auxiliary = await Promise.allSettled([initializeLauncherState(), initializeAgentBookmarks(),
+        initializeMoteFloatingPreferences(), initializeMoteAvatarDrafts(), initializeGlobalGoalPatrol()])
+      for (const result of auxiliary) if (result.status === 'rejected') get().reportWorkbenchSaveFailure(result.reason, 'local-storage')
       // Capture the original handoff before Core layout/name observations can
       // replace these caches. A name document may already own other targets;
       // absence there must not erase an alias before retainLabels receives it.
@@ -9360,6 +9378,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const groupId = tabGroupId ?? captured.layouts[workspaceId]?.activeGroupId
     if (!groupId) throw new Error('Select an exact Note display Group first')
     const launcherId = warmLauncherId({ tabGroupId: groupId, regionId: launcher?.regionId })
+    const clickedResource = captured.config?.workspaces.find(item => item.id === workspaceId)
+    try { await initializeLauncherState() }
+    catch (error) { get().reportWorkbenchSaveFailure(error, 'local-storage'); throw error }
+    const afterRead = get(), currentResource = afterRead.config?.workspaces.find(item => item.id === workspaceId)
+    const currentSurface = launcher ? afterRead.tabs[launcher.tabId]?.regions[launcher.regionId] : undefined
+    if (!clickedResource || currentResource?.hostId !== clickedResource.hostId || currentResource.path !== clickedResource.path) {
+      throw new Error('The original Note resource changed while saved input was being read. Its original target and current draft are retained; no file write was issued.')
+    }
+    // The original click may still create in its unchanged resource. A later
+    // Region choice never retargets it and never grants a reveal in that Region.
+    if (launcher && (currentSurface?.kind !== 'launcher' || currentSurface.workspaceId !== workspaceId)) navigationChanged = true
     const previous = useLauncherState.getState().drafts[launcherId]?.noteCreation
     const retrying = previous?.status === 'error' && previous.intentId === retryIntentId
     if (previous && !previous.revealed && !retrying) return previous
@@ -9404,6 +9433,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!noteCreationResourceMatches(get().config, target)) return { status: 'error', code: 'NOTE_RESOURCE_CHANGED', message: 'The original Note resource is no longer confirmed. Its draft and target are retained; no further write was issued.' }
       const path = target.relativeDirectory ? `${target.relativeDirectory}/${name}` : name
       receipt = { ...receipt, path }; publish()
+      try { await checkpointLauncherState() }
+      catch (error) { return { status: 'error', code: 'WORKBENCH_SAVE_UNCONFIRMED', message: presentError(error) } }
       return await api.files.write(workspaceId, { path, content, expectedRevision: null })
     })
     receipt = { ...receipt, status: named.result.status, write: named.result, ...(named.result.status === 'written' ? {} : { issue: named.result.message }) }; publish()
@@ -12673,7 +12704,10 @@ export function initializeAgentInputOccupation(): () => void {
 export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'): Promise<void> {
   // No writes have been admitted during cold hydration. Quitting must preserve that durable record,
   // without qualifying an empty loading projection as an original workbench.
-  if (intent === 'quit' && !workbenchWriteFence.isOpen()) return
+  if (intent === 'quit' && !workbenchWriteFence.isOpen()) {
+    if (auxiliaryUserDataPending()) throw new Error('Current Desktop input is not yet saved because original storage is unreadable. Original work and healthy Runs remain available; retry saving before Quit.')
+    return
+  }
   if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')
   if (Object.values(useAppStore.getState().savingDocuments).some(Boolean)) throw new Error('A file save is in progress; retry the update after it completes.')
   await requestWorkbenchStorageFlush()
