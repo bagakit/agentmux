@@ -20,7 +20,7 @@ function owner() {
     run: { runId: 'resumed-native-run' }, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), nativeHandle: input.nativeResumeSource!.nativeHandle }, projectionFailures: [] }))
   const ports: SpatialControlPorts = { get: () => state, patch: patch => { state = { ...state, ...patch } }, topics: async () => [],
     launch, creation: async () => { throw new Error('Unexpected creation read') }, createResource: async () => { throw new Error('Unexpected resource creation') },
-    attach: async () => {}, save: async applied => ({ layoutApplied: applied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' }),
+    attach: async () => {}, save: async applied => ({ layoutApplied: applied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' }),
     focus: () => {}, isFocused: () => false, notice: () => {}, closing: () => false }
   return { ports, launch, state: () => state }
 }

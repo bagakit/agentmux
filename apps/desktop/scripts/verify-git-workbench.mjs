@@ -298,7 +298,7 @@ async function openZoneFile(cdp, zoneId, spaceId, path, body) {
     location.tabId === opened.placement.tabId && location.regionId === opened.placement.regionId))
   assert.ok(opened.save)
   assert.equal(typeof opened.save.layoutApplied, 'boolean')
-  assert.equal(opened.save.localStorageWritten, true); assert.equal(opened.save.storageFlushRequested, true)
+  assert.equal(opened.save.clientStateWritten, true); assert.equal(opened.save.storageFlushRequested, true)
   assert.equal(opened.save.diskDurability, 'confirmed'); assert.equal(opened.save.reason, null)
   return { opened, workface: await originalWorkface(cdp, opened, body) }
 }

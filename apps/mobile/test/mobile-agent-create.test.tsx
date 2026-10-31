@@ -42,7 +42,7 @@ function setup(options: { launcher?: boolean; requireRetainedIntent?: boolean } 
   const ports = { get: () => state, patch: (patch: any) => { state = { ...state, ...patch } }, topics: async () => [],
     launch, creation: async (_host: string, id: string) => creations.get(id) ?? null,
     createResource: async () => { throw new Error('No new resource requested') }, attach: async () => {},
-    save: async (layoutApplied: boolean) => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
+    save: async (layoutApplied: boolean) => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
   const execute = async (request: any) => request.operation === 'settings.resource.list' ? { operation: request.operation, resource: 'executors', items: [{ id: 'original', value: state.config.executors.original }], partial: true }
     : await executeSpatialControl(ports as any, request as any) as any

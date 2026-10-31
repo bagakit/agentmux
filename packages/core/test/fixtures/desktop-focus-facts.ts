@@ -19,7 +19,7 @@ export function focusFacts(request: AgentMuxControlFocusRequest): AgentMuxDeskto
     floating: { provenance: 'unknown', state: 'unknown', topicId: null, tabId: 'mote-tab', regionId: 'mote-region', sessionId: 'mote-session', presentation: 'unknown' },
     overlays: { provenance: 'unknown', settings: null, quickSwitcher: null },
     focus: { executionSessionId: 'execution-session', pmoSessionId: 'mote-session', agent: target.kind === 'focus-agent' ? { hostId: target.hostId, agentSessionId: target.agentSessionId, presentationSessionId: null, state: 'unconfirmed' } : null }, partial: true,
-    save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null },
+    save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null },
     issues: [{ step: 'presentation', code: 'UNKNOWN', message: 'The mock client has no DOM owner.', recovery: 'Inspect the actual Desktop.',
       candidates: [{ spaceId: space.spaceId, zoneId: space.zoneId, tabId: space.tabId, regionId: space.regionId }] }] }
 }

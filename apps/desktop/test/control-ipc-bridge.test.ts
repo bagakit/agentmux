@@ -104,7 +104,7 @@ describe('Desktop Control IPC bridge', () => {
           executorId: 'codex', hostId: 'local', cwd: _hygiene_fixturePath("repo"),
           createOperationId: 'open-timeout', initialPrompt: 'not-requested' },
         resource: null,
-        save: { layoutApplied: true, localStorageWritten: true,
+        save: { layoutApplied: true, clientStateWritten: true,
           storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null },
         issues: []
       }

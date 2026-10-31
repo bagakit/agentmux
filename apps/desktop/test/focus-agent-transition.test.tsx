@@ -53,7 +53,7 @@ beforeEach(async () => {
     agentComposerDrafts: { [target.id]: 'Unsent original' }, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } }, true)
   execute = vi.fn(async request => request.operation === 'space.inspect' ? { operation: 'space.inspect', catalog: catalog() } : {
     operation: 'agent.open', requestId: request.requestId, outcome: 'unknown', from: null, to: null, agent: null, resource: null,
-    save: { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private fixture' },
+    save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private fixture' },
     issues: [{ step: 'creation', code: 'PRIVATE_UNKNOWN', message: 'Original result is unknown', recovery: 'Inspect same request' }] })
   useAppStore.setState({ executeControl: execute as never })
   vi.spyOn(useAppStore.getState(), 'detectExecutors').mockResolvedValue(undefined)

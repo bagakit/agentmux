@@ -60,7 +60,7 @@ function retainedFacts() {
   const { root: _root, ...layout } = facts.tabs[tabId]!.layout
   return { ...facts, tabs: { ...facts.tabs, [tabId]: { ...facts.tabs[tabId], layout } } }
 }
-const saved = { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
+const saved = { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
 
 describe.skipIf(restoring)('Region swap through compiled CLI and original layout consumers', () => {
   it('swaps two nonactive original leaves in the actual Workbench and keeps the eligible neighbor input', async () => {

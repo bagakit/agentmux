@@ -90,7 +90,7 @@ it('real CLI send retains managed authors for every target without inventing an 
     if (request.operation === 'agent.open') return { operation: 'agent.open', requestId: request.requestId,
       outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'new-region' },
       agent: { agentSessionId: 'recipient', runId: 'run-recipient', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: fixturePath("repo"), createOperationId: 'creation', initialPrompt: 'confirmed' },
-      resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
+      resource: null, save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
     throw new Error('Unexpected operation ' + request.operation)
   } })
   await server.start()

@@ -78,7 +78,7 @@ describe.skipIf(restoring)('File open through compiled CLI and the actual File o
     expect(result).toMatchObject({ resource: { hostId: 'local', workspaceId: SCRATCH_WORKSPACE_ID,
       workspacePath: _hygiene_fixturePath("private/workface-scratch"), zonePath: _hygiene_fixturePath("private/workface-scratch/") + topic.directoryPath, path },
       placement: { status: 'created' }, data: { kind: 'text' }, navigation: 'background', changed: true, outcome: 'opened',
-      save: { localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' }, issues: [] })
+      save: { clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' }, issues: [] })
     expect(result.placement.locations.map(location => [location.displayWorkspaceId, location.groupId])).toEqual([[SCRATCH_WORKSPACE_ID, 'topic-group']])
     expect(api.files.read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path)
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.activeTabId).toBeNull()
@@ -202,7 +202,7 @@ describe.skipIf(restoring)('File open through compiled CLI and the actual File o
     vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path: 'retained.md', content: 'Still usable', revision: 'retained' } })
     fixture!.flush.mockRejectedValue(new Error('Private storage flush unavailable'))
     expect(await open('retained.md', 'resource', [], 1)).toMatchObject({ placement: { status: 'created' }, outcome: 'partial',
-      save: { localStorageWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private storage flush unavailable' } })
+      save: { clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private storage flush unavailable' } })
     expect(useAppStore.getState().documents[documentKey('resource', 'retained.md')]?.content).toBe('Still usable')
     expect(useAppStore.getState().workbenchSaveWarning).toContain('Private storage flush unavailable'); fixture!.noLifecycle()
   })

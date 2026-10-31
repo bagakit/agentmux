@@ -88,7 +88,7 @@ async function fixture(providerId: 'codex' | 'claude', executionRoute = 'local')
   let focus: unknown = { tabId: tab.id, regionId: 'original-region' }
   const save = async (layoutApplied: boolean) => { const previous = await spatial.read(); await spatial.commit({ expectedRevision: previous?.revision ?? 0,
     graph: desktopSpatialGraph(state, [], previous?.graph ?? null) }); await writeFile(join(root, 'workbench.json'), JSON.stringify({ state, focus }));
-    return { layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null } }
+    return { layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null } }
   const ports: SpatialControlPorts = { get: () => state, patch: patch => { state = { ...state, ...patch } }, topics: async () => [],
     createResource: async () => { throw new Error('Fork may not create execution resources') },
     creation: async (host, id) => { expect(host).toBe(executionRoute); return client.refreshAgentSession(id, client.agentSession(id).run) },

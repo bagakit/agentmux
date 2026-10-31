@@ -17,7 +17,7 @@ const session = { agentSessionId: 'original-session', run: { runId: 'agent-run' 
   workspacePath: '/agent/launch', toolExecution: { bindingId: 'original-binding', resourceHostId: 'resource-host', resourceRuntimeId: 'resource-core', workspacePath: '/resource/project' } }
 const context = { transport: 'unix' as const, principal: { kind: 'user' as const, id: 'original-user' } }
 const receipt = () => ({ operationId: input.operationId, outcome: 'opened', from: null, to: null, agent: spatialAgentFact(session, 'agent-host'),
-  resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] })
+  resource: null, save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] })
 
 describe('public agent.open with exact tool Workspace', () => {
   it('carries both independent Workspace references through the actual CLI and Control DTO', async () => {

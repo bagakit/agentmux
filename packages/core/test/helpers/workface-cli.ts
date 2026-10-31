@@ -50,7 +50,7 @@ export function workfaceCliFixture(initial: AgentMuxControlResult) {
   }
   return { seen, run, receipt, fileOpen, setReply(value: AgentMuxControlResult) { reply = value } }
 }
-export const saved = { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true,
+export const saved = { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true,
   diskDurability: 'unconfirmed' as const, reason: null }
 export const location = { spaceId: 'space-exact', zoneId: 'zone-exact', workspaceId: 'resource-exact',
   displayWorkspaceId: 'display-exact', groupId: 'group-exact', tabId: 'tab-exact', regionId: 'region-exact' }

@@ -34,7 +34,7 @@ it('the mounted Session-only creator freezes no Region and preserves the origina
 
 it('the actual Store persists and rehydrates a Session-only submitted intent without changing its operation or phase', async () => {
   const submitted = intent('session-only-original-operation')
-  await expect(retainConnectorRoomIntent(submitted)).resolves.toMatchObject({ localStorageWritten: true })
+  await expect(retainConnectorRoomIntent(submitted)).resolves.toMatchObject({ clientStateWritten: true })
   const persisted = localStorage.getItem('agentmux-workbench-v1')!
   expect(JSON.parse(persisted).state.connectorRoomIntents[submitted.input.operationId]).toEqual(submitted)
   useAppStore.setState({ connectorRoomIntents: {} }); localStorage.setItem('agentmux-workbench-v1', persisted)

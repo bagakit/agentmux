@@ -6,9 +6,9 @@ import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(resolve(root, 'packages/connectors/package.json'))
 const variants = {
-  'manual-intent-persistence-lost': ['apps/desktop/src/renderer/src/components/settings/ExternalConnectionsSettings.tsx', "if (!retained.localStorageWritten) throw new Error('The original application input could not be saved. No credential or application request was sent.')", ''],
-  'manual-reference-persistence-lost': ['apps/desktop/src/renderer/src/components/settings/ExternalConnectionsSettings.tsx', "if (!retained.localStorageWritten) throw new Error('The credential is saved on the original Host, but this App could not retain its reference. No application save was sent. Check the same original save to continue.')", ''],
-  'removal-persistence-lost': ['apps/desktop/src/renderer/src/components/settings/ConnectionIdentityRemoval.tsx', "if (!retained.localStorageWritten) throw new Error('The original removal request could not be saved. No removal was sent.')", ''],
+  'manual-intent-persistence-lost': ['apps/desktop/src/renderer/src/components/settings/ExternalConnectionsSettings.tsx', "if (!retained.clientStateWritten) throw new Error('The original application input could not be saved. No credential or application request was sent.')", ''],
+  'manual-reference-persistence-lost': ['apps/desktop/src/renderer/src/components/settings/ExternalConnectionsSettings.tsx', "if (!retained.clientStateWritten) throw new Error('The credential is saved on the original Host, but this App could not retain its reference. No application save was sent. Check the same original save to continue.')", ''],
+  'removal-persistence-lost': ['apps/desktop/src/renderer/src/components/settings/ConnectionIdentityRemoval.tsx', "if (!retained.clientStateWritten) throw new Error('The original removal request could not be saved. No removal was sent.')", ''],
   'removal-hosting-scope-lost': ['apps/desktop/src/renderer/src/lib/bot-task-selection.ts', '...(scope.hostingTarget ? [scope.hostingTarget.hostId, scope.hostingTarget.runtimeId] : [])', '...[]'],
   'settings-original-owner-lost': ['apps/desktop/src/renderer/src/lib/connection-settings-port.ts', 'api.connections.call(method, params, original)', 'api.connections.call(method, params)'],
   'foreign-host-route': ['apps/desktop/src/main/runtime-controller.ts', 'client = this.configuredClient(hostId)', "client = this.configuredClient('owner-b')"],

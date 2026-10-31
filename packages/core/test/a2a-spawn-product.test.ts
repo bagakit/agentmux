@@ -99,7 +99,7 @@ it.each([undefined, 'Original authorized task'])('Desktop spatial open preserves
   const ports: SpatialControlPorts = { get: () => state, patch: patch => { state = { ...state, ...patch } }, topics: async () => [],
     launch, creation: (_host, sid) => h.client.inspectAgentCreation(sid), attach: async () => {},
     createResource: async () => { throw new Error('No resource creation is requested') },
-    save: async layoutApplied => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
+    save: async layoutApplied => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
   const request = { schemaVersion: 5 as const, operation: 'agent.open' as const, requestId: 'original-desktop-open',
     content: { kind: 'new-agent' as const, executorId: 'private-executor', ...(prompt === undefined ? {} : { prompt }) },

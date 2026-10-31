@@ -68,7 +68,7 @@ function creator() {
   })
   const ports = { get: () => state, patch: (patch: any) => { state = { ...state, ...patch } }, topics: async () => [], creation, launch,
     attach: async (_region: string, result: any) => { state = { ...state, sessions: [...state.sessions, result.session] } },
-    createResource: async () => { throw new Error('No new resource requested') }, save: async (layoutApplied: boolean) => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
+    createResource: async () => { throw new Error('No new resource requested') }, save: async (layoutApplied: boolean) => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
   const service = new AgentMuxRpcService({ execute: request => executeSpatialControl(ports as any, request as any) as any })
   return { ...f, nativeHandle, state: () => state, ports, service, creation, launch }

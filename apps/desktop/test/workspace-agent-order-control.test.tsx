@@ -75,7 +75,7 @@ describe('Workspace Agent list preference through actual compiled public CLI and
     const before = protectedFacts()
     expect(await order({ order: [reference(neighborSid), reference(targetSid)], expectedOrder: [] })).toMatchObject({ outcome: 'changed', changed: true,
       storedOrder: [reference(neighborSid), reference(targetSid)], effectiveOrder: [reference(neighborSid), reference(targetSid)],
-      save: { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true } })
+      save: { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true } })
     expect(useAppStore.getState().workspaceAgentOrder).toEqual({ resource: [...keys].reverse() })
     expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.workspaceAgentOrder).toEqual({ resource: [...keys].reverse() })
     expect(restorePersistedUiState(config, { ...JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state, workspaceAgentOrder: { resource: [...keys].reverse() } }).workspaceAgentOrder).toEqual({ resource: [...keys].reverse() })
@@ -104,7 +104,7 @@ describe('Workspace Agent list preference through actual compiled public CLI and
     vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('Original storage flush unavailable'))
     const result = await order({ order: [reference(neighborSid), reference(targetSid)] }, 1)
     expect(result).toMatchObject({ outcome: 'partial', changed: true, storedOrder: [reference(neighborSid), reference(targetSid)],
-      save: { localStorageWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Original storage flush unavailable' }, issues: [{ code: 'AGENT_ORDER_SAVE_UNCONFIRMED' }] })
+      save: { clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Original storage flush unavailable' }, issues: [{ code: 'AGENT_ORDER_SAVE_UNCONFIRMED' }] })
     expect((await order()).storedOrder).toEqual(result.storedOrder); fixture.noLifecycle()
   })
   it('restores independently valid scopes and canonical original keys without inventing live Sessions', () => {
@@ -112,9 +112,9 @@ describe('Workspace Agent list preference through actual compiled public CLI and
   })
   it('does not borrow a Core topology acknowledgement for the separate client preference batch', async () => {
     const result = await executeWorkspaceAgentOrder({ get: useAppStore.getState, set: vi.fn(), save: async () => ({
-      layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null
+      layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null
     }) }, { schemaVersion: 5, requestId: 'separate-preference-write', operation: 'space.agent-order', displayWorkspaceId: 'resource', order: [] })
-    expect(result.save).toEqual({ layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
+    expect(result.save).toEqual({ layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
   })
   it('uses original canonical controls for public order when list items have presentation aliases', async () => {
     const original = agent(targetSid)

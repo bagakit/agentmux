@@ -106,7 +106,7 @@ describe('public Control views through the real owner endpoint', () => {
       requestId: 'no-agent-view', outcome: 'opened', from: null, to: address,
       agent: { agentSessionId: agent.agentSessionId, runId: 'control-run', providerId: agent.providerId, executorId: agent.executorId,
         hostId: 'local', cwd: fixturePath("synthetic"), createOperationId: 'no-agent-view', initialPrompt: 'not-requested' },
-      resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: []
+      resource: null, save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: []
     } }
     expect(parseAgentMuxControlReceipt(opened)).toEqual(opened)
     expect(() => parseAgentMuxControlReceipt({ ...opened, result: { ...opened.result, agent: view } })).toThrow('Settings resource JSON')

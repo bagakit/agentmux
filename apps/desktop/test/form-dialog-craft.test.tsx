@@ -38,9 +38,9 @@ it.each(['group', 'folder', 'category', 'mote'])('%s uses one primary native sub
 
 it('the original group retries its unconfirmed save even when a later error uses applied-looking display text', async () => {
   const close = vi.fn(), save = vi.spyOn(useAppStore.getState(), 'saveProjectGroup')
-    .mockResolvedValueOnce({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
+    .mockResolvedValueOnce({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
     .mockRejectedValueOnce(new Error('Group applied. The next save failed.'))
-    .mockResolvedValueOnce({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null })
+    .mockResolvedValueOnce({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null })
   await dom.render(group(close)); await input('Retained group'); await click('Create group')
   await vi.waitFor(() => expect(document.querySelector('[role="status"]')?.textContent).toContain('Saving is unconfirmed'))
   await click('Retry saving'); await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain('next save failed'))

@@ -118,7 +118,7 @@ it('creates two stable temporary Zones on one resource through the original save
   const b = await useAppStore.getState().createWorkbenchZone({ workspaceId: 'resource', spaceIds: [] })
   expect(a.zone.zoneId).not.toBe(b.zone.zoneId)
   expect([a.zone, b.zone].map(item => [item.workspaceId, item.hostId, item.directoryPath])).toEqual([['resource', 'remote', _hygiene_fixturePath("resource")], ['resource', 'remote', _hygiene_fixturePath("resource")]])
-  expect(a.save).toEqual({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
+  expect(a.save).toEqual({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
   const id = useAppStore.getState().openLauncher({ workspaceId: 'resource', tabGroupId: 'first', zoneId: a.zone.zoneId, reveal: false })!
   expect(useAppStore.getState().tabs[id]!.space).toEqual({ zoneId: a.zone.zoneId, spaceId: folder })
   expect((await catalog()).bindings.filter(item => [a.zone.zoneId, b.zone.zoneId].includes(item.zoneId))).toEqual([])
@@ -183,7 +183,7 @@ it('keeps an explicit temporary Scratch Zone separate from the active Topic and 
 it('returns the already-created Zone when saving is unknown and retains identities when config disappears', async () => {
   vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(new Error('private save unknown'))
   const result = await useAppStore.getState().createWorkbenchZone({ workspaceId: 'resource', spaceIds: [] })
-  expect(result.save).toMatchObject({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'private save unknown' })
+  expect(result.save).toMatchObject({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'private save unknown' })
   expect(result.issues.map(item => item.code)).toEqual(['SPACE_SAVE_UNCONFIRMED'])
   expect(Object.keys(useAppStore.getState().spaceZoneBindings)).toEqual([result.zone.zoneId])
   useAppStore.setState({ config: null, tabs: { [tab.id]: tab }, layouts: { display: first } })

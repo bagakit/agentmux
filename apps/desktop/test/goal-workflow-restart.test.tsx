@@ -22,7 +22,7 @@ it.skipIf(!phase || !evidence)('retains finite intent and discussion close/unkno
     expect(await useAppStore.getState().closeTab(SCRATCH_WORKSPACE_ID, 'original-group', tab.id)).toBe(true)
     const goal = (await demands.get('goal'))!, intent = { goalId: goal.id, operationId: 'retained-original-start', sessionId: session.agentSessionId,
       expectedUpdatedAt: goal.updatedAt, phase: 'may-have-dispatched' as const }
-    expect((await retainGoalFiniteStartIntent(intent)).localStorageWritten).toBe(true)
+    expect((await retainGoalFiniteStartIntent(intent)).clientStateWritten).toBe(true)
     const storage = window.localStorage.getItem(key)!
     expect(JSON.parse(storage).state.demandPmoTabIds).toEqual({ 'unknown-goal': 'unobserved-original-tab' })
     expect(JSON.parse(storage).state.goalFiniteStartIntents.goal).toEqual(intent)

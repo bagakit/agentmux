@@ -332,7 +332,7 @@ try {
     const focused=await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:launcher.regionId}})
     receipt.launcherSaveReadiness.push(focused.save)
     if(focused.save.reason&&focused.save.reason!=='The saved Workbench is still being restored.') throw new Error(focused.save.reason)
-    return focused.save.localStorageWritten&&focused.save.storageFlushRequested&&focused.save.diskDurability==='confirmed'
+    return focused.save.clientStateWritten&&focused.save.storageFlushRequested&&focused.save.diskDurability==='confirmed'
   })
   const openedReport=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:launcher.regionId},focus:true});receipt.openedReport=openedReport;assert.equal(openedReport.outcome,'opened',JSON.stringify(openedReport));const opened=openedReport.to;assert.ok(opened)
   terminal=(await control('terminal.open',{shellCommand:'/bin/sh',destination:{kind:'split',direction:'right',region:{kind:'region',regionId:opened.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)

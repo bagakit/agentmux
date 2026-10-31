@@ -231,7 +231,7 @@ describe('public Desktop spatial Control owner', () => {
     expect(receipt.outcome).toBe('opened')
     expect(receipt.agent).toMatchObject({ cwd: _hygiene_fixturePath("other"), initialPrompt: 'confirmed' })
     expect(receipt.to).toMatchObject({ zoneId, workspaceId: 'other' })
-    expect(receipt.save).toEqual({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null })
+    expect(receipt.save).toEqual({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null })
     expect(created).toHaveBeenCalledTimes(1)
     expect(created.mock.calls[0]![0]).toMatchObject({ workspacePath: _hygiene_fixturePath("other"), prompt: 'first task', createOperationId: receipt.requestId })
     expect(useAppStore.getState().activeWorkspaceId).toBe('repo')

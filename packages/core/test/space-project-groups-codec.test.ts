@@ -32,7 +32,7 @@ function graph(state: SpatialWorkbench) {
 function read(catalog: AgentMuxSpaceCatalog, operation: 'space.ls' | 'space.inspect' | 'space.bind' | 'space.unbind' = 'space.ls') {
   const body = operation === 'space.bind' || operation === 'space.unbind' ? { catalog, operationId: 'original-binding', outcome: 'unchanged',
     binding: { kind: 'zone-space', zoneId: catalog.zones[0]!.zoneId, spaceId: catalog.spaces[0]!.spaceId },
-    save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }, issues: [] } : { catalog }
+    save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }, issues: [] } : { catalog }
   return parseRpcControlResult(operation, body).catalog as AgentMuxSpaceCatalog
 }
 

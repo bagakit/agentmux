@@ -70,7 +70,7 @@ const controlServer = new AgentMuxControlServer({
           hostId: 'local', cwd: codex.workspacePath, createOperationId: existing ? null : request.requestId,
           initialPrompt: existing ? 'not-requested' : 'confirmed' },
         resource: null,
-        save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true,
+        save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true,
           diskDurability: 'unconfirmed', reason: null },
         issues: []
       }

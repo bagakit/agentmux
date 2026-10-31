@@ -54,7 +54,7 @@ function modes() {
   expect(values).toHaveLength(3)
   return values
 }
-const saved = { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
+const saved = { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
 
 describe.skipIf(restoring)('Agent view through compiled CLI and actual consumers', () => {
   it('rejects a canonical CLI reply for another expected method without changing the original workface', async () => {

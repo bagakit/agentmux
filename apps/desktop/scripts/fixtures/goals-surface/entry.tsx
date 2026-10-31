@@ -154,7 +154,7 @@ Object.assign(window, { goalsVisual: { seed,
       demandPmoTabIds: { ...state.demandPmoTabIds, 'goal:unobserved': 'original-unobserved-discussion' } })
     const saved = await retainGoalFiniteStartIntent({ goalId: goal.id, operationId: 'workflow-original-request', sessionId: sessions[0]!.control.agentSessionId,
       expectedUpdatedAt: goal.updatedAt, phase: 'may-have-dispatched' })
-    if (!saved.localStorageWritten) throw new Error('Original workflow selection did not reach its actual localStorage owner.')
+    if (!saved.clientStateWritten) throw new Error('Original workflow selection did not reach its actual localStorage owner.')
     return workflowRestartFacts()
   },
   seedWorkflow: (mode: string) => {

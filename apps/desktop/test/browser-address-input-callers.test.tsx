@@ -105,7 +105,7 @@ it('the actual Global Survey start form records only the human submission and pr
   const create = vi.fn(async () => {
     useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { ...tab, workspaceId: scratch.id, browserId: region, regionId: region }) } })
   })
-  useAppStore.setState({ createWorkbenchZone: vi.fn(async () => ({ zone, save: { localStorageWritten: true, storageFlushRequested: true }, issues: [] })) as never,
+  useAppStore.setState({ createWorkbenchZone: vi.fn(async () => ({ zone, save: { clientStateWritten: true, storageFlushRequested: true }, issues: [] })) as never,
     openLauncher: vi.fn(() => { useAppStore.setState({ tabs: { launcher } }); return launcher.id }), createBrowser: create })
   await act(async () => root.render(<GlobalSurveySurface catalog={null} projection={null} selection={null} />))
   await inspectInputContextMenu(); expect(api.browser.listInputHistory).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: scratch.id })

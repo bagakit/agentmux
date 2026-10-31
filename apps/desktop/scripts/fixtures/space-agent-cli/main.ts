@@ -394,7 +394,7 @@ app.whenReady().then(async () => {
       assert.equal(opened.to.spaceId, mote.spaceId)
       assert.notEqual(project.projectId, mote.spaceId, 'Execution Project and display Space are different identities')
       assert.equal(opened.save.diskDurability, 'confirmed')
-      assert.equal(opened.save.localStorageWritten, true)
+      assert.equal(opened.save.clientStateWritten, true)
       assert.equal(opened.to.zoneId, (await cli(['space', 'inspect', '--operation-id', 'private:git-open'])).request.report.to.zoneId)
       const count = calls.filter(one => one.operation === 'launch').length
       const repeated = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--project', project.projectId,

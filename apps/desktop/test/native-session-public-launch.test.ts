@@ -74,7 +74,7 @@ it('continues one exact native conversation through the real CLI, public service
       if (region.kind === 'agent') tab.regions[regionId] = { ...region, phase: 'attached' }
     },
     // Layout durability is independently tested by the product restart proof.
-    save: async layoutApplied => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
+    save: async layoutApplied => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: () => {}, isFocused: () => false, notice: () => {}, closing: () => false
   }
   const server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client: core }],

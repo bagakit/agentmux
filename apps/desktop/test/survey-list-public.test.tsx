@@ -93,7 +93,7 @@ it('[survey-list] compiled CLI uses the shared Store owner, publishes every coll
   expect(fixture.flush).not.toHaveBeenCalled()
   const next = grouped(), report = await list(next, empty())
   expect(report).toMatchObject({ outcome: 'changed', storedOrganization: next, effectiveOrganization: next, changed: true,
-    save: { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' } })
+    save: { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' } })
   expect(useAppStore.getState().surveyOrganization).toEqual(next)
   expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.surveyOrganization).toEqual(next)
   expect(restorePersistedUiState(config, JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state).surveyOrganization).toEqual(next)
@@ -138,10 +138,10 @@ it('[survey-list] reports unknown storage honestly and keeps the already applied
   vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('Original client flush unconfirmed'))
   const result = await list(grouped(), empty(), 1)
   expect(result).toMatchObject({ outcome: 'partial', changed: true, storedOrganization: grouped(),
-    save: { localStorageWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed' }, issues: [{ code: 'SURVEY_LIST_SAVE_UNCONFIRMED' }] })
+    save: { clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed' }, issues: [{ code: 'SURVEY_LIST_SAVE_UNCONFIRMED' }] })
   expect((await list()).storedOrganization).toEqual(grouped())
   const ports = { get: useAppStore.getState, set: useAppStore.setState, hasZone: () => false,
-    save: async () => ({ layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null }) }
+    save: async () => ({ layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null }) }
   expect((await executeSurveyList(ports, { schemaVersion: 5, requestId: 'separate-client-save', operation: 'space.survey-list', organization: empty(), expected: grouped() })).save?.diskDurability).toBe('unconfirmed')
   fixture.noLifecycle()
 })
@@ -168,7 +168,7 @@ it('[survey-list] GUI rejects malformed organization and late save receipts rema
   expect(useAppStore.getState().surveyOrganization).toEqual(empty())
   let finish!: () => void
   const waiting = new Promise<void>(resolve => { finish = resolve })
-  const saved = { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
+  const saved = { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
   const ports = { get: useAppStore.getState, set: useAppStore.setState, hasZone: () => false, save: async () => { await waiting; return saved } }
   const first = executeSurveyList(ports, { schemaVersion: 5, requestId: 'earlier-organization', operation: 'space.survey-list', organization: grouped(), expected: empty() })
   const later = { ...grouped(), groups: grouped().groups.map(group => ({ ...group, name: 'Later user name' })) }
@@ -238,7 +238,7 @@ it('[survey-membership] compiled CLI restores exact existing Zones atomically wi
   })
   try {
     expect(await collect(members, expectedZoneIds, grouped())).toMatchObject({ outcome: 'changed', changed: true,
-      collectedZoneIds: members, storedOrganization: grouped(), save: { localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' } })
+      collectedZoneIds: members, storedOrganization: grouped(), save: { clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' } })
   } finally { stop() }
   expect(changes).toEqual([{ members: Object.fromEntries(members.map(id => [id, true])), organization: grouped() }])
   expect((await list()).collectedZoneIds).toEqual(members)
@@ -294,7 +294,7 @@ it('[survey-membership] late public save receipts retain their original applied 
   expect((await list()).collectedZoneIds).toEqual(expected)
   vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('Original membership flush unconfirmed'))
   expect(await collect(members, expected, undefined, 1)).toMatchObject({ outcome: 'partial', collectedZoneIds: members,
-    save: { localStorageWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed' }, issues: [{ code: 'SURVEY_LIST_SAVE_UNCONFIRMED' }] })
+    save: { clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed' }, issues: [{ code: 'SURVEY_LIST_SAVE_UNCONFIRMED' }] })
   expect((await list()).collectedZoneIds).toEqual(members); fixture.noLifecycle()
 })
 

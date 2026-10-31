@@ -166,7 +166,7 @@ describe('Topic and Mote placement retain the explicit execution resource', () =
     const control: SpatialControlPorts = { get: () => state, patch: patch => Object.assign(state, patch), topics: async () => [topic],
       createResource, launch: launchAgent, creation: async () => { throw new Error('No second creation reader is needed for the first launch') },
       attach: async (_regionId, created) => { state.sessions = [...state.sessions, created.session!] },
-      save: async layoutApplied => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
+      save: async layoutApplied => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
       focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
     const result = await executeSpatialControl(control, request)
     if (result.operation !== 'agent.open') throw new Error('The original owner must return an Agent open receipt')

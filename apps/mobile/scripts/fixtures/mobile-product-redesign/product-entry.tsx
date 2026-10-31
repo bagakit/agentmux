@@ -266,7 +266,7 @@ const client = {
           workspaceId: zone.workspaceId, displayWorkspaceId: 'display-original', groupId: 'group-resources' }, resource: null,
         agent: { agentSessionId: 'controlled-created-session', runId: null, providerId: null, executorId: request.content.executorId,
           hostId: zone.hostId, cwd: zone.directoryPath, createOperationId: request.operationId!, initialPrompt: 'not-requested' },
-        save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }, issues: [] }
+        save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }, issues: [] }
       record('fixture.controlled-creation-reply', reply)
       return reply
     }

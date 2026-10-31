@@ -139,7 +139,7 @@ describe('actual Space cross-device group interaction', () => {
   })
   it('keeps the group editor open when a save resolves with unconfirmed durability and no reason', async () => {
     await mount()
-    vi.spyOn(useAppStore.getState(), 'saveProjectGroup').mockResolvedValue({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
+    vi.spyOn(useAppStore.getState(), 'saveProjectGroup').mockResolvedValue({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
     await click(button('Related projects for Shared project'))
     await click(button('Create group'))
     await vi.waitFor(() => expect(document.querySelector('[role="status"]')?.textContent).toContain('Saving is unconfirmed'))
@@ -149,7 +149,7 @@ describe('actual Space cross-device group interaction', () => {
   it('keeps the dissolution confirmation open until its exact save is confirmed', async () => {
     await mount()
     await act(async () => { await useAppStore.getState().saveProjectGroup(group) })
-    const dissolve = vi.spyOn(useAppStore.getState(), 'dissolveProjectGroup').mockResolvedValue({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
+    const dissolve = vi.spyOn(useAppStore.getState(), 'dissolveProjectGroup').mockResolvedValue({ layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
     await click(button('Dissolve Shared project'))
     await click(button('Dissolve group'))
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Saving is unconfirmed'))

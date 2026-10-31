@@ -188,7 +188,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     expect(snapshot.goals).toHaveLength(1); expect(snapshot.goals[0]!.title).toBe(goal.title); expect(snapshot.activity).toHaveLength(1)
   })
   it('rejects shape-valid results from a foreign Session, File path/Zone and swap leaf', async () => {
-    const saved = { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: null }
+    const saved = { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: null }
     const common = { changed: false, save: null, issues: [] }
     const cases: Array<[Parameters<typeof parseRpcControlResult>[0], unknown, unknown]> = [
       ['agent.view', { agentSessionId: 'wanted' }, { ...common, scope: 'agent-session', agentSessionId: 'foreign', storedOverride: null, effectiveMode: null, sessionFacts: 'unconfirmed', regions: [], locations: [], outcome: 'unknown' }],

@@ -123,7 +123,7 @@ describe('Desktop display names through the compiled public CLI', () => {
   }
   const agentArgs = (name: string) => ['agent', 'rename', '--session', sid, '--name', name]
   const tabArgs = (name: string) => ['space', 'rename', '--tab', tabId, '--name', name]
-  const saved = { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
+  const saved = { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }
 
   it('renames one Agent with two Regions, trims through the owner and persists its actual override', async () => {
     const receipt = await success(agentArgs('  中文 "调查"  '))
@@ -176,7 +176,7 @@ describe('Desktop display names through the compiled public CLI', () => {
     flush.mockRejectedValue(new Error('private flush refused'))
     const receipt = await success(kind === 'agent' ? agentArgs('Applied') : tabArgs('Applied'), 1)
     expect(receipt).toMatchObject({ result: { override: 'Applied', changed: true, outcome: 'partial', save: {
-      layoutApplied: false, localStorageWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'private flush refused' } } })
+      layoutApplied: false, clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'private flush refused' } } })
     expect(kind === 'agent' ? useAppStore.getState().agentNames[sid] : useAppStore.getState().tabs[tabId]!.name).toBe('Applied')
     noFactsOrLifecycle()
   })

@@ -6,8 +6,8 @@ import base from './renderer-hosting-continuation.config.mts'
 const variants = {
  'drop-enrollment-owner': ['apps/desktop/src/renderer/src/components/settings/BotEnrollmentPane.tsx', "'connection.enrollment.begin', input, originalTarget)", "'connection.enrollment.begin', input)"],
  'drop-management-owner': ['apps/desktop/src/renderer/src/components/settings/useConnectionManagementSetup.ts', 'return call(method, input, target)', 'return call(method, input)'],
- 'ignore-enrollment-local-save': ['apps/desktop/src/renderer/src/components/settings/BotEnrollmentPane.tsx', 'if (!saved.localStorageWritten) {', 'if (false) {'],
- 'ignore-management-local-save': ['apps/desktop/src/renderer/src/components/settings/useConnectionManagementSetup.ts', 'if (!saved.localStorageWritten) {', 'if (false) {'],
+ 'ignore-enrollment-local-save': ['apps/desktop/src/renderer/src/components/settings/BotEnrollmentPane.tsx', 'if (!saved.clientStateWritten) {', 'if (false) {'],
+ 'ignore-management-local-save': ['apps/desktop/src/renderer/src/components/settings/useConnectionManagementSetup.ts', 'if (!saved.clientStateWritten) {', 'if (false) {'],
  'invent-legacy-owner': ['apps/desktop/src/renderer/src/components/settings/BotEnrollmentPane.tsx', 'const originalTarget = locator ? locator.hostingTarget : hostingTarget', 'const originalTarget = locator?.hostingTarget ?? hostingTarget']
 } as const
 const mutation = process.env.GENERIC_SETUP_MUTANT as keyof typeof variants | undefined

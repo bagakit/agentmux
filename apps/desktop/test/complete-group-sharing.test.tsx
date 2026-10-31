@@ -88,7 +88,7 @@ it.each(['active', 'paused'] as const)('a recorded %s group completes from its o
 it.each(['not-dispatched', 'may-have-dispatched'] as const)('reopening a %s recorded narrow request retains inspection without dispatch or blocking explicit full sharing', async phase => {
   const saved = await recorded(), input = { ...saved.input, operationId: 'original-unresolved-request' }
   const intent = { method: 'connection.bind' as const, input, target: { executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor }, hostingTarget: f.hostingTarget, phase }
-  await expect(retainConnectorRoomIntent(intent)).resolves.toMatchObject({ localStorageWritten: true })
+  await expect(retainConnectorRoomIntent(intent)).resolves.toMatchObject({ clientStateWritten: true })
   const persisted = localStorage.getItem('agentmux-workbench-v1')!
   useAppStore.setState({ connectorRoomIntents: {} }); localStorage.setItem('agentmux-workbench-v1', persisted); await useAppStore.persist.rehydrate()
   expect(useAppStore.getState().connectorRoomIntents[input.operationId]).toEqual(intent)

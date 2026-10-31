@@ -27,7 +27,7 @@ const variants = [
   ['agent-owner-withdrawn', replace(block, 'get().renameAgent(request.agentSessionId, request.name)', 'void request.name')],
   ['tab-owner-withdrawn', replace(block, 'get().renameTab(request.tabId, request.name)', 'void request.name')],
   ['save-boundary-withdrawn', replace(block, 'const save = await saveWorkbenchSelection(false)',
-    "const save = { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: null }", 2)],
+    "const save = { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: null }", 2)],
   ['alias-read-withdrawn', replace(block, 'override: agentDisplayOverride(get().agentNames, request.agentSessionId)', 'override: null')]
 ].map(([name, replacement]) => [name, source.slice(0, begin) + replacement + source.slice(end)])
 variants.push(

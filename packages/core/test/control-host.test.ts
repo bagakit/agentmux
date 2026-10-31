@@ -865,7 +865,7 @@ describe('external Control control', () => {
         if (request.operation === 'agent.open') return { operation: request.operation, requestId: request.requestId,
           outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab-main', regionId: 'agent-left' },
           agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: fixturePath("repo"), createOperationId: 'creation', initialPrompt: 'not-requested' },
-          resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
+          resource: null, save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
         if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [activeAgent(core)] }
         throw new Error('Unexpected operation')
       }

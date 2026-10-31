@@ -51,7 +51,7 @@ function result(): AgentMuxControlResult {
     resource: null,
     save: {
       layoutApplied: true,
-      localStorageWritten: true,
+      clientStateWritten: true,
       storageFlushRequested: true,
       diskDurability: 'unconfirmed',
       reason: null

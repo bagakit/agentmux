@@ -196,7 +196,7 @@ describe('the original member access owner', () => {
     const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
     const input = { operationId: 'original-unsent-member', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'original-unsent-grant', expectedRevision: null,
       actor: { application: binding.application, idType: 'open_id', userId: 'ou_original' }, capabilities: ['input' as const], state: 'active' as const }
-    await act(async () => { const saved = await retainConnectorRoomIntent({ method: 'connection.grant', target: { executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId, regionAnchor: binding.regionAnchor }, phase: 'not-dispatched', input }); expect(saved.localStorageWritten).toBe(true) })
+    await act(async () => { const saved = await retainConnectorRoomIntent({ method: 'connection.grant', target: { executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId, regionAnchor: binding.regionAnchor }, phase: 'not-dispatched', input }); expect(saved.clientStateWritten).toBe(true) })
     await ready('Member access not sent')
     expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toBe('No members approved to use this Agent')
     expect(f.calls.filter(call => call.method === 'connection.grant')).toHaveLength(0)

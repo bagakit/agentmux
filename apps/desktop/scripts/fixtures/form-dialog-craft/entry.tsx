@@ -23,7 +23,7 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This 
 const projects = projectWorkspaces([workspace, remote]), saveRequests: unknown[] = [], folderRequests: unknown[] = [], errors: string[] = []
 let saveMode = 'confirmed'
 useAppStore.setState({ config: config as any, projectGroups: [], selectWorkspace: async () => {},
-  saveProjectGroup: async request => { saveRequests.push(request); if (saveMode === 'failure') throw new Error('The selected host is temporarily unavailable. Your group is kept here.'); return { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: saveMode === 'unconfirmed' ? 'unconfirmed' : 'confirmed', reason: null } },
+  saveProjectGroup: async request => { saveRequests.push(request); if (saveMode === 'failure') throw new Error('The selected host is temporarily unavailable. Your group is kept here.'); return { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: saveMode === 'unconfirmed' ? 'unconfirmed' : 'confirmed', reason: null } },
   renameScratchTopic: async () => {} })
 api.workspaces.add = async request => { folderRequests.push(request); throw new Error('The original host could not confirm this folder. Your path is kept here.') }
 window.addEventListener('error', event => errors.push(event.message))

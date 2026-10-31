@@ -208,7 +208,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const fixture = await probe(request => {
       if (request.method === 'agent.send') throw Object.assign(new Error('Target is ambiguous.'), { code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates, details: { availability: 'unknown' } })
       return { agentSessionId: 'SID', changed: true, outcome: 'partial', override: 'Applied', save: {
-        layoutApplied: true, localStorageWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private save failed.'
+        layoutApplied: true, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private save failed.'
       } }
     })
     const error = await fixture.run(['agent', 'send', '--to-tab', 'TAB', '--text', 'x'])

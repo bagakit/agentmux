@@ -32,7 +32,7 @@ describe('Project resources and Space placement through the compiled CLI', () =>
       resource: { projectId: 'P', sourceWorkspaceId: 'W', hostId: 'EXEC', workspaceId: 'W-NEW', path: 'work/kept', kind: 'worktree', branch: 'feature/kept' },
       agent: { agentSessionId: 'SID', runId: 'RUN', providerId: 'codex', executorId: 'E', hostId: 'EXEC', cwd: 'work/kept',
         createOperationId: 'OPEN-RETAINED', initialPrompt: 'unconfirmed' },
-      save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null },
+      save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null },
       issues: [{ step: 'first-prompt', code: 'INITIAL_PROMPT_UNCONFIRMED', message: 'Delivery is unconfirmed.', recovery: 'Read the original operation; do not resend.' }]
     }
     const inspected = { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },

@@ -152,7 +152,7 @@ describe('one public JSON-RPC service over bounded transports', () => {
     expect((await stat(h.path)).mode & 0o777).toBe(0o600)
   })
   it.each(['agent.open', 'space.mv', 'space.bind'] as const)('validates %s with the actual durable operationId, independent of wire correlation', async method => {
-    const save = { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
+    const save = { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
     const binding = { kind: 'zone-space' as const, zoneId: 'zone', spaceId: 'space' }, seen: AgentMuxControlRequest[] = []
     const h = await endpoint({ execute: async request => { seen.push(request)
       if (request.operation === 'space.bind') return { operation: request.operation, requestId: request.requestId, outcome: 'linked', binding, catalog, save, issues: [] }

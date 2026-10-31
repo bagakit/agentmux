@@ -16,7 +16,7 @@ vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({ AgentSes
 const initial = useAppStore.getState(), alias = 'original-pane-alias', canonical = 'original-core-session'
 const origin = { workspaceId: 'display', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }
 const annotation = { messageId: 'original-record', quote: 'Original quote', note: 'Original note' }
-const saved = { layoutApplied: false, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
+const saved = { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
 let container: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

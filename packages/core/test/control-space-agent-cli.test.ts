@@ -30,7 +30,7 @@ function report(requestId: string, outcome: AgentMuxSpaceMutationReport['outcome
     agent: { agentSessionId: 'agent-target', runId: 'run-target', providerId: 'codex', executorId: 'saved-executor', hostId: 'original-host',
       cwd: fixturePath("original-cwd"), createOperationId: 'creation-op', initialPrompt: 'confirmed',
       ...(outcome === 'retired' ? { retirement: { source: 'user', observedAt: 42 } as const } : {}) }, resource: null,
-    save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
+    save: { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
 }
 
 describe('public built Agent-first Space CLI uses one private Control owner', () => {
