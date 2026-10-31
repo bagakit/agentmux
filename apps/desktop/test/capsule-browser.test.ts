@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -102,6 +102,20 @@ async function fixture() {
   return { root, owner, manager, page, create, views, profiles }
 }
 
+async function originalSourceCli(root: string): Promise<string> {
+  if (process.env.AGENTMUX_TEST_OBJECT_CLI) return process.env.AGENTMUX_TEST_OBJECT_CLI
+  const core = fileURLToPath(new URL('../../../packages/core/', import.meta.url)), directory = join(root, 'source-cli')
+  await mkdir(join(directory, 'bin'), { recursive: true }); await mkdir(join(directory, 'dist'))
+  await writeFile(join(directory, 'package.json'), '{"type":"module"}\n')
+  await copyFile(join(core, 'bin/amux'), join(directory, 'bin/amux'))
+  await symlink(join(core, 'node_modules'), join(directory, 'node_modules'), 'dir')
+  const { build } = createRequire(join(core, 'package.json'))('esbuild')
+  await build({ entryPoints: [join(core, 'src/agentmux.ts')], outfile: join(directory, 'dist/agentmux.js'),
+    bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'error',
+    banner: { js: "import {createRequire as __createRequire} from 'node:module';const require=__createRequire(import.meta.url);" } })
+  return join(directory, 'bin/amux')
+}
+
 it('keeps Capsule storage independent from user Profiles and installs SDK only for injected containers', async () => {
   const { manager, page, create, views, profiles } = await fixture()
   const ready = vi.fn(); manager.capsuleDocumentReady = ready
@@ -203,7 +217,8 @@ it('retains the original stable object address through actual Browser target RPC
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
   const original = await rpc.call('browser.targets', {})
   expect(original.targets).toEqual([expect.objectContaining({ id: opened.id, objectLink, url: opened.url })])
-  const cli = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'browser', 'targets'], objectCliEnvironment(root))
+  const cli = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'browser', 'targets'],
+    objectCliEnvironment(root, { AGENTMUX_TEST_OBJECT_CLI: await originalSourceCli(root) }))
   expect(cli.code, cli.stderr).toBe(0)
   expect(JSON.parse(cli.stdout).result.targets).toEqual(original.targets)
   expect(original.targets[0]!.control).toEqual(manager.target(opened.id)!.control)
