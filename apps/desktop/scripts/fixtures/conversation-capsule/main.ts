@@ -191,9 +191,11 @@ try {
   assert.equal((await facts()).diagram.activeTrigger, true, 'Viewer close restores the original diagram trigger')
   assert.equal(report.created.length, 0, 'Diagram viewing must not acquire another native Browser')
   await focusReader()
-  await evaluate(`conversationCapsuleProbe.set(${JSON.stringify('Page ' + 'amux://capsule/' + isolated.record.capsuleId)})`)
-  await delay(100); assert.equal(report.created.length, 0, 'An ordinary Capsule link cannot acquire a native page')
-  const content = (id: string) => `![${title}](amux://capsule/${id})`
+  await evaluate(`conversationCapsuleProbe.set(${JSON.stringify('`amux://capsule/' + isolated.record.capsuleId + '`')})`)
+  await delay(100); assert.equal(report.created.length, 0, 'A literal Capsule example cannot acquire a native page')
+  const content = (id: string) => id === isolated.record.capsuleId ? `Page amux://capsule/${id}`
+    : `已重做成[${title}](amux://capsule/${id})，可以直接查看并继续讨论。`
+  report.referenceSyntax = { isolated: 'ordinary-bare', injected: 'ordinary-markdown-in-sentence', literalCreated: report.created.length }
   await focusReader()
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(isolated.record.capsuleId))})`)
   await until('!!document.querySelector(".browser-stage")', 'The real Capsule consumer must mount its original Stage before capture')
