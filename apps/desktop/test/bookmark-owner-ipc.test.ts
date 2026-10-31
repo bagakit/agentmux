@@ -8,11 +8,12 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxMemoryAgentSessionStore, LocalExecutionHost } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
-import type { AgentMuxPreloadApi, AppConfig, WorkspaceRecord } from '../src/shared/contracts'
+import type { AgentMuxPreloadApi, AppConfig, BrowserSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { RuntimeController } from '../src/main/runtime-controller'
 
-const bridge = vi.hoisted(() => ({ root: '', api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
+const bridge = vi.hoisted(() => ({ root: '', api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), ensure: vi.fn(), navigate: vi.fn(),
+  handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
@@ -27,7 +28,11 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-preview.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class {
+  setPresentationWindowOwner() {} async release() {} dispose() {}
+  ensure(...args: unknown[]) { return bridge.ensure(...args) }
+  navigate(...args: unknown[]) { return bridge.navigate(...args) }
+} }))
 vi.mock('../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { dispose() {} } }))
 vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import('@agentmux/connectors')>(), createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
@@ -44,6 +49,38 @@ import type { CapsuleOpenResult } from '@agentmux/core/capsule'
 
 const initialState = useAppStore.getState()
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); useAppStore.setState(initialState, true) })
+
+it('forwards the exact current Capsule address through actual preload IPC after its original Browser owner is ensured', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'capsule-current-ipc-'))
+  bridge.root = root; vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
+  const config = structuredClone(DEFAULT_CONFIG), runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
+  vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  const sender = Object.assign(new EventEmitter(), { id: 714, isDestroyed: () => false, send: vi.fn() })
+  const uri = 'amux://capsule/23456789ABCD'
+  const snapshot: BrowserSnapshot = { id: 'original-browser', mode: 'normal', navigationId: 'original-navigation', profileId: null,
+    url: 'http://127.0.0.1:49152/original/route?q=kept', objectLink: uri, title: 'Original page',
+    capsuleId: '23456789ABCD', capsuleOrigin: 'http://127.0.0.1:49152', loading: false, canGoBack: false, canGoForward: false,
+    viewport: 'responsive', error: null, driving: false, appLinkPrompt: null }
+  bridge.ensure.mockReset().mockResolvedValue(snapshot); bridge.navigate.mockReset().mockResolvedValue(snapshot)
+  let dispose: (() => Promise<void>) | undefined
+  try {
+    dispose = await registerIpc({ appDocumentSources: testAppDocumentSources(sender), initialConfig: config,
+      window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
+      configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
+      scratchTopics: { setNameAudit() {} } as never, workbenchWindows: { setNativeOwner: () => () => {} } as never,
+      workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) })
+    bridge.invoke.mockClear().mockImplementation(async (channel: string, ...values: unknown[]) => {
+      const handler = bridge.handlers.get(channel)
+      expect(handler).toBeTypeOf('function')
+      return structuredClone(await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, ...values))
+    })
+    expect(await bridge.api!.browser.navigate(snapshot.id, uri)).toEqual(snapshot)
+    expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith('browser:navigate', snapshot.id, uri)
+    expect(bridge.ensure).toHaveBeenCalledExactlyOnceWith(snapshot.id, expect.any(Function), undefined)
+    expect(bridge.navigate).toHaveBeenCalledExactlyOnceWith(snapshot.id, uri)
+    expect(bridge.ensure.mock.invocationCallOrder[0]).toBeLessThan(bridge.navigate.mock.invocationCallOrder[0]!)
+  } finally { await dispose?.(); await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 }) }
+})
 
 it('awaits the original object owner through actual preload IPC and retains its unconfirmed operation diagnosis', async () => {
   const root = await mkdtemp(join(tmpdir(), 'capsule-object-ipc-'))

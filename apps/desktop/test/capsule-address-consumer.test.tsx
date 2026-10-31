@@ -40,18 +40,38 @@ async function edit(value: string) {
 async function enter() { await act(async () => address().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))) }
 
 it('shows the original object address without requiring a handshake and submits it through the object owner', async () => {
-  const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined), navigate = vi.spyOn(api.browser, 'navigate')
+  const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined), navigate = vi.spyOn(api.browser, 'navigate').mockResolvedValue(page)
   await render(); expect(address().value).toBe(uri)
   await enter()
-  expect(open).toHaveBeenCalledExactlyOnceWith(uri); expect(navigate).not.toHaveBeenCalled()
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(page.browserId, uri); expect(open).not.toHaveBeenCalled()
   expect(address().value).toBe(uri); expect(page.url).toContain('/nested/view?q=one#draft')
 })
 
 it('keeps an object navigation available while the current native connection is unavailable', async () => {
-  const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined), navigate = vi.spyOn(api.browser, 'navigate')
+  const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined), navigate = vi.spyOn(api.browser, 'navigate').mockResolvedValue(page)
   await act(async () => root.render(<BrowserPane visible released tab={page} />))
   expect(address().value).toBe(uri); await enter()
-  expect(open).toHaveBeenCalledExactlyOnceWith(uri); expect(navigate).not.toHaveBeenCalled()
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(page.browserId, uri); expect(open).not.toHaveBeenCalled()
+})
+
+it('opens a different Capsule reference through the global object owner instead of reusing the old Browser partition', async () => {
+  const target = 'amux://capsule/3456789ABCDE'
+  const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined), navigate = vi.spyOn(api.browser, 'navigate').mockResolvedValue(page)
+  await render(); await edit(target); await enter()
+  expect(open).toHaveBeenCalledExactlyOnceWith(target)
+  expect(navigate).not.toHaveBeenCalled()
+})
+
+it('keeps an untouched submitted Capsule URI after the exact owner refuses its stale document and a later external observation arrives', async () => {
+  const open = vi.spyOn(api.ui, 'openObjectLink')
+  const navigate = vi.spyOn(api.browser, 'navigate').mockRejectedValue(new Error('The original Browser has left this Capsule document'))
+  await render(); await enter()
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(page.browserId, uri)
+  const { objectLink: _object, ...original } = page
+  await render({ ...original, url: 'https://outside.invalid/actual-current-page' })
+  expect(address().value).toBe(uri)
+  expect(container.textContent).toContain('has left this Capsule document')
+  expect(open).not.toHaveBeenCalled()
 })
 
 it('retains the entered address and original page after an unknown object opening and a later observation', async () => {
@@ -95,14 +115,14 @@ it('replaces the previous object address through actual Store events when the or
 })
 
 it('keeps later address editing when the earlier object owner finishes', async () => {
-  let finish!: () => void
-  const pending = new Promise<void>(resolve => { finish = resolve })
-  const open = vi.spyOn(api.ui, 'openObjectLink').mockReturnValue(pending)
+  let finish!: (page: BrowserWorkbenchSurface) => void
+  const pending = new Promise<BrowserWorkbenchSurface>(resolve => { finish = resolve })
+  const navigate = vi.spyOn(api.browser, 'navigate').mockReturnValue(pending)
   await render(); await enter()
   const laterDraft = 'amux://capsule/456789ABCDEF'
   await edit(laterDraft)
-  await act(async () => finish())
-  expect(open).toHaveBeenCalledExactlyOnceWith(uri)
+  await act(async () => finish(page))
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(page.browserId, uri)
   expect(address().value).toBe(laterDraft)
 })
 

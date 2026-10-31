@@ -35,7 +35,7 @@ const mutations = [
     assertion: 'shows the original object address without requiring a handshake' },
   { id: 'object-address-handed-to-generic-browser', file: 'apps/desktop/src/renderer/src/components/BrowserPane.tsx', suite: tests[1],
     from: 'if (/^amux:/iu.test(target)) {', to: 'if (false) {',
-    assertion: 'shows the original object address without requiring a handshake' },
+    assertion: 'opens a different Capsule reference through the global object owner' },
   { id: 'bookmark-saves-internal-endpoint', file: 'apps/desktop/src/renderer/src/components/BrowserPane.tsx', suite: tests[1],
     from: 'source.objectLink ?? source.url', to: 'source.url',
     assertion: 'saves the stable object address and retains the original bookmark result' },

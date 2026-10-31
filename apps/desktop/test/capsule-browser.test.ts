@@ -16,7 +16,8 @@ import { parseBrowserTargetsResult } from '../../../packages/core/src/control-br
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
-import { createCapsuleBrowserDocument } from '../src/main/capsule-presentation'
+import { capsulePresentation, createCapsuleBrowserDocument, resolveCapsuleColdDocument } from '../src/main/capsule-presentation'
+import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills'
 
 // Native ownership and event ordering are controlled here. Actual Electron navigation, pixels
 // and OS restart are verified by the integrated Browser gate, not by these ports.
@@ -236,6 +237,71 @@ it('resolves a canonical Capsule address through its original acquisition owner 
   }
   expect(create).toHaveBeenCalledTimes(count)
   expect(manager.targets().map(target => target.id)).toEqual(['stable-browser', 'route-browser'])
+})
+
+it('keeps exact current Capsule URI navigation in its original Browser through multiple views and cold restoration while refusing wrong targets', async () => {
+  const { manager, owner, page, create, views } = await fixture()
+  const capsule = await page('injected'), uri = `amux://capsule/${capsule.record.capsuleId}`
+  const original = await create('original-browser', capsule)
+  const route = new URL('chapter?section=2#draft', original.url).href
+  const view = views[0]!, contents = view.webContents
+  view.responseOverride = details => view.response?.({ ...details, responseHeaders: {} })
+  await manager.navigate(original.id, route); await view.lastLoad
+  const current = await manager.create(original.id, route, 'workspace')
+  const duplicate = await create('another-view', capsule)
+  const loads = [...contents.loads]
+  expect(current.capsuleActive).toBe(false)
+  const result = await manager.navigate(original.id, uri)
+  expect(result).toMatchObject({ id: original.id, navigationId: current.navigationId, objectLink: uri, url: route, appLinkPrompt: null })
+  expect(contents.loads).toEqual(loads)
+  expect(views[0]!.webContents).toBe(contents)
+  expect(manager.target(duplicate.id)).toMatchObject({ url: original.url, objectLink: uri })
+
+  const graph = { regions: [current, duplicate].map((browser, index) => ({ kind: 'browser', browserId: browser.id,
+    regionId: 'region-' + index, tabId: 'tab-' + index })), tabs: [current, duplicate].map((_browser, index) => ({ tabId: 'tab-' + index, regionIds: ['region-' + index] })),
+    resources: Object.fromEntries([current, duplicate].map((browser, index) => ['region:region-' + index, { ...browser, browserId: browser.id, workspaceId: 'workspace' }])) } as unknown as AgentMuxSpatialGraph
+  const execute = vi.fn(async () => { throw new Error('A global ambiguous open cannot choose a Browser') })
+  const presentation = capsulePresentation({ inspect: capsuleId => owner.call('capsule.inspect', { capsuleId }),
+    graph: async () => graph, current: id => manager.target(id), ensure: id => manager.ensure(id, async () => browserColdDescriptor(graph, id)),
+    recordOpen: (id, capsuleId, operationId) => manager.recordCapsuleOpen(id, capsuleId, operationId), execute,
+    observe: async () => ({}), original: async () => { throw new Error('No replacement owner is permitted') } })
+  await expect(presentation.call('capsule.open', { capsuleId: capsule.record.capsuleId, operationId: 'global-ambiguous-open' })).resolves.toMatchObject({
+    rendering: { status: 'unavailable', reason: expect.stringContaining('Several Browser workfaces') }
+  })
+  expect(execute).not.toHaveBeenCalled()
+
+  const foreign = await page('isolated')
+  for (const target of [`amux://capsule/${foreign.record.capsuleId}`, uri + '?open=1', `amux://agent/${capsule.record.capsuleId}`]) {
+    const error = await manager.navigate(original.id, target).then(() => null, error => error)
+    expect(error).toBeInstanceOf(Error)
+  }
+  expect(contents.loads).toEqual(loads)
+  expect(manager.target(original.id)).toMatchObject({ objectLink: uri, url: route })
+  const entry = (manager as any).entries.get(original.id)
+  entry.activity.control = 'agent'; entry.humanControl = false
+  const controlled = await manager.navigate(original.id, uri).then(() => null, error => error)
+  expect(controlled).toMatchObject({ code: 'BROWSER_AGENT_CONTROL_ACTIVE' })
+  expect(contents.loads).toEqual(loads)
+  entry.activity.control = 'human'
+
+  const saved = browserColdDescriptor(graph, original.id)
+  manager.close(original.id)
+  await manager.ensure(original.id, async () => resolveCapsuleColdDocument(saved, await owner.call('capsule.inspect', { capsuleId: capsule.record.capsuleId })))
+  const restoredView = views.at(-1)!; await restoredView.lastLoad
+  const restoredLoads = [...restoredView.webContents.loads]
+  const restored = await manager.navigate(original.id, uri)
+  expect(restored).toMatchObject({ id: original.id, objectLink: uri, url: route, appLinkPrompt: null })
+  expect(restoredView.webContents.loads).toEqual(restoredLoads)
+
+  await manager.navigate(original.id, 'https://outside.invalid/current'); await restoredView.lastLoad
+  const externalLoads = [...restoredView.webContents.loads]
+  const error = await manager.navigate(original.id, uri).then(() => null, error => error)
+  expect(error).toBeInstanceOf(Error)
+  expect(restoredView.webContents.loads).toEqual(externalLoads)
+  expect(manager.target(original.id)).toMatchObject({ url: 'https://outside.invalid/current' })
+  expect(restoredView.webContents.isDestroyed()).toBe(false)
+  expect(manager.target(duplicate.id)).toMatchObject({ url: original.url, objectLink: uri })
+  expect(agentMuxModuleSkill('browser')).toContain("Submitting a Browser's own Capsule reference in its address field addresses that exact")
 })
 
 it('admits only the exact live committed nonloading Capsule main document and rejects frames, popups and stale documents', async () => {
