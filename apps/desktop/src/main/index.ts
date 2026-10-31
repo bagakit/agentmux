@@ -25,6 +25,7 @@ import { crashReporterOptions, registerCrashCapture } from './crash-capture-wiri
 import { registerWorkbenchStartupCapture } from './workbench-startup-capture.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
+import { appIconPath } from './app-brand-icon.js'
 import { RuntimeController } from './runtime-controller.js'
 import { configuredDesktopAgentMuxHost, waitForDesktopHostConnection } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
@@ -51,7 +52,6 @@ import { WorkbenchDocumentSources } from './workbench-document-sources.js'
 import { windowSecurityWebPreferences } from './window-security.js'
 import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
-const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
 const startupAttemptId = mintObjectId()
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
 
@@ -199,7 +199,7 @@ function startPrimaryInstance(): void {
       ...windowConstructorGeometry(persistedGeometry),
       minWidth: 980,
       minHeight: 660,
-      icon: appIconPath,
+      icon: appIconPath(initialConfig.appearance.appIcon),
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       backgroundColor: resolveTheme(initialConfig.appearance, nativeTheme.shouldUseDarkColors).variant.colors.background,
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
@@ -516,7 +516,6 @@ function startPrimaryInstance(): void {
     // 不含任何绑 Cmd+W 的 role，同时保留 Edit 菜单——终端粘贴走的是原生 Paste role。菜单是应用级、
     // 全窗口共享的，建窗前设一次即可。
     Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', () => { void rendererUpdates?.rollback().catch((error) => dialog.showErrorBox('Frontend rollback', String(error))) }, () => { void recoverInterface?.() })))
-    if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
     await createWindow(appReadyAtMs)
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()

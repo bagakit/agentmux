@@ -1,3 +1,4 @@
+import { APP_ICON_IDS, DEFAULT_APP_ICON } from '@agentmux/client-ui/app-icon-catalog'
 import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import type { AgentMuxControlSettingEntry } from '@agentmux/core'
 import type { AppConfig } from '../../../shared/contracts.js'
@@ -7,6 +8,9 @@ import { enumSetting, invalid } from '../scalar-setting.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 
 export const appearanceSettings = [
+  enumSetting('appearance.appIcon', APP_ICON_IDS, DEFAULT_APP_ICON,
+    (config) => config.appearance.appIcon ?? DEFAULT_APP_ICON,
+    (config, appIcon) => ({ ...config, appearance: { ...config.appearance, appIcon } })),
   {
     key: 'appearance.themeId',
     entry(config: AppConfig): AgentMuxControlSettingEntry { return {

@@ -452,6 +452,13 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on('ui:environmentWarning', wrapped)
       return () => ipcRenderer.off('ui:environmentWarning', wrapped)
     },
+    onAppIconIssue(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, issue: string | null): void => {
+        if (issue === null || typeof issue === 'string') listener(issue)
+      }
+      ipcRenderer.on('ui:appIconIssue', wrapped)
+      return () => ipcRenderer.off('ui:appIconIssue', wrapped)
+    },
     onSpatialLinkIssue(listener) {
       const wrapped = (_event: Electron.IpcRendererEvent, message: string): void => { if (typeof message === 'string') listener(message) }
       ipcRenderer.on('ui:spatialLinkIssue', wrapped)

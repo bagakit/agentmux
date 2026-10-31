@@ -906,6 +906,8 @@ export type AppState = GitReadingActions & {
   runtimeEndpointWarnings: RuntimeEndpointWarning[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
   environmentWarning: string | null | undefined
+  /** Last confirmed Main native icon projection; not a persisted preference or Runtime status. */
+  appIconIssue: string | null | undefined
   /**
    * Absolute path of the local machine's home directory, learned from the `sessions:snapshot` payload
    * (the renderer has no `process`/`os`). Empty string means "not known yet" — copy-path abbreviation
@@ -3570,7 +3572,7 @@ function startSessionMembershipResync(
             runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(runtimeEndpointWarnings, hostId, warning, observationStep)
           }
           entry.endpointWarnings.clear()
-          const next = { ...reconciled, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          const next = { ...reconciled, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null, appIconIssue: snapshot.appIconIssue ?? null }
           return { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }) }
         })
         if (!entry.historyReading && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && (entry.startupNotice?.startupSessionSnapshot || restoredHistory)) {
@@ -5259,6 +5261,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   runtimeOwnershipWarnings: undefined,
   runtimeEndpointWarnings: undefined,
   environmentWarning: undefined,
+  appIconIssue: undefined,
   localHome: '',
   displacedAgentSessionIds: [],
   error: null,
@@ -5400,6 +5403,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), ...api.readRendererMemory(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
         : get().executeControl(request, signal, { admittedControlRequestId: request.requestId }))
     const disposeEnvironmentWarning = api.ui.onEnvironmentWarning(warning => set({ environmentWarning: warning }))
+    const disposeAppIconIssue = api.ui.onAppIconIssue(issue => set({ appIconIssue: issue }))
     const disposeSpatialLinkIssues = api.ui.onSpatialLinkIssue(message => get().reportError(new Error(message)))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
@@ -5422,7 +5426,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeSessions()
       disposeBrowsers()
       disposeControl()
-      disposeEnvironmentWarning(); disposeSpatialLinkIssues()
+      disposeEnvironmentWarning(); disposeAppIconIssue(); disposeSpatialLinkIssues()
       disposeFileInvalidations()
       disposeNotesStorage()
       const candidates = Object.values(get().warmTerminals).flat()

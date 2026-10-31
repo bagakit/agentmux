@@ -1,4 +1,5 @@
 import { isTerminalMouseReportPayload } from '@agentmux/core'
+import { bindAppBrandIcon } from './app-brand-icon.js'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
 import { ExecutionBindingReaders } from './execution-binding-readers.js'
 import { AgentExecutionBindingService } from '@agentmux/core'
@@ -384,6 +385,8 @@ export async function registerIpc(args: {
       if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
+  const appBrandIcon = bindAppBrandIcon(configOwner, { platform: process.platform, images: nativeImage, dock: app.dock, window: args.window,
+    reportIssue: issue => { if (!contents.isDestroyed()) contents.send('ui:appIconIssue', issue) } })
   const fileObservations = new FileObservationRegistry()
   const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { await notesStorageOwner.confirmResources(await notesStorage.inspect()); for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
   const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notesStorage:changed', snapshot) }, notesStorage)
@@ -1444,7 +1447,7 @@ export async function registerIpc(args: {
       ...(snapshot.runtimeEndpointWarnings ?? []).filter(warning => warning.scope !== 'observation' && warning.availability !== 'connected')
         .map(warning => [JSON.stringify([warning.hostId, warning.step]), warning] as const)
     ]).values()]
-    return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
+    return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings, appIconIssue: appBrandIcon.issue },
       args.environmentWarning?.(), app.getPath('home'))
   })
   handle('sessions:nativeSessions', async (input: import('../shared/contracts.js').NativeAgentSessionsInput) => args.runtime.nativeAgentSessions(input, config))
@@ -2268,6 +2271,7 @@ export async function registerIpc(args: {
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
+      { owner: 'app-brand-icon', dispose: appBrandIcon.dispose },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },
       { owner: 'goal-change-reader', dispose: disposeGoalChanges },

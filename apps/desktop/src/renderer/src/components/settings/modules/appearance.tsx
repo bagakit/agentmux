@@ -28,6 +28,7 @@ export const appearanceSettingsModule = {
   icon: ThemeAppearanceThemeIcon,
   keywords: 'theme color palette terminal tui composer input background editor source diff font size typography icon icons semantic icons 图标',
   searchTargets: [
+    { id: 'app-icon', title: 'App icon', keywords: 'brand logo dragon 青篆 回环 折玉 灵伴 classic 图标' },
     { id: 'workspace-theme', title: 'Workspace theme', keywords: 'theme color palette custom icon icons semantic icons 图标' },
     { id: 'app-appearance', title: 'Application appearance', keywords: 'dark light system window' },
     { id: 'editor-font-size', title: 'Editor font size', keywords: 'source diff typography inherit app' },

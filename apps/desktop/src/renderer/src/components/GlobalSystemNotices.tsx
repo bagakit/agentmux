@@ -31,6 +31,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const window = document.defaultView!
   useRunServiceHealthChanges()
   const warning = useAppStore((state) => state.environmentWarning)
+  const appIconIssue = useAppStore(state => state.appIconIssue)
   const nameMetadataWarning = useAppStore(state => state.sessionNameMetadataWarning)
   const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)
   const endpointWarnings = useAppStore((state) => state.runtimeEndpointWarnings)
@@ -200,12 +201,19 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       step: desktopNavigationNotice.step, mode: desktopNavigationNotice.message, restore: desktopNavigationNotice.recovery
     } }
   }] : [], true)
-  const chromeInbox = useServiceNotices('global:native-chrome', nativeOverlayWarning ? [{
+  const chrome: ServiceNoticeItem[] = nativeOverlayWarning ? [{
     id: 'floating-chrome', notice: { kind: 'process-degraded', notice: {
       step: 'Native floating content is unavailable', mode: nativeOverlayWarning,
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
-  }] : [], true)
+  }] : []
+  if (appIconIssue) chrome.push({
+    id: 'app-icon', notice: { kind: 'process-degraded', notice: {
+      step: 'System App icon needs attention', mode: appIconIssue,
+      restore: 'Choose and save another App icon in Settings → Appearance, then reselect your preferred icon to retry. Reopening AgentMux also reapplies the saved choice.'
+    } }, ...(settings ? { action: { label: 'Open Appearance', run: () => settings.open('appearance') } } : {})
+  })
+  const chromeInbox = useServiceNotices('global:native-chrome', chrome, appIconIssue !== undefined)
   const inboxes = [agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const currentCount = notices.length + projection.current.length

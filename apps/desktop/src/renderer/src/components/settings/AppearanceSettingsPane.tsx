@@ -1,5 +1,7 @@
 import './appearance-settings.css'
 import { ThemeLibrary } from './ThemeLibrary'
+import { BrandIcon } from '@agentmux/client-ui/components/BrandIcon'
+import { APP_ICON_CATALOG, APP_ICON_IDS, DEFAULT_APP_ICON, type AppIconId } from '@agentmux/client-ui/app-icon-catalog'
 import { ThemeEditor } from './ThemeEditor'
 import { DEFAULT_THEME_ID, getThemeCatalog, type ThemeCatalogItem } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -39,6 +41,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
   const catalog = getThemeCatalog(appearance.customThemes)
   const selectedTheme = catalog.items.find(item => item.id === theme.value)
   const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
+  const appIcon = useSettingDraft<AppIconId>(appearance.appIcon ?? DEFAULT_APP_ICON)
   const terminal = useSettingDraft<TerminalThemeId>(appearance.terminalTheme)
   const font = useSettingDraft(String(appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT))
   const editorFont = useSettingDraft(String(appearance.editorFontSize ?? 'inherit'))
@@ -52,7 +55,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
     && parsedFontSize >= TERMINAL_FONT_SIZE_MIN && parsedFontSize <= TERMINAL_FONT_SIZE_MAX
   const fontSize = validFontSize ? parsedFontSize : Number(font.expected)
   const appAppearance = app.value, terminalTheme = terminal.value
-  const dirty = theme.dirty || app.dirty || terminal.dirty || font.dirty || editorFont.dirty
+  const dirty = theme.dirty || app.dirty || appIcon.dirty || terminal.dirty || font.dirty || editorFont.dirty
   const setAppAppearance = app.setValue, setTerminalTheme = terminal.setValue, setFontSize = font.setValue
 
   async function save(): Promise<void> {
@@ -71,8 +74,11 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
     const submittedTheme = theme.beginSave()
     const submittedApp = app.beginSave(), submittedTerminal = terminal.beginSave(), submittedFont = font.beginSave()
     const submittedEditorFont = editorFont.beginSave()
+    const submittedIcon = appIcon.beginSave()
     const next = { ...appearance, appAppearance: submittedApp.value, terminalTheme: submittedTerminal.value, terminalFontSize: parsedFontSize }
     const expected = { ...appearance, appAppearance: submittedApp.expected, terminalTheme: submittedTerminal.expected, terminalFontSize: Number(submittedFont.expected) }
+    if (appearance.appIcon !== undefined || submittedIcon.value !== DEFAULT_APP_ICON) next.appIcon = submittedIcon.value
+    if (appearance.appIcon !== undefined || submittedIcon.expected !== DEFAULT_APP_ICON) expected.appIcon = submittedIcon.expected
     if (appearance.themeId !== undefined || submittedTheme.value !== DEFAULT_THEME_ID) next.themeId = submittedTheme.value
     if (appearance.themeId !== undefined || submittedTheme.expected !== DEFAULT_THEME_ID) expected.themeId = submittedTheme.expected
     if (submittedEditorFont.value === 'inherit') delete next.editorFontSize
@@ -85,10 +91,24 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
     submittedTerminal.finish(committed)
     submittedFont.finish(committed)
     submittedEditorFont.finish(committed)
+    submittedIcon.finish(committed)
   }
 
   return (
     <div className="settings-pane-stack settings-appearance" data-theme-editing={editingTheme ? '' : undefined}>
+      <section className="settings-group" data-settings-field="app-icon">
+        <header><span>App icon</span><small>AgentMux</small></header>
+        <div className="settings-app-icons" role="radiogroup" aria-label="App icon">
+          {APP_ICON_IDS.map(id => <label key={id} className="settings-app-icon" data-selected={appIcon.value === id ? '' : undefined}>
+            <input className="settings-choice-radio" type="radio" name={`${choiceId}-app-icon`} value={id}
+              checked={appIcon.value === id} onChange={() => appIcon.setValue(id)} aria-label={`${APP_ICON_CATALOG[id].label} app icon`} />
+            <BrandIcon icon={id} size={56} />
+            <span>{APP_ICON_CATALOG[id].label}</span>
+            {appIcon.value === id ? <SemanticIcon name="status.selected" className="settings-app-icon__check" size={12} /> : null}
+          </label>)}
+        </div>
+        <p className="settings-hint">Save to update AgentMux and the running app’s Dock or window icon. Finder and installed shortcuts use the packaged default.</p>
+      </section>
       <section className="settings-group" data-settings-field="workspace-theme">
         <header><span>Workspace theme</span><small>{catalog.items.length} themes</small></header>
         <div className="settings-theme-grid" role="radiogroup" aria-label="Workspace theme">

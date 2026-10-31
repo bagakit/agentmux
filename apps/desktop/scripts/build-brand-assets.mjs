@@ -1,24 +1,18 @@
-// Derive every brand bitmap from a single source:
-// `apps/desktop/brand/icon-source.png`. Consumer files under
-// `apps/desktop/resources/` are regenerated on every run so the AppKit shell
-// icon, the Electron dock icon and the renderer's `BrandIcon` can never drift
-// into three different pictures. The hook is wired to `predev`/`prebuild`;
-// `scripts/package-macos.mjs` and `src/main/index.ts` keep reading the same
-// consumer paths they always did.
-//
-// macOS only: `sips` and `iconutil` ship with the OS and the packaging path is
-// already macOS-only. The script does not emit a manifest, receipt, or any
-// time-stamped artefact — the derived files themselves are the output.
+// Build the default package icon and every selectable runtime bitmap from the shared brand sources.
 import { mkdir, rm, cp, access } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, resolve } from 'node:path'
+import { APP_ICON_IDS, DEFAULT_APP_ICON } from '../../../packages/client-ui/src/lib/app-icon-catalog.ts'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(scriptDir, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
-const sourceIcon = join(desktopRoot, 'brand', 'icon-source.png')
+const brandRoot = join(repositoryRoot, 'packages/client-ui')
+const sourceDirectory = join(brandRoot, 'brand/app-icons')
+const sourceIcon = join(sourceDirectory, DEFAULT_APP_ICON + '.png')
+const sharedAssets = join(brandRoot, 'src/assets/app-icons')
 const resourcesDir = join(desktopRoot, 'resources')
 const outDockIcon = join(resourcesDir, 'icon.png')
 const outRendererIcon = join(resourcesDir, 'icon-128.png')
@@ -44,12 +38,12 @@ async function ensureSourcePresent() {
   try { await access(sourceIcon, fsConstants.R_OK) }
   catch {
     const rel = relative(repositoryRoot, sourceIcon)
-    throw new Error(`Brand source icon missing at ${rel}. Place the authoritative 1024x1024 transparent PNG there before building.`)
+    throw new Error(`Brand source icon missing at ${rel}. Restore the authoritative PNG before building.`)
   }
 }
 
-async function resizeTo(size, outPath) {
-  await run('sips', ['-s', 'format', 'png', '-z', String(size), String(size), sourceIcon, '--out', outPath])
+async function resizeTo(size, outPath, source = sourceIcon) {
+  await run('sips', ['-s', 'format', 'png', '-z', String(size), String(size), source, '--out', outPath])
 }
 
 async function buildIcns() {
@@ -79,7 +73,14 @@ async function buildIcns() {
 async function main() {
   await ensureSourcePresent()
   await mkdir(resourcesDir, { recursive: true })
-  // Dock icon is the source itself — same bitmap, no resample, no quality loss.
+  await mkdir(sharedAssets, { recursive: true })
+  await mkdir(join(resourcesDir, 'app-icons'), { recursive: true })
+  for (const id of APP_ICON_IDS) {
+    const target = join(sharedAssets, id + '.png')
+    await resizeTo(512, target, join(sourceDirectory, id + '.png'))
+    await cp(target, join(resourcesDir, 'app-icons', id + '.png'))
+  }
+  // The signed bundle has one static default. Runtime selections never rewrite it.
   await cp(sourceIcon, outDockIcon)
   await resizeTo(128, outRendererIcon)
   await resizeTo(512, outBotIcon)

@@ -1,4 +1,11 @@
 .settings-appearance .settings-theme-choice { gap: var(--sp-4); padding: var(--sp-4); }
+.settings-app-icons { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: var(--sp-3); }
+.settings-app-icon { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--sp-3); border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; color: var(--text-2); font-size: var(--fs-meta); }
+.settings-app-icon:hover { background: var(--surface-1); }
+.settings-app-icon[data-selected] { background: var(--surface-2); border-color: var(--line); color: var(--text); }
+.settings-app-icon:focus-within { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.settings-app-icon .brand-icon { display: block; object-fit: contain; border-radius: var(--radius-sm); }
+.settings-app-icon__check { position: absolute; top: var(--sp-2); right: var(--sp-2); color: var(--action); }
 .settings-appearance__theme-name { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
 .settings-appearance__theme-name small { font-size: var(--fs-micro); color: var(--text-3); }
 .settings-appearance__selection { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-5); padding-block: var(--sp-4); }

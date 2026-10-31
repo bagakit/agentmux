@@ -335,6 +335,8 @@ export type AgentAvatarAppearance = { tint?: string; badge?: AgentAvatarBadge }
 export type AgentExecutorConfig = CoreAgentExecutorConfig & { avatar?: AgentAvatarAppearance }
 
 export type AppearanceConfig = {
+  /** Application identity; independent of theme and object avatars. Absence uses the shared default. */
+  appIcon?: import('@agentmux/client-ui/app-icon-catalog').AppIconId
   /** App header presentation only; absent platform entries are shown. */
   channelHeaderVisibility?: Record<string, boolean>
   /** Client theme identity; omitted retains the built-in default. */
@@ -1113,6 +1115,8 @@ export type RuntimeSnapshot = {
   runtimeEndpointWarnings?: RuntimeEndpointWarning[]
   /** Non-secret, app-lifetime notice for incomplete local shell environment loading. */
   environmentWarning?: string
+  /** Main-owned native App icon projection; transient and independent of saved appearance or Run health. */
+  appIconIssue?: string | null
   /**
    * Absolute path of the local machine's home directory, merged in at the ipc layer (same shape as
    * `environmentWarning`: a main-process fact, not something `RuntimeController` produces). The renderer
@@ -1801,6 +1805,7 @@ export type AgentMuxDesktopApi = {
     /** Submit an internal object-link intent; later navigation issues use onSpatialLinkIssue. */
     openObjectLink(url: string): Promise<void>
     onEnvironmentWarning(listener: (warning: string | null) => void): () => void
+    onAppIconIssue(listener: (issue: string | null) => void): () => void
     onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(): Promise<string | null>
     screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatus>
