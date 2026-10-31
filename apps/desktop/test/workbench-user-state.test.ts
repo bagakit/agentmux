@@ -32,6 +32,7 @@ beforeAll(async () => {
     import { WorkbenchUserStateStore } from './apps/desktop/src/main/workbench-user-state.ts';
     const owner = new WorkbenchUserStateStore(process.argv[2]);
     const result = process.argv[3] === 'write' ? await owner.write(process.argv[4]) : await owner.read();
+    await owner.flushDiagnostics();
     process.stdout.write(JSON.stringify({ result, observation: owner.observe() }));` }, outfile: worker,
     platform: 'node', format: 'esm', bundle: true,
     alias: { '@agentmux/core': resolve('packages/core/src/durable-write.ts'),
@@ -258,6 +259,25 @@ describe('Main-owned Desktop user state', () => {
     expect(write).toHaveBeenCalledWith(path, original, { requireDirectorySync: true })
     expect(await readFile(path, 'utf8')).toBe(original)
     expect(owner.observe().lastConfirmedWrite).toBeNull()
+  })
+
+  it('a stalled historical diagnostic read does not delay user data or overwrite a newer failure', async () => {
+    const { path } = await fixture(), original = value('Healthy original')
+    await writeFile(path, original)
+    let release!: (value: string) => void
+    const historical = new Promise<string>(resolve => { release = resolve })
+    const owner = new WorkbenchUserStateStore(path, { read: (file, encoding) => file.endsWith('.failure.json') ? historical : readFile(file, encoding) })
+    try {
+      await expect(owner.read()).resolves.toBe(original)
+      await expect(owner.write(value('Still usable'))).resolves.toMatchObject({ diskDurability: 'confirmed' })
+      await expect(owner.write('malformed')).rejects.toThrow()
+      const current = owner.observe().lastFailure
+      release(JSON.stringify({ schema: 'agentmux.workbench-user-state-failure.v1', failure: {
+        operation: 'read', phase: null, code: 'OLDER_DIAGNOSTIC', observedAt: 1 } }))
+      await Promise.resolve()
+      expect(owner.observe().lastFailure).toEqual(current)
+      expect(owner.observe().lastFailure?.code).toBe('WORKBENCH_USER_STATE_INVALID')
+    } finally { release('{}'); await owner.flushDiagnostics() }
   })
 
 })
