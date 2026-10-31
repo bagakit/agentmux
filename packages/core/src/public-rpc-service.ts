@@ -137,7 +137,8 @@ import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcReco
 import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { parseAgentRestartInput } from './agent-session-recovery/restart-contract.js'
-import { observeHostRuntime } from './host-runtime-observation.js'
+import { observeHostRuntime, parseTailcatListenerObservation } from './host-runtime-observation.js'
+import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
@@ -226,6 +227,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   nameHistory?(query: import('./display-label.js').AgentMuxNameHistoryQuery): Promise<import('./display-label.js').AgentMuxNameHistoryPage>
   /** Borrow the original Host configuration owner; no configuration is stored by this service. */
   hostConfiguration?(hostId: string): import('./control.js').AgentMuxControlSettingsResourceFields | null
+  /** Read the selected Host's original listener owner. Missing observation remains unknown. */
+  hostTailcat?(hostId: string, signal?: AbortSignal): import('./host-runtime-observation.js').TailcatListenerObservation | undefined | Promise<import('./host-runtime-observation.js').TailcatListenerObservation | undefined>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
@@ -1217,6 +1220,18 @@ export class AgentMuxRpcService {
             if (owner?.client !== client) throw new AgentMuxError('The original network owner is unavailable. No other Runtime was queried.', 'RUNTIME_OWNER_UNCONFIRMED')
             return await owner.call('runtime.network.inspect', { fence }, originalContext)
           }, context.signal)
+        if (method === 'settings.hosts.inspect' && this.ports.hostTailcat) {
+          try {
+            const tailcat = await observeRead(Promise.resolve().then(() => this.ports.hostTailcat!(input.hostId, context.signal)), context.signal)
+            if (tailcat !== undefined) (result as import('./host-runtime-observation.js').HostRuntimeObservation).tailcat = parseTailcatListenerObservation(tailcat)
+          } catch {
+            context.signal?.throwIfAborted()
+            ;(result as import('./host-runtime-observation.js').HostRuntimeObservation).tailcat = {
+              state: 'unknown', detail: 'The Tailcat listener observation is unavailable. Original Host facts and Agents are retained; refresh this observation.'
+            }
+          }
+          ;(result as import('./host-runtime-observation.js').HostRuntimeObservation).completedAt = Date.now()
+        }
         const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
         if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, this.ports.hostConfiguration?.(input.hostId) ?? null)) throw new AgentMuxError(
           'The original Host route changed during this observation. Read the current saved connection again.', 'HOST_CONFIGURATION_CHANGED')

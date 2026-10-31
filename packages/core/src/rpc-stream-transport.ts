@@ -82,6 +82,8 @@ export class AgentMuxRpcStreamTransport {
     }).catch(error => this.fail(error))
   }
   private rejectReady: (error: Error) => void
+  /** Establishment sends only the protocol probe, never a business request. */
+  async establish(): Promise<void> { await this.ready; if (this.closed) throw this.failure }
   private async write(request: JSONRPCRequest, signal?: AbortSignal, dispatch?: () => void): Promise<void> {
     const encoded = rpcEncode(request)
     if (this.closed) throw this.failure!

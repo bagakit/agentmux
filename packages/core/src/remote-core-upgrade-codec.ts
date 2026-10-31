@@ -74,12 +74,21 @@ export function parseRemoteCoreUpgradeExpected(value: unknown): RemoteCoreUpgrad
     startTicks: text(p.startTicks), candidateDigest: digest(p.candidateDigest), nativeInstanceId: text(p.nativeInstanceId), nativeProcessId: count(p.nativeProcessId), nativeStartTicks: text(p.nativeStartTicks) }
 }
 function host(value: unknown): RemoteCoreUpgradeHost {
-  const p = record(value, ['id', 'kind', 'label', 'hostname', 'user', 'port', 'identityFile', 'remoteCommand', 'remoteSocketPath', 'runtimeId'])
+  const p = record(value, ['id', 'kind', 'label', 'hostname', 'user', 'port', 'identityFile', 'remoteCommand', 'remoteSocketPath', 'runtimeId', 'transport', 'tailcat'])
   text(p.id); text(p.label)
   if (p.kind === 'local') {
-    if (Object.keys(p).some(key => !['id', 'kind', 'label'].includes(key))) throw new AgentMuxError('Local upgrade input has SSH fields.', 'CONTROL_PROTOCOL_ERROR')
+    if (Object.keys(p).some(key => !['id', 'kind', 'label', 'tailcat'].includes(key))) throw new AgentMuxError('Local upgrade input has SSH fields.', 'CONTROL_PROTOCOL_ERROR')
+    if (p.tailcat !== undefined) {
+      const t = record(p.tailcat, ['enabled', 'keyFile', 'allowedClients'])
+      if (typeof t.enabled !== 'boolean' || typeof t.keyFile !== 'string' || !Array.isArray(t.allowedClients)) throw new AgentMuxError('Invalid local Tailcat configuration.', 'CONTROL_PROTOCOL_ERROR')
+      for (const key of t.allowedClients) text(key)
+    }
   } else if (p.kind === 'ssh') {
-    text(p.hostname)
+    if (p.transport !== 'tailcat') text(p.hostname)
+    else if (typeof p.hostname !== 'string') throw new AgentMuxError('Invalid remote hostname.', 'CONTROL_PROTOCOL_ERROR')
+    if (p.transport !== undefined && !['ssh', 'ssh-tailcat', 'tailcat'].includes(p.transport as string)) throw new AgentMuxError('Invalid remote transport.', 'CONTROL_PROTOCOL_ERROR')
+    if (p.tailcat !== undefined) { const t = record(p.tailcat, ['address', 'keyFile']); text(t.address); text(t.keyFile) }
+    if ((p.transport === 'tailcat' || p.transport === 'ssh-tailcat') && p.tailcat === undefined) throw new AgentMuxError('Missing Tailcat target.', 'CONTROL_PROTOCOL_ERROR')
     for (const key of ['user', 'identityFile', 'remoteCommand', 'remoteSocketPath', 'runtimeId']) if (p[key] !== undefined) text(p[key])
     if (p.port !== undefined && (count(p.port) < 1 || count(p.port) > 65535)) throw new AgentMuxError('Upgrade SSH port is invalid.', 'CONTROL_PROTOCOL_ERROR')
   } else throw new AgentMuxError('Upgrade input kind is invalid.', 'CONTROL_PROTOCOL_ERROR')

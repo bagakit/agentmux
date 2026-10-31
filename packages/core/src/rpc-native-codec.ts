@@ -1067,7 +1067,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection', 'publication']); if (p.publication !== null) parseControlEndpointState(p.publication); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
-        const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) } else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
+        const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'tailcat', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) }
+        else if (endpoint.transport === 'tailcat') { string(endpoint.address); string(endpoint.keyFile) }
+        else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
       case 'system.subscription.cancel': record(p, ['disposed']); bool(p.disposed); break
       case 'system.storage': {
         const p = record(value, ['status', 'run', 'runtime', 'observedAt', 'storage', 'message'])

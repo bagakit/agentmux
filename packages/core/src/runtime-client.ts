@@ -3,7 +3,7 @@ import { AgentMuxClient } from './client.js'
 import { connectHostedAgentMux } from './hosted-client.js'
 import type { AgentMuxHostedClient } from './hosted-client-contract.js'
 import { connectAgentMuxRpc, type AgentMuxPreparedSshRoute } from './public-rpc-client.js'
-import type { AgentMuxRpcEndpoint } from './public-rpc.js'
+import type { AgentMuxRpcRemoteEndpoint, AgentMuxTailcatTarget } from './public-rpc.js'
 export type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
@@ -36,12 +36,20 @@ export type AgentMuxSshRuntimeClientOptions = {
     identityFile?: string
     remoteCommand?: string
     remoteSocketPath?: string
+    transport?: 'ssh' | 'ssh-tailcat' | 'tailcat'
+    tailcat?: AgentMuxTailcatTarget
   }
 }
 
 /** One mapping for connection, route repair and explicit configuration inspection. */
-export function agentMuxSshEndpoint(target: AgentMuxSshRuntimeClientOptions['target']): Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }> {
+export function agentMuxSshEndpoint(target: AgentMuxSshRuntimeClientOptions['target']): AgentMuxRpcRemoteEndpoint {
+  if (target.transport !== undefined && !['ssh', 'ssh-tailcat', 'tailcat'].includes(target.transport)) throw new AgentMuxError('Unknown remote transport selection.', 'INVALID_CONTROL_REQUEST')
+  if (target.transport === 'tailcat' || target.transport === 'ssh-tailcat') {
+    if (!target.tailcat) throw new AgentMuxError('Tailcat connection requires its saved address and client key.', 'INVALID_CONTROL_REQUEST')
+    if (target.transport === 'tailcat') return { transport: 'tailcat', ...target.tailcat }
+  }
   return { transport: 'ssh', host: target.hostname,
+    ...(target.transport === 'ssh-tailcat' ? { tailcat: target.tailcat! } : {}),
     ...(target.user === undefined ? {} : { user: target.user }), ...(target.port === undefined ? {} : { port: target.port }),
     ...(target.identityFile === undefined ? {} : { identityFile: target.identityFile }),
     ...(target.remoteCommand === undefined ? {} : { command: target.remoteCommand }),

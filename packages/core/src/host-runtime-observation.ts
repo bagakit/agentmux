@@ -12,6 +12,12 @@ import type { AgentMuxRuntimeIdentity, AgentMuxRuntimeDiagnostics, AgentMuxRunti
 export type HostRuntimeSource<T> =
   | { state: 'available'; value: T; readAt: number }
   | { state: 'unavailable'; code: string; message: string; readAt: number }
+/** Listener readiness, never a remote client connection or Agent health claim. Address is a credential. */
+export type TailcatListenerObservation = {
+  state: 'disabled' | 'starting' | 'listening' | 'failed' | 'unknown'
+  address?: string
+  detail?: string
+}
 export type HostRuntimeObservation = {
   routeHostId: string
   /** Original route configuration; null when this endpoint has no Host configuration owner. */
@@ -22,6 +28,7 @@ export type HostRuntimeObservation = {
   nativeIdentity: HostRuntimeSource<AgentMuxRuntimeIdentity>
   diagnostics: HostRuntimeSource<AgentMuxRuntimeDiagnostics>
   resources: HostRuntimeSource<AgentMuxRuntimeResourceSnapshot>
+  tailcat?: TailcatListenerObservation
 }
 function invalid(): never { throw new AgentMuxError('Host Runtime observation is malformed or belongs to another source.', 'CONTROL_PROTOCOL_ERROR') }
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -38,17 +45,26 @@ function source(value: unknown, validate: (value: unknown) => void): void {
   else invalid()
 }
 export function parseHostRuntimeObservation(value: unknown, routeHostId: string): HostRuntimeObservation {
-  const p = record(value, ['routeHostId', 'configuration', 'requestedAt', 'completedAt', 'owner', 'nativeIdentity', 'diagnostics', 'resources'])
+  const p = record(value, ['routeHostId', 'configuration', 'requestedAt', 'completedAt', 'owner', 'nativeIdentity', 'diagnostics', 'resources', 'tailcat'])
   if (p.routeHostId !== routeHostId) invalid()
   if (p.configuration !== null) settingsResourceRecord(p.configuration, 'CONTROL_PROTOCOL_ERROR')
   identity(p.routeHostId); count(p.requestedAt); count(p.completedAt)
   source(p.owner, parseHostedRuntimeOwnerIdentity); source(p.nativeIdentity, parseRuntimeIdentity); source(p.diagnostics, parseRuntimeDiagnostics); source(p.resources, parseRuntimeResources)
+  if (p.tailcat !== undefined) parseTailcatListenerObservation(p.tailcat)
   const result = value as HostRuntimeObservation
   if (result.nativeIdentity.state === 'available' && result.diagnostics.state === 'available' &&
       result.nativeIdentity.value.instanceId !== result.diagnostics.value.ctxmux.serving.instanceId) invalid()
   if (result.owner.state === 'available' && result.owner.value.ctxmux && result.nativeIdentity.state === 'available' &&
       result.owner.value.ctxmux.instanceId !== result.nativeIdentity.value.instanceId) invalid()
   return result
+}
+export function parseTailcatListenerObservation(value: unknown): TailcatListenerObservation {
+  const p = record(value, ['state', 'address', 'detail'])
+  if (!['disabled', 'starting', 'listening', 'failed', 'unknown'].includes(String(p.state))) invalid()
+  if (p.address !== undefined && (p.state !== 'listening' || typeof p.address !== 'string' || !/^tc[A-Za-z0-9_-]+$/u.test(p.address))) invalid()
+  if (p.state === 'listening' && p.address === undefined) invalid()
+  if (p.detail !== undefined && (typeof p.detail !== 'string' || !p.detail || /[\0\r\n]/u.test(p.detail))) invalid()
+  return value as TailcatListenerObservation
 }
 function unavailable(error: unknown): HostRuntimeSource<never> {
   return { state: 'unavailable', code: error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'RUNTIME_OBSERVATION_UNAVAILABLE',

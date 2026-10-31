@@ -16,7 +16,9 @@ import { observeRead } from './observation-read.js'
 import { openForwardedUnixRequest, type RpcForwardingSource } from './rpc-forwarding.js'
 export type { RpcForwardingSource } from './rpc-forwarding.js'
 import { AgentMuxRpcStreamTransport } from './rpc-stream-transport.js'
-import { AgentMuxRpcSshTransport, AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS } from './rpc-ssh-transport.js'
+import { AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS } from './rpc-ssh-transport.js'
+import { AgentMuxRpcRemoteTransport, agentMuxRpcTailcatArguments } from './rpc-remote-transport.js'
+import type { AgentMuxRpcRemoteEndpoint } from './public-rpc.js'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
 import { JSONRPCClient, type JSONRPCRequest, type JSONRPCResponse } from 'json-rpc-2.0'
 import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure } from './errors.js'
@@ -59,7 +61,7 @@ export type AgentMuxPreparedSshRoute = {
 }
 export interface AgentMuxRpcClient {
   setSshRemoteCommand(command?: string): void
-  prepareSshRoute(endpoint: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }>, expectedRuntimeId: string, signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute>
+  prepareSshRoute(endpoint: AgentMuxRpcRemoteEndpoint, expectedRuntimeId: string, signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute>
   call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options?: AgentMuxRpcCallOptions): Promise<AgentMuxRpcResult<M>>
   subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>,
     options: AgentMuxRpcSubscriptionOptions<M>): Promise<AgentMuxRpcSubscription>
@@ -84,6 +86,17 @@ export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<stri
     if (url.username || url.password || url.hash || url.pathname !== '/' || url.search) throw new AgentMuxError('HTTP RPC endpoint must identify its root service.', 'INVALID_CLI_ARGUMENT')
     return { transport: 'http', url: url.href, ...(env.AGENTMUX_RPC_HTTP_TOKEN ? { token: env.AGENTMUX_RPC_HTTP_TOKEN } : {}) }
   }
+  if (url.protocol === 'tailcat:') {
+    // Tailcat addresses are case-sensitive base64url. Never put them through
+    // URL.hostname's case normalization; the opaque URI path preserves bytes.
+    if (url.host || url.username || url.password || url.hash ||
+        [...url.searchParams.keys()].some(key => key !== 'key') || url.searchParams.getAll('key').length !== 1) {
+      throw new AgentMuxError('Invalid Tailcat RPC endpoint.', 'INVALID_CLI_ARGUMENT')
+    }
+    const target = { address: url.pathname, keyFile: url.searchParams.get('key')! }
+    agentMuxRpcTailcatArguments(target)
+    return { transport: 'tailcat', ...target }
+  }
   if (url.protocol === 'ssh:') {
     if (!url.hostname || url.password || url.hash || url.pathname !== '/' && url.pathname !== '') throw new AgentMuxError('Invalid SSH RPC endpoint.', 'INVALID_CLI_ARGUMENT')
     const params = url.searchParams
@@ -94,7 +107,7 @@ export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<stri
       ...(url.port ? { port: Number(url.port) } : {}), ...(params.has('socket') ? { socketPath: params.get('socket')! } : {}),
       ...(params.has('command') ? { command: params.get('command')! } : {}) }
   }
-  throw new AgentMuxError('RPC endpoint must be unix, http, ssh or a Relay connection-offer URL.', 'INVALID_CLI_ARGUMENT')
+  throw new AgentMuxError('RPC endpoint must be unix, http, ssh, tailcat or a Relay connection-offer URL.', 'INVALID_CLI_ARGUMENT')
 }
 function timeout(method: AgentMuxRpcMethod): number {
   return Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)
@@ -288,7 +301,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   }
   throw new AgentMuxError('Reader received an event from another domain.', 'CONTROL_PROTOCOL_ERROR')
 }
-type RpcRoute = { endpoint: AgentMuxRpcEndpoint; ssh?: AgentMuxRpcSshTransport; unix?: AgentMuxRpcStreamTransport; relay?: AgentMuxRpcRelayClient }
+type RpcRoute = { endpoint: AgentMuxRpcEndpoint; stdio?: AgentMuxRpcRemoteTransport; unix?: AgentMuxRpcStreamTransport; relay?: AgentMuxRpcRelayClient }
 // Local transport provenance is intentionally not accepted from wire error fields.
 // It grants only original-operation reconciliation, never authority to replay input.
 const unconfirmedReplies = new WeakSet<object>()
@@ -354,7 +367,7 @@ class RpcClient implements AgentMuxRpcClient {
       // explicit cancellation or transport failure. Only reader opening is timed.
       if (!handlers) return
       deadline = setTimeout(() => end(new AgentMuxError('RPC reader opening timed out; its owner and Runs are preserved.', 'CONTROL_TIMEOUT')),
-        timeout(method) + (route.endpoint.transport === 'ssh' ? AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS : 0))
+        timeout(method) + (route.endpoint.transport === 'ssh' || route.endpoint.transport === 'tailcat' ? AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS : 0))
     }
     const end = (error?: Error) => {
       if (finished) return; finished = true; clearTimeout(deadline); signal?.removeEventListener('abort', abort)
@@ -438,10 +451,14 @@ class RpcClient implements AgentMuxRpcClient {
       // is independently owned here so cancelling a late opening can settle now.
       void (async () => {
         try {
-          if (route.endpoint.transport === 'ssh' && !(options.forwarding ?? this.forwarding)) {
-            if (!route.ssh) route.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(route.endpoint), () => { delete route.ssh }, route.endpoint.socketPath)
+          if ((route.endpoint.transport === 'ssh' || route.endpoint.transport === 'tailcat') && !(options.forwarding ?? this.forwarding)) {
+            if (!route.stdio) {
+              const channel = new AgentMuxRpcRemoteTransport(route.endpoint, route.endpoint.transport === 'ssh' ? agentMuxRpcSshArguments(route.endpoint) : undefined,
+                () => { if (route.stdio === channel) delete route.stdio })
+              route.stdio = channel
+            }
             sharedDispatch = 'queued'
-            opening = route.ssh.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() })
+            opening = route.stdio.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() })
           } else if (route.endpoint.transport === 'unix' && !(options.forwarding ?? this.forwarding)) {
             if (!route.unix) {
               const socket = new Socket(), lifetime = new AbortController(), path = route.endpoint.path
@@ -511,6 +528,7 @@ class RpcClient implements AgentMuxRpcClient {
     return { subscriptionId: exchange.subscriptionId!, dispose: async () => { await exchange.reader.dispose(); this.readers.delete(exchange.reader) } }
   }
   setSshRemoteCommand(command?: string): void {
+    if (this.endpoint.transport === 'tailcat') return
     if (this.endpoint.transport !== 'ssh') throw new AgentMuxError('Only an SSH route has a remote command.', 'INVALID_CONTROL_REQUEST')
     const next = { ...this.endpoint }
     if (command === undefined) delete next.command
@@ -518,13 +536,14 @@ class RpcClient implements AgentMuxRpcClient {
     agentMuxRpcSshArguments(next)
     this.route.endpoint = next
   }
-  async prepareSshRoute(endpoint: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }>, expectedRuntimeId: string, signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute> {
-    if (this.endpoint.transport !== 'ssh') throw new AgentMuxError('Only an existing SSH connection can repair its route.', 'INVALID_CONTROL_REQUEST')
-    agentMuxRpcSshArguments(endpoint)
+  async prepareSshRoute(endpoint: AgentMuxRpcRemoteEndpoint, expectedRuntimeId: string, signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute> {
+    if (this.endpoint.transport !== 'ssh' && this.endpoint.transport !== 'tailcat') throw new AgentMuxError('Only an existing remote connection can repair its route.', 'INVALID_CONTROL_REQUEST')
+    if (endpoint.transport === 'ssh') { agentMuxRpcSshArguments(endpoint); if (endpoint.tailcat) agentMuxRpcTailcatArguments(endpoint.tailcat) }
+    else agentMuxRpcTailcatArguments(endpoint)
     const previous = this.route, previousEndpoint = previous.endpoint, candidate: RpcRoute = { endpoint: { ...endpoint } }
     this.candidates.add(candidate)
     let consumed = false
-    const dispose = async () => { if (consumed) return; consumed = true; this.candidates.delete(candidate); candidate.ssh?.dispose() }
+    const dispose = async () => { if (consumed) return; consumed = true; this.candidates.delete(candidate); candidate.stdio?.dispose() }
     try {
       const response = await this.exchange('runtime.owner.identity', { expectedRuntimeId }, undefined, signal, {}, candidate)
       let owner: import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity
@@ -532,18 +551,18 @@ class RpcClient implements AgentMuxRpcClient {
       finally { await response.reader.dispose(); this.readers.delete(response.reader) }
       if (owner.runtimeId !== expectedRuntimeId || owner.availability !== 'connected') throw new AgentMuxError('The candidate route did not confirm the original Runtime.', 'RUNTIME_OWNER_MISMATCH')
       return { owner, assertCurrent: () => {
-        if (this.closed || consumed || this.route !== previous || previous.endpoint !== previousEndpoint) throw new AgentMuxError('The original SSH route changed during candidate preparation.', 'RUNTIME_OWNER_CHANGED')
+        if (this.closed || consumed || this.route !== previous || previous.endpoint !== previousEndpoint) throw new AgentMuxError('The original remote route changed during candidate preparation.', 'RUNTIME_OWNER_CHANGED')
       }, activate: () => {
         // The configuration owner validates before its durable write. Adoption is
         // local and cannot fail after that write; future RPCs retain owner fences.
         if (consumed) return
         consumed = true; this.candidates.delete(candidate); this.route = candidate
-        previous.ssh?.dispose()
+        previous.stdio?.dispose()
       }, dispose }
     } catch (error) { await dispose(); throw error }
   }
   async dispose(): Promise<void> { if (this.closed) return; this.closed = true
-    for (const route of [this.route, ...this.candidates]) { route.ssh?.dispose(); route.unix?.dispose(); route.relay?.dispose() }
+    for (const route of [this.route, ...this.candidates]) { route.stdio?.dispose(); route.unix?.dispose(); route.relay?.dispose() }
     this.candidates.clear()
     await Promise.all([...this.readers].map(reader => reader.dispose())); this.readers.clear() }
 }

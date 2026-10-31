@@ -29,16 +29,20 @@ function validateEndpoint(value: unknown, socketPath?: string): void {
 }
 
 /** A transport channel only. The existing JSONRPCClient/dispatcher retain RPC ownership. */
-export class AgentMuxRpcSshTransport extends AgentMuxRpcStreamTransport {
-  constructor(args: string[], onClose: () => void, socketPath?: string) {
-    const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+export class AgentMuxRpcStdioProcessTransport extends AgentMuxRpcStreamTransport {
+  constructor(command: 'ssh' | 'tailcat', args: string[], onClose: () => void, socketPath?: string) {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
     super({ input: child.stdin, output: child.stdout, close: () => {
       if (child.exitCode === null && child.signalCode === null) child.kill()
     } }, onClose, { budgetMs: AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS,
       probe: { request: { jsonrpc: '2.0', id: mintObjectId(), method: 'system.endpoint', params: {} },
         validate: value => validateEndpoint(value, socketPath) } })
     child.stderr.resume()
-    child.once('error', () => this.fail(new AgentMuxError('SSH RPC transport could not start.', 'CONTROL_UNAVAILABLE')))
-    child.once('exit', () => this.fail(new AgentMuxError('SSH RPC transport exited; its owner and Runs were preserved.', 'CONTROL_UNAVAILABLE')))
+    child.once('error', () => this.fail(new AgentMuxError(`${command === 'ssh' ? 'SSH' : 'Tailcat'} RPC transport could not start. Install its CLI in PATH and retry the connection.`, 'CONTROL_UNAVAILABLE')))
+    child.once('exit', () => this.fail(new AgentMuxError(`${command === 'ssh' ? 'SSH' : 'Tailcat'} RPC transport exited; its owner and Runs were preserved.`, 'CONTROL_UNAVAILABLE')))
   }
+}
+
+export class AgentMuxRpcSshTransport extends AgentMuxRpcStdioProcessTransport {
+  constructor(args: string[], onClose: () => void, socketPath?: string) { super('ssh', args, onClose, socketPath) }
 }

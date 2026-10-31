@@ -66,7 +66,7 @@ export function parseHostNetworkObservation(value: unknown, hostId: string): Hos
     if (configuration.kind === 'ssh' && configuration.runtimeId !== undefined && sample.owner.runtimeId !== configuration.runtimeId) return fail()
     return { requestDurationMs: t.requestDurationMs, sample }
   })
-  if (configuration.kind === 'local' ? p.ssh !== null : p.ssh === null) return fail()
+  if (configuration.kind === 'local' || configuration.transport === 'tailcat' ? p.ssh !== null : p.ssh === null) return fail()
   return { routeHostId: hostId, configuration, requestedAt: p.requestedAt as number, completedAt: p.completedAt as number,
     observer, target, ssh: p.ssh === null ? null : source(p.ssh, sshConfiguration) }
 }
@@ -100,9 +100,11 @@ export async function observeHostNetwork(hostId: string, configuration: AgentMux
       const sample = parseRuntimeNetworkSnapshot(raw, fence)
       return { requestDurationMs, sample }
     }),
-    configuration.kind === 'ssh' ? read(scope => {
+    configuration.kind === 'ssh' && configuration.transport !== 'tailcat' ? read(scope => {
       const target = { ...configuration, hostId, hostname: rpcString(configuration.hostname, 'SSH hostname') } as AgentMuxSshRuntimeClientOptions['target']
-      return readSshNetworkConfiguration(agentMuxSshEndpoint(target), scope)
+      const endpoint = agentMuxSshEndpoint(target)
+      if (endpoint.transport !== 'ssh') throw new AgentMuxError('This Host uses Tailcat; SSH configuration is not selected.', 'SSH_NOT_SELECTED')
+      return readSshNetworkConfiguration(endpoint, scope)
     }) : Promise.resolve(null)
   ])
   signal?.throwIfAborted()

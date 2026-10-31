@@ -12,9 +12,11 @@ import { createPortableCoreArtifact, type PortableCoreArtifact } from './portabl
 import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY } from './remote-core-upgrade-programs.js'
 import { parseRemoteCoreUpgradeExpected, parseRemoteCoreMaintenanceObservation, parseRemoteCoreMaintenanceShutdown } from './remote-core-upgrade-codec.js'
 
-export type RemoteCoreUpgradeHost = { id: string; kind: 'local'; label: string } | {
+export type RemoteCoreUpgradeHost = { id: string; kind: 'local'; label: string; tailcat?: { enabled: boolean; keyFile: string; allowedClients: string[] } } | {
   id: string; kind: 'ssh'; label: string; hostname: string; user?: string; port?: number; identityFile?: string
   remoteCommand?: string; remoteSocketPath?: string; runtimeId?: string
+  transport?: 'ssh' | 'ssh-tailcat' | 'tailcat'
+  tailcat?: import('./public-rpc.js').AgentMuxTailcatTarget
 }
 export type RemoteCoreUpgradeExpected = {
   targetDigest: string; runtimeId: string; ownerInstanceId: string; processId: number; startTicks: string
@@ -108,7 +110,7 @@ export class RemoteCoreUpgradeManager {
     }
   }
   private host(input: RemoteCoreUpgradeHost): ExecutionHost {
-    if (input.kind !== 'ssh') throw new AgentMuxError('Only explicitly configured SSH headless Core owners can be upgraded here.', 'CORE_UPGRADE_UNAVAILABLE')
+    if (input.kind !== 'ssh' || input.transport === 'tailcat') throw new AgentMuxError('Only explicitly configured SSH Linux x64 headless Core owners can be upgraded here. Tailcat does not install or upgrade a remote Mac.', 'CORE_UPGRADE_UNAVAILABLE')
     return this.options.executionHost?.(input) ?? new SshExecutionHost(input)
   }
   private async program<T>(input: RemoteCoreUpgradeHost, command: string, args: string[], params: unknown): Promise<T> {
@@ -157,6 +159,8 @@ export class RemoteCoreUpgradeManager {
   async check(input: RemoteCoreUpgradeHost): Promise<RemoteCoreUpgradeCheck> {
     const captured = structuredClone(input), artifact = await this.artifact()
     const candidate = { digest: artifact.digest, sourceCommit: artifact.sourceCommit, protocolVersion: artifact.protocolVersion }
+    if (captured.kind === 'ssh' && captured.transport === 'tailcat') return { input: captured, candidate, eligible: false, reason: 'unverified',
+      detail: 'Core maintenance requires an explicitly configured SSH Linux x64 headless service. Tailcat does not install or upgrade a remote Mac.' }
     const latestOperation = await this.latest(captured)
     const prior = latestOperation ? { latestOperation } : {}
     if (latestOperation?.status === 'unknown' || latestOperation?.status === 'running') return { input: captured, candidate, ...prior, eligible: false, reason: 'unverified',
@@ -236,7 +240,7 @@ export class RemoteCoreUpgradeManager {
         }
       } finally { await lease.close() }
     }
-    if (retained.receipt.status === 'unknown' && retained.observed && retained.releaseDirectory && retained.receipt.remoteCommand && retained.receipt.input.kind === 'ssh') {
+    if (input.kind === 'ssh' && input.transport !== 'tailcat' && retained.receipt.status === 'unknown' && retained.observed && retained.releaseDirectory && retained.receipt.remoteCommand && retained.receipt.input.kind === 'ssh') {
       try {
         const next = await this.observe({ ...retained.receipt.input, remoteCommand: retained.receipt.remoteCommand })
         this.verify(retained.observed, next, retained.receipt.expected.candidateDigest)

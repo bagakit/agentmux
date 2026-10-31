@@ -154,11 +154,16 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
 export type AgentMuxRpcCredentials = { agentSessionId: string; capability: string }
 /** Transport-approved local user/device identity; never supplied by business params. */
 export type AgentMuxRpcPrincipal = Readonly<{ kind: 'user' | 'device'; id: string }>
+/** Address includes secret connection material; never use it as a display label or diagnostic. */
+export type AgentMuxTailcatTarget = { address: string; keyFile: string }
+export type AgentMuxRpcRemoteEndpoint =
+  | { transport: 'tailcat'; address: string; keyFile: string }
+  | { transport: 'ssh'; host: string; port?: number; user?: string; identityFile?: string; command?: string; socketPath?: string; tailcat?: AgentMuxTailcatTarget }
 export type AgentMuxRpcEndpoint =
   | { transport: 'relay'; offer: import('@agentmux/relay/offer').ConnectionOffer }
   | { transport: 'unix'; path: string }
   | { transport: 'http'; url: string; token?: string }
-  | { transport: 'ssh'; host: string; port?: number; user?: string; identityFile?: string; command?: string; socketPath?: string }
+  | AgentMuxRpcRemoteEndpoint
 export type AgentMuxRpcSessionTarget = AgentMuxAgentSessionLookup | { kind: 'self' }
 export type AgentMuxRpcUnavailable = { code: string; message: string; recovery: string }
 export type AgentMuxRpcGoalFilters = {
