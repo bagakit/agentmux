@@ -64,6 +64,17 @@ async function fixture() {
   return { root, workspace, topic, mote, config, graph, state, categories, category, owner, workbench, setTopics: (next: ScratchTopicSnapshot[]) => { topics = next } }
 }
 describe('Topic Category uses original Core identities through local migration', () => {
+  it('hydrates content identity from the original Zone instead of a stale Category descriptor', async () => {
+    const f = await fixture(); await f.owner.migrateApply(1)
+    const current = (await f.state.read())!, graph = structuredClone(current.graph)
+    const resource = graph.resources['tab:original-chat'] as Record<string, any>
+    resource.space = { spaceId: f.category.spaceId, zoneId: topicContentZoneId(f.workspace, f.topic) }
+    await f.state.commit({ expectedRevision: current.revision, graph })
+    const restored = desktopWorkbenchFromSpatial((await f.state.read())!.graph)
+    expect(restored.tabs['original-chat']!.space).toEqual({ spaceId: directoryIdentity('local', f.topic.identityDirectoryPath!), zoneId: topicContentZoneId(f.workspace, f.topic) })
+    expect(restored.tabs['original-chat']!.regions['original-thread']).toMatchObject({ sessionId: 'healthy-session' })
+    expect(restored.layouts).toEqual(graph.layouts)
+  })
   it('retains the canonical original Zone when a real failed Host discovery lacks absolute identity paths', async () => {
     const f = await fixture(); await f.owner.migrateApply(1);
     const current = (await f.state.read())!, { identityDirectoryPath: _identity, physicalDirectoryPath: _physical, ...metadata } = f.topic;

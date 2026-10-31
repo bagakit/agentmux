@@ -10,6 +10,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import type { ExecutionHost, TopicKnowledge, TopicKnowledgeSource } from '@agentmux/core'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
@@ -26,7 +28,7 @@ import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWork
 import { WorkspaceFilesTool } from '../src/renderer/src/components/WorkspaceFilesTool'
 import { createWorkbenchTab, fileTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { selectedKnowledgeSources, moveKnowledgeTopic, openKnowledgeSource } from '../src/renderer/src/lib/topic-knowledge-actions'
-import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useAppStore } from '../src/renderer/src/store'
@@ -34,7 +36,9 @@ import { resolveDesktopSpaceSelection, workbenchSelectionCatalog } from '../src/
 import { api } from '../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
-import { ordinaryAgent } from './fixtures/mote-workface'
+import { ordinaryAgent, moteAgent } from './fixtures/mote-workface'
+import { directoryIdentity } from '../src/shared/space-addresses'
+import { initializeTopicSpatialClient } from './helpers/topic-spatial-client-fixture'
 const dragBoundary = vi.hoisted(() => ({ end: undefined as ((event: import('@dnd-kit/core').DragEndEvent) => void) | undefined }))
 // Observe the real component's registered drag callback; all Dnd rendering and Topic owners remain original.
 vi.mock('@dnd-kit/core', async load => {
@@ -51,10 +55,24 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('No avatar writes in this proof') } } }))
 const initial = useAppStore.getState(), CATEGORY = '11111111-1111-4111-8111-111111111111'
-let directories: string[] = [], root: Root | null = null, host: HTMLDivElement
+let directories: string[] = [], root: Root | null = null, host: HTMLDivElement, disposeClient: (() => void) | undefined
 const pendingOwnerCalls = new Set<Promise<unknown>>()
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); useAppStore.setState(initial, true); host = document.createElement('div'); document.body.append(host) })
-afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; await Promise.allSettled([...pendingOwnerCalls]); document.body.replaceChildren(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }) })
+afterEach(async () => {
+  const failures: unknown[] = []
+  try { if (root) await act(async () => root!.unmount()) } catch (error) { failures.push(error) }
+  root = null
+  await Promise.allSettled([...pendingOwnerCalls])
+  if (disposeClient) {
+    try { await useAppStore.getState().refreshSpatialState() } catch (error) { failures.push(error) }
+    finally { disposeClient(); disposeClient = undefined }
+  }
+  document.body.replaceChildren(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  for (const path of directories.splice(0)) {
+    try { await rm(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 }) } catch (error) { failures.push(error) }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Topic UI fixture cleanup did not complete: ' + failures.map(error => error instanceof Error ? error.message : String(error)).join('; '))
+})
 async function settle(predicate: () => boolean) {
   for (let i = 0; i < 100 && !predicate(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   expect(predicate()).toBe(true)
@@ -79,21 +97,21 @@ async function fixture() {
   const first = (await owner.call('topic.create', { topicId: 'view:first', title: '工作方法' })).topic
   const second = (await owner.call('topic.create', { topicId: 'view:second', title: '学习资料' })).topic
   const category = (await owner.call('topic.category.create', { categoryId: CATEGORY, title: '工作' })).category
-  const original = (await state.read())!, tabs = [first, second].map(topic => ({ ...createWorkbenchTab('chat:' + topic.topicId, { kind: 'agent', phase: 'attached', regionId: 'thread:' + topic.topicId, workspaceId: workspace.id, sessionId: 'healthy:' + topic.topicId }), topicId: topic.topicId, space: { spaceId: topic.categorySpaceIds[0]!, zoneId: topic.zoneId } }))
+  const original = (await state.read())!, tabs = [first, second].map(topic => ({ ...createWorkbenchTab('chat:' + topic.topicId, { kind: 'agent', phase: 'attached', regionId: 'thread:' + topic.topicId, workspaceId: workspace.id, sessionId: 'healthy:' + topic.topicId }), topicId: topic.topicId, space: { spaceId: directoryIdentity(workspace.hostId, topic.directoryPath), zoneId: topic.zoneId } }))
   const layout = createWorkspaceLayout('original-group', tabs.map(tab => tab.id))
-  const graph = original.graph
-  graph.tabs = tabs.map(tab => ({ tabId: tab.id, zoneId: tab.space.zoneId, workspaceId: workspace.id, name: null, regionIds: [tab.layout.activeRegionId] }))
-  graph.regions = tabs.map(tab => ({ tabId: tab.id, regionId: tab.layout.activeRegionId, kind: 'agent', agentSessionId: 'healthy:' + tab.topicId, runId: 'original-run', execution: { hostId: 'local', cwd: first.directoryPath } }))
-  graph.layouts[workspace.id] = layout
-  await state.commit({ expectedRevision: original.revision, graph })
   const topics = await scratch.list(workspace), config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-  useAppStore.setState({ config, loading: false, activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: layout }, topicCategories: categoriesFromSpatial(graph), spaceZoneBindings: desktopBindingsFromSpatial(graph), scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, reading: false, error: null, topics } }, workbenchSpaceSelection: { workspaceId: workspace.id, spaceId: first.categorySpaceIds[0]!, zoneId: first.zoneId, topicId: first.topicId, tabId: tabs[0]!.id, groupId: layout.activeGroupId, regionId: tabs[0]!.layout.activeRegionId }, pinnedItems: { [workspace.id]: [first.topicId] }, agentComposerDrafts: { ['healthy:' + first.topicId]: 'Original unsent draft' } })
+  const sessions = [first, second].map(topic => ({ ...moteAgent('healthy:' + topic.topicId, topic.topicId), workspacePath: topic.directoryPath }))
+  useAppStore.setState({ config, sessions, loading: false, activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: layout }, topicCategories: categoriesFromSpatial(original.graph), spaceZoneBindings: desktopBindingsFromSpatial(original.graph), scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, reading: false, error: null, topics } }, workbenchSpaceSelection: { workspaceId: workspace.id, spaceId: first.categorySpaceIds[0]!, zoneId: first.zoneId, topicId: first.topicId, tabId: tabs[0]!.id, groupId: layout.activeGroupId, regionId: tabs[0]!.layout.activeRegionId }, pinnedItems: { [workspace.id]: [first.topicId] }, agentComposerDrafts: { ['healthy:' + first.topicId]: 'Original unsent draft' } })
+  await state.commit({ expectedRevision: original.revision, graph: desktopSpatialGraph(useAppStore.getState(), topics, original.graph) })
   const call: typeof owner.call = async (method, params) => {
     const pending = owner.call(method, params); pendingOwnerCalls.add(pending)
     try { return await pending } finally { pendingOwnerCalls.delete(pending) }
   }
   vi.spyOn(api.topics, 'call').mockImplementation(call)
-  vi.spyOn(api.spatial, 'read').mockImplementation(() => state.read())
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => state.readForLayout())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => state.commit(input))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => state.subscribe(listener))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => state.retainDisplayLabels(values))
   vi.spyOn(api.scratch, 'listTopics').mockImplementation(() => scratch.list(workspace))
   vi.spyOn(api.scratch, 'readTopic').mockImplementation((_workspace, id) => scratch.read(workspace, id))
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
@@ -101,6 +119,7 @@ async function fixture() {
   vi.spyOn(api.files, 'read').mockImplementation((_workspace, path) => files.read(workspace, path))
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+  disposeClient = await initializeTopicSpatialClient(() => scratch.list(workspace))
   return { workspace, owner, state, first, second, category, topics, tabs, layout, publicFiles }
 }
 
@@ -144,6 +163,55 @@ async function entry(owner: TopicKnowledgeOwner, topicId: string, title: string,
   return (await owner.call('topic.knowledge.write', { topicId, entryId: crypto.randomUUID(), title, content: 'Useful original conclusion', form: sources.length ? 'reference' : 'derived', certainty: 'decision', sources, expectedRevision: null })).entry
 }
 describe('Topic knowledge UI consumes the real Host content and Core graph owners', () => {
+  it('keeps a new Topic content identity through classification transfer and opens a file beside its original Terminal', async () => {
+    const f = await fixture()
+    const terminal = { ...ordinaryAgent, id: 'identity-born-terminal', kind: 'terminal' as const, providerId: null,
+      control: { kind: 'terminal' as const, hostId: 'local', runId: 'identity-born-run', run: { runId: 'identity-born-run' } } }
+    vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(terminal)
+    const born = await useAppStore.getState().createScratchTopic(undefined, undefined, { categoryId: f.category.categoryId })
+    await useAppStore.getState().refreshSpatialState()
+    const original = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === born.id)!
+    const regionId = original.layout.activeRegionId
+    const contentSpaceId = directoryIdentity(f.workspace.hostId, born.identityDirectoryPath ?? born.physicalDirectoryPath!)
+    const submissions = vi.mocked(api.spatial.commit).mock.calls.flatMap(([input]) => input.graph.tabs
+      .filter(tab => tab.tabId === original.id && tab.zoneId === original.space?.zoneId)
+      .map(tab => input.graph.resources['tab:' + tab.tabId]))
+    expect(submissions.length).toBeGreaterThan(0)
+    // A later hydration repair cannot certify what the original producer submitted.
+    for (const metadata of submissions) expect(metadata).toMatchObject({ space: { spaceId: contentSpaceId, zoneId: original.space!.zoneId } })
+    const destination = (await f.owner.call('topic.category.ls', {})).categories.find(category => category.spaceId === f.first.categorySpaceIds[0])!
+    await moveKnowledgeTopic((await f.owner.call('topic.inspect', { topicId: born.id })).topic!, destination.categoryId)
+    const state = useAppStore.getState(), choice = state.workbenchSpaceSelection!
+    const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'open.file',
+      path: 'topic.md', zoneId: choice.zoneId!, spaceId: destination.spaceId, displayWorkspaceId: f.workspace.id,
+      groupId: choice.groupId!, tabId: original.id, regionId, split: 'right', focus: false })
+    expect(result.operation).toBe('open.file')
+    if (result.operation !== 'open.file') throw new Error('The original file producer did not return its file receipt.')
+    expect(result.outcome, JSON.stringify(result.issues)).not.toMatch(/unknown|refused/u)
+    expect(result.data.kind).toBe('text')
+    expect(useAppStore.getState().tabs[original.id]?.space).toEqual({ spaceId: contentSpaceId, zoneId: choice.zoneId })
+    expect(useAppStore.getState().tabs[original.id]?.regions[regionId]).toMatchObject({ kind: 'terminal', sessionId: terminal.id })
+  })
+  it('opens a new discussion Tab with the original content identity while its navigation remains in the Category', async () => {
+    const f = await fixture()
+    await moveKnowledgeTopic((await f.owner.call('topic.inspect', { topicId: f.first.topicId })).topic!, CATEGORY)
+    const before = useAppStore.getState()
+    const terminal = { ...ordinaryAgent, id: 'new-chat-terminal', workspacePath: f.first.directoryPath, kind: 'terminal' as const, providerId: null,
+      control: { kind: 'terminal' as const, hostId: 'local', runId: 'new-chat-run', run: { runId: 'new-chat-run' } } }
+    vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(terminal)
+    await useAppStore.getState().openScratchTopic(f.first.topicId, f.workspace.id, { newTab: true })
+    await useAppStore.getState().refreshSpatialState()
+    const state = useAppStore.getState(), added = Object.values(state.tabs).filter(tab => !before.tabs[tab.id])
+    expect(added).toHaveLength(1)
+    expect(added[0]!.space).toEqual({ spaceId: directoryIdentity(f.workspace.hostId, f.first.directoryPath), zoneId: f.first.zoneId })
+    const submissions = vi.mocked(api.spatial.commit).mock.calls.flatMap(([input]) => input.graph.tabs
+      .filter(tab => tab.tabId === added[0]!.id && tab.zoneId === f.first.zoneId).map(tab => input.graph.resources['tab:' + tab.tabId]))
+    expect(submissions.length).toBeGreaterThan(0)
+    for (const metadata of submissions) expect(metadata).toMatchObject({ space: { spaceId: directoryIdentity(f.workspace.hostId, f.first.directoryPath), zoneId: f.first.zoneId } })
+    expect(state.workbenchSpaceSelection).toMatchObject({ spaceId: f.category.spaceId, zoneId: f.first.zoneId, tabId: added[0]!.id })
+    for (const tab of Object.values(before.tabs)) expect(state.tabs[tab.id]).toBe(tab)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
   it('creates a canonical Topic from the mounted Category action and attaches its first Terminal to the confirmed original Zone', async () => {
     const f = await fixture(), before = useAppStore.getState()
     const terminal = { ...ordinaryAgent, id: 'canonical-born-terminal', kind: 'terminal' as const, providerId: null,
@@ -160,7 +228,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     const tabs = Object.values(state.tabs).filter(tab => tab.topicId === born.topicId)
     expect(tabs).toHaveLength(1)
     const tab = tabs[0]!, regionId = tab.layout.activeRegionId
-    expect(tab.space).toEqual({ spaceId: f.category.spaceId, zoneId: born.zoneId })
+    expect(tab.space).toEqual({ spaceId: directoryIdentity(f.workspace.hostId, born.directoryPath), zoneId: born.zoneId })
     expect(state.layouts[f.workspace.id]!.groups.find(group => group.id === state.workbenchSpaceSelection?.groupId)?.tabOrder).toContain(tab.id)
     expect(tab.regions[regionId]).toMatchObject({ kind: 'terminal', phase: 'attached', sessionId: terminal.id })
     expect(state.workbenchSpaceSelection).toMatchObject({ topicId: born.topicId, zoneId: born.zoneId, spaceId: f.category.spaceId, tabId: tab.id, regionId })
@@ -207,9 +275,9 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     const regionId = tab.layout.activeRegionId
     useAppStore.getState().setAgentComposerDraft(regionId, 'Later edited request')
     useAppStore.setState({ mainSurface: 'board', workbenchSpaceSelection: null })
-    release(); const topic = await pending
+    release(); await expect(pending).resolves.toMatchObject({ id: tab.topicId }); const topic = await pending
     const state = useAppStore.getState(), fact = (await f.owner.call('topic.inspect', { topicId: topic.id })).topic!
-    expect(state.tabs[tab.id]?.space).toEqual({ spaceId: f.category.spaceId, zoneId: fact.zoneId })
+    expect(state.tabs[tab.id]?.space).toEqual({ spaceId: directoryIdentity(f.workspace.hostId, fact.directoryPath), zoneId: fact.zoneId })
     expect(state.tabs[tab.id]?.regions[regionId]).toBe(tab.regions[regionId])
     expect(state.agentComposerDrafts[regionId]).toBe('Later edited request')
     expect(state.mainSurface).toBe('board'); expect(state.workbenchSpaceSelection).toBeNull()
@@ -404,8 +472,13 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     expect(document.activeElement).toBe(field)
   })
   it('reorders only the shown Category without erasing another Category user order', async () => {
-    const f = await fixture(), extra = (await f.owner.call('topic.create', { topicId: 'view:neighbor', title: '工作里的邻居' })).topic
+    const f = await fixture()
+    await useAppStore.getState().refreshSpatialState()
+    const extra = (await f.owner.call('topic.create', { topicId: 'view:neighbor', title: '工作里的邻居' })).topic
+    // Finish each arranged client's graph write before sampling the next exact revision.
+    await useAppStore.getState().refreshSpatialState()
     await moveKnowledgeTopic((await f.owner.call('topic.inspect', { topicId: f.first.topicId })).topic!, CATEGORY)
+    await useAppStore.getState().refreshSpatialState()
     await moveKnowledgeTopic((await f.owner.call('topic.inspect', { topicId: extra.topicId })).topic!, CATEGORY)
     await useAppStore.getState().refreshScratchTopics(f.workspace.id, true)
     useAppStore.setState({ pinnedItems: {}, scratchTopicOrder: [f.second.topicId, 'unshown-original-id', f.first.topicId, extra.topicId] })
@@ -463,7 +536,8 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     const f = await fixture(), before = useAppStore.getState(), current = (await f.owner.call('topic.inspect', { topicId: f.first.topicId })).topic!
     await moveKnowledgeTopic(current, CATEGORY)
     expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.category.spaceId, zoneId: f.first.zoneId, tabId: f.tabs[0]!.id, regionId: f.tabs[0]!.layout.activeRegionId })
-    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().layouts).toEqual(before.layouts)
+    for (const tab of Object.values(before.tabs)) expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
     expect(useAppStore.getState().pinnedItems).toBe(before.pinnedItems); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
     expect((await f.state.read())!.graph.regions).toHaveLength(2); expect(api.sessions.stop).not.toHaveBeenCalled()
     await mount(createElement(SpaceTopicsTree, { workspace: f.workspace, icons: {}, onChangeIcon: () => {} }))
@@ -476,7 +550,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     await act(async () => root!.render(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.category.spaceId, onRevealDirectory: () => {} })))
     await settle(() => !!host.querySelector('[data-topic-id]'))
     expect([...host.querySelectorAll('[data-topic-id]')].map(row => row.getAttribute('data-topic-id'))).toEqual([f.first.topicId])
-    expect(host.querySelector('.workspace-topic-index-header')!.textContent).toBe('Topics1')
+    expect(host.querySelector('.workspace-topic-index-header')!.textContent).toBe(f.category.title + '1')
     expect(host.querySelector('[aria-label="Actions for 工作方法"]')).not.toBeNull()
   })
   it('creates a durable Category from the only Topics creation icon without creating a Topic', async () => {
@@ -555,7 +629,8 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     expect((await f.owner.call('topic.knowledge.ls', { topicId: created.topicId })).entries).toContainEqual(expect.objectContaining({ title: 'Original research', sources, form: 'reference' }))
     expect((await f.state.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(f.tabs.map(tab => tab.id))
     expect((await f.state.read())!.graph.regions).toHaveLength(2); expect(api.sessions.stop).not.toHaveBeenCalled()
-    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().layouts).toEqual(before.layouts); expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    for (const tab of Object.values(before.tabs)) expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
   })
   it('keeps a captured target through later navigation and writes original revision/source metadata', async () => {
     const f = await fixture(), source: TopicKnowledgeSource = { kind: 'file', hostId: 'local', path: f.first.directoryPath + '/outcome/original.md', revision: 'original-source' }, saved = vi.fn()
@@ -584,11 +659,14 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     const f = await fixture(), navigation = vi.spyOn(useAppStore.getState(), 'openScratchTopic')
     await expect(openKnowledgeSource({ kind: 'topic', topicId: f.first.topicId, chatId: f.tabs[1]!.id, threadId: f.tabs[1]!.layout.activeRegionId })).rejects.toThrow('not uniquely confirmed')
     expect(navigation).not.toHaveBeenCalled()
-    useAppStore.setState({ spaceZoneBindings: {} })
-    expect(selectedKnowledgeSources(f.workspace.id)?.sources).toEqual([{ kind: 'space', zoneId: f.first.zoneId, tabId: f.tabs[0]!.id, regionId: f.tabs[0]!.layout.activeRegionId }])
-    const originalBindings = desktopBindingsFromSpatial((await f.state.read())!.graph)
-    useAppStore.setState(state => ({ tabs: { ...state.tabs, [f.tabs[0]!.id]: { ...state.tabs[f.tabs[0]!.id]!, topicId: 'view:obsolete-tag' } }, spaceZoneBindings: originalBindings }))
-    expect(selectedKnowledgeSources(f.workspace.id)?.sources).toEqual([{ kind: 'topic', topicId: f.first.topicId, chatId: f.tabs[0]!.id, threadId: f.tabs[0]!.layout.activeRegionId }])
+    const original = useAppStore.getState()
+    try {
+      // Exercise the temporary observation synchronously; it is not a user graph edit to persist.
+      useAppStore.setState({ spaceZoneBindings: {} })
+      expect(selectedKnowledgeSources(f.workspace.id)?.sources).toEqual([{ kind: 'space', zoneId: f.first.zoneId, tabId: f.tabs[0]!.id, regionId: f.tabs[0]!.layout.activeRegionId }])
+      useAppStore.setState(state => ({ tabs: { ...state.tabs, [f.tabs[0]!.id]: { ...state.tabs[f.tabs[0]!.id]!, topicId: 'view:obsolete-tag' } }, spaceZoneBindings: original.spaceZoneBindings }))
+      expect(selectedKnowledgeSources(f.workspace.id)?.sources).toEqual([{ kind: 'topic', topicId: f.first.topicId, chatId: f.tabs[0]!.id, threadId: f.tabs[0]!.layout.activeRegionId }])
+    } finally { useAppStore.setState({ tabs: original.tabs, spaceZoneBindings: original.spaceZoneBindings }) }
   })
   it('a Category Topic click selects its original Chat once while delayed metadata only refreshes content', async () => {
     const f = await fixture(), originalSpatial = await f.state.read()
@@ -714,7 +792,16 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     await click(button('Search'))
     await settle(() => vi.mocked(api.topics.call).mock.calls.some(call => call[0] === 'topic.knowledge.search') && !host.textContent!.includes('Reading knowledge…'))
     expect(api.topics.call).toHaveBeenCalledWith('topic.knowledge.search', { topicId: f.first.topicId, query: 'Original', limit: 100 })
-    expect(host.querySelectorAll('.topic-knowledge-row')).toHaveLength(1)
+    const searchIndex = vi.mocked(api.topics.call).mock.calls.findLastIndex(([method, params]) => method === 'topic.knowledge.search' && 'query' in params && params.query === 'Original')
+    expect(searchIndex).toBeGreaterThanOrEqual(0)
+    const receipt = await vi.mocked(api.topics.call).mock.results[searchIndex]!.value as Awaited<ReturnType<typeof f.owner.call<'topic.knowledge.search'>>>
+    const resultCount = receipt.entries.length + receipt.documents.length
+    await settle(() => host.querySelector('.topic-knowledge-results__label')?.textContent === `${resultCount} ${resultCount === 1 ? 'result' : 'results'}`)
+    expect(host.querySelectorAll('.topic-knowledge-row')).toHaveLength(resultCount)
+    expect(host.querySelectorAll('[data-knowledge-topic-id]')).toHaveLength(1)
+    expect([...host.querySelectorAll('[data-document-path]')].map(row => row.getAttribute('data-document-path')).sort()).toEqual(receipt.documents.map(document => document.target.path).sort())
+    expect(receipt.entries.every(item => item.topicId === f.first.topicId)).toBe(true)
+    expect(receipt.documents.every(item => item.topicId === f.first.topicId)).toBe(true)
     const results = host.querySelector('.topic-knowledge-list')!.textContent
     await click(button('Show Topics'))
     expect(ids()).toEqual([f.first.topicId])
