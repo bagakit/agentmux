@@ -4215,6 +4215,77 @@ function recordClosedWorkbenchEntities(before: Record<string, WorkbenchTab>, aft
   }
 }
 let disposeCoreSpatial:(()=>void)|null=null
+
+/** Capture only durable workface facts through the original Core spatial owner. */
+function captureSpatialWorkbench(spatial: DesktopSpatialPersistence) {
+  const state = useAppStore.getState()
+  return !state.config && spatial.current
+    ? { ...spatial.current.graph, projectGroups: state.projectGroups }
+    : desktopSpatialGraph(state, Object.values(state.scratchTopicSnapshots).flatMap(snapshot => snapshot.topics ?? []),
+      spatial.current?.graph ?? null, spatial.removedEntities)
+}
+
+/** An explicit save covers this current workface, even if a change notification was missed. */
+export async function checkpointSpatialWorkbench(): Promise<void> {
+  const spatial = coreSpatialPersistence
+  if (!spatial) throw new Error('The original Core spatial owner is unavailable. Current work and healthy Agent input are retained; reconnect storage and retry saving.')
+  spatial.stage(captureSpatialWorkbench(spatial))
+  await spatial.flush()
+  if (coreSpatialPersistence !== spatial) throw new Error('The Core spatial owner changed while saving. The current workface is retained; retry saving through its current owner.')
+  if (!spatial.ready) throw new Error('Core spatial storage has not confirmed this save. The original workface is retained; reconnect storage and retry.')
+}
+
+/** The spatial observer lives with its own owner, independently of Runtime startup success. */
+function connectSpatialWorkbench(spatial: DesktopSpatialPersistence): () => void {
+  const apply=(saved:import('@agentmux/core/spatial-graph').AgentMuxSpatialState,baseline:import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph|null)=>{
+    if (coreSpatialPersistence !== spatial) return
+    const current=useAppStore.getState()
+    // Organization facts do not require available Host resource configuration.
+    if(!current.config) { useAppStore.setState({projectGroups:saved.graph.projectGroups ?? []}); return }
+    const unavailable=new Set<string>()
+    const persisted=desktopWorkbenchFromSpatial(saved.graph,id=>unavailable.add(id))
+    if(unavailable.size) current.reportWorkbenchSaveFailure(new Error('Host resources are unavailable for '+unavailable.size+' saved tab(s). Original identities and current content are retained. Restore their Host connection.'))
+    const restored=restorePersistedWorkbench({config:current.config,sessions:current.sessions,persisted,createTabGroupId:newTabGroupId,retiredSessionIds:new Set(),preserveEntityIds:new Set(saved.graph.tabs.map(tab=>tab.tabId))})
+    const old=projectPersistedWorkbench({tabs:current.tabs,layouts:current.layouts})
+    const originalLaunchers=new Map(baseline?.regions.filter(region=>region.kind==='launcher').map(region=>[region.regionId,region]))
+    const tabs={...Object.fromEntries([...unavailable].flatMap(id=>current.tabs[id]?[[id,current.tabs[id]]]:[])),...Object.fromEntries(Object.entries(restored.tabs).map(([id,tab])=>{
+      const live=current.tabs[id]
+      if(live && sameSpatialValue(old.tabs[id],persisted.tabs[id])) return [id,live]
+      if(!live) return [id,tab]
+      const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>{
+        const surface=live.regions[regionId],original=originalLaunchers.get(regionId)
+        // A pending creation is encoded as its original Launcher until Core
+        // confirms it. That unchanged ACK cannot cancel the live creation.
+        // Compare the submitted baseline, never borrow a replacement's data.
+        const pendingLauncher=surface?.kind==='agent' && surface.phase==='launching' &&
+          current.pendingAgentLaunches[surface.sessionId]?.request?.createOperationId &&
+          region.kind==='launcher' && original?.tabId===id &&
+          sameSpatialValue(baseline?.resources['region:'+regionId],saved.graph.resources['region:'+regionId])
+        return [regionId,surface && (pendingLauncher || sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId])) ? surface : region]
+      }))
+      return [id,{...tab,regions}]
+    }))}
+    const workbenchSpaceSelection=reconcileWorkbenchSpaceSelection(current.workbenchSpaceSelection,baseline,saved.graph)
+    useAppStore.setState({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection})
+    applyNameAcknowledgement(saved)
+  }
+  const offRemote = spatial.connect(apply, applyNameAcknowledgement)
+  const offLocal = useAppStore.subscribe((state, previous) => {
+    if (coreSpatialPersistence !== spatial || state.loading ||
+      (state.topicCategories === previous.topicCategories && state.projectGroups === previous.projectGroups &&
+       state.tabs === previous.tabs && state.layouts === previous.layouts &&
+       state.spaceZoneBindings === previous.spaceZoneBindings && state.config === previous.config)) return
+    try { spatial.stage(captureSpatialWorkbench(spatial)) }
+    catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error) }
+  })
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    offLocal()
+    offRemote()
+  }
+}
 export function currentDisplayNameRevision(kind: string, id: string): number {
   return projectedNameRevision(useAppStore.getState().nameLabels, kind, id)
 }
@@ -5380,6 +5451,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let booting = true
     let browserBooting = true
     let observing = true
+    let ownedSpatial: DesktopSpatialPersistence | null = null
+    let disposeOwnedSpatialObservation: (() => void) | null = null
+    const observeOwnedSpatial = () => {
+      if (!ownedSpatial || coreSpatialPersistence !== ownedSpatial || disposeOwnedSpatialObservation) return
+      disposeOwnedSpatialObservation = connectSpatialWorkbench(ownedSpatial)
+      disposeCoreSpatial = disposeOwnedSpatialObservation
+    }
+    const disposeOwnedSpatial = () => {
+      const dispose = disposeOwnedSpatialObservation
+      disposeOwnedSpatialObservation = null
+      dispose?.()
+      if (disposeCoreSpatial === dispose) disposeCoreSpatial = null
+    }
     const a2aNotifications = createA2AMessageNotifier(async input => {
       const delivery = await api.ui.notifyAgentAttention(input)
       const notice = notificationDeliveryNotice(delivery)
@@ -5459,10 +5543,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     runtimeSubscriptionCount += 4
     const disposeRuntimeSubscriptions = (): void => {
+      if (!observing) return
       observing = false
       disposeStartupProgress()
-      disposeCoreSpatial?.();disposeCoreSpatial=null
-      if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
       cancelSessionMembershipResync()
       disposeMoteStartupRecovery()
@@ -5506,9 +5589,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ]
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if(api.spatial) {
-        coreSpatialPersistence=new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
+        const spatialOwner = new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
+        ownedSpatial = spatialOwner
+        coreSpatialPersistence = spatialOwner
         try {
-          const spatial=await coreSpatialPersistence.read()
+          const spatial=await spatialOwner.read()
           if(spatial) set({topicCategories:categoriesFromSpatial(spatial.graph),projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph,get().config)})
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
@@ -5721,50 +5806,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!persistWarning) openPersistWrites()
       // Keep observing and saving through the original Core spatial owner. A failed first
       // read retains the original preference projection until Core can confirm its document.
-      if(coreSpatialPersistence) {
-        const spatial=coreSpatialPersistence
-        const capture=()=> !get().config && spatial.current
-          ? {...spatial.current.graph,projectGroups:get().projectGroups}
-          : desktopSpatialGraph(get(),Object.values(get().scratchTopicSnapshots).flatMap(snapshot=>snapshot.topics??[]),spatial.current?.graph??null,spatial.removedEntities)
-        const apply=(saved:import('@agentmux/core/spatial-graph').AgentMuxSpatialState,baseline:import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph|null)=>{
-          const current=get()
-          // Organization facts do not require available Host resource configuration.
-          if(!current.config) { set({projectGroups:saved.graph.projectGroups ?? []}); return }
-          const unavailable=new Set<string>()
-          const persisted=desktopWorkbenchFromSpatial(saved.graph,id=>unavailable.add(id))
-          if(unavailable.size) current.reportWorkbenchSaveFailure(new Error('Host resources are unavailable for '+unavailable.size+' saved tab(s). Original identities and current content are retained. Restore their Host connection.'))
-          const restored=restorePersistedWorkbench({config:current.config,sessions:current.sessions,persisted,createTabGroupId:newTabGroupId,retiredSessionIds:new Set(),preserveEntityIds:new Set(saved.graph.tabs.map(tab=>tab.tabId))})
-          const old=projectPersistedWorkbench({tabs:current.tabs,layouts:current.layouts})
-          const originalLaunchers=new Map(baseline?.regions.filter(region=>region.kind==='launcher').map(region=>[region.regionId,region]))
-          const tabs={...Object.fromEntries([...unavailable].flatMap(id=>current.tabs[id]?[[id,current.tabs[id]]]:[])),...Object.fromEntries(Object.entries(restored.tabs).map(([id,tab])=>{
-            const live=current.tabs[id]
-            if(live && sameSpatialValue(old.tabs[id],persisted.tabs[id])) return [id,live]
-            if(!live) return [id,tab]
-            const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>{
-              const surface=live.regions[regionId],original=originalLaunchers.get(regionId)
-              // A pending creation is encoded as its original Launcher until Core
-              // confirms it. That unchanged ACK cannot cancel the live creation.
-              // Compare the submitted baseline, never borrow a replacement's data.
-              const pendingLauncher=surface?.kind==='agent' && surface.phase==='launching' &&
-                current.pendingAgentLaunches[surface.sessionId]?.request?.createOperationId &&
-                region.kind==='launcher' && original?.tabId===id &&
-                sameSpatialValue(baseline?.resources['region:'+regionId],saved.graph.resources['region:'+regionId])
-              return [regionId,surface && (pendingLauncher || sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId])) ? surface : region]
-            }))
-            return [id,{...tab,regions}]
-          }))}
-          const workbenchSpaceSelection=reconcileWorkbenchSpaceSelection(current.workbenchSpaceSelection,baseline,saved.graph)
-          set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection})
-          applyNameAcknowledgement(saved)
-        }
-        // Keep observation and local edit capture available even when the first storage read
-        // or bootstrap fails. The existing save Retry re-reads Core before admitting a write.
-        const offRemote=spatial.connect(apply, applyNameAcknowledgement)
-        const offLocal=useAppStore.subscribe((state,previous)=>{
-          if(state.loading || (state.topicCategories===previous.topicCategories && state.projectGroups===previous.projectGroups && state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
-          spatial.stage(capture())
-        })
-        disposeCoreSpatial=()=>{offLocal();offRemote()}
+      if (ownedSpatial && coreSpatialPersistence === ownedSpatial) {
+        const spatial = ownedSpatial
+        const capture = () => captureSpatialWorkbench(spatial)
+        observeOwnedSpatial()
         try {
           await spatial.bootstrap(capture())
           const closed = get().config?.workspaces.filter(workspace => workspace.closeout) ?? []
@@ -5810,6 +5855,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       void api.ui.spatialLinksReady().catch(error => get().reportError(new Error('Spatial link startup is unconfirmed. Your workface is kept; retry its exact link. ' + presentError(error))))
       return () => {
         disposeRuntimeSubscriptions()
+        disposeOwnedSpatial()
       }
     } catch (error) {
       booting = false
@@ -5835,8 +5881,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // If hydration itself failed, keep the write fence closed: opening it here would let the
       // default empty state overwrite the only durable copy before the user can repair storage.
       // Other startup failures have a verified record and may accept intentional later edits.
+      // Runtime initialization can fail while the workface remains usable. Keep
+      // this original spatial observer alive, including failures before its usual
+      // installation point; otherwise later edits have no durable consumer.
+      observeOwnedSpatial()
+      if (ownedSpatial && coreSpatialPersistence === ownedSpatial) {
+        try {
+          const graph = captureSpatialWorkbench(ownedSpatial)
+          if (ownedSpatial.ready) ownedSpatial.stage(graph)
+          else await ownedSpatial.bootstrap(graph)
+        } catch (saveError) { get().reportWorkbenchSaveFailure(saveError) }
+      }
       if (!persistHydrationError) openPersistWrites()
-      return () => {}
+      return () => {
+        disposeRuntimeSubscriptions()
+        disposeOwnedSpatial()
+      }
     }
   },
   async saveProjectGroup(input) {
