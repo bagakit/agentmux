@@ -31,19 +31,25 @@ afterEach(async () => { await server?.stop(); if (root) await rm(root, { recursi
 
 it('discovers Host read and Test in the built skill without losing project registration', async () => {
   const result = await exec(process.execPath, [cli, 'settings', '--help'], {
-    timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: join(root, 'absent-owner'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+    timeout: 5_000, env: { ...objectCliEnvironment(root), NODE_NO_WARNINGS: '1', AGENTMUX_RUNTIME_DIRECTORY: join(root, 'absent-owner'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
   })
   expect(result.stdout.length).toBeGreaterThan(0)
-  expect(result.stdout).toContain('amux settings hosts ls')
-  expect(result.stdout).toContain('amux settings hosts test <id>')
-  expect(result.stdout).toContain('amux settings workspaces register --input <file|->')
+  expect(result.stdout).toContain('amux settings hosts')
+  expect(result.stdout).toContain('amux settings workspaces')
+  const hosts = await run(['--help'])
+  expect(hosts.stdout).toContain('amux settings hosts ls')
+  expect(hosts.stdout).toContain('amux settings hosts test <id>|--input <file|->')
+  const workspaces = await exec(process.execPath, [cli, 'settings', 'workspaces', '--help'], {
+    env: { ...objectCliEnvironment(root), NODE_NO_WARNINGS: '1', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+  })
+  expect(workspaces.stdout).toContain('amux settings workspaces register --input <file|->')
   expect(seen).toEqual([])
 })
 
 async function run(args: string[], input?: string | Buffer, directory = root) {
   try {
     const pending = exec(process.execPath, [cli, 'settings', 'hosts', ...args], {
-      timeout: 5_000, env: { ...objectCliEnvironment(root), AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+      timeout: 5_000, env: { ...objectCliEnvironment(root), NODE_NO_WARNINGS: '1', AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
     })
     if (input !== undefined) pending.child.stdin!.end(input)
     return { code: 0, ...await pending }
@@ -76,8 +82,11 @@ it('documents explicit Test without a live owner, while ordinary list and Test s
   const offline = join(root, 'absent-owner')
   const help = await run(['--help'], undefined, offline)
   expect(help.code).toBe(0); expect(help.stdout).toContain('settings hosts test <id>')
-  expect(help.stdout).toContain('settings hosts test --input <file|->')
-  expect(help.stdout).toContain('check-failed'); expect(help.stdout).toContain('Exit 0')
+  expect(help.stdout).toContain('settings hosts test <id>|--input <file|->')
+  const leaf = await exec(process.execPath, [cli, 'settings', '--help'], {
+    env: { ...objectCliEnvironment(root), NODE_NO_WARNINGS: '1', AGENTMUX_RUNTIME_DIRECTORY: offline }
+  })
+  expect(leaf.stdout).toContain('check-failed'); expect(leaf.stdout).toContain('Exit 0')
   for (const args of [['ls'], ['test', 'saved'], ['test', '--input', '-']]) {
     const result = await run(args, args.includes('-') ? '{}' : undefined, offline)
     expect(result.code).not.toBe(0); expect(JSON.parse(result.stderr).error.code).toBe('CONTROL_UNAVAILABLE')

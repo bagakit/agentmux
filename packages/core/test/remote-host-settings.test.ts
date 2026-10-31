@@ -95,7 +95,7 @@ it('Hosted trust consumes one input and its real user context; wire principals c
 it('actual Unix users approve through the Desktop route and Hosted target, with durable target attribution', async () => {
   const f = await owners()
   f.inner.kernel.identity = () => ({ buildIdentity: 'trust-unix', protocolVersion: 1, daemonInstanceId: 'trust-unix' })
-  const owner = { runtimeId: 'target-runtime', ownerInstanceId: 'target-epoch', protocolVersion: 1 as const,
+  const owner = { runtimeId: 'target-runtime', ownerInstanceId: 'target-epoch', protocolVersion: 2 as const,
     processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' as const }
   const hosted = new AgentMuxHostedRuntimeService(f.client, null, () => owner)
   cleanups.push(() => hosted.dispose())

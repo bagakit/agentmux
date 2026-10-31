@@ -39,7 +39,7 @@ it('compiled CLI crosses the Host/Desktop Unix bridge to the target inventory an
   })
   remote.inner.kernel.identity = () => ({ buildIdentity: 'remote-trust', protocolVersion: 1, daemonInstanceId: 'remote-trust' })
   const hosted = new AgentMuxHostedRuntimeService(remote.client, null, () => ({ runtimeId: 'remote-runtime',
-    ownerInstanceId: 'remote-epoch', protocolVersion: 1, processId: process.pid,
+    ownerInstanceId: 'remote-epoch', protocolVersion: 2, processId: process.pid,
     ctxmux: remote.client.runtimeIdentity(), availability: 'connected' }))
   cleanups.push(() => hosted.dispose())
   const targetServer = new AgentMuxControlServer({ socketPath: join(remote.root, 'target.sock'), coreClients: remote.coreClients,
@@ -63,7 +63,7 @@ it('compiled CLI crosses the Host/Desktop Unix bridge to the target inventory an
   const host = new AgentMuxControlServer({ socketPath: join(local.root, 'host.sock'), coreClients: local.coreClients, forwardControl: forward })
   await host.start(); cleanups.push(() => host.stop())
   const cli = (args: string[], stdin = '', managed = false) => runCompiledObjectCli(['--endpoint', `unix:${host.path}`, ...args],
-    objectCliEnvironment(local.root, managed ? { AGENTMUX_AGENT_SESSION_ID: local.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: local.credentials.capability } : {}), stdin)
+    objectCliEnvironment(local.root, { NODE_NO_WARNINGS: '1', ...(managed ? { AGENTMUX_AGENT_SESSION_ID: local.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: local.credentials.capability } : {}) }), stdin)
   const found = await cli(['settings', 'executors', 'discover', '--host', 'remote'], '', true)
   expect(found.code, found.stderr).toBe(0)
   expect(JSON.parse(found.stdout).result).toMatchObject({ routeHostId: 'remote', runtimeId: 'remote-runtime', executors: [
