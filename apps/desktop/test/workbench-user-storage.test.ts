@@ -116,9 +116,14 @@ it('clearing waits for accepted writes and retains an explicit empty native docu
   base.setItem = async (_name?: string, _value?: string) => { events.push('new-write') }
   await Promise.all([saving, clearing])
   expect(events).toEqual(['write', 'remove', 'new-write'])
-  const write = vi.fn(async (_value: string) => {})
-  await createWorkbenchUserStorage({ readWorkbenchState: async () => encoded('Old'), importWorkbenchState: async value => value, writeWorkbenchState: write }, () => source(null)).removeItem(key)
-  expect(JSON.parse(write.mock.calls[0]![0] as string)).toEqual({ state: {}, version: 1 })
+  const root = await mkdtemp(join(tmpdir(), 'amux-clear-ack-'))
+  const owner = new WorkbenchUserStateStore(join(root, 'workbench-user-state.json'))
+  const write = vi.fn((value: string) => owner.write(value))
+  try {
+    await createWorkbenchUserStorage({ readWorkbenchState: () => owner.read(), importWorkbenchState: value => owner.importIfAbsent(value), writeWorkbenchState: write }, () => source(null)).removeItem(key)
+    expect(JSON.parse(write.mock.calls[0]![0])).toEqual({ state: {}, version: 1 })
+    expect(JSON.parse((await owner.read())!)).toEqual({ state: {}, version: 1 })
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 it('a failed clear releases its barrier and keeps a newer edit available to the original writer', async () => {

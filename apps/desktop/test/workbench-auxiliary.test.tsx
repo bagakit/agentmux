@@ -51,7 +51,7 @@ async function fixture(importOld = false) {
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   disposers.push(await store.getState().initialize())
-  disposers.push(async () => { await document.persistent.flush().catch(() => {}) })
+  disposers.push(async () => { try { await document.persistent.flush() } catch { /* Stop this private failed batch before removing its test root. */ } })
   await prepareRendererUpdate('quit')
   const holdWrites = (fail = false) => {
     const entered = barrier(), release = barrier()
@@ -202,6 +202,22 @@ it('actual bookmark retry reopens the same failed native read and merges current
   expect(agentBookmarks.get().bookmarks.map(item => item.agentSessionId)).toEqual(['original-retained-agent', 'new-user-pin'])
   expect(agentBookmarks.get().persistenceIssue).toBeNull()
   expect(JSON.parse((await f.saved()).desktopFragments.agentBookmarks).bookmarks).toHaveLength(2)
+})
+
+it('a repaired original native fragment can be reread in place without replacing current root or neighboring data', async () => {
+  const f = await host(), values = auxiliaryUserValues()
+  await f.user.write(JSON.stringify({ state: { original: true }, version: 1, desktopFragments: { ...values.fragments, launcher: '{broken native fragment' } }))
+  const { api } = await import('../src/renderer/src/lib/api')
+  vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => f.user.read())
+  vi.spyOn(api.ui, 'writeWorkbenchState').mockImplementation(raw => f.user.write(raw))
+  const launcher = await import('../src/renderer/src/lib/launcher-state')
+  await expect(launcher.initializeLauncherState()).rejects.toThrow()
+  launcher.useLauncherState.getState().setDraft('original-launcher', 'prompt', 'Current input after failed original read')
+  await f.user.write(JSON.stringify({ state: { original: true }, version: 1, desktopFragments: values.fragments }))
+  await launcher.initializeLauncherState(); await launcher.checkpointLauncherState()
+  const saved = await f.saved(), draft = JSON.parse(saved.desktopFragments.launcher).state.drafts['original-launcher']
+  expect(draft.prompt).toBe('Current input after failed original read'); expect(draft.note).toBe('Original unsaved Note')
+  expect(saved.state).toEqual({ original: true }); expect(saved.desktopFragments.moteAvatarSaveDrafts).toEqual(values.fragments.moteAvatarSaveDrafts)
 })
 
 it('quit cannot silently discard current auxiliary input while the original root hydration remains unknown', async () => {

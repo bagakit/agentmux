@@ -97,7 +97,8 @@ it('native user persistence waiting does not block an exactly bound healthy prom
   const { prepareRendererUpdate } = await import('../src/renderer/src/store')
   await prepareRendererUpdate('quit')
   let release!: () => void
-  vi.mocked(f.api.ui.writeWorkbenchState).mockImplementationOnce(() => new Promise<null>(resolve => { release = () => resolve(null) }))
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(f.api.ui.writeWorkbenchState).mockImplementationOnce(async value => { await held; return f.user.write(value) })
   vi.spyOn(f.api.sessions, 'submitPrompt').mockResolvedValue(undefined)
   try {
     expect(f.store.getState().send('original-agent', 'Exact original input')).toBe(true)
