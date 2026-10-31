@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 import { enrollmentInitialWeb } from '../../../packages/connectors/test/fixtures/connection-enrollment-initial'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 beforeEach(async () => { f = await moteBotUi() })
@@ -19,7 +19,7 @@ async function click(selector: string) {
 const progress = () => document.querySelector('[data-initial-setup-stage]')
 async function native(options: Parameters<typeof enrollmentInitialWeb>[0]) {
   const web = enrollmentInitialWeb(options), asset = await readFile(resolve('apps/desktop/resources/icon-512.png'))
-  vi.stubGlobal('fetch', vi.fn(async (input, init) => String(input) === iconUrl ? new Response(new Uint8Array(asset)) : web.fetch(input, init)))
+  vi.stubGlobal('fetch', vi.fn(async (input, init) => String(input) === appIconUrl() ? new Response(new Uint8Array(asset)) : web.fetch(input, init)))
   return web
 }
 

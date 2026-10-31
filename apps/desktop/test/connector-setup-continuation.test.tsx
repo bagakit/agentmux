@@ -3,7 +3,7 @@ import { unwrapSessionInputOperationResult } from '../src/shared/session-input-r
 import { act, useState } from 'react'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from '@agentmux/core/connections'
@@ -39,7 +39,7 @@ beforeEach(async () => {
   calls = []; platformCalls = []
   const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    if (String(url) === iconUrl) return new Response(new Uint8Array(image))
+    if (String(url) === appIconUrl()) return new Response(new Uint8Array(image))
     const target = new URL(String(url))
     platformCalls.push(target.pathname)
     expect(init?.redirect).toBe('manual')

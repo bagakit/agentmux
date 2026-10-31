@@ -1,3 +1,4 @@
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 // @vitest-environment happy-dom
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { act, useState } from 'react'
@@ -38,7 +39,7 @@ beforeEach(async () => {
     calls.push({ method, input: structuredClone(input), result: structuredClone(result) }); return result
   })
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    if (String(url) === '/apps/desktop/resources/icon-512.png') return new Response(new Uint8Array(asset))
+    if (String(url) === appIconUrl()) return new Response(new Uint8Array(asset))
     network.push(String(url))
     expect(new URL(String(url)).pathname).toBe('/accounts/qrlogin/init')
     expect(new URL(String(url)).origin).toBe('https://accounts.feishu.cn')

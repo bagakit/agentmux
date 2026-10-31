@@ -10,7 +10,7 @@ import { setBotTaskSelection, useAppStore } from '../src/renderer/src/store'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
 import { moteProfileWeb } from './fixtures/mote-profile-web'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 beforeEach(async () => { f = await moteBotUi() })
@@ -227,7 +227,7 @@ it('ignores a late original Mote read after Settings moves to another exact targ
 
 it('restores the selected general enrollment through actual Settings navigation and remount using only original reads', async () => {
   const transport = f.registration.getMockImplementation()!, asset = await readFile(resolve('apps/desktop/resources/icon-512.png'))
-  f.registration.mockImplementation(async (url, input) => String(url) === iconUrl ? new Response(new Uint8Array(asset)) : String(url).includes('/manifest/upsert_by_template') ? new Response(null, { status: 502 }) : transport(url, input))
+  f.registration.mockImplementation(async (url, input) => String(url) === appIconUrl() ? new Response(new Uint8Array(asset)) : String(url).includes('/manifest/upsert_by_template') ? new Response(null, { status: 502 }) : transport(url, input))
   await f.renderSettings(); await f.click('Create a general identity'); await click('[data-enrollment-create]')
   await click('[data-enrollment-action="confirm-account"]'); await click('[data-enrollment-action="create"]')
   await ready(() => expect(document.querySelector('.connector-editor-title')?.textContent).toBe('Bot creation is not confirmed'))
@@ -269,7 +269,7 @@ it('keeps a general enrollment locator whose original result cannot be read out 
 
 it('reads fresh permitted general account actions again after departure instead of retaining a private UI view', async () => {
   const transport = f.registration.getMockImplementation()!, asset = await readFile(resolve('apps/desktop/resources/icon-512.png'))
-  f.registration.mockImplementation(async (url, input) => String(url) === iconUrl ? new Response(new Uint8Array(asset)) : transport(url, input))
+  f.registration.mockImplementation(async (url, input) => String(url) === appIconUrl() ? new Response(new Uint8Array(asset)) : transport(url, input))
   await f.renderSettings(); await f.click('Create a general identity'); await click('[data-enrollment-create]')
   await ready(() => expect(document.querySelector('[data-enrollment-action="confirm-account"]')).not.toBeNull())
   const id = document.querySelector('[data-enrollment-operation]')!.getAttribute('data-enrollment-operation')!, before = effects()

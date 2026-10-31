@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { createHash } from 'node:crypto'
 import type { AgentMuxRpcParams } from '@agentmux/core'
 import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
+import type { ConnectionEnrollmentBeginInput, ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { enrollmentFixture } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 import { ExternalConnectionsSettings } from '../src/renderer/src/components/settings/ExternalConnectionsSettings'
 import { api } from '../src/renderer/src/lib/api'
@@ -19,6 +20,27 @@ import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 const dom = composerDOM(), hostingTarget: ConnectionHostingTarget = { hostId: 'local', runtimeId: 'original-enrollment-runtime' }, connections = connectionSettingsPort(hostingTarget)
 let fixture: Awaited<ReturnType<typeof enrollmentFixture>>
 let originalCall: typeof api.connections.call
+
+it('freezes the selected App brand in the original new-bot request without rewriting it after a later brand change', async () => {
+  await open()
+  const config = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...config, appearance: { ...config.appearance, appIcon: 'huihuan' } } })
+  const bytes = await readFile(resolve('packages/client-ui/src/assets/app-icons/huihuan.png'))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    expect(url).toBe(appIconUrl('huihuan'))
+    return new Response(new Uint8Array(bytes))
+  }))
+  await mount(); await click('[data-enrollment-create]')
+  await vi.waitFor(() => expect(fixture.begin).toHaveBeenCalledTimes(1))
+  const original = vi.mocked(api.connections.call).mock.calls.find(([method]) => method === 'connection.enrollment.begin')![1] as ConnectionEnrollmentBeginInput
+  const digest = (value: string | undefined) => createHash('sha256').update(value ?? 'missing').digest('hex')
+  const expected = digest('data:image/png;base64,' + bytes.toString('base64'))
+  expect(digest(original.preset?.avatar.pngDataUrl)).toBe(expected)
+  await act(async () => useAppStore.setState({ config: { ...config, appearance: { ...config.appearance, appIcon: 'classic' } } }))
+  expect(fixture.begin).toHaveBeenCalledTimes(1)
+  expect(digest(original.preset?.avatar.pngDataUrl)).toBe(expected)
+  await act(async () => useAppStore.setState({ config }))
+})
 async function open(options?: Parameters<typeof enrollmentFixture>[0]) {
   fixture = await enrollmentFixture(options)
   originalCall = async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<ConnectionResultMap[M]> => { expect(target).toEqual(hostingTarget); return fixture.sdk.call(method, params as AgentMuxRpcParams<M>) as Promise<ConnectionResultMap[M]> }
@@ -36,7 +58,7 @@ beforeEach(async () => {
   const stop = await useAppStore.getState().initialize(); stop()
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => { expect(url).toBe(iconUrl); return new Response(new Uint8Array(image)) }))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { expect(url).toBe(appIconUrl()); return new Response(new Uint8Array(image)) }))
 })
 afterEach(async () => { await dom.render(null); await fixture?.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 async function mount() {

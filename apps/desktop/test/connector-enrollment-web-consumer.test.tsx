@@ -13,7 +13,7 @@ import { ConnectionSecrets } from '../../../packages/connectors/src/connection-s
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -36,7 +36,7 @@ beforeEach(async () => {
   initWait = null; releaseInit = new Set(); initSignals = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, options: RequestInit = {}) => {
-    if (String(url) === iconUrl) return new Response(new Uint8Array(asset))
+    if (String(url) === appIconUrl()) return new Response(new Uint8Array(asset))
     const target = new URL(String(url))
     platform.push({ path: target.pathname, body: options.body })
     expect(options.redirect).toBe('manual')

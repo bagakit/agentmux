@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 import { enrollmentInitialWeb } from '../../../packages/connectors/test/fixtures/connection-enrollment-initial'
 import { api } from '../src/renderer/src/lib/api'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>, releasePending: (() => void) | null = null
 beforeEach(async () => { f = await moteBotUi() })
@@ -92,7 +92,7 @@ it('holds the configuration result until the original write settles and then pre
   const pending = new Promise<void>(resolve => { release = resolve; releasePending = resolve })
   let writeStarted = false
   vi.stubGlobal('fetch', vi.fn(async (input, init) => {
-    if (String(input) === iconUrl) return new Response(new Uint8Array(image))
+    if (String(input) === appIconUrl()) return new Response(new Uint8Array(image))
     if (String(input).includes('/event/switch/')) { writeStarted = true; await pending }
     return web.fetch(input, init)
   }))

@@ -8,7 +8,7 @@ import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
 import { initialBotPublication } from '../src/renderer/src/lib/bot-creation-preset'
 import { setBotTaskSelection } from '../src/renderer/src/store'
 import { enrollmentInitialWeb } from '../../../packages/connectors/test/fixtures/connection-enrollment-initial'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 
 let f: Awaited<ReturnType<typeof moteBotUi>> | undefined
 let web: ReturnType<typeof enrollmentInitialWeb>
@@ -30,7 +30,7 @@ async function create(options: Parameters<typeof enrollmentInitialWeb>[0] = {}, 
   f = await moteBotUi({ loseFileAck })
   web = enrollmentInitialWeb({ name: 'Saved public name', description: 'Saved public summary.', ...(options.versionStatus === undefined ? {} : { versionStatus: options.versionStatus }), ...(options.unknownEffect === undefined ? {} : { unknownEffect: options.unknownEffect }) })
   const image = await readFile(resolve('apps/desktop/resources/icon-512.png'))
-  vi.stubGlobal('fetch', vi.fn(async (input, init) => String(input) === iconUrl ? new Response(new Uint8Array(image)) : web.fetch(input, init)))
+  vi.stubGlobal('fetch', vi.fn(async (input, init) => String(input) === appIconUrl() ? new Response(new Uint8Array(image)) : web.fetch(input, init)))
   const route = { section: 'lark' as const, moteLarkOrigin: { target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title } }
   let operationId: string
   if (throughCreationUi) {

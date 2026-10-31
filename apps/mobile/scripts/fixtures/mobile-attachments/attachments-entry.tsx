@@ -8,7 +8,7 @@ import { MobileApp } from '../../../src/MobileApp'
 import { createBrowserPlatform } from '../../../src/platform/browser'
 import { nativeDevicePorts } from '../../../src/platform/native/device'
 import { getDeviceWorkface } from '../../../src/recovery/device-workface'
-import dragon from '../../../src/assets/dragon.png'
+import dragon from '../../../../../packages/client-ui/brand/app-icons/classic.png'
 import '@agentmux/client-ui/styles.css'
 
 const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'session-original', providerId: 'codex', executorId: 'original', hostId: 'local',

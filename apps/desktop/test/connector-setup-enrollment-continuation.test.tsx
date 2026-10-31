@@ -12,7 +12,7 @@ import { ConnectionSecrets } from '../../../packages/connectors/src/connection-s
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
-import iconUrl from '../resources/icon-512.png'
+import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM(), APP = 'cli_settings_continuation', USER = 'settings-continuation-user', TENANT = 'settings-continuation-enterprise'
@@ -26,7 +26,7 @@ beforeEach(async () => {
   const asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
-    if (String(url) === iconUrl) return new Response(new Uint8Array(asset))
+    if (String(url) === appIconUrl()) return new Response(new Uint8Array(asset))
     const target = new URL(String(url)); native.push(target.pathname)
     if (target.pathname === '/accounts/qrlogin/init') {
       const response = Response.json({ code: 0, data: { step_info: { token: 'settings-continuation-private-qr' } } }, { headers: { 'x-flow-key': 'settings-continuation-private-flow' } })

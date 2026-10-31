@@ -36,7 +36,7 @@ const third = originalPage(await role('preserved-after-third'))
 const attempts = before.workface.conversation.attempts
 assert.ok(attempts.length > 0 && attempts.some(([, item]) => item.phase === 'unknown' && item.inputRequested === true))
 assert.ok(before.image.bytes > 0 && before.image.naturalWidth > 0)
-assert.equal(before.image.sha256, sha256(await readFile(resolve(repository, 'apps/mobile/src/assets/dragon.png'))))
+assert.equal(before.image.sha256, sha256(await readFile(resolve(repository, 'packages/client-ui/brand/app-icons/classic.png'))))
 for (const page of [after, third]) {
   assert.equal(page.sameEditor, true); assert.equal(page.url, before.url)
   assert.equal(page.editorText, before.editorText); assert.ok(page.editorText.length > 0)

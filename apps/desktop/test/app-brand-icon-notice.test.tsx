@@ -29,6 +29,17 @@ afterEach(async () => {
   useAppStore.setState(initial, true)
 })
 
+it('does not turn an omitted native observation into recovery of a previously confirmed image failure', async () => {
+  useAppStore.setState({ appIconIssue: 'Original native image failure' })
+  vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  await act(async () => { dispose = await useAppStore.getState().initialize() })
+  expect(useAppStore.getState().appIconIssue).toBe('Original native image failure')
+  await act(async () => { dispose!(); dispose = undefined })
+  vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [], appIconIssue: null })
+  await act(async () => { dispose = await useAppStore.getState().initialize() })
+  expect(useAppStore.getState().appIconIssue).toBeNull()
+})
+
 it('retains the native issue through reading and unrelated updates, and clears it only on a confirmed native recovery', async () => {
   let changed!: (issue: string | null) => void
   const unsubscribe = vi.fn()
