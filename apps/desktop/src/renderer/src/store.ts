@@ -4498,6 +4498,7 @@ async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void
     else if (!__AGENTMUX_WEB_PREVIEW__) await persistentWorkbenchStorage.flush()
     await api.ui.requestStorageFlush()
     if (current() && failureRevision === workbenchSaveFailureRevision &&
+        (__AGENTMUX_WEB_PREVIEW__ || desktopUserDocument.unreadFragments().length === 0) &&
         (includeSpatial || useAppStore.getState().workbenchSaveWarningOwner === 'local-storage')) {
       useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
     }

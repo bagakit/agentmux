@@ -115,7 +115,21 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
           validate(value)
           document = { ...requireDocument(), desktopFragments: { ...fragments(), [name]: value } }
           imports.set(name, held)
-        } else validate(value)
+        } else {
+          try { validate(value) }
+          catch (cause) {
+            // A failed consumer read may be retried after repair at the same
+            // native owner. Refresh only this original member; current input
+            // in the root and neighboring members must never be replaced.
+            const raw = await port.readWorkbenchState()
+            const current = raw === null ? null : JSON.parse(raw)
+            if (!object(current?.desktopFragments) || !Object.hasOwn(current.desktopFragments, name)) throw cause
+            const repaired = current.desktopFragments[name] as DesktopFragmentValues[N]
+            validate(repaired)
+            document = { ...requireDocument(), desktopFragments: { ...fragments(), [name]: repaired } }
+            value = repaired
+          }
+        }
         if (imports.has(name)) {
           // This import, including a prior unknown write, gets a producer ACK
           // before the exact unchanged outgoing bytes can be removed.
