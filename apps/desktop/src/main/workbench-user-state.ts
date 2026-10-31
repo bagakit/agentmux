@@ -37,6 +37,7 @@ const size = (value: string) => Buffer.byteLength(value)
 export class WorkbenchUserStateStore {
   private tail: Promise<void> = Promise.resolve()
   private diagnosticRead = false
+  private diagnosticReading: Promise<void> | null = null
   private diagnosticWrite: Promise<void> | null = null
   private pendingDiagnostic: WorkbenchUserStateFailure | null = null
   private observation: WorkbenchUserStateObservation
@@ -63,7 +64,7 @@ export class WorkbenchUserStateStore {
     try {
       const value = JSON.parse(await (this.io.read ?? readFile)(this.path + '.failure.json', 'utf8'))
       const failure = value?.schema === 'agentmux.workbench-user-state-failure.v1' ? value.failure : null
-      if (failure && ['read', 'write'].includes(failure.operation) &&
+      if (!this.observation.lastFailure && failure && ['read', 'write'].includes(failure.operation) &&
         [null, 'request', 'before-replace', 'after-replace'].includes(failure.phase) &&
         (failure.code === null || typeof failure.code === 'string' && failure.code.length <= 128) &&
         typeof failure.observedAt === 'number' && Number.isFinite(failure.observedAt)) {
@@ -103,11 +104,13 @@ export class WorkbenchUserStateStore {
 
   /** Diagnostic observers may await this; user saving and ordinary exit must not depend on it. */
   async flushDiagnostics(): Promise<void> {
+    await this.diagnosticReading
     while (this.diagnosticWrite) await this.diagnosticWrite
   }
 
   private async readCurrent(): Promise<string | null> {
-    await this.readDiagnostic()
+    // Historical diagnostics must never delay the original user document.
+    if (!this.diagnosticRead) this.diagnosticReading = this.readDiagnostic()
     let value: string
     try { value = await (this.io.read ?? readFile)(this.path, 'utf8') }
     catch (error) {
