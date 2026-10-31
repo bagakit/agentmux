@@ -28,6 +28,8 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 不相交编辑保留双方增量；重叠编辑保留本地可见、未保存工作。客户端通过文件 owner 观察其他进程的提交。转换、保存和合并来源为 [`desktopSpatialGraph` / `desktopWorkbenchFromSpatial` / `DesktopSpatialPersistence` / `reconcileSpatialGraphs`](../../apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts)。
 
+`DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 不再私有修补选择。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
+
 ### 缺失资源与 Host 能力
 
 缺少 Host 资源元数据时如实报告，保 Core 身份与当前内容。资源来源和屏幕展示位置分别保留，不能用当前焦点补猜目录。空间管理复用既有 JSON-RPC 与远程传输；可移植 API 不以 OS 安装门禁判断可用性，随包 Native Runtime 的可用性是另一项 Host 能力。本页不为未验证 Host 的 Native surface 宣布完成。
@@ -37,5 +39,7 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 Desktop 的 [`workbenchSpaceSelection` / `selectMainRegion` / `activateTab`](../../apps/desktop/src/renderer/src/store.ts) 持有并更新 Work 当前选择。原空间目录经 [`workbenchSelectionCatalog` / `resolveDesktopSpaceSelection` / `resolveWorkbenchOccurrenceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts) 确认对象、成员与准确 occurrence；局部选择与显式导航以原 intent 区分，不按最近 Session 或第一处展示推导目标。
 
 Focus 的 [`mainFocusPresentation`](../../apps/desktop/src/renderer/src/lib/focus-tab-projection.ts) 消费同一选择，按原 Tab 或 Region 投影；[`mainRegionReference`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts) 从该选择派生准确引用，不成为第二个选择 owner。实体的展示通过 [`WorkbenchProjection`](../../apps/desktop/src/renderer/src/lib/workbench-projection.ts) 及原工作面组件消费；导航选择与 DOM 输入交接是不同事实。
+
+文件打开由 Store 的 `defaultFileOpenTarget` 捕获 UI 导航上下文，显式公共请求及工作面 projection 保原目标；两条路径消费 [`resolveFileOpenTarget`](../../apps/desktop/src/renderer/src/lib/workface-file-open.ts) 的资源／空间解析。既有准确 File reference 与新建 destination 分别沿原公共机制确认，`FileOpenPlacement` 传递本次目标，`FileOpenResult` 返回实际落点；重开与 Diff 不再重新全局查找文档或读取后来选择来推定结果。文档数据共享仍由 [`FileWorkbenchState`](../../apps/desktop/src/renderer/src/lib/file-workbench-state.ts) 持有。局部导航只从 App owner 读取必要的遮挡状态，不以前端完整 DOM 呈现探测作为选择资格。
 
 这里核对空间底座和既有 Work 导航接缝；Mote／Work／Know 的产品分组及 Survey／Recall 的独立导航要求归[导航上下文合同](../design/behavior/spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)，分组本身不新增 Core 实体或自动同步器。公共服务、JSON-RPC 与 CLI 的原接线见[系统职责地图](system-ownership.md#当前执行与展示链路)，精确参数沿[公共能力源码入口](../specs/public-capabilities.md)。
