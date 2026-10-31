@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),{pathToFileURL}=require('node:url')
 const {app,BrowserWindow,ipcMain}=require('electron')
-const [html,temporary,evidence,phase]=process.argv.slice(2)
+const [html,temporary,evidence,phase,scene]=process.argv.slice(2),scope=scene==='scope'
 app.setPath('userData',path.join(temporary,'user-data'));app.setPath('sessionData',path.join(temporary,'session-data'))
 const result={passed:false,phase,pid:process.pid,calls:[],console:[]};let win,unsubscribe
 app.whenReady().then(async()=>{try{
@@ -8,7 +8,7 @@ app.whenReady().then(async()=>{try{
   const spatial=new AgentMuxSpatialStateStore(path.join(temporary,'spatial-state.json'))
   ipcMain.handle('topics-restart:request',async(_event,operation,...args)=>{
     result.calls.push({operation})
-    if(operation==='setup')return {phase}
+    if(operation==='setup')return {phase,scope}
     if(operation==='spatial-read')return spatial.readForLayout()
     if(operation==='spatial-commit')return spatial.commit(args[0])
     if(operation==='spatial-labels')return spatial.retainDisplayLabels(args[0])
@@ -40,6 +40,27 @@ app.whenReady().then(async()=>{try{
     await click('[aria-label="Show file tree"]')
   }
   await until('explicit Files expansion',`document.querySelector('[aria-label="Hide file tree"]')?.getAttribute('aria-expanded')==='true' && document.querySelector('.file-explorer')!==null`)
+  if(scope){
+    const before=await read('topicsRestartFacts()'),foreign=before.tabs[before.foreignFileId]
+    assert.ok(foreign,'The hidden Topic must contain the original canonical File occurrence')
+    assert.equal(foreign.topicId,'view:quality-1')
+    assert.equal(Object.values(foreign.regions)[0].path,before.originalPath)
+    assert.equal(before.selection.topicId,'view:quality-0')
+    const selector='.file-explorer [data-tree-path="'+before.originalPath+'"]'
+    await until('original research file row',`document.querySelector(${JSON.stringify(selector)})!==null`)
+    const count=before.fileOpens.length
+    await click(selector)
+    await until('real Files open receipt',`topicsRestartFacts().fileOpens.length===${count+1}`)
+    const after=await read('topicsRestartFacts()'),opened=after.fileOpens.at(-1)
+    assert.equal(opened.path,before.originalPath)
+    assert.equal(opened.opened,true,'The original Files action must complete its real openFileAndReveal call')
+    for(const key of ['tabs','layouts','selection','drafts','documents','dirtyDocuments','collapsed','activeWorkspaceId','mainSurface','focus','regions'])
+      assert.deepEqual(after[key],before[key],key+' remains in the selected Topic after the real same-document Files click')
+    assert.deepEqual(after.tabs[before.foreignFileId],foreign,'The other Topic original File occurrence is preserved')
+    assert.equal(after.tabs['topic-tab-0'].layout.root.ratio,.62)
+    assert.equal(after.dirtyDocuments['__scratch__\0'+before.originalPath],true)
+    result.scopeOpen={before,after,preserved:true,boundary:'Real Chromium Files row click consumes the original production openFileAndReveal. Same-document canonical File is retained in hidden Topic1; no Session exists.'}
+  }
   await new Promise(done=>setTimeout(done,350))
   result.state=await read('topicsRestartFacts()');result.spatial=await spatial.readForLayout()
   assert.equal(result.state.error,null)

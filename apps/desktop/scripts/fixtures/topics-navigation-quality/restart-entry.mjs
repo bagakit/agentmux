@@ -1,14 +1,17 @@
 import { createElement as h } from 'react'
-import { splitWorkbenchRegion } from '@agentmux/layout'
+import { addTabOccurrence, splitWorkbenchRegion } from '@agentmux/layout'
 import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { createWorkbenchTab, fileTabId, initialWorkbenchRegionId } from '../../../src/renderer/src/lib/workbench-tabs'
+import { originalTopicAddress } from '../../../src/shared/space-addresses'
 import { qualityTopics, seedTopicNavigation, topicCategory, topicConfig, topicWorkspace } from '../../../test/fixtures/topics-navigation-quality'
 import '../../../src/renderer/src/styles/index.css'
 
-const request=window.topicsRestartBoundary.request, {phase}=await request('setup'), controls=[]
+const request=window.topicsRestartBoundary.request, {phase,scope}=await request('setup'), controls=[], fileOpens=[]
+const originalPath='topic--view--quality-0/research.md',foreignFileId=fileTabId(topicWorkspace.id,originalPath)
 const content='# Original research workface\n\nThe original file, layout and unsent work survive a real process restart.\n'
 api.config.get=async()=>topicConfig
 api.providers.list=async options=>options?.observation?{catalog:[],warnings:[]}:[]
@@ -31,6 +34,14 @@ api.topics.call=async method=>{if(method==='topic.category.ls')return {categorie
 for(const name of ['launchAgent','launchTerminal','recover','stop','write','resume','interrupt']) api.sessions[name]=async()=>{controls.push(name);throw Error('This layout proof must not invoke Agent lifecycle: '+name)}
 window.agentmux={git:{status:async()=>({kind:'not-a-git-repository',hostId:'local',workspacePath:topicWorkspace.path})}}
 const initialize=useAppStore.getState().initialize
+if(scope){
+  const openFileAndReveal=useAppStore.getState().openFileAndReveal
+  useAppStore.setState({openFileAndReveal:async(...args)=>{
+    const opened=await openFileAndReveal(...args)
+    fileOpens.push({path:args[0],opened,selection:useAppStore.getState().workbenchSpaceSelection})
+    return opened
+  }})
+}
 if(phase==='seed') useAppStore.setState({mainSurface:'board'})
 useAppStore.setState({initialize:async()=>{
   const dispose=await initialize()
@@ -41,10 +52,28 @@ useAppStore.setState({initialize:async()=>{
     const first=useAppStore.getState().tabs['topic-tab-0'], secondRegion='original-decisions-region'
     const layout=splitWorkbenchRegion(first.layout,first.layout.activeRegionId,'right',secondRegion)
     layout.root.ratio=.62;layout.activeRegionId='topic-region-0'
-    const originalPath='topic--view--quality-0/research.md',key=topicWorkspace.id+'\0'+originalPath
+    const key=topicWorkspace.id+'\0'+originalPath
     useAppStore.setState(state=>({tabs:{...state.tabs,[first.id]:{...first,layout,regions:{...first.regions,
       [secondRegion]:{kind:'file',regionId:secondRegion,workspaceId:topicWorkspace.id,path:'topic--view--quality-0/decisions.md'}}}},
       documents:{[key]:{path:originalPath,revision:'original-private-revision',content:content+'\nOriginal unsaved file annotation.\n'}},dirtyDocuments:{[key]:true}}))
+    if(scope){
+      const otherTopic=qualityTopics[1],regionId=initialWorkbenchRegionId(foreignFileId)
+      const foreign={...createWorkbenchTab(foreignFileId,{kind:'file',regionId,workspaceId:topicWorkspace.id,path:originalPath}),
+        topicId:otherTopic.id,space:originalTopicAddress(topicWorkspace,otherTopic,{})}
+      useAppStore.setState(state=>{
+        const layout=addTabOccurrence(state.layouts[topicWorkspace.id],'topic-group',foreignFileId)
+        if(!layout)throw Error('The original private Topic Group is unavailable')
+        const tabs=Object.fromEntries(Object.entries(state.tabs).map(([id,tab])=>{
+          const topic=qualityTopics.find(topic=>topic.id===tab.topicId)
+          return [id,topic?{...tab,space:originalTopicAddress(topicWorkspace,topic,{})}:tab]
+        }))
+        const bindings=Object.fromEntries(qualityTopics.map(topic=>{
+          const address=originalTopicAddress(topicWorkspace,topic,{})
+          return [address.zoneId,{...state.spaceZoneBindings[address.zoneId],spaceId:address.spaceId,directoryPath:topic.physicalDirectoryPath}]
+        }))
+        return {tabs:{...tabs,[foreignFileId]:foreign},spaceZoneBindings:bindings,layouts:{...state.layouts,[topicWorkspace.id]:layout}}
+      })
+    }
     for(const [region,path] of [['topic-region-0',originalPath],[secondRegion,'topic--view--quality-0/decisions.md']])
       await useAppStore.getState().setEditorRegionMode(region,topicWorkspace.id,path,'preview')
   }
@@ -53,7 +82,7 @@ useAppStore.setState({initialize:async()=>{
 }})
 window.topicsRestartFacts=()=>{
   const state=useAppStore.getState(),workbench=projectPersistedWorkbench(state)
-  return {phase,controls,seeded:phase==='seed',tabs:workbench.tabs,layouts:workbench.layouts,selection:state.workbenchSpaceSelection,
+  return {phase,scope,controls,fileOpens,foreignFileId,originalPath,seeded:phase==='seed',tabs:workbench.tabs,layouts:workbench.layouts,selection:state.workbenchSpaceSelection,
     drafts:state.agentComposerDrafts,documents:Object.fromEntries(Object.entries(state.documents).filter(([key])=>state.dirtyDocuments[key])),
     dirtyDocuments:Object.fromEntries(Object.entries(state.dirtyDocuments).filter(([,dirty])=>dirty)),collapsed:state.explorerCollapsed,activeWorkspaceId:state.activeWorkspaceId,
     mainSurface:state.mainSurface,focus:state.agentFocus,error:state.error,workbenchSave:state.workbenchSave,
