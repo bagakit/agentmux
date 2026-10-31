@@ -24,6 +24,12 @@ export function desktopPresentationCommitted(): void {
   for (const listener of commitListeners) listener()
 }
 
+/** Overlay control comes from the App owner; it does not require a DOM presentation probe. */
+export function readDesktopOverlays(): AgentMuxDesktopOverlays {
+  const owner = typeof document === 'undefined' ? null : appReader?.() ?? null
+  return owner ? { provenance: 'observed', ...owner.overlays } : unknownOverlays()
+}
+
 export function desktopElementVisible(element: HTMLElement | null): boolean {
   if (!element?.isConnected || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false
   const style = element.ownerDocument.defaultView!.getComputedStyle(element)
@@ -125,7 +131,7 @@ function observeFloating(owner: DesktopAppPresentationOwner | null, tabs: Readon
 export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tabs: Readonly<Record<string, WorkbenchTab>>):
   Pick<AgentMuxDesktopObservation, 'presentation' | 'floating' | 'overlays' | 'input'> {
   const owner = typeof document === 'undefined' ? null : appReader?.() ?? null
-  const overlays: AgentMuxDesktopOverlays = owner ? { provenance: 'observed', ...owner.overlays } : unknownOverlays()
+  const overlays = readDesktopOverlays()
   const blockers: AgentMuxDesktopPresentation['blockers'] = []
   if (overlays.settings) blockers.push('settings')
   if (overlays.quickSwitcher) blockers.push('quick-switcher')

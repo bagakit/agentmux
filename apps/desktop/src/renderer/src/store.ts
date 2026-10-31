@@ -111,17 +111,17 @@ import { executeWorkfaceAgentView } from './lib/workface-agent-view'
 import { changeSurveyCollection, executeSurveyList, restoreSurveyOrganization, surveyCollectedZoneIds } from './lib/survey-list'
 import { executeWorkspaceAgentOrder, restoreWorkspaceAgentOrder, workspaceAgentOrderMembers } from './lib/workspace-agent-order'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
-import { executeWorkfaceFileOpen } from './lib/workface-file-open'
+import { executeWorkfaceFileOpen, resolveFileOpenTarget } from './lib/workface-file-open'
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
-import { directoryIdentity, topicSpatialAddress, workspaceZoneId } from '../../shared/space-addresses'
+import { directoryIdentity, topicSpatialAddress, workspaceZoneId, homeZoneId } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { observeAgentInputOccupation } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -151,7 +151,7 @@ import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotifi
 import { notificationDeliveryNotice } from './lib/notification-delivery-notice'
 import { persist } from 'zustand/middleware'
 import { learningReviewKey, restoredLearningReviewDrafts, type AgentLearningReviewDraft } from './lib/agent-learning-review-draft'
-import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
+import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, surveySelectReference, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import { configValuesEqual } from '../../shared/config-edit'
 import { inspectSpaceIconOverrides } from '../../shared/space-object-appearance'
@@ -4977,6 +4977,46 @@ export function fileNavigationSelection(state: AppState): string {
     state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
 
+/** UI defaults are captured once; explicit public/projection placements bypass this resolver. */
+function defaultFileOpenTarget(navigation: AppState, workspaceId: string, path: string, requestedGroupId?: string) {
+  const workspace = navigation.config?.workspaces.find(item => item.id === workspaceId)
+  if (!workspace) throw new Error('The original Files Workspace is unavailable. Its workface and file are kept.')
+  const localSurface = navigation.mainSurface === 'recall' || navigation.mainSurface === 'survey'
+  const local = navigation.mainSurface === 'recall' ? navigation.recallZoneSelection
+    : navigation.mainSurface === 'survey' ? navigation.surveyZoneSelection : null
+  const choice = localSurface ? null : navigation.workbenchSpaceSelection
+  const catalog = workbenchSelectionCatalog(navigation)
+  const localZone = local && catalog.zones.find(zone => zone.zoneId === local.zoneId)
+  const originalZoneId = localZone?.workspaceId === workspaceId ? localZone.zoneId
+    : choice?.workspaceId === workspaceId ? choice.zoneId : null
+  const zoneId = originalZoneId ?? (isScratchWorkspaceId(workspaceId) ? homeZoneId(directoryIdentity(workspace.hostId, workspace.path))
+    : workspaceZoneId(directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path), workspaceId))
+  const topics = scratchTopicsForWorkspace(navigation.scratchTopicSnapshots,
+    navigation.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)) ?? []
+  const originalChoice = choice?.zoneId === zoneId ? choice : null
+  const spaceId = originalChoice?.spaceId && catalog.bindings.some(binding =>
+    binding.spaceId === originalChoice.spaceId && binding.zoneId === zoneId) ? originalChoice.spaceId : null
+  const displayWorkspaceId = originalChoice?.workspaceId ?? workspaceId
+  const groupId = requestedGroupId ?? originalChoice?.groupId
+  const resolved = resolveFileOpenTarget(navigation, topics, catalog, workspaceId, path, {
+    zoneId, ...(spaceId ? { spaceId } : {}), newTab: true,
+    displayWorkspaceId, ...(groupId ? { groupId } : {})
+  }, mainRegionReference(originalChoice) ?? undefined)
+  return { ...resolved, placement: { ...resolved.placement, projection: {
+    entity: { kind: 'zone' as const, zoneId }, presentationId: localSurface ? `${navigation.mainSurface}-workbench` : 'space-workbench',
+    displayWorkspaceId, catalog, selection: [], onSelect(reference: import('./lib/workbench-projection').WorkbenchProjectionSelection) {
+      const current = useAppStore.getState()
+      if (localSurface) {
+        const next = surveySelectReference(local?.zoneId === zoneId ? local : { zoneId, selection: [], active: null }, reference)
+        if (navigation.mainSurface === 'recall' && current.mainSurface === 'recall' && current.recallZoneSelection === local)
+          current.setRecallZoneSelection(next)
+        else if (navigation.mainSurface === 'survey' && current.mainSurface === 'survey' && current.surveyZoneSelection === local)
+          current.setSurveyZoneSelection(next)
+      } else current.selectMainRegion(reference, choice)
+    }
+  } } }
+}
+
 function gitNavigationTarget(state: AppState) {
   if (state.mainSurface !== 'workbench') return null
   const reference = mainRegionReference(state.workbenchSpaceSelection)
@@ -5321,6 +5361,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try { await handoffOriginalGoalDiscussions() } catch { /* The original handoff owner keeps its exact notice and saved source. */ }
     try { await prepareRendererUpdate() } catch (error) { get().reportWorkbenchSaveFailure(error) }
   },
+  async refreshSpatialState() {
+    const owner = coreSpatialPersistence
+    if (!owner) throw new Error('The original Core spatial owner is unavailable. Existing workfaces remain available; restore storage and refresh.')
+    await owner.refresh()
+  },
   async initialize() {
     if (!api.control || typeof api.control.onRequest !== 'function') {
       throw new Error('AgentMux Control API is unavailable')
@@ -5361,11 +5406,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Connection observations describe this wait; they do not need the Session
         // membership cut. Keep that cut buffered while the original loading surface
         // can explain the current Host's progress, including exact-boundary recovery.
-  async refreshSpatialState() {
-    const owner = coreSpatialPersistence
-    if (!owner) throw new Error('The original Core spatial owner is unavailable. Existing workfaces remain available; restore storage and refresh.')
-    await owner.refresh()
-  },
         if (event.endpointWarning !== undefined || event.endpointObservation) set(state => {
           const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
           const observation = event.endpointObservation
@@ -7587,66 +7627,58 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
   },
   async openFileAndReveal(path, tabGroupId, location, requestedWorkspaceId, navigationSignal) {
-    const navigation = get()
-    const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
-    const resource = navigation.config?.workspaces.find(workspace => workspace.id === workspaceId)
-    if (!workspaceId || !resource) return false
+    const navigation = get(), workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
+    if (!workspaceId || !navigation.config?.workspaces.some(workspace => workspace.id === workspaceId)) return false
     if (!navigation.layouts[workspaceId]) set(state => ({ layouts: {
       ...state.layouts, [workspaceId]: createWorkspaceLayout(newTabGroupId())
     } }))
-    const opening = navigationSignal
-      ? get().openFile(path, tabGroupId, location, workspaceId, undefined, undefined, navigationSignal)
-      : get().openFile(path, tabGroupId, location, workspaceId)
-    const intentVersion = fileOpenIntentVersion
-    const mayReveal = await opening
-    const state = get(), currentResource = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
-    // Preparation may finish after a newer navigation or a Workspace resource rebind.
-    if (!mayReveal || navigationSignal?.aborted || intentVersion !== fileOpenIntentVersion ||
-      state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId ||
-      state.agentFocus.execution.sessionId !== navigation.agentFocus.execution.sessionId ||
-      state.agentFocus.pmo.sessionId !== navigation.agentFocus.pmo.sessionId ||
-      currentResource?.hostId !== resource.hostId || currentResource.path !== resource.path) return false
-    const original = findFileWorkbenchSurface(state, workspaceId, path), layout = state.layouts[workspaceId]
-    const tab = original?.tab, surface = original?.surface
-    const groupId = tab && tabGroupForTab(layout, tab.id)
-    if (!tab || !surface || !groupId) return false
-    get().focusRegion(workspaceId, tab.id, surface.regionId, 'navigation', groupId)
-    const selected = get().workbenchSpaceSelection
-    if (selected?.workspaceId !== workspaceId || selected.tabId !== tab.id || selected.regionId !== surface.regionId || selected.groupId !== groupId) return false
-    set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
+    let target: ReturnType<typeof defaultFileOpenTarget>
+    try { target = defaultFileOpenTarget(get(), workspaceId, path, tabGroupId) }
+    catch (error) { get().reportError(error, { kind: 'indeterminate' }); return false }
+    let receipt: FileOpenResult | undefined
+    const revealed = await get().openFile(path, target.address.groupId, location, workspaceId, undefined,
+      { ...target.placement, onResult: result => { receipt = result } }, navigationSignal)
+    const placed = receipt?.placement
+    if (!revealed || navigationSignal?.aborted || !placed?.tabId || !placed.regionId ||
+      placed.status !== 'created' && placed.status !== 'reused') return false
+    const state = get(), tab = state.tabs[placed.tabId], surface = tab?.regions[placed.regionId]
+    if (!surface || surface.workspaceId !== workspaceId ||
+      !(surface.kind === 'file' && surface.path === path || surface.kind === 'browser' && surface.bookmarkOrigin?.path === path)) return false
+    if (navigation.mainSurface === 'recall' || navigation.mainSurface === 'survey') {
+      const local = navigation.mainSurface === 'recall' ? state.recallZoneSelection : state.surveyZoneSelection
+      return state.mainSurface === navigation.mainSurface && local?.active?.tabId === placed.tabId && local.active.regionId === placed.regionId
+    }
+    const reference = { displayWorkspaceId: target.address.displayWorkspaceId, groupId: target.address.groupId,
+      tabId: placed.tabId, regionId: placed.regionId }
+    if (!sameWorkbenchProjectionSelection(mainRegionReference(state.workbenchSpaceSelection), reference)) return false
+    get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'navigation', reference.groupId)
+    set({ activeWorkspaceId: reference.displayWorkspaceId, mainSurface: 'workbench' })
     const request = get().regionCaretFocus
     if (request && navigationSignal) navigationSignal.addEventListener('abort', () => get().clearRegionCaretFocus(request.nonce), { once: true })
     return true
   },
   async openFileDiff(path, requestedWorkspaceId) {
-    const navigation = get()
-    const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
+    const navigation = get(), workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
     if (!workspaceId) return
-    // 同 createNote：把开头解析出来的那一个显式传下去。下面 regionId 是按这个 workspaceId 派生的，
-    // 若 openFile 自己重读活动 Workspace，两者就会指向不同的 Workspace——文件在 A 打开、diff 模式
-    // 却切到了 B 的 Region（或谁的都不是）。
-    const opening = get().openFile(path, undefined, undefined, workspaceId)
-    const intentVersion = fileOpenIntentVersion
-    const mayReveal = await opening
-    const state = get(), original = findFileWorkbenchSurface(state, workspaceId, path), layout = state.layouts[workspaceId]
-    const tab = original?.tab, surface = original?.surface
-    const tabId = tab?.id, regionId = surface?.regionId
-    const groupId = tabId ? tabGroupForTab(layout, tabId) : undefined
-    // A failed file read has no destination. Reveal the exact successful placement without
-    // setMainSurface's Session navigation replacing it with the original Agent Tab.
-    if (!tabId || !regionId || !tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
-    // A later navigation owns the screen while the file producer is pending.
-    if (
-      mayReveal && intentVersion === fileOpenIntentVersion &&
-      state.mainSurface === navigation.mainSurface &&
-      state.activeWorkspaceId === navigation.activeWorkspaceId &&
-      state.agentFocus.execution.sessionId === navigation.agentFocus.execution.sessionId &&
-      state.agentFocus.pmo.sessionId === navigation.agentFocus.pmo.sessionId
-    ) {
-      get().focusRegion(workspaceId, tabId, regionId, 'navigation', groupId)
-      set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
+    let target: ReturnType<typeof defaultFileOpenTarget>
+    try { target = defaultFileOpenTarget(navigation, workspaceId, path) }
+    catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
+    let receipt: FileOpenResult | undefined
+    const revealed = await get().openFile(path, target.address.groupId, undefined, workspaceId, undefined,
+      { ...target.placement, onResult: result => { receipt = result } })
+    const placed = receipt?.placement
+    if (!placed?.tabId || !placed.regionId || placed.status !== 'created' && placed.status !== 'reused') return
+    const state = get(), surface = state.tabs[placed.tabId]?.regions[placed.regionId]
+    // A later selection is not this operation's receipt, even with the same path.
+    if (surface?.kind !== 'file' || surface.workspaceId !== workspaceId || surface.path !== path) return
+    const reference = { displayWorkspaceId: target.address.displayWorkspaceId, groupId: target.address.groupId,
+      tabId: placed.tabId, regionId: placed.regionId }
+    if (revealed && navigation.mainSurface !== 'recall' && navigation.mainSurface !== 'survey' &&
+      sameWorkbenchProjectionSelection(mainRegionReference(state.workbenchSpaceSelection), reference)) {
+      get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'navigation', reference.groupId)
+      set({ activeWorkspaceId: reference.displayWorkspaceId, mainSurface: 'workbench' })
     }
-    await get().setEditorRegionMode(regionId, workspaceId, path, 'diff')
+    await get().setEditorRegionMode(placed.regionId, workspaceId, path, 'diff')
   },
   ...createGitReadingActions({
     get, set,
@@ -7706,7 +7738,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   selectMainRegion(reference, expected) {
     const state = get()
     if (expected !== undefined && !sameSpatialValue(state.workbenchSpaceSelection, expected)) return false
-    const { overlays } = readDesktopPresentation(desktopSelection(state, workbenchSelectionCatalog(state)), state.tabs)
+    const overlays = readDesktopOverlays()
     if (overlays.settings === true || overlays.quickSwitcher === true) return false
     const layout = state.layouts[reference.displayWorkspaceId], tab = state.tabs[reference.tabId]
     const group = layout?.groups.find(item => item.id === reference.groupId)
@@ -8159,8 +8191,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 而漂移的症状不是报错而是**开错文件**——名字撞上另一个项目里的同名文件时界面上一切正常。
     const navigation = get()
     const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
+    if (!placement && workspaceId) {
+      try {
+        const target = defaultFileOpenTarget(navigation, workspaceId, path, tabGroupId)
+        tabGroupId = target.address.groupId
+        placement = target.placement
+      } catch (error) { get().reportError(error, { kind: 'indeterminate' }); return false }
+    }
     const displayId = placement?.displayWorkspaceId ?? workspaceId
     const background = placement?.focus === false
+    const topicId = placement?.selection?.topicId ?? (placement ? navigation.spaceZoneBindings[placement.space.zoneId]?.topicId : undefined)
     const fileIdentity = workspaceId ? fileWorkbenchIdentity(navigation, workspaceId, path, placement) : null
     const canonicalTabId = fileIdentity?.tabId ?? null
     let exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? fileIdentity?.regionId ?? null
@@ -8175,6 +8215,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (placement?.split) {
         const target = workbenchSurfaces(get().tabs[placement.split.tabId]!).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
         if (target) exactRegionId = target.regionId
+      } else if (!placement?.reference && !placement?.launcher && workspaceId) {
+        const placed = findFileWorkbenchSurface(get(), workspaceId, path, placement)
+        if (placed) { destinationTabId = placed.tab.id; exactRegionId = placed.surface.regionId }
       }
       if (!canonicalTabId || !exactRegionId) return
       const tab = get().tabs[destinationTabId!]
@@ -8261,7 +8304,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().setSurveyZoneCollected(placement.space.zoneId, true)
       }
       if (placement?.focus === true && placement.selection && resourceCurrent()) {
-        const choice = { ...placement.selection, ...((placement.split || bookmarkOpened) && exactRegionId ? { tabId: destinationTabId!, regionId: exactRegionId } : {}) }
+        const choice = { ...placement.selection, ...(destinationTabId && exactRegionId ? { tabId: destinationTabId, regionId: exactRegionId } : {}) }
         if (!choice.tabId || !choice.regionId || !choice.groupId) return
         set({ workbenchSpaceSelection: choice })
         const inputPolicy = placement.inputPolicy ?? 'preserve'
@@ -8285,12 +8328,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         return
       }
-      if (placement.reference && !bookmarkOpened) { placement.projection.onSelect(placement.reference); return }
       const tabId = bookmarkOpened ? destinationTabId! : placement.split?.tabId ?? placement.launcher?.tabId ?? destinationTabId!, tab = get().tabs[tabId]
       if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
-      const reference = { displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: placement.split && exactRegionId ? exactRegionId : tab.layout.activeRegionId }
+      const reference = placement.reference && !bookmarkOpened ? placement.reference
+        : { displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: exactRegionId ?? tab.layout.activeRegionId }
       placement.projection.onSelect(reference)
-      if (placement.projection.presentationId === 'focus-workbench') result.navigation = get().mainSurface === 'agents' &&
+      const presentationId = placement.projection.presentationId
+      if (presentationId === 'space-workbench') result.navigation =
+        sameWorkbenchProjectionSelection(mainRegionReference(get().workbenchSpaceSelection), reference) ? 'applied' : 'cancelled'
+      else if (presentationId === 'survey-workbench' || presentationId === 'recall-workbench') {
+        const local = presentationId === 'survey-workbench' ? get().surveyZoneSelection : get().recallZoneSelection
+        result.navigation = local?.active?.tabId === reference.tabId && local.active.regionId === reference.regionId ? 'applied' : 'cancelled'
+      }
+      else if (presentationId === 'focus-workbench') result.navigation = get().mainSurface === 'agents' &&
         sameWorkbenchProjectionSelection(mainRegionReference(get().workbenchSpaceSelection), reference) ? 'applied' : 'cancelled'
     }
     const key = documentKey(workspaceId, path)
@@ -8327,8 +8377,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               expectedSurface = current.tabs[destinationTabId]!.regions[exactRegionId]
               return current
             }
-            const topicId = placement?.selection?.topicId ?? inheritedTopicIdForNewTab(workspaceId, currentLayout, current.tabs, groupId)
-            const created = newLauncherTab(workspaceId, topicId ?? undefined)
+                        const created = newLauncherTab(workspaceId, topicId ?? undefined)
             const tab = { ...created, ...(placement ? { space: placement.space } : {}) }
             destinationTabId = tab.id; exactRegionId = tab.layout.activeRegionId; expectedSurface = tab.regions[exactRegionId]
             const placed = addTabPlacement(currentLayout, groupId, tab.id)
@@ -8371,9 +8420,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!mayReveal()) return false
         releaseNavigation()
         const targetGroupId = tabGroupId ?? layout.activeGroupId
-        const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
-        const topicId = activeTabId ? get().tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state)))
+
+        set((state) => reduceFileOpened(state, workspaceId, path, existing, tabGroupId, topicId, placement, confirmedExistingSpace(state)))
         rememberPlacement()
         result.data = { kind: 'text', reason: null }
         selectProjection()
@@ -8384,9 +8432,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!placement?.fileOnly && format && !format.sourceEditable || get().documentIssues[key]?.kind === 'binary') {
         if (!mayReveal()) return false
         releaseNavigation()
-        const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
-        const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
-        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state)))
+
+        set((state) => reduceFileSurfaceOpened(state, workspaceId, path, tabGroupId, topicId, placement, confirmedExistingSpace(state)))
         rememberPlacement()
         result.data = { kind: get().documentIssues[key]?.kind === 'binary' ? 'binary-preview' : 'media-preview', reason: null }
         selectProjection()
@@ -8429,8 +8476,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               }
               const targetGroupId = tabGroupId ?? (findGroup(currentLayout, layout.activeGroupId)
                 ? layout.activeGroupId : currentLayout.activeGroupId)
-              const activeTabId = findGroup(layout, targetGroupId)?.activeTabId
-              const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
+
               // Shared reads own data/placement, never a caller's later navigation. Each caller
               // below decides whether it still owns the latest uncancelled display intent.
               set((state) => {
@@ -8438,11 +8484,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   ? reduceDocumentAttached(state, workspaceId, path, result.document)
                   : reduceDocumentLoadFailed(state, workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength })
                 const opened = format && !format.sourceEditable
-                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state))
+                  ? reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, topicId, placement, confirmedExistingSpace(state))
                   : result.status === 'read'
-                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state))
+                  ? reduceFileOpened(state, workspaceId, path, result.document, targetGroupId, topicId, placement, confirmedExistingSpace(state))
                   : reduceDocumentLoadFailed(
-                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(state)),
+                    reduceFileSurfaceOpened(state, workspaceId, path, targetGroupId, topicId, placement, confirmedExistingSpace(state)),
                     workspaceId, path, { kind: 'binary', revision: result.revision, byteLength: result.byteLength }
                   )
                 const placed = opened.layouts[displayId!]!
@@ -8494,11 +8540,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if ((state.documents[key] || state.documentIssues[key]?.kind === 'binary' || format && !format.sourceEditable) && currentLayout) {
           if (!mayReveal()) return false
           releaseNavigation()
-          const activeTabId = findGroup(layout, tabGroupId ?? layout.activeGroupId)?.activeTabId
-          const topicId = activeTabId ? navigation.tabs[activeTabId]?.topicId : undefined
+
           set((current) => current.documents[key]
-            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(current))
-            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, placement ? placement.selection?.topicId ?? undefined : topicId, placement, confirmedExistingSpace(current)))
+            ? reduceFileOpened(current, workspaceId, path, current.documents[key]!, tabGroupId, topicId, placement, confirmedExistingSpace(current))
+            : reduceFileSurfaceOpened(current, workspaceId, path, tabGroupId, topicId, placement, confirmedExistingSpace(current)))
           rememberPlacement()
           selectProjection()
           return !background && intentVersion === fileOpenIntentVersion

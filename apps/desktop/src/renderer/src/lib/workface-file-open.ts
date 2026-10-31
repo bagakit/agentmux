@@ -1,5 +1,5 @@
 import { spatialDestination, selectSpatialCatalog } from '@agentmux/core/spatial-graph'
-import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialIssue, AgentMuxSpatialSave } from '@agentmux/core/control'
+import type { AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceDestination, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialIssue, AgentMuxSpatialSave } from '@agentmux/core/control'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { fileWorkbenchIdentity } from './file-workbench-state'
 import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './file-workbench-state'
@@ -14,6 +14,49 @@ export type WorkfaceFileOpenPorts = {
   openFile(path: string, groupId: string, location: undefined, workspaceId: string, openAsText: boolean, placement: FileOpenPlacement): Promise<boolean>
   closing(tabId: string): boolean
   save(layoutApplied: boolean): Promise<AgentMuxSpatialSave>
+}
+
+/** Resolve resource ownership and a display destination once, before any file read or reuse. */
+export function resolveFileOpenTarget(state: SpatialWorkbench & FileWorkbenchState, topics: readonly ScratchTopicSnapshot[],
+  catalog: AgentMuxSpaceCatalog, workspaceId: string, path: string, destination: AgentMuxSpaceDestination,
+  origin?: FileOpenPlacement['reference']
+): { address: AgentMuxSpaceAddress; placement: FileOpenPlacement } {
+  const zone = catalog.zones.find(item => item.zoneId === destination.zoneId)
+  const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
+  if (!zone || zone.workspaceId !== workspaceId || !workspace || zone.hostId !== workspace.hostId)
+    throw new Error('The original file resource and Zone are unconfirmed. Its workface and content are kept.')
+  const space = { spaceId: zoneContext(state, topics, zone), zoneId: zone.zoneId }
+  const topicId = state.spaceZoneBindings[zone.zoneId]?.topicId ?? catalog.spaces.find(item => item.spaceId === space.spaceId)?.topicId ?? null
+  const identity = fileWorkbenchIdentity(state, workspaceId, path, { space, selection: { topicId } })
+  // An exact local occurrence can be reused while its Category relationship is
+  // unknown. Collapse parent-binding copies of the same physical position;
+  // neither resource equality nor list order chooses among different positions.
+  const references = new Map<string, NonNullable<FileOpenPlacement['reference']>>()
+  if (origin && destination.newTab && !destination.tabId && !destination.regionId && !destination.split) for (const location of catalog.locations) {
+    const tab = state.tabs[location.tabId], surface = tab?.regions[location.regionId]
+    if (location.zoneId !== zone.zoneId || location.displayWorkspaceId !== (destination.displayWorkspaceId ?? origin.displayWorkspaceId) || location.groupId !== (destination.groupId ?? origin.groupId) ||
+      tab?.space?.spaceId !== space.spaceId || surface?.kind !== 'file' || surface.workspaceId !== workspaceId || surface.path !== path) continue
+    const value = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
+    references.set(JSON.stringify(value), value)
+  }
+  const candidates = [...references.values()], sameTab = candidates.filter(item => item.tabId === origin?.tabId)
+  const reference = candidates.find(item => item.tabId === origin?.tabId && item.regionId === origin?.regionId)
+    ?? (sameTab.length === 1 ? sameTab[0] : candidates.length === 1 ? candidates[0] : undefined)
+  let target: AgentMuxSpaceAddress
+  if (reference) {
+    const selected = selectSpatialCatalog(catalog, { zoneId: zone.zoneId, ...(destination.spaceId ? { spaceId: destination.spaceId } : {}), ...reference })
+    const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
+    if (!selected.locations.length || surface?.kind !== 'file' || surface.workspaceId !== workspaceId || surface.path !== path)
+      throw new Error('The original File occurrence is unconfirmed. Its workface and content are kept.')
+    target = { ...reference, workspaceId, zoneId: zone.zoneId, spaceId: destination.spaceId ?? null }
+  } else target = spatialDestination(catalog, destination, identity, state.layouts).address
+  return { address: target, placement: {
+    displayWorkspaceId: target.displayWorkspaceId, space, resource: { hostId: workspace.hostId, path: workspace.path },
+    ...(reference ? { reference } : {}),
+    selection: { spaceId: target.spaceId, zoneId: zone.zoneId, workspaceId: target.displayWorkspaceId,
+      groupId: target.groupId, tabId: target.tabId, regionId: target.regionId,
+      topicId }
+  } }
 }
 
 /** Resource resolution and the original File owner's same-call receipt stay separate from display selection. */
@@ -46,13 +89,12 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
     const mapped = zoneFileResource(workspace, zone, request.path, topics)
     report.resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path,
       zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path }
-    const { tabId, regionId } = fileWorkbenchIdentity(state, workspace.id, mapped.path, { space: { spaceId: zoneContext(state, topics, zone), zoneId: zone.zoneId } })
-    const target = spatialDestination(catalog, { zoneId: zone.zoneId, ...(request.spaceId ? { spaceId: request.spaceId } : {}),
+    const resolved = resolveFileOpenTarget(state, topics, catalog, workspace.id, mapped.path, { zoneId: zone.zoneId, ...(request.spaceId ? { spaceId: request.spaceId } : {}),
       ...(request.displayWorkspaceId ? { displayWorkspaceId: request.displayWorkspaceId, groupId: request.groupId } : {}),
-      ...(request.tabId ? { tabId: request.tabId, ...(request.regionId ? { regionId: request.regionId } : {}), ...(request.split ? { split: request.split } : {}) } : { newTab: true }) },
-      { tabId, regionId }, state.layouts).address
+      ...(request.tabId ? { tabId: request.tabId, ...(request.regionId ? { regionId: request.regionId } : {}), ...(request.split ? { split: request.split } : {}) } : { newTab: true }) })
+    const target = resolved.address
+    const { tabId, regionId } = target
     if (ports.closing(request.tabId ?? tabId)) throw new Error('The original File Tab is closing; its content is retained.')
-    const originalContext = zoneContext(state, topics, zone)
     const destinationTabId = request.tabId ?? tabId
     const beforeTab = Object.hasOwn(state.tabs, destinationTabId) ? state.tabs[destinationTabId] : undefined
     if (!request.tabId && beforeTab && beforeTab.space?.zoneId !== zone.zoneId) {
@@ -65,12 +107,9 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
     const input = focus && inputPolicy === 'target' ? null : captureDesktopInput(state.tabs)
     let actual: FileOpenResult | undefined
     await ports.openFile(mapped.path, target.groupId, undefined, workspace.id, fileOpenIntent === 'source', {
-      displayWorkspaceId: target.displayWorkspaceId,
-      space: { spaceId: originalContext, zoneId: zone.zoneId }, resource: { hostId: workspace.hostId, path: workspace.path },
+      ...resolved.placement,
       focus, inputPolicy, fileOnly: fileOpenIntent === 'source',
       ...(request.tabId && request.regionId && request.split ? { split: { tabId: request.tabId, regionId: request.regionId, direction: request.split } } : {}),
-      ...(focus ? { selection: { spaceId: target.spaceId, zoneId: zone.zoneId, workspaceId: target.displayWorkspaceId,
-        groupId: target.groupId, tabId: destinationTabId, regionId, topicId: catalog.spaces.find(space => space.spaceId === target.spaceId)?.topicId ?? null } } : {}),
       onResult: result => { actual = result }
     })
     if (!actual) throw new Error('The original File owner did not confirm a same-call result.')

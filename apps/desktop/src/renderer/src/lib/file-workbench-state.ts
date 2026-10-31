@@ -102,6 +102,7 @@ export type FileOpenPlacement = {
   focus?: boolean
   inputPolicy?: 'preserve' | 'target'
   fileOnly?: boolean
+  /** Intended object/occurrence, including background creation; only focus grants navigation. */
   selection?: import('@agentmux/core').AgentMuxDesktopSpaceSelection
   onResult?: (result: FileOpenResult) => void
 }
@@ -171,7 +172,7 @@ export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' 
       (tab.space.spaceId !== context.space.spaceId || tab.space.zoneId !== context.space.zoneId)) continue
     // A retained file in another Topic keeps its original entity and shared Document.
     // A requested display context must not borrow that unrelated occurrence.
-    if (!tab.space && tab.topicId && context?.selection?.topicId && tab.topicId !== context.selection.topicId) continue
+    if (!tab.space && context?.selection?.topicId && tab.topicId !== context.selection.topicId) continue
     const surface = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
     if (surface) return { tab, surface }
   }
