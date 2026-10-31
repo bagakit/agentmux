@@ -39,6 +39,7 @@ import { createHostConnectionOwner, type HostConnectionOptions } from './connect
 import { createHostAgentLearning } from './agent-learning.js'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
+import { configuredTailcatListener } from './tailcat-listener.js'
 export type AgentMuxHostOptions = {
   prepareExecutionEnvironment?: () => Promise<void>
   store: AgentMuxAgentSessionStore
@@ -71,9 +72,10 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let goals: ReturnType<typeof createHostGoals> | undefined
   let motePresence: ReturnType<typeof createHostMotePresence> | undefined
   let mobileIncidents: ReturnType<typeof createHostMobileIncidents> | undefined
+  let tailcat: ReturnType<typeof configuredTailcatListener> | undefined
   const closeResources = async () => {
     const errors: unknown[] = []
-    for (const close of [() => initializingMobile, () => authorityOpening?.catch(() => {}), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
+    for (const close of [() => initializingMobile, () => authorityOpening?.catch(() => {}), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
       () => mobileIncidents?.flush(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
@@ -107,6 +109,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}) })
   }
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
+  tailcat = configuredTailcatListener(configurationPath, { socketPath: path,
+    ...(options.prepareExecutionEnvironment ? { prepareEnvironment: options.prepareExecutionEnvironment } : {}) })
   if (options.store instanceof AgentMuxFileAgentSessionStore) mobileIncidents = createHostMobileIncidents({
     directory: join(dirname(options.store.path), 'mobile-web-incidents'), desktop: desktopClient,
     ...(configurationPath ? { originalMainDirectory: join(dirname(configurationPath), 'client-incidents') } : {}) })
@@ -160,6 +164,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined
   const service = {
     spatialState,
+    hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,
     ...(moteDialogue ? { moteDialogue } : {}),
     ...(moteQuickPreferences ? { moteQuickPreferences } : {}),
     ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime, agentMuxContext: async request => await goals?.contextForSpatialOpen(request) }) } : {}),
@@ -286,6 +291,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       capsuleAdapters: createCapsuleDesktopAdapters({ connect: context => desktopClient(context ?? { transport: 'unix' }) }),
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
+    // The Core endpoint is already serving before this optional listener can accept a peer.
+    void tailcat.start()
     await connectionOwner?.start(runtime)
     await motePresence?.start()
     if (goals) void goals.start().catch(error => process.emitWarning(`Starting original Goal automation is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Goal records and manual Agent input remain available.`, { code: 'GOAL_AUTOMATION_UNCONFIRMED' }))

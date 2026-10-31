@@ -1,9 +1,14 @@
 /** Original application Host records, shared by client validation and Node consumption. */
-type LocalHostConfig = { id: 'local'; kind: 'local'; label: string }
+export type TailcatListenerConfig = { enabled: boolean; keyFile: string; allowedClients: string[] }
+export type TailcatClientConfig = { address: string; keyFile: string }
+export type LocalHostConfig = { id: 'local'; kind: 'local'; label: string; tailcat?: TailcatListenerConfig }
 export type SshHostConfig = {
   id: string; kind: 'ssh'; label: string; hostname: string
   user?: string; port?: number; identityFile?: string
   remoteCommand?: string; remoteSocketPath?: string
+  /** Omitted transport preserves the original SSH-only route. */
+  transport?: 'ssh' | 'ssh-tailcat' | 'tailcat'
+  tailcat?: TailcatClientConfig
   /** Learned through the original authenticated connection, never an address alias. */
   runtimeId?: string
 }
@@ -36,7 +41,7 @@ export function parseHostConfiguration(value: unknown): HostConfigurationResult<
     if (typeof field !== 'string') issues.push({ code: 'invalid_type', expected: 'string', path: [name], message: 'Expected a string.' })
     else if (name === 'remoteSocketPath') {
       if (!field.startsWith('/')) issues.push({ code: 'invalid_format', format: 'starts_with', prefix: '/', path: [name], message: 'Remote socket path must start with /.' })
-    } else if (!field.length) issues.push({ code: 'too_small', origin: 'string', minimum: 1, inclusive: true, path: [name], message: 'Expected a nonempty string.' })
+    } else if (!field.length && !(name === 'hostname' && input.transport === 'tailcat')) issues.push({ code: 'too_small', origin: 'string', minimum: 1, inclusive: true, path: [name], message: 'Expected a nonempty string.' })
   }
   if (input.kind === 'local' && input.id !== 'local') issues.push({ code: 'invalid_value', values: ['local'], path: ['id'], message: "Local Host id must be 'local'." })
   if (input.kind === 'ssh' && input.port !== undefined) {
@@ -45,11 +50,34 @@ export function parseHostConfiguration(value: unknown): HostConfigurationResult<
     else if (input.port < 1) issues.push({ code: 'too_small', origin: 'number', minimum: 1, inclusive: true, path: ['port'], message: 'Port must be at least 1.' })
     else if (input.port > 65535) issues.push({ code: 'too_big', origin: 'number', maximum: 65535, inclusive: true, path: ['port'], message: 'Port must be at most 65535.' })
   }
-  const allowed = new Set(['id', 'kind', ...required, ...optional, ...(input.kind === 'ssh' ? ['port'] : [])])
+  if (input.kind === 'ssh' && input.transport !== undefined && !['ssh', 'ssh-tailcat', 'tailcat'].includes(input.transport as string)) {
+    issues.push({ code: 'invalid_value', values: ['ssh', 'ssh-tailcat', 'tailcat'], path: ['transport'], message: 'Choose SSH, SSH with Tailcat backup, or Tailcat.' })
+  }
+  const tailcatRequired = input.kind === 'ssh' && (input.transport === 'tailcat' || input.transport === 'ssh-tailcat')
+  if (input.tailcat !== undefined || tailcatRequired) {
+    const config = input.tailcat
+    const problem = (path: FieldPath, message: string) => issues.push({ code: 'custom', path: ['tailcat', ...path], message })
+    if (!config || typeof config !== 'object' || Array.isArray(config)) problem([], 'Expected Tailcat configuration.')
+    else {
+      const tc = config as Record<string, unknown>
+      const local = input.kind === 'local'
+      const names = local ? ['enabled', 'keyFile', 'allowedClients'] : ['address', 'keyFile']
+      const extra = Object.keys(tc).filter(key => !names.includes(key))
+      if (extra.length) issues.push({ code: 'unrecognized_keys', keys: extra, path: ['tailcat'], message: 'Tailcat contains unrecognized fields.' })
+      if (local && typeof tc.enabled !== 'boolean') problem(['enabled'], 'Tailcat listener enabled must be boolean.')
+      const enabled = local ? tc.enabled === true : tailcatRequired
+      if (typeof tc.keyFile !== 'string' || /[\0\r\n]/u.test(tc.keyFile) || enabled && !tc.keyFile.trim()) problem(['keyFile'], 'Choose a saved Tailcat key file or key name.')
+      if (local) {
+        if (!Array.isArray(tc.allowedClients) || tc.allowedClients.some(key => typeof key !== 'string' || !key.trim() || /[\0\r\n,]/u.test(key))) problem(['allowedClients'], 'Allowed clients must be a list of public keys.')
+        else if (enabled && tc.allowedClients.length === 0) problem(['allowedClients'], 'Add an allowed client public key before enabling Tailcat.')
+      } else if (typeof tc.address !== 'string' || /[\0\r\n]/u.test(tc.address) || enabled && !/^tc[A-Za-z0-9_-]+$/u.test(tc.address)) problem(['address'], 'Enter the private tc address from the other Host.')
+    }
+  }
+  const allowed = new Set(['id', 'kind', ...required, ...optional, 'tailcat', ...(input.kind === 'ssh' ? ['port', 'transport'] : [])])
   const keys = Object.keys(input).filter(key => !allowed.has(key))
   if (keys.length) issues.push({ code: 'unrecognized_keys', keys, path: [], message: 'Host contains unrecognized fields: ' + keys.join(', ') })
   const data: Record<string, unknown> = { id: input.id, kind: input.kind, label: input.label }
-  for (const field of [...optional, ...(input.kind === 'ssh' ? ['hostname', 'port'] : [])]) if (field in input) data[field] = input[field]
+  for (const field of [...optional, 'tailcat', ...(input.kind === 'ssh' ? ['hostname', 'port', 'transport'] : [])]) if (field in input) data[field] = input[field]
   return issues.length ? { success: false, issues } : { success: true, data: data as HostConfig }
 }
 
