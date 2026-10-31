@@ -18,18 +18,21 @@ import { TopicMoveDialog, type TopicMoveTarget } from '../src/renderer/src/compo
 import { TopicActionsMenu, TopicContextMenu } from '../src/renderer/src/components/TopicContextMenu'
 import { TopicKnowledgePanel } from '../src/renderer/src/components/TopicKnowledgePanel'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
-import type { WorkspaceRecord } from '../src/shared/contracts'
+import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
+import { directoryIdentity } from '../src/shared/space-addresses'
+import { initializeTopicSpatialClient } from './helpers/topic-spatial-client-fixture'
+import { moteAgent } from './fixtures/mote-workface'
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('No avatar writes in this fixture') } } }))
 const initial = useAppStore.getState(), DESTINATION = '11111111-1111-4111-8111-111111111111'
-let directories: string[] = [], root: Root | null = null, host: HTMLDivElement
+let directories: string[] = [], root: Root | null = null, host: HTMLDivElement, disposeClient: (() => void) | undefined
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); useAppStore.setState(initial, true); host = document.createElement('div'); document.body.append(host) })
-afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; document.body.replaceChildren(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }) })
+afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; if (disposeClient) { try { await useAppStore.getState().refreshSpatialState() } finally { disposeClient(); disposeClient = undefined } } document.body.replaceChildren(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 }) })
 async function settle(predicate: () => boolean) {
   for (let i = 0; i < 100 && !predicate(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   expect(predicate()).toBe(true)
@@ -54,15 +57,18 @@ async function fixture(withDestination = true) {
   const first = (await owner.call('topic.create', { topicId: 'view:move-first', title: 'Original Topic' })).topic
   const second = (await owner.call('topic.create', { topicId: 'view:move-second', title: 'Other Topic' })).topic
   const destination = withDestination ? (await owner.call('topic.category.create', { categoryId: DESTINATION, title: 'Research' })).category : null
-  const original = (await state.read())!, tabs = [first, second].map(topic => ({ ...createWorkbenchTab('chat:' + topic.topicId, { kind: 'agent', phase: 'attached', regionId: 'thread:' + topic.topicId, workspaceId: workspace.id, sessionId: 'healthy:' + topic.topicId }), topicId: topic.topicId, space: { spaceId: topic.categorySpaceIds[0]!, zoneId: topic.zoneId } }))
-  const layout = createWorkspaceLayout('original-group', tabs.map(tab => tab.id)), graph = original.graph
-  graph.tabs = tabs.map(tab => ({ tabId: tab.id, zoneId: tab.space.zoneId, workspaceId: workspace.id, name: null, regionIds: [tab.layout.activeRegionId] }))
-  graph.regions = tabs.map(tab => ({ tabId: tab.id, regionId: tab.layout.activeRegionId, kind: 'agent', agentSessionId: 'healthy:' + tab.topicId, runId: 'original-run', execution: { hostId: 'local', cwd: first.directoryPath } }))
-  graph.layouts[workspace.id] = layout
-  await state.commit({ expectedRevision: original.revision, graph })
+  const original = (await state.read())!, tabs = [first, second].map(topic => ({ ...createWorkbenchTab('chat:' + topic.topicId, { kind: 'agent', phase: 'attached', regionId: 'thread:' + topic.topicId, workspaceId: workspace.id, sessionId: 'healthy:' + topic.topicId }), topicId: topic.topicId, space: { spaceId: directoryIdentity(workspace.hostId, topic.directoryPath), zoneId: topic.zoneId } }))
+  const layout = createWorkspaceLayout('original-group', tabs.map(tab => tab.id))
   const topics = await scratch.list(workspace)
-  useAppStore.setState({ loading: false, activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: layout }, topicCategories: categoriesFromSpatial(graph), spaceZoneBindings: desktopBindingsFromSpatial(graph), scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, reading: false, error: null, topics } }, workbenchSpaceSelection: { workspaceId: workspace.id, spaceId: first.categorySpaceIds[0]!, zoneId: first.zoneId, topicId: first.topicId, tabId: tabs[0]!.id, groupId: layout.activeGroupId, regionId: tabs[0]!.layout.activeRegionId }, pinnedItems: { [workspace.id]: [first.topicId] }, agentComposerDrafts: { ['healthy:' + first.topicId]: 'Original unsent draft' } })
-  vi.spyOn(api.topics, 'call').mockImplementation(owner.call.bind(owner)); vi.spyOn(api.spatial, 'read').mockImplementation(() => state.read()); vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
+  const sessions = [first, second].map(topic => ({ ...moteAgent('healthy:' + topic.topicId, topic.topicId), workspacePath: topic.directoryPath }))
+  useAppStore.setState({ config, sessions, loading: false, activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: layout }, topicCategories: categoriesFromSpatial(original.graph), spaceZoneBindings: desktopBindingsFromSpatial(original.graph), scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, reading: false, error: null, topics } }, workbenchSpaceSelection: { workspaceId: workspace.id, spaceId: first.categorySpaceIds[0]!, zoneId: first.zoneId, topicId: first.topicId, tabId: tabs[0]!.id, groupId: layout.activeGroupId, regionId: tabs[0]!.layout.activeRegionId }, pinnedItems: { [workspace.id]: [first.topicId] }, agentComposerDrafts: { ['healthy:' + first.topicId]: 'Original unsent draft' } })
+  await state.commit({ expectedRevision: original.revision, graph: desktopSpatialGraph(useAppStore.getState(), topics, original.graph) })
+  vi.spyOn(api.topics, 'call').mockImplementation(owner.call.bind(owner)); vi.spyOn(api.spatial, 'read').mockImplementation(() => state.readForLayout()); vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => state.commit(input))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => state.subscribe(listener))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => state.retainDisplayLabels(values))
+  disposeClient = await initializeTopicSpatialClient(() => scratch.list(workspace))
   return { workspace, owner, state, first, second, destination, topics }
 }
 function target(topic: { topicId: string; title: string }): TopicMoveTarget { return { topicId: topic.topicId, title: topic.title } }
@@ -86,7 +92,8 @@ describe('whole Topic transfer through the original Host and Core owners', () =>
     expect(result).toMatchObject({ topicId: f.first.topicId, directoryPath: f.first.directoryPath, zoneId: f.first.zoneId, categorySpaceIds: [f.destination!.spaceId] })
     expect(await readFile(join(f.first.directoryPath, 'topic.md'), 'utf8')).toBe(bytes)
     expect((await f.state.read())!.graph.tabs).toEqual(graph.tabs); expect((await f.state.read())!.graph.regions).toEqual(graph.regions); expect((await f.state.read())!.graph.layouts).toEqual(graph.layouts)
-    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().pinnedItems).toBe(before.pinnedItems); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().layouts).toEqual(before.layouts); expect(useAppStore.getState().pinnedItems).toBe(before.pinnedItems); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    for (const tab of Object.values(before.tabs)) expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
     expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.destination!.spaceId, zoneId: f.first.zoneId, topicId: f.first.topicId })
     expect(api.sessions.stop).not.toHaveBeenCalled()
   })
@@ -112,7 +119,7 @@ describe('whole Topic transfer through the original Host and Core owners', () =>
     const f = await fixture(), original = (await f.state.read())!.graph
     await mount(createElement(Moving, { moveTarget: target(f.first) })); await ready()
     await input(document.querySelector<HTMLSelectElement>('.topic-move-dialog select')!, DESTINATION)
-    await f.owner.call('topic.category.create', { categoryId: '22222222-2222-4222-8222-222222222222', title: 'Concurrent Category' })
+    await act(async () => { await f.owner.call('topic.category.create', { categoryId: '22222222-2222-4222-8222-222222222222', title: 'Concurrent Category' }) })
     await click(button('Move Topic')); await settle(() => !!document.querySelector('.topic-move-dialog [role="alert"]'))
     expect(document.querySelector<HTMLSelectElement>('select')!.value).toBe(DESTINATION)
     expect(button('Move Topic').disabled).toBe(true)
@@ -128,7 +135,7 @@ describe('whole Topic transfer through the original Host and Core owners', () =>
     const f = await fixture(), before = useAppStore.getState()
     vi.mocked(api.spatial.read).mockResolvedValueOnce(null)
     await mount(createElement(Moving, { moveTarget: target(f.first) })); await ready()
-    expect(document.querySelector('[role="alert"]')!.textContent).toContain('not confirmed')
+    expect(document.querySelector('[role="alert"]')!.textContent).toContain('unconfirmed')
     expect(button('Move Topic').disabled).toBe(true)
     expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
     await click(button('Refresh Topic and categories')); await ready()
