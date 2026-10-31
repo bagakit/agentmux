@@ -7,6 +7,13 @@ import {
   type DesktopClientObservation, type DesktopLoadedIdentity
 } from '../shared/client-observation.js'
 import { conversationConsumerObservationSchema, desktopConversationConsumerObservationSchema } from '../shared/conversation-consumer-observation.js'
+import type { WorkbenchUserStateStore } from './workbench-user-state.js'
+
+/** Read only through the original Main owner, exposing metadata and its historical writer receipt. */
+export async function observeWorkbenchUserState(owner: Pick<WorkbenchUserStateStore, 'read' | 'observe'>): Promise<DesktopClientObservation['main']['storage']> {
+  try { await owner.read() } catch { /* The owner retains safe failure metadata; healthy workfaces remain observable. */ }
+  return { userState: owner.observe() }
+}
 
 /** Capture at Main startup. Missing metadata stays unknown; it is never reread during observation. */
 export async function readLoadedPackageIdentity(path: string): Promise<DesktopPackageIdentity | null> {

@@ -101,7 +101,7 @@ import { sessionObservationResult } from '../shared/session-observation-result.j
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
-import { inspectDesktopClient, registerLoadedIdentityIpc } from './client-observation.js'
+import { inspectDesktopClient, observeWorkbenchUserState, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
@@ -116,7 +116,6 @@ import { registerToolkitIpc } from './toolkit-ipc.js'
 import { registerDeviceManagementIpc } from './device-management-ipc.js'
 import { resolvePerformancePreferences } from '../shared/toolkit-preferences.js'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
-import { observeWorkbenchStorageAuthority } from './workbench-storage-authority.js'
 import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
@@ -662,9 +661,8 @@ export async function registerIpc(args: {
       pid: process.pid, package: args.loadedPackage ?? null,
       renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
       generation: () => args.runtime.rendererGeneration(contents),
-      storage: () => observeWorkbenchStorageAuthority(contents.session, {
-        userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
-      }),
+      storage: async () => ({ ...await observeWorkbenchUserState(workbenchUserState),
+        spatialRevision: (await spatialState.readForLayout().catch(() => null))?.revision ?? null }),
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
     })
     if (request.operation === 'settings.browser.default.inspect' || request.operation === 'settings.browser.default.open-settings') return executeBrowserDefaultControl(request)

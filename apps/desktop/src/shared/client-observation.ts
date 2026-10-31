@@ -5,6 +5,17 @@ import { parseSurveyOrganization } from '@agentmux/core/control'
 
 const id = z.string().min(1)
 const nullableId = id.nullable()
+const contentDigest = z.string().regex(/^[a-f0-9]{64}$/u)
+const spatialRevision = z.number().int().positive().nullable()
+const workbenchUserStateReceipt = z.object({ path: id, contentDigest, sizeBytes: z.number().int().nonnegative(),
+  diskDurability: z.literal('confirmed'), confirmedAt: z.number().finite().nonnegative() }).strict()
+const workbenchUserStateObservation = z.object({ path: id, availability: z.enum(['present', 'missing', 'unconfirmed']),
+  contentDigest: contentDigest.nullable(), sizeBytes: z.number().int().nonnegative().nullable(),
+  diskDurability: z.enum(['confirmed', 'unconfirmed']), confirmedAt: z.number().finite().nonnegative().nullable(),
+  lastConfirmedWrite: workbenchUserStateReceipt.nullable(),
+  lastFailure: z.object({ operation: z.enum(['read', 'write']), phase: z.enum(['request', 'before-replace', 'after-replace']).nullable(),
+    code: z.string().max(128).nullable(), observedAt: z.number().finite().nonnegative() }).strict().nullable()
+}).strict()
 const run = z.object({ runId: id }).strict()
 const control = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('agent'), hostId: id, agentSessionId: id, run }).strict(),
@@ -69,6 +80,9 @@ export const desktopWorkbenchObservationSchema = z.object({
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict(),
   // Older producers do not observe these preferences. Absence remains unknown, never an empty list.
   survey: survey.optional(),
+  // Missing older facts stay unknown; observation never flushes or manufactures an ACK.
+  persistence: z.object({ userStatePending: z.boolean(), userStateContentDigest: contentDigest.nullable(),
+    spatial: z.object({ revision: spatialRevision, aligned: z.boolean() }).strict() }).strict().optional(),
   desktop: desktopObservationSchema,
   tabs: z.array(z.object({ id, workspaceId: id, topicId: id.optional(), titleRegionId: id, name: z.string().optional(),
     layout: z.object({ root: regionTree, activeRegionId: id }).strict(), regions: z.array(region) }).strict()),
@@ -85,8 +99,10 @@ export const desktopLoadedRendererSchema = z.object({
   identity: z.object({ shell: id, ctxmux: id }).strict()
 }).strict()
 export const desktopWorkbenchStorageObservationSchema = z.object({
-  userData: id, sessionData: id, directory: nullableId,
-  localStorage: z.enum(['present', 'missing', 'unconfirmed']), detail: z.string().nullable()
+  userState: workbenchUserStateObservation.optional(), spatialRevision: spatialRevision.optional(),
+  // Retain older raw observations for inspection only. These are never save evidence.
+  userData: id.optional(), sessionData: id.optional(), directory: nullableId.optional(),
+  localStorage: z.enum(['present', 'missing', 'unconfirmed']).optional(), detail: z.string().nullable().optional()
 }).strict()
 export const desktopClientObservationSchema = z.object({
   schema: z.literal('agentmux.desktop-client-observation.v1'),

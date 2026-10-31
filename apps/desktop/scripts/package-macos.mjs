@@ -906,7 +906,7 @@ export async function installApplication(appPath, { intent = installIntent, home
       main: observed.main, intent, native, path: destination
     })
     process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
-    if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed, terminalRebindings,
+    if (!before && (previouslyInstalled || intent === 'ui-only')) return { intent, ui: { status: 'unknown', path: destination, observation: observed, terminalRebindings,
       reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
     if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined) return { intent, ui: {
       status: 'unknown', path: destination, observation: observed, terminalRebindings,

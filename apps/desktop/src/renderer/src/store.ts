@@ -1,5 +1,7 @@
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
 import { initialNativeComposerBinding } from './lib/initial-native-composer-binding'
@@ -6452,6 +6454,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
           organization: state.surveyOrganization, selection: persistedSurveyZoneSelection(state.surveyZoneSelection) },
+        persistence: { userStatePending: persistentWorkbenchStorage.pending() || desktopUserDocument.unreadFragments().length > 0 || auxiliaryUserDataPending(),
+          userStateContentDigest: (() => {
+            const encoded = desktopUserDocument.encodeProjection({ state: partializeAppState(state), version: 1 })
+            return encoded === null ? null : bytesToHex(sha256(utf8ToBytes(encoded)))
+          })(),
+          spatial: { revision: coreSpatialPersistence?.current?.revision ?? null,
+            aligned: !!coreSpatialPersistence?.ready && !coreSpatialPersistence.pendingChanges &&
+              sameSpatialValue(captureSpatialWorkbench(coreSpatialPersistence), coreSpatialPersistence.current!.graph) } },
         desktop: { selection, ...presentation,
           focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId, agent: readFocusAgentPresentation(state.focusAgentReveal) } },
         layouts: state.layouts,

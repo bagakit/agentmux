@@ -277,6 +277,8 @@ export class DesktopSpatialPersistence {
   private unsubscribe: (() => void) | null = null;
   constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void) { }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
+  /** Read-only observation: equal graphs cannot settle an in-flight or unknown write. */
+  get pendingChanges(): boolean { return !!(this.startup || this.pending || this.saving || this.unconfirmed); }
   get current(): AgentMuxSpatialState | null { return this.state; }
   acceptNames(state: AgentMuxSpatialState): void {
     if (this.state && state.revision < this.state.revision) return;
