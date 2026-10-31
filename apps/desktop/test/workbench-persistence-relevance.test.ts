@@ -458,6 +458,9 @@ describe('actual Store persistence relevance', () => {
     store.getState().setAgentComposerDraft(sessionId, 'Intentional draft edit while offline')
     vi.advanceTimersByTime(400)
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'Intentional draft edit while offline' })
-    expect(Object.keys(saved().state.restoredWorkbench!.tabs)).toEqual([tab.id])
+    // Spatial observation survives the Runtime startup failure and imports the
+    // original workface into its Core owner; local preferences stop duplicating it.
+    expect(saved().state).not.toHaveProperty('restoredWorkbench')
+    expect(Object.keys((await savedWorkbench()).tabs)).toEqual([tab.id])
   })
 })
