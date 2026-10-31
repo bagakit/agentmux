@@ -55,6 +55,11 @@ export type ConversationMessageProps = {
   continuation?: boolean
   /** An already-open original disclosure owns the full body, including long human input. */
   expandedContent?: boolean
+  /** The owning reading position retains explicit expansion by original source. */
+  bodyExpanded?: boolean
+  onBodyExpandedChange?(open: boolean): void
+  expandedOriginals?: ReadonlySet<string>
+  onOriginalExpandedChange?(recordId: string, open: boolean): void
   /** Keep secondary identity/context facts in the existing Info disclosure. */
   /** Compact clients keep full provenance in the existing details disclosure. Unread sources stay visible. */
   sourceLabelsInDetails?: boolean
@@ -65,6 +70,8 @@ export type ConversationMessageProps = {
   nativeCollaboration?: Extract<AgentSessionHistoryCollaboration, { kind: 'message' }>
   recordedIdentity?: boolean
   messageDetails?: ReactNode
+  /** Original message status stays visible when secondary context moves into Info. */
+  messageStatus?: ReactNode
   /** Original record timing supplied by the owning reader; replaces the bare clock. */
   messageTiming?: ReactNode
   /** Move secondary project/source context into Info while retaining the sender ID. */
@@ -176,6 +183,11 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
   return part.text.length > 0
 }
 
+/** The shared card's reading criterion, including resources and structured answers. */
+export function conversationMessageHasContent(parts: readonly AgentSessionHistoryContentPart[], answers?: readonly AgentSessionHistoryQuestionAnswer[]): boolean {
+  return Boolean(answers?.length) || parts.some(partHasRenderableContent)
+}
+
 function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
   parts: readonly AgentSessionHistoryContentPart[]
   identity: object
@@ -191,7 +203,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, processContent = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration: explicitNativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
+  active = true, compact = false, processContent = false, continuation = false, expandedContent = false, bodyExpanded, onBodyExpandedChange, expandedOriginals, onOriginalExpandedChange, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration: explicitNativeCollaboration, messageDetails, messageStatus, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, notificationRecords, locatedSourceKey, messageTiming, contextInDetails, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -209,7 +221,8 @@ export function ConversationMessage({
   const humanText = recordedSpeaker?.role === 'human' ? parts.filter(part => part.kind === 'text').map(part => part.text).join('\n\n') : ''
   const discloseHuman = !expandedContent && (humanText.length > 1200 || humanText.split('\n').length > 12)
   const discloseBody = (body: ReactNode) => discloseHuman
-    ? <ConversationMessageDisclosure key={JSON.stringify([messageId, recordSourceKey, humanText])} preview={humanText.slice(0, 160).trimEnd()} reveal={located}>{body}</ConversationMessageDisclosure>
+    ? <ConversationMessageDisclosure key={JSON.stringify([messageId, recordSourceKey, humanText])} preview={humanText.slice(0, 160).trimEnd()} reveal={located}
+      {...(bodyExpanded === undefined ? {} : { open: bodyExpanded })} {...(onBodyExpandedChange ? { onOpenChange: onBodyExpandedChange } : {})}>{body}</ConversationMessageDisclosure>
     : body
   const collaborationPreview = useMemo(() => nativeCollaboration ? conversationReplyPreview(parts.flatMap(part => part.kind === 'text'
     ? [sessionHistoryTextForReading(part)] : []).join('\n\n')).slice(0, 180) : '', [content, Boolean(nativeCollaboration)])
@@ -218,7 +231,7 @@ export function ConversationMessage({
   const hasQuestionAnswers = Boolean(questionAnswers?.length)
   const firstTextIndex = parts.findIndex(part => part.kind === 'text')
   const contextPartIndex = parts.findIndex(part => part.kind === 'text' || part.kind === 'resource' && part.resourceType === 'text')
-  const hasContent = hasQuestionAnswers || parts.some(partHasRenderableContent)
+  const hasContent = conversationMessageHasContent(parts, questionAnswers)
   const hasCopyContent = copyText === undefined ? parts.some((part) => partText(part).length > 0) : copyText.length > 0
   const isTraceOnly = !hasQuestionAnswers && parts.length > 0 && parts.every((part) =>
     part.kind === 'text' ? part.text.trim().length === 0 : !(part.kind === 'resource' && part.resourceType === 'text' && part.content?.kind === 'text'))
@@ -340,10 +353,15 @@ export function ConversationMessage({
               </button>
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null
+  const metadataInDetails = detailsOnlyMetadata || contextInDetails || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
+  const submissionMetadata = sources?.submissions?.length ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} nativeReadable={inputSource?.kind === 'native' && hasContent}
+          {...(expandedOriginals ? { expandedRecords: expandedOriginals } : {})} {...(onOriginalExpandedChange ? { onOpenChange: onOriginalExpandedChange } : {})}
+          {...(locatedSourceKey ? { locatedSourceKey } : {})} {...(renderSubmissionOriginal ? { renderOriginal: renderSubmissionOriginal } : {})} /> : null
   const contextAgentBadge = isPeerAgent && contextInDetails && !detailsOnlyMetadata
-  const metadata = hasMetadata || contextAgentBadge || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
+  const metadata = hasMetadata || contextAgentBadge || (!metadataInDetails && (messageStatus || submissionMetadata)) || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
         {contextAgentBadge ? <span className="log-turn__sender-kind">Agent</span> : null}
-        {sources?.submissions ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} nativeReadable={hasContent} {...(renderSubmissionOriginal ? { renderOriginal: renderSubmissionOriginal } : {})} /> : null}
+        {!metadataInDetails ? messageStatus : null}
+        {!metadataInDetails ? submissionMetadata : null}
         {!detailsOnlyMetadata && (!sourceLabelsInDetails || sources?.main?.unread) ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} /> : null}
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
@@ -354,7 +372,6 @@ export function ConversationMessage({
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div> : null
 
-  const metadataInDetails = detailsOnlyMetadata || contextInDetails || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
   const card = {
     avatar: nativeCollaboration ? null : described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar key={JSON.stringify([avatarSpeaker?.id, described.channelProfile.checkedAt])} url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
       : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
@@ -382,7 +399,7 @@ export function ConversationMessage({
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
         {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
       </ConversationInputDetails> : null,
-    metadata: <>{!metadataInDetails ? metadata : null}
+    metadata: <>{metadataInDetails && (messageStatus || submissionMetadata) ? <div className="log-turn__meta">{messageStatus}{submissionMetadata}</div> : null}{!metadataInDetails ? metadata : null}
       {sources && detailsOnlyMetadata && !nativeCollaboration && (!sourceLabelsInDetails || sources.main?.unread) ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
     </>,
     renderBody

@@ -6,7 +6,7 @@ import type { ConversationPresentationController } from '@agentmux/client-ui/use
 import { type AgentConversationRecord, type ConversationItemRef } from '@agentmux/core/conversation'
 import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
-import { CapturedConversationMessage, type SubmissionDisclosure } from '@agentmux/client-ui/components/CapturedConversationMessage'
+import { CapturedConversationMessage, type CapturedMessagePresentation } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation-trace-disclosure'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
@@ -940,7 +940,7 @@ export function ActivityView({
     }
   }
 
-  const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure'], submissionDisclosure?: SubmissionDisclosure): JSX.Element => {
+  const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure'], capturedPresentation?: CapturedMessagePresentation): JSX.Element => {
   // Identity is resolved once here; the shared message only renders that verdict.
   const speaker = entry.record.speaker ?? speakerOf(entry.item)
   const described = speaker ? describeSpeaker?.(speaker) : undefined
@@ -957,7 +957,7 @@ export function ActivityView({
         <CapturedConversationMessage
           active={readingEnabled}
           item={entry.item}
-          {...(submissionDisclosure ? { submissionDisclosure } : {})}
+          {...capturedPresentation}
           {...(entry.record ? { record: entry.record } : {})}
           {...(entry.record?.role === 'observation' ? { replyObservation: { compact: true } } : {})}
           messageActions={<>{entry.record && conversationItemRef(entry.record) && renderRecordActions?.(conversationItemRef(entry.record)!, readingEnabled, executionHostId)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
@@ -1020,14 +1020,13 @@ export function ActivityView({
         page={nativeHistoryPage}
         readActivity={readingWindow.readActivity}
         readProcessDetail={readingWindow.readProcessDetail}
-        expandSubmissions={Boolean(readingWindow.error || readingWindow.automaticReadError)}
         records={conversationRecords}
         originalRecords={originalConversationRecords}
         coverage={conversationCoverage}
         onLocateRecord={revealLoadedRecord}
-        renderCapturedRecord={(record, disclosure, submissionDisclosure) => {
+        renderCapturedRecord={(record, disclosure, capturedPresentation) => {
           const segment = placedByRecord.get(record.id) ?? (record.original.kind === 'captured' ? { entry: { kind: 'item' as const, item: record.original.item, record }, key: JSON.stringify(['item', record.rawId]), from: 0, to: 0 } : undefined)
-          return segment ? renderPlaced(segment, disclosure, submissionDisclosure) : null
+          return segment ? renderPlaced(record.original.kind === 'captured' ? { ...segment, entry: { kind: 'item', item: record.original.item, record } } : segment, disclosure, capturedPresentation) : null
         }}
         insertions={[...moteInsertions, { key: 'native-reading-tail', role: 'anchor', ...(nativeTailBeforeRecordId ? { beforeRecordId: nativeTailBeforeRecordId } : {}), content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
         traceDisclosure={traceDisclosure}

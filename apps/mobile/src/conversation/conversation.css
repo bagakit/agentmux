@@ -11,7 +11,6 @@
 .mobile-conversation .conversation-a2a-notice:has(> .conversation-mote-notice) :is(button, summary) { min-width: 44px; min-height: 44px; }
 .mobile-conversation .conversation-a2a-notice:has(> .conversation-mote-notice) summary { box-sizing: border-box; padding-block: 12px; }
 .mobile-conversation .conversation-a2a-notice:has(> .conversation-mote-notice) .conversation-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.mobile-conversation .conversation-submission-record:has(> .message-disclosure[open]) { width: calc(100% - var(--sp-4)); }
 .mobile-conversation :is(.log-turn__action, .log-turn__id-copy, .conversation-input-details__toggle) > svg { width: 14px; height: 14px; }
 .mobile-conversation .log-turn__sender-id code { align-self: center; }
 .mobile-conversation .log-turn__identity, .mobile-conversation .log-turn__identity > .log-turn__time { align-self: center; }

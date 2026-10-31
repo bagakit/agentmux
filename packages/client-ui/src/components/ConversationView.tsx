@@ -17,9 +17,9 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { type DescribeSpeaker } from '../lib/conversation-speaker.js'
-import { CapturedConversationMessage, type SubmissionDisclosure } from './CapturedConversationMessage.js'
+import { CapturedConversationMessage, type CapturedMessagePresentation } from './CapturedConversationMessage.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
-import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
+import { ConversationMessage, conversationMessageHasContent, type ConversationMessageProps } from './ConversationMessage.js'
 import { ConversationRecordSequence, type ConversationProcessProps, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary, type ConversationRecordInsertion } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
@@ -27,7 +27,7 @@ import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionRep
 import { projectConversationQuestions } from '@agentmux/core/conversation'
 import type { ConversationSourceRead } from '../lib/use-conversation-view.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
-import { conversationA2ANotificationId, conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
+import { conversationA2ANotificationId, conversationItemRef, type ConversationItemRef, type ConversationSourceRecord } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'sourceLabelsInDetails' | 'detailsOnlyMetadata' | 'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
@@ -61,9 +61,8 @@ type Props = ReadingProps & {
   coverageSummary?: string
   coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage']
   onLocateRecord?: import('react').ComponentProps<typeof ConversationCoverage>['onLocate']
-  renderCapturedRecord?: (record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure'], submissionDisclosure?: SubmissionDisclosure) => ReactNode
+  renderCapturedRecord?: (record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure'], presentation?: CapturedMessagePresentation) => ReactNode
   /** Original reader failure retains the full submitted input; does not change input qualification. */
-  expandSubmissions?: boolean
   /** Already accepted same-source facts; does not change this page or acquire read demand. */
   questionAnswerContext?: AgentSessionHistoryPage | null
   sessionId: string
@@ -82,7 +81,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  presentation, readingGeometry, readProcessDetail, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, coverageSummary, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
+  presentation, readingGeometry, readProcessDetail, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, coverageSummary, onLocateRecord, renderCapturedRecord, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
 }: Props) {
   const frame = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [], page: acceptedPage, recordBoundary: acceptedBoundary, insertions: acceptedInsertions }),
@@ -94,24 +93,22 @@ export const ConversationView = memo(function ConversationView({
   const bodyScope = useMemo(() => ({ work: layout.bodyWork, active: reading.active !== false }), [layout.bodyWork, reading.active])
   const { records: describedRecords, page, recordBoundary, insertions } = layout
   const projection = layout
-  const choiceScope = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
-  // Only local disclosure choices survive coalescence; no message or relation facts are retained here.
-  const [submissionChoices, setSubmissionChoices] = useState<{ scope: string; values: ReadonlyMap<string, boolean> }>({ scope: choiceScope, values: new Map() })
-  const choices = submissionChoices.scope === choiceScope ? submissionChoices.values : new Map<string, boolean>()
+  // Preserve explicit original-source reading choices, never a second message history.
+  const [originalChoices, setOriginalChoices] = useState<{ scope: string; values: ReadonlyMap<string, boolean> }>({ scope: sourceKey, values: new Map() })
+  const choices = originalChoices.scope === sourceKey ? originalChoices.values : new Map<string, boolean>()
   useEffect(() => {
     const retained = new Set(projection.originalRecords.flatMap(record => record.records?.map(source => source.id) ?? [record.id]))
-    setSubmissionChoices(previous => {
-      if (previous.scope !== choiceScope) return { scope: choiceScope, values: new Map() }
+    setOriginalChoices(previous => {
+      if (previous.scope !== sourceKey) return { scope: sourceKey, values: new Map() }
       if ([...previous.values.keys()].every(id => retained.has(id))) return previous
-      return { scope: choiceScope, values: new Map([...previous.values].filter(([id]) => retained.has(id))) }
+      return { scope: sourceKey, values: new Map([...previous.values].filter(([id]) => retained.has(id))) }
     })
-  }, [choiceScope, projection.originalRecords])
-  const expandedSubmissions = useMemo(() => new Set([...choices].filter(([, open]) => open).map(([id]) => id)), [choices])
-  function setSubmissionChoice(id: string, open: boolean): void {
-    setSubmissionChoices(previous => {
-      const values = previous.scope === choiceScope ? previous.values : new Map<string, boolean>()
-      if (values.get(id) === open && previous.scope === choiceScope) return previous
-      return { scope: choiceScope, values: new Map(values).set(id, open) }
+  }, [sourceKey, projection.originalRecords])
+  const expandedOriginals = useMemo(() => new Set([...choices].filter(([, open]) => open).map(([id]) => id)), [choices])
+  function setOriginalChoice(id: string, open: boolean): void {
+    setOriginalChoices(previous => {
+      if (previous.scope === sourceKey && previous.values.get(id) === open) return previous
+      return { scope: sourceKey, values: new Map(previous.scope === sourceKey ? previous.values : []).set(id, open) }
     })
   }
   if (page && page.agentSessionId !== sessionId) return null
@@ -137,13 +134,12 @@ export const ConversationView = memo(function ConversationView({
     || record.deferred?.records.some(source => conversationMessageSourceKey(sessionId, source.reference!.source) === locatedMessageKey)
     || record.records?.some(source => originals.has(source.id) && conversationMessageSourceKey(sessionId, originals.get(source.id)!.source) === locatedMessageKey)) : undefined
   function renderCaptured(record: ConversationRecord, canonicalDisclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
-    // Source leaves keep their raw payload API; all stored choices use the canonical key.
+    // Process disclosures keep the original record's source-qualified key.
     const key = record.presentationKey ?? record.id
     const value = canonicalDisclosure?.steps.get(key)
     const disclosure = canonicalDisclosure ? { ...canonicalDisclosure, steps: new Map(value === undefined ? [] : [[record.rawId, value]]),
       onStepExpandedChange: (_id: string, open: boolean) => canonicalDisclosure.onStepExpandedChange(key, open),
       onStepsPresented: () => canonicalDisclosure.onStepsPresented?.([key]) } : undefined
-    const choiceKey = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
     const target = record.sources?.unreadSubmissionTarget
     const request = readActivity?.sourceRead
     const targetUnavailable = (record.coverage ?? projection.coverage).some(row => row.source.kind === 'native'
@@ -156,16 +152,15 @@ export const ConversationView = memo(function ConversationView({
       && target.hostId === record.sourceHostId && target.agentSessionId === request.reference.agentSessionId
       && request.reference.hostId === (record.executionHostId ?? record.sourceHostId)
       && request.nativeSource.providerId === target.source.providerId && request.nativeSource.nativeSessionId === target.source.nativeSessionId)
-    const submissionDisclosure: SubmissionDisclosure | undefined = feed ? {
-      reading: readingSubmission,
-      compact: !expandSubmissions,
-      ...(choices.has(choiceKey) ? { open: choices.get(choiceKey)! } : {}),
-      onOpenChange: open => setSubmissionChoice(choiceKey, open)
-    } : undefined
-    return renderCapturedRecord ? renderCapturedRecord(record, disclosure, submissionDisclosure) : record.role === 'process' || record.role === 'interaction'
+    const sourceId = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
+    const bodyExpanded = choices.get(sourceId)
+    const presentation: CapturedMessagePresentation = { expandedContent: !feed, inputReadPending: readingSubmission, renderSubmissionOriginal,
+      ...(bodyExpanded === undefined ? {} : { bodyExpanded }), onBodyExpandedChange: open => setOriginalChoice(sourceId, open),
+      expandedOriginals, onOriginalExpandedChange: setOriginalChoice }
+    return renderCapturedRecord ? renderCapturedRecord(record, disclosure, presentation) : record.role === 'process' || record.role === 'interaction'
       ? <CapturedProcessRecord record={record} {...(reading.workspaceRoot ? { workspaceRoot: reading.workspaceRoot } : {})} {...(disclosure ? { disclosure } : {})} located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)} /> : <CapturedConversationMessage
         item={record.original.kind === 'captured' ? record.original.item : neverCaptured()} record={record}
-        {...(submissionDisclosure ? { submissionDisclosure } : {})}
+        {...presentation}
         {...(record.role === 'observation' ? { replyObservation: { compact: true } } : {})}
         {...(record.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})}
         {...(record.speaker ? { speaker: record.speaker } : {})}
@@ -175,17 +170,21 @@ export const ConversationView = memo(function ConversationView({
         {...reading}
         messageDetails={<CapturedToolDetails record={record} />} />
   }
-  function renderOriginals(record: ConversationRecord): ReactNode {
+  function renderOriginals(record: ConversationRecord, primaryId = record.records?.find(source => source.original.item === record.original.item)?.id): ReactNode {
     if (conversationA2ANotificationId(record)) return null // Notification evidence reads raw contributors inside its one disclosure.
-    const contributors = record.records?.filter(source => source.original.item !== record.original.item).flatMap(source => {
+    const contributors = record.records?.filter(source => source.id !== primaryId).flatMap(source => {
       const original = originals.get(source.id)
       if (!original) return []
       const submission = record.sources?.submissions?.some(item => item.id === source.id)
-      // The native card already exposes this original through its send receipt.
-      // Existing choices and exact source locators retain their own opened surface.
-      return !submission || choices.has(source.id) || locatedMessageKey === conversationMessageSourceKey(sessionId, original.source) ? [original] : []
+      // SubmissionMetadata owns these exact originals, including location and
+      // explicit open choices; never create a competing original reader here.
+      return submission ? [] : [original]
     }) ?? []
-    return contributors.length ? <ConversationOriginalRecords records={contributors} expandedRecords={expandedSubmissions} onOpenChange={setSubmissionChoice} renderRecord={renderOriginal} sessionId={sessionId} {...(locatedMessageKey === undefined ? {} : { locatedMessageKey })} /> : null
+    return contributors.length ? <ConversationOriginalRecords records={contributors} expandedRecords={expandedOriginals} onOpenChange={setOriginalChoice} renderRecord={renderOriginal} sessionId={sessionId} {...(locatedMessageKey === undefined ? {} : { locatedMessageKey })} /> : null
+  }
+  function renderSubmissionOriginal(source: ConversationSourceRecord): ReactNode {
+    const original = originals.get(source.id)
+    return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null
   }
   function renderOriginal(record: ConversationRecord): ReactNode {
     return record.original.kind === 'native' ? renderNativeRecord(record.original.item, undefined, record) : renderCaptured(record)
@@ -207,8 +206,22 @@ export const ConversationView = memo(function ConversationView({
             : <CapturedProcessRecord key={original.id} record={original} bodyOnly {...(reading.workspaceRoot ? { workspaceRoot: reading.workspaceRoot } : {})} />)
         }} />
     : record.original.kind === 'native'
-    ? renderNativeRecord(record.original.item, wrapBody, undefined, record)
+    ? renderNativeMessage(record.original.item, record, wrapBody, disclosure)
     : <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure, true)}{renderOriginals(record)}</div>
+  function renderNativeMessage(item: AgentSessionHistoryItem, record: ConversationRecord, wrapBody?: (body: ReactNode) => ReactNode, disclosure?: ConversationProcessProps['disclosure']): ReactNode {
+    // Choose only among this accepted event's confirmed originals. This changes
+    // its reading face, never Core membership, adoption or the original body target.
+    const contribution = item.kind === 'user-message' && !conversationMessageHasContent(record.contentParts, item.questionAnswers)
+      ? record.sources?.submissions?.map(source => ({ source, original: originals.get(source.id) }))
+        .find(candidate => candidate.original?.original.kind === 'captured' && conversationMessageHasContent(candidate.original.contentParts)) : undefined
+    if (!contribution?.original) return renderNativeRecord(item, wrapBody, undefined, record)
+    const { submissions: _submissions, ...sources } = record.sources!
+    const remaining = record.sources!.submissions!.filter(source => source.id !== contribution.source.id)
+    const readable: ConversationRecord = { ...contribution.original, ...(record.event ? { event: record.event } : {}),
+      ...(record.author ? { author: record.author } : {}), ...(record.speaker ? { speaker: record.speaker } : {}),
+      ...(record.records ? { records: record.records } : {}), sources: { ...sources, ...(remaining.length ? { submissions: remaining } : {}) } }
+    return <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(readable, disclosure, true)}{renderOriginals(record, contribution.source.id)}</div>
+  }
   function renderNativeRecord(item: AgentSessionHistoryItem, wrapBody?: (body: ReactNode) => ReactNode, original?: ConversationRecord, canonical?: ConversationRecord, detailPage = page): ReactNode {
       const page = detailPage
       if (!page) return null
@@ -226,7 +239,11 @@ export const ConversationView = memo(function ConversationView({
       const speaker = record.role === 'process' || collaboration ? undefined : record.speaker
       const a2aNotificationId = conversationA2ANotificationId(record)
       const described = speaker && item.kind !== 'system-message' && !a2aNotificationId ? describeSpeaker?.(speaker) : undefined
+      const sourceId = record.records?.find(source => source.original.item === item)?.id ?? record.id
+      const bodyExpanded = choices.get(sourceId)
       const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
+          expandedContent={Boolean(original)} {...(bodyExpanded === undefined ? {} : { bodyExpanded })} onBodyExpandedChange={open => setOriginalChoice(sourceId, open)}
+          expandedOriginals={expandedOriginals} onOriginalExpandedChange={setOriginalChoice} {...(locatedMessageKey ? { locatedSourceKey: locatedMessageKey } : {})}
           {...(collaboration ? { compact: true, recordedIdentity: true, nativeCollaboration: collaboration,
             messageDetails: <dl className="conversation-input-details__facts">
               <dt>原生来源</dt><dd>{collaboration.source.providerId} · <code>{collaboration.source.nativeSessionId}</code></dd>
@@ -236,7 +253,7 @@ export const ConversationView = memo(function ConversationView({
             </dl> } : {})}
           processContent={record.role === 'process' && Boolean(wrapBody) && !collaboration && item.kind !== 'system-message'}
           continuation={!original && continuedProgress.has(record.id) && locatedMessageKey !== conversationMessageSourceKey(sessionId, record.source)}
-          renderSubmissionOriginal={source => { const original = originals.get(source.id); return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null }}
+          renderSubmissionOriginal={renderSubmissionOriginal}
           {...(a2aNotificationId ? { a2aNotificationId, notificationRecords: record.records, locatedSourceKey: locatedMessageKey } : {})}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           {...(itemRef ? { itemRef } : {})}

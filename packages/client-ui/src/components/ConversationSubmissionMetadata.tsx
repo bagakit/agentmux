@@ -14,8 +14,8 @@ const inputStatus: Record<AgentInputSubmissionObservation['status'], string> = {
 export const conversationSubmissionPreview = (text: string, limit = 160) => text.slice(0, limit).replace(/\s+/gu, ' ').trim()
 
 /** The same original submission facts in a native card or an independent send row. */
-export function ConversationSubmissionSummary({ record, renderClock }: {
-  record: ConversationSourceRecord; renderClock(time: number): string; nativeRecorded?: boolean
+export function ConversationSubmissionSummary({ record, renderClock, showTime = true }: {
+  record: ConversationSourceRecord; renderClock(time: number): string; showTime?: boolean
 }) {
   if (record.original.kind !== 'captured') return null
   const item = record.original.item
@@ -25,7 +25,7 @@ export function ConversationSubmissionSummary({ record, renderClock }: {
       : item.externalInput?.code === 'INGRESS_INPUT_OUTSIDE_SCOPE' ? '对话已收录 · 未提交 Agent：未符合触发范围' : '对话已收录 · 本次请求被拒绝'
     : '对话已收录'
   return <span className="conversation-submission-summary" data-status={item.status} title={item.inputRef ? '原输入阶段，不表示群消息已交付或 Agent 任务已完成' : '原对话收录记录，不表示已提交给 Agent'}>
-    <span>{item.inputRef ? '消息输入' : '对话记录'}</span><span><time>{renderClock(item.createdAt)}</time></span>
+    <span>{item.inputRef ? '消息输入' : '对话记录'}</span>{showTime ? <span><time>{renderClock(item.createdAt)}</time></span> : null}
     <span>{summary}</span>
   </span>
 }
@@ -54,18 +54,23 @@ export function ConversationSubmissionFacts({ record }: { record: ConversationSo
 }
 
 /** Original facts from one already accepted Core event; this component never associates inputs. */
-export function ConversationSubmissionMetadata({ records, renderClock, nativeReadable, renderOriginal }: {
+export function ConversationSubmissionMetadata({ records, renderClock, nativeReadable, renderOriginal, expandedRecords, onOpenChange, locatedSourceKey }: {
   records: readonly ConversationSourceRecord[]; renderClock(time: number): string
   nativeReadable: boolean
   renderOriginal?(record: ConversationSourceRecord): ReactNode
+  expandedRecords?: ReadonlySet<string>
+  onOpenChange?(recordId: string, open: boolean): void
+  locatedSourceKey?: string
 }) {
   return <div className="conversation-submissions">{records.map(record => {
     if (record.original.kind !== 'captured') return null
     const item = record.original.item
+    const sourceKey = conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id })
     return <div key={record.id} className="conversation-submission" data-submission-record={record.id} data-status={item.status} data-native-readable={nativeReadable}
-      data-message-source-key={conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id })} tabIndex={-1}>
-      <ConversationMessageDisclosure preview={conversationSubmissionPreview(item.content ?? '', 64)} reveal={false}
-        summary={<ConversationSubmissionSummary record={record} renderClock={renderClock} nativeRecorded={nativeReadable} />}>
+      data-message-source-key={sourceKey} tabIndex={-1}>
+      <ConversationMessageDisclosure preview={conversationSubmissionPreview(item.content ?? '', 64)} reveal={Boolean(locatedSourceKey && locatedSourceKey === sourceKey)}
+        {...(expandedRecords ? { open: expandedRecords.has(record.id) } : {})} onOpenChange={open => onOpenChange?.(record.id, open)}
+        summary={<ConversationSubmissionSummary record={record} renderClock={renderClock} />}>
         <ConversationSubmissionFacts record={record} />
         {renderOriginal ? <OriginalSubmission record={record} render={renderOriginal} /> : null}
       </ConversationMessageDisclosure>
