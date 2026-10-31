@@ -64,7 +64,7 @@ it('reads the Core-parsed Browser declaration while preserving the unknown autho
 it('consumes the actual captured conversation projection without reparsing its confirmed authored body', async () => {
   const item = capturedItem(authoredExample)
   const reading = projectConversationReading({ agentSessionId: 'recipient', timeline: { agentSessionId: 'recipient', revision: 1, items: [item] } })
-  await render(<ConversationView sessionId="recipient" records={reading.records} originalRecords={reading.originalRecords} expandSubmissions />)
+  await render(<ConversationView sessionId="recipient" records={reading.records} originalRecords={reading.originalRecords} />)
   expect(element.querySelectorAll('.conversation-browser-context')).toHaveLength(1)
   expect(find('.conversation-browser-context').dataset.browserContextSource).toBe('host-capture')
   expect(find('.conversation-browser-context > summary').textContent).toContain('Browser capture')

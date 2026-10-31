@@ -81,7 +81,6 @@ async function readActivity(page: AgentSessionHistoryPage, items: AgentTimelineI
 }
 async function revealBody() {
   for (const button of host.querySelectorAll<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded="false"]')) await act(async () => button.click())
-  for (const details of host.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record .message-disclosure:not([open])')) await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
   for (const button of [...host.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === '显示正文')) await act(async () => button.click())
 }
 
@@ -99,11 +98,11 @@ describe('Conversation and History shared reading UI presentation', () => {
     const reply = host.querySelector<HTMLElement>('[data-message-id="msg-agent"]')!
     expect(reply).not.toBeNull(); expect(reply.dataset.speakerRole).toBe('agent')
     expect(reply.textContent).toContain('回答已生成。'); expect(reply.querySelector('.md-list')).not.toBeNull(); expect(reply.querySelector('.md-block-code')).not.toBeNull()
-    const input = host.querySelector<HTMLElement>('[data-submission-id="sub-1"]')!
-    expect(input).not.toBeNull(); expect(input.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
+    const input = host.querySelector<HTMLElement>('.log-turn[data-message-id="captured:sub-1"]')!
+    expect(input).not.toBeNull(); expect(input.getAttribute('data-speaker-role')).toBe('human')
     expect(input.textContent).toContain(human.content)
-    const unattributed = host.querySelector<HTMLElement>('[data-submission-id="sub-2"]')!
-    expect(unattributed).not.toBeNull(); expect(unattributed.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
+    const unattributed = host.querySelector<HTMLElement>('.log-turn[data-message-id="captured:sub-2"]')!
+    expect(unattributed).not.toBeNull(); expect(unattributed.getAttribute('data-speaker-role')).toBe('human')
     expect(unattributed.textContent).toContain(unknown.content)
     expect(Reflect.get(unknown, 'authorHuman')).toBeUndefined()
     const group = host.querySelector<HTMLButtonElement>('.wf-head')!; expect(group).not.toBeNull()
@@ -111,7 +110,10 @@ describe('Conversation and History shared reading UI presentation', () => {
     const step = host.querySelector<HTMLElement>('[data-observation-step-id="msg-machine"]')!
     expect(step).not.toBeNull(); expect(step.closest('.log-turn')).toBeNull()
     await act(async () => step.click())
-    expect(host.querySelector('.wf-native-process__body')?.textContent).toContain(machine.content)
+    await vi.waitFor(async () => {
+      await act(async () => { await Promise.resolve() })
+      expect(host.querySelector('.wf-native-process__body')?.textContent).toContain(machine.content)
+    })
   })
 
   it('renders trace-only turn compactly with identity preserved and no heavy header wall', async () => {

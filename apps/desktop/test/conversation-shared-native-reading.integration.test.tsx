@@ -198,8 +198,6 @@ describe('shared native presentation preserves the existing reading owner', () =
         await act(async () => root.render(<ActivityView sessionId={f.control.agentSessionId} items={timeline} nativeHistoryPage={page}
           capability="complete-events" displayState="done" onContinue={onContinue} />))
         for(const disclosure of host.querySelectorAll<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded=false]'))await act(async()=>disclosure.click())
-        const originalSubmission = host.querySelector<HTMLDetailsElement>('.conversation-submission-record .message-disclosure')
-        if (originalSubmission) await act(async () => { originalSubmission.open = true; originalSubmission.dispatchEvent(new Event('toggle')) })
         const turns = [...host.querySelectorAll<HTMLElement>('.log-turn')]
         expect(turns.map(turn => turn.querySelector('.log-turn__body p')?.textContent)).toEqual([
           collision ? 'Earlier captured input' : 'Earlier agent answer', 'Native tail initial', 'Do not leak this future answer'
@@ -244,13 +242,13 @@ it('the original Desktop window pages retained captured records beyond the recen
   await act(async () => root.render(<ReaderActivityView {...activityReadingProps({ control: f.control })} />))
   const ready = () => {
     const consumer = inspectConversationConsumers(f.control).consumers[0]
-    return Boolean(host.querySelector('[data-submission-id^="captured-original:"]') && consumer && !consumer.loading && !consumer.inFlight)
+    return Boolean(host.querySelector('.log-turn[data-message-id^="captured:captured-original:"]') && consumer && !consumer.loading && !consumer.inFlight)
   }
   for(let turn=0;turn<200&&!ready();turn++)
     await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10))})
-  for (let turn = 0; turn < 12 && !host.querySelector('[data-submission-id="captured-original:0"]'); turn++) {
+  for (let turn = 0; turn < 12 && !host.querySelector('.log-turn[data-message-id="captured:captured-original:0"]'); turn++) {
     const earlier = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')
-    expect(earlier, JSON.stringify({ text: host.textContent?.slice(0, 2000), rows: host.querySelectorAll('[data-submission-id]').length,
+    expect(earlier, JSON.stringify({ text: host.textContent?.slice(0, 2000), rows: host.querySelectorAll('.log-turn[data-message-id]').length,
       consumer: inspectConversationConsumers(f.control).consumers })).toBeDefined()
     expect(earlier!.disabled).toBe(false)
     const before = inspectConversationConsumers(f.control).consumers[0]!.accepted!
@@ -263,9 +261,9 @@ it('the original Desktop window pages retained captured records beyond the recen
       expect([consumer!.accepted!.id, consumer!.accepted!.revision]).not.toEqual([before.id, before.revision])
     }, { timeout: 8000 })
   }
-  const rows = [...host.querySelectorAll<HTMLElement>('[data-submission-id^="captured-original:"]')]
-  expect(rows.map(row => row.dataset.submissionId)).toEqual(original.map(item => item.id))
-  const large = host.querySelector<HTMLElement>('[data-submission-id="captured-original:1"]')!
+  const rows = [...host.querySelectorAll<HTMLElement>('.log-turn[data-message-id^="captured:captured-original:"]')]
+  expect(rows.map(row => row.dataset.messageId?.slice('captured:'.length))).toEqual(original.map(item => item.id))
+  const large = host.querySelector<HTMLElement>('.log-turn[data-message-id="captured:captured-original:1"]')!
   const originalBody = large.querySelector<HTMLDetailsElement>('.message-disclosure')!
   await act(async () => { originalBody.open = true; originalBody.dispatchEvent(new Event('toggle')) })
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()

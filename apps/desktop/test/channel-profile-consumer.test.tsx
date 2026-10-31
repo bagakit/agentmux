@@ -102,7 +102,7 @@ async function click(text: string) {
   expect(button, text).toBeDefined(); await act(async () => button!.click())
 }
 const actorReads = () => calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')
-const submittedRecord = (id: string) => [...dom.container.querySelectorAll<HTMLElement>('[data-submission-id]')].find(node => node.dataset.submissionId === id) ?? null
+const submittedRecord = (id: string) => [...dom.container.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]')].find(node => node.dataset.messageSourceKey === JSON.stringify(['original-agent', 'captured', id])) ?? null
 async function originalMessages() {
   let messages: AgentSessionUserMessage[] = []
   await vi.waitFor(async () => {
@@ -274,17 +274,14 @@ it('native sender -> original profile cache -> public RPC -> registered IPC/prel
   const external = messages.find(message => message.author.kind === 'external')!
   let originalRecord: HTMLElement | undefined
   await vi.waitFor(() => {
-    originalRecord = [...dom.container.querySelectorAll<HTMLElement>('.conversation-submission-record')].find(node => node.dataset.submissionId === external.rawId)
+    originalRecord = submittedRecord(external.rawId) ?? undefined
     expect(originalRecord).toBeDefined()
     expect(JSON.parse(originalRecord!.dataset.conversationAuthor!)).toEqual(external.author)
   })
   const originalEvent = reads.filter(read => read.method === 'readAgentConversation').flatMap(read => read.result.items).find((entry: any) =>
     entry.kind === 'item' && entry.item.event.reference.source.kind === 'captured' && entry.item.event.reference.source.recordId === external.rawId)?.item.event
   expect(originalEvent?.author).toEqual(external.author)
-  // The real feed initially folds original captured submissions. Open this exact
-  // source record through its ordinary reader control before inspecting its card.
-  expect(originalRecord!.querySelector('details')!.open).toBe(false)
-  await act(async () => originalRecord!.querySelector('summary')!.click())
+  expect(originalRecord!.querySelector('.log-turn__body')).not.toBeNull()
   await vi.waitFor(() => { expect(dom.container.querySelector('[data-speaker-role=external] .log-turn__sender')?.textContent).toBe('Original native person'); expect(dom.container.querySelector('[data-group-name]')?.textContent).toBe('Original native group') })
   expect(dom.container.querySelector('[data-speaker-role=external] .log-turn__node img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
   await vi.waitFor(() => { expect(metadataReady).toBe(true); expect(metadataInFlight).toBe(0) })
@@ -495,7 +492,6 @@ it('Activity demands channel profiles only when Earlier admits the original acto
     expect(originalRecord).not.toBeNull()
     expect(JSON.parse(originalRecord!.dataset.conversationAuthor!)).toEqual(external.author)
   })
-  await act(async () => originalRecord!.querySelector('summary')!.click())
   await vi.waitFor(() => {
     expect(originalRecord!.querySelector('.log-turn__sender')?.textContent).toBe('Original native person')
     expect(originalRecord!.querySelector('.log-turn__node img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
@@ -528,7 +524,6 @@ it('an enabled hidden Activity preparation does not read profiles and a foreign 
   await dom.render(frame('local', true))
   const original = submittedRecord(external.rawId)!
   expect(original).not.toBeNull()
-  await act(async () => original.querySelector('summary')!.click())
   await vi.waitFor(() => {
     expect(original.querySelector('.log-turn__sender')?.textContent).toBe('Original native person')
     expect(metadataReady).toBe(true); expect(metadataInFlight).toBe(0)
@@ -545,8 +540,6 @@ it('an enabled hidden Activity preparation does not read profiles and a foreign 
     foreign = submittedRecord(external.rawId)
     expect(foreign).not.toBeNull()
   })
-  const disclosure = foreign!.querySelector<HTMLDetailsElement>('details')!
-  if (!disclosure.open) await act(async () => disclosure.querySelector('summary')!.click())
   expect(foreign!.querySelector('.log-turn__sender')?.textContent).toBe(`${author.actor.userId} · ${author.actor.application.domain}`)
   expect(foreign!.querySelector('.log-turn__node img')).toBeNull()
   await act(async () => foreign!.querySelector<HTMLButtonElement>('button[aria-label="Message details"]')!.click())

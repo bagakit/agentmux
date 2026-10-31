@@ -42,7 +42,7 @@ function App() {
       <header className="reading-proof__head"><SemanticIcon name="object.agent" size={15} /><strong>Review Agent</strong><span>{scene === 'mailbox' ? 'Sent inputs' : 'Conversation'}</span></header>
       <div className="reading-proof__content">
         {scene === 'mailbox' ? <InputMailboxRecords mailbox={mailbox} hostId="local" /> : <>
-          <ConversationView sessionId="recipient" records={reading.records} originalRecords={reading.originalRecords} expandSubmissions />
+          <ConversationView sessionId="recipient" records={reading.records} originalRecords={reading.originalRecords} />
           <ConversationMessage messageId="complete-input" recordedIdentity speaker={{ role: 'unknown', id: 'unknown' }} content={[resource]}
             nativeResourceRecord={resourceRecord} inputContext={context} inputContextSource="host-capture"
             readHistoryResource={async input => ({ agentSessionId: 'recipient', ...resourceRecord, partIndex: input.partIndex, reference: resource.reference,

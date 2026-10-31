@@ -108,13 +108,6 @@ async function exposeCaptured() {
     '.conversation-reply-observation__toggle[aria-expanded="false"]',
   ))
     await act(async () => button.click())
-  for (const disclosure of host.querySelectorAll<HTMLDetailsElement>(
-    '.conversation-submission-record > details:not([open])',
-  ))
-    await act(async () => {
-      disclosure.open = true
-      disclosure.dispatchEvent(new Event('toggle'))
-    })
 }
 function turns() {
   return [...host.querySelectorAll<HTMLElement>('.log-turn')]

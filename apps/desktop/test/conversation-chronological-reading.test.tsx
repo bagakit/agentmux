@@ -32,17 +32,9 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-// These cases inspect original body order and Range, after the reader opens each
-// submitted original. Default compact send rows are covered by submission presentation.
-async function openCapturedInputs() {
-  for (const original of host.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record > .message-disclosure:not([open])')) {
-    await act(async () => { original.open = true; original.dispatchEvent(new Event('toggle')) })
-  }
-}
 async function render(nativePage: AgentSessionHistoryPage | null = page, routeHostId = 'local') {
   await act(async () => root.render(<ActivityView sessionId={sid} executionHostId={routeHostId} capability="complete-events"
     items={items} timelineSnapshot={{agentSessionId:sid,sourceHostId:'local',revision:1,items}} nativeHistoryPage={nativePage} />))
-  await openCapturedInputs()
 }
 function bodies() { return [...host.querySelectorAll('.log-turn__body')].map(node => node.textContent) }
 
@@ -142,7 +134,6 @@ it('keeps an expanded native process Range mounted while a captured input would 
   expect(host.textContent).toContain('保留选区')
   expect(host.querySelector('[data-message-id="new-input"]')).toBeNull()
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
-  await openCapturedInputs()
   expect(host.querySelectorAll('[data-conversation-process-members]')).toHaveLength(2)
   expect(bodies()).toContain('new-input')
   expect(host.querySelector('[data-native-step-id="process-b"] .wf-tool-row')?.getAttribute('aria-expanded')).toBe('true')

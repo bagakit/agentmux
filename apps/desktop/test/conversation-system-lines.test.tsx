@@ -57,9 +57,6 @@ async function renderTimeline(timeline:AgentTimelineSnapshot){
   expect(consumer,'The Activity must accept the exact public Timeline publication').toMatchObject({loading:false,inFlight:false,dirty:false,watch:{binding:false,bound:true}})
  },{timeout:3000,interval:10})
  await act(async()=>{
-  for(const disclosure of dom.container.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record .message-disclosure')){
-   disclosure.open=true;disclosure.dispatchEvent(new Event('toggle'))
-  }
   for(const toggle of dom.container.querySelectorAll<HTMLButtonElement>('.conversation-reply-observation__toggle[aria-expanded="false"]'))toggle.click()
  })
  return view

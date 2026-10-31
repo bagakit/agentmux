@@ -116,7 +116,7 @@ it('preserves Core saved-input recorded status in the User route and neutral obs
   expect(projection.records).toHaveLength(1)
   expect(projection.records[0]).toMatchObject({ role: 'message', original: { item: { status: 'recorded' } } })
   await render(<ConversationView timeline={timeline} sessionId={item.agentSessionId} executionHostId="local"
-    records={projection.records} originalRecords={projection.originalRecords} expandSubmissions />)
+    records={projection.records} originalRecords={projection.originalRecords} />)
   expect(host.querySelector('[data-speaker-role="human"]')?.textContent).toContain(item.content)
   expect(host.querySelector('.conversation-submission-summary')?.getAttribute('data-status')).toBe('recorded')
   expect(host.querySelector('.conversation-submission-summary')?.textContent).toContain('已保存 · 等待 Agent')

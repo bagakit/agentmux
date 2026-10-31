@@ -46,9 +46,6 @@ async function draw(items: AgentTimelineItem[], capability: 'unavailable' | 'com
 }
 async function openRecordedMessages() {
   await act(async () => {
-    for (const disclosure of host.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record .message-disclosure')) {
-      disclosure.open = true; disclosure.dispatchEvent(new Event('toggle'))
-    }
     for (const toggle of host.querySelectorAll<HTMLButtonElement>('.conversation-reply-observation__toggle[aria-expanded="false"]')) toggle.click()
   })
 }
@@ -73,11 +70,14 @@ it('consumes recorded system facts in the actual Activity without changing user 
   expect(system.querySelector('.conversation-avatar--system')?.getAttribute('aria-label')).toBe('AgentMux')
   expect(system.querySelector('.log-turn__body')).toBeNull()
   expect(host.querySelector('[data-message-id="captured:legacy"]')?.getAttribute('data-speaker-role')).toBe('human')
-  const originalInput = host.querySelector<HTMLElement>('[data-submission-id="legacy"]')!
+  const originalInput = host.querySelector<HTMLElement>('.log-turn[data-message-id="captured:legacy"]')!
   expect(JSON.parse(originalInput.dataset.conversationAuthor!)).toEqual({ kind: 'unknown' })
   expect(host.querySelector('[data-message-id="captured:peer"]')?.getAttribute('data-speaker-relation')).toBe('other-agent')
   expect(host.querySelector('[data-message-id="answer"]')?.getAttribute('data-speaker-relation')).toBeNull()
-  expect(host.querySelector('.log-row--lifecycle')?.textContent).toContain('AgentMux context')
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('[data-observation-step-id="machine"]')?.textContent).toContain('AgentMux context')
+  })
   expect(host.querySelectorAll('.log-turn')).toHaveLength(4)
 })
 
@@ -116,11 +116,11 @@ it('keeps System out of hook step folds and preserves the original user selectio
   const user = item('user', { kind: 'user_message', source: 'user', content: 'Original user quote', createdAt: 2000 })
   await draw([item('context'), user])
   await openRecordedMessages()
-  const text = host.querySelector('[data-submission-id="user"] .log-turn__text p')!
+  const text = host.querySelector('.log-turn[data-message-id="captured:user"] .log-turn__text p')!
   expect(text).not.toBeNull()
   const range = document.createRange(); range.selectNodeContents(text); window.getSelection()!.addRange(range)
   await draw([item('context', { updatedAt: 4000 }), user])
-  expect(host.querySelector('[data-submission-id="user"] .log-turn__text p')).toBe(text)
+  expect(host.querySelector('.log-turn[data-message-id="captured:user"] .log-turn__text p')).toBe(text)
   expect(window.getSelection()!.toString()).toBe('Original user quote')
   expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(0)
   expect(host.querySelectorAll('.log-turn')).toHaveLength(2)
