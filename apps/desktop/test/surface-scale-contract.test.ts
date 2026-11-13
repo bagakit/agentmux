@@ -176,7 +176,10 @@ const RUNTIME_INJECTED_VARS = new Set([
   // MediaPlayer.tsx: the played, hovered and buffered fractions of the native range slider, set as
   // inline `style` on `.media-player__slider` / `.media-player__volume` from the element's own events.
   // Every read gives a `0%` fallback, so a slider without them paints an empty track.
-  '--media-fill', '--media-hover', '--media-buffered'
+  '--media-fill', '--media-hover', '--media-buffered',
+  // MediaPlayer.tsx: the stage's size fitted to the picture inside the free box, set as inline style on
+  // `.media-player__stage[data-fitted]`; the rule only applies when both are present.
+  '--media-fit-width', '--media-fit-height'
 ])
 
 describe('surface scale contract', () => {
