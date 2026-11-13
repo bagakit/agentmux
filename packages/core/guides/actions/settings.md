@@ -74,6 +74,12 @@ healthy Runs can be retained. upgrade requires the complete checked expected val
 an explicit operationId in its JSON input. It only updates a saved exact Host; it never
 fetches npm latest or replaces an unqualified Native Runtime. An unknown result requires
 upgrade-inspect with the same operationId; neither inspect nor reconnect replays upgrade.
+When the serving Native is older than the candidate and keeps its Runtime ID in its state,
+reason is native-replacement: nativeReplacement lists the running Runs that end and the
+state size, and expected pins them. Upgrading with that expected stops the exact Native,
+keeps a copy of its state, and starts the candidate Native on the same state; Sessions,
+history and the Runtime ID are kept, and ended Runs continue through Session recovery. A
+Run that started after the check refuses the upgrade before anything stops; check again.
 Updates require an exact Linux x64 headless owner with verified leases and an explicit
 supported launch environment. Additional launch configuration is refused before stopping
 the owner; it is not copied into deployment receipts. Existing Runs remain available.
