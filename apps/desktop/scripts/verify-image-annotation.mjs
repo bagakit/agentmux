@@ -21,9 +21,10 @@ const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
 const capture = 'apps/desktop/test/image-annotation-capture.test.tsx'
 const pointing = 'apps/desktop/test/image-annotation-pointing-marks.test.ts'
+const pointingTools = 'apps/desktop/test/image-annotation-pointing-tools.test.tsx'
 const specifications = {
   pointing: {
-    tests: [pointing, 'apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-geometry.test.ts'],
+    tests: [pointing, pointingTools, 'apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-geometry.test.ts'],
     mutations: [{ label: 'blur-not-a-mask', source: component + 'drawing-model.ts',
       find: "return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover' || shape.kind === 'blur'",
       replace: "return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover'", test: pointing,
@@ -40,7 +41,28 @@ const specifications = {
       consumer: 'renumbers notes to 1..n after removal and restores the earlier numbers with one Undo', failure: /removing note 2 of 3 must leave 1, 2/ },
     { label: 'parser-accepts-any-zoom', source: component + 'document.ts',
       find: "zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.')", replace: 'zoom: positive(base.zoom)', test: pointing,
-      consumer: 'rejects pointing marks with out-of-range strength, extra fields or missing geometry', failure: /callout zoom below 1\.5 must be rejected/ }]
+      consumer: 'rejects pointing marks with out-of-range strength, extra fields or missing geometry', failure: /callout zoom below 1\.5 must be rejected/ },
+    { label: 'blur-tool-missing', source: component + 'AnnotationToolbar.tsx',
+      find: "tools: ['crop', 'pixelate', 'cover', 'blur', 'erase']", replace: "tools: ['crop', 'pixelate', 'cover', 'erase']", test: pointingTools,
+      consumer: 'offers blur, spotlight and magnifier as toolbar tools with their own letter shortcuts', failure: /real Blur control/ },
+    { label: 'pointing-click-commits', source: component + 'ImageAnnotationEditor.tsx',
+      find: "'cover', 'blur', 'spotlight', 'callout'])", replace: "'cover'])", test: pointingTools,
+      consumer: 'draws each pointing tool as its own kind and commits nothing for a click without travel', failure: /a click with no drag commits no zero-size mark/ },
+    { label: 'callout-bubble-fixed-while-drawing', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom)', replace: 'shape.to = at', test: pointingTools,
+      consumer: 'keeps the magnifier bubble beside its source while drawing, then drags only the bubble after release', failure: /the bubble follows the source as it grows/ },
+    { label: 'callout-bubble-drags-whole-mark', source: component + 'ImageAnnotationEditor.tsx',
+      find: "const bubble = !handle && shape?.kind === 'callout' && rectContains(calloutBubble(shape), at)", replace: 'const bubble = false', test: pointingTools,
+      consumer: 'keeps the magnifier bubble beside its source while drawing, then drags only the bubble after release', failure: /dragging inside the bubble moves only the bubble/ },
+    { label: 'strength-ignores-selection', source: component + 'ImageAnnotationEditor.tsx',
+      find: '      edit(doc => replaceShape(doc, next))', replace: '      void next', test: pointingTools,
+      consumer: 'changes a selected pointing mark through its strength control as one Undo step, else sets the next one', failure: /the selected mark takes the new strength/ },
+    { label: 'renumber-unwired', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'onRenumber={() => { commitNote(); edit(doc => setShapes(doc, renumberNotes(doc.shapes))) }}', replace: 'onRenumber={() => { commitNote() }}', test: pointingTools,
+      consumer: 'renumbers a gapped original to 1..n with one action and restores it with one Undo', failure: /explicit renumbering makes the numbers continuous/ },
+    { label: 'capture-callout-missing', source: component + 'CaptureToolbar.tsx',
+      find: "'pixelate', 'blur', 'text', 'note', 'callout'] as const", replace: "'pixelate', 'blur', 'text', 'note'] as const", test: pointingTools,
+      consumer: 'offers blur and the magnifier on the light capture toolbar and keeps spotlight in the window editor', failure: /carries blur and the magnifier/ }]
   },
   capture: {
     tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
