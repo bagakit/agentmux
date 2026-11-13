@@ -216,6 +216,7 @@ class BrowserCdpConnection implements BrowserPageTransport {
 export class BrowserCdpSession implements BrowserPageTransport {
   private static readonly connections = new WeakMap<WebContents, { native: BrowserCdpConnection; leases: number }>()
   private readonly observers = new Set<() => void>()
+  private readonly frameWrappers = new Map<string, { native: BrowserCdpSender; send: BrowserCdpSender }>()
   private released = false
   private constructor(private readonly contents: WebContents, private readonly owner: { native: BrowserCdpConnection; leases: number }) {}
 
@@ -238,10 +239,18 @@ export class BrowserCdpSession implements BrowserPageTransport {
   }
   get frames(): Map<string, BrowserCdpSender> {
     if (this.released) return new Map()
-    return new Map([...this.owner.native.frames].map(([id, send]) => [id, (method, params) => {
-      this.assertActive()
-      return send(method, params)
-    }]))
+    const frames = this.owner.native.frames
+    for (const id of this.frameWrappers.keys()) if (!frames.has(id)) this.frameWrappers.delete(id)
+    for (const [id, native] of frames) {
+      if (this.frameWrappers.get(id)?.native === native) continue
+      const send: BrowserCdpSender = (method, params) => {
+        this.assertActive()
+        if (this.owner.native.frames.get(id) !== native) throw new Error('This original child document sender changed. Nothing was sent to its replacement; take a new snapshot().')
+        return native(method, params)
+      }
+      this.frameWrappers.set(id, { native, send })
+    }
+    return new Map([...this.frameWrappers].map(([id, value]) => [id, value.send]))
   }
   get endedReason(): string | null { return this.released ? 'This consumer released its debugger lease.' : this.owner.native.endedReason }
   get frameDiscoveryFailure(): string | null { return this.owner.native.frameDiscoveryFailure }
@@ -257,6 +266,7 @@ export class BrowserCdpSession implements BrowserPageTransport {
     this.released = true
     for (const remove of this.observers) remove()
     this.observers.clear()
+    this.frameWrappers.clear()
     if (--this.owner.leases !== 0) return null
     if (BrowserCdpSession.connections.get(this.contents) === this.owner) BrowserCdpSession.connections.delete(this.contents)
     return this.owner.native.detach()
