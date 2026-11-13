@@ -11,7 +11,7 @@ import { useAppStore } from '../store'
 import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 
 const LoadingIcon = semanticIconComponent('status.loading')
-const OpenIcon = semanticIconComponent('action.open-external')
+const FocusIcon = semanticIconComponent('navigation.focus')
 
 /** One requested person's original generations. No session creation, selection or recovery owner. */
 export function MoteChatHistory({ target, actor, hostingTarget, active }: {
@@ -40,7 +40,7 @@ export function MoteChatHistory({ target, actor, hostingTarget, active }: {
         <span title={generation.agentSessionId}>{generation.executionHostId} · {generation.agentSessionId}</span>
         {generation.phase === 'preparing' ? <small>Preparing conversation</small> : null}</div>
         <div className="mote-chat-actions"><button type="button" className="small-button" aria-expanded={selected === generation.generationId} onClick={() => setSelected(current => current === generation.generationId ? null : generation.generationId)}>{selected === generation.generationId ? 'Hide messages' : 'View messages'}</button>
-          <button type="button" className="icon-button" title="Locate in Focus" aria-label={`Locate Agent ${generation.agentSessionId} in Focus`} onClick={() => useAppStore.getState().revealFocusAgent({ hostId: generation.executionHostId, agentSessionId: generation.agentSessionId })}><OpenIcon size={13} /></button></div>
+          <button type="button" className="icon-button" title="Locate in Focus" aria-label={`Locate Agent ${generation.agentSessionId} in Focus`} onClick={() => useAppStore.getState().revealFocusAgent({ hostId: generation.executionHostId, agentSessionId: generation.agentSessionId })}><FocusIcon size={13} /></button></div>
       </div>
       {selected === generation.generationId ? <MoteChatInputs generation={generation} active={active} /> : null}
     </li>)}</ol>

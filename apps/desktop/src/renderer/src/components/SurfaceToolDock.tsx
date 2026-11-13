@@ -42,7 +42,7 @@ import { SemanticIcon } from './semantic-icons'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationFocusIcon = semanticIconComponent('navigation.focus')
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
@@ -168,7 +168,7 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
           </div>}
           <div className="workspace-agents-tool__actions" role="group" aria-label={selecting ? 'Selected Agent actions' : 'Agent list actions'}>
             {!selecting ? <WorkspaceCollaboration /> : null}
-            {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="View in Focus" title="View in Focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={15} aria-hidden="true" /></button> : null}
+            {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="View in Focus" title="View in Focus" onClick={() => openFocus('agents')}><ThemeNavigationFocusIcon size={15} aria-hidden="true" /></button> : null}
             {selecting ? <>
               <button type="button" aria-label="Select visible Agents" title="Select visible Agents" onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}><SemanticIcon name="object.criteria" size={15} /></button>
               <button type="button" aria-label="Clear selection" title="Clear selection" onClick={() => setSelected(new Set())}><SemanticIcon name="action.clear-list" size={15} /></button>

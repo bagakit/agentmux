@@ -13,7 +13,7 @@ const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationSpaceIcon = semanticIconComponent('navigation.space')
 const CollectSourcesIcon = semanticIconComponent('action.collect-sources')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
@@ -121,7 +121,7 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       <M.Separator className="tab-context-menu__separator" />
       {onManageBrowsers ? <M.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={() => run(onManageBrowsers)}><ThemeActionAdjustIcon size={14} /><span>Browser tools</span></M.Item> : null}
       {workspace ? <M.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${displayPath(workspace.path, workspace.hostId)}`}
-        onSelect={() => run(() => onOpenWorkspace(workspace.id))}><ThemeActionOpenExternalIcon size={14} /><span>Open resource in Space</span></M.Item> : null}
+        onSelect={() => run(() => onOpenWorkspace(workspace.id))}><ThemeNavigationSpaceIcon size={14} /><span>Open resource in Space</span></M.Item> : null}
       <M.Sub><M.SubTrigger className="tab-context-menu__item" aria-label="Item details"><span className="survey-topic-menu__indicator" aria-hidden="true" /><span>Details</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>
         <DocumentOverlayPortal component={M.Portal}><M.SubContent className="tab-context-menu survey-topic-menu" collisionPadding={8} sideOffset={4}>
           <div className="survey-item-details-content">

@@ -52,7 +52,7 @@ const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationSpaceIcon = semanticIconComponent('navigation.space')
 
 /** The shared workbench presents the exact original Agent, including Project Agents. */
 function OriginalAgentConversation({ floating, target, projectionState, visible, onSelect }: {
@@ -725,7 +725,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
         active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
       !target.tabId && discussionChoices.length === 0 && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
-        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} memberEntry={floating.conversationIntent === 'member'} threadsEntry={floating.threadsEntry} navigationActions={<>{profileTrigger}<button type="button" className="pane-action" aria-label="Open Mote in Space" title="Open Mote in Space" onClick={() => openSpace()}><ThemeActionOpenExternalIcon size={14} /></button></>} onTabSelect={selectDiscussion} onReferenceSelect={(reference, intent) => {
+        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} memberEntry={floating.conversationIntent === 'member'} threadsEntry={floating.threadsEntry} navigationActions={<>{profileTrigger}<button type="button" className="pane-action" aria-label="Open Mote in Space" title="Open Mote in Space" onClick={() => openSpace()}><ThemeNavigationSpaceIcon size={14} /></button></>} onTabSelect={selectDiscussion} onReferenceSelect={(reference, intent) => {
           const state = useAppStore.getState()
           if (!workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) return false
           spaceActionRef.current?.abort(); state.rememberMoteAgent(reference)

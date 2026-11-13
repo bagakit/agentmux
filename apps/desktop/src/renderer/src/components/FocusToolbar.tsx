@@ -28,7 +28,7 @@ const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeLayoutRegionIcon = semanticIconComponent('layout.grid-4')
 const ThemeObjectTabIcon = semanticIconComponent('object.tab')
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationSpaceIcon = semanticIconComponent('navigation.space')
 const ThemeObjectCollaborationIcon = semanticIconComponent('action.locate')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
@@ -184,7 +184,7 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
       <ContextMenu.Trigger asChild onContextMenu={() => { menuOriginRef.current = identityRef.current }}><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`${tab ? 'Tab' : 'Focus context'}: ${name}`} title={`${name} · ${statusLabel}${tab ? ' · Right-click for Tab actions' : ''}`} onKeyDown={event => { if (tab && ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu')) { event.preventDefault(); menuOriginRef.current = event.currentTarget; focusTitleMenuRef.current = true; setMenuOpen(true); tabMenuRef.current?.focus() } }}><strong>{name}</strong><small>{statusLabel}</small></button></ContextMenu.Trigger>
       <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}><FocusTabMenuContent name={name} actions={actions} Label={ContextMenu.Label} Item={ContextMenu.Item} /></ContextMenu.Content></DocumentOverlayPortal>
     </ContextMenu.Root>}
-    <button type="button" className="focus-toolbar__action" aria-label="View in Space" title={`View in Space · ${name}`} onClick={viewInSpace}><ThemeActionOpenExternalIcon size={14} aria-hidden="true" /><span>Space</span></button>
+    <button type="button" className="focus-toolbar__action" aria-label="View in Space" title={`View in Space · ${name}`} onClick={viewInSpace}><ThemeNavigationSpaceIcon size={14} aria-hidden="true" /><span>Space</span></button>
     <div className="focus-toolbar__chat">
       <button type="button" className="focus-toolbar__action" aria-label="Chat about this tab with Mote" aria-description={`Recipient: ${recipientLabel}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`Chat about this tab with ${recipientLabel} · ${name}${recipientIssue ? '\n' + recipientIssue : ''}`} disabled={discussionPending} aria-busy={discussionPending} onClick={() => { void chatAboutTab() }}><ThemeObjectConversationIcon size={14} aria-hidden="true" /><span>{discussionPending ? 'Preparing…' : 'Chat'}</span></button>
       <DropdownMenu.Root modal={false} open={active && chatOpen} onOpenChange={setChatOpen}>

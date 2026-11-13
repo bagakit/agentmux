@@ -18,6 +18,7 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionCreateGoalIcon = semanticIconComponent('action.create-goal')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeNavigationGoalsIcon = semanticIconComponent('navigation.goals')
 
 
 /** A reading surface over the original Goal owner; it has no timer or execution state. */
@@ -139,7 +140,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
       return <div className="mote-current-work__goal" key={goal.id} data-mote-goal={goal.id}>
         <div className="mote-current-work__row"><button type="button" className="mote-current-work__copy" aria-expanded={open}
           onClick={() => { associationIntent.current = {}; setExpanded(open ? null : goal.id) }}><strong>{goal.title}</strong><span>{summary.next}</span></button>
-          <MoteBehaviorAction label={`Open goal and results: ${goal.title}`} onClick={() => void openGoal(goal.id)}><ThemeActionOpenExternalIcon size={15} /></MoteBehaviorAction>
+          <MoteBehaviorAction label={`Open goal and results: ${goal.title}`} onClick={() => void openGoal(goal.id)}><ThemeNavigationGoalsIcon size={15} /></MoteBehaviorAction>
         </div>
         {open && summary.detail ? <p className="mote-current-work__detail">{summary.detail}</p> : null}
         {unloaded.length ? <p className="mote-details__hint">{unloaded.length} linked discussion{unloaded.length > 1 ? 's' : ''} not loaded. Original references retained.</p> : null}
