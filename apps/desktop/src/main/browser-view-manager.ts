@@ -2049,11 +2049,27 @@ export class BrowserViewManager {
   }
 
   usesProfile(profileId: string): boolean {
-    return [...this.entries.values()].some((entry) => (
+    return this.profileUses(profileId).length > 0
+  }
+
+  /** Every native owner that holds this Profile now: live, released, switching into it, or still closing. */
+  profileUses(profileId: string): { browserId: string; workspaceId: string | null; title: string; url: string }[] {
+    const uses = new Map<string, { browserId: string; workspaceId: string | null; title: string; url: string }>()
+    const holds = (entry: { storage: BrowserStorage; pendingSwitch?: PendingProfileSwitch | null }) =>
       entry.storage.profileId === profileId || entry.pendingSwitch?.profileId === profileId
-    )) || [...this.releasedEntries.values()].some((entry) => (
-      entry.storage.profileId === profileId || entry.pendingSwitch?.profileId === profileId
-    )) || this.closingOwners().some(owner => !owner.view.webContents.isDestroyed() && owner.storage.profileId === profileId)
+    for (const entry of this.entries.values()) if (holds(entry)) {
+      // A page that cannot report its title or address still holds the Profile; fall back to what it was asked to load.
+      let title = '', url = ''
+      try { if (!entry.view.webContents.isDestroyed()) { title = entry.view.webContents.getTitle(); url = entry.view.webContents.getURL() } } catch { /* reported by its own owner */ }
+      uses.set(entry.id, { browserId: entry.id, workspaceId: entry.workspaceId, title, url: url || entry.requestedUrl })
+    }
+    for (const entry of this.releasedEntries.values()) if (holds(entry) && !uses.has(entry.id)) {
+      uses.set(entry.id, { browserId: entry.id, workspaceId: entry.workspaceId, title: '', url: entry.requestedUrl })
+    }
+    for (const owner of this.closingOwners()) if (!owner.view.webContents.isDestroyed() && owner.storage.profileId === profileId && !uses.has(owner.id)) {
+      uses.set(owner.id, { browserId: owner.id, workspaceId: owner.workspaceId, title: '', url: owner.requestedUrl })
+    }
+    return [...uses.values()]
   }
 
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
