@@ -1,4 +1,5 @@
 import { AppCaptureSource } from './app-capture.js'
+import { WorkspaceFileSources } from './workspace-file-sources.js'
 import { AppRecordingOwner } from './app-recording.js'
 import { createAppCapturePort } from './app-capture-owner.js'
 import { isTerminalMouseReportPayload } from '@agentmux/core'
@@ -432,16 +433,18 @@ export async function registerIpc(args: {
   })
   const htmlPreviews = new HtmlFilePreviews(files, id => config.workspaces.find(item => item.id === id))
   const mediaStreams = new WorkspaceMediaStreams(files, id => config.workspaces.find(item => item.id === id))
+  const fileSources = new WorkspaceFileSources(files, id => config.workspaces.find(item => item.id === id))
+  const releaseFileSources = () => { void fileSources.releaseCaller(contents.id).catch(error => process.stderr.write('File source cleanup failed: ' + String(error) + '\n')) }
   const previewResources = new FilePreviewResources(files, id => config.workspaces.find(item => item.id === id))
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
   const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
   let channelMetadata: ReturnType<typeof registerConnectorIpc> | undefined
-  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews(); mediaStreams.releaseAll(); channelMetadata?.releaseReaders() }
+  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews(); mediaStreams.releaseAll(); releaseFileSources(); channelMetadata?.releaseReaders() }
   const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
     if (mainFrame) {
       // A same-document navigation (an anchor, pushState) keeps every playing media element, so their leases stay.
-      if (!inPlace) { controlBridge.dispose(); mediaStreams.releaseAll(); channelMetadata?.releaseReaders() }
+      if (!inPlace) { controlBridge.dispose(); mediaStreams.releaseAll(); releaseFileSources(); channelMetadata?.releaseReaders() }
       releaseHtmlPreviews()
     }
   }
@@ -1158,6 +1161,10 @@ export async function registerIpc(args: {
     await mediaStreams.open(workspace(config, workspaceId), path))
   handleWithEvent('files:releaseMediaStream', async (event, id: string) => { mediaStreams.release(id) })
   handleWithEvent('files:mediaStreamStatus', async (event, id: string) => mediaStreams.status(id))
+  handleWithEvent('files:openSource', async (event, workspaceId: string, path: string) => fileSources.open(event.sender.id, workspace(config, workspaceId), path))
+  handleWithEvent('files:readSource', async (event, id: string, readId: string, offset: number, length: number) => fileSources.read(event.sender.id, id, readId, offset, length))
+  handleWithEvent('files:cancelSourceRead', async (event, id: string, readId: string) => { fileSources.cancel(event.sender.id, id, readId) })
+  handleWithEvent('files:releaseSource', async (event, id: string) => { await fileSources.release(event.sender.id, id) })
   handleWithEvent('files:renderDiagram', async (event, request: import('../shared/file-diagram').FileDiagramRequest) => {
     return await diagramPreviews.render(request)
   })
@@ -2554,6 +2561,7 @@ export async function registerIpc(args: {
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
       { owner: 'html-previews', dispose: () => htmlPreviews.dispose() },
       { owner: 'media-streams', dispose: () => mediaStreams.dispose() },
+      { owner: 'file-sources', dispose: () => fileSources.dispose() },
       { owner: 'file-builds', dispose: () => builds.dispose() },
       { owner: 'diagram-previews', dispose: () => diagramPreviews.dispose() },
       { owner: 'html-preview-listeners', dispose: () => {

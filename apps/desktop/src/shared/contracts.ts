@@ -1795,6 +1795,10 @@ export type AgentMuxDesktopApi = {
     releaseMediaStream(id: string): Promise<void>
     /** The lease owner's own record of why it stopped serving bytes. */
     mediaStreamStatus(id: string): Promise<import('./workspace-media-stream').WorkspaceMediaStreamFact>
+    openSource(workspaceId: string, path: string): Promise<import('./workspace-file-source').WorkspaceFileSourceOpenResult>
+    readSource(id: string, readId: string, offset: number, length: number): Promise<import('./workspace-file-source').WorkspaceFileSourceReadResult>
+    cancelSourceRead(id: string, readId: string): Promise<void>
+    releaseSource(id: string): Promise<void>
     /** CPU-heavy DOM engines own a disposable renderer for this request only. */
     renderDiagram(request: import('./file-diagram').FileDiagramRequest): Promise<import('./file-diagram').FileDiagramResult>
     cancelDiagram(id: string): Promise<void>
