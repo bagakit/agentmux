@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 import { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from '../src/remote-core-upgrade.js'
-import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY, SELECT_CORE_RELEASE } from '../src/remote-core-upgrade-programs.js'
+import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, SELECT_CORE_RELEASE } from '../src/remote-core-upgrade-programs.js'
 import { parseRemoteCoreUpgradeCheck } from '../src/remote-core-upgrade-codec.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -34,6 +34,10 @@ async function fixture() {
   const physical = () => { const { nativeInstanceId, nativeRuntimeId, nativeBuildId, ...value } = launch; return value }
   let shutdownUnknown = false, startUnknown = false, selectUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false, savedRunMissing = false
   let stageCommand = fixturePath("scope/state/core-releases/") + digest + '/launcher/amux'
+  // Every Run of the serving Native, as its own SDK reports it.
+  const inventory = () => [...(savedRunMissing ? [] : [{ runId: 'original-run', pid: 404, state: 'running', outputBytes: owner.processId === 101 ? 100 : 120, durableOutputBytes: 100, inputBytes: 3 }]),
+    { runId: 'ordinary-terminal', pid: owner.processId !== 101 && naturalExit ? null : owner.processId !== 101 && changedTerminal ? 506 : 505,
+      state: owner.processId !== 101 && naturalExit ? 'exited' : 'running', outputBytes: 50, durableOutputBytes: 50, inputBytes: owner.processId !== 101 && naturalExit ? null : 6 }]
   let stagePause: Promise<void> | undefined, resumeStage: (() => void) | undefined
   const compatibility = { daemonInstanceId: native.instanceId, runtimeId: launch.nativeRuntimeId, protocolGeneration: PROTOCOL_VERSION,
     runtimeIdPersistence: 'state_dir', buildId: native.buildIdentity, platform: 'linux', arch: 'x86_64',
@@ -47,9 +51,7 @@ async function fixture() {
       return { owner: projectedOwner, accepted: true }
     }
     return { owner: projectedOwner, bootstrap: { storePath: launch.storePath, hostProcessId: owner.processId, sessions },
-      runs: savedRunMissing ? [] : [{ agentSessionId: 'original-session', runId: 'original-run', pid: 404, state: 'running', outputBytes: owner.processId === 101 ? 100 : 120, inputBytes: 3 }],
-      missingRunIds: savedRunMissing ? ['original-run'] : [],
-      nativeRuntime: { ...compatibility, protocolGeneration: native.protocolVersion } }
+      nativeRuns: inventory(), nativeRuntime: { ...compatibility, protocolGeneration: native.protocolVersion } }
   })
   const run = vi.fn(async (_command, args, options) => {
     const p = JSON.parse(options.input)
@@ -65,10 +67,6 @@ async function fixture() {
     }
     else if (args[1] === READ_CORE_MAINTENANCE) { expect(_command).toBe(launch.node); expect(p.launch).toEqual(p.shutdown ? launch : physical()); output = await maintenance(p) }
     else if (args[1] === OWNER_GONE) output = { gone: true }
-    else if (args[1] === NATIVE_RUN_INVENTORY) output = { instanceId: native.instanceId, protocolVersion: native.protocolVersion,
-      runs: [...(savedRunMissing ? [] : [{ runId: 'original-run', pid: 404, state: 'running', outputBytes: owner.processId === 101 ? 100 : 120, inputBytes: 3 }]),
-        { runId: 'ordinary-terminal', pid: owner.processId !== 101 && naturalExit ? null : owner.processId !== 101 && changedTerminal ? 506 : 505,
-          state: owner.processId !== 101 && naturalExit ? 'exited' : 'running', outputBytes: 50, inputBytes: owner.processId !== 101 && naturalExit ? null : 6 }] }
     else if (args[1] === STAGE_CORE) {
       effects.push('stage-offline-candidate'); expect(p.stateDirectory).toBe(fixturePath("scope/state")); expect(p.node).toBe(fixturePath("original/bin/node"))
       await stagePause
@@ -209,8 +207,7 @@ it('preserves the original saved Session binding when its exact Native Run is ph
   expect(receipt.status, receipt.detail).toBe('completed')
   const retained = JSON.parse(await readFile(join(f.root, 'operations', 'missing-saved-run.json'), 'utf8'))
   expect(retained.observed.bootstrap.sessions).toEqual([{ agentSessionId: 'original-session', run: { runId: 'original-run' } }])
-  expect(retained.observed.missingRunIds).toEqual(['original-run'])
-  expect(retained.nativeRuns).toMatchObject([{ runId: 'ordinary-terminal', pid: 505, state: 'running' }])
+  expect(retained.observed.nativeRuns).toMatchObject([{ runId: 'ordinary-terminal', pid: 505, state: 'running' }])
   expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
 })
 
@@ -406,29 +403,35 @@ it.each(['same', 'different', 'unavailable', 'historical-without-summary'] as co
     expect(cli.code, cli.stderr).toBe(0)
     expect(JSON.parse(cli.stdout).result.receipt).toEqual(inspected.receipt)
     expect(assemble).toHaveBeenCalledOnce()
-    expect(f.run.mock.calls.filter(([, args]) => args[1] === NATIVE_RUN_INVENTORY).every(([, , options]) => JSON.parse(options.input).releaseDirectory === fixturePath('scope/state/core-releases/') + digest)).toBe(true)
     expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
   } finally { await rpc.dispose(); await server.stop() }
 }, 15_000)
 
-it.each(['identity', 'native-contract', 'native-capability', 'candidate-contract', 'inventory-protocol', 'run', 'missing-contract'] as const)('retained operation inspection keeps conflicting or insufficient %s evidence unknown without replay', async shape => {
+it.each(['identity', 'native-contract', 'native-capability', 'candidate-contract', 'inventory-regressed', 'missing-inventory', 'run', 'missing-contract'] as const)('retained operation inspection keeps conflicting or insufficient %s evidence unknown without replay', async shape => {
   const f = await fixture(), checked = await f.manager.check(host)
   f.setStartUnknown(); await f.manager.upgrade(host, checked.expected!, 'uncertain-original')
   if (shape === 'identity') f.native.instanceId = 'another-native'
   if (shape === 'native-contract') f.native.protocolVersion = 21
   if (shape === 'native-capability') f.compatibility.capabilities['native.recoverable_input'] = 2
   if (shape === 'run') f.setChangedTerminal()
+  if (shape === 'missing-inventory') {
+    // A record without the original Native inventory cannot prove Run continuity.
+    const path = join(f.root, 'operations', 'uncertain-original.json'), retained = JSON.parse(await readFile(path, 'utf8'))
+    delete retained.observed.nativeRuns
+    await writeFile(path, JSON.stringify(retained))
+  }
   if (shape === 'missing-contract' || shape === 'candidate-contract') {
     const path = join(f.root, 'operations', 'uncertain-original.json'), retained = JSON.parse(await readFile(path, 'utf8'))
     if (shape === 'missing-contract') delete retained.observed.nativeRuntime
     else retained.receipt.candidate.requiredNativeProtocolVersion = 21
     await writeFile(path, JSON.stringify(retained))
   }
-  if (shape === 'inventory-protocol') {
-    const execute = f.run.getMockImplementation()!
-    f.run.mockImplementation(async (...args) => {
-      const result = await execute(...args)
-      return args[1][1] === NATIVE_RUN_INVENTORY ? { ...result, stdout: JSON.stringify({ ...JSON.parse(result.stdout), protocolVersion: 21 }) } : result
+  if (shape === 'inventory-regressed') {
+    // The same Native reports less retained output than before the stop.
+    const read = f.maintenance.getMockImplementation()!
+    f.maintenance.mockImplementation(async (...args) => {
+      const value = await read(...args)
+      return value.nativeRuns ? { ...value, nativeRuns: value.nativeRuns.map((run: { outputBytes: number }) => ({ ...run, outputBytes: 1, durableOutputBytes: 1 })) } : value
     })
   }
   const assemble = vi.fn(async () => { throw new Error('Must not assemble a new candidate to inspect the original') })
@@ -544,5 +547,19 @@ it('a failed upgrade never names its release for the next restart', async () => 
   f.setStartUnknown()
   const receipt = await f.manager.upgrade(host, check.expected!, 'start-lost')
   expect(receipt.status).toBe('unknown')
+  expect(f.effects).not.toContain('select-current-release')
+})
+
+it('keeps an upgrade unknown when the new Core no longer reports an original Session binding', async () => {
+  const f = await fixture(), check = await f.manager.check(host)
+  const read = f.maintenance.getMockImplementation()!
+  f.maintenance.mockImplementation(async (...args) => {
+    const value = await read(...args)
+    // After the restart the updated owner reports no Session for the original Run.
+    return value.bootstrap && args[0].launch.processId !== 101 ? { ...value, bootstrap: { ...value.bootstrap, sessions: [] } } : value
+  })
+  const receipt = await f.manager.upgrade(host, check.expected!, 'binding-lost')
+  expect(receipt).toMatchObject({ status: 'unknown', stage: 'verifying' })
+  expect(receipt.detail).toContain('Session/Run binding')
   expect(f.effects).not.toContain('select-current-release')
 })
