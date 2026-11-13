@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { NameChangeAudit } from './name-change-audit.js'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { durableWriteFile } from '@agentmux/core'
+import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, durableWriteFile } from '@agentmux/core'
 import type { BrowserDemonstrationDraft } from '../shared/browser-demonstration.js'
 import type { BrowserReplayStep, BrowserReplayTarget } from '../shared/browser-operation.js'
 import type { BrowserScriptRunReport } from '../shared/contracts.js'
@@ -318,6 +318,8 @@ export class BrowserTaskAssets {
       run = prepared.run
       const version = prepared.version
       let actions = 0
+      // Script failures of the step at this cursor index in this invocation; a forward cursor never revisits it.
+      let failed = { index: -1, count: 0 }
       const previousDecision = run.branchDecisions?.find(fact => fact.result !== 'unknown' && fact.nextStepId === version.steps[run!.nextStep]?.id && run!.stepExecutions?.at(-1)?.operationId === fact.operationId)
       let selectedByBranch: { stepId: string; index: number; navigationId: string } | undefined = previousDecision ? { stepId: previousDecision.stepId, index: version.steps.findIndex(step => step.id === previousDecision.stepId), navigationId: previousDecision.navigationId } : undefined
       const invalidateSelection = async () => {
@@ -374,7 +376,7 @@ export class BrowserTaskAssets {
         if (!started || (run as BrowserTaskAssetRun).status === 'stopped') break
         if (selectedByBranch && host.navigationId?.(browserId) !== selectedByBranch.navigationId) return await invalidateSelection()
         const branchIndex = run.nextStep
-        let report: BrowserScriptRunReport
+        let report: BrowserScriptRunReport, retry = false
         const callStartedAt = performance.now()
         execution.deadlineMillis = callStartedAt + Math.min(BROWSER_TASK_MAX_EXECUTED_MILLIS, budget?.timeMillis ?? BROWSER_TASK_MAX_EXECUTED_MILLIS) - (run.executedMillis ?? 0)
         try { report = await host.runScript(browserId, script, execution) }
@@ -410,8 +412,28 @@ export class BrowserTaskAssets {
                 run!.nextStep = browserTaskNextIndex(version.steps, run!.nextStep, destination)
                 selectedByBranch = { stepId: step.id, index: branchIndex, navigationId: decision.navigationId }
               }
-            } else if (report.outcome.kind === 'completed') run!.nextStep = browserTaskNextIndex(version.steps, run!.nextStep, step.nextStepId)
-            else {
+            } else if (report.outcome.kind === 'completed') {
+              if (failed.index === run!.nextStep) run!.warning = `Task step ${stepName(step)} completed on attempt ${failed.count + 1} after ${failed.count} script failure${failed.count === 1 ? '' : 's'}.`
+              run!.nextStep = browserTaskNextIndex(version.steps, run!.nextStep, step.nextStepId)
+            } else if (report.outcome.kind === 'script-failed' && !stopped) {
+              // Only a known script failure is handled by the step itself. Stopped, interrupted and
+              // indeterminate results keep the branch below: never retried, never continued.
+              failed = { index: run!.nextStep, count: failed.index === run!.nextStep ? failed.count + 1 : 1 }
+              const next = afterStepFailure(step, failed.count, report), operationId = report.runOperation.id
+              const attempts = `${failed.count} attempt${failed.count === 1 ? '' : 's'}`
+              const sent = next.actionMayHaveRun ? ' A page action of the failed attempt may already have run, so it was not retried.' : ''
+              if (next.then === 'retry') {
+                retry = true
+                run!.warning = `Task step ${stepName(step)} attempt ${failed.count} failed (script-failed); retrying, ${failed.count} of ${step.retry} retries used.`
+              } else if (next.then === 'stop') {
+                run!.status = 'failed'
+                run!.warning = `Task step ${stepName(step)} failed (script-failed) after ${attempts}.${sent} Earlier steps remain; inspect operation ${operationId} before another action.`
+              } else {
+                run!.failedSteps = [...(run!.failedSteps ?? []), { stepId: step.id, operationId }]
+                run!.nextStep = browserTaskNextIndex(version.steps, run!.nextStep, next.then === 'continue' ? step.nextStepId : next.then.goto)
+                run!.warning = `Task step ${stepName(step)} failed (script-failed) after ${attempts}.${sent} Its failure handling moved on; this run cannot complete as a success.`
+              }
+            } else {
               run!.status = report.outcome.kind === 'stopped' ? 'stopped' : report.outcome.kind === 'script-failed' ? 'failed' : 'interrupted'
               run!.warning = 'The Browser step did not complete. Earlier steps remain; inspect the operation details before another action.'
             }
@@ -419,6 +441,8 @@ export class BrowserTaskAssets {
           if (stopped) run!.status = 'stopped'
           await this.updateRun(run!)
         })
+        // A retry keeps this cursor and passes the same stop, budget, segment and compile checks again.
+        if (retry && run.status === 'running') continue
         if (run.status !== 'running') {
           if (step.kind === 'branch' && run.status === 'ready') host.yieldControl(browserId)
           return copy(this.projectRun(run))
@@ -431,7 +455,10 @@ export class BrowserTaskAssets {
         }
       }
       await this.change(async () => {
-        run!.status = run!.status === 'stopped' ? 'stopped' : 'completed'
+        if (run!.status !== 'stopped' && run!.failedSteps?.length) {
+          run!.status = 'failed'
+          run!.warning = `Task reached the end of its path with failed steps: ${run!.failedSteps.map(fact => `${stepName(version.steps.find(step => step.id === fact.stepId) ?? { id: fact.stepId })} (operation ${fact.operationId})`).join(', ')}. Each failure is recorded; this run is not a success.`
+        } else run!.status = run!.status === 'stopped' ? 'stopped' : 'completed'
         await this.updateRun(run!)
       })
       return copy(this.projectRun(run))
@@ -607,6 +634,21 @@ export class BrowserTaskAssets {
 
 export async function runBrowserTaskAsset(assets: BrowserTaskAssets, input: BrowserTaskAssetRunInput, host: BrowserTaskAssetHost, budget?: BrowserTaskRunBudget): Promise<BrowserTaskAssetRun> {
   return await assets.run(input, host, budget)
+}
+
+function stepName(step: Pick<BrowserTaskStep, 'id' | 'label'>): string { return JSON.stringify(step.label || step.id) }
+
+/**
+ * What a page step does after one known script failure. Only an attempt whose operation sent no
+ * page action may run again: a failed action can have half-applied, and replaying it could send it
+ * twice. Steps the operation cannot describe count as possibly sent.
+ */
+function afterStepFailure(step: BrowserTaskStep, attempts: number, report: BrowserScriptRunReport): { then: 'retry' | BrowserTaskStepFailure; actionMayHaveRun: boolean } {
+  const calls = report.runOperation.steps
+  const actionMayHaveRun = !Array.isArray(calls) || calls.some(call => !call || typeof call !== 'object' ||
+    typeof (call as { method?: unknown }).method !== 'string' || BROWSER_PAGE_MUTATING_CAPABILITY_NAMES.has((call as { method: string }).method))
+  if (!actionMayHaveRun && attempts <= (step.retry ?? 0)) return { then: 'retry', actionMayHaveRun }
+  return { then: step.onFail ?? 'stop', actionMayHaveRun }
 }
 
 /** Page steps that send exactly one existing Browser page function; the replay compiler checks it against the real page API. */
@@ -834,8 +876,8 @@ function recordStepOperation(run: BrowserTaskAssetRun, stepId: string, operation
   if (!run.operationIds.includes(id)) run.operationIds.push(id)
   if (!run.stepExecutions?.some(item => item.operationId === id)) run.stepExecutions = [...(run.stepExecutions ?? []), { stepId, operationId: id }]
 }
-function normalizePathFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersion): Pick<BrowserTaskAssetRun, 'stepExecutions' | 'branchDecisions' | 'executedMillis'> {
-  const facts: Pick<BrowserTaskAssetRun, 'stepExecutions' | 'branchDecisions' | 'executedMillis'> = {}
+function normalizePathFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersion): Pick<BrowserTaskAssetRun, 'stepExecutions' | 'branchDecisions' | 'failedSteps' | 'executedMillis'> {
+  const facts: Pick<BrowserTaskAssetRun, 'stepExecutions' | 'branchDecisions' | 'failedSteps' | 'executedMillis'> = {}
   if (run.stepExecutions !== undefined) {
     if (!Array.isArray(run.stepExecutions) || run.stepExecutions.length > MAX_STEPS ||
         new Set(run.stepExecutions.map(item => item.operationId)).size !== run.stepExecutions.length ||
@@ -852,6 +894,12 @@ function normalizePathFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersio
       return { stepId: identity(item.stepId), operationId: identity(item.operationId), navigationId: typeof item.navigationId === 'string' ? item.navigationId.slice(0, 128) : '',
         result: item.result, ...(expected === undefined ? {} : { nextStepId: expected }) }
     })
+  }
+  if (run.failedSteps !== undefined) {
+    if (!Array.isArray(run.failedSteps) || run.failedSteps.length > MAX_STEPS || new Set(run.failedSteps.map(item => item.stepId)).size !== run.failedSteps.length ||
+        run.failedSteps.some(item => !version.steps.some(step => step.id === item.stepId && step.kind !== 'checkpoint' && step.kind !== 'branch') ||
+          !run.stepExecutions?.some(fact => fact.stepId === item.stepId && fact.operationId === item.operationId))) throw new Error('Invalid task failed step facts')
+    facts.failedSteps = run.failedSteps.map(item => ({ stepId: identity(item.stepId), operationId: identity(item.operationId) }))
   }
   if (run.executedMillis !== undefined) {
     if (!Number.isFinite(run.executedMillis) || run.executedMillis < 0) throw new Error('Invalid task execution time budget')

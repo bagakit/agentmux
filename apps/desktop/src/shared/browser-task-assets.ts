@@ -79,6 +79,8 @@ export type BrowserTaskAssetRun = {
   /** Original journal operations bound to the actual executed step, not a linear index guess. */
   stepExecutions?: { stepId: string; operationId: string }[]
   branchDecisions?: { stepId: string; operationId: string; navigationId: string; result: 'true' | 'false' | 'unknown'; nextStepId?: string | null }[]
+  /** Steps whose last attempt ended script-failed, with that attempt's journal operation. Any entry keeps the run from completing. */
+  failedSteps?: { stepId: string; operationId: string }[]
   executedMillis?: number
   pendingCheckpointId?: string
   /** Main-created trusted Continue events. Absence means their recording information is unavailable. */
