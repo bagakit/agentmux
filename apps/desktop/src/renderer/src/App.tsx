@@ -462,7 +462,7 @@ function DesktopApp() {
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectRecallReference({ ...reference, regionId }) })
       }
     }
-    if (focusVisible && focusProjection && focusTab) {
+    if (focusProjection && focusTab) {
       const reference = focusProjection.selection[0]!
       append(focusTab.id, {
         hostId: focusProjection.entity.kind === 'region' ? workbenchRegionProjectionSlotId(`${focusProjection.presentationId}-slot`, reference) : workbenchProjectionSlotId(`${focusProjection.presentationId}-slot`, reference),
