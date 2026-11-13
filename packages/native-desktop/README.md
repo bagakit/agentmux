@@ -8,7 +8,7 @@ const native = new NativeDesktop({ appPath: '/exact/path/AgentMux Native.app' })
 const frames = await native.captureDisplays()
 // Every active display's frozen PNG from one grab, or that display's issue; Desktop draws selection over them.
 const display = await native.captureScreenshot({ mode: 'display', displayId: frames.displays[0].displayId })
-// state: captured / cancelled / failed; transport loss throws with original operation.
+// state: captured / failed; transport loss throws with original operation.
 await native.dispose()
 
 // A page's original GUI/CDP owner supplies pixels; no OS process or permission query.
@@ -23,7 +23,7 @@ PNG 沿用 Desktop 的 18 MiB/16384 边长/32M 像素边界，不在页面热路
 
 `node scripts/verify-client.mjs` 验证真实 Unix socket、生产客户端、页面源和非空变异；这是协议 fixture，不是系统权限或真实 UI 证据。
 
-`node scripts/verify-native-frames.mjs` 用受控显示器列表、ScreenCaptureKit 与 PNG 编码编译生产 `captureDisplays` 源码，验证每屏一次抓取、单屏问题隔离与抓取租约独占，并跑单分支变异；不抓真实像素、不弹授权。
+`node scripts/verify-native-frames.mjs` 用受控显示器列表、ScreenCaptureKit 与 PNG 编码编译生产 `captureDisplays` 源码，验证每屏一次抓取、单屏问题隔离（含响应帧预算与显示器边界变化）、截图时刻先于首次抓取、未知模式（含 selection）不触发抓取与抓取租约独占，并跑单分支变异；不抓真实像素、不弹授权。
 
 `node scripts/build-macos.mjs --configuration debug --bare` 只构建开发裸程序；release 输出 `AgentMux Native.app`，两种 profile 不互相 fallback。Desktop 的 `predev`／`prebuild` 分别消费对应 profile，正式组包核对 Native 的编译文件、复制内容和来源，并与主 App 使用同一准确持久证书分别签名校验。构建回执只证明构建结果，不证明系统授权。
 
