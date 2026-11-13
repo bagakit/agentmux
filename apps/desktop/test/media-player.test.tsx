@@ -356,4 +356,45 @@ describe('mounted player', () => {
     expect(video.hasAttribute('src')).toBe(false)
     expect(HTMLMediaElement.prototype.load).toHaveBeenCalled()
   })
+
+  it('the timeline lives inside the bar, so there is no empty capsule beside the controls', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { duration: 90 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    const bar = container.querySelector('.media-player__bar')!
+    const timeline = container.querySelector('.media-player__timeline')!
+    // The timeline is a child of the bar; the controls are not two stacked rows with empty space between.
+    expect(bar.contains(timeline)).toBe(true)
+    expect(timeline.parentElement).toBe(bar)
+  })
+
+  it('a paused player past its first frame still shows the play disc, not a blank stage', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    const video = media()
+    let paused = true
+    define(video, { ended: false, duration: 30 })
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => paused })
+    Object.defineProperty(video, 'currentTime', { configurable: true, get: () => 10 })
+    // First frame decoded, then started, then paused again — the disc must still be there.
+    await act(async () => { video.dispatchEvent(new Event('loadeddata')) })
+    paused = false
+    await act(async () => { video.dispatchEvent(new Event('play')) })
+    paused = true
+    await act(async () => { video.dispatchEvent(new Event('pause')) })
+    const disc = container.querySelector('.media-player__start')
+    expect(disc).not.toBeNull()
+    expect(disc!.getAttribute('aria-label')).toBe('Play')
+  })
+
+  it('a failure surfaces a solid primary Retry button, not a small inline one', async () => {
+    vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'deleted', path: 'clip.mp4' })
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { error: { code: 4 } })
+    await act(async () => { media().dispatchEvent(new Event('error')) })
+    const retry = container.querySelector('.media-player__retry')
+    expect(retry).not.toBeNull()
+    expect(retry!.textContent).toBe('Retry')
+    // The deprecated small-button retry must be gone for this player.
+    expect(container.querySelector('.media-player__failure .small-button')).toBeNull()
+  })
 })
