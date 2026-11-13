@@ -5,7 +5,7 @@ import { ctxmuxOwnerReceiptPath } from '../../../packages/core/src/runtime-paths
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { fstatSync, readSync } from 'node:fs'
+import { appendFileSync, fstatSync, readSync } from 'node:fs'
 import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -44,7 +44,7 @@ afterEach(async () => {
   hooks.openDrift = false
 })
 
-async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
+async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale', declarationDelayMs = 0) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-owner-unit-")); roots.push(root)
   const socket = join(root, 'runtime/ctxmux.sock'), configured = join(root, 'configured/ctxmux')
   const state = join(root, 'actual-state'), lock = join(state, 'state.lock')
@@ -57,9 +57,10 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
     await mkdir(join(core, 'dist'), { recursive: true }); await mkdir(join(vendor, 'bin'), { recursive: true })
     await writeFile(join(core, 'package.json'), '{"type":"module"}')
     await writeFile(join(core, 'dist/runtime-paths.js'), `export const defaultCtxmuxSocketPath=()=>${JSON.stringify(socket)};export const defaultCtxmuxStateDirectory=()=>${JSON.stringify(configured)};`)
-    const bytes = Buffer.from(`never-executed-private-image-${index}`), archive = Buffer.from('never-unpacked-private-sdk')
+    const bytes = index === 1 && declarationDelayMs ? Buffer.from(`#!${process.execPath}\nif (process.argv[2] !== '--version') process.exit(2);\nsetTimeout(() => process.stdout.write('ctxmuxd 0.1.0 (protocol 18, handoff opaque-public-declaration)\\n'), ${declarationDelayMs});\n`)
+      : Buffer.from(`never-executed-private-image-${index}`), archive = Buffer.from('never-unpacked-private-sdk')
     const binary = join(vendor, 'bin/ctxmuxd'); binaries.push(binary)
-    await writeFile(binary, bytes); await writeFile(join(vendor, 'sdk.tgz'), archive)
+    await writeFile(binary, bytes, { mode: 0o700 }); await writeFile(join(vendor, 'sdk.tgz'), archive)
     await writeFile(join(vendor, 'manifest.json'), JSON.stringify({ schema: 'ctxmux.local-artifacts.v1',
       support: { platform: process.platform, architecture: process.arch }, source: { commit: `source-${index}`, tree: `tree-${index}` },
       product: { protocol: 18 }, binaries: [{ name: 'ctxmuxd', path: 'bin/ctxmuxd', version: '0.1.0', sha256: sha(bytes) }],
@@ -89,18 +90,37 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   let display = true, staticDrift: 'inode' | 'bytes' | 'restore-bytes' | undefined
   let staticArchitecture: string | undefined, staticExit = true, staticPrimary = false, staticCleanup = false
   const readerReceipts: any[] = []
+  const declarationReaders: Array<{ pid: number | null; elapsedMs: number; timeout: number | null; maxBuffer: number | null;
+    exitConfirmed: boolean; closeConfirmed: boolean; code: number | null; signal: NodeJS.Signals | null; killed: boolean }> = []
   const fields = async (fd: string, path: string) => {
     const metadata = await lstat(path, { bigint: true })
     return `f${fd}\ntREG\nD0x${metadata.dev.toString(16)}\ni${wrongInode && fd === 'txt' && mappingReads > 1 ? metadata.ino + 1n : metadata.ino}\nn${path}\n`
   }
   hooks.live.mockResolvedValue('alive')
-  hooks.exec.mockImplementation(async (executable: string, args: string[]) => {
+  hooks.exec.mockImplementation(async (executable: string, args: string[], options?: import('node:child_process').ExecFileOptions) => {
     if (executable === binaries[0] && args.length === 1 && args[0] === '--version') {
       expect(signalled).toBe(false)
       return { stdout: outgoingVersion }
     }
     if (executable === binaries[1] && args.length === 1 && args[0] === '--version') {
       expect(signalled).toBe(false); versionCalls++
+      if (declarationDelayMs) {
+        const native = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+        const started = performance.now(), receipt = { pid: null as number | null, elapsedMs: 0, timeout: options?.timeout ?? null, maxBuffer: options?.maxBuffer ?? null,
+          exitConfirmed: false, closeConfirmed: false, code: null as number | null, signal: null as NodeJS.Signals | null, killed: false }
+        declarationReaders.push(receipt)
+        // The selected fixture image is actually executed. Pass production options
+        // through unchanged so restoring the old timeout really kills this child.
+        return await new Promise((resolve, reject) => {
+          const child = native.execFile(executable, args, options ?? {}, (error, stdout, stderr) => {
+            receipt.elapsedMs = performance.now() - started; receipt.killed = child.killed
+            if (error) reject(error); else resolve({ stdout: stdout.toString(), stderr: stderr.toString() })
+          })
+          receipt.pid = child.pid ?? null
+          child.once('exit', (code, signal) => { receipt.exitConfirmed = true; receipt.code = code; receipt.signal = signal })
+          child.once('close', () => { receipt.closeConfirmed = true })
+        })
+      }
       if (versionError) throw versionError
       if (versionChange === 'bytes') await writeFile(binaries[1]!, 'changed-private-image')
       if (versionChange === 'inode') { const next = `${binaries[1]}.next`; await copyFile(binaries[1]!, next); await rename(next, binaries[1]!) }
@@ -204,8 +224,30 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
     driftBeforeOriginalOpen() { hooks.openDrift = true },
     wrongStaticArchitecture() { staticArchitecture = 'another-architecture' },
     unknownReaderExit() { staticExit = false }, failStaticOwners() { staticPrimary = true; staticCleanup = true },
-    failFileClose(error = new Error('original file close failed')) { hooks.closeFailure = error }, readerReceipts }
+    failFileClose(error = new Error('original file close failed')) { hooks.closeFailure = error }, readerReceipts, declarationReaders }
 }
+
+it('waits for the selected private declaration child to exit naturally beyond the former ten-second observation window', async () => {
+  const f = await fixture('stale', 11_250)
+  const previous = await readFile(f.receiptPath)
+  let outcome: unknown
+  try {
+    const plan = await f.prepare()
+    expect(plan.candidate.daemonPath).toBe(f.binaries[1])
+    expect(f.declarationReaders).toHaveLength(1)
+    expect(f.declarationReaders[0]).toMatchObject({ timeout: null, maxBuffer: 4096, exitConfirmed: true, closeConfirmed: true, code: 0, signal: null, killed: false })
+    expect(f.declarationReaders[0]!.pid).toBeGreaterThan(0)
+    expect(f.declarationReaders[0]!.elapsedMs).toBeGreaterThan(10_000)
+    expect(await readFile(f.receiptPath)).toEqual(previous)
+    expect(f.signal).not.toHaveBeenCalled()
+    outcome = { state: 'prepared', candidate: plan.candidate.daemonPath, running: plan.before.running }
+  } catch (error) {
+    outcome = { state: 'failed', message: (error as Error).message }
+    throw error
+  } finally {
+    if (process.env.RUNTIME_DECLARATION_FACTS) appendFileSync(process.env.RUNTIME_DECLARATION_FACTS, JSON.stringify({ outcome, declarationReaders: f.declarationReaders, servingRuntimeSignals: f.signal.mock.calls }) + '\n')
+  }
+}, 30_000)
 
 it('qualifies the original wrapper from machine signing facts when signature display changes', async () => {
   const f = await fixture(); f.omitSignatureDisplay()
