@@ -1,3 +1,4 @@
+import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
 import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
 import { parseMessageFieldPage } from './agent-message-field.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
@@ -237,7 +238,7 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
-    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'sessionHistoryCheckpoint' || method === 'readSessionHistoryChanges' || method === 'conversationCheckpoint' || method === 'readConversationChanges' || method === 'readAgentConversation') {
+    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'readAgentSessionUsage' || method === 'sessionHistoryCheckpoint' || method === 'readSessionHistoryChanges' || method === 'conversationCheckpoint' || method === 'readConversationChanges' || method === 'readAgentConversation') {
       const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
       if (input && isAbortSignal(input.signal)) {
         const { signal: cancellation, ...value } = input
@@ -301,6 +302,7 @@ export async function connectHostedAgentMux(options: {
     if (method === 'readAgentInputResource') return parseAgentInputResourceResult(decoded, parseAgentInputResourceRead(wireArgs[0]))
     if (method === 'readAgentInputChanges') return parseAgentInputChangesPage(decoded, wireArgs[0] as import('./agent-input-changes.js').AgentInputChangesRead)
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
+    if (method === 'readAgentSessionUsage') return parseAgentSessionUsagePage(decoded, wireArgs[0] as AgentSessionUsageInput)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     if (method === 'readMessage') {
       const input = wireArgs[0] as import('./agent-message-query.js').AgentMuxMessageReadRequest & { caller?: { agentSessionId: string } }

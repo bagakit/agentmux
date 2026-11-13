@@ -1400,6 +1400,19 @@ export class RuntimeController {
     return { ...result, hostId: control.hostId }
   }
 
+  async readSessionUsage(control: SessionHistoryReference,
+    options: Pick<import('@agentmux/core').AgentSessionUsageInput, 'cursor' | 'limit'>,
+    signal?: AbortSignal): Promise<import('@agentmux/core').AgentSessionUsagePage> {
+    const host = this.hosts.get(control.hostId)
+    if (!host) throw new Error(`History Host is not configured: ${control.hostId}`)
+    signal?.throwIfAborted()
+    const result = await host.client.readAgentSessionUsage({ ...options, hostId: 'local', agentSessionId: control.agentSessionId }, signal ? { signal } : {})
+    signal?.throwIfAborted()
+    if (this.hosts.get(control.hostId) !== host) throw new Error('History Host changed while inspecting. Original results are kept.')
+    if (result.hostId !== 'local' || result.agentSessionId !== control.agentSessionId) throw new Error('Usage belongs to another original Session.')
+    return { ...result, hostId: control.hostId }
+  }
+
   /** Remote invocation configuration stays private to its Core; local templates keep their existing meaning. */
   private sessionExecutorOptions(hostId: string, client: AgentMuxClient, config: AppConfig,
     session: { executorId: AgentExecutorId; providerId: AgentProviderId; creation?: { executorRevision?: string } }): Pick<AgentMuxAgentResumeInput, 'commandOverride' | 'args' | 'env'> {

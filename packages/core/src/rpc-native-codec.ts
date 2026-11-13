@@ -1,3 +1,4 @@
+import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
 import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
 import { verifyAgentMessageInboxReceipt } from './agent-creation-authority.js'
 import { parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
@@ -607,6 +608,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.landmark.ls': return parseConversationLandmarkPage(value, parseConversationLandmarkQuery(input))
       case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as import('./conversation-changes.js').ConversationTimelineReadInput)
+      case 'agent.history.usage': return parseAgentSessionUsagePage(value, input as AgentSessionUsageInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.continuity.control': {
         const result = parseAgentContinuityControlResult(value, parseAgentContinuityControlInput(input))

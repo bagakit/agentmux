@@ -16,6 +16,7 @@
 .agent-region-header-home .agent-region-header__more { align-items: flex-start; }
 .agent-region-header .session-result-review-slot { height: 22px; }
 .agent-region-header-home .session-result-review__trigger { align-items: flex-start; }
+.agent-region-header-home .session-record-details-trigger { pointer-events: auto; align-items: flex-start; margin: 0; }
 /* A reading inset clears the padded local paint; moving controls to Focus releases it. */
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) { --agent-region-reading-inset: calc(var(--sp-6) + var(--sp-2)); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .terminal-view__xterm { --agent-region-reading-inset: calc(var(--sp-6) + var(--region-focus-ring-width)); margin-top: var(--agent-region-reading-inset); height: calc(100% - var(--agent-region-reading-inset)); }

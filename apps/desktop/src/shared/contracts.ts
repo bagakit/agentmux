@@ -2027,6 +2027,8 @@ export type AgentMuxDesktopApi = {
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     readHistory(session: SessionHistoryReference, options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>,
       context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').AgentSessionHistoryReadPage>
+    readUsage(session: SessionHistoryReference, options: Pick<import('@agentmux/core').AgentSessionUsageInput, 'cursor' | 'limit'>,
+      context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').AgentSessionUsagePage>
     historyResource(session: SessionHistoryReference, input: AgentSessionHistoryResourceRequest): Promise<AgentSessionHistoryResourceReadResult>
     confirmNativeSession(session: AgentSessionControl, input: AgentMuxNativeSessionConfirmationInput): Promise<AgentMuxNativeSessionConfirmation>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
@@ -2269,7 +2271,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'readUsage' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
     recover(...args: Parameters<AgentMuxDesktopApi['sessions']['recover']>): Promise<import('./session-recovery-result').SessionRecoveryOperationReply>
     stop(...args: Parameters<AgentMuxDesktopApi['sessions']['stop']>): Promise<import('./session-stop-result').SessionStopReply>
     inspectStop(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectStop']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectStop']>>>>
@@ -2290,6 +2292,8 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     /** Functions cross contextBridge; AbortSignal and its prototype stay in Renderer. */
     readHistory(session: SessionHistoryReference, options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>,
       context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').AgentSessionHistoryReadPage>>
+    readUsage(session: SessionHistoryReference, options: Pick<import('@agentmux/core').AgentSessionUsageInput, 'cursor' | 'limit'>,
+      context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').AgentSessionUsagePage>>
     observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
       options?: { onAbort?: (abort: () => void) => () => void }): Promise<AgentSessionHistoryObservationHandle>
   }

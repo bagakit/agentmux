@@ -1,3 +1,4 @@
+import { sessionUsageWindow, sessionUsageMeasurement, type AgentSessionUsagePage } from './agent-session-usage.js'
 import { agentNativeTurnEnd } from './agent-session-identity.js'
 import { parseResumeResolution, type AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { assertPreparedResumeBinding, parseResumeResolutionRequest, resumeResolutionDigest, type ResumeResolutionRequest } from './agent-prepared-resume.js'
@@ -224,6 +225,8 @@ export type AgentMuxAgentSessionStore = {
   settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void>
   /** Resolve one original active/retired source and its reopen correlation, without catalog discovery. */
   readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null>
+  /** Existing captured body bytes only; a bounded read, never imports or touches Runtime. */
+  readCapturedUsage(agentSessionId: string, input: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<AgentSessionUsagePage['captured']>
   readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null>
   listFuturePromptIntents(agentSessionId: string, options?: { afterIntentId?: string; limit?: number }): Promise<AgentMuxFuturePromptPage>
   /**
@@ -2821,6 +2824,17 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return sessionHistorySources(active ? [active] : [], retired ? [retired] : [],
       reservation ? reopenCorrelations([reservation]) : [])[0] ?? null
   }
+  async readCapturedUsage(id: string, input: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<AgentSessionUsagePage['captured']> {
+    signal?.throwIfAborted()
+    const timeline = this.timelines.get(id)
+    if (!timeline) return { status: 'not-measured', reason: 'No existing captured stream has been observed. Native and other Core records are not measured.' }
+    const window = sessionUsageWindow(id, timeline.stream.epoch, timeline.stream.sequence, input.cursor)
+    const limit = input.limit ?? 100
+    // Captured versions are append-only with sequence == array index + 1.
+    const rows = timeline.versions.slice(window.afterSequence, Math.min(window.throughSequence, window.afterSequence + limit + 1))
+      .map(record => ({ sequence: record.sequence, logicalBytes: Buffer.byteLength(JSON.stringify(record.item)) }))
+    return sessionUsageMeasurement(window, rows, limit)
+  }
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
     return structuredClone(this.sessions.get(agentSessionId)?.futurePromptIntents?.[intentId] ?? null)
   }
@@ -3581,6 +3595,26 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     )[0] ?? null, signal, true)
   }
 
+  async readCapturedUsage(id: string, input: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<AgentSessionUsagePage['captured']> {
+    await this.sessionWrites(id, signal)
+    return await this.withReadDatabase(db => {
+      // Inspect existing committed storage only. Do not prepare/import a captured stream.
+      if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='captured_streams'").get())
+        return { status: 'not-measured', reason: 'The existing captured store is unavailable; no history has been imported for this inspection.' }
+      const stream = capturedStream(db, id)
+      if (!stream) return { status: 'not-measured', reason: 'No existing captured stream has been observed. Native and other Core records are not measured.' }
+      if (stream.state !== 'ready') return { status: 'not-measured', reason: 'Captured source handover is unconfirmed. Original records are kept; this inspection does not import or repair them.' }
+      const window = sessionUsageWindow(id, stream.epoch, stream.sequence, input.cursor)
+      const limit = input.limit ?? 100
+      // The original (session_id,epoch,sequence) key bounds both the visit and returned rows.
+      const rows = db.prepare(`SELECT sequence, octet_length(item_json) AS logicalBytes
+        FROM captured_record_versions WHERE session_id=? AND epoch=? AND sequence>? AND sequence<=?
+        ORDER BY sequence LIMIT ?`).all(id, window.epoch, window.afterSequence, window.throughSequence, limit + 1)
+        .map(row => ({ sequence: Number(row.sequence), logicalBytes: Number(row.logicalBytes) }))
+      signal?.throwIfAborted()
+      return sessionUsageMeasurement(window, rows, limit)
+    }, () => ({ status: 'not-measured', reason: 'The original store is readable through rescue, but captured storage usage is unconfirmed.' }), signal, true)
+  }
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
     await this.sessionWrites(agentSessionId)
     return await this.withReadDatabase(db => this.futureIntent(db, agentSessionId, intentId),

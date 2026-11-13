@@ -1,3 +1,4 @@
+import { parseAgentSessionUsageInput, parseAgentSessionUsagePage } from './agent-session-usage.js'
 import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
 import { parseMessageApplication } from './agent-message-envelope.js'
 import { parseConversationSnapshotInput, parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
@@ -156,7 +157,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
@@ -384,6 +385,7 @@ const NATIVE_FIELDS = {
   'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent'],
   'agent.conversation.landmark.ls': ['hostId', 'agentSessionId', 'operationId'],
   'agent.conversation.landmark.apply': ['hostId', 'agentSessionId', 'operationId', 'expectedRevision', 'change'],
+  'agent.history.usage': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -1884,6 +1886,19 @@ export class AgentMuxRpcService {
         ? ['agent', context.caller.agentSessionId, context.caller.capability]
         : ['principal', context.principal?.kind ?? 'public', context.principal?.id ?? '', context.transport ?? 'sdk'])).digest('hex')
       return await this.search.read(input, { authority, rpc: context, ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.history.usage') {
+      const input = parseAgentSessionUsageInput(params)
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact usage Host owner is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+      const client = owners[0]!.client
+      const local = { ...input, hostId: 'local' }
+      context.signal?.throwIfAborted()
+      const { caller: _localCaller, ...readContext } = context
+      const raw = client.forwardRpc ? await client.forwardRpc('agent.history.usage', local, readContext)
+        : await client.readAgentSessionUsage(local, context.signal ? { signal: context.signal } : {})
+      const page = parseAgentSessionUsagePage(raw, local)
+      return { ...page, hostId: input.hostId } as AgentMuxRpcResult<M>
     }
     if (method === 'agent.history') {
       const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>

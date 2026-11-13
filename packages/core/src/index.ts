@@ -229,3 +229,5 @@ export type { AgentMuxMessageApplication, AgentMuxMessageJson } from './agent-me
 
 export * from './app-capture.js'
 export type { ConversationSnapshotInput, ConversationSnapshotReleaseInput, ConversationSnapshotPage, ConversationSnapshotReleaseResult } from './conversation-snapshot.js'
+
+export * from './agent-session-usage.js'

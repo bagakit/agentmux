@@ -52,7 +52,7 @@ import { createRendererHistoryObservation } from './history-observation'
 import { createRendererSearchRead } from './search-read'
 import { unwrapBrowserRunResult } from '../../../shared/browser-run-result'
 import { BROWSER_PROFILE_RESULT_METHODS, ipcResult, unwrapIpcResultMethods } from '../../../shared/ipc-result'
-import { createRendererHistoryRead } from './history-read'
+import { createRendererHistoryRead, createRendererUsageRead } from './history-read'
 import { createRendererHostObservation } from './host-observation'
 import {
   DEFAULT_TOPIC_WIKI,
@@ -1112,6 +1112,10 @@ const mockApi: AgentMuxDesktopApi = {
       ? (await mockHistorySources()).find(source => source.hostId === reference.hostId && source.agentSessionId === reference.agentSessionId) ?? null : null,
       issue: 'runtimeId' in reference ? { code: 'RUNTIME_UNAVAILABLE', message: 'The original Runtime binding requires Desktop.', recovery: 'Open Desktop to read the original owner.' } : null }),
     historySources: mockHistorySources,
+    readUsage: async reference => ({ hostId: reference.hostId, agentSessionId: reference.agentSessionId,
+      observedAt: Date.now(), lifecycle: { state: 'retired' as const },
+      captured: { status: 'not-measured' as const, reason: 'Preview does not measure the original Core store.' },
+      unmeasured: ['other-core-records', 'provider-native', 'ctxmux-runtime', 'shared-database-physical'] as const }),
     readHistory: async () => {
       throw new Error('Host input history queries are unavailable in the web preview. The current draft and existing records are kept.')
     },
@@ -1685,6 +1689,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       rejoinInputWaiting: (...args) => preload.sessions.rejoinInputWaiting(...args).then(unwrapSessionInputOperationResult),
       observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       readHistory: createRendererHistoryRead(preload.sessions.readHistory),
+      readUsage: createRendererUsageRead(preload.sessions.readUsage),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
   }

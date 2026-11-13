@@ -2,6 +2,7 @@ import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
 import { decodeNativeSnapshotCursor } from './native-snapshot-cursor.js'
 import { NativeSourceSnapshots } from './native-source-snapshot.js'
 import { parseConversationSnapshotInput, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput, type ConversationSnapshotPage, type ConversationSnapshotReleaseResult } from './conversation-snapshot.js'
+import { parseAgentSessionUsageInput, SESSION_USAGE_UNMEASURED, type AgentSessionUsageInput, type AgentSessionUsagePage } from './agent-session-usage.js'
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { homedir } from 'node:os'
@@ -2853,6 +2854,19 @@ export class AgentMuxClient {
     return descriptor ? { ...page, hostId: input.hostId } : page
   }
 
+  /** Bounded logical captured-body usage at this semantic owner; no Run operation. */
+  async readAgentSessionUsage(value: AgentSessionUsageInput, options: { signal?: AbortSignal } = {}): Promise<AgentSessionUsagePage> {
+    const input = parseAgentSessionUsageInput(value)
+    options.signal?.throwIfAborted()
+    const source = await this.historyDescriptor(input.agentSessionId, options.signal)
+    if (input.hostId !== 'local' && source.hostId !== input.hostId) throw new AgentMuxError('Usage target belongs to another semantic Host.', 'UNKNOWN_AGENT_SESSION')
+    const captured = await this.store.readCapturedUsage(input.agentSessionId, input, options.signal)
+    options.signal?.throwIfAborted()
+    return { hostId: input.hostId, agentSessionId: input.agentSessionId, observedAt: Date.now(),
+      lifecycle: { state: source.state, ...(source.retiredAt === undefined ? {} : { retiredAt: source.retiredAt }),
+        ...(source.pendingReopen ? { pendingReopen: true as const } : {}) }, captured, unmeasured: SESSION_USAGE_UNMEASURED }
+  }
+
   /** Read this owner's retained startup facts without probing or connecting Runtime. */
   async readAgentStartupDiagnostic(input: { target: AgentStartupDiagnosticExactTarget; includeRaw?: boolean }) {
     if (!input || Object.keys(input).some(key => !['target', 'includeRaw'].includes(key)) || input.includeRaw !== undefined && typeof input.includeRaw !== 'boolean')
@@ -3349,8 +3363,8 @@ export class AgentMuxClient {
     return index
   }
 
-  private async historyDescriptor(agentSessionId: string): Promise<AgentSessionHistoryDescriptor> {
-    const descriptor = await this.store.readHistorySource(agentSessionId)
+  private async historyDescriptor(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor> {
+    const descriptor = await this.store.readHistorySource(agentSessionId, signal)
     if (!descriptor) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
     return descriptor
   }

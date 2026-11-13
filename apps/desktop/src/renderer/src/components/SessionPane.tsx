@@ -1,3 +1,4 @@
+import { SessionRecordDetails } from './SessionRecordDetails'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { MoteInputReceipt } from './MoteInputReceipt'
 import { moteInputSource } from '../lib/mote-input-source'
@@ -873,6 +874,7 @@ export function SessionPane({
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
       regionId={origin.regionId} readOnly={readOnly} portalTargetId={portalTargetId} onHistory={onHistory} onTakeOver={takeOverAt(origin, displayId)}
       onLearn={learnAt(origin, displayId)} onDerived={derivedAt(origin, displayId)}
+      recordDetails={!session && retainedHistory?.state === 'retired' ? <SessionRecordDetails target={{ hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }} /> : undefined}
       currentConversationActions={currentConversationActions(origin)} forkAction={action => currentConversationActions(origin, { id: action.id, label: action.label, instruction: action.instruction })} resultReview={resultReview}
       onRefreshObservation={session?.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined} refreshing={refreshing}
       nativeSession={session?.kind === 'agent' ? session : recoveryCandidate ? {

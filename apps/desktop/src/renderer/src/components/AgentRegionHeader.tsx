@@ -25,7 +25,7 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onLearn, onDerived, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions, forkAction }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onLearn, onDerived, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, recordDetails, nativeSession, currentConversationActions, forkAction }: {
   name: string
   executorLabel: string
   sessionId: string
@@ -42,6 +42,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   /** One precise owner may present its existing controls in the Focus bar. */
   portalTargetId?: string | null
   resultReview?: ReactNode
+  recordDetails?: ReactNode
   currentConversationActions?: ReactNode
   forkAction?: ((action: AgentDerivedAction) => ReactNode) | undefined
   nativeSession?: AgentNativeSourceReference | undefined
@@ -140,6 +141,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     <HostBadge host={executionHost} />
     {connectorSession?.kind === 'agent' ? <AgentOperationFeedback compact subject={{ hostId: connectorSession.control.hostId, agentSessionId: connectorSession.control.agentSessionId, regionId }} /> : null}
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
+    {recordDetails}
     {resultReview}
     {!readOnly && connectorSession?.kind === 'agent' ? <AgentConnections session={connectorSession} regionId={regionId} visible={active} /> : null}
     {sessionKind === 'agent' && nativeSession ? <RegionCurrentDemand agentSessionId={nativeSession.control.agentSessionId} hostId={nativeSession.control.hostId} /> : null}
