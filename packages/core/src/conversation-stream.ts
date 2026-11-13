@@ -109,13 +109,11 @@ export function conversationRevision(value: unknown): string {
 export function conversationContentRevision(record: ConversationSourceRecord): string {
   if (record.original.kind !== 'native') return conversationRevision(record.original.item)
   const item = record.original.item
-  return conversationRevision({ id: item.id, kind: item.kind, contentParts: item.contentParts.map(part => {
+  return conversationRevision({ ...item, contentParts: item.contentParts.map(part => {
     if (part.kind !== 'resource' || part.resourceType !== 'text' || part.content?.encoding !== 'json-utf8') return part
     const { reference: _readCapability, label: _projectionLabel, ...content } = part
     return content
-  }), ...(item.turnId ? { turnId: item.turnId } : {}), ...(item.turnOutcome ? { turnOutcome: item.turnOutcome } : {}),
-    ...(item.questionRequest ? { questionRequest: item.questionRequest } : {}), ...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {}),
-    ...(item.conversation ? { conversation: item.conversation } : {}), ...(item.collaboration ? { collaboration: item.collaboration } : {}) })
+  }) })
 }
 export function conversationRecordId(reference: { hostId?: string; agentSessionId: string; source: ConversationItemRef['source'] }): string {
   const { source } = reference

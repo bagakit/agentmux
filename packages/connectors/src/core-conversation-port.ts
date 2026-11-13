@@ -2,7 +2,7 @@ import { AgentMuxError, parseAgentInputJournalCut, forwardConversationInput, rea
 import { parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPageForWindow } from '@agentmux/core/conversation'
 import type { PublicationConversationPort } from './publication-host.js'
 
-type Reader = Pick<AgentMuxClient, 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeConversation' | 'sessionHistoryResource' | 'inspectMessageNotification' | 'readMessage' | 'readAgentInputResource'>
+type Reader = Pick<AgentMuxClient, 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeConversation' | 'sessionHistoryResource' | 'inspectMessageNotification' | 'readMessage' | 'readAgentInputResource' | 'releaseConversationView'>
 /** Adapt existing execution owners. Every read resolves its frozen Host, never current UI or a replacement Session. */
 export function createPublicationConversationPort(clients: () => readonly { hostId: string; client: Reader }[]): PublicationConversationPort {
   const original = (hostId: string): Reader => {
@@ -25,9 +25,11 @@ export function createPublicationConversationPort(clients: () => readonly { host
       return result
     },
     checkpoint: async (reference, signal) => {
-      const page = await original(reference.hostId).conversationCheckpoint({ ...reference, hostId: 'local' }, { signal })
+      let page = await original(reference.hostId).conversationCheckpoint({ ...reference, hostId: 'local', nativeSnapshot: reference.nativeSnapshot ?? 'scope' }, { signal })
+      if (!page.checkpoint.frontier.cuts.some(cut => cut.kind === 'native')) page = await original(reference.hostId).conversationCheckpoint({ hostId: 'local', agentSessionId: reference.agentSessionId, ...(reference.nativePosition ? { nativePosition: reference.nativePosition } : {}) }, { signal })
       return parseConversationCheckpointPage({ ...page, hostId: reference.hostId, checkpoint: { ...page.checkpoint, hostId: reference.hostId } }, reference)
     },
+    release: async input => { const forwarded = forwardConversationInput(input); await original(input.hostId).releaseConversationView(forwarded.input) },
     changes: async (input, signal) => {
       const client = original(input.hostId), forwarded = forwardConversationInput(input)
       return parseConversationChangesPageForWindow(await readRoutedConversation(input, (maxBytes, replay) => client.readConversationChanges({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, { signal }), forwarded.sourceHostId), input)

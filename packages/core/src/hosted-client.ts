@@ -9,7 +9,6 @@ import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } f
 import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
 import { parseLifecycleDiagnosticEvent } from './lifecycle-diagnostic.js'
 import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
-import { parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage } from './session-history-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { dequal } from 'dequal'
@@ -297,7 +296,6 @@ export async function connectHostedAgentMux(options: {
         : parseConversationChangesPage(decoded, { ...expected, checkpoint: (input as import('./conversation-changes.js').ConversationChangesInput).checkpoint })
     }
     if (method === 'releaseConversationView') return parseConversationViewReleaseResult(decoded, wireArgs[0] as ConversationRef)
-    if (method === 'listConversationSnapshots' || method === 'releaseConversationSnapshot') return parseConversationSnapshotResult(decoded, wireArgs[0] as ConversationSnapshotInput | ConversationSnapshotReleaseInput)
     if (method === 'readAgentInputResource') return parseAgentInputResourceResult(decoded, parseAgentInputResourceRead(wireArgs[0]))
     if (method === 'readAgentInputChanges') return parseAgentInputChangesPage(decoded, wireArgs[0] as import('./agent-input-changes.js').AgentInputChangesRead)
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)

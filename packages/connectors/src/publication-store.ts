@@ -16,7 +16,7 @@ import { parsePreparedPublication, publicationSpeechText, type PreparedPublicati
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDeliveryRetrySource, parseConnectionDeliveryContinuation, type ConnectionDeliveryRetrySource, type ConnectionDeliveryContinuation, type ConnectionDeliveryRetryInput, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
+import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationUnitsForPage, parseConversationCheckpoint, conversationContentRevision, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope' | 'executionRuntimeId' | 'inputTarget' | 'publicationBoundary'>
@@ -81,6 +81,8 @@ export type PublicationOperation = Omit<ConnectionDelivery, 'retrySource' | 'las
   /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
   prepared?: PreparedPublication
   sourceRecords?: ConversationItemRef[]
+  /** Original Core facts at admission, covering every member of this exact effect. */
+  sourceProofs?: { record: ConversationItemRef; revision: string; semanticRevision: string; protocolIdentity: boolean; closed: boolean }[]
   /** Exact immutable journal body, qualified before queuing; the source remains its original notification record. */
   originalMessage?: Pick<PublicationOriginalMessage, 'messageId' | 'senderSessionId' | 'notificationId'>
   /** Private unfinished receipt observation; never an input state or a platform effect state. */
@@ -102,7 +104,7 @@ export type PublicationOperation = Omit<ConnectionDelivery, 'retrySource' | 'las
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { continuations: _continuations, rateLimitScopes: _rateLimitScopes, rateLimit: _rateLimit, payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
+  const { continuations: _continuations, rateLimitScopes: _rateLimitScopes, rateLimit: _rateLimit, payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, sourceProofs: _proofs, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, cardPreparation, cardSequence: _cardSequence, portrait, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...(cardPreparation || portrait ? { presentation: {
     ...(cardPreparation ? { entity: { state: cardPreparation.receipt.state, ...('reason' in cardPreparation.receipt ? { reason: cardPreparation.receipt.reason } : {}) } } : {}),
@@ -209,6 +211,10 @@ function representationFragments(value: RepresentationPayload | QuestionRepresen
 const recoverableGapPredicate = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') AND json_type(decision_json,'$.gap.anchor')='object' AND (json_extract(decision_json,'$.gap.code')='PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' OR (json_type(decision_json,'$.gap.part')='object' AND json_type(decision_json,'$.gap.event')='object'))"
 const rateLimitSourcePredicate = "state='not-applied' AND json_extract(operation_json,'$.reason')='rate-limited' AND json_type(operation_json,'$.prepared')='object' AND json_extract(operation_json,'$.rateLimit.source.kind')='message' AND json_extract(operation_json,'$.rateLimit.source.attempt')=json_extract(operation_json,'$.attempt')"
 const rateLimitOtherScope = "CASE WHEN json_extract(operation_json,'$.rateLimit.scopeKey')=json_extract(operation_json,'$.rateLimitScopes.request') THEN COALESCE(json_extract(operation_json,'$.rateLimitScopes.conversation'),'') ELSE json_extract(operation_json,'$.rateLimitScopes.request') END"
+export type NativePublicationRecovery = {
+  id: string; phase: 'clearing' | 'qualifying' | 'scanning' | 'validating' | 'replaying' | 'complete' | 'blocked'; effectAfter: number; validatedAfter: number; nativeScanned?: true; original: ConversationCheckpoint;
+  range: NonNullable<ConversationChangesPage['nativeRecoveryRange']>; checkpoint: ConversationCheckpoint
+}
 /** Both candidate selection and the final claim consume the same durable resource window. */
 const rateLimitAvailable = (alias: string) => `NOT EXISTS (
   SELECT 1 FROM connector_publication_operation cooling INDEXED BY connector_publication_rate_scope
@@ -223,6 +229,24 @@ export class PublicationStore {
 
   constructor(readonly database: DatabaseSync, private readonly bindings?: Pick<RoomBindingReadPort, 'readExact'>) {
     database.exec(`
+      CREATE TABLE IF NOT EXISTS connector_publication_native_version_gap (
+        binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, record_key TEXT NOT NULL, revision TEXT NOT NULL,
+        PRIMARY KEY(binding_id,binding_revision,record_key,revision)
+      );
+      CREATE TABLE IF NOT EXISTS connector_publication_native_recovery (
+        binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, recovery_json TEXT NOT NULL,
+        PRIMARY KEY(binding_id,binding_revision)
+      );
+      CREATE TABLE IF NOT EXISTS connector_publication_native_effect_proof (
+        binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, record_key TEXT NOT NULL,
+        semantic_revision TEXT NOT NULL, ordinal INTEGER NOT NULL,
+        PRIMARY KEY(binding_id,binding_revision,record_key)
+      );
+      CREATE TABLE IF NOT EXISTS connector_publication_native_recovery_record (
+        binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, record_key TEXT NOT NULL,
+        record_json TEXT NOT NULL, revision TEXT NOT NULL, semantic_revision TEXT NOT NULL, conflict INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(binding_id,binding_revision,record_key)
+      );
       CREATE TABLE IF NOT EXISTS connector_publication_frontier (
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, source_key TEXT NOT NULL,
         checkpoint_json TEXT NOT NULL, PRIMARY KEY(binding_id, binding_revision, source_key)
@@ -544,6 +568,117 @@ export class PublicationStore {
     const saved = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
     return saved ? parseConversationCheckpoint(JSON.parse(String(saved.checkpoint_json)), ref(boundary)) : null
   }
+  nativeRecovery(boundary: PublicationBoundary): NativePublicationRecovery | null {
+    const row = this.database.prepare('SELECT recovery_json FROM connector_publication_native_recovery WHERE binding_id=? AND binding_revision=?').get(...scopeKey(boundary))
+    return row ? JSON.parse(String(row.recovery_json)) as NativePublicationRecovery : null
+  }
+  private saveNativeRecovery(boundary: PublicationBoundary, value: NativePublicationRecovery): void {
+    this.database.prepare('INSERT INTO connector_publication_native_recovery VALUES(?,?,?) ON CONFLICT(binding_id,binding_revision) DO UPDATE SET recovery_json=excluded.recovery_json').run(...scopeKey(boundary), encode(value))
+  }
+  beginNativeRecovery(boundary: PublicationBoundary, range: NonNullable<ConversationChangesPage['nativeRecoveryRange']>, expected: ConversationCheckpoint, authorized: () => boolean): void {
+    this.transaction(() => {
+      if (!authorized() || !this.nativeReplayQualified(boundary)) throw new AgentMuxError('The original Binding or complete original effect evidence changed.', 'PUBLICATION_SOURCE_CONFLICT')
+      const current = this.nativeRecovery(boundary)
+      if (current && current.phase !== 'complete') return
+      const original = this.retainedCheckpoint(boundary)!
+      if (!same(original.frontier.cuts.find(cut => cut.kind === 'native'), expected.frontier.cuts.find(cut => cut.kind === 'native'))) return
+      const source = { kind: 'native' as const, ...range.from.source }, checkpoint: ConversationCheckpoint = { ...ref(boundary), sourceHostId: original.sourceHostId,
+        frontier: { hostId: original.sourceHostId, agentSessionId: boundary.agentSessionId, scope: { sources: [source] }, cuts: [{ kind: 'native', checkpoint: range.from }] } }
+      const value: NativePublicationRecovery = { id: digest([scopeKey(boundary), range]), phase: 'clearing', effectAfter: 0, validatedAfter: 0, original, range, checkpoint }
+      this.saveNativeRecovery(boundary, value)
+      this.saveDecision(boundary, 'native-recovery-' + value.id, 'current', { kind: 'native-recovery', original, range })
+    })
+  }
+  stageNativeRecovery(boundary: PublicationBoundary, expected: NativePublicationRecovery, page: ConversationChangesPage, units: readonly ConversationUnit[], authorized: () => boolean): void {
+    this.transaction(() => {
+      if (!authorized() || !same(this.nativeRecovery(boundary), expected) || expected.phase !== 'scanning') throw new AgentMuxError('The exact original recovery phase changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
+      const insert = this.database.prepare('INSERT INTO connector_publication_native_recovery_record(binding_id,binding_revision,record_key,record_json,revision,semantic_revision) VALUES(?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,record_key) DO UPDATE SET conflict=CASE WHEN revision!=excluded.revision THEN 1 ELSE conflict END')
+      for (const unit of units) for (const record of unit.records) {
+        if (record.reference?.source.kind !== 'native') continue
+        if (!isCompleteConversationRecord(record)) throw new AgentMuxError('Recovery requires complete original source records.', 'PUBLICATION_COMPLETE_RECORDS_REQUIRED')
+        insert.run(...scopeKey(boundary), record.id, encode(record.reference), record.revision, conversationContentRevision(record))
+      }
+      this.saveNativeRecovery(boundary, { ...expected, checkpoint: page.checkpoint })
+    })
+  }
+  finishNativeRecoveryScan(boundary: PublicationBoundary, authorized: () => boolean): void {
+    this.transaction(() => {
+      const value = this.nativeRecovery(boundary)
+      if (!authorized() || value?.phase !== 'scanning') throw new AgentMuxError('The original scan phase changed.', 'PUBLICATION_SOURCE_CONFLICT')
+      this.saveNativeRecovery(boundary, { ...value, nativeScanned: true, phase: 'qualifying' })
+    })
+  }
+  /** One bounded owner transaction per turn, including old effect qualification
+   * and version comparison. No whole-history JSON join runs on the Host loop. */
+  advanceNativeRecovery(boundary: PublicationBoundary, authorized: () => boolean): void {
+    this.transaction(() => {
+      const value = this.nativeRecovery(boundary)
+      if (!authorized() || !value) throw new AgentMuxError('The original recovery authority changed.', 'PUBLICATION_SOURCE_CONFLICT')
+      if (value.phase === 'clearing') {
+        for (const table of ['connector_publication_native_recovery_record', 'connector_publication_native_effect_proof'])
+          this.database.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE binding_id=? AND binding_revision=? LIMIT 100)`).run(...scopeKey(boundary))
+        const remaining = ['connector_publication_native_recovery_record', 'connector_publication_native_effect_proof'].some(table => this.database.prepare(`SELECT 1 FROM ${table} WHERE binding_id=? AND binding_revision=? LIMIT 1`).get(...scopeKey(boundary)))
+        if (!remaining) this.saveNativeRecovery(boundary, { ...value, phase: 'qualifying' })
+        return
+      }
+      if (value.phase === 'qualifying') {
+        const rows = this.database.prepare('SELECT ordinal,operation_json FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND ordinal>? ORDER BY ordinal LIMIT 100').all(...scopeKey(boundary), value.effectAfter)
+        const insert = this.database.prepare(`INSERT INTO connector_publication_native_effect_proof VALUES(?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,record_key) DO UPDATE SET semantic_revision=excluded.semantic_revision,ordinal=excluded.ordinal WHERE excluded.ordinal>ordinal`)
+        for (const row of rows) {
+          const operation = JSON.parse(String(row.operation_json)) as PublicationOperation
+          if (!['native', 'captured'].includes(operation.reference.source.kind)) continue
+          const refs = operation.sourceRecords ? [...new Map(operation.sourceRecords.map(reference => [conversationRecordId(reference), reference])).values()] : undefined, proofs = operation.sourceProofs
+          if (!refs?.length || !proofs || refs.length !== proofs.length || refs.some(reference => {
+            const proof = proofs.find(proof => same(proof.record, reference))
+            return !proof?.closed || !proof.semanticRevision || reference.source.kind === 'native' && !proof.protocolIdentity
+          })) {
+            const gap: ConnectionDeliveryGap = { gapId: 'native-effect-unqualified-' + operation.operationId, source: { kind: 'native', ...value.range.from.source }, code: 'CONVERSATION_RECOVERY_EFFECT_UNCONFIRMED', reason: 'version-unavailable' }
+            this.saveDecision(boundary, gap.gapId, value.id, { kind: 'gap', state: 'unresolved', gap })
+            this.saveNativeRecovery(boundary, { ...value, phase: 'blocked' }); return
+          }
+          for (const proof of proofs) insert.run(...scopeKey(boundary), conversationRecordId(proof.record), proof.semanticRevision, Number(row.ordinal))
+        }
+        this.saveNativeRecovery(boundary, { ...value, effectAfter: Number(rows.at(-1)?.ordinal ?? value.effectAfter), ...(rows.length ? { validatedAfter: 0 } : { phase: value.nativeScanned ? 'validating' : 'scanning' }) })
+        return
+      }
+      if (value.phase !== 'validating') return
+      // Newly admitted captured effects may be related. Qualify their exact delta
+      // and repeat bounded validation before opening the first native effect.
+      if (this.database.prepare('SELECT 1 FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND ordinal>? LIMIT 1').get(...scopeKey(boundary), value.effectAfter)) {
+        this.saveNativeRecovery(boundary, { ...value, phase: 'qualifying', validatedAfter: 0 }); return
+      }
+      const rows = this.database.prepare('SELECT rowid,record_key,record_json,semantic_revision,conflict FROM connector_publication_native_recovery_record WHERE binding_id=? AND binding_revision=? AND rowid>? ORDER BY rowid LIMIT 100').all(...scopeKey(boundary), value.validatedAfter)
+      const original = this.database.prepare('SELECT semantic_revision FROM connector_publication_native_effect_proof WHERE binding_id=? AND binding_revision=? AND record_key=?')
+      for (const row of rows) {
+        const previous = original.get(...scopeKey(boundary), String(row.record_key))
+        if (!row.conflict && (!previous || previous.semantic_revision === row.semantic_revision)) continue
+        const record = JSON.parse(String(row.record_json)) as ConversationItemRef
+        this.database.prepare('INSERT OR IGNORE INTO connector_publication_native_version_gap VALUES(?,?,?,?)').run(...scopeKey(boundary), String(row.record_key), String(row.semantic_revision))
+        const gap: ConnectionDeliveryGap = { gapId: 'native-recovery-version-' + digest([scopeKey(boundary), row.record_key]), record, code: 'CONVERSATION_RECOVERY_VERSION_UNCONFIRMED', reason: 'version-unavailable' }
+        this.saveDecision(boundary, gap.gapId, String(row.semantic_revision), { kind: 'gap', state: 'unresolved', gap })
+      }
+      if (rows.length) { this.saveNativeRecovery(boundary, { ...value, validatedAfter: Number(rows.at(-1)!.rowid) }); return }
+      const current = this.retainedCheckpoint(boundary)!, before = value.original.frontier.cuts.find(c => c.kind === 'native'), actual = current.frontier.cuts.find(c => c.kind === 'native')
+      if (!same(before, actual)) throw new AgentMuxError('The retained native frontier changed during recovery; its original range is retained.', 'PUBLICATION_CHECKPOINT_CONFLICT')
+      const checkpoint = { ...current, frontier: { ...current.frontier, cuts: current.frontier.cuts.map(cut => cut.kind === 'native' ? { kind: 'native' as const, checkpoint: value.range.from } : cut) } }
+      this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(checkpoint), ...scopeKey(boundary), 'unified')
+      this.saveNativeRecovery(boundary, { ...value, phase: 'replaying' })
+    })
+  }
+  private nativeRecoveryUnits(boundary: PublicationBoundary, units: readonly ConversationUnit[]): readonly ConversationUnit[] {
+    if (units.some(unit => unit.records.some(record => !isCompleteConversationRecord(record)))) throw new AgentMuxError('Recovery requires complete original source records.', 'PUBLICATION_COMPLETE_RECORDS_REQUIRED')
+    const conflict = this.database.prepare('SELECT 1 FROM connector_publication_native_version_gap WHERE binding_id=? AND binding_revision=? AND record_key=? AND revision=?')
+    return units.filter(unit => !unit.records.some(record => isCompleteConversationRecord(record) && record.reference?.source.kind === 'native' && conflict.get(...scopeKey(boundary), record.id, conversationContentRevision(record))))
+  }
+  recoveryOrigin(boundary: PublicationBoundary): ConversationCheckpoint | null {
+    const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'origin')
+    return row ? parseConversationCheckpoint(JSON.parse(String(row.checkpoint_json)), ref(boundary)) : boundary.sourceFrontier ?? null
+  }
+  /** Replaying a source may only reconcile effects whose complete original
+   * membership and identity were actually admitted, including unknown/prepared. */
+  nativeReplayQualified(boundary: PublicationBoundary): boolean {
+    return !!this.recoveryOrigin(boundary)?.frontier.cuts.some(cut => cut.kind === 'native' && cut.checkpoint.scopeEvidence)
+  }
   /** Lift frozen cuts, or the explicitly authorized creation's first real native origin. Never replace a saved cut. */
   checkpoint(boundary: PublicationBoundary, sourceHostId: string, origin?: ConversationCheckpoint): ConversationCheckpoint {
     return this.transaction(() => {
@@ -567,6 +702,7 @@ export class PublicationStore {
       }
       const checkpoint = parseConversationCheckpoint(initial, ref(boundary))
       if (checkpoint.sourceHostId !== sourceHostId) throw new AgentMuxError('The original Binding belongs to another source namespace.', 'PUBLICATION_SOURCE_CONFLICT')
+      this.database.prepare('INSERT INTO connector_publication_frontier VALUES (?, ?, ?, ?)').run(...scopeKey(boundary), 'origin', encode(checkpoint))
       this.database.prepare('INSERT INTO connector_publication_frontier VALUES (?, ?, ?, ?)').run(...scopeKey(boundary), 'unified', encode(checkpoint))
       return checkpoint
     })
@@ -728,7 +864,7 @@ export class PublicationStore {
   /** Complete units, exact gaps and their next read frontier commit in the original outbox transaction. */
   commitPage(boundary: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: PublicationPageOptions): void {
     const page = parseConversationChangesPageForWindow(value, { ...ref(boundary), checkpoint: after, limit: 100, maxBytes: value.budgetBytes })
-    const units = parseConversationUnitsForPage(options.units, page)
+    const units = this.nativeRecoveryUnits(boundary, parseConversationUnitsForPage(options.units, page))
     const decisions = units.map(unit => ({ unit, plan: publicationContent(unit, boundary, page.checkpoint, { resolved: options.resolvedText, origin: id => this.origin(boundary, unit, id), ...(options.speakers?.has(unit.event.id) ? { attributed: true } : {}) }) }))
     const questionRecords = units.flatMap(unit => unit.records.flatMap(record => {
       const reference = record.reference
@@ -880,6 +1016,8 @@ export class PublicationStore {
       this.accountInputAliases(boundary, units)
       for (const projectionId of replyProjections) this.refreshReplyMetadata(boundary, projectionId, options.fragmentText)
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
+      const recovery = this.nativeRecovery(boundary)
+      if (recovery?.phase === 'replaying' && page.nativeRecoveryRange && same(page.nativeRecoveryRange, recovery.range) && page.coverage.some(coverage => coverage.source.kind === 'native' && coverage.current === 'complete-through-cut' && !coverage.gaps.length)) this.saveNativeRecovery(boundary, { ...recovery, phase: 'complete' })
     })
   }
   /** A public captured span represents only its exact accepted native text wrapper. */
@@ -1053,6 +1191,14 @@ export class PublicationStore {
         const presentationTime = originalMessage?.createdAt ?? (sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
           ? sourceTime : prior?.presentationTime ?? Date.now())
         const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime, ...(event ? { event } : {}), sourceRecords: [...references],
+          sourceProofs: unit.records.map(record => {
+            const protocolIdentity = record.order.kind === 'native-page' && record.order.recordIdentity === 'protocol'
+            if (!isCompleteConversationRecord(record)) return { record: record.reference!, revision: record.revision, semanticRevision: record.revision, protocolIdentity, closed: false }
+            const original = record.original, provenance = original.item.conversation, target = provenance?.sameEvent
+            const closedRelations = !provenance || Object.keys(provenance).every(key => key === 'nativeInvocationScope' || key === 'sameEvent')
+            return { record: record.reference!, revision: record.revision, semanticRevision: conversationContentRevision(record), protocolIdentity,
+              closed: closedRelations && (original.kind !== 'native' || !original.item.questionRequest && !original.item.questionAnswers) && (!target || unit.records.some(member => same(member.reference, target))) }
+          }),
           ...(speaker && (payload.kind === 'speech' || payload.kind === 'question') ? { speaker } : {}),
           ...(originalMessage ? { originalMessage: { messageId: originalMessage.messageId, senderSessionId: originalMessage.senderSessionId, ...(originalMessage.notificationId ? { notificationId: originalMessage.notificationId } : {}) } } : {}),
           bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
