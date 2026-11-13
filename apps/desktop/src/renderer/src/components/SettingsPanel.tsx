@@ -211,7 +211,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
           navigationGroup={settingsModules.find(candidate => candidate.id === initialSection)?.group}
           searching={searching} visible={visible} navigationKey={route} onOpen={section => chooseSection(section as SettingsPageId)} />
       </aside>
-      <main className="settings-content">
+      {/* The open pane names itself, so a wide resource pane can bring the page header out to its own gutter. */}
+      <main className="settings-content" data-settings-active={showResults ? undefined : active}>
         <header className="settings-content__header">
           <div className="settings-content__title">
             <div>

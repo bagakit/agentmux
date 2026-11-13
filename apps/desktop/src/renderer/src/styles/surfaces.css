@@ -53,6 +53,11 @@
 .settings-content__title { min-width: 0; display: flex; align-items: flex-start; gap: var(--sp-3); }
 .settings-content__breadcrumb { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .settings-content__header h2 { margin: var(--sp-2) 0 var(--sp-2); font-size: var(--fs-title); font-weight: 650; letter-spacing: -.015em; }
+/* Resource pages lay out a list and an editor up to 960px wide. Their header uses the same width and gutter,
+   so the title starts on the list's edge and Close ends on the editor's. */
+.settings-content:is([data-settings-active='browser-profiles'], [data-settings-active='prompts'], [data-settings-active='toolkit'], [data-settings-active='derived-actions']) > .settings-content__header {
+  width: 100%; padding-inline: max(var(--sp-7), calc((100% - 960px) / 2));
+}
 .settings-content__header p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .settings-content__actions { display: flex; align-items: center; gap: var(--sp-3); }
 .settings-content__hint { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
