@@ -288,6 +288,15 @@ export class NativeDesktop {
       || !(CAPTURE_EDIT_TOOLS as readonly unknown[]).includes(result.editTool))) {
       throw invalid('Capture returned a start tool outside an editable selection opened for editing')
     }
+    const inlineEditing = allowsEditing && params.mode === 'selection' && params.inlineEditing === true
+    if (result.backdrop !== undefined) {
+      const backdrop = result.backdrop as unknown
+      const shaped = !!backdrop && typeof backdrop === 'object' && !Array.isArray(backdrop) && Object.keys(backdrop).length === 1
+        && typeof (backdrop as { id?: unknown }).id === 'string' && (backdrop as { id: string }).id.length > 0
+      if (!shaped || result.state !== 'captured' || !inlineEditing || result.completionAction !== 'edit') {
+        throw invalid('Capture returned a backdrop outside an inline editing selection opened for editing')
+      }
+    }
     if (result.state === 'captured') {
       const screenshot = result.screenshot
       if (!screenshot || screenshot.format !== 'png' || typeof screenshot.data !== 'string' || !Number.isFinite(screenshot.scale) || screenshot.scale <= 0) {
@@ -305,6 +314,16 @@ export class NativeDesktop {
       }
     }
     return result
+  }
+
+  /** Closes the frozen backdrop an inline editing capture kept. Releasing an unknown or already released id reports `missing`. */
+  async releaseSelectionBackdrop(id: string): Promise<{ state: 'released' | 'missing' }> {
+    if (typeof id !== 'string' || !id) throw new NativeRequestError('invalid_argument', 'A backdrop id from captureScreenshot is required')
+    const result = await this.request('releaseSelectionBackdrop', { id })
+    if (!result || typeof result !== 'object' || Array.isArray(result) || (result.state !== 'released' && result.state !== 'missing')) {
+      throw new NativeRequestError('invalid_backdrop_result', 'The native backdrop release receipt is unconfirmed')
+    }
+    return { state: result.state }
   }
 
   async readClipboardText(): Promise<string> {

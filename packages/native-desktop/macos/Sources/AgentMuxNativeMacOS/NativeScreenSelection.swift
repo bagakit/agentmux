@@ -14,6 +14,11 @@ final class NativeScreenSelection: NSView {
         let windows: [NSWindow]
     }
     private static var active: Presentation?
+    /// Frozen displays kept behind an inline editor, by backdrop id. Only the
+    /// owner's explicit release or its connection closing removes one.
+    private static var backdrops: [String: NSWindow] = [:]
+    /// Drawn as the editor's still background: no handles, controls or loupe.
+    fileprivate var isBackdrop = false
     private let coordinator: NativeSelectionCoordinator
     let viewport: NSRect
     private var motionTracking: NSTrackingArea?
@@ -42,7 +47,7 @@ final class NativeScreenSelection: NSView {
     required init?(coder: NSCoder) { nil }
 
     /// `initialRect` is a global Quartz rectangle proposed by the host.
-    static func begin(allowEditing: Bool = false, initialRect: CGRect? = nil,
+    static func begin(allowEditing: Bool = false, initialRect: CGRect? = nil, inlineEditing: Bool = false,
         copyColor: @escaping @Sendable (String) throws -> Void,
         load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels,
         completion: @escaping (Result<NativeSelectionChoice?, Error>) -> Void) throws {
@@ -52,7 +57,7 @@ final class NativeScreenSelection: NSView {
             throw NativeScreenSelectionError(code: "display_unavailable", message: "macOS did not provide an active selection display")
         }
         let coordinator = NativeSelectionCoordinator(screenFrames: screens.map(\.frame), primaryTop: primary.frame.maxY,
-            initialPoint: NSEvent.mouseLocation, allowEditing: allowEditing, previousApp: NSWorkspace.shared.frontmostApplication,
+            initialPoint: NSEvent.mouseLocation, allowEditing: allowEditing, inlineEditing: inlineEditing, previousApp: NSWorkspace.shared.frontmostApplication,
             copyColor: copyColor, completion: completion)
         if let initialRect {
             // Quartz and AppKit flip about the same primary top in both directions.
@@ -87,13 +92,42 @@ final class NativeScreenSelection: NSView {
         }
     }
 
-    fileprivate static func closePresentation(for coordinator: NativeSelectionCoordinator) {
-        guard let presentation = active, presentation.coordinator === coordinator else { return }
+    /// Closes every display overlay, except `keeping`, which stays on screen
+    /// as a passive frozen backdrop and is returned under a new id.
+    fileprivate static func closePresentation(for coordinator: NativeSelectionCoordinator, keeping display: NSRect? = nil) -> String? {
+        guard let presentation = active, presentation.coordinator === coordinator else { return nil }
+        active = nil
+        var kept: String?
         for window in presentation.windows {
+            if let display, kept == nil, let view = window.contentView as? NativeScreenSelection, view.viewport == display {
+                view.becomeBackdrop()
+                window.ignoresMouseEvents = true
+                window.resignKey()
+                let id = UUID().uuidString
+                backdrops[id] = window
+                kept = id
+                continue
+            }
             window.orderOut(nil)
             window.close()
         }
-        active = nil
+        return kept
+    }
+    /// Main thread only.
+    static func releaseBackdrop(_ id: String) -> Bool {
+        guard let window = backdrops.removeValue(forKey: id) else { return false }
+        window.orderOut(nil)
+        window.close()
+        return true
+    }
+    static func releaseBackdrops(_ ids: [String]) { for id in ids { _ = releaseBackdrop(id) } }
+    static var backdropCount: Int { backdrops.count }
+    private func becomeBackdrop() {
+        isBackdrop = true
+        for subview in subviews { subview.isHidden = true }
+        window?.makeFirstResponder(nil)
+        discardCursorRects()
+        needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -109,6 +143,22 @@ final class NativeScreenSelection: NSView {
         }
         NSColor.black.withAlphaComponent(0.28).setFill()
         bounds.fill()
+        if isBackdrop {
+            // The editor draws its own chrome; the backdrop only shows which
+            // frozen region it is editing.
+            if let global = selection.rectangle, let image = frozen?.image {
+                let rect = global.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(rect: rect.intersection(bounds)).addClip()
+                NSImage(cgImage: image, size: bounds.size).draw(in: bounds)
+                NSGraphicsContext.restoreGraphicsState()
+                let border = NSBezierPath(rect: rect.insetBy(dx: -0.5, dy: -0.5))
+                border.lineWidth = 1
+                NSColor.white.withAlphaComponent(0.6).setStroke()
+                border.stroke()
+            }
+            return
+        }
         if let global = selection.rectangle {
             let rect = global.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
             if let image = frozen?.image {
@@ -235,6 +285,7 @@ final class NativeScreenSelection: NSView {
     }
     override func mouseMoved(with event: NSEvent) { coordinator.pointerMoved(globalPoint(event)) }
     override func resetCursorRects() {
+        guard !isBackdrop else { return }
         addCursorRect(bounds, cursor: .crosshair)
         if let rect = selection.rectangle {
             let visible = rect.offsetBy(dx: -viewport.minX, dy: -viewport.minY).intersection(bounds)
@@ -295,6 +346,7 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
     var primaryDisplayTop: CGFloat { primaryTop }
     private let screenFrames: [NSRect]
     private let allowEditing: Bool
+    private let inlineEditing: Bool
     private let previousApp: NSRunningApplication?
     private let copyColor: (@Sendable (String) throws -> Void)?
     private var colorCopyOperation: UUID?
@@ -324,7 +376,7 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
     /// The loupe serves aiming: before a selection exists and while it moves.
     var magnifierVisible: Bool { selection.rectangle == nil || selection.isInteracting || colorCopyStatusVisible }
 
-    init(screenFrames: [NSRect], primaryTop: CGFloat, initialPoint: NSPoint, allowEditing: Bool,
+    init(screenFrames: [NSRect], primaryTop: CGFloat, initialPoint: NSPoint, allowEditing: Bool, inlineEditing: Bool = false,
          previousApp: NSRunningApplication? = nil, pixels: NativeSelectionPixels? = nil,
          copyColor: (@Sendable (String) throws -> Void)? = nil,
          completion: ((Result<NativeSelectionChoice?, Error>) -> Void)? = nil) {
@@ -335,6 +387,7 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         self.pixels = pixels
         preferredPoint = initialPoint
         self.allowEditing = allowEditing
+        self.inlineEditing = inlineEditing && allowEditing
         self.previousApp = previousApp
         self.copyColor = copyColor
         self.completion = completion
@@ -416,22 +469,32 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         guard selection.canConfirm, let rect = selection.rectangle, let pixels else { return }
         let quartz = NativeCaptureGeometry.quartzRect(appKitRect: rect, primaryDisplayTop: primaryTop)
         guard pixels.issue(in: quartz) == nil else { return }
-        finish(.success(NativeSelectionChoice(rectangle: quartz, completionAction: action, editTool: action == .edit ? tool : nil, pixels: pixels)))
+        // An inline editor opens over the same frozen display, so that one
+        // display stays as its backdrop. A selection across displays has no
+        // single backdrop and closes normally.
+        let holding = action == .edit && inlineEditing ? screenFrames.filter { $0.contains(rect) } : []
+        let display = holding.count == 1 ? holding[0] : nil
+        finish(.success(nil), keeping: display) { backdrop in
+            NativeSelectionChoice(rectangle: quartz, completionAction: action, editTool: action == .edit ? tool : nil, backdrop: backdrop, pixels: pixels)
+        }
     }
     @objc fileprivate func cancel() { finish(.success(nil)) }
     @objc fileprivate func displayConfigurationChanged() {
         finish(.failure(NativeScreenSelectionError(code: "display_configuration_changed", message: "display geometry changed during the original selection; choose the region again")))
     }
-    private func finish(_ result: Result<NativeSelectionChoice?, Error>) {
+    private func finish(_ result: Result<NativeSelectionChoice?, Error>, keeping display: NSRect? = nil,
+                        choice: ((String?) -> NativeSelectionChoice)? = nil) {
         guard let callback = completion else { return }
         completion = nil
         loading.cancel()
         NotificationCenter.default.removeObserver(self)
-        NativeScreenSelection.closePresentation(for: self)
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+        let backdrop = NativeScreenSelection.closePresentation(for: self, keeping: display)
+        // The host's editor takes focus over a kept backdrop; handing focus
+        // back to the previous app would put it between them.
+        if backdrop == nil, NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
             previousApp?.activate(options: [.activateIgnoringOtherApps])
         }
-        callback(result)
+        callback(choice.map { .success($0(backdrop)) } ?? result)
     }
 
     func loaded(_ result: Result<NativeSelectionPixels, Error>) {

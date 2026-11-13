@@ -5,7 +5,7 @@ export type JsonObject = { [key: string]: Json }
 export const NATIVE_METHODS = [
   'handshake', 'listApps', 'listWindows', 'listDisplays', 'getAppState', 'permissionStatus',
   'captureScreenshot', 'clipboardRead', 'clipboardWrite', 'click', 'performSecondaryAction',
-  'setValue', 'typeText', 'pressKey', 'hotkey', 'pasteText', 'scroll', 'drag'
+  'setValue', 'typeText', 'pressKey', 'hotkey', 'pasteText', 'scroll', 'drag', 'releaseSelectionBackdrop'
 ] as const
 export type NativeMethod = typeof NATIVE_METHODS[number]
 export const NATIVE_MUTATIONS = new Set<NativeMethod>([
@@ -38,8 +38,11 @@ export interface NativeOperation {
 export const CAPTURE_EDIT_TOOLS = ['rect', 'arrow', 'note', 'pixelate', 'text'] as const
 export type CaptureEditTool = typeof CAPTURE_EDIT_TOOLS[number]
 export type CaptureParams =
-  /** `initialRect` seeds the selection in global Quartz points; it must touch an active display. */
-  | { mode: 'selection'; allowEditing?: boolean; initialRect?: { x: number; y: number; width: number; height: number } }
+  /**
+   * `initialRect` seeds the selection in global Quartz points; it must touch an active display.
+   * `inlineEditing` (requires `allowEditing`) keeps the selected display frozen behind the host editor.
+   */
+  | { mode: 'selection'; allowEditing?: boolean; inlineEditing?: boolean; initialRect?: { x: number; y: number; width: number; height: number } }
   | { mode: 'display'; displayId: number }
   | { mode: 'window'; windowId: number; app: string; processStartedAt: number }
   | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }
@@ -52,6 +55,8 @@ export interface CaptureResult {
   completionAction?: 'capture' | 'edit'
   /** Quick-mark tool the editor starts with; only on an editable selection whose intent is `edit`. */
   editTool?: CaptureEditTool
+  /** Frozen display kept behind an inline editor; release it with `releaseSelectionBackdrop`. */
+  backdrop?: { id: string }
   error?: NativeErrorData
 }
 

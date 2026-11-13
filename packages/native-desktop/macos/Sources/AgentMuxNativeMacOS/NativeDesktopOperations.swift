@@ -9,28 +9,40 @@ import AgentMuxNativeMacOSCore
 /// All rectangles crossing this boundary use global Quartz display points.
 /// The primary display's upper-left is (0, 0); other displays may have negative origins.
 enum NativeDesktopOperations {
-    static func capture(_ params: [String: JSONValue]) -> [String: Any] {
+    /// `owner` identifies the connection a kept backdrop belongs to, so the
+    /// backdrop is released if that connection closes before the host does.
+    static func capture(_ params: [String: JSONValue], owner: UInt64? = nil) -> [String: Any] {
         do {
             let mode = params["mode"]?.string ?? "selection"
             if let editing = params["allowEditing"], mode != "selection" || editing.bool == nil {
                 throw ProviderError.coded("invalid_argument", "allowEditing must be a boolean on a selection request")
             }
+            if let inline = params["inlineEditing"], mode != "selection" || inline.bool == nil || (inline.bool == true && params["allowEditing"]?.bool != true) {
+                throw ProviderError.coded("invalid_argument", "inlineEditing must be a boolean on a selection request that also allows editing")
+            }
+            let inlineEditing = params["inlineEditing"]?.bool == true
             let initialRect = try selectionInitialRect(params, mode: mode)
             let rect: CGRect
             if mode == "selection" {
                 return try NativeSelectionCaptureLease.shared.withCapture { ownership in
                     let allowEditing = params["allowEditing"]?.bool == true
-                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect, copyColor: { hex in
+                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing, initialRect: initialRect, inlineEditing: inlineEditing, copyColor: { hex in
                         _ = try clipboardWrite(["format": .string("text"), "data": .string(hex)])
                     }) { loading in
                         try frozenSelectionPixels(loading: loading, ownership: ownership)
                     }
                     guard let selection else { return ["state": "cancelled"] }
-                    let frozen = try selection.pixels.compose(selection.rectangle)
+                    if let backdrop = selection.backdrop { NativeSelectionBackdrops.adopt(backdrop, owner: owner) }
+                    // A composition failure must not strand a backdrop the host will never learn about.
+                    let frozen = try { () throws in
+                        do { return try selection.pixels.compose(selection.rectangle) }
+                        catch { NativeSelectionBackdrops.release(selection.backdrop); throw error }
+                    }()
                     var result: [String: Any] = ["state": "captured", "screenshot": try png(frozen.image, scale: frozen.scale),
                         "engine": frozen.engine, "selectionRect": renderRect(selection.rectangle)]
                     if allowEditing { result["completionAction"] = selection.completionAction.rawValue }
                     if allowEditing, selection.completionAction == .edit, let tool = selection.editTool { result["editTool"] = tool }
+                    if inlineEditing, selection.completionAction == .edit, let backdrop = selection.backdrop { result["backdrop"] = ["id": backdrop] }
                     return result
                 }
             } else if mode == "rect" {
@@ -106,6 +118,13 @@ enum NativeDesktopOperations {
     }
 
     /// Global Quartz bounds of every active display.
+    static func releaseSelectionBackdrop(_ params: [String: JSONValue]) throws -> [String: Any] {
+        guard let id = params["id"]?.string, !id.isEmpty else {
+            throw ProviderError.coded("invalid_argument", "releaseSelectionBackdrop requires the backdrop id returned by captureScreenshot")
+        }
+        return ["state": NativeSelectionBackdrops.release(id) ? "released" : "missing"]
+    }
+
     static func activeDisplayBounds() -> [CGRect] {
         var count: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
@@ -421,6 +440,32 @@ func withNativeClipboard<T>(_ body: () throws -> T) rethrows -> T {
     nativeClipboardLock.lock()
     defer { nativeClipboardLock.unlock() }
     return try body()
+}
+
+/// Which connection kept which frozen backdrop. Windows themselves stay in
+/// NativeScreenSelection on the main thread; this only maps owners to ids.
+enum NativeSelectionBackdrops {
+    nonisolated(unsafe) private static var owners: [String: UInt64] = [:]
+    private static let lock = NSLock()
+    static func adopt(_ id: String, owner: UInt64?) {
+        guard let owner else { return }
+        lock.lock(); owners[id] = owner; lock.unlock()
+    }
+    @discardableResult
+    static func release(_ id: String?) -> Bool {
+        guard let id else { return false }
+        lock.lock(); owners[id] = nil; lock.unlock()
+        return onMain { MainActor.assumeIsolated { NativeScreenSelection.releaseBackdrop(id) } }
+    }
+    /// Releases every backdrop kept for a connection that has closed.
+    static func releaseAll(ownedBy owner: UInt64) {
+        lock.lock()
+        let ids = owners.filter { $0.value == owner }.map(\.key)
+        for id in ids { owners[id] = nil }
+        lock.unlock()
+        guard !ids.isEmpty else { return }
+        DispatchQueue.main.async { MainActor.assumeIsolated { NativeScreenSelection.releaseBackdrops(ids) } }
+    }
 }
 
 func onMain<T>(_ body: () throws -> T) rethrows -> T {

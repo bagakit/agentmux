@@ -182,14 +182,16 @@ final class Provider: @unchecked Sendable {
     private var snapshots: [String: Snapshot] = [:]
     private var snapshotEntries: [CachedSnapshotEntry] = []
 
-    func handle(method: String, params: [String: JSONValue]) throws -> Any {
+    func handle(method: String, params: [String: JSONValue], connection: UInt64? = nil) throws -> Any {
         switch method {
         case "handshake":
             return providerHandshake()
         case "listDisplays":
             return NativeDesktopOperations.listDisplays()
         case "captureScreenshot":
-            return NativeDesktopOperations.capture(params)
+            return NativeDesktopOperations.capture(params, owner: connection)
+        case "releaseSelectionBackdrop":
+            return try NativeDesktopOperations.releaseSelectionBackdrop(params)
         case "clipboardRead":
             return try NativeDesktopOperations.clipboardRead(params)
         case "clipboardWrite":
@@ -395,6 +397,7 @@ final class Provider: @unchecked Sendable {
                 "observation": [
                     "screenshot": true,
                     "screenSelection": true,
+                    "selectionBackdrop": true,
                     "displayScreenshot": true,
                     "rectScreenshot": true,
                     "annotatedScreenshot": false,
@@ -3742,6 +3745,8 @@ private final class SocketListener: @unchecked Sendable {
         let connection = NativeSocketConnection(fd: fd)
         defer {
             connection.close()
+            // A backdrop only ever belongs to the connection whose capture kept it.
+            NativeSelectionBackdrops.releaseAll(ownedBy: connectionID.rawValue)
             if registeredSession { disconnectSession(connectionID) }
         }
         var peerUID = uid_t.max
@@ -3765,7 +3770,7 @@ private final class SocketListener: @unchecked Sendable {
                 if registration == .claimed { onSessionClaimed() }
             }
             DispatchQueue.global(qos: .userInitiated).async { [self] in
-                let response = handleRequest(provider: provider, lock: providerLock, request: request,
+                let response = handleRequest(provider: provider, lock: providerLock, request: request, connection: connectionID.rawValue,
                                              expectedToken: token, authorizedPeer: authorizedPeer,
                                              isConnected: { connection.isOpen })
                 connection.write(response)
@@ -3894,7 +3899,7 @@ func nativeErrorPayload(_ error: Error) -> [String: String] {
 }
 
 private func handleRequest(
-    provider: Provider, lock: NSLock, request: Request,
+    provider: Provider, lock: NSLock, request: Request, connection: UInt64? = nil,
     expectedToken: String?, authorizedPeer: Bool, isConnected: () -> Bool
 ) -> Any {
     var envelope: [String: Any] = ["id": request.id, "instanceId": provider.instanceId]
@@ -3920,7 +3925,8 @@ private func handleRequest(
             return failed("invalid_argument", "native mutation requires its original operationId")
         }
     }
-    let independent = ["handshake", "listApps", "listDisplays", "permissionStatus", "clipboardRead", "clipboardWrite", "captureScreenshot"].contains(request.method)
+    let independent = ["handshake", "listApps", "listDisplays", "permissionStatus", "clipboardRead", "clipboardWrite", "captureScreenshot",
+                       "releaseSelectionBackdrop"].contains(request.method)
     if !independent { lock.lock() }
     defer { if !independent { lock.unlock() } }
     guard isConnected() else { return failed("connection_closed", "original native connection closed before this operation began") }
@@ -3939,7 +3945,7 @@ private func handleRequest(
 
     var response = envelope
     do {
-        let result = try provider.handle(method: request.method, params: request.params ?? [:])
+        let result = try provider.handle(method: request.method, params: request.params ?? [:], connection: connection)
         response["ok"] = true
         response["result"] = result
     } catch {
