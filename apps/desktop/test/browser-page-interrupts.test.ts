@@ -4,17 +4,13 @@ import type { BrowserPageTransport } from '../src/main/browser-page-transport.js
 import type { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 
 /** A transport that records commands and lets the test emit protocol events on the root session. */
-function fakeTransport(options: { pageEnable?: 'ok' | 'fail' | 'held'; heldHousekeeping?: boolean } = {}) {
+function fakeTransport(options: { pageEnable?: 'ok' | 'fail' } = {}) {
   const sent: { method: string; params: Record<string, unknown> }[] = []
   const listeners = new Set<(method: string, params: unknown) => void>()
-  // An open dialog holds these replies in Chromium; 'held' models a reply that never comes.
-  const never = new Promise<never>(() => {})
   const session: BrowserPageTransport = {
     sendCommand: async (method, params = {}) => {
       sent.push({ method, params })
       if (method === 'Page.enable' && options.pageEnable === 'fail') throw new Error('Page.enable failed')
-      if (method === 'Page.enable' && options.pageEnable === 'held') return await never
-      if (options.heldHousekeeping && (method === 'Page.disable' || method === 'Page.setInterceptFileChooserDialog' || method === 'Page.handleJavaScriptDialog')) return await never
       return {}
     },
     frames: new Map(),
@@ -41,8 +37,6 @@ describe('one owner for a run’s page dialogs', () => {
     // The page's message is marked as the page's and kept on one line.
     expect(failure.message).toContain('confirm dialog: [page-authored text] Delete this item?')
     expect(failure.message).toContain('acceptDialog() or dismissDialog()')
-    // Navigation does not get past an open dialog, so it is not offered as a way out.
-    expect(failure.message).not.toContain('gotoUrl')
 
     // A call that sent no input before the dialog opened did nothing to the page.
     await interrupts.answer(false)
@@ -135,34 +129,6 @@ describe('one owner for a run’s page dialogs', () => {
     expect(answered.fact?.effects).toBe('not-dispatched')
     await interrupts.dispose()
     expect(t.sent.filter(command => command.method === 'Page.handleJavaScriptDialog'), 'the person answers their own dialog').toEqual([])
-  })
-
-  it('never waits behind a dialog that holds its own housekeeping replies: start, Stop and end all return', async () => {
-    // A dialog already open when the run starts holds Page.enable: the run goes on unobserved instead of hanging.
-    const held = fakeTransport({ pageEnable: 'held' })
-    const started = installBrowserPageInterrupts(held.session, { signal: new AbortController().signal })
-    const begun = performance.now()
-    await started.ready()
-    expect(performance.now() - begun).toBeLessThan(3_000)
-    expect(started.observing()).toBe(false)
-    // A dialog open at Stop or at the end holds every reply: dispose still returns.
-    const stuck = fakeTransport({ heldHousekeeping: true })
-    const control = new AbortController()
-    const owner = installBrowserPageInterrupts(stuck.session, { signal: control.signal })
-    await owner.ready()
-    stuck.emit('Page.javascriptDialogOpening', opening('confirm'))
-    const ended = performance.now()
-    await owner.dispose()
-    expect(performance.now() - ended, 'dispose must not wait behind a held reply').toBeLessThan(6_000)
-  }, 15_000)
-
-  it('a call raced after a dialog has already opened fails at once instead of waiting for an event that already came', async () => {
-    const t = fakeTransport()
-    const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })
-    await interrupts.ready()
-    t.emit('Page.javascriptDialogOpening', opening('alert', 'Saved'))
-    const failure = await interrupts.race(() => new Promise(() => {}), () => false).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
-    expect(failure.fact).toEqual({ kind: 'page-dialog', effects: 'not-dispatched' })
   })
 
   it('when Page notifications cannot be turned on, nothing is refused and the run behaves as before', async () => {

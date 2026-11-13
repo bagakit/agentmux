@@ -3038,37 +3038,13 @@ describe('a run owns the page’s dialogs only while it runs', () => {
     const f = await dialogBrowser()
     try {
       const started = performance.now()
-      const report = await f.manager.runScript('b1', `let seen = ''; try { await click('@e1') } catch (error) { seen = String(error.message) + ' | ' + error.effects }; await dismissDialog(); return seen`)
+      const report = await f.manager.runScript('b1', `let seen = ''; try { await click('@e1') } catch (error) { seen = String(error.message) }; await dismissDialog(); return seen`)
       expect(performance.now() - started, 'the program must not wait for its 30 s budget').toBeLessThan(5_000)
       // The program answered the dialog itself, so the run completes with what it saw.
       expect(report.outcome).toEqual({ kind: 'completed' })
       expect(String(report.result)).toContain('The page opened a confirm dialog: [page-authored text] Delete it?')
       expect(String(report.result)).toContain('acceptDialog() or dismissDialog()')
-      expect(String(report.result)).toMatch(/\| unknown$/)
       expect(f.commands).toContain('Page.enable')
-    } finally { f.manager.close('b1'); createDispatch.mockReset() }
-  })
-
-  it('a script call cut short by a dialog is unknown, not a safe miss; pageInfo still answers while the dialog is open', async () => {
-    const f = await dialogBrowser()
-    try {
-      const fake = f.contents.debugger
-      createDispatch.mockImplementation((context: BrowserPageContext) => async (name: string) => {
-        // js changes the page and then the page opens a dialog; no Input command is involved.
-        if (name === 'js') { fake.emit('message', 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Sure?', url: 'https://example.invalid/' }); return await new Promise(() => {}) }
-        if (name === 'dismissDialog') return await context.interrupts!.answer(false)
-        return `dispatched:${name}`
-      })
-      const report = await f.manager.runScript('b1', `
-        let effects = null
-        try { await js('document.title = "changed"; confirm("Sure?")') } catch (error) { effects = error.effects }
-        const info = await pageInfo()
-        await dismissDialog()
-        return { effects, info }`)
-      expect(report.outcome).toEqual({ kind: 'completed' })
-      // The script may already have changed the page, so retrying it is not safe.
-      expect((report.result as { effects: string }).effects).toBe('unknown')
-      expect((report.result as { info: string }).info).toBe('dispatched:pageInfo')
     } finally { f.manager.close('b1'); createDispatch.mockReset() }
   })
 

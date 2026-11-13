@@ -12,6 +12,7 @@ assert.ok(output, 'Explicit private presentation receipt is required.')
 const creationWake = process.env.AGENTMUX_CREATION_WAKE_PRESENTATION === '1'
 const recheck = process.env.AGENTMUX_RECOVERY_RECHECK_PRESENTATION === '1'
 const unobserved = process.env.AGENTMUX_RECOVERY_UNOBSERVED_PRESENTATION === '1'
+const noConversation = process.env.AGENTMUX_NO_CONVERSATION_PRESENTATION === '1'
 const startup = process.env.AGENTMUX_STARTUP_PRESENTATION === '1'
 const parkingOnly = startup && process.env.AGENTMUX_STARTUP_PARKING_ONLY === '1'
 const detailsOnly = startup && process.env.AGENTMUX_STARTUP_DETAILS_ONLY === '1'
@@ -28,11 +29,11 @@ const creationVisualSources = new Set([
  'apps/desktop/scripts/fixtures/recovery-actions/presentation-cases.tsx'
 ])
 const entry = `import React from 'react';import { createRoot } from 'react-dom/client';
-import { initializeRecoveryScene,recoveryScene,setUnobservedRecoveryScene,setOriginalRecheckScene,setStartupRecoveryScene,setCreationWakeScene,updateCreationWakeScene,setCreationWakeReceipt } from '${join(desktop, 'scripts/fixtures/recovery-actions/presentation-cases.tsx')}';
+import { initializeRecoveryScene,recoveryScene,setUnobservedRecoveryScene,setOriginalRecheckScene,setStartupRecoveryScene,setCreationWakeScene,updateCreationWakeScene,setCreationWakeReceipt,setNoConversationScene } from '${join(desktop, 'scripts/fixtures/recovery-actions/presentation-cases.tsx')}';
 import { mountThemeRuntime,updateThemeSelection } from '@agentmux/client-ui/theme';
 const applyAppAppearance=mode=>updateThemeSelection({appAppearance:mode});mountThemeRuntime(window,{appAppearance:'dark'});
 import '${join(desktop,'src/renderer/src/styles/index.css')}';
-await initializeRecoveryScene();${creationWake ? "setCreationWakeScene();" : ""}${startup ? "setStartupRecoveryScene('preparing');" : ''}${recheck ? 'setOriginalRecheckScene();' : ''}${unobserved ? "setUnobservedRecoveryScene('connecting');" : ''}applyAppAppearance('dark');const root=createRoot(document.getElementById('root'));root.render(recoveryScene());
+await initializeRecoveryScene();${creationWake ? "setCreationWakeScene();" : ""}${startup ? "setStartupRecoveryScene('preparing');" : ''}${recheck ? 'setOriginalRecheckScene();' : ''}${noConversation ? 'setNoConversationScene();' : ''}${unobserved ? "setUnobservedRecoveryScene('connecting');" : ''}applyAppAppearance('dark');const root=createRoot(document.getElementById('root'));root.render(recoveryScene());
 window.__setCreationWake=updateCreationWakeScene;window.__setCreationContinueStatus=setCreationWakeReceipt;window.__setStartupVisible=visible=>root.render(recoveryScene(visible));window.__setStartup=phase=>setStartupRecoveryScene(phase);window.__setUnobservedRecovery=mode=>setUnobservedRecoveryScene(mode);window.__fixtureReady=true;window.__setLight=light=>{applyAppAppearance(light?'light':'dark')};`
 const main = `import { app,BrowserWindow } from 'electron';import { readFileSync,writeFileSync } from 'node:fs';import { createHash } from 'node:crypto';
 app.setPath('home',process.env.PRIVATE_HOME);app.setPath('userData',process.env.PRIVATE_DATA);
@@ -134,6 +135,15 @@ app.whenReady().then(async()=>{try{
  await setPhase('unknown');await click('Check startup');await wait(()=>evaluate('!!window.__startupRecoveryReceipt && document.body.textContent.includes("The original setup check has not returned")'),'original recovery action feedback');
  await frame('startup-original-action-feedback',900,760,false);report.action=await evaluate('window.__startupRecoveryReceipt');
  }
+ ` : noConversation ? `
+ await frame('no-conversation-dark',820,760,false);await frame('no-conversation-narrow-light',360,640,true);await frame('no-conversation-short',420,340,false);
+ report.actions=await evaluate('[...document.querySelectorAll(".session-recovery-actions button")].map(b=>({label:b.textContent.trim(),primary:b.classList.contains("primary-button")}))');
+ if(JSON.stringify(report.actions.filter(a=>a.primary).map(a=>a.label))!==JSON.stringify(['Start a new conversation here'])||report.actions.some(a=>/Re-read|Restore/.test(a.label)))throw new Error('No-conversation surface has the wrong actions');
+ report.phase=await evaluate('document.querySelector(".full-page-loading")?.dataset.loadingPhase');if(report.phase==='failed')throw new Error('No-conversation fact shown as a failure');
+ await click('Start a new conversation here');await wait(()=>evaluate('!!window.__startNewInput && document.body.textContent.includes("New conversation unconfirmed")'),'actual start-new handler');
+ report.startNewInput=await evaluate('window.__startNewInput');
+ if(report.startNewInput.prompt!==null||report.startNewInput.agentMuxNote!==null||report.startNewInput.executorId!=='codex')throw new Error('Start-new sent input or changed the Executor');
+ await frame('no-conversation-unconfirmed-dark',820,820,false);
  ` : recheck ? `
  await frame('original-recheck-dark',820,820,false);
  await click('Re-read original');await wait(()=>evaluate('document.body.textContent.includes("Original Session recheck failed")'),'actual original recheck feedback');
@@ -169,7 +179,7 @@ try {
   {find:/^@agentmux\/layout$/,replacement:join(root,'packages/layout/src/index.ts')},{find:/^@agentmux\/client-ui\/styles\/(.+)$/,replacement:join(root,'packages/client-ui/src/styles/$1')},
   {find:/^@agentmux\/client-ui\/styles.css$/,replacement:join(root,'packages/client-ui/src/styles/index.css')},{find:/^@agentmux\/client-ui\/components\/(.+)$/,replacement:join(root,'packages/client-ui/src/components/$1.tsx')},
   {find:/^@agentmux\/client-ui\/platform$/,replacement:join(root,'packages/client-ui/src/platform.tsx')},{find:/^@agentmux\/client-ui\/terminal\/(.+)$/,replacement:join(root,'packages/client-ui/src/terminal/$1.ts')},
-  {find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},{find:/^@agentmux\/client-ui$/,replacement:join(root,'packages/client-ui/src/index.ts')},
+  {find:/^@agentmux\/client-ui\/brand\/(.+)$/,replacement:join(root,'packages/client-ui/brand/$1')},{find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},{find:/^@agentmux\/client-ui$/,replacement:join(root,'packages/client-ui/src/index.ts')},
   ...Object.entries({react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'lucide-react':join(desktop,'node_modules/lucide-react')}).map(([find,replacement])=>({find,replacement}))]
  const sourcePins={}
  await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},css:{postcss:{plugins:[{

@@ -47,6 +47,16 @@ export function setOriginalRecheckScene() {
     ? { ...item, status: { ...item.status, exitReason: 'crashed' as const, exitCode: 17 } } : item) }))
   api.sessions.refresh = async () => { throw new Error('The original Host observation is unavailable.') }
 }
+/** Core holds no native conversation for the ended original: its one action starts a new one beside it. */
+export function setNoConversationScene() {
+  useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === originalId
+    ? { ...item, status: { ...item.status, exitReason: 'unknown' as const, exitCode: 1, continuity: 'unavailable' as const, continuityReason: 'native-conversation-absent' as const,
+      detail: 'AgentMux holds no native conversation for this ended Session to continue.' } } : item) }))
+  api.sessions.launchAgent = async input => {
+    Object.assign(window, { __startNewInput: { executorId: input.executorId, hostId: input.hostId, workspacePath: input.workspacePath, prompt: input.prompt ?? null, agentMuxNote: input.agentMuxNote ?? null } })
+    throw new Error('Private fixture: the new conversation reply was lost.')
+  }
+}
 export function recoveryScene(visible = true) { return <DesktopClientUiProvider><SessionPane sessionId={originalId} surfaceKind="agent" visible={visible} interactiveResize={false} linkOrigin={{ workspaceId: 'project', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }} /></DesktopClientUiProvider> }
 
 /** Actual Pane presentation of exact synthetic startup facts, without starting a Provider. */

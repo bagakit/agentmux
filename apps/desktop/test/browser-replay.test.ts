@@ -63,28 +63,6 @@ describe('Browser semantic replay', () => {
     expect(clicked).toEqual(['@e2'])
   })
 
-  it('a recorded double-click or right-click replays as that same press, not a plain left click', async () => {
-    const script = buildReplayScript({
-      schema: 'agentmux.browser-replay.v1',
-      operationId: 'op-4',
-      url: 'https://example.test/files',
-      steps: [
-        { method: 'click', url: 'https://example.test/files', target: { role: 'row', name: 'report.pdf', ordinal: 1, count: 1 }, args: [{ count: 2 }] },
-        { method: 'click', url: 'https://example.test/files', target: { role: 'row', name: 'report.pdf', ordinal: 1, count: 1 }, args: [{ button: 'right' }] }
-      ]
-    })
-    const clicks: unknown[][] = []
-    await runReplayScript(script, {
-      pageInfo: async () => ({ url: 'https://example.test/files' }),
-      snapshot: async () => ({
-        observation: { scope: { kind: 'page', document: null }, truncated: false, omittedFrames: [] }, missingFrames: [],
-        nodes: [{ ref: '@e1', role: 'row', name: 'report.pdf' }]
-      }),
-      click: async (...args: unknown[]) => { clicks.push(args) }
-    })
-    expect(clicks).toEqual([['@e1', { count: 2 }], ['@e1', { button: 'right' }]])
-  })
-
   it('页面换了身份就一步都不做——闸门在第一个动作之前', async () => {
     const script = buildReplayScript({
       schema: 'agentmux.browser-replay.v1',

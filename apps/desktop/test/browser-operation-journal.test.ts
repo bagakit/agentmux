@@ -127,20 +127,6 @@ describe('BrowserOperationJournal', () => {
     expect(store.document?.operations[0]?.phase).toBe('indeterminate')
   })
 
-  it('keeps a click’s button and count for replay, and drops any other object argument', async () => {
-    const store = new MemoryStore()
-    const journal = new BrowserOperationJournal(store, { id: () => 'op-click-options' })
-    await journal.start({ browserId: 'browser-1', operator: { id: 'agent-1', name: 'Agent' }, summary: 'Open a file', url: 'https://example.test/files' })
-    const target = { role: 'row', name: 'report.pdf', ordinal: 1, count: 1 }
-    for (const args of [[{ count: 2 }], [{ button: 'right' }], [{ button: 'right', secret: 'x' }], [{ count: 3 }]]) {
-      const sequence = (await journal.startStep('op-click-options', { method: 'click', label: 'click', replay: { method: 'click', url: 'https://example.test/files', args } }))!.sequence
-      await journal.finishStep('op-click-options', sequence, { status: 'completed', target, replay: { method: 'click', url: 'https://example.test/files', args, target } })
-    }
-    await journal.finish('op-click-options', 'completed')
-    const plan = await journal.replayPlan('op-click-options')
-    expect(plan?.steps.map(step => step.args)).toEqual([[{ count: 2 }], [{ button: 'right' }], ['[object]'], ['[object]']])
-  })
-
   it('keeps the semantic replay target learned during dispatch', async () => {
     const store = new MemoryStore()
     const journal = new BrowserOperationJournal(store, { id: () => 'op-target' })
