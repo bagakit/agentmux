@@ -231,6 +231,14 @@ enum NativeDesktopOperations {
                     }
                 }
                 guard !screens.isEmpty else { throw ProviderError.coded("display_not_found", "macOS reports no active display") }
+                let pixels: (CGDirectDisplayID, CGRect, CGFloat) throws -> CapturedImage
+                if #available(macOS 14.0, *) {
+                    // One window enumeration serves every display's grab.
+                    let content = Result { try BlockingAsync.run(timeout: 10) { try await SCShareableContent.current } }
+                    pixels = { id, frame, scale in try displayPixels(id, frame: frame, scale: scale, content: content.get(), ownership: ownership) }
+                } else {
+                    pixels = { _, frame, scale in try coreGraphicsDisplayPixels(frame, scale: scale) }
+                }
                 // Every display's pixels share one response frame. The identity envelope and
                 // all displays' metadata stay far below the reserve.
                 var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024
@@ -239,7 +247,7 @@ enum NativeDesktopOperations {
                     var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale,
                         "isMain": screen.id == CGMainDisplayID()]
                     do {
-                        let capture = try displayPixels(screen.id, frame: frame, scale: screen.scale, ownership: ownership)
+                        let capture = try pixels(screen.id, frame, screen.scale)
                         let png = try pngData(capture.image)
                         let encodedBytes = (png.count + 2) / 3 * 4
                         guard encodedBytes <= remainingFrameBytes else {
@@ -269,30 +277,34 @@ enum NativeDesktopOperations {
     /// One grab of one exact display. The asynchronous producer keeps
     /// `ownership` until it actually returns, so a timed-out observer cannot
     /// let a second physical grab start while ScreenCaptureKit still runs.
-    private static func displayPixels(_ id: CGDirectDisplayID, frame: CGRect, scale: CGFloat,
+    @available(macOS 14.0, *)
+    private static func displayPixels(_ id: CGDirectDisplayID, frame: CGRect, scale: CGFloat, content: SCShareableContent,
         ownership: NativeDisplayCaptureLease.Ownership) throws -> CapturedImage {
         let width = ceil(frame.width * scale), height = ceil(frame.height * scale)
         guard NativeImageLimits.permits(width: width, height: height) else {
             throw ProviderError.coded("image_too_large", "display pixels exceed the host image allocation limit")
         }
-        if #available(macOS 14.0, *) {
-            let image = try BlockingAsync.run(timeout: 10) {
-                defer { withExtendedLifetime(ownership) {} }
-                let content = try await SCShareableContent.current
-                guard let display = content.displays.first(where: { $0.displayID == id }) else {
-                    throw ProviderError.coded("display_not_found", "the exact display disappeared before its pixels were captured")
-                }
-                guard display.frame == frame else {
-                    throw ProviderError.coded("display_configuration_changed", "the display bounds changed before its pixels were captured")
-                }
-                let configuration = SCStreamConfiguration()
-                configuration.width = Int(width)
-                configuration.height = Int(height)
-                configuration.showsCursor = false
-                return try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: []),
-                    configuration: configuration)
-            }
-            return CapturedImage(image: image, engine: "screenCaptureKit")
+        guard let display = content.displays.first(where: { $0.displayID == id }) else {
+            throw ProviderError.coded("display_not_found", "the exact display disappeared before its pixels were captured")
+        }
+        guard display.frame == frame else {
+            throw ProviderError.coded("display_configuration_changed", "the display bounds changed before its pixels were captured")
+        }
+        let image = try BlockingAsync.run(timeout: 10) {
+            defer { withExtendedLifetime(ownership) {} }
+            let configuration = SCStreamConfiguration()
+            configuration.width = Int(width)
+            configuration.height = Int(height)
+            configuration.showsCursor = false
+            return try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: []),
+                configuration: configuration)
+        }
+        return CapturedImage(image: image, engine: "screenCaptureKit")
+    }
+
+    private static func coreGraphicsDisplayPixels(_ frame: CGRect, scale: CGFloat) throws -> CapturedImage {
+        guard NativeImageLimits.permits(width: ceil(frame.width * scale), height: ceil(frame.height * scale)) else {
+            throw ProviderError.coded("image_too_large", "display pixels exceed the host image allocation limit")
         }
         guard let image = CGWindowListCreateImage(frame, .optionOnScreenOnly, kCGNullWindowID, [.bestResolution]) else {
             throw ProviderError.coded("capture_failed", "macOS did not return pixels for this display")
