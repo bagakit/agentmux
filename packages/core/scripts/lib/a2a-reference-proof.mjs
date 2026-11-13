@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { idleInputMutations, idleInputOwners } from '../../test/fixtures/a2a-idle-input-proof.mjs'
 
 export const referenceProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
@@ -20,11 +21,40 @@ function local(root, path) {
   assert.ok(!isAbsolute(name) && name.startsWith('.tmp/') && !name.split('/').includes('..'), 'Proof artifacts stay in their owning evidence area')
   return target
 }
-async function inputs(root, expected) {
+async function inputs(root, expected, preparation) {
   assert.ok(expected && Object.keys(expected).length > 0, 'Nonempty original proof inputs')
-  for (const [path, digest] of Object.entries(expected)) assert.equal(referenceProofSha(await readFile(join(root, path))), digest, 'Current candidate input: ' + path)
+  for (const [path, digest] of Object.entries(expected)) {
+    if (preparation && /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)) {
+      assert.ok(Object.hasOwn(preparation.sourceSnapshot.files, path), 'Declared fixed product source: ' + path)
+      assert.equal(preparation.sourceSnapshot.files[path], digest, 'Original prepared product source: ' + path)
+    } else assert.equal(referenceProofSha(await readFile(join(root, path))), digest, 'Current harness or source-build input: ' + path)
+  }
 }
-async function testRun(root, directory, run, red, artifacts, sourceOnly = false) {
+/** One coherent set of observed compiler conditions; the target alone may be edited. */
+export function nativeSourceConditions(records, targetFile) {
+  assert.ok(records.length > 0)
+  const conditions = new Map()
+  for (const item of records) {
+    assert.ok(typeof item.file === 'string' && !isAbsolute(item.file) && !item.file.split('/').includes('..'))
+    assert.match(item.originalSHA256, /^[a-f0-9]{64}$/u); assert.match(item.sha256, /^[a-f0-9]{64}$/u)
+    assert.ok(Number.isSafeInteger(item.bytes) && item.bytes > 0)
+    if (item.mutation) {
+      assert.equal(item.file, targetFile)
+      assert.equal(idleInputMutations[item.mutation]?.[0], targetFile)
+      assert.ok(idleInputOwners.includes(item.file)); assert.notEqual(item.sha256, item.originalSHA256)
+    } else assert.equal(item.sha256, item.originalSHA256)
+    const condition = { sourceSHA256: item.originalSHA256,
+      ...(item.file === targetFile ? {} : { compilerSHA256: item.sha256, bytes: item.bytes }) }
+    if (conditions.has(item.file)) assert.deepEqual(conditions.get(item.file), condition, 'One source version per original test run: ' + item.file)
+    conditions.set(item.file, condition)
+  }
+  return Object.fromEntries([...conditions].sort(([left], [right]) => left.localeCompare(right)))
+}
+export function assertNativeSourcePair(red, restored, mutation) {
+  const target = idleInputMutations[mutation]?.[0]; assert.ok(target)
+  assert.deepEqual(nativeSourceConditions(red, target), nativeSourceConditions(restored, target), 'Only the selected compilation may differ between mutation and restoration')
+}
+async function testRun(root, directory, run, red, artifacts, nativeSources) {
   assert.ok(run && run.tests > 0)
   const reportPath = local(root, join(directory, run.report)), report = await json(reportPath)
   artifacts.add(reportPath); artifacts.add(local(root, join(directory, run.log)))
@@ -39,14 +69,19 @@ async function testRun(root, directory, run, red, artifacts, sourceOnly = false)
     assert.equal(run.exit, 0); assert.equal(report.success, true); assert.equal(report.numFailedTests, 0)
     assert.ok(cases.every(test => test.status === 'passed'))
   }
-  if (sourceOnly) {
+  if (nativeSources) {
     const loadedPath = local(root, join(directory, run.loaded)); artifacts.add(loadedPath)
     const loaded = (await readFile(loadedPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
-    assert.ok(loaded.length > 0)
+    nativeSourceConditions(loaded, red ? run.transformed[0]?.file : undefined)
     for (const item of loaded) {
-      assert.ok(!isAbsolute(item.file) && !item.file.split('/').includes('..'))
-      assert.equal(referenceProofSha(await readFile(join(root, 'packages/core/src', item.file))), item.originalSHA256, 'Actually loaded native source: ' + item.file)
-      assert.equal(item.sha256 === item.originalSHA256, !Boolean(item.mutation))
+      if (!idleInputOwners.includes(item.file)) continue
+      const path = 'packages/core/src/' + item.file, source = await readFile(join(root, path), 'utf8')
+      assert.equal(item.originalSHA256, nativeSources[path], 'Original owning source candidate: ' + item.file)
+      assert.equal(referenceProofSha(source), item.originalSHA256, 'Current owning native source: ' + item.file)
+      const edit = item.mutation && idleInputMutations[item.mutation]
+      if (edit) assert.equal(source.split(edit[1]).length, 2)
+      const compiled = edit ? source.replace(edit[1], edit[2]) : source
+      assert.equal(referenceProofSha(compiled), item.sha256); assert.equal(Buffer.byteLength(compiled), item.bytes)
     }
     assert.deepEqual(loaded.filter(item => item.mutation), run.transformed)
     assert.equal(loaded.some(item => item.mutation), red)
@@ -59,7 +94,6 @@ async function deliveryFacts({ root, receipt }) {
   const compiled = await json(compiledPath), native = await json(nativePath), artifacts = new Set([local(root, receipt), compiledPath, nativePath])
   assert.equal(compiled.passed, true); assert.equal(compiled.sharedTreeMutations, 0); assert.equal(compiled.cleanup.privateCopyRemoved, true)
   assert.equal(compiled.frozenTests.mutableWorkingTreeUsedByTests, false)
-  await inputs(root, compiled.sourceBefore)
   let preparation
   if (compiled.preparation) {
     const path = local(root, compiled.preparation.path), bytes = await readFile(path); artifacts.add(path)
@@ -74,6 +108,7 @@ async function deliveryFacts({ root, receipt }) {
     assert.deepEqual(Object.keys(compiled.compiledInputs).sort(), actualJs, 'The entire actual Core executable graph is bound')
     for (const file of actualJs) assert.equal(referenceProofSha(await readFile(join(root, 'packages/core/dist', file))), compiled.compiledInputs[file], 'Actual compiled Core: ' + file)
   }
+  await inputs(root, compiled.sourceBefore, preparation)
   const directory = dirname(compiledPath), baseline = await testRun(root, directory, compiled.baseline, false, artifacts)
   assert.equal(baseline.length, 26); assert.ok(baseline.some(name => name.includes('across concurrent Core processes and reopening')))
   assert.ok(baseline.some(name => name.includes('budgets the complete bridge and escaped identities')))
@@ -85,13 +120,16 @@ async function deliveryFacts({ root, receipt }) {
   for (const item of compiled.cases) assert.deepEqual(await testRun(root, directory, item.red, true, artifacts), await testRun(root, directory, item.restored, false, artifacts))
   assert.equal(native.passed, true); assert.equal(native.sourceOnly, true); assert.equal(native.sharedTreeMutations, 0)
   assert.deepEqual(native.sourceBefore, native.sourceAfter); await inputs(root, native.sourceBefore)
+  for (const file of idleInputOwners) assert.ok(native.sourceBefore['packages/core/src/' + file], 'Required native input contract owner: ' + file)
   assert.deepEqual(native.cases.map(item => item.mutation), nativeEdits)
-  const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, true)
-  assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
+  const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, native.sourceBefore)
+  assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, native.sourceBefore)).length, 30)
   for (const item of native.cases) {
-    assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, true), nativeBaseline)
-    assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, true), nativeBaseline)
+    assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, native.sourceBefore), nativeBaseline)
+    assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, native.sourceBefore), nativeBaseline)
     assert.ok(item.red.transformed.every(record => record.mutation === item.mutation))
+    const loaded = async run => (await readFile(local(root, join(nativeDirectory, run.loaded)), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+    assertNativeSourcePair(await loaded(item.red), await loaded(item.restored), item.mutation)
   }
   const factPath = local(root, join(directory, 'baseline-green-native-facts.jsonl')); artifacts.add(factPath)
   const facts = (await readFile(factPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))

@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { idleInputMutations, idleInputOwners } from '../test/fixtures/a2a-idle-input-proof.mjs'
+import { nativeSourceConditions, assertNativeSourcePair } from './lib/a2a-reference-proof.mjs'
 
 // Source adapter qualification is separate from the real CLI/Runtime and native
 // actor proofs. Its only mocked authority is the adapter's OS process locator.
@@ -16,15 +18,18 @@ const mutations = ['native-queue-becomes-steer', 'native-idle-target-is-omitted'
   'native-queue-receipt-is-unchecked', 'notification-identity-is-not-restored',
   'independent-idle-notification-is-blocked', 'independent-idle-completion-is-consumed',
   'controlled-notice-reservation-spills-to-other-key', 'uncontrolled-notice-reservation-spills-to-other-key']
-const inputs = ['types.ts', 'agent-provider.ts', 'prompt-submission.ts', 'prompt-submission-record.ts',
-  'providers/codex-native-input.ts', 'native-input-adoption.ts', 'agent-global-message-queue.ts'].map(file => 'packages/core/src/' + file)
-inputs.push(...tests, ...regressions, config, 'packages/core/scripts/verify-a2a-idle-input.mjs')
+const inputs = idleInputOwners.map(file => 'packages/core/src/' + file)
+inputs.push(...tests, ...regressions, config, 'packages/core/test/fixtures/a2a-idle-input-proof.mjs', 'packages/core/scripts/verify-a2a-idle-input.mjs',
+  'packages/core/scripts/lib/a2a-reference-proof.mjs', 'packages/core/test/helpers/public-rpc-owner.ts',
+  'packages/core/test/helpers/fixture-values.ts', 'test/fixture-values.mjs', 'test/fixture-epoch.cjs',
+  'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/dist/runtime-source.js')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [file, hash(await readFile(join(root, file)))])))
 const receipt = { schema: 'agentmux.a2a-idle-input-owning-proof.v1', sourceOnly: true, sharedTreeMutations: 0, passed: false, cases: [] }
+receipt.sourceScope = 'Declared input-contract owners and harness remain exact; other observed Core compiler inputs are historical test conditions, equal within each mutation/restoration pair.'
 
 await mkdir(evidence, { recursive: true })
-async function run(label, mutation, selected = tests, count = 40) {
+async function run(label, mutation, selected = tests, count = 50) {
   const output = join(evidence, label + '.json'), loaded = join(evidence, label + '.loaded.jsonl')
   await writeFile(loaded, '')
   const env = { ...process.env, AGENTMUX_IDLE_INPUT_LOADED: loaded }
@@ -48,8 +53,16 @@ async function run(label, mutation, selected = tests, count = 40) {
   const records = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   const transformed = records.filter(record => record.mutation)
   assert.ok(records.length > 0, label + ': actual source graph was not observed')
-  for (const record of records) assert.equal(hash(await readFile(join(root, 'packages/core/src', record.file))), record.originalSHA256,
-    label + ': source changed while loading ' + record.file)
+  nativeSourceConditions(records, mutation ? idleInputMutations[mutation][0] : undefined)
+  for (const record of records) if (idleInputOwners.includes(record.file)) {
+    const source = await readFile(join(root, 'packages/core/src', record.file), 'utf8')
+    assert.equal(hash(source), receipt.sourceBefore['packages/core/src/' + record.file], label + ': original owning candidate changed')
+    assert.equal(hash(source), record.originalSHA256, label + ': owning source changed while loading ' + record.file)
+    const edit = record.mutation && idleInputMutations[record.mutation]
+    if (edit) assert.equal(source.split(edit[1]).length, 2)
+    const compiled = edit ? source.replace(edit[1], edit[2]) : source
+    assert.equal(hash(compiled), record.sha256); assert.equal(Buffer.byteLength(compiled), record.bytes)
+  }
   if (mutation) {
     assert.ok(result.code > 0 && report.numFailedTests > 0 && assertionFailures > 0, label + ': mutation must fail a behavior assertion')
     assert.ok(transformed.length > 0 && transformed.every(record => record.mutation === mutation && record.sha256 !== record.originalSHA256),
@@ -64,12 +77,20 @@ async function run(label, mutation, selected = tests, count = 40) {
 }
 
 try {
+  for (const mutation of mutations) {
+    const edit = idleInputMutations[mutation]
+    assert.ok(edit, 'Every owning mutation has its exact source edit: ' + mutation)
+    const source = await readFile(join(root, 'packages/core/src', edit[0]), 'utf8')
+    assert.equal(source.split(edit[1]).length, 2, 'Unique original source target before running tests: ' + mutation)
+  }
   receipt.sourceBefore = await hashes()
   receipt.baseline = await run('baseline')
   receipt.regression = await run('original-manual-author', undefined, regressions, 30)
   for (const mutation of mutations) {
     const red = await run(mutation + '-red', mutation)
     const restored = await run(mutation + '-restored')
+    const loaded = async run => (await readFile(join(evidence, run.loaded), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+    assertNativeSourcePair(await loaded(red), await loaded(restored), mutation)
     receipt.cases.push({ mutation, red, restored })
     assert.deepEqual(await hashes(), receipt.sourceBefore)
     process.stdout.write(mutation + ': Assertion RED -> GREEN\n')

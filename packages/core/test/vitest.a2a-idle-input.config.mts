@@ -1,3 +1,4 @@
+import { idleInputMutations } from './fixtures/a2a-idle-input-proof.mjs'
 import { defineConfig } from 'vitest/config'
 import { readFileSync } from 'node:fs'
 import { appendFileSync } from 'node:fs'
@@ -12,21 +13,7 @@ const identityArtifact = await import(pathToFileURL(identitySourcePath).href)
 // against its non-writing build recipe before reusing it in the source consumer graph.
 if (identityArtifact.identityRuntimeSource !== (await bundleIdentityRuntime()).source)
   throw new Error('The identity runtime source artifact does not match its original build recipe')
-const mutations: Record<string, [string, string, string]> = {
-  'manual-input-requires-native-qualification': ['prompt-submission.ts', "const sessionConversation = admissionIntent?.kind === 'session-conversation'", "const sessionConversation = admissionIntent?.kind === 'session-conversation' || admissionIntent?.kind === 'manual-actor'"],
-  'native-queue-becomes-steer': ['providers/codex-native-input.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
-  'native-idle-target-is-omitted': ['prompt-submission.ts', '...(control?.idleOnly ? { idleOnly: true } : {})', '...{}'],
-  'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {', '} else if (false) {'],
-  'final-input-fence-is-omitted': ['prompt-submission.ts', 'if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte)', 'if (false)'],
-  'notification-identity-is-omitted': ['prompt-submission.ts', 'message.questionReply, message.a2aNotificationId, message.inputContext', 'message.questionReply, message.inputContext'],
-  'edited-notification-is-adopted': ['native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],
-  'native-queue-receipt-is-unchecked': ['providers/codex-native-input.ts', "if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||\n                !isDeepStrictEqual(queued.input, input)) throw unavailable()", 'void queued'],
-  'notification-identity-is-not-restored': ['prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
-  'independent-idle-notification-is-blocked': ['prompt-submission.ts', '&& !(manual && nativePredecessor) && !independentIdleNotification)) {', '&& !(manual && nativePredecessor))) {'],
-  'independent-idle-completion-is-consumed': ['prompt-submission.ts', 'completionId === expectedCompletionId && !independentIdleNotification)', 'completionId === expectedCompletionId)'],
-  'controlled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', "key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)", "key.kind === 'prompt' && this.notification(key.submissionId)"],
-  'uncontrolled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', 'if (expectedNotificationId === undefined ? sameNotificationKey :', 'if (expectedNotificationId === undefined ? notice !== undefined :'],
-}
+const mutations: Record<string, [string, string, string]> = idleInputMutations
 export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', resolveId(id) {
   if (id === '@agentmux/identity/runtime-source') return identitySourcePath
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
@@ -46,6 +33,6 @@ export default defineConfig({ root, plugins: [{ name: 'original-workspace-source
   }
   const hash = (value: string) => createHash('sha256').update(value).digest('hex')
   if (process.env.AGENTMUX_IDLE_INPUT_LOADED) appendFileSync(process.env.AGENTMUX_IDLE_INPUT_LOADED,
-    JSON.stringify({ file, originalSHA256: hash(before), sha256: hash(code), ...(before === code ? {} : { mutation }) }) + '\n')
+    JSON.stringify({ file, originalSHA256: hash(before), sha256: hash(code), bytes: Buffer.byteLength(code), ...(before === code ? {} : { mutation }) }) + '\n')
   if (before !== code) return { code, map: null }
 } }], test: { include: ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/a2a-reference-budget.test.ts', 'packages/core/test/codex-idle-queue.test.ts', 'packages/core/test/current-terminal-prompt.test.ts', 'packages/core/test/native-prompt-authority-store.test.ts', 'packages/core/test/provider-input-isolation.test.ts'], maxWorkers: 1, globalSetup: [], testTimeout: 20_000 } })
