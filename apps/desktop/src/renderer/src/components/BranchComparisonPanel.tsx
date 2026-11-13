@@ -16,7 +16,7 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const requestId = useRef(0)
-  const scroller = useRef<HTMLElement>(null)
+  const [scroller, setScroller] = useState<HTMLElement | null>(null)
   const open = useAppStore((state) => state.openBranchDiff)
   useEffect(() => () => { requestId.current += 1 }, [])
   function changeSelection(update: () => void): void {
@@ -45,7 +45,7 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
   const branchesExist = [baseBranch, targetBranch].every((name) => branches.some((branch) => branch.name === name))
   const selectionMatches = result?.kind === 'ready' && result.snapshot.baseBranch === baseBranch && result.snapshot.targetBranch === targetBranch && result.snapshot.mode === mode
   return (
-    <section ref={scroller} className="branch-comparison" aria-label="Branch comparison">
+    <section ref={setScroller} className="branch-comparison" aria-label="Branch comparison">
       <form onSubmit={(event) => { event.preventDefault(); if (branchesExist) void compare() }}>
         <label>Base branch A
           <select aria-label="Base branch A" value={baseBranch} onChange={(event) => changeSelection(() => setBaseBranch(event.target.value))}>
@@ -80,7 +80,7 @@ export function BranchComparisonPanel({ workspaceId, branches }: {
           {!selectionMatches ? <span>Showing the previous fixed comparison. Compare to update.</span> : null}
         </div>
         {result.warnings.map((warning, index) => <p key={index} role="status">{warning}</p>)}
-        {result.entries.length === 0 ? <p>No changed files between these commits.</p> : <ChangedFileList files={result.entries} scrollRef={scroller}
+        {result.entries.length === 0 ? <p>No changed files between these commits.</p> : <ChangedFileList files={result.entries} scroller={scroller}
           className="branch-comparison__files" renderFile={file => <button
             className="branch-comparison__file"
             title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}

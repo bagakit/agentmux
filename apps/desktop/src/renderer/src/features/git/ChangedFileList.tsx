@@ -1,10 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ROW_HEIGHT = 36
+/** One-line rows; matches the CSS row padding (git-workbench.css, source-control.css). */
+const ROW_HEIGHT = 28
 /** Below this a list renders whole; filtering a handful of files only adds a control to read past. */
 const FILTER_FROM = 12
 
@@ -14,10 +15,13 @@ export type ChangedFile = { path: string; origPath: string | null; change: strin
  * One read of a fixed changed-file list: every file is available, only the rows near the viewport mount,
  * and a path filter narrows long lists. The list owns no Git facts; callers pass the files and the row.
  */
-export function ChangedFileList<File extends ChangedFile>({ files, scrollRef, className, renderFile }: {
+export function ChangedFileList<File extends ChangedFile>({ files, scroller, className, renderFile }: {
   files: readonly File[]
-  /** The element that scrolls; the list may sit below other content inside it. */
-  scrollRef: RefObject<HTMLElement | null>
+  /**
+   * The element that scrolls; the list may sit below other content inside it. Passed as a value, not a ref:
+   * a parent's ref is still empty when the parent and this list mount in the same commit.
+   */
+  scroller: HTMLElement | null
   className: string
   renderFile(file: File): ReactNode
 }) {
@@ -28,7 +32,7 @@ export function ChangedFileList<File extends ChangedFile>({ files, scrollRef, cl
   const rows = useRef<HTMLUListElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
   useLayoutEffect(() => {
-    const scroller = scrollRef.current, list = rows.current
+    const list = rows.current
     if (!scroller || !list) return
     const measure = () => {
       if (list.getClientRects().length === 0) return
@@ -39,8 +43,8 @@ export function ChangedFileList<File extends ChangedFile>({ files, scrollRef, cl
     const observer = new ResizeObserver(measure)
     observer.observe(scroller)
     return () => observer.disconnect()
-  }, [scrollRef, files])
-  const virtualizer = useVirtualizer({ count: shown.length, getScrollElement: () => scrollRef.current,
+  }, [scroller, files])
+  const virtualizer = useVirtualizer({ count: shown.length, getScrollElement: () => scroller,
     estimateSize: () => ROW_HEIGHT, getItemKey: index => shown[index]!.path, overscan: 12, scrollMargin, useFlushSync: false })
   return <>
     {files.length >= FILTER_FROM && <div className="changed-file-list__filter">

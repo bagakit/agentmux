@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { GitCommitDetailsResult, GitCommitSnapshot } from '../../../../../shared/git-contracts'
 import { presentCommitMessage, summarizeCommitChanges } from './commit-presentation'
@@ -24,13 +24,13 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
   result: ReadyCommit | null; loading: boolean; error: string | null
   onReload(): void; onSelectParent(snapshot: GitCommitSnapshot): void; onSelectFile(file: ChangedFile): void; selectedPath?: string
 }) {
-  const scroller = useRef<HTMLElement>(null)
+  const [scroller, setScroller] = useState<HTMLElement | null>(null)
   const message = presentCommitMessage(result?.commit.message ?? '')
   const changes = summarizeCommitChanges(result?.entries ?? [])
   const differentCommitter = result && result.commit.author !== result.commit.committer
   const showCommitted = result && (differentCommitter || result.commit.authoredAt !== result.commit.committedAt
     || result.commit.authoredAt === null || result.commit.committedAt === null)
-  return <article ref={scroller} className="git-workbench__details" aria-label="Commit details" aria-busy={loading}>
+  return <article ref={setScroller} className="git-workbench__details" aria-label="Commit details" aria-busy={loading}>
     {!selection && <div className="pane-state"><strong>Select a commit</strong><span>Choose a commit to read its message and files.</span></div>}
     {selection && <div className="git-workbench__target">
       <span>Fixed commit</span>
@@ -85,7 +85,7 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
         {changes.map(summary => <li key={summary.change} className={'git-workbench__file-summary--' + summary.change}>{summary.count} {summary.change.replace('-', ' ')}</li>)}
       </ul>}
       {result.entries.length === 0 && <p className="git-workbench__empty">No file changes against this parent.</p>}
-      <ChangedFileList files={result.entries} scrollRef={scroller} className="git-workbench__files" renderFile={file =>
+      <ChangedFileList files={result.entries} scroller={scroller} className="git-workbench__files" renderFile={file =>
         <button aria-label={'Open diff for ' + file.path} aria-pressed={selectedPath === file.path}
           title={file.origPath ? file.origPath + ' → ' + file.path : file.path} onClick={() => onSelectFile(file)}>
           <span className={'git-workbench__change git-workbench__change--' + file.change} title={file.change}>{file.change === 'type-changed' ? 'T' : file.change[0]!.toUpperCase()}</span>
