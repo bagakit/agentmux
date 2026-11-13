@@ -37,7 +37,7 @@ export interface PublicationPermissionsPort {
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
 type SourceRead = { observation: ConnectionDeliverySourceObservation; checkpoint: ConversationCheckpoint | null }
-type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; nativeRecoveryWork?: Promise<void> | undefined; nativeScan?: { cursor?: string; pending?: ConversationWindowAssembly } | undefined; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; recover?: ConversationCheckpoint; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { rateLimitAfter?: PublicationRateLimitCursor; rateLimitPendingAfter?: PublicationRateLimitPendingCursor; portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceRead?: SourceRead; gapAfter?: number; nativeRecoveryWork?: Promise<void> | undefined; nativeScan?: { view?: string | undefined; cursor?: string; pending?: ConversationWindowAssembly } | undefined; view?: string | undefined; viewId?: string | undefined; read?: { view?: string | undefined; after: ConversationCheckpoint; cursor?: string; recover?: ConversationCheckpoint; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
@@ -59,6 +59,35 @@ export class PublicationHost implements ConnectionDeliveryPort {
     this.timer = setInterval(() => this.refresh(true), 5_000); this.timer.unref()
     this.refresh()
   }
+  private async releaseRead(binding: RoomBinding, reading: { view?: string | undefined }): Promise<void> {
+    const view = reading.view
+    reading.view = undefined
+    if (view) await this.options.conversation.release?.({ hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, view }).catch(() => undefined)
+  }
+  /** The lane owns returned windows, including fragment-only and late cancelled replies. */
+  private retainPage<T extends AgentConversationReadPage>(lane: Lane, reading: { view?: string | undefined }, pending: Promise<T>): Promise<T> {
+    return pending.then(async page => {
+      const view = page.window.view ?? page.window.replay
+      if (lane.abort.signal.aborted) {
+        await this.releaseRead(lane.binding, { view })
+        lane.abort.signal.throwIfAborted()
+      }
+      reading.view = view
+      return page
+    })
+  }
+  private resetLaneRead(lane: Lane): void {
+    const views = new Set([lane.view, lane.read?.view])
+    lane.read = undefined; lane.view = undefined; lane.viewId = undefined
+    const watch = lane.watch; lane.watch = undefined
+    try { watch?.handle?.dispose() } catch { /* Only this original observation is released. */ }
+    for (const view of views) void this.releaseRead(lane.binding, { view })
+  }
+  private stopLane(lane: Lane): void {
+    lane.abort.abort(); lane.permissionStop?.(); this.resetLaneRead(lane)
+    if (lane.nativeScan) void this.releaseRead(lane.binding, lane.nativeScan)
+    lane.nativeScan = undefined
+  }
   refresh(recoveryOnly = false): void {
     if (this.closed) return
     this.refreshNotices()
@@ -69,7 +98,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const authority = this.authority(lane.binding)
       if (authority === null) { lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; continue }
       if (current.get(id)?.revision !== lane.binding.revision || !authority.authorized) {
-        lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Cancels only this original reader. */ }; this.lanes.delete(id)
+        this.stopLane(lane); this.lanes.delete(id)
       }
     }
     for (const binding of active) {
@@ -89,8 +118,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const previous = this.lanes.get(binding.bindingId)
     if (previous?.binding.revision === binding.revision) return previous
     if (previous) {
-      previous.abort.abort(); previous.permissionStop?.()
-      try { previous.watch?.handle?.dispose() } catch { /* Release only this obsolete original reader. */ }
+      this.stopLane(previous)
       this.lanes.delete(binding.bindingId)
     }
     const lane: Lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
@@ -232,7 +260,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     catch {
       // COMMIT may have succeeded before its acknowledgment was lost. Reload
       // the retained cut before retrying, without inventing another operation.
-      lane.read = undefined; lane.view = undefined; lane.viewId = undefined
+      this.resetLaneRead(lane)
       if (!signal.aborted) {
         lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
         this.sourceObserved(lane, { state: 'unavailable', reason: 'storage-unconfirmed', code: null, codeRecorded: false, checkpointKey: lane.sourceRead?.observation.checkpointKey ?? null })
@@ -294,14 +322,15 @@ export class PublicationHost implements ConnectionDeliveryPort {
       return { ...checkpoint, frontier: { ...checkpoint.frontier, scope: { sources: cuts.map(cut => ({ kind: 'native' as const, ...cut.checkpoint.source })) }, cuts } }
     }
     const checkpoint = nativeOnly(after), recover = nativeOnly(origin), signal = lane.abort.signal
+    const reading: { view?: string | undefined } = {}
     lane.nativeRecoveryWork = (async () => {
       const input: ConversationChangesInput = { hostId: lane.binding.executionHostId, agentSessionId: lane.binding.agentSessionId, checkpoint, recover, limit: 1, maxBytes: CONVERSATION_MAX_READ_BYTES }
-      const page = parseConversationChangesPageForWindow(await this.options.conversation.changes(input, signal), input)
+      const page = await this.retainPage(lane, reading, this.options.conversation.changes(input, signal).then(page => parseConversationChangesPageForWindow(page, input)))
       const failure = page.coverage.find(source => source.current === 'unavailable' || source.gaps.length)?.gaps[0]
       if (failure || !page.nativeRecoveryRange) throw new AgentMuxError('The original source range is not qualified for automatic recovery.', failure?.code ?? 'PUBLICATION_SOURCE_CONFLICT')
       if (!signal.aborted && !this.closed && this.authorized(lane.binding)) this.store.beginNativeRecovery(lane.binding, page.nativeRecoveryRange, after, () => this.authorized(lane.binding))
     })().catch(error => { if (!signal.aborted && !this.closed) this.sourceUnavailable(lane, 'source-gap', error, after) })
-      .finally(() => { lane.nativeRecoveryWork = undefined; if (!signal.aborted && !this.closed && ['clearing', 'qualifying', 'scanning', 'validating'].includes(this.store.nativeRecovery(lane.binding)?.phase ?? '')) this.wake(lane) })
+      .finally(async () => { await this.releaseRead(lane.binding, reading); lane.nativeRecoveryWork = undefined; if (!signal.aborted && !this.closed && ['clearing', 'qualifying', 'scanning', 'validating'].includes(this.store.nativeRecovery(lane.binding)?.phase ?? '')) this.wake(lane) })
   }
   private async scanNativeRecovery(lane: Lane): Promise<void> {
     const signal = lane.abort.signal, binding = lane.binding
@@ -312,7 +341,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
         await new Promise<void>(done => setImmediate(done))
         if (signal.aborted || this.closed || !this.authorized(binding)) return
         this.store.advanceNativeRecovery(binding, () => this.authorized(binding)); lane.dirty = true
-        if (this.store.nativeRecovery(binding)?.phase === 'replaying') { lane.view = undefined; lane.viewId = undefined; lane.read = undefined }
+        if (this.store.nativeRecovery(binding)?.phase === 'replaying') this.resetLaneRead(lane)
         return
       }
       if (current.phase !== 'scanning') return
@@ -320,20 +349,20 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const input: ConversationChangesInput = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, checkpoint: current.checkpoint,
         through: { ...current.checkpoint, frontier: { ...current.checkpoint.frontier, cuts: [{ kind: 'native', checkpoint: current.range.through }] } },
         limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}) }
-      const page = parseConversationChangesPageForWindow(await this.options.conversation.changes(input, signal), input)
+      const page = await this.retainPage(lane, state, this.options.conversation.changes(input, signal).then(page => parseConversationChangesPageForWindow(page, input)))
       if (page.coverage.some(source => source.current === 'unavailable' || source.gaps.length)) throw new AgentMuxError('The original frozen recovery range is unavailable; its phase and original cut are retained.', 'PUBLICATION_SOURCE_CONFLICT')
       const consumed = consumeConversationWindowPage(page, state.pending)
       if (consumed.kind === 'pending') { state.pending = consumed.pending; state.cursor = page.nextCursor!; continue }
       this.store.stageNativeRecovery(binding, current, page, consumed.snapshot.units, () => this.authorized(binding))
       lane.nativeScan = undefined
-      if (page.window.view) await this.options.conversation.release?.({ hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, view: page.window.view }).catch(() => undefined)
-      if (!page.more) { this.store.finishNativeRecoveryScan(binding, () => this.authorized(binding)); lane.view = undefined; lane.viewId = undefined; lane.read = undefined; return }
+      await this.releaseRead(binding, state)
+      if (!page.more) { this.store.finishNativeRecoveryScan(binding, () => this.authorized(binding)); this.resetLaneRead(lane); return }
     }
     lane.dirty = true
   }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
-    try { await this.scanNativeRecovery(lane) } catch (error) { lane.nativeScan = undefined; this.sourceUnavailable(lane, 'source-gap', error); }
+    try { await this.scanNativeRecovery(lane) } catch (error) { if (lane.nativeScan) await this.releaseRead(binding, lane.nativeScan); lane.nativeScan = undefined; this.sourceUnavailable(lane, 'source-gap', error); }
     let after = this.store.retainedCheckpoint(binding)
     let sourceHostId = after?.sourceHostId ?? binding.sourceFrontier?.sourceHostId
     if (!after && binding.publicationOrigin) await this.observeLane(lane)
@@ -372,8 +401,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const replaying = this.store.nativeRecovery(binding)?.phase === 'replaying'
       const state: NonNullable<Lane['read']> = lane.read, input: ConversationChangesInput = { ...reference, checkpoint: state.after, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}), ...(state.recover ? { recover: state.recover } : {}), ...(!replaying && lane.view ? { view: lane.view } : {}) }
       let page: ConversationChangesPage
-      try { page = parseConversationChangesPageForWindow(await this.options.conversation.changes(input, signal), input) }
-      catch (error) { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; this.sourceUnavailable(lane, 'source-gap', error, state.after); return }
+      try { page = await this.retainPage(lane, state, this.options.conversation.changes(input, signal).then(page => parseConversationChangesPageForWindow(page, input))) }
+      catch (error) { this.resetLaneRead(lane); this.sourceUnavailable(lane, 'source-gap', error, state.after); return }
       // Core may return captured records while the exact native changes read failed.
       // The current page, not an established cut or an open watch, owns that fact.
       const unavailable = page.coverage.find(value => (value.source.kind === 'native' || value.source.kind === 'native-unavailable') &&
@@ -398,7 +427,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
       this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(adapter.replyMetadata ? { replyMetadata: true } : {}), ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true, ...(this.options.queryInput ? { queryAuthorized: (query: import('@agentmux/core/connections').ConnectionIngressMessage) => this.options.queryInput!.authorized(query, binding) } : {}) } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = replaying ? undefined : page.window.view!; lane.viewId = replaying ? undefined : page.window.id; lane.read = { after }
-      if (replaying && page.window.view) await this.options.conversation.release?.({ ...reference, view: page.window.view }).catch(() => undefined)
+      if (replaying) await this.releaseRead(binding, state)
       if (nativeFailure && !recoveryAttempted && ['AGENT_SESSION_HISTORY_REWRITTEN', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'].includes(nativeFailure.code ?? '') && !['clearing', 'qualifying', 'scanning', 'validating', 'replaying', 'blocked'].includes(this.store.nativeRecovery(binding)?.phase ?? '') && this.store.nativeReplayQualified(binding)) {
         const origin = this.store.recoveryOrigin(binding)
         if (origin) {
@@ -572,27 +601,30 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const binding = lane.binding, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }, signal = lane.abort.signal
     let cursor: string | undefined, pending: JsonReadAssembly | undefined
     const units: ConversationUnit[] = []
-    for (let reads = 0; reads < 1024; reads++) {
-      signal.throwIfAborted()
-      const input = { ...reference, anchor: gap.anchor!, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
-      const page = parseConversationReadPageForWindow(await this.until(this.options.conversation.inspect(input, signal), signal), input)
-      for (const entry of page.items) {
-        const value = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify(gap.anchor), ...(pending ? { pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
-        if (value.kind === 'pending') { pending = value.pending; continue }
-        pending = undefined; units.push(parseConversationUnit(value.value, { hostId: page.sourceHostId, agentSessionId: binding.agentSessionId }, page.scope))
-      }
-      if (!page.nextCursor) {
-        if (pending) throw Error('Original part fragments are incomplete')
-        if (!units.length) {
-          const failure = page.coverage.flatMap(c => c.gaps).find(g => g.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE')
-          if (failure) this.store.versionUnavailable(binding, gap, failure.code)
+    const reading: { view?: string | undefined } = {}
+    try {
+      for (let reads = 0; reads < 1024; reads++) {
+        signal.throwIfAborted()
+        const input = { ...reference, anchor: gap.anchor!, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
+        const page = await this.until(this.retainPage(lane, reading, this.options.conversation.inspect(input, signal).then(page => parseConversationReadPageForWindow(page, input))), signal)
+        for (const entry of page.items) {
+          const value = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify(gap.anchor), ...(pending ? { pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
+          if (value.kind === 'pending') { pending = value.pending; continue }
+          pending = undefined; units.push(parseConversationUnit(value.value, { hostId: page.sourceHostId, agentSessionId: binding.agentSessionId }, page.scope))
         }
-        return units
+        if (!page.nextCursor) {
+          if (pending) throw Error('Original part fragments are incomplete')
+          if (!units.length) {
+            const failure = page.coverage.flatMap(c => c.gaps).find(g => g.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE')
+            if (failure) this.store.versionUnavailable(binding, gap, failure.code)
+          }
+          return units
+        }
+        if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
+        cursor = page.nextCursor
       }
-      if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
-      cursor = page.nextCursor
-    }
-    return units
+      return units
+    } finally { await this.releaseRead(binding, reading) }
   }
   /** One cancellable related journal read cannot hold this Binding's ordinary speech lane. */
   private recoverOriginalMessages(lane: Lane, adapter: PublicationAdapter, gap: import('@agentmux/core/connections').ConnectionDeliveryGap): void {
@@ -821,21 +853,24 @@ export class PublicationHost implements ConnectionDeliveryPort {
             const key = conversationRecordId(record)
             if (accepted.has(key)) continue
             let cursor: string | undefined, pending: ConversationWindowAssembly | undefined, complete = false
-            while (!complete) {
-              signal.throwIfAborted()
-              const input = { ...reference, record, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
-              const page = parseConversationReadPageForWindow(await this.options.conversation.inspect(input, signal), input)
-              const before = (pending?.bytes ?? 0) + (pending?.fragment?.receivedBytes ?? 0)
-              const consumed = consumeConversationWindowPage(page, pending)
-              if (consumed.kind === 'complete') {
-                const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
-                if (!unit) throw Error('The exact pending conversation record is unavailable')
-                accepted.set(key, { unit, frontier: page.window.checkpoint, resolved: await this.resolve(reference, [unit], signal, binding, adapter) }); complete = true; break
+            const reading: { view?: string | undefined } = {}
+            try {
+              while (!complete) {
+                signal.throwIfAborted()
+                const input = { ...reference, record, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
+                const page = await this.retainPage(lane, reading, this.options.conversation.inspect(input, signal).then(page => parseConversationReadPageForWindow(page, input)))
+                const before = (pending?.bytes ?? 0) + (pending?.fragment?.receivedBytes ?? 0)
+                const consumed = consumeConversationWindowPage(page, pending)
+                if (consumed.kind === 'complete') {
+                  const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
+                  if (!unit) throw Error('The exact pending conversation record is unavailable')
+                  accepted.set(key, { unit, frontier: page.window.checkpoint, resolved: await this.resolve(reference, [unit], signal, binding, adapter) }); complete = true; break
+                }
+                pending = consumed.pending
+                if (!page.items.length || !page.nextCursor || cursor === page.nextCursor || pending.bytes + (pending.fragment?.receivedBytes ?? 0) <= before) throw Error('The exact pending record made no progress')
+                cursor = page.nextCursor
               }
-              pending = consumed.pending
-              if (!page.items.length || !page.nextCursor || cursor === page.nextCursor || pending.bytes + (pending.fragment?.receivedBytes ?? 0) <= before) throw Error('The exact pending record made no progress')
-              cursor = page.nextCursor
-            }
+            } finally { await this.releaseRead(binding, reading) }
           }
         } catch { signal.throwIfAborted() /* The exact missing observation becomes a durable gap below. */ }
         const qualification = this.store.qualifyPending(binding, original, accepted, this.store.checkpoint(binding, binding.sourceFrontier?.sourceHostId ?? original.reference.hostId))
@@ -1006,7 +1041,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (this.closed) return
     this.closed = true; clearInterval(this.timer)
     this.speakerLifetime.abort(); this.speakerPreparations.clear()
-    for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
+    for (const lane of this.lanes.values()) this.stopLane(lane)
     this.lanes.clear()
     for (const lane of this.notices.values()) lane.abort.abort()
     this.notices.clear()
