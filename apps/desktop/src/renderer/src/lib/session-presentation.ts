@@ -1,4 +1,5 @@
-import { agentStatusLabel } from '@agentmux/client-ui/agent-presentation'
+import { agentPresentationState, agentStatusLabel } from '@agentmux/client-ui/agent-presentation'
+import { observeAgentSession } from './agent-observation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
@@ -119,7 +120,10 @@ export function createFirstPromptSelector(sessionId: string) {
   }
 }
 
-/** Human-readable status uses the same facts in Focus and a projected coordination context. */
-export function sessionStatusLabel(session: SessionSnapshot): string {
-  return agentStatusLabel(session)
+/** Human-readable status uses the same facts in Focus and a projected coordination context.
+ * An Agent is read through its Core observation, so a running Agent whose native activity says idle
+ * reads Idle, and a missing or stale activity signal is named instead of the bare process state. */
+export function sessionStatusLabel(session: SessionSnapshot, now = Date.now()): string {
+  if (session.kind !== 'agent') return agentStatusLabel(session)
+  return agentPresentationState(session, observeAgentSession(session, now), false).stateLabel
 }
