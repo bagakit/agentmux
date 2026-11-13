@@ -180,7 +180,17 @@ module.exports = async function adaptive({ win, result, read, click, key, move, 
       await read(`window.graphCapture.adaptiveTraceStart(${JSON.stringify(name)})`)
       const fact = await read(expression)
       if (name !== 'redraw-motion-off') {
-        await until('a genuine original adaptive intermediate frame', async () => { const value = await sample(); return value.transitioning && value.boxes.some(box => { const old = before.boxes.find(old => old.id === box.id); return old && movement(old, box) > .2 }) })
+        // Wait for a frame the trace will accept as genuinely intermediate: progress well inside
+        // the transition, not its first sub-pixel step, so a following gesture interrupts it mid-way.
+        let target = null
+        await until('a genuine original adaptive intermediate frame', async () => {
+          target ??= (await read('window.graphCapture.workerSamples()')).slice(first).filter(worker => worker.request?.type === 'reconcile' && worker.geometry?.length).at(-1)?.geometry ?? null
+          const value = await sample(); return Boolean(target) && value.transitioning && value.boxes.some(box => {
+          const old = before.boxes.find(old => old.id === box.id), next = target.find(next => next.id === box.id)
+          if (!old || !next || movement(old, next) <= 1) return false
+          const key = ['x', 'y', 'width', 'height'].sort((a, b) => Math.abs(next[b] - old[b]) - Math.abs(next[a] - old[a]))[0], t = (box[key] - old[key]) / (next[key] - old[key])
+          return t > .1 && t < .9
+        }) })
         if (middle) await frame(middle, { motion: true })
         if (gesture) { await dragCanvas(36, 20); await read('window.graphCapture.adaptiveRememberFocus()') }
       }
