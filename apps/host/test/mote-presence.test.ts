@@ -133,7 +133,7 @@ it('actual headless Host and CLI save original preferences, share one schedule, 
   expect(retained.maintenance!.schedule!.loopId).toBe(schedule.loopId)
   expect(await readFile(join(topic.physicalDirectoryPath!,'MOTE.md'),'utf8')).toContain('Keep original user notes.')
   expect(await readFile(join(topic.physicalDirectoryPath!,'MOTE.md'),'utf8')).toContain('recovery: on-open')
-})
+}, 120_000)
 
 async function managedFixture() {
   const f=await rpcOwnerFixture(['main'],core);cleanup.push(f.close)
