@@ -158,7 +158,7 @@
 .collaboration-navigation button { margin: 3px; }
 
 .collaboration-area__internal { pointer-events: auto; display: flex; align-items: center; gap: 8px; contain: inline-size; overflow-wrap: anywhere; margin: 0 32px 6px 8px; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-micro); cursor: pointer; }
-.collaboration-area__internal:hover { color: var(--green); }
+:where(.collaboration-canvas:not([data-camera-moving])) .collaboration-area__internal:hover { color: var(--green); }
 .collaboration-area-issues { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 
 .collaboration-agent__mark { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
@@ -179,7 +179,9 @@
 .collaboration-agent--closed .collaboration-agent__body { background: transparent; }
 .collaboration-agent--closed .collaboration-agent__body:not([data-selected=true]) { box-shadow: none; }
 .collaboration-agent--closed .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); }
-.collaboration-agent--closed:is(:hover, :focus-within, [data-reading=true]) .agent-avatar { filter: none; opacity: 1; }
+/* Hover emphasis on map content waits for the camera to rest: content sliding under a still
+ * pointer is not hover intent. :where() keeps each rule's original specificity. */
+.collaboration-agent--closed:is(:focus-within, [data-reading=true]) .agent-avatar, :where(.collaboration-canvas:not([data-camera-moving])) .collaboration-agent--closed:hover .agent-avatar { filter: none; opacity: 1; }
 /* A raised disc reads as a shape on any region fill; its absence is the closed signal. */
 .collaboration-canvas { --collaboration-closed-ink: .55; --collaboration-disc: color-mix(in srgb, var(--text) 12%, var(--surface-3)); --collaboration-disc-line: color-mix(in srgb, var(--text) 22%, transparent); }
 :root[data-appearance="light"] .collaboration-canvas { --collaboration-closed-ink: .5; --collaboration-disc: var(--surface-0); --collaboration-disc-line: color-mix(in srgb, var(--text) 30%, transparent); }
@@ -211,7 +213,7 @@
 .collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2.5; opacity: .95; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge { opacity: .16; }
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge__pulse { opacity: .2; }
-.collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2.5; }
+.collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, :where(.collaboration-canvas:not([data-camera-moving])) .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2.5; }
 .collaboration-edge { vector-effect: non-scaling-stroke; }
 
 .collaboration-activity { position: absolute; top: -9px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; min-width: 18px; height: 18px; padding: 0 5px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--green); font-size: 10px; font-weight: 600; line-height: 16px; white-space: nowrap; pointer-events: none; animation: collaboration-activity linear 1 both; }
@@ -246,7 +248,7 @@
 .collaboration-area__overview-label::before { content: ''; position: absolute; inset: 9px auto 9px -1px; width: 3px; border-radius: 3px; background: var(--area-color); pointer-events: none; }
 .collaboration-area__overview-label[data-current=true] { border-color: var(--area-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--area-color) 13%, transparent), 0 4px 16px color-mix(in srgb, var(--surface-1) 80%, transparent); }
 .collaboration-area__summary { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 6px 26px 6px 11px; border: 0; border-radius: inherit; background: transparent; color: var(--text); text-align: left; cursor: pointer; pointer-events: auto; }
-.collaboration-area__summary:hover { background: color-mix(in srgb, var(--area-color) 7%, transparent); }
+:where(.collaboration-canvas:not([data-camera-moving])) .collaboration-area__summary:hover { background: color-mix(in srgb, var(--area-color) 7%, transparent); }
 .collaboration-area__summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .collaboration-area__identity { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; color: var(--area-color); }
 .collaboration-area__identity > :is(.project-rail-row__icon, .space-object-icon) { width: 24px; height: 24px; margin: 0; font-size: 16px; }
@@ -258,7 +260,7 @@
 .collaboration-area__meta small { font-size: inherit; font-variant-numeric: tabular-nums; }
 .collaboration-area__meta .host-identity { font-size: inherit; line-height: inherit; }
 .collaboration-area__fold { position: absolute; right: 4px; top: calc(var(--collaboration-summary-bottom, 44px) - 28px); display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 4px; color: var(--text-2); background: transparent; cursor: pointer; pointer-events: auto; }
-.collaboration-area__fold:hover, .collaboration-area__fold:focus-visible { color: var(--text); background: var(--surface-3); }
+:where(.collaboration-canvas:not([data-camera-moving])) .collaboration-area__fold:hover, .collaboration-area__fold:focus-visible { color: var(--text); background: var(--surface-3); }
 .collaboration-area__overview-label .collaboration-area__activity { position: absolute; right: 12px; top: calc(var(--collaboration-summary-top, 0px) + 10px); }
 .collaboration-area__overview-label[data-empty=true] { border-color: var(--line); box-shadow: none; background: var(--surface-1); }
 .collaboration-area__overview-label[data-empty=true]::before { opacity: .4; }
