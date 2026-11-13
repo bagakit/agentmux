@@ -1726,6 +1726,33 @@ it('re-clips a route only when a painted endpoint body changes, not on every zoo
   expect(clips.count).toBeGreaterThan(0); expect(edge()).not.toBe(card)
 })
 
+it('merges stacked inbound arrowheads into one counted head at icon scale and restores them when readable', async () => {
+  const scene = scenario(5), [hub, ...peers] = [...scene.agents.values()] as CollaborationAgent[]
+  scene.areas = [{ id: 'hub', name: 'Hub', kind: 'project', members: [hub!.id, ...peers.map(peer => peer.id)] }]
+  // Three messages and one creation arrive at the hub; the hub sends one message out.
+  scene.relations = [...peers.slice(0, 3).map((peer, index) => ({ id: `in-${index}`, kind: 'communication' as const, source: peer.id, target: hub!.id, evidence: [] })),
+    { id: 'made', kind: 'creation', source: peers[3]!.id, target: hub!.id, evidence: [] }, { id: 'out', kind: 'communication', source: hub!.id, target: peers[0]!.id, evidence: [] }]
+  await loaded(scene)
+  const hubNode = collaborationAgentNode('hub', hub!.id), box = renderedBox(hubNode)
+  const edges = () => [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')].map(edge => {
+    const [kind, , target] = JSON.parse(edge.dataset.id!) as [string, string, string]
+    return { kind, target, head: Boolean(edge.querySelector('.react-flow__edge-path')!.getAttribute('marker-end')) }
+  })
+  const counts = () => [...dom.container.querySelectorAll('.collaboration-edge__merged')].map(count => count.textContent)
+  // Icon scale: one message head into the hub with "+2"; the creation and the outbound keep theirs.
+  await viewport(-box.x * .1 + 300, -box.y * .1 + 200, 2000, 2000, .1)
+  const inbound = edges().filter(edge => edge.target === hubNode)
+  expect(inbound.filter(edge => edge.kind === 'communication').map(edge => edge.head).sort()).toEqual([false, false, true])
+  expect(inbound.filter(edge => edge.kind === 'creation').map(edge => edge.head)).toEqual([true])
+  expect(edges().filter(edge => edge.target !== hubNode).every(edge => edge.head)).toBe(true)
+  expect(counts()).toEqual(['+2'])
+  // Every merged route is still drawn and selectable.
+  expect(inbound).toHaveLength(4)
+  // Readable scale: one head per route again, no count.
+  await viewport(-box.x + 300, -box.y + 200, 2000, 2000, 1)
+  expect(edges().every(edge => edge.head)).toBe(true); expect(counts()).toEqual([])
+})
+
 it('weights routes by saturated message strength and lets regions outside a selection recede', async () => {
   const scene = scenario(3), [a, b, c] = [...scene.agents.values()] as [CollaborationAgent, CollaborationAgent, CollaborationAgent]
   scene.areas = [{ id: 'near', name: 'Near', kind: 'project', members: [a.id, b.id] }, { id: 'far', name: 'Far', kind: 'project', members: [c.id] }]
