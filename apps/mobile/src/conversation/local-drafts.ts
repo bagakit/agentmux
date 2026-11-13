@@ -2,7 +2,7 @@ import type { MobileQuestionReplyAttempt } from './question-replies'
 import type { MobileMoteMainInput } from './mote-main-input'
 import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput, AgentPromptSubmissionRecord } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
-import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
+import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface, type UnstoredConversationDraft } from '../recovery/device-workface'
 
 export type PromptAttempt = {
   operationId: string
@@ -76,7 +76,7 @@ class SessionIntents<T> extends Map<string, T> {
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
   const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
-  const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false,
+  const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, unstoredDraftEdits, recordChanged: false,
     get saveIssue() { return owner.snapshot().issue },
     get hasUnconfirmedSave() { return saveRevision !== durableRevision } }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
@@ -135,6 +135,10 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
         ...(questions.size ? { questions: [...questions].map(([key, intent]) => [key, structuredClone(intent)] as [string, MobileQuestionReplyAttempt]) } : {}),
         ...(questionDrafts.size ? { questionDrafts: [...questionDrafts].map(([key, answers]) => [key, structuredClone(answers)] as [string, AgentSessionHistoryQuestionAnswer[]]) } : {}) }
       return record
+  }
+  function unstoredDraftEdits(): UnstoredConversationDraft[] {
+    const saved = new Map(durableBaseline.drafts)
+    return [...drafts].flatMap(([key, next]) => next === saved.get(key) ? [] : [{ key, expected: saved.get(key), next }])
   }
   function exportBackup(): string {
     const current = owner.snapshot().record

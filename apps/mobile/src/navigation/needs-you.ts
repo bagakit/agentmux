@@ -10,7 +10,7 @@ import type { MobileAgentPresentation } from './mobile-agent-status'
  * Display labels are never read, and nothing here grants input, permission or recovery.
  */
 export type MobileNeedsYouReason = 'waiting' | 'error'
-export type MobileNeedsYouItem = { agentSessionId: string; reason: MobileNeedsYouReason; row: MobileAgentPresentation | undefined }
+export type MobileNeedsYouItem = { agentSessionId: string; reason: MobileNeedsYouReason }
 
 export function mobileNeedsYouReason(row: MobileAgentPresentation | undefined): MobileNeedsYouReason | null {
   if (!row) return null
@@ -28,7 +28,7 @@ export function mobileNeedsYou(rows: readonly MobileAgentPresentation[] | undefi
     if (seen.has(row.agentSessionId)) continue
     seen.add(row.agentSessionId)
     const reason = mobileNeedsYouReason(row)
-    if (reason) items.push({ agentSessionId: row.agentSessionId, reason, row })
+    if (reason) items.push({ agentSessionId: row.agentSessionId, reason })
   }
   return items.map((item, index) => ({ item, index })).sort((a, b) => rank[a.item.reason] - rank[b.item.reason] || a.index - b.index).map(value => value.item)
 }

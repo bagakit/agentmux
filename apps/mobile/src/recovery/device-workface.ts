@@ -32,6 +32,8 @@ export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
 export type ConversationBucket = 'drafts' | 'attempts' | 'responses' | 'questions' | 'questionDrafts'
 export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Omit<ResponseAttempt, 'message'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
 export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
+/** Only unsaved draft text can follow an explicit device-record replacement. */
+export type UnstoredConversationDraft = { key: string; expected: string | undefined; next: string }
 export type ConversationConflict = { bucket: ConversationBucket; key: string; value: ConversationValue }
 /** Facts written by this transaction, excluding later optimistic edits. */
 export type ConversationCommit = { recordId: string | null; conversation: DraftRecord }
@@ -332,6 +334,15 @@ export function parseGoalWorkface(value: unknown): GoalWorkface {
 /** One device record owns navigation, drafts and intent guards. All writers
  * serialize read/merge/set across pages; readers never own whole-record replacement. */
 export class DeviceWorkfaceStore {
+  private recordReplacementListeners = new Map<() => void, (() => UnstoredConversationDraft[]) | undefined>()
+  private recordReplacementVersion = 0
+  recordReplacementRevision = (): number => this.recordReplacementVersion
+  /** Only an explicit replacement in this page can adopt a new draft owner. External record
+   * changes retain the old page's unsaved data and its original record-change/export path. */
+  subscribeRecordReplacement = (listener: () => void, unstoredDrafts?: () => UnstoredConversationDraft[]): (() => void) => {
+    this.recordReplacementListeners.set(listener, unstoredDrafts)
+    return () => this.recordReplacementListeners.delete(listener)
+  }
   private goalIntentFlights = new Map<string, string | null>()
   private goalIntentListeners = new Set<() => void>()
   private goalIntentVersion = 0
@@ -680,27 +691,29 @@ export class DeviceWorkfaceStore {
       throw error
     })
   }
+  private applyConversationEdits(value: DeviceWorkface, captured: readonly ConversationEdit[], recordId: string | null): DeviceWorkface {
+    const conversation = structuredClone(value.conversation)
+    const conflicts = conversation.conflicts ?? []
+    for (const edit of captured) {
+      const items = ((conversation as Record<ConversationBucket, Array<[string, ConversationValue]>>)[edit.bucket] ??= [])
+      const at = items.findIndex(([key]) => key === edit.key), current = at < 0 ? undefined : items[at]![1]
+      if ((value.recordId ?? null) !== recordId || !sameValue(current, edit.expected) && !sameValue(current, edit.next)) {
+        if (edit.next !== undefined && !sameValue(current, edit.next)) {
+          const conflict = { bucket: edit.bucket, key: edit.key, value: edit.next }
+          if (!conflicts.some(item => sameValue(item, conflict))) conflicts.push(conflict)
+        }
+        continue
+      }
+      if (at >= 0) items.splice(at, 1)
+      if (edit.next !== undefined) items.push([edit.key, edit.next])
+    }
+    if (conflicts.length) conversation.conflicts = conflicts
+    return { ...value, conversation: parseDraftRecord(conversation) }
+  }
   editConversation(edits: ConversationEdit[], recordId: string | null): Promise<ConversationCommit> {
     const captured = structuredClone(edits)
-    return this.update(value => {
-      const conversation = structuredClone(value.conversation)
-      const conflicts = conversation.conflicts ?? []
-      for (const edit of captured) {
-        const items = ((conversation as Record<ConversationBucket, Array<[string, ConversationValue]>>)[edit.bucket] ??= [])
-        const at = items.findIndex(([key]) => key === edit.key), current = at < 0 ? undefined : items[at]![1]
-        if ((value.recordId ?? null) !== recordId || !sameValue(current, edit.expected) && !sameValue(current, edit.next)) {
-          if (edit.next !== undefined && !sameValue(current, edit.next)) {
-            const conflict = { bucket: edit.bucket, key: edit.key, value: edit.next }
-            if (!conflicts.some(item => sameValue(item, conflict))) conflicts.push(conflict)
-          }
-          continue
-        }
-        if (at >= 0) items.splice(at, 1)
-        if (edit.next !== undefined) items.push([edit.key, edit.next])
-      }
-      if (conflicts.length) conversation.conflicts = conflicts
-      return { ...value, conversation: parseDraftRecord(conversation) }
-    }, recordId, committed => ({ recordId: committed.recordId ?? null, conversation: structuredClone(committed.conversation) }))
+    return this.update(value => this.applyConversationEdits(value, captured, recordId), recordId,
+      committed => ({ recordId: committed.recordId ?? null, conversation: structuredClone(committed.conversation) }))
   }
   retainFileUpload(input: MobileFileUpload, expectedRecordId = this.recordIdentity(), expectedUpload?: MobileFileUpload): Promise<void> {
     const upload = parseMobileFileUpload(input)
@@ -795,9 +808,15 @@ export class DeviceWorkfaceStore {
     this.writeRevision++
     const parsed = parseDeviceWorkface(next)
     const work = this.tail.then(() => this.exclusive(() => {
-      const adopted = { ...parsed, recordId: randomClientRequestId() }
+      const replacement = { ...parsed, recordId: randomClientRequestId() }
+      // Preserve only unsaved text through the original merge/backup owner. Input packets and
+      // their dispatch authority remain with the original record and are never reconstructed here.
+      const drafts = [...this.recordReplacementListeners.values()].flatMap(read => read?.() ?? [])
+      const adopted = this.applyConversationEdits(replacement, drafts.map(draft => ({ bucket: 'drafts', ...draft })), replacement.recordId)
       this.write(adopted)
       this.value = adopted; this.temporary = false
+      this.recordReplacementVersion++
+      for (const listener of this.recordReplacementListeners.keys()) listener()
       this.notifyGoalIntents()
     }))
     this.tail = work.catch(() => {})

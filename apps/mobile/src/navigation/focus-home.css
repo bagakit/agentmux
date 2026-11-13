@@ -27,7 +27,7 @@
 .mobile-ticket-answer__title { margin: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
 .mobile-ticket-answer__choices { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-.mobile-ticket-answer__choices > button { flex: 1 1 0; min-width: 72px; min-height: 40px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.mobile-ticket-answer__choices > button { flex: 1 1 0; min-width: 72px; min-height: 44px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   border: 1px solid var(--mobile-hairline); border-radius: 999px; background: var(--mobile-group); color: var(--text); font-size: var(--fs-meta); font-weight: 600;
   transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease, opacity var(--dur-fast) ease; }
 .mobile-ticket-answer__choices > button.is-primary { border-color: transparent; background: var(--mobile-accent); color: var(--bg); }
@@ -38,7 +38,7 @@
 .mobile-ticket-answer > p[role='status'] { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
 .mobile-ticket-answer[data-phase='confirmed'] > p[role='status'] { color: var(--green); }
 .mobile-ticket-answer__issue { margin: 0; color: var(--red); font-size: var(--fs-micro); }
-.mobile-ticket-answer__open { justify-self: start; min-height: 36px; padding: 0 12px; border: 1px solid var(--mobile-hairline); border-radius: 999px;
+.mobile-ticket-answer__open { justify-self: start; min-height: 44px; padding: 0 12px; border: 1px solid var(--mobile-hairline); border-radius: 999px;
   background: transparent; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 @keyframes mobile-ticket-answer-in { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes mobile-ticket-sending { 50% { opacity: .62; } }

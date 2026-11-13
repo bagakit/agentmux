@@ -85,3 +85,7 @@
 @media (prefers-reduced-motion: reduce) {
   .mobile-main, .mobile-main[data-edge-back] { transform: none; }
 }
+
+/* The persistent read-state entry stays compact; full detail uses the shared phone sheet. */
+.mobile-attention-notice > .mobile-notice__body > button { display: flex; align-items: center; gap: var(--sp-3); text-align: left; text-decoration: none; }
+.mobile-attention-details > .mobile-text-button { margin-block: var(--sp-3); }

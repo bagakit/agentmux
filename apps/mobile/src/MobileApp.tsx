@@ -41,8 +41,9 @@ import { BrandIcon } from '@agentmux/client-ui/components/BrandIcon'
 import { MobileIdentity, type MobileObjectIdentity } from './navigation/MobileIdentity'
 import { MobilePrimaryNavigation } from './navigation/MobilePrimaryNavigation'
 import { MobileHeaderMenuContext } from './navigation/MobileHeaderMenu'
-import { mobileNeedsYou, mobileNeedsYouElsewhere } from './navigation/needs-you'
+import { mobileNeedsYouElsewhere } from './navigation/needs-you'
 import { useMobileAttentionCatalog } from './navigation/use-mobile-attention-catalog'
+import { MobileAttentionNotice } from './navigation/MobileAttentionNotice'
 import { useMobileScreenMotion } from './navigation/use-mobile-screen-motion'
 import './navigation/shell.css'
 import './conversation/chrome.css'
@@ -465,9 +466,9 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const screenLayer = !showSession ? `directory:${secondary ?? home}` : showGoalWork ? 'goal' : workface.panel === 'terminal' ? 'terminal' : 'conversation'
   const screenDepth = !showSession ? 0 : showGoalWork || workface.panel === 'terminal' ? 2 : 1
   const screenMotion = useMobileScreenMotion(screenLayer, screenDepth, navigationRevision.current)
-  const focusDirectoryVisible = exposed && !showSession && secondary === null && home === 'focus'
-  const attention = useMobileAttentionCatalog(client, connected && workspaceVisible, focusDirectoryVisible)
-  const needsYou = useMemo(() => mobileNeedsYou(attention.rows), [attention.rows])
+  const directoryVisible = exposed && !showSession && secondary === null
+  const attention = useMobileAttentionCatalog(client, connected && workspaceVisible, directoryVisible)
+  const needsYou = attention.items
   const needsYouElsewhere = mobileNeedsYouElsewhere(needsYou, showSession ? workface.selectedSessionId : null)
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
   const moteSection = moteView && moteView.spaceId === objectIdentity?.mote?.spaceId ? moteView.section : moteDirectAgent ? 'threads' : 'discussion'
@@ -562,7 +563,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession ? ' mobile-header--session' : ''}`}>
       {workspaceVisible && showSession ? <div className="mobile-session-toolbar">
-        <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} {...(needsYouElsewhere ? { 'aria-description': `另有 ${needsYouElsewhere} 个需要你` } : {})} onClick={requestBack}><ThemeNavigationBackIcon size={18} /><span>{pageName}</span>{needsYouElsewhere ? <span className="mobile-back-badge" aria-hidden="true" data-count={needsYouElsewhere}>{needsYouElsewhere > 99 ? '99+' : needsYouElsewhere}</span> : null}</button>
+        <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} {...(attention.unconfirmed ? { 'aria-description': '需要你列表尚未确认，可打开 Focus 重新读取' } : needsYouElsewhere ? { 'aria-description': `另有 ${needsYouElsewhere} 个需要你` } : {})} onClick={requestBack}><ThemeNavigationBackIcon size={18} /><span>{pageName}</span>{attention.unconfirmed || needsYouElsewhere ? <span className="mobile-back-badge" aria-hidden="true" data-count={attention.unconfirmed ? undefined : needsYouElsewhere} data-unconfirmed={attention.unconfirmed || undefined}>{attention.unconfirmed ? '?' : needsYouElsewhere > 99 ? '99+' : needsYouElsewhere}</span> : null}</button>
         {objectIdentity?.mote ? <button className="mobile-mote-heading mobile-session-identity" aria-label={`${moteConversation ? moteTitle : objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={28} visible={exposed} /><span className="mobile-session-title">{moteConversation ? moteTitle : sessionTitle ?? objectIdentity.name}</span></button>
           : <><MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '对话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} /><span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '对话'}</span></>}
         <div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />
@@ -669,14 +670,15 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       </section>
     </main>
     <div className="mobile-notice-stack">
-      <MobileAvatarNoticeOutlet />
       {webObservation && <MobileNotice owner={client} hidden={mobileWebUpdateStatus(webObservation) !== 'available'}
         identity={[webObservation.inspection.result?.hostInstanceId, webObservation.inspection.result?.active?.digest]} className="mobile-web-update-notice" kind="feedback">
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
       </MobileNotice>}
+      {!directoryVisible && attention.issue && <MobileAttentionNotice owner={client} issue={attention.issue} retry={attention.refresh} />}
+      <MobileAvatarNoticeOutlet />
       {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,noticeDetail,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{notice && noticeDetail && <details><summary>技术信息</summary><p>{noticeDetail}</p></details>}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
     </div>
-    {workspaceVisible && <footer className="mobile-navigation-bar"><MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} needsYou={needsYou.length} /></footer>}
+    {workspaceVisible && <footer className="mobile-navigation-bar"><MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} needsYou={needsYou.length} needsYouUnconfirmed={attention.unconfirmed} /></footer>}
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: 'Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : ''}`} aria-describedby="mobile-sheet-description" onCloseAutoFocus={event => {

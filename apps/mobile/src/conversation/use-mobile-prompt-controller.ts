@@ -1,5 +1,5 @@
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
@@ -115,7 +115,9 @@ type PendingInputAction = { cancelled: boolean; dispatched: boolean; saving: boo
 export function useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired, session, timeline, connection,
   disconnected, visible, refresh }: MobilePromptControllerOptions) {
   const draftKey = JSON.stringify(['draft', agentSessionId])
-  const drafts = useRef(local.drafts), attempts = useRef(local.attempts)
+  // Each asynchronous producer retains the maps of its original device record.
+  const drafts = useMemo(() => ({ current: local.drafts }), [local])
+  const attempts = useMemo(() => ({ current: local.attempts }), [local])
   const [diagnostics] = useState(() => new ClientDeliveryDiagnostics())
   const [revision, redraw] = useState(0)
   const protectUpdate = useMobileWebUpdatePendingAction()

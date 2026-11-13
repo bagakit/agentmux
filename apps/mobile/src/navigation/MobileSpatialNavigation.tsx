@@ -37,7 +37,7 @@ export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxH
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
   onCreateAgent?(target: MobileAgentCreateTarget): void; onBackChange?(back: (() => void) | null): void
   /** The shell's needs-you facts; presentation only. */
-  needsYou?: readonly MobileNeedsYouItem[]; onPresentation?(client: AgentMuxHostedClient | null, rows: readonly MobileAgentPresentation[] | undefined): void }
+  needsYou?: readonly MobileNeedsYouItem[]; onPresentation?(client: AgentMuxHostedClient | null, rows: readonly MobileAgentPresentation[] | undefined, issue?: string | null): void }
 type Region = Catalog['regions'][number]
 /** A discovered SID is navigable even before the SDK has hydrated its metadata. */
 type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<Pick<AgentMuxAgentSession, 'providerId'>>
@@ -81,8 +81,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       try {
         if (!client.forwardRpc) throw new Error('空间目录暂不可读；已有会话仍可在 Focus 中访问。')
         const value = await client.forwardRpc('space.ls', { target: {}, presentation: true })
-        if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog; onPresentation?.(client, value.catalog.agentPresentation) }
-      } catch (error) { if (!disposed) setIssue(error instanceof Error ? error.message : '空间目录暂时读不到，可以刷新重试。') }
+        if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog; onPresentation?.(client, value.catalog.agentPresentation, value.catalog.agentPresentation === undefined ? '需要你列表暂时没有返回，可重新读取；已有对话仍可使用。' : null) }
+      } catch (error) { if (!disposed) {
+        const message = error instanceof Error ? error.message : '空间目录暂时读不到，可以刷新重试。'
+        setIssue(message); onPresentation?.(client, undefined, message)
+      } }
       finally { inFlight = false; if (!disposed) setPending(false) }
       if (observed) observeCatalog?.(observed)
     }
@@ -378,7 +381,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
             <span className="mobile-row-avatar"><AgentAvatarFace providerId={row?.providerId || session.providerId} appearance={row?.avatar} size={20} /><span className="mobile-row-dot" data-mark={item.reason === 'error' ? 'error' : 'attention'} aria-hidden="true" /></span>
             <span><strong>{object.name}</strong><small>{item.reason === 'error' ? '出错 · 需要处理' : row?.projectGroup?.name ?? object.project}</small></span>
           </button>
-          {item.reason === 'waiting' && <MobileNeedsYouAnswer client={client} connected={connected} agentSessionId={item.agentSessionId}
+          {item.reason === 'waiting' && <MobileNeedsYouAnswer client={client} connected={connected} agentSessionId={item.agentSessionId} identity={object}
             onOpen={() => openSession(item.agentSessionId, object)} onAnswered={answered} />}</li>
         })}</ul>
       </section>}

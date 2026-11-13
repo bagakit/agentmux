@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationReceipt, AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
@@ -15,7 +15,7 @@ type MobileInteractionControllerOptions = {
 
 /** Synchronous request operations keep their original Core identity independently of prompt and async-question input. */
 export function useMobileInteractionController({ local, client, agentSessionId, session, available }: MobileInteractionControllerOptions) {
-  const responses = useRef(local.responses)
+  const responses = useMemo(() => ({ current: local.responses }), [local])
   const [, redraw] = useState(0)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -52,23 +52,27 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
       hostId: session.hostId, runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null } }
     responses.current.set(originalKey, original)
     const retained = await local.save()
-    redraw(value => value + 1)
+    if (mounted.current) redraw(value => value + 1)
     try {
       if (!retained || responses.current.get(originalKey) !== original) throw new Error('另一页面已保全这个请求的答复；本次未重复回答。')
       const target = client.agentSession(original.original!.input.agentSessionId)
       if (target.hostId !== original.original!.hostId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.original!.runtimeId) throw new Error('Mac 连接已变化，这次没有发送。答复已留在这台手机上。')
       const receipt = await client.respondAgentInteraction(original.original!.input)
-      if (!mounted.current || responses.current.get(originalKey) !== original) return
+      if (responses.current.get(originalKey) !== original) return
       adoptResponseReceipt(original, receipt)
       return receipt
     } catch (error) {
-      if (!mounted.current) throw error
+      if (responses.current.get(originalKey) !== original) throw error
       original.phase = deliveryOutcome(error, 'interaction')
       original.message = original.phase === 'unknown'
         ? `还没确认答复是否送达，不会重复发送。可以打开对话查看。${errorMessage(error)}`
         : `Core 已拒绝答复。${errorMessage(error)}`
       throw error
-    } finally { if (mounted.current) { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) } }
+    } finally {
+      // The page owns this attempt beyond the ticket's lifetime. Only painting depends on its view.
+      void local.save().then(() => { if (mounted.current) redraw(value => value + 1) })
+      if (mounted.current) redraw(value => value + 1)
+    }
   }
   function adoptResponseReceipt(attempt: ResponseAttempt, receipt: AgentMuxInteractionOperationReceipt) {
     const input = attempt.original!.input
@@ -85,13 +89,13 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
       if (client.agentSession(original.input.agentSessionId).hostId !== original.hostId ||
           !original.runtimeId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.runtimeId) throw new Error('当前连接的不是这条答复所在的 Mac。')
       const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
-      if (!mounted.current || responses.current.get(key) !== attempt) return receipt
+      if (responses.current.get(key) !== attempt) return receipt
       if (receipt) adoptResponseReceipt(attempt, receipt)
       else attempt.message = '还没查到确认结果，答复是否送达仍未知。'
       await local.save()
       return receipt
     } catch (error) {
-      if (mounted.current && responses.current.get(key) === attempt) attempt.message = `没有查到答复结果。${errorMessage(error)}`
+      if (responses.current.get(key) === attempt) attempt.message = `没有查到答复结果。${errorMessage(error)}`
       throw error
     } finally { if (mounted.current) redraw(value => value + 1) }
   }

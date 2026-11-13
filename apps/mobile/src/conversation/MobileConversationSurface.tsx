@@ -107,7 +107,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
   }, [reading.page, reading.timeline, reading.olderWindow, visible])
   const local = useMobileLocalDrafts()
-  const drafts = useRef(local.drafts)
+  const drafts = useMemo(() => ({ current: local.drafts }), [local])
   const [, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const notices = useMobileNotices()

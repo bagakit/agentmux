@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createLocalDrafts } from './local-drafts'
+import { getDeviceWorkface } from '../recovery/device-workface'
 
 export type MobileLocalDrafts = ReturnType<typeof createLocalDrafts>
 const Owner = createContext<MobileLocalDrafts | null>(null)
@@ -10,7 +11,13 @@ const Owner = createContext<MobileLocalDrafts | null>(null)
  * holds its in-flight or unknown answer.
  */
 export function MobileLocalDraftsOwner({ children }: { children: ReactNode }) {
-  const [local] = useState(createLocalDrafts)
+  const device = getDeviceWorkface()
+  const retained = useRef<MobileLocalDrafts | null>(null)
+  const subscribe = useCallback((listener: () => void) => device.subscribeRecordReplacement(listener,
+    () => retained.current?.unstoredDraftEdits() ?? []), [device])
+  const replacementRevision = useSyncExternalStore(subscribe, device.recordReplacementRevision)
+  const local = useMemo(createLocalDrafts, [replacementRevision])
+  retained.current = local
   return <Owner.Provider value={local}>{children}</Owner.Provider>
 }
 

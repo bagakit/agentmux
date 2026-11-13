@@ -4,6 +4,8 @@ import type { AgentMuxAgentSession, AgentMuxInteractionRequest, AgentMuxInteract
 import { mintObjectId } from '@agentmux/core/object-id'
 import { isAffirmative, permissionPlan, questionPlan } from '@agentmux/client-ui/agent-interaction-plan'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import type { MobileObjectIdentity } from './MobileIdentity'
+import { mobileMoteInputSource } from '../conversation/mote-input-source'
 import { useMobileLocalDrafts } from '../conversation/local-drafts-owner'
 import { useMobileInteractionController } from '../conversation/use-mobile-interaction-controller'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
@@ -37,8 +39,8 @@ function readSession(client: AgentMuxHostedClient | null, id: string): AgentMuxA
  * operation: the same device record, response plan, Core receipt and never-replay rule. This only
  * picks a smaller presentation for requests that fit one tap.
  */
-export function MobileNeedsYouAnswer({ client, connected, agentSessionId, onOpen, onAnswered }: {
-  client: AgentMuxHostedClient | null; connected: boolean; agentSessionId: string
+export function MobileNeedsYouAnswer({ client, connected, agentSessionId, identity, onOpen, onAnswered }: {
+  client: AgentMuxHostedClient | null; connected: boolean; agentSessionId: string; identity?: MobileObjectIdentity
   onOpen(): void; onAnswered(): void
 }) {
   const local = useMobileLocalDrafts()
@@ -48,13 +50,13 @@ export function MobileNeedsYouAnswer({ client, connected, agentSessionId, onOpen
   const [chosen, setChosen] = useState<string | null>(null)
   useEffect(() => {
     if (!client) return
-    return client.onEvent(event => {
+    return client.onStatusEvent(event => {
       if (event.type === 'agent-session' && event.session.agentSessionId === agentSessionId ||
           event.type === 'connection-state' && event.state === 'restored') observe(value => value + 1)
     })
   }, [client, agentSessionId])
-  const { request, responseAttempt, responseDisabled, respond } = useMobileInteractionController({ local, client, agentSessionId, session, available: connected && Boolean(session) })
-  const operation = useRef<{ requestId: string; operationId: string } | null>(null)
+  const { request, requestKey, responseAttempt, responseDisabled, respond } = useMobileInteractionController({ local, client, agentSessionId, session, available: connected && Boolean(session) })
+  const operation = useRef<{ requestKey: string | null; operationId: string } | null>(null)
   const plan = mobileTicketChoices(request)
   // The controller owns the answer's phase, including a receipt that is unknown or a call that threw.
   const phase = responseAttempt?.phase
@@ -65,9 +67,9 @@ export function MobileNeedsYouAnswer({ client, connected, agentSessionId, onOpen
   // count follows the settled fact instead of waiting for the next periodic read.
   const answeredRequest = useRef<string | null>(null)
   useEffect(() => {
-    if (settled && request) { answeredRequest.current = request.id; onAnswered() }
-    else if (answeredRequest.current && request?.id !== answeredRequest.current) { answeredRequest.current = null; onAnswered() }
-  }, [settled, request, onAnswered])
+    if (settled && requestKey && answeredRequest.current !== requestKey) { answeredRequest.current = requestKey; onAnswered() }
+    else if (answeredRequest.current && requestKey !== answeredRequest.current) { answeredRequest.current = null; onAnswered() }
+  }, [settled, request, requestKey, onAnswered])
   if (phase === 'unknown') return <div className="mobile-ticket-answer" data-phase="unknown">
     <p role="status">还没确认送达</p>
     <button type="button" className="mobile-ticket-answer__open" onClick={onOpen}>打开对话查看</button>
@@ -77,10 +79,12 @@ export function MobileNeedsYouAnswer({ client, connected, agentSessionId, onOpen
   const sending = responseAttempt?.phase === 'sending'
   async function choose(choice: MobileTicketChoice) {
     if (responseDisabled || sending || !request) return
-    if (operation.current?.requestId !== request.id) operation.current = { requestId: request.id, operationId: mintObjectId() }
+    if (operation.current?.requestKey !== requestKey) operation.current = { requestKey, operationId: mintObjectId() }
     setChosen(choice.id)
     // A refused or unknown outcome is recorded by the controller; this view only reads it back.
-    await respond(choice.response, { operationId: operation.current.operationId, expectedRequest: structuredClone(request) }).catch(() => {})
+    const moteSource = mobileMoteInputSource(identity ?? null, agentSessionId, agentSessionId)
+    await respond(choice.response, { operationId: operation.current.operationId, expectedRequest: structuredClone(request),
+      ...(moteSource ? { moteSource } : {}) }).catch(() => {})
   }
   return <div className="mobile-ticket-answer" data-phase={sending ? 'sending' : 'idle'} data-request-id={request.id}>
     <p className="mobile-ticket-answer__title">{plan.title}</p>
