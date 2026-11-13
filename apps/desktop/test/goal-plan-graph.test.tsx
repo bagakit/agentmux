@@ -94,13 +94,16 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="gone"]')!.dataset.goalPlanState).toBe('cancelled')
   })
 
-  it('keeps an unplanned Goal to one discussion entry without an empty graph', async () => {
+  it('makes the missing execution plan discoverable without inventing task nodes', async () => {
     seed(goal({}))
     await dom.render(<GlobalBoardSurface />)
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-node]')).toBeNull()
     expect(graph()!.querySelectorAll('button')).toHaveLength(1)
-    expect(graph()!.textContent).toContain('Plan in goal discussion')
+    expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
+    expect(graph()!.textContent).toContain('Tasks and dependencies')
+    expect(graph()!.textContent).toContain('No execution plan yet')
+    expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
   })
 })
 
