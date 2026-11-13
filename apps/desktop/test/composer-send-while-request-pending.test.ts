@@ -145,6 +145,19 @@ it('the public message.pending.send of a never-sent composer message waits for t
   expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => call[1])).toEqual(['from the outbox'])
 })
 
+it('a message already bound to direct input before the request opened goes to Core, not into the queue wait', async () => {
+  // Bound with no request in sight, then a card opens before the drain reaches it. Only Core can now say
+  // what happened to that input, so the queue must not park it as if it would wake by itself.
+  useAppStore.setState({ sessions: [idle] })
+  let opened = false
+  vi.mocked(api.sessions.inspectInput).mockImplementation(async () => { opened = true; return null as never })
+  useAppStore.getState().send(sid, 'bound before the card', () => {}, 'manual')
+  useAppStore.setState({ sessions: [pending('opened-after-bind')] })
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(opened).toBe(true)
+  expect(queue()[0]?.directInputBinding).toBeDefined()
+})
+
 it('without a pending request Send still binds the direct input path', async () => {
   useAppStore.setState({ sessions: [idle] })
   useAppStore.getState().send(sid, 'plain send', undefined, 'manual')
