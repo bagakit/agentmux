@@ -18,5 +18,7 @@ export type WorkspaceMediaStreamFact =
   | { state: 'external-reference'; path: string }
   | { state: 'unsupported-resource'; path: string }
   | { state: 'read-error'; path: string; code: string }
+  /** Refused once for a retryable reason (a moved live window, a rewrite in progress); not a verdict on the file. */
+  | { state: 'transient'; path: string; code: string }
 
 export const WORKSPACE_MEDIA_PLAYLIST_EXTENSION = 'm3u8'

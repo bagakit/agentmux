@@ -299,8 +299,10 @@ export class WorkspaceMediaStreams {
       }
       await this.serveBytes(lease, path, lease.media.handle, lease.media.byteLength, lease.mimeType, request, response, fail)
     } catch (error) {
+      // An unexpected failure is recorded as unknown-but-retryable, never left looking like a served lease.
+      const lease = this.leases.get(/^\/([A-Za-z0-9_-]{43})\//.exec(request.url ?? '')?.[1] ?? '')
+      if (lease && !lease.released) lease.fact = { state: 'transient', path: lease.path, code: errorCode(error) }
       fail(500, 'Media resource is unavailable. Reload to retry.')
-      void error
     }
   }
 
@@ -333,8 +335,9 @@ export class WorkspaceMediaStreams {
   }
 
   /** The resource a playlist lease's fact names played again; nothing it explained is failing now. */
+  /** A clean reply clears that path's fact; any clean reply clears a transient one, since it explained a moment, not a file. */
   private clear(lease: PlaylistLease, path: string): void {
-    if ('path' in lease.fact && lease.fact.path === path) lease.fact = { state: 'active' }
+    if (lease.fact.state === 'transient' || ('path' in lease.fact && lease.fact.path === path)) lease.fact = { state: 'active' }
   }
 
   /** Range headers and positional bytes for one opened file object. */
@@ -361,9 +364,9 @@ export class WorkspaceMediaStreams {
       const code = errorCode(error)
       if (lease.released) { fail(410, 'This media lease was released.'); return }
       // A live window deletes old segments: a missing one fails this request, never the playback lease.
-      if (code === 'ENOENT' || code === 'ENOTDIR') { fail(404, 'This segment no longer exists.'); return }
+      if (code === 'ENOENT' || code === 'ENOTDIR') { lease.fact = { state: 'transient', path, code }; fail(404, 'This segment no longer exists.'); return }
       // Replaced between open and its identity check; the next request opens the new object.
-      if (code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') { fail(503, 'This segment changed while it was opened. Retry.', { 'Retry-After': '1' }); return }
+      if (code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') { lease.fact = { state: 'transient', path, code }; fail(503, 'This segment changed while it was opened. Retry.', { 'Retry-After': '1' }); return }
       lease.fact = code === 'WORKSPACE_PATH_ESCAPE' ? { state: 'outside-workspace', path }
         : code === 'EISDIR' || code === 'WORKSPACE_MEDIA_NOT_REGULAR' ? { state: 'unsupported-resource', path } : { state: 'read-error', path, code }
       fail(lease.fact.state === 'outside-workspace' ? 403 : lease.fact.state === 'unsupported-resource' ? 422 : 500,
@@ -419,7 +422,7 @@ export class WorkspaceMediaStreams {
     if (lease.released) { fail(410, 'This media lease was released.'); return null }
     if (body) return body
     // An encoder rewrote it in place during every retry; the player's next reload reads it again.
-    if (code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') { fail(503, 'This playlist changed while it was read. Retry.', { 'Retry-After': '1' }); return null }
+    if (code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') { lease.fact = { state: 'transient', path, code }; fail(503, 'This playlist changed while it was read. Retry.', { 'Retry-After': '1' }); return null }
     lease.fact = code === 'ENOENT' || code === 'ENOTDIR' ? { state: 'deleted', path }
       : code === 'WORKSPACE_PATH_ESCAPE' ? { state: 'outside-workspace', path } : { state: 'read-error', path, code }
     fail(lease.fact.state === 'deleted' ? 404 : lease.fact.state === 'outside-workspace' ? 403 : code === 'WORKSPACE_FILE_BYTE_LIMIT' ? 413 : 500,

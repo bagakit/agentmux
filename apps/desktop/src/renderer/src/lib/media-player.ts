@@ -101,7 +101,7 @@ export function resolveMediaKey(event: MediaKeyEvent, context: MediaKeyContext):
 }
 
 export type MediaFailureView = { title: string; detail: string; retry: boolean }
-export type MediaStreamFactState = 'active' | 'released' | 'deleted' | 'changed' | 'outside-workspace' | 'external-reference' | 'unsupported-resource' | 'read-error'
+export type MediaStreamFactState = 'active' | 'released' | 'deleted' | 'changed' | 'outside-workspace' | 'external-reference' | 'unsupported-resource' | 'read-error' | 'transient'
 
 /**
  * A playback failure, explained by the lease owner's record first. MediaError.code alone cannot tell a
@@ -117,6 +117,7 @@ export function describeMediaFailure(fact: MediaStreamFactState | 'unknown', cod
     case 'external-reference': return { title: 'Playlist points outside the Workspace', detail: 'This playlist references media by an absolute address. Only files inside the Workspace can play here.', retry: false }
     case 'unsupported-resource': return { title: 'Playlist references an unsupported file', detail: 'A file this playlist names is not a media segment type that plays here.', retry: false }
     case 'read-error': return { title: 'Could not read this file', detail: 'Reading the file failed. Retry, or open it in a system application.', retry: true }
+    case 'transient': return { title: 'Playback was interrupted', detail: 'The media was briefly unavailable, for example while it was being rewritten. Retry to continue.', retry: true }
     case 'active': case 'unknown': break
   }
   if (code === 1) return null
