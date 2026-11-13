@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parsePngImage } from './png-image.js'
@@ -139,7 +139,7 @@ export function parseAppCaptureResult<M extends AppCaptureMethod>(method: M, val
       v.data.length > Math.ceil(APP_CAPTURE_LIMITS.maxVideoBytes / 3) * 4) invalid('Recording payload is invalid.', code)
     const data = Buffer.from(v.data, 'base64')
     if (!data.length || data.toString('base64') !== v.data || data.length !== recording.bytes || data.subarray(0, 4).toString('hex') !== '1a45dfa3') invalid('Recording payload does not match its original artifact.', code)
-    if (createHash('sha256').update(data).digest('hex') !== recording.sha256) invalid('Recording payload checksum changed.', code)
+    if (Array.from(sha256(data), byte => byte.toString(16).padStart(2, '0')).join('') !== recording.sha256) invalid('Recording payload checksum changed.', code)
     video = { format: 'webm', data: v.data }
   }
   let frames: AppRecordPage['frames']
