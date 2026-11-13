@@ -1,7 +1,7 @@
 import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { join } from 'node:path'
 import type { AgentManagedHookMutation } from '../managed-hook-installer.js'
-import { resolveCoreBinPath } from '../runtime-paths.js'
+import { defaultAgentMuxStateDirectory, resolveCoreBinPath } from '../runtime-paths.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../types.js'
 
@@ -57,9 +57,13 @@ export function claudeNativeActivity(
     ...(eventName === 'turn.complete' ? { interruption: payload.isAborted ? 'interrupted' as const : 'not-interrupted' as const } : {}) }
 }
 
-/** A Provider-owned native observer; classic hooks retain input, permission and history ownership. */
-export function claudeNativeActivityDirectory(workspacePath: string): string {
-  return join(workspacePath, '.claude', 'agentmux', 'native-activity')
+/**
+ * A Provider-owned native observer; classic hooks retain input, permission and history ownership.
+ * It lives in AgentMux's own state directory and is loaded by --plugin-dir, never written into the
+ * user's workspace. Its content does not depend on the workspace, so one copy serves every Run.
+ */
+export function claudeNativeActivityDirectory(): string {
+  return join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'native-activity')
 }
 
 /**
@@ -230,8 +234,8 @@ export function register(on) {
 `
 }
 
-export function claudeNativeActivityMutations(workspacePath: string): AgentManagedHookMutation[] {
-  const directory = claudeNativeActivityDirectory(workspacePath)
+export function claudeNativeActivityMutations(): AgentManagedHookMutation[] {
+  const directory = claudeNativeActivityDirectory()
   return [
     { path: join(directory, '.claude-plugin', 'plugin.json'), mode: 0o600,
       content: `${JSON.stringify({ name: 'agentmux-native-activity', version: '1.0.0',
@@ -244,8 +248,8 @@ export function claudeNativeActivityMutations(workspacePath: string): AgentManag
 }
 
 /** The repeatable, single-value --plugin-dir follows prompts; an explicit -- keeps its meaning. */
-export function withClaudeNativeActivity(args: readonly string[], workspacePath: string): string[] {
+export function withClaudeNativeActivity(args: readonly string[]): string[] {
   const separator = args.indexOf('--')
   const at = separator < 0 ? args.length : separator
-  return [...args.slice(0, at), '--plugin-dir', claudeNativeActivityDirectory(workspacePath), ...args.slice(at)]
+  return [...args.slice(0, at), '--plugin-dir', claudeNativeActivityDirectory(), ...args.slice(at)]
 }

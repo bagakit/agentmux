@@ -153,7 +153,7 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
       merge: { kind: 'json-managed-events' }
-    }, ...claudeNativeActivityMutations(workspace)]
+    }, ...claudeNativeActivityMutations()]
   }
 }
 
@@ -259,15 +259,15 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     },
     buildLaunch(context) {
       const launch = provider.buildLaunch(context)
-      return { ...launch, args: withClaudeNativeActivity(launch.args, context.workspacePath) }
+      return { ...launch, args: withClaudeNativeActivity(launch.args) }
     },
     buildResumeLaunch(context) {
       const launch = provider.buildResumeLaunch(context)
-      return { ...launch, args: withClaudeNativeActivity(launch.args, context.workspacePath) }
+      return { ...launch, args: withClaudeNativeActivity(launch.args) }
     },
     ...(provider.buildForkLaunch ? { buildForkLaunch(context: Parameters<NonNullable<AgentProvider['buildForkLaunch']>>[0]) {
       const launch = provider.buildForkLaunch!(context)
-      return { ...launch, args: withClaudeNativeActivity(launch.args, context.workspacePath) }
+      return { ...launch, args: withClaudeNativeActivity(launch.args) }
     } } : {})
   }
 }
