@@ -7,7 +7,7 @@ import { assertA2aReferenceUserReading } from '../../lib/a2a-inbox-product-proof
 await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, coreRoot, executable, workspace, nativeHome, controls,
   cli, credential, waitFor, activate, region, openMailbox, screenshot, nativeRequests, inputEffects }) => {
   if (process.argv.includes('--isolation-only')) { facts.isolationOnly = true; return }
-  facts.reading = { boundary: 'Actual public CLI → product Host/Core → qualified native and captured notice → Main/preload → production Conversation and Mailbox. Synthetic authenticated native actor, no model or vendor idle-race claim. Complete resource boundaries are separately exercised by the source-bound owning component tests; these App frames exercise original inline notice wire.' }
+  facts.reading = { boundary: 'Actual public CLI → product Host/Core → qualified native and captured notice → Main/preload → production Conversation and Mailbox. Synthetic authenticated native actor, no model or vendor idle-race claim. Complete resource boundaries are separately exercised by the source-bound owning component tests; these App frames exercise qualified original Inbox reading with an independent notification wire.' }
   for (const label of ['Author', 'Recipient']) {
     const session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'proof', providerId: 'codex', workspacePath: workspace,
       commandOverride: executable, env: { HOME: process.env.HOME, CODEX_HOME: nativeHome, AGENTMUX_A2A_PROOF_DIRECTORY: controls }, injectAgentMuxGuide: false, cols: 100, rows: 30 })
@@ -65,22 +65,49 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
   const notification = `${base}.querySelector('[data-a2a-notification-id="${key.submissionId}"]')`
   await waitFor('production typed platform notice', () => first.cdp.evaluate(`Boolean(${notification})`))
   await first.cdp.evaluate(`${notification}.scrollIntoView({block:'center'})`)
-  await activate(first.cdp, `${notification}.querySelector('.log-turn__system-toggle')`)
-  await waitFor('actual static reference list', () => first.cdp.evaluate(`${notification}.querySelectorAll('.log-turn__references li').length===1`))
-  const rendered = await first.cdp.evaluate(`(()=>{const n=${notification};return{text:n.textContent,title:n.querySelector('.log-turn__system-title')?.textContent,
+  const originalCard = `${notification}.querySelector('[data-a2a-original-message-id="${messageId}"] > .log-turn')`
+  await waitFor('the original right-side Agent message', () => first.cdp.evaluate(`Boolean(${originalCard}?.querySelector('.log-turn__body'))`))
+  const rendered = await first.cdp.evaluate(`(()=>{const n=${notification},card=${originalCard};return{
     role:n.dataset.speakerRole,eventRole:n.dataset.conversationRole,eventAuthor:JSON.parse(n.dataset.conversationAuthor),notificationId:n.dataset.a2aNotificationId,
-    refs:[...n.querySelectorAll('.log-turn__references li')].map(row=>row.textContent),hint:n.querySelector('.log-turn__references-hint')?.textContent,
-    actionable:n.querySelectorAll('.log-turn__references a,.log-turn__references button').length}})()`)
-  assert.ok(rendered.title); assert.equal(rendered.role, 'system'); assert.equal(rendered.eventRole, 'notice')
-  assert.equal(rendered.eventAuthor.kind, 'system'); assert.equal(rendered.notificationId, key.submissionId); assert.equal(rendered.actionable, 0)
-  assert.ok(rendered.refs[0].includes(messageId)); assert.ok(rendered.hint.includes('message --skill'))
-  assert.ok(!rendered.text.includes('authored-example-message'))
-  await activate(first.cdp, `${notification}.querySelector('[aria-label="Copy message"]')`)
-  const copiedWire = await waitFor('exact original notification Copy through production IPC', async () => {
-    try { const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === wire ? value : null }
+    originals:n.querySelectorAll('[data-a2a-original-message-id]').length,primarySystemCards:n.querySelectorAll('.conversation-a2a-notice__messages .log-turn[data-speaker-role="system"]').length,
+    original:{messageId:card.dataset.messageId,role:card.dataset.speakerRole,relation:card.dataset.speakerRelation,direction:card.dataset.messageDirection,
+      senderId:card.querySelector('.log-turn__sender-id code')?.textContent,body:card.querySelector('.log-turn__body').textContent,decodedReferences:card.querySelectorAll('.log-turn__references').length},
+    detailsInitiallyOpen:n.querySelector('.conversation-a2a-notice__details').open}})()`)
+  assert.equal(rendered.role, 'system'); assert.equal(rendered.eventRole, 'notice'); assert.equal(rendered.eventAuthor.kind, 'system')
+  assert.equal(rendered.notificationId, key.submissionId); assert.equal(rendered.originals, 1); assert.equal(rendered.primarySystemCards, 0)
+  assert.deepEqual(rendered.original, { messageId, role: 'agent', relation: 'other-agent', direction: 'outgoing', senderId: author.agentSessionId, body, decodedReferences: 0 })
+  assert.equal(rendered.detailsInitiallyOpen, false)
+  await activate(first.cdp, `${originalCard}.querySelector('[aria-label="Copy message"]')`)
+  const copiedConversationBody = await waitFor('exact original message Copy in Conversation', async () => {
+    try { const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === body ? value : null }
     catch (error) { if (error.code === 'ENOENT') return null; throw error }
   })
-  const wireCopyFeedback = await waitFor('original notification Copy feedback', () => first.cdp.evaluate(`${notification}.querySelector('.log-turn__actions')?.dataset.copyState==='copied'`))
+  const conversationBodyCopyFeedback = await waitFor('original message Copy feedback in Conversation', () => first.cdp.evaluate(`${originalCard}.querySelector('.log-turn__actions')?.dataset.copyState==='copied'`))
+  const details = `${notification}.querySelector('.conversation-a2a-notice__details')`
+  await activate(first.cdp, `${details}.querySelector('summary')`)
+  await waitFor('notification details retain the original complete wire', () => first.cdp.evaluate(`Boolean(${details}.querySelector('[aria-label="Copy notification protocol"]'))`))
+  await first.cdp.evaluate(`${details}.querySelector('[aria-label="Copy notification protocol"]').scrollIntoView({block:'center'})`)
+  await activate(first.cdp, `${details}.querySelector('[aria-label="Copy notification protocol"]')`)
+  const copiedWire = await waitFor('exact original notification Copy through production IPC', async () => {
+    const value = JSON.parse(await readFile(process.env.AGENTMUX_A2A_PROOF_CLIPBOARD, 'utf8')); return value.text === wire ? value : null
+  })
+  const wireCopyFeedback = await waitFor('original notification Copy feedback', () => first.cdp.evaluate(`${details}.querySelector('[aria-label="Copy notification protocol"]')?.dataset.copyState==='copied'`))
+  const noticeContributions = conversation.items.find(entry => entry.kind === 'item' && entry.item.records.some(record =>
+    record.original.kind === 'captured' && record.original.item.a2aNotificationId === key.submissionId)).item.records
+  const originalRecords = []
+  for (const record of noticeContributions) {
+    const disclosure = `${details}.querySelector('[data-original-contribution="${record.id}"]')`
+    await first.cdp.evaluate(`${disclosure}.querySelector('summary').scrollIntoView({block:'center'})`)
+    await activate(first.cdp, `${disclosure}.querySelector('summary')`)
+    const originalRecord = await waitFor('complete original contribution JSON', () => first.cdp.evaluate(`${disclosure}.querySelector('pre')?.textContent`))
+    assert.deepEqual(JSON.parse(originalRecord), record.original.item)
+    originalRecords.push({ id: record.id, kind: record.original.kind, original: JSON.parse(originalRecord) })
+    assert.equal(await first.cdp.evaluate(`${notification}.querySelectorAll('[data-a2a-original-message-id]').length`), 1)
+    await activate(first.cdp, `${disclosure}.querySelector('summary')`)
+  }
+  await first.cdp.evaluate(`${details}.querySelector('summary').scrollIntoView({block:'center'})`)
+  await activate(first.cdp, `${details}.querySelector('summary')`)
+  await waitFor('primary original reading restored', () => first.cdp.evaluate(`!${details}.open`))
   const batch = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result
   assert.equal(batch.messages.length, 1); assert.equal(batch.messages[0].envelope.messageId, messageId)
   assert.equal(batch.readerRun.runId, recipient.run.runId)
@@ -94,9 +121,9 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
         await first.cdp.call('Emulation.setDeviceMetricsOverride', { width, height: 980, deviceScaleFactor: 1, mobile: false })
         await first.cdp.evaluate(`${notification}.scrollIntoView({block:'center'})`)
         await screenshot(first, `reference-conversation-${value}-${size}`, width, 980)
-        const geometry = await first.cdp.evaluate(`(()=>{const n=${notification}.querySelector('.log-turn__references'),r=n.getBoundingClientRect();return{left:r.left,right:r.right,width:r.width,height:r.height,scrollWidth:n.scrollWidth,clientWidth:n.clientWidth,viewport:innerWidth}})()`)
+        const geometry = await first.cdp.evaluate(`(()=>{const n=${originalCard},r=n.getBoundingClientRect();return{left:r.left,right:r.right,width:r.width,height:r.height,scrollWidth:n.scrollWidth,clientWidth:n.clientWidth,viewport:innerWidth}})()`)
         assert.ok(geometry.width > 150 && geometry.height > 50 && geometry.left >= 0 && geometry.right <= geometry.viewport)
-        assert.ok(geometry.scrollWidth <= geometry.clientWidth + 1, 'The original long identity wraps inside the reading face')
+        assert.ok(geometry.scrollWidth <= geometry.clientWidth + 1, 'The original Agent message stays inside its reading face')
         facts.frames.at(-1).referenceGeometry = geometry
       }
     }
@@ -144,5 +171,5 @@ await runPrivateA2aProductScenario(async ({ client, first, sessions, facts, core
   assert.deepEqual(afterBatch, batch, 'Human rendering and Copy must not acknowledge the Agent inbox')
   const afterEffects = await inputEffects(); assert.deepEqual(afterEffects, effects, 'Reading, themes, Copy and public check must not enqueue or steer input')
   facts.reading = { ...facts.reading, author, recipient, messageId, operationId, sent, original, key, input, wire, conversation, captured, rendered,
-    publicRead, copiedWire, copiedBody, wireCopyFeedback, bodyCopyFeedback, userPage, userReading, inbox, outbox, batch, afterBatch, effects: { before: effects, after: afterEffects } }
+    publicRead, copiedWire, copiedBody, copiedConversationBody, originalRecords, wireCopyFeedback, bodyCopyFeedback, conversationBodyCopyFeedback, userPage, userReading, inbox, outbox, batch, afterBatch, effects: { before: effects, after: afterEffects } }
 })

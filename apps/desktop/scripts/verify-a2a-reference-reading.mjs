@@ -15,7 +15,7 @@ const sources = [
   ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
   'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',
-  ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView'].map(name => `packages/client-ui/src/components/${name}.tsx`),
+  ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView', 'ConversationA2AReferences', 'ConversationA2AMetadata', 'ConversationNotificationDetails', 'ConversationMessageCard', 'ConversationToolPayload'].map(name => `packages/client-ui/src/components/${name}.tsx`),
   'packages/client-ui/src/lib/conversation-speaker.ts', 'packages/client-ui/src/styles/conversation-message.css',
   'packages/client-ui/test/a2a-reference-reading.test.tsx', 'packages/client-ui/test/conversation-leading-context.test.tsx',
   'apps/desktop/src/renderer/src/components/MailboxA2A.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
@@ -78,6 +78,12 @@ function mergeSources(target, inputs) {
     target[path] = digest
   }
 }
+function owningProductionInputs(facts) {
+  const inputs = Object.fromEntries(facts.inputs.filter(input => sources.includes(input.path) && input.path.includes('/src/')).map(input => [input.path, input.sourceSHA256]))
+  assert.ok(Object.keys(inputs).length > 0)
+  for (const path of new Set(readingMutations.map(edit => edit.path))) assert.ok(inputs[path], 'Actual tests must consume their production mutation owner: ' + path)
+  return inputs
+}
 async function prepare(preparation) {
   const directory = join(area, 'run-' + Date.now()); await mkdir(directory, { recursive: true })
   const receipt = { schema: 'agentmux.a2a-reference-reading.v1', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
@@ -98,7 +104,7 @@ async function prepare(preparation) {
     }
     receipt.types = await execute('pnpm', ['--filter', '@agentmux/client-ui', 'typecheck'], directory, 'types')
     assert.equal(receipt.types.exitCode, 0, 'Current Core and shared UI types: ' + receipt.types.log)
-    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation })
+    receipt.product = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation, testInputs: owningProductionInputs(baseline) })
     const runs = [receipt.baseline, ...receipt.mutations.flatMap(item => [item.mutant, item.restored])]
     for (const path of [...runs.flatMap(run => [run.log, run.report, run.loaded]), receipt.types.log]) receipt.artifacts[path] = sha(await readFile(local(path)))
     for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Source stayed fixed: ' + path)
@@ -126,7 +132,7 @@ async function verify() {
   }
   assert.equal(receipt.types.exitCode, 0); assert.deepEqual(receipt.types.argv, ['--filter', '@agentmux/client-ui', 'typecheck'])
   const productBytes = await readFile(receipt.product.path); assert.equal(sha(productBytes), receipt.product.sha256)
-  const product = JSON.parse(productBytes), result = await verifyA2aReferenceReadingProductProof(product, { root })
+  const product = JSON.parse(productBytes), result = await verifyA2aReferenceReadingProductProof(product, { root, testInputs: owningProductionInputs(baseline) })
   console.log(JSON.stringify({ passed: true, tests: baseline.cases.length, mutants: receipt.mutations.length, ...result }))
 }
 const args = process.argv.slice(2)

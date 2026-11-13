@@ -43,6 +43,13 @@ async function reference(root, value) {
   return { path, sha256: value.sha256, bytes }
 }
 
+export function a2aPreparedExecution(applicationBundle) {
+  const desktopRoot = join(applicationBundle, 'Contents/Resources/app'), coreRoot = join(desktopRoot, 'node_modules/@agentmux/core')
+  return { kind: 'prepared-artifact', applicationBundle, desktopRoot, coreRoot,
+    mainEntry: join(desktopRoot, 'out/main/index.js'), executable: join(applicationBundle, 'Contents/MacOS', PRODUCT_NAME),
+    argv: [], cli: { executable: join(coreRoot, 'bin/amux'), argv: [] } }
+}
+
 /** The input references the original clone/build/review owners; it never upgrades their outcomes. */
 export async function prepareA2aArtifact({ root, input, privateRoot, sourcePaths }) {
   root = await realpath(root); privateRoot = await realpath(privateRoot)
@@ -88,9 +95,7 @@ export async function prepareA2aArtifact({ root, input, privateRoot, sourcePaths
   const coreGraph = Object.fromEntries(Object.entries(inventory.files).filter(([path, value]) =>
     path.startsWith(corePrefix) && path.endsWith('.js') && value.kind === 'file').map(([path, value]) => ['dist/' + path.slice(corePrefix.length), value.sha256]))
   assert.ok(Object.keys(coreGraph).length > 100, 'Full prepared Core JS graph is nonempty')
-  const execution = { kind: 'prepared-artifact', applicationBundle, desktopRoot: application, coreRoot,
-    mainEntry: join(application, 'out', 'main', 'index.js'), executable: join(applicationBundle, 'Contents', 'MacOS', PRODUCT_NAME),
-    argv: [], cli: { executable: join(coreRoot, 'bin', 'amux'), argv: [] } }
+  const execution = a2aPreparedExecution(applicationBundle)
   for (const path of [execution.executable, execution.mainEntry, execution.cli.executable, coreRoot]) {
     assert.ok(inside(applicationBundle, await realpath(path)), 'Actual execution must stay within the frozen artifact')
   }
@@ -100,8 +105,9 @@ export async function prepareA2aArtifact({ root, input, privateRoot, sourcePaths
     artifact: { applicationBundle, inventory }, coreGraph, execution }
 }
 
-export async function verifyA2aPreparedArtifact(preparation, { root }) {
+export async function verifyA2aPreparedArtifact(preparation, { root, artifact = 'execution' }) {
   root = await realpath(root)
+  assert.ok(['execution', 'origin'].includes(artifact), 'Choose the exact artifact being observed; never silently fall back')
   assert.equal(preparation.kind, 'prepared-artifact')
   const descriptor = JSON.parse((await reference(root, preparation.input)).bytes)
   assert.equal(descriptor.schema, 'agentmux.a2a-prepared-input.v1')
@@ -115,12 +121,14 @@ export async function verifyA2aPreparedArtifact(preparation, { root }) {
   assert.equal(preparation.sourceSnapshot.tree, preparation.identity.sourceTree)
   assert.equal((await exec('git', ['show', '-s', '--format=%T', preparation.sourceSnapshot.commit], { cwd: root })).stdout.trim(), preparation.sourceSnapshot.tree)
   for (const record of Object.values(preparation.records)) await reference(root, record)
-  assert.equal(preparation.execution.applicationBundle, preparation.artifact.applicationBundle)
-  for (const path of [preparation.execution.executable, preparation.execution.mainEntry, preparation.execution.cli.executable, preparation.execution.coreRoot])
-    assert.ok(inside(preparation.artifact.applicationBundle, await realpath(path)), 'Selected execution stays inside the sealed artifact')
-  assertPackageIdentity(await readPackageIdentity(preparation.artifact.applicationBundle), preparation.identity)
-  assert.deepEqual(await a2aArtifactInventory(preparation.artifact.applicationBundle), preparation.artifact.inventory,
-    'The actual prepared execution graph stayed unchanged')
+  assert.deepEqual(preparation.execution, a2aPreparedExecution(preparation.artifact.applicationBundle))
+  const observedBundle = artifact === 'origin' ? preparation.origin.applicationBundle : preparation.artifact.applicationBundle
+  const execution = a2aPreparedExecution(observedBundle)
+  for (const path of [execution.executable, execution.mainEntry, execution.cli.executable, execution.coreRoot])
+    assert.ok(inside(observedBundle, await realpath(path)), 'Selected execution stays inside the sealed artifact')
+  assertPackageIdentity(await readPackageIdentity(observedBundle), preparation.identity)
+  assert.deepEqual(await a2aArtifactInventory(observedBundle), preparation.artifact.inventory,
+    'The selected prepared artifact graph stayed unchanged')
   for (const [path, digest] of Object.entries(preparation.sourceSnapshot.files)) {
     const bytes = (await exec('git', ['show', preparation.sourceSnapshot.commit + ':' + path], { cwd: root, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024 })).stdout
     assert.equal(sha(bytes), digest, 'Fixed prepared source snapshot: ' + path)
@@ -129,4 +137,5 @@ export async function verifyA2aPreparedArtifact(preparation, { root }) {
   const graph = Object.fromEntries(Object.entries(preparation.artifact.inventory.files).filter(([path, value]) =>
     path.startsWith(prefix) && path.endsWith('.js') && value.kind === 'file').map(([path, value]) => ['dist/' + path.slice(prefix.length), value.sha256]))
   assert.deepEqual(graph, preparation.coreGraph, 'The product and later model join retain the full same-Core graph')
+  return execution
 }
