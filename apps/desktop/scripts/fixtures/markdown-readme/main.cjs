@@ -124,6 +124,16 @@ app.whenReady().then(async () => { try {
     await scrollTo('h1', 24); await frame(`elements-alerts-${theme}`, { theme, document: 'elements.md' })
     await scrollTo('details.md-details', 24); await frame(`elements-details-cards-${theme}`, { theme, document: 'elements.md' })
   }
+  // Conversation density: the same README HTML in an Agent reply and a user message, normal and narrow.
+  for (const [width, theme] of [[760, 'dark'], [420, 'light']]) {
+    await evaluate(`filePreviewProbe.theme(${JSON.stringify(theme)}); filePreviewProbe.conversation(${width})`); await paint(); await sleep(300)
+    const facts = await evaluate('filePreviewProbe.conversationFacts()')
+    report.facts[`conversation-${width}`] = facts
+    assert.equal(facts.bodies, 2); assert.equal(facts.documentMode, 0, 'Conversations keep their compact reading mode')
+    assert.equal(facts.remote, 0, 'Conversations never request remote images')
+    assert.deepEqual(facts.overflow, [false, false], 'Cards and alerts stay inside each conversation body')
+    await frame(`conversation-${width}-${theme}`, { theme, document: 'conversation' })
+  }
   report.passed = true
 } catch (error) {
   report.failure = { name: error.name, message: error.message, stack: error.stack }

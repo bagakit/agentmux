@@ -5,6 +5,7 @@ import { FileExplorer } from '../../../src/renderer/src/components/FileExplorer'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
+import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { addWorkbenchRegion, documentKey, fileTabId, type FileWorkbenchSurface } from '../../../src/renderer/src/lib/workbench-tabs'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
@@ -111,4 +112,28 @@ const probe = {
   unmount() { flushSync(() => root.unmount()) },
   key: (path: string) => documentKey(workspaceId, path)
 }
+// Conversation reading of the same README HTML: the real ConversationMessage in an Agent reply and a user
+// message, mounted in a separate root so the Workbench layout stays as the file preview frames left it.
+const conversationContent = '> [!NOTE]\n> The reply quotes a README alert.\n\n<div align="center"><b>Centered</b> H<sub>2</sub>O and <kbd>Ctrl</kbd></div>\n\n' +
+  '<table><tr><td width="50%"><b>Space</b><br><sub>Where work is shown.</sub></td><td width="50%"><b>Focus</b><br><sub>Who needs you now.</sub></td></tr></table>\n\n' +
+  '![Badge](https://img.shields.io/badge/tests-passing-8de3ae)'
+const conversationHost = document.createElement('div')
+conversationHost.id = 'conversation-scene'
+conversationHost.style.cssText = 'position:fixed;inset:0;z-index:50;display:none;overflow:auto;padding:24px;box-sizing:border-box;background:var(--surface-0);color:var(--text);font-size:var(--fs-body);font-family:var(--font-sans)'
+document.body.append(conversationHost)
+const conversationRoot = createRoot(conversationHost)
+Object.assign(probe, {
+  conversation(width: number) {
+    conversationHost.style.display = 'block'
+    flushSync(() => conversationRoot.render(<main className="activity-feed" style={{ maxWidth: width, margin: '0 auto' }}>
+      <ConversationMessage messageId="readme-reply" conversationSessionId="readme-agent" speaker={{ role: 'agent', id: 'readme-agent' }} name="Docs" providerId="claude" content={conversationContent} />
+      <ConversationMessage messageId="readme-input" conversationSessionId="readme-agent" speaker={{ role: 'user', id: 'person' }} name="You" content={conversationContent} />
+    </main>))
+  },
+  conversationFacts() {
+    const scene = document.getElementById('conversation-scene')!, bodies = [...scene.querySelectorAll<HTMLElement>('.md')]
+    return { bodies: bodies.length, documentMode: scene.querySelectorAll('.md-document').length, remote: scene.querySelectorAll('img.md-remote-image').length,
+      overflow: bodies.map(body => { const outer = body.getBoundingClientRect(); return [...body.querySelectorAll('.md-html-table--layout, .md-alert')].some(node => { const r = node.getBoundingClientRect(); return r.left < outer.left - 1 || r.right > outer.right + 1 }) }) }
+  }
+})
 Object.assign(window, { filePreviewProbe: probe })
