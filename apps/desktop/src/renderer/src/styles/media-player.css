@@ -15,11 +15,12 @@
   border-radius: var(--radius-lg); background: color-mix(in srgb, var(--bg) 20%, black); box-shadow: inset 0 0 0 1px var(--wash-1); }
 /* The frame is the free box; the stage inside it is sized to the picture so the controls sit on it. */
 .media-player__frame { flex: 1; min-height: 0; width: 100%; display: grid; place-items: center; }
+/* Audio has no picture: the frame leaves the layout, or its own display would keep an empty stage on screen. */
+.media-player__frame[hidden] { display: none; }
 .media-player__frame > .media-player__stage { flex: none; height: 100%; }
 .media-player__stage[data-fitted] { width: var(--media-fit-width); height: var(--media-fit-height); }
 :root[data-appearance="light"] .media-player__stage { box-shadow: var(--elev-2); }
 .media-player__stage > video { width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
-.media-player__stage[hidden] { display: none; }
 .media-player[data-fullscreen] { padding: 0; background: black; }
 .media-player[data-fullscreen] .media-player__stage { border-radius: 0; box-shadow: none; }
 .media-player[data-fullscreen] > .media-player__metadata { display: none; }
