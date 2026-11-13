@@ -43,16 +43,23 @@ export async function createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS,
   for (const directory of sourceRoots) await scan(join(root, directory))
   // Native CSS consumers have masks instead of literal semantic IDs. These are source references only.
   const nativeSource=await fs.readFile(join(root,'packages/client-ui/src/theme/icon-sprite.ts'),'utf8')
+  // Every stylesheet under the same source roots, so Mobile and nested styles count too.
+  const stylesheets=[]
+  async function collectStyles(directory) {
+    for (const entry of await fs.readdir(join(root, directory), { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await collectStyles(path)
+      else if (entry.name.endsWith('.css')) stylesheets.push({ path, text: await fs.readFile(join(root, path), 'utf8') })
+    }
+  }
+  for (const directory of sourceRoots) await collectStyles(directory)
   for(const match of nativeSource.matchAll(/'(--native-[^']+)': '([^']+)'/g)) {
     if(!references.has(match[2]))continue
-    for(const directory of ['packages/client-ui/src/styles','apps/desktop/src/renderer/src/styles']) {
-      for(const name of await fs.readdir(join(root,directory))) {
-        if(!name.endsWith('.css'))continue
-        const path=join(directory,name),text=await fs.readFile(join(root,path),'utf8'),position=text.indexOf(match[1])
-        if(position<0)continue
-        const line=text.slice(0,position).split('\n').length
-        references.get(match[2]).push({file:path,line,kind:'native',excerpt:text.split('\n')[line-1].trim().slice(0,220)})
-      }
+    for(const {path,text} of stylesheets) {
+      const position=text.indexOf(match[1])
+      if(position<0)continue
+      const line=text.slice(0,position).split('\n').length
+      references.get(match[2]).push({file:path,line,kind:'native',excerpt:text.split('\n')[line-1].trim().slice(0,220)})
     }
   }
   const roles = metadata.icons.map(icon => {
