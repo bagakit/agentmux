@@ -712,6 +712,18 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
   }
 }
 
+// The outgoing read is one public read-only RPC. A loaded original Main can miss its own short Control
+// budget; that is an unknown observation, not an unhealthy GUI. Retry only the missing read within one
+// window. A qualification failure on an actual observation (loading, storage, identity) still rejects.
+async function qualifyOutgoingUi(appPath) {
+  const deadline = Date.now() + 30_000
+  while (true) {
+    try { return await qualifyUi(appPath, null, { outgoing: true }) }
+    catch (error) { if (error.uiContinuity || Date.now() >= deadline) throw error }
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+}
+
 async function awaitUiActivation(appPath, before, runtimePlan = null) {
   const { confirmUiRuntime, assertUiRuntimeObservation, confirmUiTerminalRebindings } = await import('./package-runtime-upgrade.mjs')
   const deadline = Date.now() + 30_000
@@ -786,7 +798,7 @@ export async function installApplication(appPath, { intent = installIntent, home
       previousScope = await scopedProcesses(currentPath, [], semanticHost ? [semanticHost.owner] : [])
       running = previousScope.serving
     }
-    if (running.length > 0) before = await qualifyUi(currentPath, null, { outgoing: true })
+    if (running.length > 0) before = await qualifyOutgoingUi(currentPath)
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
     if (intent === 'full' && runtimeChanged) runtimeUpgrade = await prepareRuntimeUpgrade(currentPath, next)
     if (intent === 'ui-only') native = { status: 'deferred', reason: uiRuntime
