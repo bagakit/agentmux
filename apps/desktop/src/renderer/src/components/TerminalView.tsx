@@ -259,6 +259,8 @@ export function TerminalView({
   const viewportRef = useRef<TerminalViewportSynchronizer | null>(null)
   const viewportMemoryRef = useRef<TerminalViewportMemory>({ kind: 'latest' })
   const viewportMemoryMarkerRef = useRef<{ terminal: Terminal; buffer: IBuffer; marker: IMarker } | null>(null)
+  // The caret request whose one-time reveal of the live output already ran.
+  const revealedCaretNonceRef = useRef<number | null>(null)
   const terminalGenerationRef = useRef(0)
   const nextLinkRequestIdRef = useRef(0)
   const linkRequestRef = useRef<TerminalLinkRequest | null>(null)
@@ -448,6 +450,15 @@ export function TerminalView({
     if (!target) return
     const element = search ?? terminalRef.current?.element
     if (!element?.isConnected || element.closest('[inert]')) return
+    // An explicit handoff shows where the live prompt is, once. It replaces the remembered reading
+    // position too, so the visibility restore of a just-revealed terminal lands on the same line;
+    // a later focus retry for the same request never pulls a reader back down.
+    if (!search && request.reveal === 'latest' && revealedCaretNonceRef.current !== request.nonce) {
+      revealedCaretNonceRef.current = request.nonce
+      releaseViewportMemoryMarker()
+      viewportMemoryRef.current = { kind: 'latest' }
+      terminalRef.current?.scrollToBottom()
+    }
     target.focus()
     // A retained View can still be in its private parking host when this child mounts.
     // focus() is a request, not confirmation; preserve the same intent until its actual

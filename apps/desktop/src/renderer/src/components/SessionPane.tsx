@@ -272,7 +272,7 @@ export function SessionPane({
     setHistoryOpen(false)
     selectOwnRegion()
     if (projectionPolicy.acceptsInput && !pendingAgentRestore && linkOrigin.regionId) {
-      useAppStore.getState().requestRegionCaretFocus(linkOrigin.regionId)
+      useAppStore.getState().requestRegionCaretFocus(linkOrigin.regionId, { reveal: 'latest' })
     }
   }
   useEffect(() => {

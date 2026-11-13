@@ -1006,7 +1006,7 @@ export type AppState = GitReadingActions & {
   // 指针点击那一路原生 mousedown 已经把焦点放对了，再夺一次会打断原生行为。不持久化（是一次导航，
   // 不是布局事实）。browser 那格没有消费者——原生 WebContentsView 的聚焦是另一条路；一条无人认领的
   // 意图停在这里是惰性的（下一次投递会覆盖它）。
-  regionCaretFocus: { regionId: string; nonce: number; target?: 'terminal' } | null
+  regionCaretFocus: { regionId: string; nonce: number; target?: 'terminal'; reveal?: 'latest' } | null
   /**
    * A derived action chosen outside its Region (a Focus card) and handed to that exact Region's
    * SessionPane, which alone opens it in place. Not persisted; a mismatched Region never consumes it.
@@ -1335,7 +1335,8 @@ export type AppState = GitReadingActions & {
   // 调用方不显式说明时按最保守的一路走，不夺焦。
   focusRegion(workspaceId: string, tabId: string, regionId: string, cause?: RegionFocusCause, groupId?: string): void
   // 被点名那格的表面消费完 caret 意图后调它清除（只清自己那条 nonce，避免抹掉更晚一次导航投的新意图）。
-  requestRegionCaretFocus(regionId: string): void
+  // reveal: 'latest' 让终端同时回到当前输出：只聚焦一块已显示的终端看不出任何变化。
+  requestRegionCaretFocus(regionId: string, options?: { reveal?: 'latest' }): void
   clearRegionCaretFocus(nonce: number): void
   requestRegionDerivedAction(request: Omit<RegionDerivedActionRequest, 'nonce'>): void
   clearRegionDerivedAction(nonce: number): void
@@ -7538,8 +7539,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) } : {})
     }))
   },
-  requestRegionCaretFocus(regionId) {
-    set({ regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce, target: 'terminal' } })
+  requestRegionCaretFocus(regionId, options) {
+    set({ regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce, target: 'terminal', ...(options?.reveal ? { reveal: options.reveal } : {}) } })
   },
   requestRegionDerivedAction(request) {
     set({ regionDerivedActionRequest: { ...request, nonce: ++regionCaretFocusNonce } })
