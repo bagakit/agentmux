@@ -897,7 +897,7 @@ export class AgentSessionRunLifecycle {
         provider, readySession, run, lifecycleOperationId, deferredResumePrompt, continuity?.launchInput?.message ?? message,
         continuity?.launchInput?.input.submissionId)
       await this.ports.input.recordPromptMessageAfterSideEffect(readySession, continuity?.launchInput?.input.submissionId ?? lifecycleOperationId, 'Resume prompt', continuity?.launchInput?.message ?? message,
-        promptConfirmed ? 'complete' : 'failed')
+        promptConfirmed ? 'complete' : 'failed', continuity?.launchInput?.key, continuity?.launchInput ? 'launch' : undefined)
       return this.ports.events.projectSession(readySession)
     } catch (error) {
       operationError = error
@@ -1178,7 +1178,7 @@ export class AgentSessionRunLifecycle {
     if (carried?.delivery === 'launch' && carried.state === 'launch-carried') {
       // The exact original Start is now known, so its frozen history can be
       // recorded under the same input ID without dispatching any input again.
-      await this.ports.input.recordPromptMessageAfterSideEffect(restored, carried.input.submissionId, 'Resume prompt', carried.message)
+      await this.ports.input.recordPromptMessageAfterSideEffect(restored, carried.input.submissionId, 'Resume prompt', carried.message, 'complete', carried.key, 'launch')
     }
     this.ports.events.publisher.publish(lifecycleObserved(reservation, restored.run))
     return restored

@@ -5760,7 +5760,7 @@ export class AgentMuxClient {
           now,
           'user',
           { status: promptConfirmed ? 'complete' : 'failed',
-            ...(!initialEnvelope ? { publicContent: 'confirmed' as const } : {}),
+            ...(!initialEnvelope ? { publicContent: 'confirmed' as const, ...(readySession.initialInput?.key ? { inputRef: readySession.initialInput.key } : {}) } : {}),
             ...(initialEnvelope?.senderSessionId ? { authorAgentSessionId: initialEnvelope.senderSessionId } : {}) }
         )
       }
@@ -9403,7 +9403,8 @@ export class AgentMuxClient {
     title: string,
     message: AgentPromptMessageContent,
     status: 'complete' | 'failed' = 'complete',
-    inputRef?: AgentPromptInputKey
+    inputRef?: AgentPromptInputKey,
+    inputOwner?: 'launch'
   ): Promise<void> {
     const now = Date.now()
     if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
@@ -9430,7 +9431,9 @@ export class AgentMuxClient {
       }
       return
     }
-    if (message.userContent && message.authorHuman && inputRef?.kind === 'prompt') {
+    // The continuity owner already holds its original launch producer. It is not
+    // a journal input, and an unrelated journal observation cannot gate its body.
+    if (message.userContent && message.authorHuman && inputRef?.kind === 'prompt' && inputOwner !== 'launch') {
       try {
         const saved = await this.messageQueue.inspectInput({ key: inputRef })
         if (saved?.intent.source.kind === 'prompt' && saved.intent.source.authorHuman === true) {

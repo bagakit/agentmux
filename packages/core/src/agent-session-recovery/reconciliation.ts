@@ -230,7 +230,7 @@ export class AgentSessionRecoveryReconciler {
         continuityOperations: { ...value.continuityOperations, [operationId]: next }, updatedAt: Math.max(value.updatedAt, Date.now()) }
     })
     this.ports.events.publishSession(settled)
-    if (['terminal-confirmed', 'native-admitted'].includes(state)) await this.ports.input.recordPromptMessageAfterSideEffect(settled, input.input.submissionId, 'Resume prompt', input.message)
+    if (['terminal-confirmed', 'native-admitted'].includes(state)) await this.ports.input.recordPromptMessageAfterSideEffect(settled, input.input.submissionId, 'Resume prompt', input.message, 'complete', input.key, 'launch')
     return settled
   }
   async dispose(): Promise<void> {

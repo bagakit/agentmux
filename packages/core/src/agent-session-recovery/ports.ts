@@ -115,7 +115,8 @@ export type AgentSessionRecoveryPorts = {
     title: string,
     message: AgentPromptMessageContent,
     status?: 'complete' | 'failed',
-    inputRef?: AgentPromptInputKey
+    inputRef?: AgentPromptInputKey,
+    inputOwner?: 'launch'
   ): Promise<void>;
     readCapturedPromptProducer(agentSessionId: string, expectedRun: AgentMuxRunRef, operationId: string): Promise<AgentPromptMessageContent | undefined>;
     resolveMessageAuthor(
