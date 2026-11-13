@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { CollaborationLayoutInput, CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse, CollaborationLayoutStructure } from './collaboration-layout-engine'
 import { collaborationLayoutStructureKey, translateCollaborationPath, type CollaborationPath } from './collaboration-layout-engine'
@@ -57,7 +57,9 @@ export function useCollaborationLayout(input: CollaborationLayoutInput, active: 
     }
     clock.frame = window.requestAnimationFrame(step)
   }, [window, publish, settle])
-  useEffect(() => { if (!motion || !active) settle() }, [motion, active, settle])
+  // Motion Off or hiding lands on the complete target in the same commit that turned it off,
+  // not at a later passive flush that would paint one more intermediate frame first.
+  useLayoutEffect(() => { if (!motion || !active) settle() }, [motion, active, settle])
   useEffect(() => () => { if (animation.current !== null) window.cancelAnimationFrame(animation.current.frame); animation.current = null }, [window])
   const latest = useRef(input); latest.current = input
   const latestStructure = useRef(structure); latestStructure.current = structure
