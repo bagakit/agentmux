@@ -153,6 +153,17 @@ class FakeStore {
     this.profiles.push(profile)
     return { snapshot: this.commit(), profile: structuredClone(profile) }
   }
+  async updateProfile(profileId: string, edit: { network?: unknown }, expected: number) {
+    if (expected !== this.revision) throw Object.assign(new Error('changed since'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    this.profiles = this.profiles.map((profile) => {
+      if (profile.id !== profileId) return profile
+      const next = { ...profile } as BrowserProfileSummary
+      if (edit.network === null || (edit.network as { mode?: string } | undefined)?.mode === 'system') delete next.network
+      else if (edit.network !== undefined) next.network = structuredClone(edit.network) as never
+      return next
+    })
+    return { snapshot: this.commit(), profile: structuredClone(this.profiles.find((profile) => profile.id === profileId)!) }
+  }
   async deleteProfile(profileId: string) {
     this.profiles = this.profiles.filter((profile) => profile.id !== profileId)
     this.pendingDeletes.push(profileId)
@@ -189,9 +200,14 @@ class FakeStore {
   }
 }
 
-function managerFixture(store = new FakeStore()): { store: FakeStore; manager: BrowserProfileManager } {
-  return { store, manager: new BrowserProfileManager(store as never) }
+function managerFixture(store = new FakeStore(), sessions?: ConstructorParameters<typeof BrowserProfileManager>[1]): { store: FakeStore; manager: BrowserProfileManager } {
+  return { store, manager: new BrowserProfileManager(store as never, sessions) }
 }
+
+function routeSessions(apply: (profileId: string, network: unknown) => Promise<void>) {
+  return { prepare: vi.fn(() => undefined), apply: vi.fn(apply), observe: vi.fn() }
+}
+const PROXY = { mode: 'proxy' as const, server: { scheme: 'http' as const, host: 'gw.corp.test', port: 3128 } }
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -344,6 +360,46 @@ describe('BrowserProfileManager', () => {
     await manager.initialize()
     expect(manager.defaultProfileId()).toBe(DEFAULT_ID)
     expect(store.pendingDeletes).toEqual([CREATED_ID])
+  })
+
+  it('applies a new route to the session before saving it, so a route that fails leaves the old one saved', async () => {
+    const order: string[] = []
+    const sessions = routeSessions(async (_id, network) => {
+      order.push(`apply:${(network as { mode?: string } | undefined)?.mode ?? 'system'}`)
+      if ((network as { server?: { host?: string } } | undefined)?.server?.host === 'down.corp.test') throw Object.assign(new Error('route failed'), { code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
+    })
+    const { store, manager } = managerFixture(new FakeStore(), sessions as never)
+    await manager.initialize()
+    const update = store.updateProfile.bind(store)
+    store.updateProfile = vi.fn(async (...args: Parameters<typeof update>) => { order.push('save'); return await update(...args) })
+
+    await manager.updateProfile(DEFAULT_ID, { network: PROXY }, 0)
+    expect(order).toEqual(['apply:proxy', 'save'])
+    expect(manager.listProfiles()[0]!.network).toEqual(PROXY)
+
+    order.length = 0
+    await expect(manager.updateProfile(DEFAULT_ID, { network: { ...PROXY, server: { ...PROXY.server, host: 'down.corp.test' } } }, 1))
+      .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
+    expect(order).toEqual(['apply:proxy'])
+    expect(manager.listProfiles()[0]!.network).toEqual(PROXY)
+  })
+
+  it('refuses a malformed route or a stale revision before touching the session', async () => {
+    const sessions = routeSessions(async () => {})
+    const { manager } = managerFixture(new FakeStore(), sessions as never)
+    await manager.initialize()
+    await expect(manager.updateProfile(DEFAULT_ID, { network: { mode: 'proxy', server: 'bad host::' } as never }, 0)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID' })
+    await expect(manager.updateProfile(DEFAULT_ID, { network: PROXY }, 7)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
+    expect(sessions.apply).not.toHaveBeenCalled()
+  })
+
+  it('puts the session back on the saved route when saving the new route fails', async () => {
+    const sessions = routeSessions(async () => {})
+    const { store, manager } = managerFixture(new FakeStore(), sessions as never)
+    await manager.initialize()
+    store.updateProfile = vi.fn(async () => { throw new Error('EIO') }) as never
+    await expect(manager.updateProfile(DEFAULT_ID, { network: PROXY }, 0)).rejects.toThrow('EIO')
+    expect(sessions.apply.mock.calls.map(([, network]) => network)).toEqual([PROXY, undefined])
   })
 
   it('keeps a deleting Profile out of a list committed while its partition is cleared', async () => {

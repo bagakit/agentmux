@@ -259,6 +259,32 @@ describe('BrowserProfileStore', () => {
     expect((await store.listProfiles()).find((item) => item.id === profile.id)?.source?.skippedByReason).toEqual({ expired: 1, 'app-bound-encryption': 2 })
   })
 
+  it('stores a parsed network route, refuses a malformed one, and clears it back to the system route', async () => {
+    const { path, store } = await storeFixture()
+    const [profile] = await store.listProfiles()
+    const route = { mode: 'proxy' as const, server: { scheme: 'socks5' as const, host: '10.0.0.2', port: 1080 }, bypass: ['*.corp.test'] }
+    const { profile: routed } = await store.updateProfile(profile!.id, { network: route }, 0)
+    expect(routed.network).toEqual(route)
+    expect(JSON.parse(await readFile(path, 'utf8')).profiles[0].network).toEqual(route)
+    expect(JSON.stringify(JSON.parse(await readFile(path, 'utf8')))).not.toMatch(/password|secret/)
+
+    const before = await readFile(path, 'utf8')
+    await expect(store.updateProfile(profile!.id, { network: { mode: 'proxy', server: 'http://me:pw@gw:1' } as never }, 1)).rejects.toThrow(/user name and password/)
+    expect(await readFile(path, 'utf8')).toBe(before)
+
+    const { profile: system } = await store.updateProfile(profile!.id, { network: null }, 1)
+    expect(system.network).toBeUndefined()
+    expect(JSON.parse(await readFile(path, 'utf8')).profiles[0]).not.toHaveProperty('network')
+  })
+
+  it('refuses metadata whose stored route the parser would not produce', async () => {
+    const { path, store } = await storeFixture()
+    const raw = JSON.parse(await readFile(path, 'utf8').catch(async () => { await store.listProfiles(); return await readFile(path, 'utf8') }))
+    raw.profiles[0].network = { mode: 'proxy', server: { scheme: 'http', host: 'bad host', port: 80 } }
+    await writeFile(path, JSON.stringify(raw))
+    await expect(store.listProfiles()).rejects.toThrow('not a valid route')
+  })
+
   it('aborts a pending fresh import without publishing a Profile', async () => {
     const { path, store } = await storeFixture()
     const { pending } = await store.beginPendingImport('Discarded import')

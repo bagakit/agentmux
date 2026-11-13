@@ -2681,3 +2681,67 @@ describe('Browser Profile reference on targets', () => {
   })
 })
 
+
+describe('Profile network route before the first page', () => {
+  // The manager waits for a Profile's route before any page of it exists, on create, restore and switch.
+  // A route that cannot be applied refuses that request and keeps the original page, Region and Profile.
+  function routedManager(window: ReturnType<typeof fakeWindow>['window'], prepare: (profileId: string) => Promise<void> | undefined) {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-bvm-route-'))
+    privateLedgerRoots.push(root)
+    const routed = { ...profiles, prepareSession: vi.fn(prepare) }
+    const manager = new BrowserViewManager(window as never, routed, new BrowserRefLedgerStore(join(root, 'ref-ledger.json')), appLinkHost())
+    return { manager, routed }
+  }
+
+  it('creates the page only after its Profile route is applied', async () => {
+    const fixture = fakeWindow()
+    let release!: () => void
+    const { manager, routed } = routedManager(fixture.window, () => new Promise<void>(resolve => { release = resolve }))
+    try {
+      const created = manager.create('routed', 'https://example.com/', null, 'work')
+      await Promise.resolve()
+      expect(routed.prepareSession).toHaveBeenCalledWith('work')
+      expect(fixture.children, 'a page existed before its route was applied').toHaveLength(0)
+      release(); await created
+      expect(fixture.children.map(view => view.partition)).toEqual(['persist:browser-work'])
+    } finally { manager.dispose() }
+  })
+
+  it('a route that cannot be applied refuses the page and opens nothing', async () => {
+    const fixture = fakeWindow()
+    const { manager } = routedManager(fixture.window, () => Promise.reject(Object.assign(new Error('route failed'), { code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })))
+    try {
+      await expect(manager.create('routed', 'https://example.com/', null, 'work')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
+      expect(fixture.children).toHaveLength(0)
+    } finally { manager.dispose() }
+  })
+
+  it('a refused switch keeps the original page in its Profile', async () => {
+    const fixture = fakeWindow()
+    const { manager, routed } = routedManager(fixture.window, id => id === 'work' ? Promise.reject(new Error('route failed')) : undefined)
+    try {
+      await manager.create('routed', 'https://example.com/page', null, 'personal')
+      const original = fixture.children[0]!
+      await expect(manager.switchProfile('routed', 'work')).rejects.toThrow('route failed')
+      expect(fixture.children).toEqual([original])
+      expect(original.webContents.isDestroyed()).toBe(false)
+      expect(manager.setViewport('routed', 'responsive')).toMatchObject({ profileId: 'personal' })
+      expect(routed.prepareSession.mock.calls.map(([id]) => id)).toEqual(['personal', 'work'])
+    } finally { manager.dispose() }
+  })
+
+  it('a refused restore keeps the released Region so it can be restored again', async () => {
+    const fixture = fakeWindow()
+    let fail = false
+    const { manager } = routedManager(fixture.window, () => fail ? Promise.reject(new Error('route failed')) : undefined)
+    try {
+      await manager.create('routed', 'https://example.com/page', null, 'work')
+      await release(manager, 'routed')
+      fail = true
+      await expect(manager.restore('routed')).rejects.toThrow('route failed')
+      expect(fixture.children.filter(view => !view.webContents.isDestroyed())).toHaveLength(0)
+      fail = false
+      expect(await manager.restore('routed')).toMatchObject({ id: 'routed', profileId: 'work', url: 'https://example.com/page' })
+    } finally { manager.dispose() }
+  })
+})
