@@ -141,7 +141,7 @@ const RESTORE_FOCUS_SNIPPET = `
   // After a refusal: focus() may already have moved focus (a page handler can bounce it elsewhere),
   // so put it back where the person had it.
   const returnFocus = (previous) => { if (focusable(previous) && !holdsFocus(previous)) previous.focus() }
-  const FOCUS_REFUSED = 'did not keep focus: it is inert (behind a modal dialog) or hidden, or the page moved focus elsewhere'`
+  const FOCUS_REFUSED = 'did not keep focus: it cannot take focus, is inert (behind a modal dialog) or hidden, or the page moved focus elsewhere'`
 
 /**
  * Scroll before reading geometry. `instant`, because a page with `scroll-behavior: smooth` would still
