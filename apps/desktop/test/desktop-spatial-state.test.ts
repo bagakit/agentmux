@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild');
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state';
+import { admitSpatialAgentOpen } from '../../../packages/core/src/spatial-agent-open';
 import { createWorkspaceLayout, addTabOccurrence, moveTabToNewGroup } from '@agentmux/layout';
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs';
 import { projectPersistedWorkbench, restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence';
@@ -258,6 +259,23 @@ describe('Desktop consumes the Core spatial owner', () => {
       if (data && typeof data === 'object' && !Array.isArray(data)) delete data.workspaceId;
     }
     expect(desktopWorkbenchFromSpatial(graph)).toEqual(projectPersistedWorkbench(original));
+  });
+  it('gives a Tab that Core opened in a Topic Zone that Topic, and keeps a recorded one', () => {
+    const zoneId = 'mote-home', spaceId = 'mote-space', cwd = _hygiene_fixturePath('mote');
+    const graph = { spaces: [{ spaceId, kind: 'mote' as const, name: 'Mote', hostId: 'local', directoryPath: cwd, projectId: null, topicId: 'original-mote' }],
+      zones: [{ zoneId, workspaceId: '__scratch__', kind: 'home' as const, hostId: 'local', directoryPath: cwd, branch: null }], tabs: [], regions: [],
+      bindings: [{ spaceId, zoneId }], layouts: {}, tabLayouts: {}, resources: {} };
+    const open = (requestId: string, from: typeof graph) => admitSpatialAgentOpen(from, { agentSessionId: requestId + '-session',
+      request: { schemaVersion: 5, requestId, operation: 'agent.open', content: { kind: 'new-agent', executorId: 'original' }, destination: { spaceId, zoneId, newTab: true }, focus: false },
+      execution: { hostId: 'local', workspacePath: cwd, workspaceId: '__scratch__' }, regionResource: { workspaceId: '__scratch__', phase: 'launching' } });
+    const first = open('first-main', graph), second = open('second-main', first.graph as typeof graph);
+    const opened = second.graph, recorded = second.record.address.tabId;
+    expect(opened.resources['tab:' + first.record.address.tabId]).not.toHaveProperty('topicId');
+    opened.resources['tab:' + recorded] = { ...(opened.resources['tab:' + recorded] as object), topicId: 'recorded-topic' };
+    const tabs = desktopWorkbenchFromSpatial(opened).tabs;
+    expect(tabs[first.record.address.tabId]).toMatchObject({ topicId: 'original-mote', space: { spaceId, zoneId } });
+    expect(tabs[recorded]!.topicId).toBe('recorded-topic');
+    expect(desktopBindingsFromSpatial(opened)[zoneId]).toMatchObject({ spaceId, topicId: 'original-mote', contentKind: 'mote' });
   });
   it('retains an edit made during the retry read and an edit made during the bootstrap write', async () => {
     const store = await owner(), graph = desktopSpatialGraph(workbench(), []);
