@@ -104,23 +104,24 @@ function image(value: unknown, limits: AnnotationDocumentLimits): AnnotationImag
 }
 
 function shape(value: unknown): ScreenshotShape {
-  const base = record(value, ['kind', 'id', 'color'], ['points', 'width', 'from', 'to', 'at', 'text', 'fontSize', 'radius', 'number', 'note', 'blockSize', 'template', 'dim', 'zoom'])
+  const base = record(value, ['kind', 'id', 'color'], ['points', 'width', 'from', 'to', 'at', 'text', 'fontSize', 'radius', 'number', 'note', 'blockSize', 'template', 'dim', 'zoom', 'locked'])
   const kind = text(base.kind), id = text(base.id), color = text(base.color)
   if (!id || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) invalid('Annotation IDs must be nonempty and colors must be opaque hexadecimal colors.')
-  const common = { id, color }
-  const fields = ['kind', 'id', 'color']
+  if (base.locked !== undefined && base.locked !== true) invalid('A locked annotation must record locked as true.')
+  const common = { id, color, ...(base.locked ? { locked: true as const } : {}) }
+  const fields = ['kind', 'id', 'color'], lockable = ['locked']
   if (kind === 'pen' || kind === 'highlight' || kind === 'pixelate-brush') {
-    record(value, [...fields, 'points', 'width', ...(kind === 'pixelate-brush' ? ['blockSize'] : [])])
+    record(value, [...fields, 'points', 'width', ...(kind === 'pixelate-brush' ? ['blockSize'] : [])], lockable)
     if (!Array.isArray(base.points) || !base.points.length) invalid('A stroke must contain its original points.')
     const stroke = { ...common, points: base.points.map(point), width: positive(base.width) }
     return kind === 'pixelate-brush' ? { ...stroke, kind, blockSize: positive(base.blockSize) } : { ...stroke, kind }
   }
   if (kind === 'text') {
-    record(value, [...fields, 'at', 'text', 'fontSize'])
+    record(value, [...fields, 'at', 'text', 'fontSize'], lockable)
     return { ...common, kind, at: point(base.at), text: text(base.text), fontSize: positive(base.fontSize) }
   }
   if (kind === 'note') {
-    record(value, [...fields, 'from', 'to', 'width', 'radius', 'number', 'note'], ['template'])
+    record(value, [...fields, 'from', 'to', 'width', 'radius', 'number', 'note'], ['template', ...lockable])
     const number = positive(base.number)
     if (!Number.isSafeInteger(number)) invalid('A numbered note must have a positive integer number.')
     if (base.template !== undefined && !['observation', 'expected', 'request'].includes(text(base.template))) invalid('The note template is unsupported.')
@@ -129,27 +130,27 @@ function shape(value: unknown): ScreenshotShape {
       ...(base.template === undefined ? {} : { template: base.template as 'observation' | 'expected' | 'request' }) }
   }
   if (kind === 'pixelate') {
-    record(value, [...fields, 'from', 'to', 'blockSize'])
+    record(value, [...fields, 'from', 'to', 'blockSize'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), blockSize: positive(base.blockSize) }
   }
   if (kind === 'blur') {
-    record(value, [...fields, 'from', 'to', 'radius'])
+    record(value, [...fields, 'from', 'to', 'radius'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), radius: inRange(base.radius, BLUR_RADIUS_RANGE, 'The blur strength is out of range.') }
   }
   if (kind === 'spotlight') {
-    record(value, [...fields, 'from', 'to', 'dim'])
+    record(value, [...fields, 'from', 'to', 'dim'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), dim: inRange(base.dim, SPOTLIGHT_DIM_RANGE, 'The spotlight dimming is out of range.') }
   }
   if (kind === 'callout') {
-    record(value, [...fields, 'from', 'to', 'at', 'zoom'])
+    record(value, [...fields, 'from', 'to', 'at', 'zoom'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), at: point(base.at), zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.') }
   }
   if (kind === 'cover') {
-    record(value, [...fields, 'from', 'to'])
+    record(value, [...fields, 'from', 'to'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to) }
   }
   if (kind === 'rect' || kind === 'ellipse' || kind === 'arrow') {
-    record(value, [...fields, 'from', 'to', 'width'])
+    record(value, [...fields, 'from', 'to', 'width'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), width: positive(base.width) }
   }
   return invalid('The annotation shape kind is unsupported.')

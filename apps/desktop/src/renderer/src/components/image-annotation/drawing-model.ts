@@ -4,7 +4,8 @@
 export type ScreenshotTool = 'pen' | 'highlight' | 'arrow' | 'rect' | 'ellipse' | 'text'
 export type ScreenshotPoint = { x: number; y: number }
 
-type ShapeBase = { id: string; color: string }
+/** A locked mark is never hit, erased, marquee-selected or moved; it still paints and exports. */
+type ShapeBase = { id: string; color: string; locked?: true }
 
 export type PenShape = ShapeBase & { kind: 'pen'; points: ScreenshotPoint[]; width: number }
 export type HighlightShape = ShapeBase & { kind: 'highlight'; points: ScreenshotPoint[]; width: number }
@@ -283,6 +284,127 @@ export function shapeBounds(shape: ScreenshotShape, textWidth?: (shape: TextShap
   return rect
 }
 
+/** Union of the marks' bounds; null for no marks. */
+export function groupBounds(shapes: readonly ScreenshotShape[], textWidth?: (shape: TextShape) => number): NormalizedRect | null {
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+  for (const shape of shapes) {
+    const box = shapeBounds(shape, textWidth)
+    left = Math.min(left, box.x); top = Math.min(top, box.y); right = Math.max(right, box.x + box.width); bottom = Math.max(bottom, box.y + box.height)
+  }
+  return shapes.length ? { x: left, y: top, width: right - left, height: bottom - top } : null
+}
+
+/** Moves each listed mark by its own delta. Unmoved marks keep their identity, and
+ * when nothing moves the same array returns so no empty Undo step is recorded. */
+function moveEach(shapes: ScreenshotShape[], deltas: ReadonlyMap<string, ScreenshotPoint>): ScreenshotShape[] {
+  let changed = false
+  const next = shapes.map(shape => {
+    const delta = deltas.get(shape.id)
+    if (!delta || (!delta.x && !delta.y)) return shape
+    changed = true
+    return moveShape(shape, delta.x, delta.y)
+  })
+  return changed ? next : shapes
+}
+
+export function moveShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>, dx: number, dy: number): ScreenshotShape[] {
+  return moveEach(shapes, new Map(shapes.filter(shape => ids.has(shape.id)).map(shape => [shape.id, { x: dx, y: dy }])))
+}
+
+export type ShapeAlignment = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
+/** Aligns each mark's bounds to the same edge or centre of the group's bounds. */
+export function alignShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>, alignment: ShapeAlignment,
+  textWidth?: (shape: TextShape) => number): ScreenshotShape[] {
+  const members = shapes.filter(shape => ids.has(shape.id)), group = groupBounds(members, textWidth)
+  if (!group || members.length < 2) return shapes
+  const horizontal = alignment === 'left' || alignment === 'center' || alignment === 'right'
+  const fraction = alignment === 'left' || alignment === 'top' ? 0 : alignment === 'right' || alignment === 'bottom' ? 1 : 0.5
+  return moveEach(shapes, new Map(members.map(shape => {
+    const box = shapeBounds(shape, textWidth)
+    const offset = horizontal ? group.x + (group.width - box.width) * fraction - box.x : group.y + (group.height - box.height) * fraction - box.y
+    return [shape.id, horizontal ? { x: offset, y: 0 } : { x: 0, y: offset }]
+  })))
+}
+
+/** Three or more marks: the outermost two stay and the rest move so every gap between neighbours is equal. */
+export function distributeShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>, axis: 'horizontal' | 'vertical',
+  textWidth?: (shape: TextShape) => number): ScreenshotShape[] {
+  const start = axis === 'horizontal' ? 'x' : 'y', size = axis === 'horizontal' ? 'width' : 'height'
+  const members = shapes.filter(shape => ids.has(shape.id)).map(shape => ({ shape, box: shapeBounds(shape, textWidth) }))
+    .sort((a, b) => a.box[start] - b.box[start])
+  if (members.length < 3) return shapes
+  const first = members[0]!.box, last = members.at(-1)!.box
+  const gap = (last[start] + last[size] - first[start] - members.reduce((sum, member) => sum + member.box[size], 0)) / (members.length - 1)
+  let cursor = first[start] + first[size] + gap
+  const deltas = new Map<string, ScreenshotPoint>()
+  for (const { shape, box } of members.slice(1, -1)) {
+    const offset = cursor - box[start]
+    deltas.set(shape.id, axis === 'horizontal' ? { x: offset, y: 0 } : { x: 0, y: offset })
+    cursor += box[size] + gap
+  }
+  return moveEach(shapes, deltas)
+}
+
+export type ShapeOrder = 'forward' | 'backward' | 'front' | 'back'
+/** Changes stacking within each paint layer only, so every step is visible and a
+ * mask still never paints under a mark. A contiguous selection moves as a block. */
+export function reorderShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>, order: ShapeOrder): ScreenshotShape[] {
+  const next = [...shapes]
+  for (const layer of new Set(shapes.map(screenshotOutputLayer))) {
+    const slots = shapes.flatMap((shape, index) => screenshotOutputLayer(shape) === layer ? [index] : [])
+    const run = slots.map(index => shapes[index]!)
+    let reordered: ScreenshotShape[]
+    if (order === 'front' || order === 'back') {
+      const picked = run.filter(shape => ids.has(shape.id)), rest = run.filter(shape => !ids.has(shape.id))
+      reordered = order === 'front' ? [...rest, ...picked] : [...picked, ...rest]
+    } else {
+      reordered = [...run]
+      const step = order === 'forward' ? 1 : -1
+      for (let index = step > 0 ? reordered.length - 2 : 1; index >= 0 && index < reordered.length; index -= step) {
+        const neighbour = index + step
+        if (ids.has(reordered[index]!.id) && !ids.has(reordered[neighbour]!.id)) [reordered[index], reordered[neighbour]] = [reordered[neighbour]!, reordered[index]!]
+      }
+    }
+    slots.forEach((slot, index) => { next[slot] = reordered[index]! })
+  }
+  return next.every((shape, index) => shape === shapes[index]) ? shapes : next
+}
+
+/** Adds copies of `sources` on top, offset by `offset`, each with a fresh id; copied
+ * notes take the next free numbers so no number repeats. */
+export function pasteShapes(shapes: ScreenshotShape[], sources: readonly ScreenshotShape[], offset: ScreenshotPoint,
+  mintId: () => string): { shapes: ScreenshotShape[]; ids: string[] } {
+  let number = nextNoteNumber(shapes)
+  const copies = sources.map(source => {
+    const moved = { ...moveShape(source, offset.x, offset.y), id: mintId() }
+    return moved.kind === 'note' ? { ...moved, number: number++ } : moved
+  })
+  return { shapes: copies.length ? [...shapes, ...copies] : shapes, ids: copies.map(copy => copy.id) }
+}
+
+export function duplicateShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>, offset: ScreenshotPoint,
+  mintId: () => string): { shapes: ScreenshotShape[]; ids: string[] } {
+  return pasteShapes(shapes, shapes.filter(shape => ids.has(shape.id)), offset, mintId)
+}
+
+/** Locks the listed marks, or, when every one is already locked, unlocks them. */
+export function toggleShapeLock(shapes: ScreenshotShape[], ids: ReadonlySet<string>): ScreenshotShape[] {
+  const members = shapes.filter(shape => ids.has(shape.id))
+  if (!members.length) return shapes
+  const lock = members.some(shape => !shape.locked)
+  return shapes.map(shape => !ids.has(shape.id) || Boolean(shape.locked) === lock ? shape : setLocked(shape, lock))
+}
+
+export function unlockAllShapes(shapes: ScreenshotShape[]): ScreenshotShape[] {
+  return shapes.some(shape => shape.locked) ? shapes.map(shape => shape.locked ? setLocked(shape, false) : shape) : shapes
+}
+
+function setLocked(shape: ScreenshotShape, locked: boolean): ScreenshotShape {
+  if (locked) return { ...shape, locked: true }
+  const { locked: _locked, ...rest } = shape
+  return rest as ScreenshotShape
+}
+
 export function intersectRect(a: NormalizedRect, b: NormalizedRect): NormalizedRect | null {
   const x = Math.max(a.x, b.x), y = Math.max(a.y, b.y)
   const width = Math.min(a.x + a.width, b.x + b.width) - x
@@ -368,6 +490,7 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
   textWidth?: (shape: TextShape) => number): ScreenshotShape | null {
   for (let index = shapes.length - 1; index >= 0; index--) {
     const shape = shapes[index]!
+    if (shape.locked) continue
     if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') {
       const reach = tolerance + (shape.kind === 'highlight' ? highlightWidth(shape.width) : shape.width) / 2
       if (shape.points.some((at, i) => distanceToSegment(point, shape.points[Math.max(0, i - 1)]!, at) <= reach)) return shape

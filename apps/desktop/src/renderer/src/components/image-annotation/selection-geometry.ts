@@ -1,4 +1,4 @@
-import { CALLOUT_ZOOM_RANGE, calloutBubble, constrainedEndpoint, normalizeRect, type CalloutShape, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+import { CALLOUT_ZOOM_RANGE, calloutBubble, constrainedEndpoint, normalizeRect, shapeBounds, type CalloutShape, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape, type TextShape } from './drawing-model'
 
 type Corner = 'nw' | 'ne' | 'se' | 'sw'
 /** `zoom-*` are the corners of a callout bubble; they change its zoom, not its source. */
@@ -74,4 +74,15 @@ export function resizeShapeFromHandle(original: ScreenshotShape, handle: Selecti
   if (top === (original.from.y <= original.to.y)) from.y = point.y
   else to.y = point.y
   return { ...original, from, to }
+}
+
+/** Ids of unlocked marks whose bounds touch the marquee, in stacking order. Edges count,
+ * so a straight horizontal arrow (zero-height bounds) is still caught. */
+export function marqueeSelection(shapes: readonly ScreenshotShape[], marquee: NormalizedRect,
+  textWidth?: (shape: TextShape) => number): string[] {
+  return shapes.filter(shape => {
+    if (shape.locked) return false
+    const box = shapeBounds(shape, textWidth)
+    return box.x <= marquee.x + marquee.width && box.x + box.width >= marquee.x && box.y <= marquee.y + marquee.height && box.y + box.height >= marquee.y
+  }).map(shape => shape.id)
 }
