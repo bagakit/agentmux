@@ -1,10 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { formatSessionAddress } from '@agentmux/core/sharing'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { projectGoalPlan, type GoalPlanNodeProjection, type GoalPlanNodeState, type GoalPlanProjection } from '@agentmux/demand/goal-plan'
-import { api } from '../lib/api'
+import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
-import { useGoalAgentName } from '../lib/goal-discussion-recipient'
+import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
+import { GoalPlanThread } from './GoalPlanThread'
 
 /** One distinct glyph per node state, so a node still reads without its color. */
 const STATE_ICON_NAMES = {
@@ -55,6 +57,7 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
     if (!element) return
     const measure = () => {
       const box = element.getBoundingClientRect()
+      const content = element.querySelector<HTMLOListElement>('.goal-plan__columns')!
       const anchor = (id: string) => element.querySelector<HTMLElement>(`[data-goal-plan-node="${CSS.escape(id)}"] .goal-plan-node__head`)
       const edges: Edge[] = []
       for (const item of projection.nodes) for (const dependency of item.node.dependsOn) {
@@ -67,8 +70,10 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
         if (to.x <= from.x) continue
         edges.push({ from: dependency, to: item.node.id, d: goalPlanEdgePath(from, to), live: item.state === 'ready' || item.state === 'changes' })
       }
-      setState(previous => JSON.stringify(previous.edges) === JSON.stringify(edges) && previous.width === element.scrollWidth && previous.height === element.scrollHeight
-        ? previous : { edges, width: element.scrollWidth, height: element.scrollHeight })
+      // Measure content, not scrollHeight: the previous absolute SVG also contributes to scrolling.
+      const width = Math.max(element.clientWidth, content.scrollWidth), height = content.offsetTop + content.offsetHeight
+      setState(previous => JSON.stringify(previous.edges) === JSON.stringify(edges) && previous.width === width && previous.height === height
+        ? previous : { edges, width, height })
     }
     measure()
     if (typeof ResizeObserver === 'undefined') return
@@ -82,35 +87,43 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
 
 function NodeExecutor({ item }: { item: GoalPlanNodeProjection }) {
   const executor = item.delegation ? { hostId: item.delegation.hostId, agentSessionId: item.delegation.workerAgentSessionId } : item.node.executor
-  const name = useGoalAgentName(executor?.agentSessionId, executor?.hostId)
+  const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
   if (!executor) return <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
-  const place = executor.hostId === 'local' ? 'This Mac' : executor.hostId
-  return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}`}>
-    <ThemeObjectAgentIcon size={11} aria-hidden="true" />{name ?? executor.agentSessionId}<span aria-hidden="true"> · </span><span className="goal-plan-node__place">{place}</span>
+  const place = presentation.toolExecution ? `Tools · ${presentation.toolExecution.resourceHostId}`
+    : presentation.hostId ? `Agent · ${presentation.hostId}` : `Agent · ${executor.hostId} · position unknown`
+  return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}${presentation.toolExecution ? ` · ${presentation.toolExecution.workspacePath}` : ''}`}>
+    <ThemeObjectAgentIcon size={11} aria-hidden="true" /><span className="goal-plan-node__name">{presentation.name ?? executor.agentSessionId}</span><span className="goal-plan-node__place">{place}</span>
   </span>
 }
 
-function NodeDetail({ item, onIssue }: { item: GoalPlanNodeProjection; onIssue(message: string | null): void }) {
+function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeProjection; dependencyNames: string[]; onIssue(message: string | null): void }) {
   const report = item.delegation?.report
   const open = async (agentSessionId: string) => {
-    try { onIssue(null); await api.ui.openObjectLink(formatSessionAddress(agentSessionId)) }
+    try {
+      onIssue(null)
+      const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
+        operation: 'focus', target: { kind: 'focus-agent', hostId: item.delegation!.hostId, agentSessionId }, inputPolicy: 'preserve' })
+      if (result.operation === 'focus' && result.navigation.state === 'rejected') onIssue(result.issues.map(issue => issue.message).join(' '))
+    }
     catch (error) { onIssue(error instanceof Error ? error.message : String(error)) }
   }
   return <div className="goal-plan-node__detail" data-goal-plan-detail={item.node.id}>
     <p className="goal-plan-node__outcome">{item.node.outcome}</p>
     <dl className="goal-plan-node__facts">
       <div><dt>Check</dt><dd><code>{item.node.check}</code></dd></div>
-      {item.node.dependsOn.length ? <div><dt>Depends on</dt><dd>{item.node.dependsOn.join(', ')}</dd></div> : null}
+      {dependencyNames.length ? <div><dt>Depends on</dt><dd title={item.node.dependsOn.join(', ')}>{dependencyNames.join(', ')}</dd></div> : null}
       {item.delegation ? <div><dt>Thread</dt><dd><code>{item.delegation.threadId}</code>{item.attempts > 1 ? ` · attempt ${item.attempts}` : ''}</dd></div> : null}
       {report ? <div><dt>Report</dt><dd>{report.grounding.summary}</dd></div> : null}
-      {item.review ? <div><dt>Review</dt><dd data-goal-plan-verdict={item.review.verdict}>{item.review.verdict === 'pass' ? 'Passed' : 'Changes requested'} by {item.review.reviewer.id}
+      {item.review ? <div><dt>{item.staleCriteria.length ? 'Previous review' : 'Review'}</dt><dd data-goal-plan-verdict={item.review.verdict}>{item.review.verdict === 'pass' ? 'Passed' : 'Changes requested'} by {item.review.reviewer.id}
         {item.review.verdict === 'pass' ? <> · <code>{item.review.check.command}</code> → {item.review.check.result}</> : <> · {item.review.note}</>}</dd></div> : null}
-      {item.staleCriteria.length ? <div><dt>Criteria</dt><dd className="goal-plan-node__stale">No longer in the goal: {item.staleCriteria.join(', ')}</dd></div> : null}
+      {item.review?.check.evidence.length ? <div><dt>Evidence</dt><dd>{item.review.check.evidence.map(location => <p key={location}>{location}</p>)}</dd></div> : null}
+      {item.staleCriteria.length ? <div><dt>Criteria</dt><dd className="goal-plan-node__stale">Changed or unavailable in the current goal: {item.staleCriteria.join(', ')}</dd></div> : null}
     </dl>
     {item.delegation ? <div className="goal-plan-node__actions">
       <button type="button" className="small-button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId)}>Open executor</button>
       <button type="button" className="small-button" data-goal-plan-open="owner" onClick={() => void open(item.delegation!.ownerAgentSessionId)}>Open owner</button>
     </div> : null}
+    {item.delegation ? <GoalPlanThread key={JSON.stringify([item.delegation.hostId, item.delegation.sourceMessageId])} delegation={item.delegation} /> : null}
   </div>
 }
 
@@ -119,16 +132,22 @@ function NodeDetail({ item, onIssue }: { item: GoalPlanNodeProjection; onIssue(m
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * shared plan projection; this view never decides it.
  */
-export function GoalPlanGraph({ demand }: { demand: Pick<DemandProjection, 'id' | 'plan' | 'delegations' | 'alignment'> }) {
+export function GoalPlanGraph({ demand, onOpenDiscussion }: { demand: Pick<DemandProjection, 'id' | 'plan' | 'delegations' | 'alignment'>; onOpenDiscussion?: () => void }) {
   const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.delegations, demand.alignment])
   const [open, setOpen] = useState<string | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
   const canvas = useRef<HTMLDivElement>(null)
+  const reading = useRef<HTMLDivElement>(null), readingId = useId()
   const empty: GoalPlanProjection = { revision: 0, nodes: [], done: 0, total: 0, next: [] }
   const { edges, width, height } = useEdges(canvas, projection ?? empty, open ?? '')
-  if (!projection) return null
+  useLayoutEffect(() => { if (open) reading.current?.scrollIntoView?.({ block: 'nearest' }) }, [open])
+  if (!projection) return onOpenDiscussion ? <section className="goal-plan goal-plan--empty" aria-label="Goal plan">
+    <div className="goals-inline-actions"><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /><span className="goals-caption">Plan</span>
+      <button type="button" className="small-button" onClick={onOpenDiscussion}>Plan in goal discussion</button></div>
+  </section> : null
   const columns = goalPlanColumns(projection), highlight = goalPlanHighlight(projection)
   const byId = new Map(projection.nodes.map(item => [item.node.id, item]))
+  const selected = open ? byId.get(open) : undefined
   const ratio = projection.total ? projection.done / projection.total : 0
   return <section className="goal-plan" aria-label="Goal plan" data-goal-plan-revision={projection.revision}>
     <div className="goals-section-heading">
@@ -149,19 +168,25 @@ export function GoalPlanGraph({ demand }: { demand: Pick<DemandProjection, 'id' 
               const waitsOn = item.node.dependsOn.filter(id => byId.get(id)?.state !== 'done')
               return <li key={item.node.id} className={`goal-plan-node${item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
                 data-goal-plan-node={item.node.id} data-goal-plan-state={item.state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
-                <button type="button" className="goal-plan-node__head" aria-expanded={expanded} onClick={() => setOpen(expanded ? null : item.node.id)}>
+                <button type="button" className="goal-plan-node__head" aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={() => setOpen(expanded ? null : item.node.id)}>
                   <span className="goal-plan-node__mark" data-goal-plan-state={item.state} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation="none" /></span>
                   <span className="goal-plan-node__title">{item.node.title}</span>
                 </button>
-                <span className="goal-plan-node__state">{GOAL_PLAN_STATE_LABELS[item.state]}{item.state === 'waiting' && waitsOn.length ? ` · ${waitsOn.join(', ')}` : ''}</span>
+                <span className="goal-plan-node__state">{item.staleCriteria.length ? 'Criteria need review' : GOAL_PLAN_STATE_LABELS[item.state]}{item.state === 'waiting' && waitsOn.length ? ` · ${waitsOn.map(id => byId.get(id)!.node.title).join(', ')}` : ''}</span>
                 <NodeExecutor item={item} />
-                {expanded ? <NodeDetail item={item} onIssue={setIssue} /> : null}
               </li>
             })}
           </ol>
         </li>)}
       </ol>
     </div>
+    {selected ? <div className="goal-plan__reading" ref={reading} id={readingId}>
+      <div className="goals-section-heading"><h3>{selected.node.title}</h3><button type="button" className="small-button" onClick={() => {
+        canvas.current?.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${CSS.escape(selected.node.id)}"] .goal-plan-node__head`)?.focus()
+        setOpen(null)
+      }}>Back to node</button></div>
+      <NodeDetail key={selected.node.id} item={selected} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue} />
+    </div> : null}
   </section>
 }
 

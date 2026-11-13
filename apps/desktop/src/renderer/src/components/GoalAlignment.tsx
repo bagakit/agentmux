@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted, type DemandGroundingCheck } from '@agentmux/demand/goals'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
@@ -22,7 +22,7 @@ const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
 export const EMPTY_GOAL_ACKNOWLEDGEMENT: GoalAcknowledgementFeedback = { pending: false, failure: null, reloadError: null }
-export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
+export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; children?: ReactNode; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
   const confirmDemandGoal = useAppStore((state) => state.confirmDemandGoal)
   const acceptDemandResult = useAppStore((state) => state.acceptDemandResult)
   const refreshDemand = useAppStore((state) => state.refreshDemand)
@@ -79,6 +79,7 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
     </section> : <div className="goals-clarification" aria-label="Clarify goal" data-goal-id={demand.id} data-goal-confirmation-state="unconfirmed">
       <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p><div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
     </div>}
+    {children}
     {grounding ? <section className="goals-grounding" aria-label="Results review" data-goal-grounding-submission={grounding.submissionId} data-goal-result-state={accepted ? (hasGaps ? 'accepted-with-gaps' : 'accepted') : stale ? 'stale' : 'reported'}>
       <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">{accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'}</span></div>
       {stale ? <p className="goals-condition">This report is for the previous goal (v{grounding.alignmentRevision}). Check the current goal (v{alignment!.revision}) again; previous acceptance does not apply.</p> : <p className="goals-proposal" data-goal-result-summary>{grounding.summary}</p>}

@@ -37,12 +37,17 @@ export function useGoalDiscussionRecipient(goalId: string) {
 }
 
 /** Presentation for one exact canonical recipient; absence never selects a replacement. */
-export function useGoalAgentName(agentSessionId: string | null | undefined, hostId?: string): string | null {
-  return useAppStore(state => {
-    if (!agentSessionId) return null
+export function useGoalAgentPresentation(agentSessionId: string | null | undefined, hostId?: string) {
+  return useAppStore(useShallow(state => {
+    if (!agentSessionId) return { name: null, hostId: null, toolExecution: null }
     const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session => session.control.agentSessionId === agentSessionId &&
       session.control.hostId === session.hostId && (hostId === undefined || session.control.hostId === hostId))
     const session = matches.length === 1 ? matches[0] : undefined
-    return session?.kind === 'agent' ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPromptFromTimeline(state.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId }) : null
-  })
+    return { name: session?.kind === 'agent' ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPromptFromTimeline(state.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId }) : null,
+      hostId: session?.control.hostId ?? null, toolExecution: session?.toolExecution ?? null }
+  }))
+}
+
+export function useGoalAgentName(agentSessionId: string | null | undefined, hostId?: string): string | null {
+  return useGoalAgentPresentation(agentSessionId, hostId).name
 }
