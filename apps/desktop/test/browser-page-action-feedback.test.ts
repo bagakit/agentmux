@@ -53,7 +53,7 @@ vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   let nextId = 90
   class Contents extends EventEmitter {
-    id = ++nextId; url = ''; attached = false; destroyed = false; focused = false; focusCalls = 0; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []; documentPayloads: any[] = []
+    typedText = ''; id = ++nextId; url = ''; attached = false; destroyed = false; focused = false; focusCalls = 0; actions = 0; displayAttempts = 0; feedbackCalls = 0; feedbackPayloads: any[] = []; scripts: string[] = []; commands: string[] = []; documentPayloads: any[] = []
     displays: Array<{ family: 'action' | 'control' | 'revision' | 'selection' | 'annotation' | 'unknown'; payload?: any; code: string }> = []
     readonly session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} })
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
@@ -74,6 +74,13 @@ vi.mock('electron', async () => {
         if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
         // A native press is the click reaching the page.
         if (method === 'Input.dispatchMouseEvent') { if (params.type === 'mousePressed') this.actions++; return {} }
+        // Native text input: insertText is the action; prepare and read-back are its own checks.
+        if (method === 'Input.insertText') { this.actions++; this.typedText = params.text; return {} }
+        if (method === 'Input.dispatchKeyEvent') return {}
+        if (method === 'Runtime.callFunctionOn' && params.objectId === 'native-input-object' && String(params.functionDeclaration).includes('__agentMuxTextFocus = previous'))
+          return { result: { value: { ok: true, before: '', caret: 'set' } } }
+        if (method === 'Runtime.callFunctionOn' && params.objectId === 'native-input-object' && String(params.functionDeclaration).includes('isContentEditable ?'))
+          return { result: { value: this.typedText } }
         if (method === 'Runtime.evaluate') {
           const code = params.expression ?? '', start = code.lastIndexOf(')(')
           if (start >= 0 && code.slice(start + 2, -1).startsWith('{')) this.documentPayloads.push(JSON.parse(code.slice(start + 2, -1)))

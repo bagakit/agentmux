@@ -5,7 +5,7 @@ import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserCdpSender } from '../src/main/browser-page-snapshot.js'
 import type { BrowserScopedSnapshot } from '../src/shared/browser-snapshot-query.js'
 import type { BrowserRefLedger } from '../src/main/browser-ref-ledger.js'
-import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
+import { isNativeScroll, isNativeTextStep, nativeInputDouble } from './browser-native-input-double.js'
 
 const TREE = [
   { nodeId: 'root', role: { value: 'RootWebArea' }, childIds: ['left', 'right'] },
@@ -31,15 +31,20 @@ function harness(withFrames = false, initialLedger: BrowserRefLedger | null = nu
     { nodeId: 'field', backendDOMNodeId: 30, role: { value: 'textbox' }, name: { value: 'Frame field' } }
   ]
   const native: Record<string, ReturnType<typeof nativeInputDouble>> = {}
+  // The field a native text input prepared; insertText goes to that document's own session.
+  let textTarget = 0
   const sender = (document: string): BrowserCdpSender => async (method, params) => {
     calls.push({ document, method, ...(params ? { params } : {}) })
     native[document] ??= nativeInputDouble((objectId) => Number(objectId.split('-').at(-1)))
     // Geometry is asked in the target's own document; Input arrives on the top-level session.
     const geometry = method === 'Input.dispatchMouseEvent' ? native[actingDocument] ??= nativeInputDouble() : native[document]
+    if (method === 'Runtime.callFunctionOn' && isNativeTextStep(params) === 'prepare') textTarget = Number(String(params?.objectId).split('-').at(-1))
     const answered = geometry.answer(method, params)
     if (answered !== undefined) {
       // A native press is the click reaching the page.
       if (method === 'Input.dispatchMouseEvent' && params?.type === 'mousePressed') acted.push({ document: actingDocument, backend: geometry.presses.at(-1)!.target })
+      // A native text insert reaches the field the prepare step resolved in the acting document.
+      if (method === 'Input.insertText') acted.push({ document, backend: textTarget })
       return answered
     }
     if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: document === 'main' ? 'main-document' : document, loaderId: 'loader-' + document, ...(document === 'main' ? {} : { parentId: 'main-document' }) } } }

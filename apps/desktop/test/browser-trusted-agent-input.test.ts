@@ -198,6 +198,146 @@ describe('Agent click is one trusted native press at the proven box', () => {
   })
 })
 
+/**
+ * A text field the dispatcher types into. `Input.insertText` replaces the selection the dispatcher's
+ * own prepare step made (all of it for fill, a caret at the end for type); `format` lets a test model
+ * a page that rewrites what was typed, and `deaf` a field that never receives the insert.
+ */
+function textPeer(options: { value?: string; format?: (value: string) => string; deaf?: boolean; readOnly?: boolean; noRange?: boolean } = {}) {
+  const peer = pagePeer()
+  const field = { value: options.value ?? 'old', selection: [0, 0] as [number, number], focused: false, restored: 0 }
+  const send = peer.session.sendCommand
+  const notes: string[] = []
+  Reflect.set(peer.session, 'sendCommand', async (method: string, params: Record<string, any> = {}) => {
+    if (method === 'Runtime.callFunctionOn') {
+      const declaration = String(params.functionDeclaration)
+      peer.commands.push({ method, params })
+      if (declaration.includes('__agentMuxTextFocus = previous')) {
+        if (options.readOnly) return { result: { value: { ok: false, reason: 'is read-only' } } }
+        field.focused = true
+        const replace = params.arguments?.[0]?.value === true
+        if (replace) field.selection = [0, field.value.length]
+        else if (!options.noRange) field.selection = [field.value.length, field.value.length]
+        return { result: { value: { ok: true, before: field.value, caret: replace || !options.noRange ? 'set' : 'end-key' } } }
+      }
+      if (declaration.includes('restoreFocus(this, previous)')) { field.focused = false; field.restored += 1; return { result: { value: null } } }
+      if (declaration.includes('isContentEditable ?')) return { result: { value: field.value } }
+    }
+    if (method === 'Input.insertText') {
+      peer.commands.push({ method, params })
+      if (!options.deaf) {
+        const [start, end] = field.selection
+        const next = field.value.slice(0, start) + params.text + field.value.slice(end)
+        field.value = options.format ? options.format(next) : next
+      }
+      return {}
+    }
+    if (method === 'Input.dispatchKeyEvent') {
+      peer.commands.push({ method, params })
+      if (params.type === 'rawKeyDown' && params.key === 'End') field.selection = [field.value.length, field.value.length]
+      if (params.type === 'rawKeyDown' && params.key === 'Delete') { const [start, end] = field.selection; field.value = field.value.slice(0, start) + field.value.slice(end) }
+      return {}
+    }
+    return await send(method, params)
+  })
+  return { peer, field, notes }
+}
+
+function textDispatch(t: ReturnType<typeof textPeer>, contents = nativeContents()) {
+  const nativeInput = vi.fn(async () => beginOwnDispatch(contents))
+  const seen: boolean[] = []
+  const dispatch = createBrowserPageDispatch({
+    session: t.peer.session,
+    pageInfo: () => ({ url: 'https://page.invalid/', title: 'Page', navigationId: 'nav-1' }),
+    gotoUrl: async () => {}, captureScreenshot: async () => ({}), readLedger: async () => null,
+    writeLedger: async () => {}, note: text => t.notes.push(text), beginNativeInput: nativeInput
+  })
+  t.peer.onInput(() => {})
+  const sendCommand = t.peer.session.sendCommand
+  Reflect.set(t.peer.session, 'sendCommand', async (method: string, params?: Record<string, unknown>) => {
+    if (method.startsWith('Input.')) seen.push(isOwnDispatch(contents, { type: 'keyDown' }))
+    return await sendCommand(method, params)
+  })
+  return { dispatch, nativeInput, seen }
+}
+
+const textInputs = (peer: ReturnType<typeof pagePeer>) => peer.commands.filter(command => command.method.startsWith('Input.'))
+  .map(command => command.method === 'Input.insertText' ? ['insertText', command.params.text] : [command.params.type, command.params.key])
+
+describe('Agent fill and type are trusted native text input, read back after', () => {
+  it('fillInput selects everything, inserts the text natively, reads it back and returns focus', async () => {
+    const t = textPeer({ value: 'old value' })
+    const { dispatch, seen } = textDispatch(t)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(dispatch('fillInput', [page.nodes[0]!.ref, 'new'])).resolves.toBeUndefined()
+    expect(textInputs(t.peer)).toEqual([['insertText', 'new']])
+    expect(t.field.value).toBe('new')
+    expect(seen, 'text input was sent outside Main’s receipt').toEqual([true])
+    expect(t.field.restored, 'page focus was not returned').toBe(1)
+    expect(t.notes).toEqual([])
+    expect(t.peer.commands.map(command => String(command.params.functionDeclaration ?? '')),
+      'the synthetic value-setter path is still used').not.toEqual(expect.arrayContaining([expect.stringContaining("dispatchEvent(new Event('input'")]))
+  })
+
+  it('typeText appends at the end, and an input without a selection range moves its caret with a native End key', async () => {
+    const t = textPeer({ value: 'abc' })
+    const { dispatch } = textDispatch(t)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await dispatch('typeText', [page.nodes[0]!.ref, 'def'])
+    expect(t.field.value).toBe('abcdef')
+    expect(textInputs(t.peer)).toEqual([['insertText', 'def']])
+
+    const n = textPeer({ value: '12', noRange: true })
+    const numeric = textDispatch(n)
+    const numericPage = await numeric.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await numeric.dispatch('typeText', [numericPage.nodes[0]!.ref, '3'])
+    expect(n.field.value).toBe('123')
+    expect(textInputs(n.peer)).toEqual([['rawKeyDown', 'End'], ['keyUp', 'End'], ['insertText', '3']])
+  })
+
+  it('an empty fill clears the field with a native delete; an empty type sends nothing', async () => {
+    const t = textPeer({ value: 'abc' })
+    const { dispatch } = textDispatch(t)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await dispatch('fillInput', [page.nodes[0]!.ref, ''])
+    expect(t.field.value).toBe('')
+    expect(textInputs(t.peer)).toEqual([['rawKeyDown', 'Delete'], ['keyUp', 'Delete']])
+    const typed = textPeer({ value: 'abc' })
+    const append = textDispatch(typed)
+    const appendPage = await append.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await append.dispatch('typeText', [appendPage.nodes[0]!.ref, ''])
+    expect(textInputs(typed.peer)).toEqual([])
+  })
+
+  it('text that never reached the field is not-dispatched; a read-only field is refused before typing', async () => {
+    const t = textPeer({ value: 'kept', deaf: true })
+    const { dispatch } = textDispatch(t)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    const failure = await dispatch('fillInput', [page.nodes[0]!.ref, 'lost']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(failure.fact).toEqual({ kind: 'locator-changed', effects: 'not-dispatched' })
+    expect(failure.message).toMatch(/did not reach .* value is unchanged/)
+    expect(t.field.restored, 'focus was not returned after a failed insert').toBe(1)
+
+    const r = textPeer({ readOnly: true })
+    const readOnly = textDispatch(r)
+    const readOnlyPage = await readOnly.dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    const refused = await readOnly.dispatch('fillInput', [readOnlyPage.nodes[0]!.ref, 'x']).catch((error: unknown) => error) as BrowserLocalRecoveryFailure
+    expect(refused.fact?.effects).toBe('not-dispatched')
+    expect(refused.message).toContain('is read-only')
+    expect(textInputs(r.peer)).toEqual([])
+    expect(readOnly.nativeInput).not.toHaveBeenCalled()
+  })
+
+  it('a page that reformats what was typed keeps the action and says the field holds a different value', async () => {
+    const t = textPeer({ value: '', format: value => value.toUpperCase() })
+    const { dispatch } = textDispatch(t)
+    const page = await dispatch('snapshot', []) as { nodes: { ref: string }[] }
+    await expect(dispatch('fillInput', [page.nodes[0]!.ref, 'abc'])).resolves.toBeUndefined()
+    expect(t.field.value).toBe('ABC')
+    expect(t.notes).toEqual([expect.stringContaining('holds a different value than was typed')])
+  })
+})
+
 describe('Main’s receipt is the only judge of who sent an input', () => {
   const managers: InstanceType<typeof BrowserViewManager>[] = []
   afterEach(() => { for (const manager of managers.splice(0)) manager.dispose() })
