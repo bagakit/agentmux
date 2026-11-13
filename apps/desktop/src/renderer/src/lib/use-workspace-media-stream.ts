@@ -17,7 +17,7 @@ function resourceKey(workspaceId: string, config: AppConfig = useAppStore.getSta
  * One playback lease for one visible File view. Hidden, retried, retargeted or unmounted views
  * release it, so a lease never outlives the view that asked for it and a URL is never reused.
  */
-export function useWorkspaceMediaStream(workspaceId: string, path: string, enabled: boolean) {
+export function useWorkspaceMediaStream(workspaceId: string, path: string, enabled: boolean, revision: string | null = null) {
   // Recompute only when config changes; every other store update returns the cached key in O(1).
   const selectResource = useMemo(() => {
     let config: AppConfig | undefined, key = ''
@@ -30,7 +30,8 @@ export function useWorkspaceMediaStream(workspaceId: string, path: string, enabl
   const [attempt, setAttempt] = useState(0)
   // One per File target: hiding, retrying or a new lease of the same File resume here; another File starts fresh.
   const resume = useMemo<MediaResume>(() => ({ current: null }), [workspaceId, path])
-  const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt])
+  // A new saved revision is a new file to play: its lease is reopened, and the place in it is kept.
+  const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt, revision])
   const [lease, setLease] = useState<{ owner: typeof owner; value: MediaLease } | null>(null)
   const [failed, setFailed] = useState<{ owner: typeof owner; failure: Failure } | null>(null)
   useEffect(() => {
