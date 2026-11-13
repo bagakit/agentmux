@@ -1,4 +1,3 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SCRATCH_WORKSPACE_ID } from '../../../../shared/scratch-topics'
 import { openTopicDirectory } from '../../lib/topic-directory-navigation'
 import { useAppStore } from '../../store'
@@ -13,8 +12,6 @@ import './settings-concept-intro.css'
 import '../../styles/settings-workflows.css'
 import './settings-topic.css'
 import { saveConfigSlice } from './save-config-slice'
-
-const OpenIcon = semanticIconComponent('action.open-external')
 
 function TopicInitialViewSettings({ config }: Pick<SettingsPaneProps, 'config'>) {
   const saved = config.topicDirectoryInitialView ?? TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT
@@ -60,9 +57,9 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
       {workspace ? <button type="button" className="small-button" data-open-topic-directory onClick={() => {
         onClose()
         void openTopicDirectory(workspace).catch(useAppStore.getState().reportError)
-      }}>Open Topic directory<OpenIcon size={14} aria-hidden="true" /></button> : <>
+      }}>Open Topic directory</button> : <>
         <p className="settings-workflows__note" role="status">The Topic directory is not ready. Your existing work is available in Space.</p>
-        <button type="button" className="small-button" onClick={() => { onClose(); useAppStore.getState().setMainSurface('workbench') }}>Open Space<OpenIcon size={14} aria-hidden="true" /></button>
+        <button type="button" className="small-button" onClick={() => { onClose(); useAppStore.getState().setMainSurface('workbench') }}>Open Space</button>
       </>}
     </section>
     {promotion ? <section className="settings-group settings-topic-configuration" data-settings-field="mote-configuration">
@@ -74,7 +71,7 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
       </dl>
       <div className="settings-workflows__inline-action">
         <p className="settings-workflows__note">Settings apply to the selected Mote.</p>
-        <button type="button" className="small-button" data-open-mote-club onClick={() => { onClose(); requestPmoTeamsTopicFloatingOpen() }}>Open Mote Club<OpenIcon size={14} aria-hidden="true" /></button>
+        <button type="button" className="small-button" data-open-mote-club onClick={() => { onClose(); requestPmoTeamsTopicFloatingOpen() }}>Open Mote Club</button>
       </div>
     </section> : null}
   </div>

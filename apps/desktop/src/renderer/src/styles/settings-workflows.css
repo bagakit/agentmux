@@ -19,7 +19,6 @@
 .settings-workflows__destinations button:hover { background: var(--surface-2); }
 .settings-workflows__destinations button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .settings-workflows__destinations button > svg { flex: 0 0 auto; }
-.settings-workflows__destinations button > svg:last-child { margin-left: auto; color: var(--text-3); }
 .settings-workflows__destinations button > span { min-width: 0; display: grid; gap: 3px; }
 .settings-workflows__destinations strong { color: var(--text); font-weight: 500; font-size: var(--fs-body); }
 .settings-workflows__destinations small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }

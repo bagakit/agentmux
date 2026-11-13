@@ -9,8 +9,6 @@ import '../../styles/mote-directory.css'
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 const ThemeObjectListIcon = semanticIconComponent('object.list')
 const ThemeObjectUserIcon = semanticIconComponent('object.user')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-
 
 export const moteDirectoryViewLabel = (value: MoteDirectoryView | undefined): string =>
   (value ?? MOTE_DIRECTORY_VIEW_DEFAULT) === 'collaborators' ? 'Collaborators' : 'List'
@@ -60,7 +58,7 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
       <header><span>Your collaborators</span></header>
       <div className="settings-workflows__inline-action">
         <p className="settings-workflows__note">Profiles, avatars and behavior belong to each Mote.</p>
-        <button type="button" className="small-button" onClick={onOpen}>Open Mote Club<ThemeActionOpenExternalIcon size={14} aria-hidden="true" /></button>
+        <button type="button" className="small-button" onClick={onOpen}>Open Mote Club</button>
       </div>
     </section>
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} onSave={() => void commit()} />

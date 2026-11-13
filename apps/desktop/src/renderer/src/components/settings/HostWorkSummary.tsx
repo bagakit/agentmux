@@ -15,7 +15,6 @@ import { SettingsNavigation } from '../SettingsNavigation'
 const NO_DETECTIONS = {}
 
 const TerminalIcon = semanticIconComponent('object.terminal')
-const OpenIcon = semanticIconComponent('action.open-external')
 const RefreshIcon = semanticIconComponent('action.refresh')
 
 /** Existing Session references are not a second activity registry or a running-process count. */
@@ -37,7 +36,7 @@ function HostSessionRow({ session, active, onOpen }: { session: SessionSnapshot;
   return <button type="button" className="remote-work__row" data-host-session={session.id} onClick={() => onOpen(session.id)}>
     {session.kind === 'agent' ? <ResolvedAgentAvatar label={name} providerId={session.providerId} executorId={session.executorId} state={session.status.state} size={24} /> : <TerminalIcon size={20} />}
     <span><strong>{name}</strong><small title={session.workspacePath}>{path(session.workspacePath, session.hostId)}</small></span>
-    <span className="remote-work__state" title={session.status.detail}>{sessionStatusLabel(session)}</span><OpenIcon size={13} />
+    <span className="remote-work__state" title={session.status.detail}>{sessionStatusLabel(session)}</span>
   </button>
 }
 
@@ -65,6 +64,6 @@ export function HostExecutorsSummary({ config, host, active }: { config: AppConf
       <span><strong>{choice.label}</strong><small>{agentProviderLabel(choice.providerId)}</small><code>{choice.command}</code></span>
       <span className="remote-work__state">{executorDetectionLabel(choice.detection)}</span>
     </div>)}</div> : saved ? <p className="remote-work__empty" role="status">{checking ? 'Reading configurations…' : 'No configurations have been confirmed for this environment.'}</p> : null}
-    {navigation ? <button type="button" className="small-button" onClick={() => navigation.open('agents')}>Manage Agent configurations<OpenIcon size={13} /></button> : null}
+    {navigation ? <button type="button" className="small-button" onClick={() => navigation.open('agents')}>Manage Agent configurations</button> : null}
   </section>
 }

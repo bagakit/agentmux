@@ -7,8 +7,6 @@ import '../../styles/settings-workflows.css'
 
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
-
 
 const DENSITY_LABELS = { default: 'Comfortable', compact: 'Compact', dense: 'Dense' } as const
 export const projectRailDensityLabel = (value: ProjectRailDensity | undefined): string => DENSITY_LABELS[value ?? PROJECT_RAIL_DENSITY_DEFAULT]
@@ -57,7 +55,7 @@ export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, 
       <header><span>Manage your work</span><small>Object settings</small></header>
       <div className="settings-workflows__destinations">{destinations.map(({ id, label, description, icon: Icon, open }) =>
         <button key={id} type="button" data-workflows-manage={id} onClick={open}>
-          <Icon size={17} aria-hidden="true" /><span><strong>{label}</strong><small>{description}</small></span><ThemeActionOpenExternalIcon size={14} aria-hidden="true" />
+          <Icon size={17} aria-hidden="true" /><span><strong>{label}</strong><small>{description}</small></span>
         </button>)}</div>
     </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} onSave={() => void save()} />

@@ -15,7 +15,6 @@ import type { SettingsPaneProps } from './settings-catalog'
 
 const AgentIcon = semanticIconComponent('object.agent')
 const ToolsIcon = semanticIconComponent('object.terminal')
-const OpenIcon = semanticIconComponent('action.open-external')
 const BackIcon = semanticIconComponent('navigation.back')
 const ArrowIcon = semanticIconComponent('navigation.disclosure')
 const NO_SESSIONS: SessionSnapshot[] = []
@@ -120,7 +119,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   }
   return <div ref={container} className="settings-pane-stack remote-execution-settings">
     <section hidden={narrow && view === 'detail'} className="settings-group remote-execution-prepare" data-settings-field="prepare">
-      <header><span>Work on your project with another device</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts<OpenIcon size={13} /></button></header>
+      <header><span>Work on your project with another device</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts</button></header>
       <p className="settings-group-note">{preparedProject && config.hosts.find(host => host.id === preparedProject.hostId)?.kind !== 'local' ? `Files and commands stay on ${hostName(preparedProject.hostId)}. Choose where the Agent runs.` : 'Your task and files stay on this Mac. The Agent runs on the device you choose.'}</p>
       <div className="remote-execution-prepare__controls">
         <label><span>{preparedProject && !localProjects.some(item => item.id === preparedProject.id) ? `Project on ${hostName(preparedProject.hostId)}` : 'Project on this Mac'}</span>
@@ -161,10 +160,10 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
         </div>
         {selected ? <div hidden={!detailVisible} className="remote-execution-detail" data-remote-binding={selected.toolExecution.bindingId}>
           <header><div><h3 ref={detailHeading} tabIndex={-1}>{agentName(selected)}</h3><span>Agent · {sessionStatusLabel(selected)}</span></div>
-            <button type="button" className="small-button" data-remote-open onClick={() => openOriginal(selected)}>Open original work<OpenIcon size={13} /></button></header>
+            <button type="button" className="small-button" data-remote-open onClick={() => openOriginal(selected)}>Open original work</button></header>
           <dl className="remote-execution-endpoints">
-            <div><dt><AgentIcon size={16} />Agent runtime</dt><dd><button type="button" onClick={() => openHost(selected.control.hostId)}>{hostName(selected.control.hostId)}<OpenIcon size={12} /></button><code>{selected.control.hostId}</code><span>{selected.workspacePath}</span></dd></div>
-            <div><dt><ToolsIcon size={16} />Project &amp; tools</dt><dd><button type="button" onClick={() => openHost(selected.toolExecution.resourceHostId)}>{hostName(selected.toolExecution.resourceHostId)}<OpenIcon size={12} /></button><code>{selected.toolExecution.resourceHostId}</code><span>{selected.toolExecution.workspacePath}</span></dd></div>
+            <div><dt><AgentIcon size={16} />Agent runtime</dt><dd><button type="button" onClick={() => openHost(selected.control.hostId)}>{hostName(selected.control.hostId)}</button><code>{selected.control.hostId}</code><span>{selected.workspacePath}</span></dd></div>
+            <div><dt><ToolsIcon size={16} />Project &amp; tools</dt><dd><button type="button" onClick={() => openHost(selected.toolExecution.resourceHostId)}>{hostName(selected.toolExecution.resourceHostId)}</button><code>{selected.toolExecution.resourceHostId}</code><span>{selected.toolExecution.workspacePath}</span></dd></div>
           </dl>
           <AgentToolExecutionNotice key={selected.toolExecution.bindingId} session={selected} visible={active && detailVisible} presentation="inline" />
           <details className="remote-execution-identities"><summary>Original identities</summary><dl><dt>Session</dt><dd>{selected.control.agentSessionId}</dd><dt>Binding</dt><dd>{selected.toolExecution.bindingId}</dd></dl></details>
