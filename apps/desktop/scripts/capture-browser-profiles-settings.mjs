@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const fixture = join(desktop, 'scripts/fixtures/browser-profiles-settings'), directory = join(root, '.tmp/browser-profiles-visual', randomUUID())
 const output = join(directory, 'compiled')
+const scene = process.argv.includes('--service-notice') ? 'service-notice' : 'profiles'
 await mkdir(directory, { recursive: true })
 const sourceFiles = [
   'apps/desktop/src/renderer/src/components/settings/BrowserProfilesSettingsPane.tsx',
@@ -16,10 +17,12 @@ const sourceFiles = [
   'apps/desktop/src/renderer/src/components/settings/settings-browser-profiles.css',
   'apps/desktop/src/renderer/src/components/settings/modules/browser-profiles.tsx',
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
+  'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx',
   'apps/desktop/src/renderer/src/components/BrowserProfileChip.tsx',
   'apps/desktop/src/renderer/src/components/ProfileMark.tsx',
   'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/styles/browser.css',
+  'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
   'apps/desktop/scripts/fixtures/browser-profiles-settings/entry.tsx',
   'apps/desktop/scripts/fixtures/browser-profiles-settings/main.cjs'
 ]
@@ -30,7 +33,7 @@ await build({ configFile: false, root: fixture, base: './', logLevel: 'error', w
 const electron = createRequire(join(desktop, 'package.json'))('electron')
 const logs = [], exit = await new Promise((done, reject) => {
   const child = spawn(electron, [join(fixture, 'main.cjs')], { cwd: root,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, PROFILES_VISUAL_ROOT: directory, PROFILES_VISUAL_HTML: join(output, 'index.html') }, stdio: ['ignore', 'pipe', 'pipe'] })
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, PROFILES_VISUAL_ROOT: directory, PROFILES_VISUAL_HTML: join(output, 'index.html'), PROFILES_VISUAL_SCENE: scene }, stdio: ['ignore', 'pipe', 'pipe'] })
   const timeout = setTimeout(() => child.kill('SIGTERM'), 90000)
   child.once('close', () => clearTimeout(timeout))
   child.stdout.on('data', data => logs.push(data)); child.stderr.on('data', data => logs.push(data)); child.on('error', reject); child.on('close', done)
@@ -41,6 +44,6 @@ source.unchanged = JSON.stringify(source.files) === JSON.stringify(await sourceH
 await writeFile(join(directory, 'source.json'), JSON.stringify(source, null, 2))
 await rm(output, { recursive: true, force: true })
 for (const name of ['home', 'appData', 'userData', 'sessionData']) await rm(join(directory, name), { recursive: true, force: true })
-console.log(JSON.stringify({ exit, captureOnly: true, aestheticReview: 'not-performed', directory, source, screenshots: capture.screenshots?.map(item => item.file) }))
+console.log(JSON.stringify({ exit, scene, captureOnly: true, aestheticReview: 'not-performed', directory, source, screenshots: capture.screenshots?.map(item => item.file) }))
 if (exit || !capture.complete) throw new Error(capture.failure?.message ?? 'Private visual capture failed')
 if (!source.unchanged) throw new Error('Profile visual inputs changed during capture; retain these images as an unconfirmed candidate')

@@ -5,7 +5,7 @@ const { join } = require('node:path')
 const directory = process.env.PROFILES_VISUAL_ROOT
 for (const key of ['home', 'appData', 'userData', 'sessionData']) { mkdirSync(join(directory, key), { recursive: true }); app.setPath(key, join(directory, key)) }
 const wait = ms => new Promise(done => setTimeout(done, ms))
-const receipt = { captureOnly: true, aestheticReview: 'not-performed', realComponents: ['SettingsPanel', 'BrowserProfilesSettingsPane', 'ProfileMark'], fixtureConfigOnly: true, userDataTouched: false, screenshots: [] }
+const receipt = { scene: process.env.PROFILES_VISUAL_SCENE ?? 'profiles', captureOnly: true, aestheticReview: 'not-performed', realComponents: ['SettingsPanel', 'BrowserProfilesSettingsPane', 'BrowserPane', 'BrowserOperationWarning', 'ProfileMark'], fixtureConfigOnly: true, userDataTouched: false, screenshots: [] }
 app.whenReady().then(async () => {
   try {
     const win = new BrowserWindow({ width: 1250, height: 900, show: false, title: 'Browser Profiles · private review', webPreferences: { contextIsolation: true, nodeIntegration: false } })
@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
     })()`)
     const capture = async (name, width, height) => {
       win.setContentSize(width, height); await wait(300)
-      if (name.startsWith('profiles-toolbar')) {
+      if (name.startsWith('profiles-toolbar') || name.startsWith('profiles-service-notice')) {
         const bounds = await evaluate('document.querySelector(".browser-surface").getBoundingClientRect().toJSON()')
         if (Math.abs(bounds.width - width) > 1 || Math.abs(bounds.x) > 1) throw new Error('The real BrowserPane must fill its fixture workface')
         if (!await toolbarFits()) throw new Error('The Profile mark, name and disclosure must fit inside their real toolbar chip')
@@ -43,6 +43,16 @@ app.whenReady().then(async () => {
     await win.loadFile(process.env.PROFILES_VISUAL_HTML)
     await ready('Boolean(window.profilesVisual && document.querySelectorAll(\'[data-settings-pane="browser-profiles"] [data-resource-row]\').length === 4)')
     win.showInactive()
+    if (receipt.scene === 'service-notice') {
+      await evaluate('profilesVisual.serviceNotice()')
+      await ready('document.querySelector(".browser-operation-warning")?.textContent.includes("Settings → Browser Profiles")')
+      await capture('profiles-service-notice-dark', 900, 520)
+      await evaluate('profilesVisual.appearance("light")')
+      await capture('profiles-service-notice-narrow-light', 360, 520)
+      await click('[aria-label="Dismiss this Browser notice"]')
+      if (await evaluate('Boolean(document.querySelector(".browser-operation-warning"))')) throw new Error('Dismiss hides only this service notice')
+      receipt.complete = true
+    } else {
     await capture('profiles-default-dark', 1250, 860)
     await click('[aria-label="Sites with sign-ins"] button')
     await ready('document.querySelectorAll(\'.browser-profile-editor__sites li\').length === 3')
@@ -128,6 +138,7 @@ app.whenReady().then(async () => {
     await ready('document.querySelector("[aria-label=\\"Proxy sign-in\\"]")?.textContent.includes("Signs in as review-user")')
     await capture('profiles-proxy-saved-reconnect-light', 1250, 940)
     receipt.complete = true
+    }
   } catch (error) { receipt.complete = false; receipt.failure = { message: error instanceof Error ? error.message : String(error) } }
   writeFileSync(join(directory, 'capture.json'), JSON.stringify(receipt, null, 2))
   app.quit()

@@ -41,6 +41,11 @@ function BrowserScene() {
   const browser = workbenchSurfaces(original).find(surface => surface.kind === 'browser')!
   return <DesktopClientUiProvider><main style={{ width: '100%', height: '100%' }}><BrowserPane tab={browser as never} visible /></main></DesktopClientUiProvider>
 }
+async function browser(warning?: string) {
+  const snapshot = await api.browser.create('b-launch', 'about:blank', workspaceId, client.id)
+  useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: warning ? { ...snapshot, activity: { operation: null, control: 'human', warning } } : snapshot })
+  flushSync(() => root.render(<BrowserScene />))
+}
 settings()
 Object.assign(window, { profilesVisual: {
   appearance: (mode: 'dark' | 'light') => updateThemeSelection({ ...config.appearance, appAppearance: mode }),
@@ -54,9 +59,9 @@ Object.assign(window, { profilesVisual: {
   partialProxyReconnect() {
     api.browser.setProfileProxySignIn = async (...args) => { await setProxySignIn(...args); return { reconnected: false } }
   },
-  async browser() {
-    const snapshot = await api.browser.create('b-launch', 'about:blank', workspaceId, client.id)
-    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: snapshot })
-    flushSync(() => root.render(<BrowserScene />))
+  browser,
+  async serviceNotice() {
+    await api.browser.updateProfile(client.id, { network: { mode: 'proxy', server: { scheme: 'http', host: 'gateway.example.test', port: 3128 } } }, (await api.browser.readProfiles()).revision)
+    await browser('Profile “Northwind client”: The saved proxy password could not be read from the keychain. Enter it again. Browser controls remain available. Open Settings → Browser Profiles → Northwind client → Proxy sign-in.')
   }
 } })
