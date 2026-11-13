@@ -17,6 +17,7 @@ import {
   type BrowserProfileSnapshot
 } from './browser-profile-store.js'
 import type { BrowserProfileResolver } from './browser-view-manager.js'
+import { presentSkipCounts } from '../shared/browser-profile-import-skip.js'
 
 const PROFILE_IMPORT_SOURCE_TOKEN_TTL_MS = 5 * 60_000
 const IMPORT_DOCUMENT_URL = 'data:text/html,<!doctype html><title>AgentMux Browser Profile import</title>'
@@ -248,7 +249,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         profileLabel: plan.profileLabel,
         importedAt: Date.now(),
         importedCookies: plan.importedCookies,
-        skippedCookies: plan.skippedCookies
+        skippedCookies: plan.skippedCookies,
+        skippedByReason: presentSkipCounts(plan.skippedByReason)
       })
       this.adopt(snapshot)
       return cloneProfile(profile)

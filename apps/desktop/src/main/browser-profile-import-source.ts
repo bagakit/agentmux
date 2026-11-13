@@ -48,6 +48,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { domainToASCII } from 'node:url'
 import { app } from 'electron'
 import { getDomain, parse as parseDomain } from 'tldts'
+import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipReason } from '../shared/browser-profile-import-skip.js'
 
 const SNAPSHOT_ATTEMPTS = 5
 const LOCAL_STATE_MAX_BYTES = 4 * 1024 * 1024
@@ -75,17 +76,7 @@ const REQUIRED_COOKIE_COLUMNS = [
 const PARTITION_SITE_COLUMN = 'top_frame_site_key'
 const PARTITION_ANCESTOR_COLUMN = 'has_cross_site_ancestor'
 
-const SKIP_REASONS = [
-  'expired',
-  'invalid-cookie',
-  'app-bound-encryption',
-  'undecryptable',
-  'non-transplantable',
-  'partition-unreadable',
-  'partition-family-unreadable'
-] as const
-
-export type BrowserProfileCookieSkipReason = (typeof SKIP_REASONS)[number]
+export type { BrowserProfileCookieSkipReason } from '../shared/browser-profile-import-skip.js'
 
 export type BrowserProfileImportSource = {
   kind: 'chromium'
@@ -710,7 +701,7 @@ function resolvePlanLimits(options: BrowserProfileImportPlanOptions): ResolvedPl
 }
 
 function emptySkipCounts(): Record<BrowserProfileCookieSkipReason, number> {
-  return Object.fromEntries(SKIP_REASONS.map((reason) => [reason, 0])) as Record<
+  return Object.fromEntries(BROWSER_PROFILE_COOKIE_SKIP_REASONS.map((reason) => [reason, 0])) as Record<
     BrowserProfileCookieSkipReason,
     number
   >

@@ -5,6 +5,7 @@ import { app } from 'electron'
 import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import { clearsSemanticHues } from '../renderer/src/lib/conversation-avatar-color.js'
+import { BROWSER_PROFILE_COOKIE_SKIP_REASONS } from '../shared/browser-profile-import-skip.js'
 import type {
   BrowserProfileEdit,
   BrowserProfileImportedSource,
@@ -37,9 +38,13 @@ const importedSourceSchema = z
     profileLabel: profileLabelSchema,
     importedAt: nonNegativeSafeIntegerSchema,
     importedCookies: nonNegativeSafeIntegerSchema,
-    skippedCookies: nonNegativeSafeIntegerSchema
+    skippedCookies: nonNegativeSafeIntegerSchema,
+    skippedByReason: z.partialRecord(z.enum(BROWSER_PROFILE_COOKIE_SKIP_REASONS), z.number().int().positive().max(Number.MAX_SAFE_INTEGER)).optional()
   })
   .strict()
+  .refine((source) => source.skippedByReason === undefined ||
+    Object.values(source.skippedByReason).reduce((sum, count) => sum + (count ?? 0), 0) === source.skippedCookies,
+  'Skipped cookies per reason must add up to the skipped total')
 
 const profileRecordSchema = z
   .object({
@@ -126,8 +131,10 @@ export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 /** The whole committed list after one write; the manager replaces its cache with it. */
 export type BrowserProfileSnapshot = { revision: number; profiles: BrowserProfileSummary[]; defaultProfileId: string }
 
-function cloneImportedSource(source: BrowserProfileImportedSource | null): BrowserProfileImportedSource | null {
-  return source === null ? null : { ...source }
+function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
+  if (source === null) return null
+  const { skippedByReason, ...rest } = source
+  return skippedByReason === undefined ? { ...rest } : { ...rest, skippedByReason: { ...skippedByReason } }
 }
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {

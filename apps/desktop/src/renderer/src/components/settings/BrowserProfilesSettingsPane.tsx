@@ -4,6 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
+import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
 import { clearsSemanticHues } from '../../lib/conversation-avatar-color'
@@ -28,6 +29,23 @@ const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
  *  success, attention, failure or a person. Lime and yellow-green read as success, so none here. */
 export const PROFILE_HUES = [180, 248, 266, 284, 302, 320, 338].filter(clearsSemanticHues)
 const HUE_NAMES: Readonly<Record<number, string>> = { 180: 'Teal', 248: 'Indigo', 266: 'Violet', 284: 'Purple', 302: 'Orchid', 320: 'Magenta', 338: 'Rose' }
+
+/** What each skip reason means to the person who imported, said once here rather than per caller. */
+const SKIP_LABELS: Readonly<Record<BrowserProfileCookieSkipReason, string>> = {
+  expired: 'Already expired',
+  'invalid-cookie': 'Not a valid cookie',
+  'app-bound-encryption': 'Locked to the other browser by its app-bound encryption',
+  undecryptable: 'Could not be decrypted',
+  'non-transplantable': 'Bound to that browser and cannot move',
+  'partition-unreadable': 'Its site partition could not be read',
+  'partition-family-unreadable': 'Its partitioned site group could not be read'
+}
+
+/** Reasons in the importer's order; zero counts are never stored. */
+function skipLines(counts: BrowserProfileCookieSkipCounts | undefined): { reason: BrowserProfileCookieSkipReason; label: string; count: number }[] {
+  if (!counts) return []
+  return BROWSER_PROFILE_COOKIE_SKIP_REASONS.flatMap(reason => counts[reason] ? [{ reason, label: SKIP_LABELS[reason], count: counts[reason] }] : [])
+}
 
 type Failure = { code: string | null; message: string }
 /** Runs one edit. A caller that decides by the refusal's code asks for the failure itself. */
@@ -291,6 +309,9 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
       {profile.source ? <section className="browser-profile-editor__section" aria-label="Imported">
         <h4>Imported</h4>
         <p className="browser-profile-editor__quiet">{profile.source.browserLabel} · {profile.source.profileLabel}: {profile.source.importedCookies} cookies, {profile.source.skippedCookies} skipped</p>
+        {skipLines(profile.source.skippedByReason).length ? <ul className="browser-profile-editor__skips" aria-label="Why cookies were skipped">
+          {skipLines(profile.source.skippedByReason).map(line => <li key={line.reason}><span>{line.label}</span><small>{line.count}</small></li>)}
+        </ul> : null}
       </section> : null}
 
       {confirm === 'delete' ? <div className="browser-profile-editor__confirm" role="alertdialog" aria-label={`Delete ${profile.label}`}

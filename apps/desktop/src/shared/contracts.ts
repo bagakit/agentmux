@@ -1310,6 +1310,8 @@ export type BrowserProfileImportedSource = {
   importedAt: number
   importedCookies: number
   skippedCookies: number
+  /** Skipped cookies per reason; absent on Profiles imported before reasons were kept. */
+  skippedByReason?: import('./browser-profile-import-skip.js').BrowserProfileCookieSkipCounts
 }
 
 export type BrowserProfileSummary = {
