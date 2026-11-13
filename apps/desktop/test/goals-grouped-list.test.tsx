@@ -6,7 +6,7 @@ import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSu
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { goalNextStepFact } from '../src/renderer/src/lib/goal-presentation'
 import { useAppStore } from '../src/renderer/src/store'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 /**
  * People open Goals to learn what waits on them. The first screen groups Goals by whose turn it is,
@@ -153,5 +153,24 @@ describe('Goals brand start', () => {
   it('keeps the header compact without art while a Goal is open', async () => {
     seed(); useAppStore.setState({ selectedDemandId: 'review' }); await dom.render(<GlobalBoardSurface />)
     expect(dom.container.querySelector('.goals-page-header__art')).toBeNull()
+  })
+})
+
+describe('Goal detail reading', () => {
+  it('marks a related Session that failed from its Core state, not from its label', async () => {
+    const failed = { ...composerSession('failed-agent'), status: { state: 'error' as const, source: 'run-process' as const, observedAt: 1 } }
+    useAppStore.setState({ sessions: [failed] })
+    seed([goal('linked', { alignment: agreed(), sessionIds: ['failed-agent'] })]); useAppStore.setState({ selectedDemandId: 'linked' })
+    await dom.render(<GlobalBoardSurface />)
+    const member = [...dom.container.querySelectorAll<HTMLElement>('.goal-collaboration__member')].find(node => node.textContent?.includes('Failed'))!
+    expect(member.dataset.sessionState).toBe('error')
+  })
+
+  it('keeps the clarify request on the same line as the stage primary', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'confirm' }); await dom.render(<GlobalBoardSurface />)
+    const actions = dom.container.querySelector('.goals-alignment .goals-inline-actions')!
+    expect(actions.querySelector('[data-goal-confirm]')).not.toBeNull()
+    expect(actions.querySelector('[data-goal-grill]')).not.toBeNull()
+    expect(actions.querySelector('[data-goal-grill]')!.parentElement).toBe(actions)
   })
 })
