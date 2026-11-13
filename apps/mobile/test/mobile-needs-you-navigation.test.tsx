@@ -113,3 +113,47 @@ describe('the five-tab shell with typed counts', () => {
     expect(f.submit).not.toHaveBeenCalled()
   })
 })
+
+describe('gestures in the real shell', () => {
+  function touch(type: string, x: number, y: number, t: number) {
+    const event = new Event(type, { bubbles: true, cancelable: true }) as Event & { touches: unknown[]; changedTouches: unknown[] }
+    const point = { clientX: x, clientY: y }
+    Object.defineProperty(event, 'timeStamp', { value: t })
+    event.touches = type === 'touchend' ? [] : [point]; event.changedTouches = [point]
+    return event
+  }
+  it('a left-edge swipe leaves the open conversation the same way the back button does, and does nothing at the top level', async () => {
+    const f = fixture()
+    f.sessions.set('session-waiting', { ...f.sessions.get('peer')!, agentSessionId: 'session-waiting' })
+    f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => {
+      if (method === 'topic.category.ls') return { categories: [], unavailable: [] }
+      if (method === 'goal.ls') return { goals: [] }
+      if (method === 'app.snapshot') return { agents: [], workspaces: [], projects: [], executors: [], unavailable: [] }
+      return { catalog: catalog() }
+    })
+    const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    const focus = await vi.waitFor(() => { const value = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-navigation button')][3]; expect(value).toBeDefined(); return value! })
+    await click(focus)
+    const main = view.element.querySelector<HTMLElement>('.mobile-main')!
+    const swipe = async () => act(async () => {
+      main.dispatchEvent(touch('touchstart', 6, 400, 0)); main.dispatchEvent(touch('touchmove', 60, 402, 60))
+      main.dispatchEvent(touch('touchmove', 150, 404, 160)); main.dispatchEvent(touch('touchend', 150, 404, 200))
+    })
+    // At the top level there is nothing behind, so the gesture is off: it neither changes the page
+    // nor takes the touch from a horizontal scroller that starts at the edge.
+    const edgePan = touch('touchmove', 60, 402, 60)
+    await act(async () => { main.dispatchEvent(touch('touchstart', 6, 400, 0)); main.dispatchEvent(edgePan); main.dispatchEvent(touch('touchend', 60, 402, 90)) })
+    expect(edgePan.defaultPrevented).toBe(false)
+    expect(main.dataset.edgeBack).toBeUndefined()
+    await swipe()
+    expect(view.element.querySelector('[data-workface="focus"]')?.getAttribute('aria-current')).toBe('page')
+    const ticket = await vi.waitFor(() => { const value = view.element.querySelector<HTMLButtonElement>('.mobile-needs-you-ticket[data-reason="waiting"]'); expect(value).not.toBeNull(); return value! })
+    await click(ticket)
+    await vi.waitFor(() => expect(view.element.querySelector('.mobile-session-origin')).not.toBeNull())
+    expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-waiting')
+    await swipe()
+    await vi.waitFor(() => expect(view.element.querySelector('.mobile-session-origin')).toBeNull())
+    expect(view.element.querySelector('[data-workface="focus"]')?.getAttribute('aria-current')).toBe('page')
+    expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+  })
+})
