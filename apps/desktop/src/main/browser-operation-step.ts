@@ -20,8 +20,17 @@ export function safeBrowserUrl(value: string): string {
   }
 }
 
+/**
+ * Page calls whose arguments are never kept: text a person or page may consider private (typed
+ * values, prompt answers) and opaque page code or protocol input. One list, read by the step and by
+ * the journal, so a new private argument is redacted in both or in neither.
+ */
+export function isSensitiveBrowserPageCall(method: string): boolean {
+  return method === 'fillInput' || method === 'typeText' || method === 'acceptDialog' || method === 'js' || method === 'cdp'
+}
+
 export function startBrowserOperationStep(operation: BrowserOperation, method: string, args: unknown[]): BrowserOperationStep {
-  const sensitive = method === 'fillInput' || method === 'typeText' || method === 'js' || method === 'cdp'
+  const sensitive = isSensitiveBrowserPageCall(method)
   const replay: BrowserReplayStep = {
     method,
     url: safeBrowserUrl(operation.url),

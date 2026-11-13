@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { normalizeBrowserOutcomeJournal } from './browser-outcome-journal.js'
+import { isSensitiveBrowserPageCall } from './browser-operation-step.js'
 import type { BrowserOutcomeRegistration, BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
 
 import { BROWSER_OPERATION_JOURNAL_VERSION, type BrowserOperationJournalStore, type BrowserOperationJournalChanges } from './browser-operation-store.js'
@@ -718,7 +719,7 @@ function sanitizeTarget(target: BrowserReplayTarget): BrowserReplayTarget {
 
 /** Opaque code and text input never enter the journal. A replay consumer must ask for them again. */
 function sanitizeReplay(replay: BrowserReplayStep): BrowserReplayStep {
-  const sensitive = replay.method === 'fillInput' || replay.method === 'typeText' || replay.method === 'js' || replay.method === 'cdp'
+  const sensitive = isSensitiveBrowserPageCall(replay.method)
   const navigationWithQuery = replay.method === 'gotoUrl' && typeof replay.args[0] === 'string'
   const navigationArgs = navigationWithQuery ? [] : replay.args
   return {

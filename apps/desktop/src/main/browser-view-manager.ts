@@ -56,7 +56,8 @@ import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
-import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
+import { beginOwnDispatch, isOwnDispatch, ownDispatchMark, ownDispatchSince, type BrowserOwnDispatch } from './browser-own-dispatch.js'
+import { installBrowserPageInterrupts, describeBrowserPageDialog, BROWSER_PAGE_DIALOG_ANSWERS, type BrowserPageInterrupts } from './browser-page-interrupts.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
@@ -267,7 +268,7 @@ type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: Brows
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
-  !['gotoUrl', 'cdp', 'readResult', 'readDownload', 'wait'].includes(name)))
+  !['gotoUrl', 'cdp', 'readResult', 'readDownload', 'wait'].includes(name) && !BROWSER_PAGE_DIALOG_ANSWERS.has(name)))
 
 
 // Pure hover and motion do not establish active document use; other native input is retained.
@@ -2258,6 +2259,7 @@ export class BrowserViewManager {
     const notes: string[] = []
     const stopController = new AbortController()
     let stopRequested = false
+    let interrupts: BrowserPageInterrupts | undefined
     const localOperation: BrowserOperation = {
       // 非空白 id 保留原值；缺席或全空白才由 journal 的 `start` 唯一铸造。
       // 这里不写 `?? mintObjectId()`：那会是第二个铸造点，而它造出来的 id 与 journal 记下的那个可能
@@ -2382,12 +2384,19 @@ export class BrowserViewManager {
       if (stopRequested) return {
         result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning! }, runOperation: operation
       }
+      // One owner for the page's own dialogs, for this run only (browser-page-interrupts.ts).
+      const pageInterrupts = installBrowserPageInterrupts(session, { signal: stopController.signal })
+      interrupts = pageInterrupts
+      await pageInterrupts.ready()
+      if (!pageInterrupts.observing()) {
+        operation.warning = appendWarning(operation.warning, 'Page dialogs could not be observed in this run. The page and Agent remain usable; a dialog the page opens may make a page call wait until the program budget ends.')
+      }
       const deadlineMillis = Math.min(performance.now() + 30_000, taskPage?.cursor.deadlineMillis ?? Infinity)
       const remainingMillis = Math.floor(deadlineMillis - performance.now())
       if (!Number.isFinite(remainingMillis) || remainingMillis <= 0) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
         timeoutMs: remainingMillis,
-        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis),
+        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis, pageInterrupts),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) => {
           if (!this.owns(entry, feedbackView) || entry.activeRun?.operationId !== operation.id || stopController.signal.aborted) throw new Error('The original Browser operation changed before retaining its result.')
           const context: BrowserResultContext = { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId }
@@ -2398,6 +2407,12 @@ export class BrowserViewManager {
       // `try { await click(ref) } catch {}` 完全是正常写法，而那个 catch 会把"会话没了"
       // 吞掉，程序照常 return——于是一次不知道点没点成的运行被报成 completed，
       // 而 `completed` 连个放警告的字段都没有。判在这一层，程序catch 不catch 都盖不住。
+      await pageInterrupts.dispose()
+      const leftOpen = pageInterrupts.leftOpenAtEnd()
+      if (leftOpen) {
+        notes.push(`The program ended with the page's ${leftOpen.type} dialog still open, so AgentMux dismissed it to keep the page usable. ` +
+          `${describeBrowserPageDialog(leftOpen)} Look at the page before treating this as done.`)
+      }
       const ended = session.endedReason
       if (stopRequested) {
         operation.phase = 'stopped'
@@ -2527,6 +2542,7 @@ export class BrowserViewManager {
       // Its returned operation still reports the final dispatch/control facts.
       operation.control = this.controlState(entry)
       await feedback.end(operation.phase === 'completed')
+      await interrupts?.dispose()
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
         operation.warning ??= cleanupWarning
@@ -3189,7 +3205,8 @@ export class BrowserViewManager {
     privateTaskParameters = false,
     signal?: AbortSignal,
     taskPage?: BrowserTaskPageExecution,
-    deadlineMillis = taskPage?.cursor.deadlineMillis ?? Infinity
+    deadlineMillis = taskPage?.cursor.deadlineMillis ?? Infinity,
+    interrupts?: BrowserPageInterrupts
   ): (name: string, args: unknown[]) => Promise<unknown> {
     const controlRevision = entry.controlRevision
     let activeStep: BrowserOperationStep | null = null
@@ -3223,6 +3240,7 @@ export class BrowserViewManager {
       session,
       beforeAction,
       beginNativeInput: () => this.beginAgentInput(entry, observingView),
+      ...(interrupts ? { interrupts } : {}),
       inputScale: () => this.inputScales.get(observingView.webContents) ?? 1,
       ...(Number.isFinite(deadlineMillis) ? { remainingMillis: () => deadlineMillis - performance.now() } : {}),
       ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
@@ -3335,6 +3353,8 @@ export class BrowserViewManager {
         }
       }
       try {
+        // A call that needs the document would hang on an open dialog: refuse it before sending.
+        if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) interrupts?.assertNoDialog(name)
         if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) {
           requireCurrentDocumentOperation()
           await this.waitForInitialDocument(entry, observingView, signal, deadlineMillis)
@@ -3351,7 +3371,9 @@ export class BrowserViewManager {
           } else if (BROWSER_WAIT_PAGE_CALLS.has(name)) await feedback?.clear()
           else await feedback?.observe()
           if (BROWSER_DOCUMENT_PAGE_CALLS.has(name)) requireCurrentDocumentOperation()
-          value = await dispatch(name, args, { beforeAction: () => beforeAction(step),
+          // A dialog opening during the call ends it at once; whether Main's input went out decides its effect.
+          const inputMark = ownDispatchMark(observingView.webContents)
+          const call = () => dispatch(name, args, { beforeAction: () => beforeAction(step),
             ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {
               dispatched: () => feedback.clickConfirmed(action)
             } : {}),
@@ -3360,6 +3382,9 @@ export class BrowserViewManager {
               await feedback.showTarget(node, send, action)
               beforeAction(step)
             } } : {}) })
+          // An answer is not raced: the page may open its next dialog before the answer's reply arrives.
+          value = interrupts && !BROWSER_PAGE_DIALOG_ANSWERS.has(name)
+            ? await interrupts.race(call, () => ownDispatchSince(observingView.webContents, inputMark)) : await call()
           if (action !== undefined) await feedback?.completeAction(action)
         }
         catch (error) {

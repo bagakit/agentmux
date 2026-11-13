@@ -19,6 +19,7 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import type { BrowserOwnDispatch } from './browser-own-dispatch.js'
 import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
+import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -75,6 +76,8 @@ export type BrowserPageContext = {
    * Absent (a shared external tab) means the commands are sent without a Main receipt.
    */
   beginNativeInput?(): Promise<BrowserOwnDispatch>
+  /** The run's page-dialog owner; absent (a shared external tab, a probe) means dialogs are not answered here. */
+  interrupts?: BrowserPageInterrupts
   /** Page CSS pixels → `Input.*` coordinates under the execution Viewport Main actually applied. Absent means 1. */
   inputScale?(): number
   /**
@@ -1208,6 +1211,13 @@ export function createBrowserPageDispatch(
         }
         return evaluated.result?.value
       }
+      case 'acceptDialog':
+      case 'dismissDialog': {
+        if (!context.interrupts) throw new BrowserLocalRecoveryFailure('This Browser does not answer page dialogs from a program. Nothing was sent.', 'page-dialog', 'not-dispatched')
+        const promptText = name === 'acceptDialog' && args[0] !== undefined ? requireString(args[0], 'promptText') : undefined
+        return await context.interrupts.answer(name === 'acceptDialog', promptText)
+      }
+
       case 'cdp': {
         const method = requireString(args[0], 'method')
         const params = (args[1] ?? {}) as Record<string, unknown>
