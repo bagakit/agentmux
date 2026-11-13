@@ -12,6 +12,7 @@ import { AgentExecutorPicker } from '../AgentExecutorPicker'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useResourceDrafts } from './use-resource-drafts'
+import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-prompts.css'
 import './settings-derived-actions.css'
 
@@ -61,11 +62,11 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
 }) {
   const saved = config.agentDerivedActions ?? {}
   const resource = useResourceDrafts(useMemo(() => Object.fromEntries((saved.actions ?? []).map(action => [action.id, action])), [saved.actions]))
-  const [hidden, setHidden] = useState<{ value: readonly AgentBuiltInDerivedActionId[]; expected: readonly AgentBuiltInDerivedActionId[] }>(() => ({ value: saved.hidden ?? [], expected: saved.hidden ?? [] }))
-  useEffect(() => {
-    // Adopt a committed visibility unless this page has its own unsaved choice.
-    setHidden(current => configValuesEqual(current.value, current.expected) ? { value: saved.hidden ?? [], expected: saved.hidden ?? [] } : { ...current, expected: saved.hidden ?? [] })
-  }, [saved.hidden])
+  // Visibility is one authored field: a clean draft follows committed changes, a dirty one keeps the
+  // baseline it was edited from, so a concurrent change surfaces as a conflict instead of being overwritten.
+  const savedHidden = useMemo(() => ({ hidden: [...(saved.hidden ?? [])].sort() as readonly AgentBuiltInDerivedActionId[] }), [saved.hidden])
+  const visibility = useSettingDraftRecord(savedHidden, configValuesEqual)
+  const hidden = { value: visibility.value.hidden, expected: visibility.expected.hidden }
   const drafts = Object.values(resource.value)
   const [selected, setSelected] = useState<string>(() => AGENT_BUILT_IN_DERIVED_ACTIONS[0].id)
   const [view, setView] = useState<'library' | 'editor'>('library')
@@ -80,7 +81,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     try { parseAgentDerivedActionFields({ label: draft.label, base: draft.base, instruction: draft.instruction, ...(draft.executorId ? { executorId: draft.executorId } : {}) }); return [] }
     catch (error) { return [[draft.id, error instanceof Error ? error.message : String(error)] as const] }
   }))
-  const hiddenDirty = !configValuesEqual([...hidden.value].sort(), [...hidden.expected].sort())
+  const hiddenDirty = visibility.dirty
   const dirty = resource.dirty || hiddenDirty
   const deleted = Object.keys(resource.expected).filter(id => !Object.hasOwn(resource.value, id)).length
 
@@ -111,16 +112,17 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     setView('library')
   }
   function toggle(id: AgentBuiltInDerivedActionId) {
-    setHidden(current => ({ ...current, value: current.value.includes(id) ? current.value.filter(value => value !== id) : AGENT_BUILT_IN_DERIVED_ACTIONS.map(action => action.id).filter(value => value === id || current.value.includes(value)) }))
+    const current = visibility.value.hidden
+    visibility.setField('hidden', current.includes(id) ? current.filter(value => value !== id) : AGENT_BUILT_IN_DERIVED_ACTIONS.map(action => action.id).filter(value => value === id || current.includes(value)).sort())
   }
   async function save() {
-    const submitted = resource.beginSave(), visibility = hidden
+    const submitted = resource.beginSave(), shown = visibility.beginSave()
     const actions = Object.values(submitted.value).map(action => ({ ...action, label: action.label.trim() }))
-    const next: AgentDerivedActionsConfig = { ...(actions.length || saved.actions ? { actions } : {}), ...(visibility.value.length ? { hidden: [...visibility.value] } : {}) }
-    const expected: AgentDerivedActionsConfig = { ...(saved.actions ? { actions: Object.values(submitted.expected) } : {}), ...(visibility.expected.length ? { hidden: [...visibility.expected] } : {}) }
+    const next: AgentDerivedActionsConfig = { ...(actions.length || saved.actions ? { actions } : {}), ...(shown.value.hidden.length ? { hidden: [...shown.value.hidden] } : {}) }
+    const expected: AgentDerivedActionsConfig = { ...(saved.actions ? { actions: Object.values(submitted.expected) } : {}), ...(shown.expected.hidden.length ? { hidden: [...shown.expected.hidden] } : {}) }
     const committed = await saveState.run(() => onSave(next, expected))
     submitted.finish(committed ? Object.fromEntries(actions.map(action => [action.id, action])) : undefined)
-    if (committed) setHidden(current => ({ value: current.value, expected: visibility.value }))
+    shown.finish(committed)
   }
 
   const changedCount = drafts.filter(draft => !configValuesEqual(draft, Object.hasOwn(resource.expected, draft.id) ? resource.expected[draft.id] : undefined)).length + (hiddenDirty ? 1 : 0)
