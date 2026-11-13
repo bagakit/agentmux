@@ -30,6 +30,7 @@ const port = vi.hoisted(() => {
     deleteProfile: vi.fn(async () => {}),
     listProfileSites: vi.fn(async () => [{ site: 'github.com', cookies: 3 }, { site: 'example.com', cookies: 1 }]),
     clearProfileSite: vi.fn(async () => {}),
+    checkProfileExit: vi.fn(async () => ({ status: 'reachable' as const, httpStatus: 200, latencyMs: 184.4, ip: '203.0.113.7' })),
     detectProfileImportSources: vi.fn(async () => []),
     importProfile: vi.fn()
   }
@@ -37,7 +38,7 @@ const port = vi.hoisted(() => {
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
 const store = vi.hoisted(() => ({
   tabs: {} as Record<string, unknown>,
-  config: { browser: { agentAutomation: true } } as { browser: { agentAutomation: boolean } },
+  config: { browser: { agentAutomation: true } } as { browser: { agentAutomation: boolean; exitCheckUrl?: string } },
   layouts: {} as Record<string, { activeGroupId: string; groups: { id: string; tabOrder: string[] }[] }>,
   activeWorkspaceId: 'ws-1' as string | null,
   selectMainRegion: vi.fn((_reference: unknown) => true),
@@ -447,5 +448,39 @@ describe('Settings › Browser Profiles Agents switch', () => {
     await act(async () => root.render(<BrowserProfilesSettingsPane active />))
     expect(container.querySelector('[aria-label="Agents"] small')?.textContent).toContain('Agent browser automation is off in Settings › Browser')
     store.config.browser.agentAutomation = true
+  })
+})
+
+describe('Settings › Browser Profiles exit check', () => {
+  const section = () => container.querySelector('[aria-label="Exit check"]')!
+
+  it('offers to set a check address when none is saved, and sends nothing', async () => {
+    delete store.config.browser.exitCheckUrl
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    expect(section().textContent).toContain('System settings')
+    expect([...section().querySelectorAll('button')].map(button => button.textContent)).toEqual(['Set a check address'])
+    expect(port.checkProfileExit).not.toHaveBeenCalled()
+  })
+
+  it('checks this Profile through its route and shows the reached address, status and time', async () => {
+    store.config.browser.exitCheckUrl = 'https://ip.example.test/'
+    port.set({ revision: 4, profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 } } }, client] })
+    await act(async () => { await browserProfiles.refresh() })
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    const check = [...section().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check')!
+    await act(async () => check.click())
+    expect(port.checkProfileExit).toHaveBeenCalledWith('p-personal')
+    expect(section().textContent).toBe('Exit checksocks5://10.0.0.2:1080→ 203.0.113.7 · HTTP 200 · 184 msCheck again')
+    delete store.config.browser.exitCheckUrl
+  })
+
+  it('says an unanswered check is unknown and keeps it repeatable', async () => {
+    store.config.browser.exitCheckUrl = 'https://ip.example.test/'
+    port.checkProfileExit.mockResolvedValueOnce({ status: 'unknown', reason: 'ERR_PROXY_CONNECTION_FAILED', latencyMs: 40 } as never)
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await act(async () => [...section().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check')!.click())
+    expect(section().querySelector('[role="status"]')?.textContent).toBe('→ unknown · ERR_PROXY_CONNECTION_FAILED')
+    expect([...section().querySelectorAll('button')].map(button => button.textContent)).toEqual(['Check again'])
+    delete store.config.browser.exitCheckUrl
   })
 })
