@@ -146,16 +146,29 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         // does not exist. Delivery/input observation and dispatch absence cannot substitute.
         const existing = await core.call(saved.hostId, 'message.read', { hostId: saved.hostId, operationId: saved.operationId }, context)
         if (existing.message) this.assertSource(saved, existing.message, input.goalId)
-        else {
+        const remote = delegationWorkerHostId(saved) !== saved.hostId
+        const reconcileRemote = remote && saved.linkedAt === undefined && method === 'goal.delegate'
+        if (!existing.message || reconcileRemote) {
           if (method === 'goal.delegation.bind') throw new AgentMuxError('The original message became unavailable before binding. Keep its original source and body.', 'CONTROL_UNAVAILABLE')
-          if (authority.runId !== saved.ownerRunId) throw new AgentMuxError('The saved task owner Run changed before its first submission. Read the original delegation and explicitly continue its responsibility.', 'CONTROL_REQUEST_CONFLICT')
-          await core.call(saved.hostId, 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.workerAgentSessionId, hostId: delegationWorkerHostId(saved) },
+          if (!existing.message && authority.runId !== saved.ownerRunId) throw new AgentMuxError('The saved task owner Run changed before its first submission. Read the original delegation and explicitly continue its responsibility.', 'CONTROL_REQUEST_CONFLICT')
+          // Only an explicit delegate retries this original outbox operation. A local save
+          // cannot attest receipt; Core reconciles the exact target without renotifying it.
+          const received = await core.call(saved.hostId, 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.workerAgentSessionId, hostId: delegationWorkerHostId(saved) },
             operationId: saved.operationId, messageId: saved.sourceMessageId, threadId: saved.threadId,
             correlationId: saved.sourceMessageId, text: saved.text, application: goalDelegationApplication(input.goalId, saved), expectedRun: { runId: saved.workerRunId } }, context)
+          this.assertSource(saved, received, input.goalId)
+          if (remote && (!received.provenance || received.deliveryMode !== 'reference' || received.transport?.state !== 'received' ||
+              received.transport.targetRuntimeId !== received.provenance.target.runtimeId || received.envelope.recipientRuntimeId !== received.provenance.target.runtimeId ||
+              existing.message?.provenance && !isDeepStrictEqual(existing.message.provenance, received.provenance)))
+            throw new AgentMuxError('The original worker receipt is unconfirmed. The signed outbox is retained; explicitly reconcile this same delegation after restoring its exact route or trust.', 'CONTROL_UNAVAILABLE')
         }
         await core.call(saved.hostId, 'message.dispatch.open', { sourceMessageId: saved.sourceMessageId }, context)
-        const observed = await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
+        const confirmBinding = remote && saved.linkedAt === undefined && method === 'goal.delegation.bind'
+        const observed = confirmBinding
+          ? await core.call(saved.hostId, 'message.dispatch.sync', { hostId: delegationWorkerHostId(saved), sourceMessageId: saved.sourceMessageId }, context)
+          : await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
         this.assertSource(saved, observed.source, input.goalId)
+        if (confirmBinding) this.assertRemoteSourceReceipt(saved, observed)
         await this.demands.linkDelegation(input.goalId, saved.operationId, saved.sourceMessageId, authority.actor.id,
           observed.source.provenance && observed.source.envelope.senderRuntimeId && observed.source.envelope.recipientRuntimeId
             ? { ownerRuntimeId: observed.source.envelope.senderRuntimeId, workerRuntimeId: observed.source.envelope.recipientRuntimeId } : undefined)
@@ -226,6 +239,15 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       ...(goal.grounding ? { grounding: goal.grounding } : {}), diskDurability: 'confirmed' }
     if (this.responsibility && !quiet) result.responsibility = await this.responsibility.observe(goal, result)
     return result as GoalDelegationResultMap[M]
+  }
+
+  private assertRemoteSourceReceipt(saved: DemandDelegation, observed: AgentMuxRpcResult<'message.dispatch.sync'>): void {
+    const receipt = observed.remoteSource, source = observed.source, proof = source.provenance
+    if (!proof || !receipt || receipt.kind !== 'recipient-inbox' || receipt.diskDurability !== 'confirmed' || receipt.deliveryMode !== 'reference' ||
+        receipt.runtimeId !== proof.target.runtimeId || receipt.runtimeId !== source.envelope.recipientRuntimeId ||
+        receipt.keyFingerprint !== proof.targetKeyFingerprint || receipt.messageId !== saved.sourceMessageId || receipt.operationId !== saved.operationId ||
+        receipt.intentDigest !== proof.intentDigest || !Number.isSafeInteger(receipt.sequence) || receipt.sequence < 1)
+      throw new AgentMuxError('The original worker inbox receipt differs from this exact source. No delegation link was confirmed; keep the source and inspect its exact target.', 'CONTROL_PROTOCOL_ERROR')
   }
 
   private requireCore(): GoalDelegationCorePort {
