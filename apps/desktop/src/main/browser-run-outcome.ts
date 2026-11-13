@@ -1,4 +1,4 @@
-import type { AgentMuxControlBrowserRunOutcome } from '@agentmux/core'
+import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, type AgentMuxControlBrowserRunOutcome } from '@agentmux/core'
 import type { BrowserOperationPhase } from '../shared/browser-operation.js'
 import type { BrowserScriptFailure } from './browser-script-runner.js'
 
@@ -48,10 +48,34 @@ function describe(failure: BrowserScriptFailure): string {
   return `${failure.reason} The page may have been partially changed — check it before running anything again.`
 }
 
+/**
+ * What the run had done when it ended: the page calls Main recorded, in order. Only the method and
+ * status are read, so no page data or arguments reach the message.
+ */
+export type BrowserRunProgress = readonly { method: string; status: 'running' | 'completed' | 'failed' | 'stopped' }[]
+
+/**
+ * A stopped program says where it stopped. When the budget ends with a page-changing call still in
+ * flight, that call may have taken effect, so the outcome is indeterminate (look before rerunning),
+ * not stopped (which reads as "nothing happened, safe to run again").
+ */
 export function browserRunOutcomeFromFailure(
-  failure: BrowserScriptFailure
+  failure: BrowserScriptFailure,
+  progress: BrowserRunProgress = []
 ): AgentMuxControlBrowserRunOutcome {
-  return OUTCOME_BY_FAILURE[failure.kind](failure)
+  // Core's capability table owns which page calls act or navigate; every caller reads the same answer.
+  const changesPage = (method: string) => BROWSER_PAGE_MUTATING_CAPABILITY_NAMES.has(method)
+  const outcome = OUTCOME_BY_FAILURE[failure.kind](failure)
+  if (failure.kind !== 'timeout') return outcome
+  const done = progress.filter(step => step.status === 'completed').length
+  const running = progress.filter(step => step.status === 'running')
+  const where = running.length
+    ? ` It was in ${running.map(step => step.method + '()').join(', ')} after ${done} completed page call${done === 1 ? '' : 's'}.`
+    : ` ${done} page call${done === 1 ? '' : 's'} had completed; it was running your own code, not waiting on the page.`
+  if (running.some(step => changesPage(step.method))) {
+    return { kind: 'indeterminate', message: `${describe(failure)}${where} That call may have changed the page. Take a snapshot to see the page before running anything again; do not rerun the same program.` }
+  }
+  return { kind: 'stopped', message: `${describe(failure)}${where} Earlier calls stand. Split long work into shorter programs, or wait on one condition with its own timeout.` }
 }
 
 /**

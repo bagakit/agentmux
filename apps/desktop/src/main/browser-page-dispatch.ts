@@ -76,10 +76,18 @@ export type BrowserPageContext = {
   beginNativeInput?(): Promise<BrowserOwnDispatch>
   /** Page CSS pixels → `Input.*` coordinates under the execution Viewport Main actually applied. Absent means 1. */
   inputScale?(): number
+  /**
+   * Milliseconds left before the whole program is stopped; absent means no program budget. A wait is
+   * cut to this so it ends with its own reason, while the program still runs, rather than the program
+   * being killed in the middle of the wait with nothing said about what it was waiting for.
+   */
+  remainingMillis?(): number
 }
 
 /** 默认的等待上限。脚本整体还有自己的超时兜底，这里只防"一个 wait 把整轮吃光"。 */
 const DEFAULT_WAIT_MS = 10_000
+/** Time a cut-short wait leaves for its reason to reach the program before the program's budget ends. */
+const WAIT_RETURN_MARGIN_MS = 1_500
 /** 网络安静判定：这么久没有新请求就算静了。取自 CDP 惯例，不是可调项——调它只会让判据变模糊。 */
 const NETWORK_IDLE_QUIET_MS = 500
 
@@ -824,11 +832,19 @@ export function createBrowserPageDispatch(
 
   /** 等一个条件成立，超时就说清等的是什么、等了多久——"timeout" 三个字帮不了任何人。 */
   async function until(what: string, timeoutMs: number, probe: () => Promise<boolean>): Promise<void> {
-    const deadline = Date.now() + timeoutMs
+    // Keep a margin so the reason below reaches the program before the program's own budget ends.
+    const left = context.remainingMillis ? context.remainingMillis() - WAIT_RETURN_MARGIN_MS : Infinity
+    const budget = Math.max(0, Math.min(timeoutMs, left))
+    const capped = budget < timeoutMs
+    const deadline = Date.now() + budget
     for (;;) {
       if (await probe()) return
-      if (Date.now() >= deadline) throw new Error(`Timed out after ${timeoutMs}ms waiting for ${what}.`)
-      await new Promise((resolve) => setTimeout(resolve, 100))
+      if (Date.now() >= deadline) {
+        throw new Error(capped
+          ? `Stopped waiting for ${what} after ${budget}ms because this program's time is almost up. Earlier steps stand; take a snapshot to see the page, then continue in a new program.`
+          : `Timed out after ${timeoutMs}ms waiting for ${what}.`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))))
     }
   }
 

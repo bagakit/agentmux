@@ -2484,7 +2484,7 @@ export class BrowserViewManager {
         entry.activity = { operation, control: 'agent', ...(operation.warning ? { warning: operation.warning } : {}) }
         return { result: run.value, logs: run.logs, outcome: { kind: 'completed' }, runOperation: operation }
       }
-      const failureOutcome = browserRunOutcomeFromFailure(run.failure)
+      const failureOutcome = browserRunOutcomeFromFailure(run.failure, operation.steps)
       const outcome = privateTaskParameters && 'message' in failureOutcome
         ? { ...failureOutcome, message: `Browser task ${run.failure.kind} did not report completion. Raw error text is withheld because this invocation contains private parameters. Inspect the page before retrying.` }
         : failureOutcome
@@ -3224,6 +3224,7 @@ export class BrowserViewManager {
       beforeAction,
       beginNativeInput: () => this.beginAgentInput(entry, observingView),
       inputScale: () => this.inputScales.get(observingView.webContents) ?? 1,
+      ...(Number.isFinite(deadlineMillis) ? { remainingMillis: () => deadlineMillis - performance.now() } : {}),
       ...(this.downloads && signal ? { downloads: { store: this.downloads, signal, context: () => {
         const view = requireLive()
         if (view !== observingView) throw new Error('The Browser view changed before download.')

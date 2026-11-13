@@ -220,7 +220,7 @@ export class ExternalBrowserOwner {
       const uncertain = attached.endedReason ?? (binding.connection?.id !== connectionId || binding.status !== 'ready' ? binding.warning : undefined)
       const outcome = active.stopped ? { kind: 'stopped' as const, message: 'The shared-tab operation was stopped. Sharing must be granted explicitly before another action.' } :
         uncertain || notes.length ? { kind: 'indeterminate' as const, message: [uncertain, ...notes].filter(Boolean).join('\n') } :
-          run.completed ? { kind: 'completed' as const } : browserRunOutcomeFromFailure(run.failure)
+          run.completed ? { kind: 'completed' as const } : browserRunOutcomeFromFailure(run.failure, operation.steps)
       operation.phase = browserOperationPhaseFromOutcome(outcome.kind); operation.finishedAt = Date.now()
       operation.summary = 'message' in outcome ? outcome.message : 'Shared-tab program completed'
       if ('message' in outcome) operation.warning = outcome.message
