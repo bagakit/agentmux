@@ -59,8 +59,14 @@ function fixture(initial: BrowserProfileEnvironment | undefined = configured) {
     debuggerOwner.emit('detach', {}, 'detach command')
   })
   debuggerOwner.isAttached = () => debuggerOwner.attached
-  debuggerOwner.sendCommand = vi.fn(async (method: string, _params?: unknown) =>
-    method === 'Runtime.evaluate' ? { result: { value: 12 } } : {}
+  debuggerOwner.sendCommand = vi.fn(async (method: string, params?: any) =>
+    method === 'Page.getFrameTree'
+      ? { frameTree: { frame: { id: 'original-main-frame' } } }
+      : method === 'Page.createIsolatedWorld'
+        ? { executionContextId: 17 }
+        : method === 'Runtime.evaluate'
+          ? { result: { value: params?.contextId === 17 ? 12 : 997 } }
+          : {}
   )
   contents.debugger = debuggerOwner
   contents.isDestroyed = () => destroyed
@@ -196,9 +202,9 @@ describe('one original Profile environment across native target scopes', () => {
     const f = fixture()
     cleanup.push(f.destroy)
     await f.prepare()
-    expect(f.owner.hasOnlyEnvironmentDebugger('profile',f.contents as any)).toBe(true)
+    expect(f.owner.hasOnlyEnvironmentDebugger('profile', f.contents as any)).toBe(true)
     const program = BrowserCdpSession.attach(f.contents as any)
-    expect(f.owner.hasOnlyEnvironmentDebugger('profile',f.contents as any)).toBe(false)
+    expect(f.owner.hasOnlyEnvironmentDebugger('profile', f.contents as any)).toBe(false)
     expect(f.contents.debugger.attach).toHaveBeenCalledTimes(1)
     f.set(undefined)
     await settled(
@@ -318,6 +324,39 @@ describe('one original Profile environment across native target scopes', () => {
       expect.anything()
     )
     expect(f.contents.reload).not.toHaveBeenCalled()
+  })
+  it('restores the native isolated baseline rather than a page-defined main-world getter', async () => {
+    const f = fixture({ hardwareConcurrency: 3 })
+    cleanup.push(f.destroy)
+    await f.prepare()
+    f.set(undefined)
+    await f.prepare()
+    expect(f.contents.debugger.sendCommand).toHaveBeenCalledWith('Page.createIsolatedWorld', {
+      frameId: 'original-main-frame',
+      worldName: 'agentmux-profile-environment-baseline',
+      grantUniveralAccess: false
+    })
+    expect(f.contents.debugger.sendCommand).toHaveBeenLastCalledWith(
+      'Emulation.setHardwareConcurrencyOverride',
+      { hardwareConcurrency: 12 }
+    )
+  })
+  it('an absent isolated context stays hardware-unknown without falling back to the page world', async () => {
+    const f = fixture()
+    cleanup.push(f.destroy)
+    const original = f.contents.debugger.sendCommand.getMockImplementation()!
+    f.contents.debugger.sendCommand.mockImplementation(async (method, params) =>
+      method === 'Page.createIsolatedWorld' ? {} : await original(method, params)
+    )
+    await f.prepare()
+    const page = f.owner.inspect('profile')!.pages![0]!
+    expect(page.fields.hardwareConcurrency?.status).toBe('unknown')
+    expect(page.fields.locale?.status).toBe('applied')
+    expect(f.contents.debugger.sendCommand).not.toHaveBeenCalledWith('Runtime.evaluate', expect.anything())
+    expect(f.contents.debugger.sendCommand).not.toHaveBeenCalledWith(
+      'Emulation.setHardwareConcurrencyOverride',
+      expect.anything()
+    )
   })
   it('a fresh target observes its missing baseline when the original document is ready and applies only the newest saved version', async () => {
     const f = fixture()

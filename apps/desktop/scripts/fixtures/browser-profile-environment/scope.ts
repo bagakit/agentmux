@@ -134,6 +134,32 @@ export async function runProfileEnvironmentScope(input: {
   let navigations = 0
   const track = () => navigations++
   original.on('did-start-navigation', track)
+  if(process.env.AGENTMUX_ENV_PROOF_HARDWARE_BASELINE==='1'){
+    await observe('page-main-world-getter-cannot-corrupt-native-hardware-clear',async()=>{
+      const program=BrowserCdpSession.attach(original)
+      try{
+        const tree=await program.sendCommand('Page.getFrameTree') as any
+        const realm=await program.sendCommand('Page.createIsolatedWorld',{frameId:tree.frameTree.frame.id,worldName:'agentmux-profile-baseline-proof',grantUniveralAccess:false}) as any
+        const nativeHardware=async()=>((await program.sendCommand('Runtime.evaluate',{expression:'navigator.hardwareConcurrency',contextId:realm.executionContextId,returnByValue:true})) as any).result.value
+        const nativeBaseline=await nativeHardware()
+        await original.executeJavaScript('Object.defineProperty(navigator,"hardwareConcurrency",{configurable:true,get:()=>997})')
+        await settings(profileId,{hardwareConcurrency:3,locale:'fr-FR'})
+        await applied(profileId,browserId)
+        assert.equal(await nativeHardware(),3)
+        assert.equal(await original.executeJavaScript('navigator.hardwareConcurrency'),997,'The page owns its original main-world getter')
+        await settings(profileId,null)
+        await applied(profileId,browserId)
+        const cleared=await nativeHardware()
+        assert.equal(cleared,nativeBaseline,'Native hardware clear must restore the isolated native baseline')
+        assert.equal(await original.executeJavaScript('navigator.hardwareConcurrency'),997)
+        assert.equal(await original.executeJavaScript('document.querySelector("input").value'),'original unsaved scope input')
+        assert.equal(navigations,0)
+        assert.ok(await program.sendCommand('DOM.getDocument'))
+        report.hardwareBaseline={nativeBaseline,pageGetter:997,cleared,otherNativeConsumerHealthy:original.debugger.isAttached()}
+      }finally{program.detach()}
+    })
+    return
+  }
   await observe('public-cli-native-current-document-and-original-viewport', async () => {
     const saved = await settings(profileId, environment)
     assert.deepEqual(saved.profile.environment, environment)
