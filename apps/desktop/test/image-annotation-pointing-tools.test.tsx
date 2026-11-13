@@ -72,7 +72,7 @@ describe('pointing-mark entry points in the mounted editor', () => {
     expect(toolButton('Magnifier').getAttribute('aria-pressed'), 'Command Z stays Undo').toBe('true')
     const groups = Object.fromEntries([...editor.querySelectorAll<HTMLElement>('.image-annotation-toolbar__group')].map(group =>
       [group.getAttribute('aria-label'), [...group.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))]))
-    expect(groups['Process image'], 'blur sits with the other redaction tools').toEqual(['Crop', 'Pixelate', 'Cover', 'Blur', 'Erase'])
+    expect(groups['Process image'], 'blur sits with the other redaction tools').toEqual(['Crop', 'Magic wand', 'Pixelate', 'Cover', 'Blur', 'Erase'])
     expect(groups['Annotate']).toEqual(['Text', 'Numbered note', 'Spotlight', 'Magnifier'])
   })
 
@@ -207,6 +207,6 @@ describe('pointing-mark entry points in the mounted editor', () => {
 
   it('offers blur and the magnifier on the light capture toolbar and keeps spotlight in the window editor', () => {
     expect(CAPTURE_TOOLS.map(item => item.id), 'the capture toolbar carries blur and the magnifier but no spotlight')
-      .toEqual(['rect', 'ellipse', 'arrow', 'pen', 'pixelate', 'blur', 'text', 'note', 'callout'])
+      .toEqual(['rect', 'ellipse', 'arrow', 'pen', 'wand', 'pixelate', 'blur', 'text', 'note', 'callout'])
   })
 })

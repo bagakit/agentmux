@@ -14,7 +14,7 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'snapping', 'pointing', 'objects'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|snapping|pointing|objects')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'snapping', 'pointing', 'objects', 'adjustments'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|snapping|pointing|objects|adjustments')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
@@ -28,7 +28,87 @@ const pointingTools = 'apps/desktop/test/image-annotation-pointing-tools.test.ts
 const objects = 'apps/desktop/test/image-annotation-objects.test.ts'
 const objectsEditor = 'apps/desktop/test/image-annotation-objects-editor.test.tsx'
 const windowShortcuts = 'apps/desktop/test/image-annotation-window-shortcuts.test.tsx'
+const adjustments = 'apps/desktop/test/image-annotation-adjustments.test.ts'
+const wandTools = 'apps/desktop/test/image-annotation-wand-tools.test.tsx'
+const editor = component + 'ImageAnnotationEditor.tsx'
 const specifications = {
+  adjustments: {
+    tests: [adjustments, wandTools, 'apps/desktop/test/image-annotation-magic-wand.test.ts'],
+    mutations: [{ label: 'adjust-not-first', source: component + 'drawing-model.ts',
+      find: "  if (shape.kind === 'adjust') return -1", replace: "  if (shape.kind === 'adjust') return 0", test: adjustments,
+      consumer: 'paints adjustments first, then marks, masks, magnifiers and spotlights', failure: /expected \[ 3, 2, 1, \+0, \+0 \] to deeply equal \[ 3, 2, 1, \+0, -1 \]/ },
+    { label: 'outline-not-moved', source: component + 'drawing-model.ts',
+      find: '      return { ...shape, ...mapOutline(shape, move), from: move(shape.from), to: move(shape.to) }', replace: '      return { ...shape, from: move(shape.from), to: move(shape.to) }', test: adjustments,
+      consumer: 'moves and scales a wand outline with its region', failure: /the rings move with the region/ },
+    { label: 'outline-not-scaled', source: component + 'drawing-model.ts',
+      find: '  const outline = (outlined: Outlined) => mapOutline(outlined, point => scalePoint(point, scale))', replace: '  const outline = (_outlined: Outlined) => ({})', test: adjustments,
+      consumer: 'moves and scales a wand outline with its region', failure: /the rings scale with the region/ },
+    { label: 'outline-truncated', source: component + 'document.ts',
+      find: "  if (value.length > OUTLINE_LIMITS.rings) invalid('The region outline has too many rings.')", replace: '  value = value.slice(0, OUTLINE_LIMITS.rings)', test: adjustments,
+      consumer: 'rejects outlines that are open, non-finite, outside their region or over the limits', failure: /the document is refused/ },
+    { label: 'outline-region-unchecked', source: component + 'document.ts',
+      find: "extent.from.x < region.x || extent.from.y < region.y || extent.to.x > region.x + region.width || extent.to.y > region.y + region.height)", replace: 'false)', test: adjustments,
+      consumer: 'rejects outlines that are open, non-finite, outside their region or over the limits', failure: /the document is refused/ },
+    { label: 'adjust-range-unchecked', source: component + 'document.ts',
+      find: "factor = (field: unknown) => inRange(field, ADJUST_FACTOR_RANGE, 'The adjustment is out of range.')", replace: 'factor = (field: unknown) => finite(field)', test: adjustments,
+      consumer: 'rejects adjust marks out of range or with missing or extra fields', failure: /the document is refused/ },
+    { label: 'wand-samples-marks', source: editor,
+      find: '    context.drawImage(base, 0, 0, image.width, image.height)\n    return sourcePixelsRef.current', replace: '    context.drawImage(committedLayerRef.current!, 0, 0, image.width, image.height)\n    return sourcePixelsRef.current', test: wandTools,
+      consumer: 'selects the connected region of the original pixels under a click, never the marked result', failure: /the click selects block A of the original under the existing cover/ },
+    { label: 'wand-tolerance-ignored', source: editor,
+      find: '    const picked = magicWandRegion(pixels, at, wandTolerance)', replace: '    const picked = magicWandRegion(pixels, at, DEFAULT_MAGIC_WAND_TOLERANCE)', test: wandTools,
+      consumer: 'grows the region with the tolerance slider, from a default of 20', failure: /at 25 block B joins/ },
+    { label: 'wand-shift-replaces', source: editor,
+      find: '    const region = add && wand ? unionMagicWandRegions(wand.region, picked) : picked', replace: '    const region = picked', test: wandTools,
+      consumer: 'adds a Shift-clicked region to the current one and replaces it on a plain click', failure: /to match object/ },
+    { label: 'wand-conversion-unoutlined', source: editor,
+      find: '    const shape = withOutline(base, wand.outline)\n', replace: '    const shape = base\n', test: wandTools,
+      consumer: 'turns the region into each mask and the spotlight as one Undo step', failure: /^AssertionError: Cover/m },
+    { label: 'wand-pixels-reread', source: editor,
+      find: '    if (sourcePixelsRef.current) return sourcePixelsRef.current\n', replace: '', test: wandTools,
+      consumer: 'reads the original pixels once per image, not on each click or pointer move', failure: /one readback serves every click/ },
+    { label: 'ants-ignore-reduced-motion', source: editor,
+      find: 'timer = reduced.matches || document.hidden ? 0 :', replace: 'timer = document.hidden ? 0 :', test: wandTools,
+      consumer: 'marches the ants only while a region shows and keeps them still under reduced motion', failure: /reduced motion runs no timer/ },
+    { label: 'ants-run-at-rest', source: editor,
+      find: '    if (!active || !wand) return\n    const reduced', replace: '    if (!active) return\n    const reduced', test: wandTools,
+      consumer: 'marches the ants only while a region shows and keeps them still under reduced motion', failure: /no region, no timer/ },
+    { label: 'capture-wand-all-actions', source: editor,
+      find: '  const regionActions = REGION_ACTIONS.filter(([kind]) => !capture || CAPTURE_TOOLS.some(item => item.id === kind))', replace: '  const regionActions = REGION_ACTIONS', test: wandTools,
+      consumer: 'offers the wand in a capture selection with the capture masks only', failure: /'Cover'/ },
+    { label: 'adjust-each-change-new-mark', source: editor,
+      find: '    if (adjustment) { edit(doc => replaceShape(doc, { ...adjustment, [property]: value })); return }\n', replace: '', test: wandTools,
+      consumer: 'adjusts the whole image with four sliders, each change one Undo step', failure: /one mark for the whole image/ },
+    { label: 'adjust-region-unoutlined', source: editor,
+      find: '    const shape = adjusting.outline ? withOutline(created, adjusting.outline) : created', replace: '    const shape = created', test: wandTools,
+      consumer: 'adjusts the current wand region through its outline', failure: /the adjustment keeps the region outline/ },
+    { label: 'outline-rects-nonzero', source: component + 'drawing-model.ts',
+      find: '    for (let index = 0; index + 1 < xs.length; index += 2) if (xs[index + 1]! > xs[index]!) rects.push({ x: xs[index]!, y: top, width: xs[index + 1]! - xs[index]!, height })',
+      replace: '    if (xs.length > 1) rects.push({ x: xs[0]!, y: top, width: xs.at(-1)! - xs[0]!, height })', test: adjustments,
+      consumer: "covers an outline's even-odd fill exactly with rects, holes and notches left out", failure: /pixel 25,25/ },
+    { label: 'outline-slant-accepted', source: component + 'document.ts',
+      find: "  if (!isAxisAlignedOutline(rings)) invalid('Each region outline edge must be horizontal or vertical.')\n", replace: '', test: adjustments,
+      consumer: 'rejects outlines that are open, non-finite, outside their region or over the limits', failure: /the document is refused/ },
+    { label: 'adjusted-base-per-view', source: component + 'canvas-render.ts',
+      find: "  if (cached && cached.source === source && cached.width === width && cached.height === height && cached.adjustments.length === adjustments.length &&",
+      replace: "  if (cached && false && cached.source === source && cached.width === width && cached.height === height && cached.adjustments.length === adjustments.length &&", test: adjustments,
+      consumer: 'reuses the adjusted image across pan and zoom and repaints it when a parameter changes', failure: /pan, zoom and other marks reuse the adjusted image/ },
+    { label: 'adjusted-base-stale', source: component + 'canvas-render.ts',
+      find: '    cached.adjustments.every((shape, index) => shape === adjustments[index])) return cached.canvas', replace: '    true) return cached.canvas', test: adjustments,
+      consumer: 'reuses the adjusted image across pan and zoom and repaints it when a parameter changes', failure: /a changed parameter repaints it/ },
+    { label: 'adjust-list-hidden', source: editor,
+      find: '        {regionAdjusts.length ? <div className="image-annotation-editor__mode" role="group" aria-label="Adjustment">', replace: '        {false ? <div className="image-annotation-editor__mode" role="group" aria-label="Adjustment">', test: wandTools,
+      consumer: 'lists existing adjustments to edit or remove one after the wand selection is gone, each change one Undo step', failure: /the adjustments are listed/ },
+    { label: 'adjust-pick-ignored', source: editor,
+      find: '            onClick={() => setAdjusting(adjustTarget(shape))}>', replace: '            onClick={() => undefined}>', test: wandTools,
+      consumer: 'lists existing adjustments to edit or remove one after the wand selection is gone, each change one Undo step', failure: /picking the region edits the region/ },
+    { label: 'adjust-remove-unwired', source: editor,
+      find: '    edit(doc => removeShapes(doc, new Set([adjustment.id]))); setAdjusting(wholeImageTarget(adjustment.id))', replace: '    setAdjusting(wholeImageTarget(adjustment.id))', test: wandTools,
+      consumer: 'lists existing adjustments to edit or remove one after the wand selection is gone, each change one Undo step', failure: /Remove deletes the region adjustment/ },
+    { label: 'adjusted-region-unoutlined', source: editor,
+      find: '  const outlined = wand?.outline ?? adjusting?.outline ?? null', replace: '  const outlined = wand?.outline ?? null', test: wandTools,
+      consumer: 'keeps the adjusted region outlined after a tool change drops the wand selection', failure: /the region it adjusts still shows its outline/ }]
+  },
   objects: {
     tests: [objects, objectsEditor, windowShortcuts],
     mutations: [
@@ -140,7 +220,7 @@ const specifications = {
       find: "zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.')", replace: 'zoom: positive(base.zoom)', test: pointing,
       consumer: 'rejects pointing marks with out-of-range strength, extra fields or missing geometry', failure: /callout zoom below 1\.5 must be rejected/ },
     { label: 'blur-tool-missing', source: component + 'AnnotationToolbar.tsx',
-      find: "tools: ['crop', 'pixelate', 'cover', 'blur', 'erase']", replace: "tools: ['crop', 'pixelate', 'cover', 'erase']", test: pointingTools,
+      find: "tools: ['crop', 'wand', 'pixelate', 'cover', 'blur', 'erase']", replace: "tools: ['crop', 'wand', 'pixelate', 'cover', 'erase']", test: pointingTools,
       consumer: 'offers blur, spotlight and magnifier as toolbar tools with their own letter shortcuts', failure: /real Blur control/ },
     { label: 'pointing-click-commits', source: component + 'ImageAnnotationEditor.tsx',
       find: "'cover', 'blur', 'spotlight', 'callout'])", replace: "'cover'])", test: pointingTools,

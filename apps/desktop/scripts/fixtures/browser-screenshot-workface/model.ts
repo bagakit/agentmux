@@ -1,8 +1,9 @@
 import { composeScreenshot } from '../../../src/renderer/src/components/image-annotation/compose'
 import { drawScreenshotShapes } from '../../../src/renderer/src/components/image-annotation/drawing-renderer'
-import { calloutBubble, commitShape, createBlurShape, createCalloutShape, createScreenshotDocument, createSpotlightShape, hitTestShape, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
+import { calloutBubble, commitShape, createAdjustShape, createBlurShape, createCalloutShape, createScreenshotDocument, createSpotlightShape, hitTestShape, withOutline, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type CoverShape, type PixelateShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
 import { renderCommittedLayer, renderScreenshotScene } from '../../../src/renderer/src/components/image-annotation/canvas-render'
 import { resizeShapeFromHandle } from '../../../src/renderer/src/components/image-annotation/selection-geometry'
+import { outlineContains } from '../../../src/renderer/src/components/image-annotation/magic-wand'
 import type { ImageViewport } from '../../../src/renderer/src/components/image-annotation/view'
 
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message) }
@@ -163,7 +164,110 @@ async function decode(dataUrl: string) {
   const zoomExport = canvas(160, 100), zoomExportContext = zoomExport.getContext('2d')!
   zoomExportContext.drawImage(await decode(zoomPng.dataUrl), 0, 0)
   check(blockSpread(zoomExportContext) < 40, 'exported callout bubble must show the pixelated pixels, never the original under a mask')
-  return { passed: true, pointing: ['blur-stripe-contrast', 'blur-outside-untouched', 'blur-edge-opacity', 'spotlight-after-masks', 'callout-enlarges-source', 'callout-masked-preview', 'callout-masked-PNG'], cases: ['actual-pixel-blocks', 'crop-dimensions', 'preview-export-pixel-equality', 'outside-scaled-pixelation', 'identity-move-erase-undo', 'ellipse-ink-distance', 'pixelation-failure',
+  // Wand outlines: an L with a square hole. The even-odd fill is the only area a mask may change, and the editor's
+  // committed preview layer and the exported PNG carry the same pixels.
+  const L = [[{ x: 20, y: 20 }, { x: 20, y: 80 }, { x: 90, y: 80 }, { x: 90, y: 55 }, { x: 50, y: 55 }, { x: 50, y: 20 }],
+    // The hole turns the same way as its outer ring, so only the even-odd rule leaves it unpainted.
+    [{ x: 28, y: 30 }, { x: 28, y: 45 }, { x: 40, y: 45 }, { x: 40, y: 30 }]]
+  const filled = (x: number, y: number) => outlineContains(L, { x, y })
+  const unchangedOutside = (target: CanvasRenderingContext2D) => {
+    const after = target.getImageData(0, 0, 160, 100).data, before = context.getImageData(0, 0, 160, 100).data
+    for (let y = 0; y < 100; y++) for (let x = 0; x < 160; x++) {
+      if (filled(x + 0.5, y + 0.5)) continue
+      const at = (y * 160 + x) * 4
+      if (after[at] !== before[at] || after[at + 1] !== before[at + 1] || after[at + 2] !== before[at + 2]) return false
+    }
+    return true
+  }
+  const exportedPixels = async (shapes: ScreenshotShape[], scale: number) => {
+    const png = await composeScreenshot({ image: base, shapes, displayWidth: 160, displayHeight: 100, outputScale: scale })
+    const target = canvas(png.width, png.height), targetContext = target.getContext('2d')!
+    targetContext.drawImage(await decode(png.dataUrl), 0, 0)
+    return { png, data: targetContext.getImageData(0, 0, png.width, png.height).data }
+  }
+  // The editor's committed layer at one image pixel per canvas pixel: the preview the export must equal.
+  const previewPixels = (shapes: ScreenshotShape[]) => {
+    const layer = canvas(1, 1), view: ImageViewport = { width: 160, height: 100, dpr: 1, imageWidth: 160, imageHeight: 100, view: { scale: 1, x: 0, y: 0 } }
+    renderCommittedLayer(layer, screenshotOutputShapes(shapes), view, base)
+    return layer.getContext('2d')!.getImageData(0, 0, 160, 100).data
+  }
+  const sameAsExport = async (shapes: ScreenshotShape[]) => {
+    const { png, data } = await exportedPixels(shapes, 1), preview = previewPixels(shapes)
+    return png.width === 160 && png.height === 100 && data.length === preview.length && data.every((byte, index) => byte === preview[index])
+  }
+  const outlinedCover = withOutline<CoverShape>({ id: 'wand-cover', kind: 'cover', color: '#111827', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
+  const outlinedPixels = withOutline<PixelateShape>({ id: 'wand-pixels', kind: 'pixelate', color: '#000', blockSize: 10, from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
+  const coverPaint = paintOutput([outlinedCover]), pixelPaint = paintOutput([outlinedPixels])
+  check(coverPaint.getImageData(60, 70, 1, 1).data[0]! < 30, 'outlined cover must paint inside its fill')
+  // Outside the L's notch only an unclipped mask paints; inside the hole a nonzero clip paints too.
+  check(coverPaint.getImageData(75, 35, 1, 1).data.every((byte, index) => byte === context.getImageData(75, 35, 1, 1).data[index]), 'an outlined mask must leave its notch original')
+  check(coverPaint.getImageData(34, 38, 1, 1).data.every((byte, index) => byte === context.getImageData(34, 38, 1, 1).data[index]), 'an outline hole must keep its original pixels')
+  check(unchangedOutside(coverPaint), 'outlined cover must keep every pixel outside its even-odd fill original')
+  check(unchangedOutside(pixelPaint), 'outlined pixelation must keep every pixel outside its even-odd fill original')
+  check(await sameAsExport([outlinedCover]) && await sameAsExport([outlinedPixels]), 'outlined mask preview and actual exported PNG must share the same pixels')
+  const notchNote: ScreenshotShape = { id: 'notch-note', kind: 'note', number: 1, note: 'under the bounds', color: '#ef4444', width: 2, radius: 4, from: { x: 75, y: 35 }, to: { x: 75, y: 35 } }
+  check(!screenshotOutputShapes([notchNote, outlinedCover]).some(shape => shape.id === notchNote.id), 'outlined mask output must filter notes under its bounds')
+  // At a fractional pixel ratio and view scale the outline's edges fall inside canvas pixels. Each canvas pixel the fill
+  // touches must take the mask whole, exactly as the unoutlined mask over the same rect paints it, so no edge pixel
+  // blends with the original. Touch is sampled on a 4 × 4 grid inside each canvas pixel.
+  const fractional: ImageViewport = { width: 120, height: 80, dpr: 1.5, imageWidth: 160, imageHeight: 100, view: { scale: 0.7, x: 3.3, y: 2.6 } }
+  const touched = (viewport: ImageViewport, width: number, height: number) => {
+    const unit = viewport.dpr * viewport.view.scale, pixels: number[] = []
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      let inside = false
+      for (let sy = 0; sy < 4 && !inside; sy++) for (let sx = 0; sx < 4 && !inside; sx++)
+        inside = filled((x + (sx + 0.5) / 4 - viewport.dpr * viewport.view.x) / unit, (y + (sy + 0.5) / 4 - viewport.dpr * viewport.view.y) / unit)
+      if (inside) pixels.push(y * width + x)
+    }
+    return pixels
+  }
+  const sameAt = (pixels: readonly number[], a: Uint8ClampedArray, b: Uint8ClampedArray) => pixels.every(pixel => [0, 1, 2, 3].every(channel => a[pixel * 4 + channel] === b[pixel * 4 + channel]))
+  const layerPixels = (shapes: ScreenshotShape[], viewport: ImageViewport) => {
+    const layer = canvas(1, 1); renderCommittedLayer(layer, shapes, viewport, base)
+    return { layer, data: layer.getContext('2d')!.getImageData(0, 0, layer.width, layer.height).data }
+  }
+  const unoutlined = <T extends CoverShape | PixelateShape>(shape: T): T => { const { outline: _outline, ...rest } = shape; return rest as T }
+  const edge = touched(fractional, 180, 120)
+  check(edge.length > 2000, 'the fractional view must hold the outline')
+  for (const shape of [outlinedCover, outlinedPixels]) {
+    check(sameAt(edge, layerPixels([shape], fractional).data, layerPixels([unoutlined(shape)], fractional).data),
+      'an outlined mask must cover every device pixel an outline touches at a fractional scale: ' + shape.kind)
+  }
+  // The export at a fractional output scale puts the edges inside PNG pixels the same way.
+  for (const shape of [outlinedCover, outlinedPixels]) {
+    const outlined = await exportedPixels([shape], 1.5), plain = await exportedPixels([unoutlined(shape)], 1.5)
+    const exportView: ImageViewport = { width: outlined.png.width, height: outlined.png.height, dpr: 1, imageWidth: 160, imageHeight: 100, view: { scale: 1.5, x: 0, y: 0 } }
+    check(outlined.png.width === 240 && sameAt(touched(exportView, outlined.png.width, outlined.png.height), outlined.data, plain.data),
+      'an outlined mask must cover every PNG pixel an outline touches at a fractional scale: ' + shape.kind)
+  }
+  // While ink is drawn, committed outlined masks keep their processed pixels across their whole touched area, and the
+  // ink still shows in the outline's notch, which is inside the mask's rect but outside its fill.
+  const committedMask = layerPixels([outlinedPixels], fractional), liveScene = canvas(1, 1)
+  const liveInk: ScreenshotShape = { id: 'live-ink', kind: 'pen', color: '#ef4444', width: 14, points: [{ x: 10, y: 40 }, { x: 150, y: 40 }, { x: 150, y: 70 }, { x: 10, y: 70 }] }
+  renderScreenshotScene(liveScene, committedMask.layer, liveInk, fractional, [outlinedPixels])
+  const live = liveScene.getContext('2d')!.getImageData(0, 0, liveScene.width, liveScene.height).data
+  check(sameAt(edge, live, committedMask.data), 'live ink must not replace processed outlined mask pixels at a fractional scale')
+  const notch = Math.round((40 * fractional.view.scale + fractional.view.y) * fractional.dpr) * liveScene.width + Math.round((75 * fractional.view.scale + fractional.view.x) * fractional.dpr)
+  check(live[notch * 4]! > 200 && live[notch * 4 + 1]! < 120, "live ink must show in an outlined mask's notch")
+  // Adjustments: a whole-image brightness and a region sharpen. Callouts sample the adjusted pixels, and the
+  // preview equals the export.
+  const brighter = createAdjustShape('bright', { x: 0, y: 0 }, { x: 160, y: 100 }, { brightness: 1.3, saturation: 0.6 })
+  const sharper = withOutline(createAdjustShape('sharp', { x: 0, y: 0 }, { x: 1, y: 1 }, { sharpen: 1, contrast: 1.2 }), L)
+  const dark = context.getImageData(2, 50, 1, 1).data[0]!
+  check(paintOutput([brighter]).getImageData(2, 50, 1, 1).data[0]! > dark + 3, 'brightness must lift the actual dark stripe')
+  check(unchangedOutside(paintOutput([sharper])), 'region adjustment must keep every pixel outside its even-odd fill original')
+  check(paintOutput([sharper]).getImageData(60, 70, 4, 1).data.some((byte, index) => index % 4 < 3 && byte !== context.getImageData(60, 70, 4, 1).data[index]),
+    'region adjustment must change pixels inside its fill')
+  check(await sameAsExport([brighter]) && await sameAsExport([sharper]), 'adjustment preview and actual exported PNG must share the same pixels')
+  // The adjusted range holds the magnifier's source but not its bubble, so only adjusted-then-magnified pixels brighten it.
+  const lens = createCalloutShape('lens', '#ef4444', { x: 2, y: 50 }, { x: 10, y: 58 }, 2, { x: 100, y: 10 })
+  const brighterSource = createAdjustShape('bright-source', { x: 0, y: 40 }, { x: 60, y: 100 }, { brightness: 1.3 })
+  const lensRow = (target: CanvasRenderingContext2D) => target.getImageData(calloutBubble(lens).x + 6, calloutBubble(lens).y + 6, 4, 1).data.filter((_, index) => index % 4 === 0)
+  const lifted = lensRow(paintOutput([lens, brighterSource])), plain = lensRow(paintOutput([lens]))
+  check(lifted.every((value, index) => value >= plain[index]!) && lifted.some((value, index) => value > plain[index]!), 'callout must magnify the adjusted pixels')
+  return { passed: true, pointing: ['blur-stripe-contrast', 'blur-outside-untouched', 'blur-edge-opacity', 'spotlight-after-masks', 'callout-enlarges-source', 'callout-masked-preview', 'callout-masked-PNG'],
+    wand: ['outline-cover-inside', 'outline-notch', 'outline-cover-outside', 'outline-pixelate-outside', 'outline-hole', 'outline-PNG-equality', 'outline-note-filter',
+      'outline-fractional-preview-opacity', 'outline-fractional-PNG-opacity', 'outline-live-ink-protection', 'outline-live-ink-notch', 'adjust-brightness', 'adjust-region-outside', 'adjust-region-inside', 'adjust-PNG-equality', 'adjust-under-callout'], cases: ['actual-pixel-blocks', 'crop-dimensions', 'preview-export-pixel-equality', 'outside-scaled-pixelation', 'identity-move-erase-undo', 'ellipse-ink-distance', 'pixelation-failure',
     'cover-note-filtering', 'fractional-cover-opacity', 'live-ink-mask-protection', 'viewport-bounded-high-zoom', 'tiny-pixelate-sample-bounds', 'actual-resized-ink', 'processed-PNG-cover-opacity'],
     enhancements: ['brush-corridor-pixels', 'brush-preview-PNG-equality', 'live-brush-mask-protection', 'multiline-raster'],
     pixelCount: a.length / 4, viewportAllocation: { width: scene.width, height: scene.height, scale: highZoom.view.scale }, png: brushedPng }
