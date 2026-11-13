@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
@@ -16,13 +17,15 @@ const settingsFixture = vi.hoisted(() => ({
       { id: 'claude', label: 'Claude', executable: 'claude' }
     ],
     executorDetections: {},
+    hostExecutorInventories: {},
+    discoverHostExecutors: vi.fn(async () => {}),
     detectExecutors: vi.fn(async () => {})
   }
 }))
 
 vi.mock('../src/renderer/src/store.js', () => ({
   executorDetectionKey: (hostId: string, executorId: string) => `${hostId}\0${executorId}`,
-  useAppStore: (selector: (state: typeof settingsFixture.state) => unknown) => selector(settingsFixture.state)
+  useAppStore: Object.assign((selector: (state: typeof settingsFixture.state) => unknown) => selector(settingsFixture.state), { getState: () => settingsFixture.state })
 }))
 
 const config: AppConfig = {
