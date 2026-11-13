@@ -9,6 +9,10 @@ function text(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 8192 || value.includes('\0')) throw new AgentMuxError('Upgrade DTO text is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value
 }
+function tailcatField(value: unknown, required: boolean): string {
+  if (typeof value !== 'string' || value.length > 8192 || /[\0\r\n]/u.test(value) || required && !value.trim()) throw new AgentMuxError('Upgrade Tailcat target is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value
+}
 function count(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new AgentMuxError('Upgrade DTO count is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value as number
@@ -87,7 +91,9 @@ function host(value: unknown): RemoteCoreUpgradeHost {
     if (p.transport !== 'tailcat') text(p.hostname)
     else if (typeof p.hostname !== 'string') throw new AgentMuxError('Invalid remote hostname.', 'CONTROL_PROTOCOL_ERROR')
     if (p.transport !== undefined && !['ssh', 'ssh-tailcat', 'tailcat'].includes(p.transport as string)) throw new AgentMuxError('Invalid remote transport.', 'CONTROL_PROTOCOL_ERROR')
-    if (p.tailcat !== undefined) { const t = record(p.tailcat, ['address', 'keyFile']); text(t.address); text(t.keyFile) }
+    // Same values as the saved Host record: an unused Tailcat target may stay empty.
+    const tailcatRequired = p.transport === 'tailcat' || p.transport === 'ssh-tailcat'
+    if (p.tailcat !== undefined) { const t = record(p.tailcat, ['address', 'keyFile']); tailcatField(t.address, tailcatRequired); tailcatField(t.keyFile, tailcatRequired) }
     if ((p.transport === 'tailcat' || p.transport === 'ssh-tailcat') && p.tailcat === undefined) throw new AgentMuxError('Missing Tailcat target.', 'CONTROL_PROTOCOL_ERROR')
     for (const key of ['user', 'identityFile', 'remoteCommand', 'remoteSocketPath', 'runtimeId']) if (p[key] !== undefined) text(p[key])
     if (p.port !== undefined && (count(p.port) < 1 || count(p.port) > 65535)) throw new AgentMuxError('Upgrade SSH port is invalid.', 'CONTROL_PROTOCOL_ERROR')
