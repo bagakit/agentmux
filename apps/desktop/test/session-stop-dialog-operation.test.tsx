@@ -13,6 +13,7 @@ import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-con
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => <span /> }))
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
+import { useSessionStop } from '../src/renderer/src/components/SessionStop'
 
 const initial = useAppStore.getState(), target = composerSession('stop-op-target')
 const tab = createWorkbenchTab('stop-op-tab', { kind: 'agent', regionId: 'stop-op-region', phase: 'attached', workspaceId: 'workspace', sessionId: target.id })
@@ -125,6 +126,22 @@ it('a Run changed in the renderer is still sent once with the original frozen ex
   await act(async () => useAppStore.setState({ sessions: [{ ...target, control: { ...target.control, run: { runId: 'new-run' } } }] }))
   await act(async () => button('Stop Agent')!.click()); await settle()
   expect(stop()).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
+})
+
+it.each(['missing', 'newer-run'] as const)('an explicit frozen Stop can be confirmed when its cached observation is %s', async observation => {
+  function FrozenStop() {
+    const stop = useSessionStop()
+    return <><button onClick={event => stop.requestStop({ id: target.id, hostId: target.hostId, control: target.control }, 'Stop target', event.currentTarget)}>Request frozen Stop</button>{stop.dialog}</>
+  }
+  await act(async () => {
+    root.render(<FrozenStop />)
+    useAppStore.setState({ sessions: observation === 'missing' ? [] : [{ ...target, control: { ...target.control, run: { runId: 'observed-new-run' } } }] })
+  })
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click()); await settle()
+  expect(dialog()?.textContent).toContain('original Run’s current state is unknown')
+  await act(async () => button('Stop Agent')!.click()); await settle()
+  expect(stop()).toHaveBeenCalledExactlyOnceWith(target.control, expect.any(String))
+  expect(dialog()).toBeNull()
 })
 
 it('Core stale-Run failure stays on the original operation; stopping a replacement Run needs a new explicit confirmation', async () => {

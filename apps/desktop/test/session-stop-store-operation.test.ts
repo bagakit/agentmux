@@ -26,6 +26,50 @@ it('stops the exact Run with one operation id and answers stopped', async () => 
   expect(stop()).toHaveBeenCalledExactlyOnceWith(agent.control, expect.stringMatching(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/))
 })
 
+it.each(['missing', 'another-session', 'another-run', 'another-operation'] as const)(
+  'an Agent Stop with a %s receipt stays unconfirmed and retains its original intent', async kind => {
+    stop().mockImplementationOnce(async (control, operationId) => {
+      if (kind === 'missing' || control.kind !== 'agent') return undefined
+      const receipt = sessionStopReceipt(control, operationId!)
+      return kind === 'another-session' ? { ...receipt, agentSessionId: 'another-agent' }
+        : kind === 'another-run' ? { ...receipt, expectedRun: { runId: 'another-run' } }
+          : { ...receipt, operationId: 'another-operation' }
+    })
+    const outcome = await useAppStore.getState().stopSession(agent.id)
+    const operationId = stop().mock.calls[0]![1]!
+    expect(outcome).toMatchObject({ status: 'unconfirmed', operationId })
+    expect(useAppStore.getState().sessions).toEqual([agent])
+    expect(useAppStore.getState().tabs[tab.id]).toBeTruthy()
+    expect(Object.values(useAppStore.getState().agentOperations)).toEqual([expect.objectContaining({
+      kind: 'stop', operationId, control: agent.control, phase: 'unconfirmed'
+    })])
+    expect(await useAppStore.getState().stopSession(agent.id)).toMatchObject({ status: 'stopped' })
+    expect(stop().mock.calls[1]).toEqual([agent.control, operationId])
+  })
+
+it('a retained Stop receipt settles its canonical operation and keeps it in the returned outcome', async () => {
+  stop().mockImplementationOnce(async (control) => control.kind === 'agent'
+    ? { ...sessionStopReceipt(control, 'original-stop'), admission: 'retained' } : undefined)
+  expect(await useAppStore.getState().stopSession(agent.id)).toMatchObject({ status: 'stopped', receipt: { operationId: 'original-stop' } })
+  expect(useAppStore.getState().agentOperations).toEqual({})
+})
+
+it('a last-View close keeps the workface when its Agent Stop has no confirmed receipt', async () => {
+  stop().mockResolvedValueOnce(undefined)
+  await useAppStore.getState().closeTab('workspace', 'store-stop-group', tab.id)
+  await vi.waitFor(() => expect(useAppStore.getState().closingWorkbenchViews).toEqual({}))
+  const operationId = stop().mock.calls[0]![1]!
+  expect(useAppStore.getState().tabs[tab.id]).toBeTruthy()
+  expect(useAppStore.getState().sessions).toEqual([agent])
+  expect(Object.values(useAppStore.getState().agentOperations)).toEqual([expect.objectContaining({
+    operationId, control: agent.control, phase: 'unconfirmed'
+  })])
+  expect(useAppStore.getState().error).toContain(operationId)
+  await useAppStore.getState().closeTab('workspace', 'store-stop-group', tab.id)
+  await vi.waitFor(() => expect(stop()).toHaveBeenCalledTimes(2))
+  expect(stop().mock.calls[1]).toEqual([agent.control, operationId])
+})
+
 it('a pending startup recovery is cancelled, not awaited: the Stop is sent while recovery is still unsettled', async () => {
   const end = beginMoteStartupRecovery()
   try {
