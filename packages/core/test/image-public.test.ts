@@ -168,3 +168,13 @@ it('actual public client and CLI preserve current pin state and the separate ori
   expect(JSON.parse(unknown.stdout).result).toMatchObject({ state: 'unknown', recordedOperation: { operationId: 'unknown-pin', effect: null } })
   expect(h.call.mock.calls.filter(([method, input]) => method === 'image.pin' && input.operationId === 'unknown-pin')).toHaveLength(1)
 })
+
+it('accepts a missing close effect beside a closed pin and still refuses it beside an open window', () => {
+  const close = { hostId: 'local', pinId: 'original-image', operationId: 'later-close' }
+  const missing: ImageOperation = { operationId: 'later-close', method: 'image.close', actor, pinId: 'original-image', state: 'completed', effect: 'missing', message: null }
+  const receipt = (state: ImageResult['state']): ImageResult => ({ hostId: 'local', pinId: 'original-image', state,
+    creationOperationId: state === 'missing' ? null : pin.operationId, recordedOperation: missing })
+  expect(parseImageResult('image.close', receipt('closed'), close, actor)).toMatchObject({ state: 'closed', recordedOperation: { effect: 'missing' } })
+  expect(parseImageResult('image.close', receipt('missing'), close, actor)).toMatchObject({ state: 'missing' })
+  expect(() => parseImageResult('image.close', receipt('open'), close, actor)).toThrow('An absent image effect cannot claim a current window.')
+})

@@ -261,3 +261,18 @@ it('public service client and actual CLI reach the real Main pin owner without r
   const service = new AgentMuxRpcService({ coreClients: () => [], images: owner })
   await expect(service.call('image.inspect', { hostId: 'local', operationId: 'original-pin' }, { principal: otherActor })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
 })
+
+it('a later close of an already closed pin is a completed receipt the public codec accepts, and inspect reads it again', async () => {
+  const { parseImageResult } = await import('../../../packages/core/src/public-rpc-image')
+  const first = await open('pin-closed-twice')
+  const pinId = first.result.pinId!
+  const closed = await owner.call('image.close', { hostId: 'local', pinId, operationId: 'first-close' }, context)
+  expect(closed).toMatchObject({ state: 'closed', recordedOperation: { effect: 'closed' } })
+  expect(parseImageResult('image.close', closed, { hostId: 'local', pinId, operationId: 'first-close' }, actor)).toMatchObject({ state: 'closed' })
+  // The window is already gone: a second close finds nothing to close and must still say so as a valid receipt.
+  const again = await owner.call('image.close', { hostId: 'local', pinId, operationId: 'second-close' }, context)
+  expect(again.recordedOperation).toMatchObject({ state: 'completed', effect: 'missing' })
+  expect(() => parseImageResult('image.close', again, { hostId: 'local', pinId, operationId: 'second-close' }, actor)).not.toThrow()
+  const read = await owner.call('image.inspect', { hostId: 'local', operationId: 'second-close' }, context)
+  expect(() => parseImageResult('image.inspect', read, { hostId: 'local', operationId: 'second-close' }, actor)).not.toThrow()
+})
