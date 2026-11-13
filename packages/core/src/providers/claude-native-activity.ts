@@ -209,7 +209,7 @@ export function register(on) {
   // Attach the one exact main call this ask belongs to. Each recorded ask is used once; two
   // equal candidates stay unidentified. Nothing else in the payload changes.
   on('classic.PermissionRequest', ($, event, next) => {
-    if (!initialSessionId || sourceChanged || event?.agent_id !== undefined || event?.tool_use_id !== undefined) return next(event)
+    if (sourceChanged || event?.agent_id !== undefined || event?.tool_use_id !== undefined) return next(event)
     const input = canonical(event?.tool_input)
     const matches = [...askedCalls].filter(([, call]) => !call.identified && call.tool === event?.tool_name && call.input === input)
     if (matches.length !== 1) return next(event)
