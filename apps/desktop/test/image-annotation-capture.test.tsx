@@ -421,6 +421,13 @@ describe('capture image annotation', () => {
     expect(off.props.onComplete.mock.lastCall![0].crop, 'a drag still makes a free selection').toEqual({ x: 420, y: 320, width: 160, height: 60 })
   })
 
+  it('a press that drags away and comes back to its start selects no window', async () => {
+    const { move, press, release, bar, props } = await mount(undefined, [FRONT, BACK])
+    // The press lights the front window, the drag puts the highlight out, and the release lands within a click of the press.
+    await move([300, 200], 0); await press([300, 200]); await move([320, 220]); await move([301, 200]); await release([301, 200])
+    expect([bar(), props.onSelect.mock.calls.length], 'a press that became a drag selects nothing on its way back').toEqual([null, 0])
+  })
+
   it('the capture overlay hands its frozen windows to the editor, so a click there selects one', async () => {
     const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
       pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
