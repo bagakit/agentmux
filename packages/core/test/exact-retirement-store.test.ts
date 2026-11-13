@@ -32,7 +32,9 @@ it.each(['memory', 'file'] as const)('reads only the exact original strict retir
   if (kind === 'file') {
     const db = new DatabaseSync(path)
     try {
-      db.prepare('INSERT INTO retired_sessions(id,json) VALUES(?,?)').run('unrelated-corrupt-retirement', '{')
+      // The creation-operation index makes SQLite refuse non-JSON bytes, so an adjacent damaged
+      // retirement is valid JSON that fails the strict retirement shape.
+      db.prepare('INSERT INTO retired_sessions(id,json) VALUES(?,?)').run('unrelated-corrupt-retirement', '{"source":"unknown"}')
       expect(await store.readRetiredAgentSession(original.agentSessionId), 'a corrupt adjacent retirement cannot poison the exact owner').toEqual(retained)
       db.prepare('UPDATE retired_sessions SET json=? WHERE id=?').run(JSON.stringify({ ...retained, agentSessionId: 'wrong-stored-location' }), original.agentSessionId)
       await expect(store.readRetiredAgentSession(original.agentSessionId)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })

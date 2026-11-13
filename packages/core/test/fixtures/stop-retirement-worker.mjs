@@ -57,7 +57,9 @@ if (phase === 'first') {
 }
 const live = await store.load()
 const retired = await store.loadRetiredAgentSessions()
-const lifecycle = JSON.parse(await readFile(storePath, 'utf8')).reservations
+// The durable lifecycle owner is the Store's exact reservation row, read through its public reader.
+const reservation = await store.readLifecycleReservation(session.agentSessionId)
+const lifecycle = reservation ? [reservation] : []
 const projection = await client.runtimeProjection()
 const statuses = projection.subjects.map((subject) => projectRunProcessStatus({
   state: subject.run.state, source: 'run-process', observedAt: subject.run.observedAt, ...runExitFacts(subject.run)
