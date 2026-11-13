@@ -31,7 +31,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { DatabaseSync } from 'node:sqlite'
-import { openSessionDatabase, promptAdmissionSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
+import { openSessionDatabase, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -3549,10 +3549,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         const updated = this.db.prepare('UPDATE reservations SET json=? WHERE id=? AND json=?')
           .run(JSON.stringify(reservation), reservation.agentSessionId, String(row!.json))
         if (updated.changes !== 1) throw new AgentMuxError('Lifecycle reservation changed before supersession.', 'STALE_AGENT_SESSION')
-      } else {
-        this.db.prepare('INSERT INTO reservations (id, json) VALUES (?, ?)').run(reservation.agentSessionId, JSON.stringify(reservation))
-      }
-      this.dirty = true
+        this.dirty = true
+      } else this.insertReservation(this.db, reservation)
     }, undefined, reservation.agentSessionId) } catch (error) {
       if (!admissionChecked) throw error
       const failure = agentCreationNotAppliedError(error, reservation.operationId)
@@ -3606,9 +3604,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async recordRestartStartNotApplied(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, failure: { code: string; message: string; observedAt: number }) {
     let next!: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = restartStartNotAppliedReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, failure)
-      await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next.agentSessionId ? next : item) })
+      next = restartStartNotAppliedReservation(this.reservationRow(this.db, reservation.agentSessionId), reservation, failure)
+      this.replaceReservation(this.db, next)
     }, undefined, reservation.agentSessionId)
     return structuredClone(next)
   }
@@ -3616,11 +3613,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch) {
     let next!: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = preparedResumeReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, session, dispatch)
-      assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
-      assertSupervisedResumeClaim(next, document.sessions)
-      await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next.agentSessionId ? next : item) })
+      next = preparedResumeReservation(this.reservationRow(this.db, reservation.agentSessionId), reservation, session, dispatch)
+      const target = this.lifecycleTarget(this.db, reservation.agentSessionId)
+      assertReservationPrecondition(next, target.sessions, target.retired)
+      assertSupervisedResumeClaim(next, target.sessions)
+      this.replaceReservation(this.db, next)
     }, undefined, reservation.agentSessionId)
     return structuredClone(next)
   }
@@ -3628,12 +3625,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async admitResumeResolution(original: ResumeReservation, request: ResumeResolutionRequest, claim: AgentMuxLifecycleClaim & { reservationId: string }) {
     let result!: ResumeReservation
     await this.enqueue(async () => {
-      const document = await this.read()
-      const next = admittedResumeResolution(document.reservations.find(item => item.agentSessionId === original.agentSessionId), original,
-        document.sessions.find(item => item.agentSessionId === original.agentSessionId), request, claim)
-      assertReservationPrecondition(next.reservation, document.sessions, document.retiredAgentSessions)
-      await this.write({ ...document, sessions: document.sessions.map(item => item.agentSessionId === original.agentSessionId ? next.session : item),
-        reservations: document.reservations.map(item => item.agentSessionId === original.agentSessionId ? next.reservation : item) })
+      const target = this.lifecycleTarget(this.db, original.agentSessionId)
+      const next = admittedResumeResolution(this.reservationRow(this.db, original.agentSessionId), original, target.session ?? undefined, request, claim)
+      assertReservationPrecondition(next.reservation, target.sessions, target.retired)
+      this.saveSession(this.db, normalizeStoredAgentSession(next.session), false)
+      this.replaceReservation(this.db, next.reservation)
       result = next.reservation
     }, undefined, original.agentSessionId)
     return structuredClone(result)
@@ -3653,11 +3649,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async recordResumeResolutionFailure(original: ResumeReservation, failure: { code: string; message: string }) {
     let result!: AgentMuxStoredAgentSession
     await this.enqueue(async () => {
-      const document = await this.read()
-      const canonical = document.sessions.find(item => item.agentSessionId === original.agentSessionId)
-      result = resumeResolutionFailure(document.reservations.find(item => item.agentSessionId === original.agentSessionId), original, canonical, failure)
-      if (result !== canonical) await this.write({ ...document,
-        sessions: document.sessions.map(item => item.agentSessionId === original.agentSessionId ? result : item) })
+      const canonical = this.sessionMetadata(this.db, original.agentSessionId) ?? undefined
+      result = resumeResolutionFailure(this.reservationRow(this.db, original.agentSessionId), original, canonical, failure)
+      if (result !== canonical) { this.saveSession(this.db, normalizeStoredAgentSession(result), false); this.dirty = true }
     }, undefined, original.agentSessionId)
     return structuredClone(result)
   }
@@ -3666,12 +3660,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     dispatch: AgentMuxPreparedResumeDispatch, retirement: AgentMuxCreationRuntime) {
     let result!: ResumeReservation
     await this.enqueue(async () => {
-      const document = await this.read()
-      const next = handedOffResumeResolution(document.reservations.find(item => item.agentSessionId === original.agentSessionId), original,
-        document.sessions.find(item => item.agentSessionId === original.agentSessionId), successor, session, dispatch, retirement)
-      assertReservationPrecondition(next.reservation, document.sessions, document.retiredAgentSessions)
-      await this.write({ ...document, sessions: document.sessions.map(item => item.agentSessionId === original.agentSessionId ? next.session : item),
-        reservations: document.reservations.map(item => item.agentSessionId === original.agentSessionId ? next.reservation : item) })
+      const target = this.lifecycleTarget(this.db, original.agentSessionId)
+      const next = handedOffResumeResolution(this.reservationRow(this.db, original.agentSessionId), original, target.session ?? undefined,
+        successor, session, dispatch, retirement)
+      assertReservationPrecondition(next.reservation, target.sessions, target.retired)
+      this.saveSession(this.db, normalizeStoredAgentSession(next.session), false)
+      this.replaceReservation(this.db, next.reservation)
       result = next.reservation
     }, undefined, original.agentSessionId)
     return structuredClone(result)
@@ -3680,10 +3674,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>> {
     let next: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> | undefined
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = preparedReopenReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, session)
-      assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
-      await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next!.agentSessionId ? next! : item) })
+      next = preparedReopenReservation(this.reservationRow(this.db, reservation.agentSessionId), reservation, session)
+      const target = this.lifecycleTarget(this.db, reservation.agentSessionId)
+      assertReservationPrecondition(next, target.sessions, target.retired)
+      this.replaceReservation(this.db, next)
     }, undefined, reservation.agentSessionId)
     return structuredClone(next!)
   }
@@ -3691,11 +3685,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>> {
     let next: Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | undefined
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = preparedCreateReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, seed)
-      assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
-      assertNativeCreationOwner(next.preparedCreation!, document.sessions, document.retiredAgentSessions, document.reservations)
-      await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? next! : item) })
+      next = preparedCreateReservation(this.reservationRow(this.db, reservation.agentSessionId), reservation, seed)
+      const target = this.lifecycleTarget(this.db, reservation.agentSessionId)
+      assertReservationPrecondition(next, target.sessions, target.retired)
+      const owners = this.nativeOwnerCandidates(this.db, next.preparedCreation!.nativeHandle)
+      assertNativeCreationOwner(next.preparedCreation!, owners.sessions, owners.retired, owners.reservations)
+      this.replaceReservation(this.db, next)
     }, undefined, reservation.agentSessionId)
     return structuredClone(next!)
   }
@@ -3703,28 +3698,28 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async claimCreate(agentSessionId: string, operationId: string, intentDigest: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null> {
     let next: Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null = null
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = claimedCreateReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, intentDigest, claim)
-      if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
+      next = claimedCreateReservation(this.reservationRow(this.db, agentSessionId), operationId, intentDigest, claim)
+      if (next) this.replaceReservation(this.db, next)
     }, undefined, agentSessionId)
     return next ? structuredClone(next) : null
   }
 
   async releaseReopenOwner(ownerId: string): Promise<void> {
     await this.enqueue(async () => {
-      const document = await this.read()
       const retained = (item: AgentMuxLifecycleReservation) => (item.kind === 'reopen' || item.kind === 'create' && item.preparedCreation || item.kind === 'resume' && (item.restart || item.resolution)) && item.ownerId === ownerId
-      if (!document.reservations.some(retained)) return
-      await this.write({ ...document, reservations: document.reservations.map(item => retained(item) ? { ...item, ownerReleased: true } : item) })
+      // Reservations are the open lifecycle operations only; reading them all never touches Sessions or history.
+      for (const row of this.db.prepare('SELECT json FROM reservations ORDER BY rowid').all()) {
+        const item = lifecycleReservation(JSON.parse(String(row.json)))
+        if (retained(item)) this.replaceReservation(this.db, { ...item, ownerReleased: true } as AgentMuxLifecycleReservation)
+      }
     }, undefined, CROSS_SESSION_WRITE)
   }
 
   async claimRestart(agentSessionId: string, operationId: string, claim: AgentMuxLifecycleClaim) {
     let next: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> | null = null
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = claimedRestartReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, claim)
-      if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
+      next = claimedRestartReservation(this.reservationRow(this.db, agentSessionId), operationId, claim)
+      if (next) this.replaceReservation(this.db, next)
     }, undefined, agentSessionId)
     return next ? structuredClone(next) : null
   }
@@ -3732,9 +3727,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async claimReopen(agentSessionId: string, operationId: string, expectedRetiredAt: number, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> | null> {
     let next: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> | null = null
     await this.enqueue(async () => {
-      const document = await this.read()
-      next = claimedReopenReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, expectedRetiredAt, claim)
-      if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
+      next = claimedReopenReservation(this.reservationRow(this.db, agentSessionId), operationId, expectedRetiredAt, claim)
+      if (next) this.replaceReservation(this.db, next)
     }, undefined, agentSessionId)
     return next ? structuredClone(next) : null
   }
@@ -3753,8 +3747,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         claimed = [next]
         return
       }
-      const document = await this.read()
-      claimed = document.reservations.flatMap((reservation) => {
+      const reservations = this.db.prepare('SELECT json FROM reservations ORDER BY rowid').all().map(row => lifecycleReservation(JSON.parse(String(row.json))))
+      claimed = reservations.flatMap((reservation) => {
         if (
           !((reservation.kind === 'reopen' || reservation.kind === 'create' || reservation.kind === 'resume') && reservation.ownerReleased) && reservation.ownerId !== claim.ownerId &&
           processIsAlive(reservation.ownerPid)
@@ -3768,14 +3762,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
           expiresAt: claim.expiresAt
         })]
       })
-      if (claimed.length === 0) return
-      const claimedById = new Map(claimed.map((reservation) => [reservation.reservationId, reservation]))
-      await this.write({
-        ...document,
-        reservations: document.reservations.map(
-          (reservation) => claimedById.get(reservation.reservationId) ?? reservation
-        )
-      })
+      for (const reservation of claimed) this.replaceReservation(this.db, reservation)
     }, undefined, CROSS_SESSION_WRITE)
     return claimed.map((reservation) => structuredClone(reservation))
   }
@@ -3786,55 +3773,20 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   ): Promise<void> {
     await this.enqueue(async () => {
       const reservation = lifecycleReservation(value)
-      const document = await this.read()
-      const current = document.reservations.find(
-        (item) => item.agentSessionId === reservation.agentSessionId
-      )
+      const current = this.reservationRow(this.db, reservation.agentSessionId)
       if (!current) return
       if (!sameReservationOwner(current, reservation)) {
         throw new AgentMuxError('Lifecycle reservation belongs to another owner.', 'AGENT_SESSION_BUSY')
       }
-      const mergedRetiredRuns = mergeRetiredRuns(document.retiredRuns, retiredRuns)
-      const retiredAgentSessions = retiredAgentSessionsForRuns(
-        document.retiredAgentSessions,
-        mergedRetiredRuns
-      )
-      assertUnboundRetiredRuns(document.sessions, mergedRetiredRuns)
-      assertRetiredAgentSessions(
-        document.sessions,
-        mergedRetiredRuns,
-        retiredAgentSessions
-      )
-      await this.write({
-        ...document,
-        retiredRuns: mergedRetiredRuns,
-        retiredAgentSessions,
-        reservations: document.reservations.filter(
-          (item) => item.reservationId !== reservation.reservationId
-        )
-      })
+      this.retireRunRows(this.db, retiredRuns)
+      this.db.prepare('DELETE FROM reservations WHERE id=?').run(reservation.agentSessionId)
+      this.dirty = true
     }, undefined, CROSS_SESSION_WRITE)
   }
 
   async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
     await this.enqueue(async () => {
-      const document = await this.read()
-      const retiredRuns = mergeRetiredRuns(document.retiredRuns, runs)
-      const retiredAgentSessions = retiredAgentSessionsForRuns(
-        document.retiredAgentSessions,
-        retiredRuns
-      )
-      assertUnboundRetiredRuns(document.sessions, retiredRuns)
-      assertRetiredAgentSessions(
-        document.sessions,
-        retiredRuns,
-        retiredAgentSessions
-      )
-      await this.write({
-        ...document,
-        retiredRuns,
-        retiredAgentSessions
-      })
+      this.retireRunRows(this.db, runs)
     }, undefined, CROSS_SESSION_WRITE)
   }
 
@@ -3846,46 +3798,44 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.enqueue(async () => {
       const reservation = lifecycleReservation(value)
       if (reservation.kind === 'stop') { committed = this.commitStop(reservation, next); return }
-      const document = await this.read()
-      const currentReservation = document.reservations.find(
-        (item) => item.agentSessionId === reservation.agentSessionId
-      )
-      if (!currentReservation || !sameReservationOwner(currentReservation, reservation)) {
-        throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
-      }
-      assertReservationPrecondition(
-        reservation,
-        document.sessions,
-        document.retiredAgentSessions
-      )
-      const previous = document.sessions.find(
-        (session) => session.agentSessionId === reservation.agentSessionId
-      )
-      const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next, currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined)) : null
-      assertLifecycleReceiptFence(currentReservation, previous ?? null, normalized, true)
-      assertLifecycleCommit(currentReservation, normalized)
-      const sessions = document.sessions.filter(
-        (session) => session.agentSessionId !== reservation.agentSessionId
-      )
-      if (normalized) sessions.push(normalized)
-      const committedSessions = normalizeAgentSessions(sessions)
-      const retiredRuns = reservation.kind === 'reopen'
-        ? withoutReopenedRuns(document.retiredRuns, reservation.expectedRetirement)
-        : document.retiredRuns
-      const retiredAgentSessions = retiredAgentSessionsForRuns(document.retiredAgentSessions, retiredRuns)
-      assertUnboundRetiredRuns(committedSessions, retiredRuns)
-      assertRetiredAgentSessions(committedSessions, retiredRuns, retiredAgentSessions)
-      await this.write({
-        version: 5,
-        sessions: committedSessions,
-        reservations: document.reservations.filter(
-          (item) => item.reservationId !== reservation.reservationId
-        ),
-        retiredRuns,
-        retiredAgentSessions
-      })
+      this.commitSessionLifecycle(reservation, next)
     }, undefined, value.agentSessionId)
     return committed
+  }
+
+  /**
+   * Create, resume and reopen commit one Session by its own rows. The prepared Session replaces
+   * the current row; a reopen also moves its exact retirement and Runs back from retired history.
+   * Cross-Session uniqueness (id, Run, native identity, prompt operation) is enforced by the binding
+   * tables, the unique prompt index and saveSession's exact lookups, never by reading the catalog.
+   */
+  private commitSessionLifecycle(reservation: Exclude<AgentMuxLifecycleReservation, { kind: 'stop' }>, next: AgentMuxStoredAgentSession | null): void {
+    const db = this.db, id = reservation.agentSessionId
+    const current = this.reservationRow(db, id)
+    if (!current || !sameReservationOwner(current, reservation)) {
+      throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
+    }
+    const target = this.lifecycleTarget(db, id), previous = target.session ?? undefined
+    assertReservationPrecondition(reservation, target.sessions, target.retired)
+    const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next,
+      current.kind === 'resume' ? current.resolution?.receipt.originalOperationId : undefined)) : null
+    assertLifecycleReceiptFence(current, previous ?? null, normalized, true)
+    assertLifecycleCommit(current, normalized)
+    if (reservation.kind === 'reopen') {
+      // The exact retirement leaves history together with the closed Run and the earlier Runs its
+      // creation fact names (reopenedPriorRuns). Any other retired Run the prepared Session names
+      // stays retired, so saveSession refuses it through its NULL binding.
+      const retirement = reservation.expectedRetirement
+      db.prepare('DELETE FROM retired_sessions WHERE id=?').run(id)
+      for (const run of [retirement.run, ...reopenedPriorRuns(retirement)]) {
+        db.prepare('DELETE FROM retired_runs WHERE id=?').run(run.runId)
+        db.prepare('DELETE FROM run_bindings WHERE run_id=? AND session_id IS NULL').run(run.runId)
+      }
+    }
+    if (normalized) this.saveSession(db, normalized, false)
+    else this.deleteSession(db, id)
+    db.prepare('DELETE FROM reservations WHERE id=?').run(id)
+    this.dirty = true
   }
 
   /**
@@ -3915,12 +3865,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     db.prepare('DELETE FROM reservations WHERE id=?').run(id)
     this.deleteSession(db, id)
-    for (const run of runs) {
-      // Re-retiring a Run keeps one row, moved to the end, as mergeRetiredRuns orders the history.
-      db.prepare('DELETE FROM retired_runs WHERE id=?').run(run.runId)
-      db.prepare('INSERT INTO retired_runs (id, json) VALUES (?, ?)').run(run.runId, JSON.stringify(run))
-      db.prepare('INSERT INTO run_bindings (run_id, session_id) VALUES (?, NULL)').run(run.runId)
-    }
+    this.retireRunRows(db, runs)
     const retired = retiredAgentSession({
       agentSessionId: previous.agentSessionId,
       hostId: previous.hostId,
@@ -3939,6 +3884,62 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   private retiredSession(db: DatabaseSync, id: string): AgentMuxRetiredAgentSession | null {
     const row = db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(id)
     return row ? retiredAgentSession(JSON.parse(String(row.json))) : null
+  }
+
+  /** The exact lifecycle reservation row of one Session; no other Session's rows are read. */
+  private reservationRow(db: DatabaseSync, id: string): AgentMuxLifecycleReservation | undefined {
+    const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(id)
+    return row ? lifecycleReservation(JSON.parse(String(row.json))) : undefined
+  }
+
+  /**
+   * Append Runs to the retired history by their own rows. A Run bound to a current Session cannot
+   * retire unbound; re-retiring keeps one row moved to the end, as mergeRetiredRuns orders history.
+   */
+  private retireRunRows(db: DatabaseSync, runs: readonly AgentMuxRunRef[]): void {
+    for (const value of runs) {
+      const run = runRef(value)
+      const bound = db.prepare('SELECT session_id FROM run_bindings WHERE run_id=?').get(run.runId)
+      if (bound && bound.session_id !== null) throw new AgentMuxError('Unbound retired Run conflicts with an Agent Session.', 'INVALID_AGENT_SESSION_STORE')
+      db.prepare('DELETE FROM retired_runs WHERE id=?').run(run.runId)
+      db.prepare('INSERT INTO retired_runs (id, json) VALUES (?, ?)').run(run.runId, JSON.stringify(run))
+      db.prepare('INSERT INTO run_bindings (run_id, session_id) VALUES (?, NULL) ON CONFLICT(run_id) DO UPDATE SET session_id=NULL').run(run.runId)
+    }
+    if (runs.length) this.dirty = true
+  }
+
+  /** Admit one new lifecycle reservation row. */
+  private insertReservation(db: DatabaseSync, reservation: AgentMuxLifecycleReservation): void {
+    db.prepare('INSERT INTO reservations (id, json) VALUES (?, ?)').run(reservation.agentSessionId, JSON.stringify(reservation))
+    this.dirty = true
+  }
+
+  /** Replace one reservation in place, keeping its rowid so stale-claim recovery keeps its order. */
+  private replaceReservation(db: DatabaseSync, next: AgentMuxLifecycleReservation): void {
+    const updated = db.prepare('UPDATE reservations SET json=? WHERE id=?').run(JSON.stringify(lifecycleReservation(next)), next.agentSessionId)
+    if (updated.changes !== 1) throw new AgentMuxError('Lifecycle reservation changed before its update.', 'STALE_AGENT_SESSION')
+    this.dirty = true
+  }
+
+  /**
+   * The rows that could already own one native conversation, found through SQLite instead of the
+   * whole catalog: current Sessions naming it as handle, observed handle or candidate, retirements
+   * naming it in their history, and prepared creations or reopens naming it. The original predicate
+   * (assertNativeCreationOwner) still decides on exactly these rows.
+   */
+  private nativeOwnerCandidates(db: DatabaseSync, handle: AgentNativeSessionHandle | undefined) {
+    if (handle?.kind !== 'provider') return { sessions: [], retired: [], reservations: [] }
+    const like = `%${JSON.stringify(handle.sessionId).slice(1, -1)}%`
+    const sessions = db.prepare('SELECT json FROM sessions WHERE json LIKE ?').all(like).map(row => normalizeStoredAgentSession(JSON.parse(String(row.json))))
+    const retired = db.prepare('SELECT json FROM retired_sessions WHERE json LIKE ?').all(like).map(row => retiredAgentSession(JSON.parse(String(row.json))))
+    const reservations = db.prepare('SELECT json FROM reservations WHERE json LIKE ?').all(like).map(row => lifecycleReservation(JSON.parse(String(row.json))))
+    return { sessions, retired, reservations }
+  }
+
+  /** The one Session a lifecycle precondition can name, as the single-element catalog its assertions read. */
+  private lifecycleTarget(db: DatabaseSync, id: string) {
+    const session = this.sessionMetadata(db, id), retired = this.retiredSession(db, id)
+    return { session, sessions: session ? [session] : [], retired: retired ? [retired] : [] }
   }
 
   private async withCapturedRead<T>(read: (db: DatabaseSync) => T): Promise<T> {
@@ -4146,16 +4147,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return this.strictStoreDocument(value)
   }
 
-  private async read(signal?: AbortSignal): Promise<AgentSessionStoreDocument> {
-    signal?.throwIfAborted()
-    return await this.withReadDatabase(db => ({ version: 5,
-      sessions: this.sessionCatalog(db),
-      reservations: db.prepare('SELECT json FROM reservations ORDER BY rowid').all().map(row => lifecycleReservation(JSON.parse(String(row.json)))),
-      retiredRuns: db.prepare('SELECT json FROM retired_runs ORDER BY rowid').all().map(row => runRef(JSON.parse(String(row.json)))),
-      retiredAgentSessions: db.prepare('SELECT json FROM retired_sessions ORDER BY rowid').all().map(row => retiredAgentSession(JSON.parse(String(row.json))))
-    }), document => document)
-  }
-
   private sessionCatalog(db: DatabaseSync): AgentMuxStoredAgentSession[] {
     return db.prepare('SELECT json FROM sessions ORDER BY rowid').all().map(row => normalizeStoredAgentSession(JSON.parse(String(row.json))))
   }
@@ -4221,6 +4212,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     if (native) {
       const bound = db.prepare('SELECT session_id FROM native_bindings WHERE native_key=?').get(native)
       if (bound && bound.session_id !== id) throw new AgentMuxError('Native identity conflicts with another Session.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    const submission = session.terminalPromptSubmission?.submissionId
+    if (submission && db.prepare("SELECT 1 FROM sessions WHERE json_extract(json,'$.terminalPromptSubmission.submissionId')=? AND id<>?").get(submission, id)) {
+      throw new AgentMuxError('Agent Session store contains a duplicate prompt operation.', 'INVALID_AGENT_SESSION_STORE')
     }
     const present = replaceFuture || session.futurePromptIntents !== undefined ? Number(session.futurePromptIntents !== undefined)
       : Number(db.prepare('SELECT future_present FROM sessions WHERE id=?').get(id)?.future_present ?? 0)
@@ -4426,13 +4421,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
 
-  private async write(document: AgentSessionStoreDocument, signal?: AbortSignal): Promise<void> {
-    signal?.throwIfAborted()
-    this.writeDocument(this.db, document)
-    this.dirty = true
-    // Captured facts retain their original Session identity across active/retired transitions.
-  }
-
+  /** One-time physical import of an original JSON document into a fresh database; never a lifecycle write. */
   private writeDocument(db: DatabaseSync, document: AgentSessionStoreDocument): void {
     // Lifecycle operations explicitly inspect metadata identities and reconcile their ownership;
     // preserved future bodies never join this catalog or its JSON serialization.
@@ -4487,6 +4476,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         }
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='index' AND name='retired_creation_operation'").get()) {
           this.db.exec(retiredCreationIndexSchema); this.dirty = true
+        }
+        if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='index' AND name='terminal_prompt_submission'").get()) {
+          this.db.exec(promptSubmissionIndexSchema); this.dirty = true
         }
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name='captured_streams'").get()) { this.db.exec(capturedHistorySchema); this.dirty=true }
         stage = 'mutation'
