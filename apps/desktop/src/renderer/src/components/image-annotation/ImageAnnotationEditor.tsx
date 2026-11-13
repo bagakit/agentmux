@@ -59,7 +59,7 @@ function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish:
 export type CaptureAnnotationHandoff = { shapes: ScreenshotShape[]; crop: NormalizedRect; tool: AnnotationTool }
 const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover', 'blur', 'spotlight', 'callout'])
 // Selection handle hit radius and painted diameter, in frame CSS pixels.
-const CROP_HANDLE_HIT = 6, CROP_HANDLE_SIZE = 7
+const CROP_HANDLE_HIT = 8, CROP_HANDLE_SIZE = 8
 // The loupe magnifies a square of frozen pixels around the pointer into a grid of cells, in loupe CSS pixels.
 const LOUPE_CELLS = 15, LOUPE_CELL = 8, LOUPE_GRID = LOUPE_CELLS * LOUPE_CELL, LOUPE_CENTRE = (LOUPE_CELLS - 1) / 2
 type LoupeSample = { x: number; y: number; hex: string; rgb: [number, number, number] }
@@ -251,11 +251,14 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     if (!crop) { context.fillRect(0, 0, image.width, image.height); return }
     context.fillRect(0, 0, image.width, crop.y); context.fillRect(0, crop.y + crop.height, image.width, image.height - crop.y - crop.height)
     context.fillRect(0, crop.y, crop.x, crop.height); context.fillRect(crop.x + crop.width, crop.y, image.width - crop.x - crop.width, crop.height)
+    // A white line between two dark hairlines reads on any frozen content, white windows included.
     context.lineWidth = unit; context.setLineDash([])
-    context.strokeStyle = 'rgba(0, 0, 0, .35)'; context.strokeRect(crop.x - 1.5 * unit, crop.y - 1.5 * unit, crop.width + 3 * unit, crop.height + 3 * unit)
+    context.strokeStyle = 'rgba(0, 0, 0, .55)'
+    context.strokeRect(crop.x - 1.5 * unit, crop.y - 1.5 * unit, crop.width + 3 * unit, crop.height + 3 * unit)
+    context.strokeRect(crop.x + .5 * unit, crop.y + .5 * unit, crop.width - unit, crop.height - unit)
     context.strokeStyle = '#ffffff'; context.strokeRect(crop.x - .5 * unit, crop.y - .5 * unit, crop.width + unit, crop.height + unit)
     const xs = [crop.x, crop.x + crop.width / 2, crop.x + crop.width], ys = [crop.y, crop.y + crop.height / 2, crop.y + crop.height]
-    context.fillStyle = '#ffffff'; context.strokeStyle = 'rgba(0, 0, 0, .35)'
+    context.fillStyle = '#ffffff'; context.strokeStyle = 'rgba(0, 0, 0, .55)'
     for (const [column, x] of xs.entries()) for (const [row, y] of ys.entries()) {
       if (column === 1 && row === 1) continue
       context.beginPath(); context.arc(x, y, CROP_HANDLE_SIZE / 2 * unit, 0, Math.PI * 2); context.fill(); context.stroke()
