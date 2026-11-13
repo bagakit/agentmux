@@ -206,6 +206,11 @@ try {
   report.heightReceipt = { placeholder: resting.placeholderHeight ?? null, page: report.initialLayout.presentationHeight }
   assert.ok(typeof report.heightReceipt.placeholder === 'number' && report.heightReceipt.placeholder > 0, 'The placeholder height must be measured')
   assert.ok(Math.abs(report.heightReceipt.placeholder - report.heightReceipt.page) <= 1, 'The placeholder and the loaded page share one height')
+  // Let the release of the hidden card settle, as a real scroll does, before it returns to the reading window.
+  for (const deadline = Date.now() + 10000; !report.releases.length && Date.now() < deadline;) await delay(30)
+  assert.ok(report.releases.length > 0, 'The hidden card releases its native presentation')
+  await delay(150)
+  await focusReader()
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(isolated.record.capsuleId))})`)
   await until('conversationCapsuleProbe.facts().ready', 'The card reconnects its original page when it returns to the reading window')
   const verifyStyles = async (capsuleId: string) => { if (phase === 'green' && cssProofPath) {
@@ -326,6 +331,7 @@ try {
   report.pending = await facts(); assertCardLayout(report.pending)
   assert.equal(report.pending.questions[0].answer, draft, 'The complete long Chinese draft must remain in the original trusted editor')
   assert.ok(report.pending.layout.questionChip.includes('Needs your answer'), 'A page that waits for the person marks its concise host chip')
+  assert.equal(report.pending.layout.headerWaiting, '1', 'The card header repeats the pending answer beside its tools')
   await evaluate("conversationCapsuleProbe.click('Open in Browser')")
   assert.equal(report.opened, `amux://capsule/${injected.record.capsuleId}`, 'The original explicit Browser action retains the exact Capsule link')
   assert.ok((await owner.call('capsule.interaction.ls', { capsuleId: injected.record.capsuleId })).interactions.length === 1)
@@ -359,6 +365,8 @@ try {
   assert.equal(await evaluate('document.querySelector(".capsule-question textarea").value'), retainedDraft, 'True message unmount retains trusted editable bytes without resuming autosave')
   report.trustedEditor.remountBytes = retainedDraft
 
+  report.metadataIssue = await evaluate(`(() => {const issue=document.querySelector('.capsule-chrome__issue'),question=document.querySelector('.capsule-question');return {present:!!issue,afterQuestion:!!(issue&&question&&(question.compareDocumentPosition(issue)&Node.DOCUMENT_POSITION_FOLLOWING)),retry:issue?.querySelector('button')?.textContent??null}})()`)
+  assert.deepEqual(report.metadataIssue, { present: true, afterQuestion: true, retry: 'Retry' }, 'A failed page refresh is a quiet status after the question, with its own retry')
   await writeFile(join(evidence!, `${phase}-metadata-unavailable.png`), (await win.webContents.capturePage()).toPNG())
   await until("Boolean([...document.querySelectorAll('button')].find(button => button.getAttribute('aria-label') === 'Refresh' && !button.disabled))", 'The original failed metadata refresh must settle before recovery')
   metadataUnavailable = false
@@ -431,6 +439,7 @@ try {
   assert.equal(unboundRequest.target, undefined, 'The no-recipient form must consume a genuinely unbound original owner record')
   assert.equal(report.noRecipient.questions[0].confirmDisabled, true, 'A missing original recipient disables only this explicit confirmation')
   assert.equal(report.noRecipient.layout.questionChip.includes('Needs your answer'), false, 'A question no Agent can receive does not ask the person for an answer')
+  assert.equal(report.noRecipient.layout.headerWaiting, null, 'A question no Agent can receive adds no header marker')
   assert.equal(report.replySubmissions.length, 1, 'Displaying an unbound request must not submit any input')
   await writeFile(join(evidence!, `${phase}-no-recipient.png`), (await win.webContents.capturePage()).toPNG())
   await captureAnswer('no-recipient')

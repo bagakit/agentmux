@@ -86,7 +86,7 @@ function Feed({ content, visible }: { content: string; visible: boolean }) {
         headerGap: header && parseFloat(getComputedStyle(header).columnGap), actions: rect(actions ?? null), actionsGap: actions && parseFloat(getComputedStyle(actions).columnGap),
         title: rect(header?.querySelector('strong') ?? null), headerText: header?.textContent ?? '',
         buttons: [...(actions?.querySelectorAll('button') ?? [])].map(button => ({ text: button.textContent?.trim(), ...rect(button) })),
-        overflow: page.scrollWidth > page.clientWidth + 1, questionChip: page.querySelector('[aria-label="Page questions"]')?.textContent },
+        overflow: page.scrollWidth > page.clientWidth + 1, questionChip: page.querySelector('[aria-label="Page questions"]')?.textContent, headerWaiting: header?.querySelector('[aria-label="Needs your answer"]')?.textContent ?? null },
       questions: [...document.querySelectorAll<HTMLElement>('.capsule-question')].map(question => ({ text: question.innerText, ...rect(question),
         answer: question.querySelector('textarea')?.value, readOnly: question.querySelector('textarea')?.readOnly,
         confirmDisabled: question.querySelector<HTMLButtonElement>('.capsule-question__confirm')?.disabled })),
