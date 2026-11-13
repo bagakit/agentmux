@@ -1,4 +1,5 @@
 import { posix } from 'node:path'
+import type { WorkspaceRecord } from '../shared/contracts.js'
 
 /** One Workspace-relative path rule for every loopback preview owner. */
 export function previewRelativePath(path: string): string {
@@ -19,4 +20,9 @@ export function previewRequestPath(encoded: string): string {
 
 export function previewUrlPath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/')
+}
+
+/** A loopback lease still serves only while its Workspace keeps the same id, Host, path and kind. */
+export function sameWorkspaceResource(original: WorkspaceRecord, current: WorkspaceRecord | undefined): boolean {
+  return current?.id === original.id && current.hostId === original.hostId && current.path === original.path && current.kind === original.kind
 }

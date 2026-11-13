@@ -4,7 +4,7 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { FileHandle } from 'node:fs/promises'
 import { workspaceFileExtension, workspaceFilePreviewFormat } from '../shared/workspace-file-preview.js'
 import { WORKSPACE_MEDIA_PLAYLIST_EXTENSION, type WorkspaceMediaStreamFact, type WorkspaceMediaStreamOpenResult } from '../shared/workspace-media-stream.js'
-import { previewRelativePath, previewRequestPath, previewUrlPath } from './preview-paths.js'
+import { previewRelativePath, previewRequestPath, previewUrlPath, sameWorkspaceResource } from './preview-paths.js'
 import type { WorkspaceFiles, WorkspaceMediaHandle } from './workspace-files.js'
 
 type LeaseBase = {
@@ -217,8 +217,7 @@ export class WorkspaceMediaStreams {
   }
 
   private workspaceMatches(lease: Lease): boolean {
-    const original = lease.workspace, current = this.currentWorkspace(original.id)
-    return current?.id === original.id && current.hostId === original.hostId && current.path === original.path && current.kind === original.kind
+    return sameWorkspaceResource(lease.workspace, this.currentWorkspace(lease.workspace.id))
   }
 
   private async start(): Promise<string> {

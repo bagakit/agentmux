@@ -4,7 +4,7 @@ import { posix } from 'node:path'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 import type { WorkspaceFiles } from './workspace-files.js'
-import { previewRelativePath, previewRequestPath, previewUrlPath } from './preview-paths.js'
+import { previewRelativePath, previewRequestPath, previewUrlPath, sameWorkspaceResource } from './preview-paths.js'
 
 type Preview = { workspace: WorkspaceRecord; path: string; content: Buffer; reads: Set<AbortController> }
 
@@ -81,8 +81,7 @@ export class HtmlFilePreviews {
   }
 
   private workspaceMatches(preview: Preview): boolean {
-    const original = preview.workspace, current = this.currentWorkspace(original.id)
-    return current?.id === original.id && current.hostId === original.hostId && current.path === original.path && current.kind === original.kind
+    return sameWorkspaceResource(preview.workspace, this.currentWorkspace(preview.workspace.id))
   }
 
   private current(id: string, preview: Preview): boolean {
