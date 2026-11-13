@@ -2,7 +2,7 @@ import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
-import { DEFAULT_MOTE_PRESENCE, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteQuickDraft } from './useMoteQuickDraft'
 
 type Props = { target: MotePreferencesTarget; client: AgentMuxHostedClient | null; visible: boolean;
@@ -18,11 +18,10 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   const rolloverKind = draft.conversationRolloverEditor?.kind ?? rollover?.kind ?? 'keep-current'
   const rolloverMinutes = draft.conversationRolloverEditor?.minutes ?? (rollover?.kind === 'idle' ? String(rollover.idleMs / 60000) : '')
   const [rolloverIssue, setRolloverIssue] = useState('')
-  const validRolloverMinutes = (value: string) => value.trim() !== '' && Number(value) > 0 && Number.isSafeInteger(Number(value) * 60000)
   function editRollover(kind: 'keep-current' | 'idle', value: string) {
     setRolloverIssue('')
     const values = kind === 'keep-current' ? { ...draft.values, conversationRollover: { kind } }
-      : validRolloverMinutes(value) ? { ...draft.values, conversationRollover: { kind, idleMs: Number(value) * 60000 } } : draft.values
+      : moteMinutesToMs(value) !== null ? { ...draft.values, conversationRollover: { kind, idleMs: moteMinutesToMs(value)! } } : draft.values
     model.edit(values, { kind, minutes: value })
   }
   const maintenance = read?.maintenance
@@ -39,8 +38,8 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
     <p>设置主对话、自动流转策略与心跳。配置保存、原会话接回和心跳投递分别确认。</p>
     <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存原配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '原保存未确认；选择和请求保留。' : model.notice || '正在核对原配置…'}</MobileNotice>
     <form onSubmit={event => { event.preventDefault()
-      if (!minutes.trim() || !Number.isSafeInteger(Number(minutes)) || !Number.isSafeInteger(Number(minutes) * 60000) || Number(minutes) < 1) { setIntervalIssue('心跳间隔请填至少 1 分钟的整数；原设置与选择保留。'); return }
-      if (rolloverKind === 'idle' && !validRolloverMinutes(rolloverMinutes)) { setRolloverIssue('请填写大于 0 且能精确换算为毫秒的空闲分钟数；原设置与草稿保留。'); return }
+      if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) { setIntervalIssue('心跳间隔请填至少 1 分钟的整数；原设置与选择保留。'); return }
+      if (rolloverKind === 'idle' && moteMinutesToMs(rolloverMinutes) === null) { setRolloverIssue('请填写大于 0 的空闲分钟数，例如 20 或 1.5；原设置与草稿保留。'); return }
       void model.save()
     }}>
       <label>新对话使用的 Agent<select aria-label="新对话使用的 Agent" value={executor} onChange={event => {
@@ -66,8 +65,9 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         <label><input type="checkbox" aria-label="启用 Mote 自动维持" checked={presence.enabled} onChange={event => model.edit({ ...draft.values, presence: { ...presence, enabled: event.target.checked } })} />启用自动维持</label>
         <label>心跳间隔（分钟）<input type="number" inputMode="numeric" min="1" step="1" required aria-label="心跳间隔（分钟）" value={minutes} onChange={event => {
           const value = event.target.value; setMinutes(value)
-          if (value.trim() && Number.isSafeInteger(Number(value)) && Number.isSafeInteger(Number(value) * 60000) && Number(value) >= 1) {
-            setIntervalIssue(''); model.edit({ ...draft.values, presence: { ...presence, intervalMs: Number(value) * 60000 } })
+          const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
+          if (intervalMs !== null) {
+            setIntervalIssue(''); model.edit({ ...draft.values, presence: { ...presence, intervalMs } })
           } else setIntervalIssue('心跳间隔请填至少 1 分钟的整数；原设置与选择保留。')
         }} /></label>
         <p>默认每 30 分钟核对目标、工作 thread 和未完成承诺；没有新进展时可保持安静。修改间隔不会恢复已经暂停的安排。</p>

@@ -5,7 +5,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
-import { DEFAULT_MOTE_PRESENCE } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs } from '@agentmux/core/mote-preferences'
 import { MOTE_QUICK_MODE_PATH, type MoteQuickDefaults } from '../../../shared/mote-quick-mode'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -73,7 +73,6 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const [minutes, setMinutes] = useState(restored.current?.minutes ?? String((draft.presence ?? DEFAULT_MOTE_PRESENCE).intervalMs / 60000))
   const [rolloverKind, setRolloverKind] = useState<'keep-current' | 'idle'>(restored.current?.rolloverKind ?? draft.conversationRollover?.kind ?? 'keep-current')
   const [rolloverMinutes, setRolloverMinutes] = useState(restored.current?.rolloverMinutes ?? (draft.conversationRollover?.kind === 'idle' ? String(draft.conversationRollover.idleMs / 60000) : ''))
-  const validRolloverMinutes = (value: string) => value.trim() !== '' && Number(value) > 0 && Number.isSafeInteger(Number(value) * 60000)
   const presence = draft.presence ?? DEFAULT_MOTE_PRESENCE
   const maintenance = saved?.maintenance
   const resumeRequest = useRef<ResumeRequest | null>(restored.current?.resume ?? null)
@@ -122,7 +121,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   function editRollover(kind: 'keep-current' | 'idle', value: string) {
     edited.current = true; setRolloverKind(kind); setRolloverMinutes(value); setIssue(null)
     if (kind === 'keep-current') update({ ...form.current, conversationRollover: { kind } })
-    else if (validRolloverMinutes(value)) update({ ...form.current, conversationRollover: { kind, idleMs: Number(value) * 60000 } })
+    else if (moteMinutesToMs(value) !== null) update({ ...form.current, conversationRollover: { kind, idleMs: moteMinutesToMs(value)! } })
     else update({ ...form.current }) // Raw edits also fence a late save from closing this later draft.
   }
   const selected = draft.conversation ? JSON.stringify(draft.conversation) : ''
@@ -148,11 +147,11 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   }
   async function save() {
     if (busy || !saved) return
-    if (!minutes.trim() || !Number.isSafeInteger(Number(minutes)) || Number(minutes) < 1 || !Number.isSafeInteger(Number(minutes) * 60000)) {
+    if (moteMinutesToMs(minutes, { wholeMinutes: true }) === null) {
       setIssue('Enter a whole number of minutes, at least 1. Your choices and original settings are kept.'); return
     }
-    if (rolloverKind === 'idle' && !validRolloverMinutes(rolloverMinutes)) {
-      setIssue('Enter a positive idle duration that converts exactly to milliseconds. Your draft and original settings are kept.'); return
+    if (rolloverKind === 'idle' && moteMinutesToMs(rolloverMinutes) === null) {
+      setIssue('Enter a positive number of minutes for inactivity, such as 20 or 1.5. Your draft and original settings are kept.'); return
     }
     const submitted = form.current, epoch = lifetime.current
     const current = () => lifetime.current === epoch && form.current === submitted
@@ -195,8 +194,9 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
           <label htmlFor={id + '-interval'}>Heartbeat interval <small>Minutes · default 30</small></label>
           <input id={id + '-interval'} aria-label="Heartbeat interval (minutes)" type="number" inputMode="numeric" min="1" step="1" value={minutes}
             onChange={event => { const value = event.target.value; setMinutes(value); edited.current = true
-              if (value.trim() && Number.isSafeInteger(Number(value)) && Number(value) >= 1 && Number.isSafeInteger(Number(value) * 60000)) {
-                update({ ...form.current, presence: { ...presence, intervalMs: Number(value) * 60000 } })
+              const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
+              if (intervalMs !== null) {
+                update({ ...form.current, presence: { ...presence, intervalMs } })
               }
             }} />
           <p className="mote-details__hint">Mote checks goals, work threads and unfinished commitments. It can stay quiet when nothing needs attention. Changing the interval keeps a paused schedule paused.</p>
