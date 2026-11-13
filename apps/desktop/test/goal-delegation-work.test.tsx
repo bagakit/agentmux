@@ -16,6 +16,7 @@ import { goalDelegationRows } from '../src/renderer/src/lib/goal-delegation-pres
 import { goalNextStep } from '../src/renderer/src/lib/goal-presentation'
 import { goalStartRows } from '../src/renderer/src/lib/goal-start-presentation'
 import { createGoalDelegationEvents } from '../src/renderer/src/lib/goal-delegation-events'
+import { currentDemandIndex, currentDemandKey } from '../src/renderer/src/lib/goal-current-work'
 import { applyGoalDelegationResult, beginGoalDelegationRead } from '../src/renderer/src/lib/goal-delegation-work'
 import { GoalDelegationWork } from '../src/renderer/src/components/GoalDelegationWork'
 import { GoalExecution } from '../src/renderer/src/components/GoalExecution'
@@ -184,7 +185,25 @@ it('finite Start adds only its original Host and Run to the existing event bridg
   release()
 })
 
+it('indexes remote worker responsibility and events by the worker Host while retaining the owner source', () => {
+  const d = { ...delegation(), workerHostId: 'worker-host' }, record = goal(d)
+  const index = currentDemandIndex({ [record.id]: record })
+  expect(index.get(currentDemandKey('worker-host', d.workerAgentSessionId))?.goals[0]?.goalId).toBe(record.id)
+  expect(index.get(currentDemandKey(d.hostId, d.workerAgentSessionId))).toBeUndefined()
+  let notify!: (event: RuntimeEvent) => void
+  const changed = vi.fn(), observe = createGoalDelegationEvents({ sessions: listener => { notify = listener; return () => {} }, demands: () => () => {} })
+  const release = observe(record.id, [d], changed)
+  notify({ hostId: d.hostId, event: { type: 'process-state', run: { runId: d.workerRunId }, state: 'exited' } } as RuntimeEvent)
+  expect(changed).not.toHaveBeenCalled()
+  notify({ hostId: 'worker-host', event: { type: 'process-state', run: { runId: d.workerRunId }, state: 'exited' } } as RuntimeEvent)
+  notify({ hostId: d.hostId, event: { type: 'dispatch-changed', sourceMessageId: d.sourceMessageId } } as RuntimeEvent)
+  notify({ hostId: 'worker-host', event: { type: 'dispatch-changed', sourceMessageId: d.sourceMessageId } } as RuntimeEvent)
+  expect(changed).toHaveBeenCalledTimes(3)
+  release()
+})
+
 const initial = useAppStore.getState()
+const originalExecuteControl = initial.executeControl
 let root: Root, container: HTMLDivElement
 let notifyDomain: (goalIds: string[]) => void
 beforeEach(() => {
@@ -192,7 +211,9 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   vi.spyOn(api.demands, 'onChanged').mockImplementation(listener => { notifyDomain = listener; return () => {} })
   vi.spyOn(api.sessions, 'onEvent').mockReturnValue(() => {})
-  vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined)
+  vi.spyOn(useAppStore.getState(), 'executeControl').mockImplementation((request, signal, options) =>
+    request.operation === 'focus' ? Promise.resolve({ operation: 'focus', navigation: { state: 'applied' }, issues: [] } as never)
+      : originalExecuteControl(request, signal, options))
   useAppStore.setState({ demands: {}, sessions: [] })
 })
 afterEach(async () => {
@@ -238,7 +259,7 @@ describe('mounted original Goal delegation consumer', () => {
     expect(container.textContent).toContain('prompt:original-start')
     expect(container.textContent).not.toContain('Collect report')
     await click('Open original Agent')
-    expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+    expect(useAppStore.getState().executeControl).toHaveBeenCalledWith(expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'original-host', agentSessionId: 'original-worker' }, inputPolicy: 'preserve' }))
     const grounding = { ...report().grounding, submissionId: 'goal-result', submittedAt: _reshape_fixtureEpoch(0, 0, 30), acceptedAt: null }
     const latest = { ...record, updatedAt: _reshape_fixtureEpoch(0, 0, 2), startObservations: [{ ...observed, goalResult: { grounding, association: 'unknown' as const, basis: 'unknown' as const, changedSinceStart: null } }] }
     read.mockResolvedValue(result(latest)); await click('Refresh reports')
@@ -269,7 +290,7 @@ describe('mounted original Goal delegation consumer', () => {
     await act(async () => useAppStore.setState({ demands: { [record.id]: { ...record, startObservations: [{ ...observed, unknown: 'Original history is unavailable.' }] } } }))
     expect(container.textContent).toContain('Original history is unavailable.')
     expect(container.textContent!.split(reason)).toHaveLength(2)
-    await click('Open original Agent'); expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+    await click('Open original Agent'); expect(useAppStore.getState().executeControl).toHaveBeenCalledWith(expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'original-host', agentSessionId: 'original-worker' }, inputPolicy: 'preserve' }))
   })
   it('distinguishes two same-state workers and current follow-up responsibility beside the visible report', async () => {
     const original = delegation(), second = { ...original, operationId: 'second-operation', sourceMessageId: 'second-message', workerAgentSessionId: 'second-worker' }
@@ -289,7 +310,7 @@ describe('mounted original Goal delegation consumer', () => {
     expect(name.textContent).toBe('Reviewer'); expect(name.getAttribute('title')).toContain('original-worker')
     await act(async () => useAppStore.setState({ agentNames: { 'worker-view': 'Renamed reviewer' } }))
     expect(name.textContent).toBe('Renamed reviewer')
-    await click('Open original Agent'); expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+    await click('Open original Agent'); expect(useAppStore.getState().executeControl).toHaveBeenCalledWith(expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'original-host', agentSessionId: 'original-worker' }, inputPolicy: 'preserve' }))
     await act(async () => useAppStore.setState({ sessions: [{ ...worker, hostId: 'wrong-host', control: { ...worker.control, hostId: 'wrong-host' } }] }))
     expect(name.textContent).toContain('original-worker'); expect(name.textContent).not.toContain('Renamed reviewer')
   })
@@ -342,7 +363,7 @@ describe('mounted original Goal delegation consumer', () => {
     expect(container.textContent).toContain('Supervisor reminder unknown')
     expect(container.textContent).toContain('Original reminder receipt is unavailable')
     await click('Open original Supervisor')
-    expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-supervisor')
+    expect(useAppStore.getState().executeControl).toHaveBeenCalledWith(expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'original-host', agentSessionId: 'original-supervisor' }, inputPolicy: 'preserve' }))
     await click('Refresh reports')
     expect(calls.mock.calls.map(([method]) => method)).toEqual(['goal.delegations', 'goal.delegations'])
     expect(submit).not.toHaveBeenCalled()
@@ -398,7 +419,7 @@ describe('mounted original Goal delegation consumer', () => {
     expect(button('Collect report').disabled).toBe(false)
     expect(button('Open original Agent').disabled).toBe(false)
     await click('Open original Agent')
-    expect(api.ui.openObjectLink).toHaveBeenCalledWith('amux://agent/original-worker')
+    expect(useAppStore.getState().executeControl).toHaveBeenCalledWith(expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'original-host', agentSessionId: 'original-worker' }, inputPolicy: 'preserve' }))
     expect(useAppStore.getState().demands['original-goal']!.delegations).toEqual(record.delegations)
   })
   it('explicit retries keep the collection ID and body while unknown reads never resubmit it', async () => {

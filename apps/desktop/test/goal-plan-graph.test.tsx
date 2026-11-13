@@ -143,7 +143,7 @@ describe('plan graph navigation and list progress', () => {
   })
 
   it('opens the exact executor and owner Agents of a node attempt, and names a failed open in place', async () => {
-    seed(goal({ plan: plan(nodes), delegations: [{ ...reported('api'), hostId: 'remote-host' }] }))
+    seed(goal({ plan: plan(nodes), delegations: [{ ...reported('api'), hostId: 'owner-host', workerHostId: 'remote-host' }] }))
     await dom.render(<GlobalBoardSurface />)
     const open = vi.spyOn(useAppStore.getState(), 'executeControl').mockResolvedValue({ operation: 'focus', navigation: { state: 'applied' }, issues: [] } as never)
     await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-node="api"] .goal-plan-node__head')!.click())
@@ -151,7 +151,7 @@ describe('plan graph navigation and list progress', () => {
     await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-open="owner"]')!.click())
     expect(open.mock.calls.map(call => call[0])).toEqual([
       expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'remote-host', agentSessionId: 'worker-api' }, inputPolicy: 'preserve' }),
-      expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'remote-host', agentSessionId: 'mote' }, inputPolicy: 'preserve' })
+      expect.objectContaining({ operation: 'focus', target: { kind: 'focus-agent', hostId: 'owner-host', agentSessionId: 'mote' }, inputPolicy: 'preserve' })
     ])
     open.mockRejectedValueOnce(new Error('The original Agent is not open on this Mac.'))
     await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-open="executor"]')!.click())
@@ -165,9 +165,9 @@ describe('plan graph navigation and list progress', () => {
   it('names remote tools from the exact Host-qualified Session snapshot', async () => {
     const original = useAppStore.getState().sessions.find(session => session.kind === 'agent')!
     if (original.kind !== 'agent') throw new Error('An actual preview Agent snapshot is required')
-    seed(goal({ plan: plan(nodes), delegations: [reported('api')] }))
+    seed(goal({ plan: plan(nodes), delegations: [{ ...reported('api'), hostId: 'owner-host', workerHostId: 'worker-host' }] }))
     useAppStore.setState({ sessions: [
-      { ...original, id: 'local-presentation', hostId: 'local', control: { ...original.control, hostId: 'local', agentSessionId: 'worker-api' },
+      { ...original, id: 'local-presentation', hostId: 'worker-host', control: { ...original.control, hostId: 'worker-host', agentSessionId: 'worker-api' },
         toolExecution: { bindingId: 'remote-tools', resourceHostId: 'tool-host', workspacePath: '/project/work' } },
       { ...original, id: 'other-presentation', hostId: 'another-host', control: { ...original.control, hostId: 'another-host', agentSessionId: 'worker-api' } }
     ], agentNames: { 'local-presentation': 'Exact execution lead', 'other-presentation': 'Another Agent' } })
