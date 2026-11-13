@@ -195,7 +195,7 @@ $$
 库复制到新目录后，原 owner 核对受管正文身份并更新属于原库的本地资源地址；外部引用与历史 `originalResource` 保留原地址。
 文件自足与内容保全要求归[Note 基础原则](../design/behavior/knowledge-workflows.md#recallnotebook-与块知识)。
 
-`file.read/write/create` 复用原 Files 的准确资源与 revision CAS；`notebook.content`／`inspect --content` 观察同一已保存正文。
+`file.read/write/create` 复用原 Files 的准确资源与 revision CAS；`notebook.inspect --note ID --content`／GUI `notebook:content` 观察同一已保存正文。
 `noteProvenance` 绑定 Note ID、完整 resource、正文 revision 和稳定 block ID。可信 actor 来自原调用权限边界，不能从正文声明作者。
 创建者与最近编辑者分别记录，空值保持未知；外部编辑导致 revision 失配时保留已知创建者、最近作者未确认。
 
@@ -206,12 +206,12 @@ $$
 `notebook graph` 提供页面层级、incoming／outgoing 与准确 source／target；原始文本 occurrence 的位置是当前保存修订内的
 block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件原子快照；未读、歧义和未锚定状态不能被空边列表代签。
 `notebook apply` 的 `follow/unfollow` 只改变可信调用者自己的持久关注，不表示在线或通知授权。
-完整 Agent 操作指引由 [CLI Note guide](../../packages/core/src/agentmux-cli-note-guide.ts) 持有，
+完整 Agent 操作指引由 Core 的 [Notebook 模块指南](../../packages/core/guides/modules/notebook.md) 与 [Notebook 操作指南](../../packages/core/guides/actions/notebook.md) 持有，
 经 `amux --skill` 的模块目录发现，再由 `amux notebook --skill`／Notebook help 读取。
 
 ## 仅从原 Markdown 重建索引
 
-`amux notebook scan --workspace ID --path DIR [--query TEXT]` 经原 Files 读取指定物理目录，不要求 Notebook 的目录与元数据文件。
+`amux notebook scan --workspace ID --path DIR [--max-files N] [--max-directories N] [--max-bytes N] [--query TEXT [--limit N]]` 经原 Files 读取指定物理目录，不要求 Notebook 的目录与元数据文件。
 结果包含每个准确文件的 Note ID、可用标题、revision、大纲、显式前向关系和全文命中；反链可由同一前向关系派生。
 同名页保候选，重复 Note ID 保不同资源行，不选首或合并。无锚点的新正文也可命中，`blockId:null` 明确它没有稳定跳转目标；
 读取不分配身份。未读／无效文件、缺标题、未锚定内容和预算耗尽保 partial／unknown，不能用已见单个候选确认全范围唯一。
@@ -315,7 +315,7 @@ parent 未知不丢弃独立已知创建者。GUI 和 CLI 共享原权限、可�
 ## 存量转换与恢复
 
 原 `.note.json` 和 JSON 目录只作显式一次转换输入。原 NotesStorage journal 配合
-[Host 转换适配器](../../apps/desktop/src/main/note-legacy-conversion.ts) 校验原身份、全部语义与 source／target hashes，
+[Desktop Main 转换适配器](../../apps/desktop/src/main/note-legacy-conversion.ts) 校验原身份、全部语义与 source／target hashes，
 先保全原字节备份并确认目标正文、元数据、目录和空间资源，再清理旧活动文件。
 不覆盖不同目标，不自动合并重复身份；中断沿原 operation ID 继续，不另造 Note。
 
