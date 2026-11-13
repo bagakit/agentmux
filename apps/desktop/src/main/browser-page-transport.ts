@@ -6,5 +6,6 @@ export interface BrowserPageTransport {
   readonly frames: Map<string, BrowserCdpSender>
   readonly endedReason: string | null
   readonly frameDiscoveryFailure: string | null
-  observe(listener: (method: string, params: unknown) => void): () => void
+  /** `sessionId` names the child frame session an event came from; absent for the page's own session. */
+  observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void
 }

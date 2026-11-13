@@ -29,17 +29,18 @@ export class BrowserCdpSession implements BrowserPageTransport {
    */
   private frameAttachFailure: string | null = null
   /** 订阅 CDP 事件的人。等一个事件（如 networkIdle）比轮询一个近似量诚实。 */
-  private readonly listeners = new Set<(method: string, params: unknown) => void>()
+  private readonly listeners = new Set<(method: string, params: unknown, sessionId?: string) => void>()
   private readonly onDetach: (_event: unknown, reason: string) => void
-  private readonly onMessage: (_event: unknown, method: string, params: unknown) => void
+  private readonly onMessage: (_event: unknown, method: string, params: unknown, sessionId?: string) => void
 
   private constructor(private readonly contents: WebContents) {
     this.onDetach = (_event, reason) => {
       this.gone = reason
     }
     // flatten 模式下，子 target 的 attach/detach 是主会话上的普通事件。
-    this.onMessage = (_event, method, params) => {
-      for (const listener of this.listeners) listener(method, params)
+    this.onMessage = (_event, method, params, sessionId) => {
+      // Electron passes the child session an event came from; an empty string means the page itself.
+      for (const listener of this.listeners) listener(method, params, sessionId || undefined)
       if (method === 'Target.attachedToTarget') {
         const { sessionId, targetInfo } = params as { sessionId?: string; targetInfo?: { type?: string } }
         if (!sessionId || targetInfo?.type !== 'iframe') return
@@ -122,7 +123,7 @@ export class BrowserCdpSession implements BrowserPageTransport {
   }
 
   /** 订阅 CDP 事件，返回退订函数。 */
-  observe(listener: (method: string, params: unknown) => void): () => void {
+  observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }

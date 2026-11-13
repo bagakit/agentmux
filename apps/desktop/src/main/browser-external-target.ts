@@ -8,7 +8,7 @@ import { EXTERNAL_AUTO_ATTACH } from '../../browser-extension/protocol.js'
 export class ExternalBrowserTargetSession implements BrowserPageTransport {
   readonly frames = new Map<string, BrowserCdpSender>()
   private readonly parents = new Map<string, string | null>()
-  private readonly listeners = new Set<(method: string, params: unknown) => void>()
+  private readonly listeners = new Set<(method: string, params: unknown, sessionId?: string) => void>()
   private readonly connection: ExternalBrowserConnection
   private readonly releaseEvents: () => void
   private readonly releaseAvailability: () => void
@@ -32,7 +32,7 @@ export class ExternalBrowserTargetSession implements BrowserPageTransport {
   }
   get frameDiscoveryFailure(): string | null { return this.missing }
   readonly sendCommand: BrowserCdpSender = (method, params) => this.command(undefined, method, params)
-  observe(listener: (method: string, params: unknown) => void): () => void {
+  observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
@@ -81,7 +81,7 @@ export class ExternalBrowserTargetSession implements BrowserPageTransport {
         for (const child of removed) { this.frames.delete(child); this.parents.delete(child) }
       }
     }
-    for (const listener of this.listeners) listener(event.method, event.params)
+    for (const listener of this.listeners) listener(event.method, event.params, event.sessionId || undefined)
   }
   async detach(): Promise<string | null> {
     if (this.closed) return null
