@@ -70,17 +70,17 @@ app.whenReady().then(async () => {
     assert.equal(await read(details + '.querySelector(".mote-details__profile").checkVisibility()'), false)
     await capture('02-ideas-wide-dark')
     await page('Calendar'); await capture('03-calendar-wide-dark')
-    await click('js:' + header + '.querySelector("[aria-label=\\"团队协作\\"]")')
-    await until('!!' + team + ' && ' + team + '.querySelectorAll("[data-mote-member]").length===2')
+    await click('js:' + header + '.querySelector("[data-mote-conversation-switcher] .mote-cooperation__team")')
+    await until('!!' + team + ' && ' + team + '.querySelectorAll("[data-mote-member]").length===1 && ' + team + '.querySelector("[data-mote-main-entry]")')
     await capture('04-cooperation-overlay-wide-dark')
-    await click('js:' + team + '.querySelector("[aria-label=\\"关闭团队协作\\"]")')
+    await click('js:' + team + '.querySelector(".mote-cooperation__popover-heading button")')
     await until('!' + team)
     await read('window.moteCooperationCapture.longNames()')
     win.setContentSize(640, 850); await settle()
     await page('Ideas'); await capture('05-ideas-long-name-narrow-dark')
     await page('Profile'); await capture('06-profile-long-name-narrow-dark')
     await read('window.moteCooperationCapture.theme(true)'); await page('Calendar'); await capture('07-calendar-narrow-light')
-    await click('js:' + header + '.querySelector("[aria-label=\\"团队协作\\"]")')
+    await click('js:' + header + '.querySelector("[data-mote-conversation-switcher] .mote-cooperation__team")')
     await until('!!' + team)
     await read('window.moteCooperationCapture.unknown()')
     await until(team + '.textContent.includes("暂未确认") || ' + team + '.textContent.includes("状态未确认")')
@@ -230,7 +230,7 @@ async function conversationScenes({ input, initial }) {
 }
 
 async function evolutionScenes({ input }) {
-  const { read, until, settle, click, type, press, factsOf } = input
+  const { read, until, factsOf } = input
   const floating = 'document.querySelector("[data-pmo-teams-topic-floating]:popover-open")'
   const space = 'document.querySelector(".mote-space-frame[data-mote-space]")'
   const popup = 'document.querySelector(".mote-cooperation__popover")'
@@ -239,6 +239,37 @@ async function evolutionScenes({ input }) {
   const trigger = () => `${surface}.querySelector('[data-mote-conversation-switcher] .mote-cooperation__team')`
   const current = () => read('window.moteEvolutionCapture.facts()')
   result.scenes = []; result.motion = []; result.preservation = []
+  // Hidden retained workfaces intentionally pause their finite avatar motion.
+  // Waiting for every document animation would wait forever on healthy hidden
+  // content. Only currently visible, running finite effects can delay a photo.
+  async function settle() {
+    const observation = read(`Promise.all(document.getAnimations().filter(a=>a.playState==='running'&&a.effect?.target instanceof Element&&a.effect.target.checkVisibility()&&a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{}))).then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))`)
+    let timer
+    try { await Promise.race([observation, new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Visible transition did not settle; this ends only the private capture observation')), 6000) })]) }
+    catch (error) {
+      result.waitDiagnostic = await read(`document.getAnimations().map(a=>({name:a.animationName??a.id,state:a.playState,time:a.currentTime,progress:a.effect?.getComputedTiming().progress,iterations:a.effect?.getTiming().iterations,target:a.effect?.target?.className,visible:a.effect?.target instanceof Element&&a.effect.target.checkVisibility()}))`)
+      throw error
+    } finally { clearTimeout(timer) }
+  }
+  async function click(selector) { await nativeClickWithoutSettle(selector.startsWith('js:') ? selector.slice(3) : 'document.querySelector(' + JSON.stringify(selector) + ')'); await settle() }
+  async function type(selector, value) {
+    await click(selector); await until('document.activeElement===document.querySelector(' + JSON.stringify(selector) + ')', 'Exact original search input focus')
+    win.webContents.selectAll()
+    const before = await read('window.__connectionsTrustedEvents.length')
+    await win.webContents.insertText(value)
+    await until('document.querySelector(' + JSON.stringify(selector) + ').value===' + JSON.stringify(value), 'Original native search edit')
+    const events = await read('window.__connectionsTrustedEvents.slice(' + before + ')')
+    assert.ok(events.some(event => event.type === 'input' && event.trusted))
+    result.interactions.push({ kind: 'native-search-edit', events }); await settle()
+  }
+  async function press(key) {
+    const before = await read('window.__connectionsTrustedEvents.length')
+    const beforeKeys = await read('window.moteEvolutionCapture.facts().nativeKeys.length')
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key })
+    await until('window.moteEvolutionCapture.facts().nativeKeys.slice(' + beforeKeys + ').some(event=>event.key===' + JSON.stringify(key) + '&&event.trusted)', 'Trusted native keyboard action')
+    result.interactions.push({ kind: 'native-renderer-key', key, events: await read('window.__connectionsTrustedEvents.slice(' + before + ')'),
+      keys: await read('window.moteEvolutionCapture.facts().nativeKeys.slice(' + beforeKeys + ')') }); await settle()
+  }
   await until('window.moteEvolutionCapture?.ready && !!' + floating, 'Finite evolution sources and complete App')
   await until(floating + '.innerText.includes("把协作体验补完整")', 'Original Main Reader is ready')
   await settle()
@@ -264,7 +295,7 @@ async function evolutionScenes({ input }) {
     const view = await dom()
     assert.ok(view.identity.visible && view.identity.bounds.width > 0, 'Persistent accurate Mote identity is visible')
     const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG())
-    result.images.push(file); result.scenes.push(scene); result[name] = { facts, dom: view }
+    result.images.push(file); if (scene) result.scenes.push(scene); result[name] = { facts, dom: view }
   }
   async function remember(id) {
     const saved = await read(`(()=>{const root=${surface},reader=[...root.querySelectorAll('.activity-feed')].find(n=>n.checkVisibility()),composer=[...root.querySelectorAll('[role="textbox"][aria-label="Message Agent"]')].find(n=>n.checkVisibility()),body=reader?.querySelector('.log-turn__body');
@@ -272,10 +303,10 @@ async function evolutionScenes({ input }) {
     assert.deepEqual(saved, { reader: true, composer: true, body: true }, 'Original Reader/Composer/body mounted for ' + id)
   }
   async function retained(id, scroll = false) {
-    const facts = await read(`(()=>{const root=${surface},old=window.__moteEvolutionRetained[${JSON.stringify(id)}],reader=[...root.querySelectorAll('.activity-feed')].find(n=>n.checkVisibility()),composer=[...root.querySelectorAll('[role="textbox"][aria-label="Message Agent"]')].find(n=>n.checkVisibility());return{reader:reader===old.reader,composer:composer===old.composer,body:old.body?.isConnected,draft:composer?.textContent===old.draft,scroll:Math.abs((reader?.scrollTop??0)-old.scroll)<=1}})()`)
+    const facts = await read(`(()=>{const root=${surface},old=window.__moteEvolutionRetained[${JSON.stringify(id)}],reader=[...root.querySelectorAll('.activity-feed')].find(n=>n.checkVisibility()),composer=[...root.querySelectorAll('[role="textbox"][aria-label="Message Agent"]')].find(n=>n.checkVisibility());return{reader:reader===old.reader,composer:composer===old.composer,body:old.body?.isConnected,draft:composer?.textContent===old.draft,scroll:Math.abs((reader?.scrollTop??0)-old.scroll)<=1,expectedScroll:old.scroll,actualScroll:reader?.scrollTop,scrollHeight:reader?.scrollHeight,clientHeight:reader?.clientHeight}})()`)
+    result.preservation.push({ id, ...facts })
     assert.ok(facts.reader && facts.composer && facts.body && facts.draft, 'The same original ' + id + ' subtree and draft survive local navigation')
     if (scroll) assert.equal(facts.scroll, true, 'Original reading position survives the round trip')
-    result.preservation.push({ id, ...facts })
   }
   const animationFacts = () => read(`(()=>{const p=${popup};return{now:performance.now(),present:!!p,state:p?.dataset.state,animations:document.getAnimations().filter(a=>a.effect?.target instanceof Element&&p?.contains(a.effect.target)).map(a=>({name:a.animationName??a.id,target:a.effect.target.className,state:a.playState,time:a.currentTime,progress:a.effect.getComputedTiming().progress,iterations:a.effect.getTiming().iterations,duration:a.effect.getComputedTiming().duration}))}})()`)
   async function nativeClickWithoutSettle(expression) {
@@ -311,12 +342,12 @@ async function evolutionScenes({ input }) {
     await click('js:' + popup + '.querySelector(' + JSON.stringify('[data-mote-member="' + id + '"] button') + ')')
     await until('!' + popup, 'Exact member selection closes the picker')
     await until('window.moteEvolutionCapture.facts().' + (surface === floating ? 'floating?.reference' : 'selection') + '?.tabId===' + JSON.stringify(id + '-tab'), 'Exact selected original member reference')
-    await until(surface + '.querySelector(".mote-workface")?.dataset.moteSection==="threads"', 'Explicit member navigation intent')
+    await until(surface + '.querySelector("[data-mote-workface]")?.dataset.moteSection==="threads"', 'Explicit member navigation intent')
     await settle()
   }
   async function main() {
     await click('js:' + surface + '.querySelector("[data-mote-main-entry]")')
-    await until(surface + '.querySelector(".mote-workface")?.dataset.moteSection==="discussion"', 'Main navigation remains Main intent')
+    await until(surface + '.querySelector("[data-mote-workface]")?.dataset.moteSection==="discussion"', 'Main navigation remains Main intent')
     await until(surface + '.innerText.includes("把协作体验补完整")', 'Original Main is readable again')
   }
   // Native resize of this private floating surface; original layout and CSS own the geometry.
@@ -333,8 +364,19 @@ async function evolutionScenes({ input }) {
   await remember('member-a'); await photo('e04-member-a-waiting', 'member-a')
   await choose('mote-research'); await until(surface + '.innerText.includes("第 9 条研究记录")', 'Original member B body')
   await remember('member-b')
-  await read(`(()=>{const old=window.__moteEvolutionRetained['member-b'];old.reader.scrollTop=Math.min(180,old.reader.scrollHeight-old.reader.clientHeight);old.reader.dispatchEvent(new Event('scroll'));old.scroll=old.reader.scrollTop})()`)
+  if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
+  await read(`document.addEventListener('wheel',event=>window.__connectionsTrustedEvents.push({type:'wheel',trusted:event.isTrusted,label:'original-reader'}),true)`)
+  const wheel = await read(`(()=>{const n=window.__moteEvolutionRetained['member-b'].reader,r=n.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),before:n.scrollTop}})()`)
+  const beforeWheel = await read('window.__connectionsTrustedEvents.length')
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wheel.x, y: wheel.y, deltaX: 0, deltaY: -300 })
+  await until(`(()=>{const n=window.__moteEvolutionRetained['member-b'].reader;return n.scrollTop<${wheel.before}-1&&n.scrollHeight-n.clientHeight-n.scrollTop>100})()`, 'Actual upward reading leaves the existing tail-follow zone')
+  await settle()
+  await read(`window.__moteEvolutionRetained['member-b'].scroll=window.__moteEvolutionRetained['member-b'].reader.scrollTop`)
+  const wheelEvents = await read('window.__connectionsTrustedEvents.slice(' + beforeWheel + ')')
+  assert.ok(wheelEvents.some(event => event.type === 'wheel' && event.trusted), 'Actual native wheel establishes the original upward reading intent')
+  result.interactions.push({ kind: 'native-original-reader-wheel', events: wheelEvents, before: wheel.before })
   await photo('e05-member-b-research', 'member-b')
+  result.retainedAnimationsBeforeReturn = await read(`document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>({state:a.playState,progress:a.effect?.getComputedTiming().progress,target:a.effect?.target?.className,visible:a.effect?.target instanceof Element&&a.effect.target.checkVisibility()}))`)
   await choose('mote-neighbor'); await retained('member-a'); await choose('mote-research'); await retained('member-b', true)
   await main(); await retained('main'); await photo('e06-main-direct-return', 'main-return')
   await openPicker()
@@ -348,7 +390,7 @@ async function evolutionScenes({ input }) {
   await type('.mote-cooperation__popover input[aria-label="查找对话"]', '')
   await read(`(()=>{const body=window.__moteEvolutionRetained.main.body,p=body.querySelector('p')??body,r=document.createRange();r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);window.__moteEvolutionSelection=getSelection().toString()})()`)
   await read('window.moteEvolutionCapture.unknown(true)')
-  await until(popup + '.innerText.includes("未确认")', 'Original directory observation unknown is visible')
+  await until(popup + '.innerText.includes("未确认") || ' + popup + '.innerText.includes("最后确认")', 'Original directory observation unknown is visible')
   assert.ok(await read(popup + '.querySelectorAll("[data-mote-member]").length>=2'), 'Last confirmed members remain available')
   assert.equal(await read('getSelection()?.toString()'), await read('window.__moteEvolutionSelection'), 'Directory observation failure preserves the original reading selection')
   await retained('main')
@@ -364,10 +406,16 @@ async function evolutionScenes({ input }) {
   await openPicker(); await choose('mote-neighbor'); await main()
   await photo('e12-space-shared-conversation', 'space-conversation')
   await read('window.moteEvolutionCapture.longNames();window.moteEvolutionCapture.theme(true)')
-  win.setContentSize(640, 650); await settle(); await openPicker()
+  win.setContentSize(640, 650); await settle()
+  await photo('e13a-main-navigation-narrow-light', null)
+  result.narrowMainPage = await read(`(()=>{const tabs=${space}.querySelector('.mote-space-frame__navigation .surface-mode-switch'),n=tabs.querySelector('[aria-selected="true"]'),r=tabs.getBoundingClientRect(),b=n?.getBoundingClientRect();return{text:n?.textContent,visible:!!b&&b.left>=r.left-1&&b.right<=r.right+1}})()`)
+  assert.deepEqual(result.narrowMainPage, { text: 'Discussion', visible: true }, 'The actual current Discussion page stays visible at narrow width')
+  await choose('mote-neighbor'); await openPicker()
   await photo('e13-narrow-long-name-light', 'narrow-long-light')
+  result.narrowHeader = await read(`(()=>{const root=${space},tabs=root.querySelector('.mote-space-frame__navigation .surface-mode-switch'),r=tabs.getBoundingClientRect();return[...tabs.querySelectorAll('[role=tab]')].map(n=>{const b=n.getBoundingClientRect();return{text:n.textContent,current:n.getAttribute('aria-selected'),visible:b.left>=r.left-1&&b.right<=r.right+1,bounds:b.toJSON(),viewport:r.toJSON()}})})()`)
+  assert.ok(result.narrowHeader.length === 5 && result.narrowHeader.every(tab => tab.visible), 'Narrow full Space keeps its pages and the selected page discoverable beside the current conversation')
   await press('Escape'); await until('!' + popup, 'Native Escape closes the original picker')
-  win.webContents.debugger.attach('1.3')
+  if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
   await until('matchMedia("(prefers-reduced-motion: reduce)").matches', 'Actual browser reduced-motion setting')
   await openPicker(); await choose('mote-neighbor'); await main(); await openPicker()

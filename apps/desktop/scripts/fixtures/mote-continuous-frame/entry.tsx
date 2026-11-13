@@ -240,9 +240,11 @@ if (new URLSearchParams(location.search).has('evolution')) {
     return { hostId: input.hostId, sourceHostId, agentSessionId: researchId, scope: page.scope, coverage: page.coverage,
       closed: controller.signal, dispose: () => controller.abort() } }
   const stableTopics = useAppStore.getState().scratchTopicSnapshots[workspace.id]!
+  const nativeKeys: { key: string; code: string; trusted: boolean }[] = []
+  document.addEventListener('keydown', event => nativeKeys.push({ key: event.key, code: event.code, trusted: event.isTrusted }), true)
   let directoryUnknown = false
   Object.assign(window, { moteEvolutionCapture: { ready: true,
-    facts: () => ({ ...capture.facts(), sourceReads: reads, directoryUnknown, floating: readPmoTeamsTopicFloatingState(),
+    facts: () => ({ ...capture.facts(), sourceReads: reads, directoryUnknown, nativeKeys, floating: readPmoTeamsTopicFloatingState(),
       discussion: (window as unknown as { moteDiscussionCapture: { facts(): unknown } }).moteDiscussionCapture.facts() }),
     unknown(value: boolean) { directoryUnknown = value
       useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [workspace.id]: {

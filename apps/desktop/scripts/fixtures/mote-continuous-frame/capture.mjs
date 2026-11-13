@@ -77,6 +77,7 @@ try {
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(evolutionOnly ? ['--evolution-only'] : conversationOnly ? ['--conversation-only'] : process.argv.includes('--unknown-only') ? ['--unknown-only'] : [])],
     { cwd: root, env, timeoutMs: 300000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
+  assert.notEqual(receipt.process.timedOut, true, 'The private Renderer observation timed out; captured partial images do not sign completion')
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
   if (evolutionOnly) {
