@@ -5,14 +5,10 @@ import type { BrowserPageTransport, BrowserNetworkSession } from '@agentmux/brow
 /**
  * 原生 CDP 连接：一个 WebContents 一个连接；调用者持有独立租约。
  *
- * **普通页面程序按次持有，已配置的 Profile 环境可持有持久租约**：Electron 的 debugger 与 DevTools 互斥——
- * attach 期间用户打不开这个页面的 DevTools，而用户开 DevTools 会把我们踢掉
- * （electron.d.ts:7480-7488，`detach` 事件自述这两种触发）。DevTools 的真实 detach 使全部原租约失效，不能抢回连接；关闭后由原环境 owner 重应用配置。
- * 没有环境租约时，最后一个普通消费者仍立即 detach。
- *
- * **被踢掉必须能说出来**。这是本文件存在的主要理由：detach 之后再 sendCommand，CDP 报的是一句
- * 与原因无关的泛化错误，Agent 只会看到"页面没反应"然后重试。而真相是「用户打开了 DevTools」——
- * 那是第 1 类结局（确实做不下去了），要明说、要停。按 AGENTS.md:32-52，分不清的不许当成好的。
+ * 普通页面程序按次持有，已配置的 Profile 环境可持有背景租约。DevTools 可与健康连接共存；
+ * 只有真实 detach 事件使原租约失效，原原因留给调用者。原环境 owner 在 DevTools 关闭后重应用配置。
+ * 最后一个消费者释放时才结束原连接，单个消费者退出不打断其它消费者。
+ * 已结束的原连接不得将迟到命令发到新 incarnation；当前页和已保存的操作回执仍保留。
  */
 
 /** 跨域 iframe 各自是独立 target，要各自 attach 才够得着。一层不够——iframe 里还能再套 iframe。 */
@@ -165,8 +161,8 @@ class BrowserCdpConnection implements BrowserPageTransport {
     // 那既没说是谁踢的，也没说该怎么办。
     if (this.gone !== null) {
       throw new Error(
-        `The debugging session for this Browser ended (${this.gone}) — opening DevTools on the page ` +
-          'does that. Nothing after this point ran. Close DevTools and run the program again.'
+        `The debugging session for this Browser ended (${this.gone}). No later command was sent. ` +
+          'Inspect the original operation. If DevTools is open, close it before starting another program.'
       )
     }
     if (this.contents.isDestroyed()) {
@@ -178,8 +174,8 @@ class BrowserCdpConnection implements BrowserPageTransport {
   }
 
   /**
-   * 收摊。**不 detach 的后果是静默的**：用户此后再也打不开这个页面的 DevTools，而且没有任何提示。
-   * 所以这一步必须在 finally 里，且它自己不许抛——它是收尾，不能把真正的失败盖掉。
+   * 释放原连接的事件与协议资源；只有最后一个消费者调用这里。
+   * 清理失败返回准确原因，不能盖掉已取得的操作结果。
    */
   detach(): string | null {
     this.frameSenders.clear()
@@ -253,6 +249,11 @@ export class BrowserCdpSession implements BrowserPageTransport {
     return new Map([...this.frameWrappers].map(([id, value]) => [id, value.send]))
   }
   get endedReason(): string | null { return this.released ? 'This consumer released its debugger lease.' : this.owner.native.endedReason }
+  /** Exact native connection fact; another lease or an unknown attachment is never background-only. */
+  get isSoleConsumer(): boolean {
+    return !this.released && !this.contents.isDestroyed() && this.owner.leases === 1 && this.owner.native.endedReason === null &&
+      BrowserCdpSession.connections.get(this.contents) === this.owner && this.contents.debugger.isAttached()
+  }
   get frameDiscoveryFailure(): string | null { return this.owner.native.frameDiscoveryFailure }
   observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void {
     this.assertActive()

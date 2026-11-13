@@ -387,7 +387,10 @@ export interface BrowserProfileResolver {
   listProfiles?(): readonly { id: string; label: string }[]
   /** Applies this Profile's network route to its session before any of its pages is created; nothing to wait for without a route. */
   prepareSession?(profileId: string): Promise<void> | undefined
+  environmentSettings?(profileId: string): import('@agentmux/core/control').BrowserProfileEnvironment | undefined
+  preparePageEnvironment?(profileId: string, browserId: string, contents: WebContents, port: import('./browser-profile-page-environment.js').BrowserProfilePageEnvironmentPorts): Promise<void>
   environmentApplication?(profileId: string): BrowserProfileEnvironmentApplication | undefined
+  hasOnlyEnvironmentDebugger?(profileId: string, contents: WebContents): boolean
   onEnvironmentApplicationChange?(listener: (profileId: string) => void): () => void
   readonly activityObserverId?: string
   activitySource?(profileId: string): string | null
@@ -540,10 +543,18 @@ export class BrowserViewManager {
     return `Profile “${name}”: ${issue} Browser controls remain available. Open Settings → Browser Profiles → ${name} → Proxy sign-in.`
   }
 
+  private async prepareProfilePageEnvironment(entry: BrowserEntry, view = entry.view, profileId = entry.storage.mode === 'normal' ? entry.storage.profileId : null): Promise<void> {
+    if (!profileId || 'capsule' in entry.storage) return
+    await this.profiles.preparePageEnvironment?.(profileId, entry.id, view.webContents, { applyScreen: () => {
+      if (view.webContents.isDestroyed()) throw new Error('The original native Browser page ended before screen application.')
+      this.applyViewport(entry, view, entry.viewport, this.profiles.environmentSettings?.(profileId)?.screen ?? null)
+    } })
+  }
+
   private profileEnvironmentWarning(storage: BrowserStorage): string | undefined {
     if (storage.mode !== 'normal' || !storage.profileId || 'capsule' in storage) return undefined
     if (this.profiles.environmentApplication?.(storage.profileId)?.status !== 'unknown') return undefined
-    return 'This Profile’s user agent and request-language session defaults could not be confirmed. Existing pages remain available and may still use earlier defaults. Open a new page in this Profile to retry. These settings do not change navigator.language/languages or userAgentMetadata.'
+    return 'This Profile’s native environment could not be fully confirmed. The original pages and input remain available. Open Settings → Browser Profiles to review the saved environment. If DevTools is open, close it to reapply without reloading. Subdocument, Worker and first-script scope remain unknown.'
   }
 
   private refreshProfileEnvironment(profileId: string): void {
@@ -1782,7 +1793,9 @@ export class BrowserViewManager {
     if (contents.isLoading()) reasons.add('loading')
     if (contents.isCurrentlyAudible?.()) reasons.add('media')
     if (this.uploads?.hasRetained(entry.id)) reasons.add('upload')
-    if (contents.debugger?.isAttached?.() || contents.isDevToolsOpened?.()) reasons.add('debugger')
+    const onlyEnvironment = entry.storage.mode === 'normal' && entry.storage.profileId && !('capsule' in entry.storage) &&
+      this.profiles.hasOnlyEnvironmentDebugger?.(entry.storage.profileId,contents) === true
+    if (contents.debugger?.isAttached?.() && !onlyEnvironment || contents.isDevToolsOpened?.()) reasons.add('debugger')
     if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
     if (entry.releaseAttempt?.pending && entry.releaseAttempt.view === entry.view) reasons.add('close-unconfirmed')
     if (entry.inputShield && (entry.inputIsolation === 'unconfirmed' || !this.agentOwnsInput(entry))) reasons.add('close-unconfirmed')
@@ -1857,12 +1870,14 @@ export class BrowserViewManager {
     const view = this.createView(storage.partition, 'capsule' in storage ? storage.capsule.record : undefined)
     const entry = this.registerEntry(id, url, storage, view, viewport, workspaceId, retiredInputShield, saved, native)
     try {
+      await this.prepareProfilePageEnvironment(entry, view)
+      if (!this.owns(entry, view)) throw new Error('The original Browser changed during environment preparation. No navigation was sent to its replacement.')
       void this.startNavigation(entry, url, true, saved?.history).catch(() => {})
       return this.snapshot(entry)
     } catch (error) {
       // The ordinary creation transaction has not delivered its resource yet.
       // Native child adoption does not use this URL-navigation transaction.
-      try { this.destroyOwner(id) }
+      try { if (this.owns(entry, view)) this.destroyOwner(id) }
       catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Browser creation and owner rollback failed') }
       throw error
     }
@@ -1885,6 +1900,7 @@ export class BrowserViewManager {
     const window = { width: options.width ?? 1024, height: options.height ?? 768 }
     const child = this.registerEntry(mintObjectId(), view.webContents.getURL() || 'about:blank', parent.storage, view,
       'responsive', parent.workspaceId, undefined, { source, agent: parent.agent, ...(parent.agentWarning ? { warning: parent.agentWarning } : {}) }, { window, originalRequest: true })
+    void this.prepareProfilePageEnvironment(child, view).catch(error => { if (this.owns(child, view)) { child.activity = { ...child.activity, warning: `Native child environment scope is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Its original page remains.` }; this.emit(child) } })
     this.observeNativeChild(child, () => this.markResourceRisk(parent, sourceView, 'document-used'))
     // Main created this Browser for the parent's page; a program's call running now caused it.
     parent.activeRun?.effects?.opened(child.id)
@@ -2382,6 +2398,7 @@ export class BrowserViewManager {
       this.placeView(candidate, this.windowForView(authoritativeView))
       pending.attached = true
       const candidateControlFeedback = this.attach(entry, candidate)
+      await Promise.race([this.prepareProfilePageEnvironment(entry, candidate, profileId), cancellation])
       await Promise.race([candidate.webContents.loadURL(url), cancellation])
       if (
         this.entries.get(id) !== entry ||
@@ -2466,8 +2483,8 @@ export class BrowserViewManager {
 
   openDevTools(id: string): void {
     const entry = this.require(id)
-    // Opening this engine debugger detaches the active Agent CDP session and
-    // exposes a page-writing Console. Reading retained inspect data stays free.
+    // This original page-writing Console is a human input surface.
+    // Reading retained inspect data stays free; native detach is observed separately.
     this.requireHumanInput(entry)
     entry.view.webContents.openDevTools({ mode: 'detach', activate: true })
   }
@@ -2587,9 +2604,8 @@ export class BrowserViewManager {
    * 契约形状。程序本身在独立子进程里跑（`runBrowserScript`），页面能力由 `createBrowserPageDispatch`
    * 派发——那一层持有快照缓存与 ref 解析。
    *
-   * **CDP 会话按次开关**，不常驻：Electron 的 debugger 与 DevTools 互斥，常驻等于永久占着用户的
-   * DevTools（见 browser-cdp-session.ts 的说明）。`detach` 放在 finally 里，因为漏掉它的后果是
-   * 静默的——用户此后再也打不开这个页面的 DevTools，而且没有任何提示。
+   * 程序持有原 CDP 连接的独立租约，并在 finally 释放。Profile 环境可同时持有背景租约，
+   * 一个消费者退出不关闭其它消费者；真实 detach 由同一连接 owner 传播，不能从 DevTools 展示推断。
    *
    * 翻译成四类结局是承重的：执行器的失败联合有四支，任何两支折成一支都会让 Agent 走错方向。
    * 特别是 `crashed` → `indeterminate`——进程死了意味着**做到哪一步不知道**，页面上可能已经点过
@@ -5135,10 +5151,11 @@ export class BrowserViewManager {
     if (errors.length) throw new AggregateError(errors, 'Browser native cleanup failed: ' + errors.map(error => error instanceof Error ? error.message : String(error)).join('; '))
   }
 
-  private applyViewport(entry: BrowserEntry, view = entry.view, viewport = entry.viewport): void {
+  private applyViewport(entry: BrowserEntry, view = entry.view, viewport = entry.viewport, screenOverride?: { width: number; height: number } | null): void {
     const contents = view.webContents
     const size = browserViewportSize(viewport)
-    if (size === null) {
+    const screen = screenOverride === undefined ? entry.storage.mode === 'normal' && entry.storage.profileId && !('capsule' in entry.storage) ? this.profiles.environmentSettings?.(entry.storage.profileId)?.screen : undefined : screenOverride
+    if (size === null && !screen) {
       contents.disableDeviceEmulation()
       this.inputScales.delete(contents)
       return
@@ -5146,6 +5163,11 @@ export class BrowserViewManager {
     // Desktop emulation includes page zoom in its layout size. Compensate locally:
     // changing zoom would also change same-origin pages in this profile.
     const zoom = contents.getZoomFactor()
+    if (size === null) {
+      contents.enableDeviceEmulation({ screenPosition: 'desktop', screenSize: screen!, viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 0, viewSize: { width: 0, height: 0 }, scale: 1 })
+      this.inputScales.delete(contents)
+      return
+    }
     const viewSize = size.screenPosition === 'desktop'
       ? { width: Math.round(size.width * zoom), height: Math.round(size.height * zoom) }
       : { width: size.width, height: size.height }
@@ -5157,7 +5179,7 @@ export class BrowserViewManager {
       : 1
     contents.enableDeviceEmulation({
       screenPosition: size.screenPosition,
-      screenSize: { width: size.width, height: size.height },
+      screenSize: screen ?? { width: size.width, height: size.height },
       viewPosition: { x: 0, y: 0 },
       deviceScaleFactor: 0,
       viewSize,

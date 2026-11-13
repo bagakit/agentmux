@@ -1,4 +1,5 @@
 import type { BrowserProfileEnvironment } from '@agentmux/core/control'
+import type { BrowserProfilePageEnvironmentPorts } from './browser-profile-page-environment.js'
 import { createBrowserProfileEnvironment } from './browser-profile-environment.js'
 import type { Session, WebContents } from 'electron'
 import { browserProfileProxyConfig, type BrowserProfileNetwork } from '../shared/browser-profile-network.js'
@@ -82,8 +83,10 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
       return apply(target, network, profileId)
     },
 
-    applyEnvironment(profileId: string): void { environment?.prepare(profileId) },
+    applyEnvironment(profileId: string): void { environment?.prepare(profileId); environment?.applyPages(profileId) },
+    preparePageEnvironment(profileId: string, browserId: string, contents: WebContents, port: BrowserProfilePageEnvironmentPorts): Promise<void> { return environment?.preparePage(profileId, browserId, contents, port) ?? Promise.resolve() },
     environmentApplication(profileId: string) { return environment?.inspect(profileId) },
+    hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean { return environment?.hasOnlyEnvironmentDebugger(profileId,contents) === true },
     onEnvironmentApplicationChange(listener: (profileId: string) => void): () => void { return environment?.subscribe(listener) ?? (() => {}) },
 
     /** A saved route change: apply it now, so open pages reconnect through the new route. */

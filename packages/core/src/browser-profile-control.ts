@@ -47,36 +47,266 @@ function tags(value: unknown, code: string): string[] {
   }))]
 }
 
-/** Native session defaults, not a complete device identity or webpage language override. */
-export type BrowserProfileEnvironment = { userAgent?: string; acceptLanguages?: string[] }
-/** Native setter receipt. UA covers new pages; request language covers subsequent requests. */
-export type BrowserProfileEnvironmentApplication = { status: 'not-applied' | 'applied' | 'unknown'; scope: 'session-defaults';
-  userAgent?: string; acceptLanguages?: string[]; unsupported: string[]; reason?: string }
+/** Profile-owned native environment. It is not a complete or independent fingerprint engine. */
+export type BrowserProfileUserAgentMetadata = {
+  brands?: { brand: string; version: string }[]
+  fullVersionList?: { brand: string; version: string }[]
+  platform: string
+  platformVersion: string
+  architecture: string
+  model: string
+  mobile: boolean
+  bitness?: string
+  wow64?: boolean
+}
+export type BrowserProfileEnvironment = {
+  userAgent?: string
+  acceptLanguages?: string[]
+  timeZone?: string
+  locale?: string
+  geolocation?: { latitude: number; longitude: number; accuracy: number }
+  userAgentMetadata?: BrowserProfileUserAgentMetadata
+  screen?: { width: number; height: number }
+  hardwareConcurrency?: number
+}
+export const BROWSER_PROFILE_ENVIRONMENT_FIELDS = [
+  'userAgent',
+  'acceptLanguages',
+  'timeZone',
+  'locale',
+  'geolocation',
+  'userAgentMetadata',
+  'screen',
+  'hardwareConcurrency'
+] as const satisfies readonly (keyof BrowserProfileEnvironment)[]
+export type BrowserProfileEnvironmentField = (typeof BROWSER_PROFILE_ENVIRONMENT_FIELDS)[number]
+export type BrowserProfileEnvironmentPageApplication = {
+  browserId: string
+  status: 'applied' | 'pending' | 'unknown'
+  fields: Partial<
+    Record<BrowserProfileEnvironmentField, { status: 'applied' | 'unknown'; scope: 'page-target'; reason?: string }>
+  >
+  /** Native page-target ACK is not a claim about another target or its first script. */
+  scope: {
+    currentDocument: 'applied' | 'unknown'
+    futureNavigation: 'applied' | 'unknown'
+    subdocuments: 'unknown'
+    workers: 'unknown'
+    initialScripts: 'unknown'
+  }
+  reason?: string
+}
+/** Session-default receipt plus exact native page-target applications; no retained application is persisted. */
+export type BrowserProfileEnvironmentApplication = {
+  status: 'not-applied' | 'applied' | 'unknown'
+  scope: 'session-defaults'
+  userAgent?: string
+  acceptLanguages?: string[]
+  unsupported: string[]
+  reason?: string
+  pages?: BrowserProfileEnvironmentPageApplication[]
+}
 
 export function parseBrowserProfileEnvironment(value: unknown): BrowserProfileEnvironment {
-  const code = 'INVALID_CONTROL_REQUEST', row = record(value, ['userAgent', 'acceptLanguages'], code, 'Browser Profile environment')
-  if (!Object.keys(row).length) fail(code, 'An environment needs a userAgent or acceptLanguages; use null to restore defaults.')
+  const code = 'INVALID_CONTROL_REQUEST',
+    row = record(value, [...BROWSER_PROFILE_ENVIRONMENT_FIELDS], code, 'Browser Profile environment')
+  if (!Object.keys(row).length) fail(code, 'An environment needs a native setting; use null to restore defaults.')
   const userAgent = row.userAgent === undefined ? undefined : text(row.userAgent, code, 'User agent')
-  if (userAgent !== undefined && (!userAgent.trim() || /[^\x20-\x7e]/u.test(userAgent))) fail(code, 'User agent must be nonempty printable HTTP header text.')
+  if (userAgent !== undefined && (!userAgent.trim() || /[^\x20-\x7e]/u.test(userAgent)))
+    fail(code, 'User agent must be nonempty printable HTTP header text.')
   let acceptLanguages: string[] | undefined
   if (row.acceptLanguages !== undefined) {
-    if (!Array.isArray(row.acceptLanguages) || !row.acceptLanguages.length || row.acceptLanguages.some(item => typeof item !== 'string')) fail(code, 'Request languages must be a nonempty list of language tags.')
-    try { acceptLanguages = Intl.getCanonicalLocales(row.acceptLanguages as string[]) }
-    catch { fail(code, 'Request languages must be valid language tags, without HTTP quality weights.') }
+    if (
+      !Array.isArray(row.acceptLanguages) ||
+      !row.acceptLanguages.length ||
+      row.acceptLanguages.some((item) => typeof item !== 'string')
+    )
+      fail(code, 'Request languages must be a nonempty list of language tags.')
+    try {
+      acceptLanguages = Intl.getCanonicalLocales(row.acceptLanguages as string[])
+    } catch {
+      fail(code, 'Request languages must be valid language tags, without HTTP quality weights.')
+    }
   }
-  return { ...(userAgent === undefined ? {} : { userAgent }), ...(acceptLanguages === undefined ? {} : { acceptLanguages }) }
+  let timeZone: string | undefined, locale: string | undefined
+  if (row.timeZone !== undefined) {
+    timeZone = text(row.timeZone, code, 'Time zone', 256)
+    try {
+      new Intl.DateTimeFormat('en', { timeZone })
+    } catch {
+      fail(code, 'Time zone must be a supported IANA time-zone identity.')
+    }
+  }
+  if (row.locale !== undefined) {
+    try {
+      locale = Intl.getCanonicalLocales(text(row.locale, code, 'Locale', 256))[0]
+    } catch {
+      fail(code, 'Locale must be a valid language tag.')
+    }
+    if (!locale) fail(code, 'Locale must be a valid language tag.')
+  }
+  let geolocation: BrowserProfileEnvironment['geolocation'], screen: BrowserProfileEnvironment['screen']
+  if (row.geolocation !== undefined) {
+    const point = record(row.geolocation, ['latitude', 'longitude', 'accuracy'], code, 'Geolocation')
+    const latitude = environmentNumber(point.latitude, -90, 90, code, 'Latitude'),
+      longitude = environmentNumber(point.longitude, -180, 180, code, 'Longitude'),
+      accuracy = environmentNumber(point.accuracy, 0, Number.MAX_VALUE, code, 'Accuracy')
+    geolocation = { latitude, longitude, accuracy }
+  }
+  if (row.screen !== undefined) {
+    const size = record(row.screen, ['width', 'height'], code, 'Screen')
+    screen = {
+      width: environmentInteger(size.width, code, 'Screen width'),
+      height: environmentInteger(size.height, code, 'Screen height')
+    }
+  }
+  const hardwareConcurrency =
+    row.hardwareConcurrency === undefined
+      ? undefined
+      : environmentInteger(row.hardwareConcurrency, code, 'Hardware concurrency')
+  let userAgentMetadata: BrowserProfileUserAgentMetadata | undefined
+  if (row.userAgentMetadata !== undefined) {
+    const meta = record(
+      row.userAgentMetadata,
+      [
+        'brands',
+        'fullVersionList',
+        'platform',
+        'platformVersion',
+        'architecture',
+        'model',
+        'mobile',
+        'bitness',
+        'wow64'
+      ],
+      code,
+      'User agent metadata'
+    )
+    const scalar = (key: string) => {
+      if (typeof meta[key] !== 'string' || meta[key].length > 512 || /[\u0000-\u001f\u007f]/u.test(meta[key] as string))
+        fail(code, `User agent metadata ${key} is invalid.`)
+      return meta[key] as string
+    }
+    if (typeof meta.mobile !== 'boolean' || (meta.wow64 !== undefined && typeof meta.wow64 !== 'boolean'))
+      fail(code, 'User agent metadata mobile/wow64 must be boolean.')
+    const brands = (value: unknown) => {
+      if (!Array.isArray(value)) fail(code, 'User agent brands must be a list.')
+      return value.map((value) => {
+        const brand = record(value, ['brand', 'version'], code, 'User agent brand')
+        return {
+          brand: text(brand.brand, code, 'Brand', 512),
+          version: text(brand.version, code, 'Brand version', 512)
+        }
+      })
+    }
+    userAgentMetadata = {
+      platform: scalar('platform'),
+      platformVersion: scalar('platformVersion'),
+      architecture: scalar('architecture'),
+      model: scalar('model'),
+      mobile: meta.mobile as boolean,
+      ...(meta.brands === undefined ? {} : { brands: brands(meta.brands) }),
+      ...(meta.fullVersionList === undefined ? {} : { fullVersionList: brands(meta.fullVersionList) }),
+      ...(meta.bitness === undefined ? {} : { bitness: scalar('bitness') }),
+      ...(meta.wow64 === undefined ? {} : { wow64: meta.wow64 as boolean })
+    }
+  }
+  return {
+    ...(userAgent === undefined ? {} : { userAgent }),
+    ...(acceptLanguages === undefined ? {} : { acceptLanguages }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
+    ...(geolocation ? { geolocation } : {}),
+    ...(userAgentMetadata ? { userAgentMetadata } : {}),
+    ...(screen ? { screen } : {}),
+    ...(hardwareConcurrency === undefined ? {} : { hardwareConcurrency })
+  }
+}
+function environmentNumber(value: unknown, min: number, max: number, code: string, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max)
+    fail(code, `${label} is invalid.`)
+  return value as number
+}
+function environmentInteger(value: unknown, code: string, label: string): number {
+  const number = environmentNumber(value, 1, 2 ** 31 - 1, code, label)
+  if (!Number.isInteger(number)) fail(code, `${label} must be an integer.`)
+  return number
 }
 
+function environmentPage(value: unknown, code: string): BrowserProfileEnvironmentPageApplication {
+  const row = record(value, ['browserId', 'status', 'fields', 'scope', 'reason'], code, 'Page environment application')
+  if (!['applied', 'pending', 'unknown'].includes(String(row.status))) fail(code, 'Page environment status is invalid.')
+  const fields = record(row.fields, [...BROWSER_PROFILE_ENVIRONMENT_FIELDS], code, 'Page environment fields'),
+    scope = record(
+      row.scope,
+      ['currentDocument', 'futureNavigation', 'subdocuments', 'workers', 'initialScripts'],
+      code,
+      'Page environment scope'
+    )
+  if (
+    !['applied', 'unknown'].includes(String(scope.currentDocument)) ||
+    !['applied', 'unknown'].includes(String(scope.futureNavigation)) ||
+    scope.subdocuments !== 'unknown' ||
+    scope.workers !== 'unknown' ||
+    scope.initialScripts !== 'unknown'
+  )
+    fail(code, 'Page environment scope is invalid.')
+  const parsed: BrowserProfileEnvironmentPageApplication['fields'] = {}
+  for (const field of BROWSER_PROFILE_ENVIRONMENT_FIELDS)
+    if (fields[field] !== undefined) {
+      const fact = record(fields[field], ['status', 'scope', 'reason'], code, 'Native field application')
+      if (!['applied', 'unknown'].includes(String(fact.status)) || fact.scope !== 'page-target')
+        fail(code, 'Native field application is invalid.')
+      parsed[field] = {
+        status: fact.status as 'applied' | 'unknown',
+        scope: 'page-target',
+        ...(fact.reason === undefined ? {} : { reason: text(fact.reason, code, 'Native field reason') })
+      }
+    }
+  return {
+    browserId: identity(row.browserId, code, 'Browser ID'),
+    status: row.status as BrowserProfileEnvironmentPageApplication['status'],
+    fields: parsed,
+    scope: scope as BrowserProfileEnvironmentPageApplication['scope'],
+    ...(row.reason === undefined ? {} : { reason: text(row.reason, code, 'Page environment reason') })
+  }
+}
 function environmentApplication(value: unknown, code: string): BrowserProfileEnvironmentApplication {
-  const row = record(value, ['status', 'scope', 'userAgent', 'acceptLanguages', 'unsupported', 'reason'], code, 'Environment application')
-  if (!['not-applied', 'applied', 'unknown'].includes(row.status as string) || row.scope !== 'session-defaults' || !Array.isArray(row.unsupported)) fail(code, 'Environment application is invalid.')
-  const settings = row.userAgent === undefined && row.acceptLanguages === undefined ? {} : parseBrowserProfileEnvironment({
-    ...(row.userAgent === undefined ? {} : { userAgent: row.userAgent }), ...(row.acceptLanguages === undefined ? {} : { acceptLanguages: row.acceptLanguages }) })
-  return { status: row.status as BrowserProfileEnvironmentApplication['status'], scope: 'session-defaults', ...settings,
-    unsupported: row.unsupported.map(item => text(item, code, 'Unsupported environment field')),
-    ...(row.reason === undefined ? {} : { reason: text(row.reason, code, 'Environment application reason') }) }
+  const row = record(
+    value,
+    ['status', 'scope', 'userAgent', 'acceptLanguages', 'unsupported', 'reason', 'pages'],
+    code,
+    'Environment application'
+  )
+  if (
+    !['not-applied', 'applied', 'unknown'].includes(row.status as string) ||
+    row.scope !== 'session-defaults' ||
+    !Array.isArray(row.unsupported)
+  )
+    fail(code, 'Environment application is invalid.')
+  const settings =
+    row.userAgent === undefined && row.acceptLanguages === undefined
+      ? {}
+      : parseBrowserProfileEnvironment({
+          ...(row.userAgent === undefined ? {} : { userAgent: row.userAgent }),
+          ...(row.acceptLanguages === undefined ? {} : { acceptLanguages: row.acceptLanguages })
+        })
+  let pages: BrowserProfileEnvironmentPageApplication[] | undefined
+  if (row.pages !== undefined) {
+    if (!Array.isArray(row.pages)) fail(code, 'Page environment applications must be a list.')
+    pages = row.pages.map((page) => environmentPage(page, code))
+    if (new Set(pages.map((page) => page.browserId)).size !== pages.length)
+      fail(code, 'Page environment applications duplicate a Browser.')
+  }
+  return {
+    status: row.status as BrowserProfileEnvironmentApplication['status'],
+    scope: 'session-defaults',
+    ...settings,
+    unsupported: row.unsupported.map((item) => text(item, code, 'Unsupported environment field')),
+    ...(row.reason === undefined ? {} : { reason: text(row.reason, code, 'Environment application reason') }),
+    ...(pages ? { pages } : {})
+  }
 }
-
 /** Password input is transient; no read operation or receipt returns it. */
 export type BrowserProfileProxySignIn = { username: string; password: string }
 /** One observation through the original Profile session; failure is unknown and changes no page. */
