@@ -3,9 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { mkdtemp, rm, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDemandStore } from '@agentmux/demand'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -20,6 +18,7 @@ import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { openHostGoalTransport, type HostGoalTransport } from './helpers/host-goal-transport'
 
 const initial = useAppStore.getState()
 let dispose: (() => void) | undefined
@@ -29,38 +28,31 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This 
 const intent = '  Keep the exact original work.\n  A healthy Agent must remain available.  '
 const proposal: DemandAlignmentProposal = { summary: 'Return to the same work after restart.', criteria: [{ id: 'tabs', text: 'The same tabs and splits return.' }, { id: 'agent', text: 'The original healthy Agent can resume.' }], openQuestions: [] }
 function report(outcome: 'met' | 'gap' | 'unknown' = 'met'): DemandGroundingProposal { return { alignmentRevision: 1, summary: 'Workspace restored; both criteria were checked.', checks: [{ criterionId: 'tabs', outcome: 'met', evidence: ['artifacts/restart.log:12'], note: 'The saved tab and split identities match.' }, { criterionId: 'agent', outcome, evidence: ['artifacts/session.log:8'], note: outcome === 'gap' ? 'The draft returned, but automatic resume still needs a retry.' : 'The original Session identity is retained.' }] } }
-const activeTransport = new Set<Promise<unknown>>()
-function transport<T>(request: Promise<T>): Promise<T> { activeTransport.add(request); void request.finally(() => activeTransport.delete(request)).catch(() => {}); return request }
+// Exact public Goal acknowledgement requests the renderer sent to the original Host owner.
+const confirmed = (...revisions: number[]) => revisions.map(expectedRevision => ({ operation: 'demand.confirm', demandId: 'goal', expectedRevision }))
+const accepted = (submission: string, acceptGaps: boolean) => ({ operation: 'demand.accept', demandId: 'goal', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps })
 let disposeTheme: () => void
-let temporaryRoot: string, owner: ReturnType<typeof openDemandStore>, root: Root, container: HTMLDivElement
+let host: HostGoalTransport, temporaryRoot: string, owner: HostGoalTransport['demands'], root: Root, container: HTMLDivElement
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   disposeTheme = mountThemeRuntime(window)
-  temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-goal-ui-')); owner = openDemandStore({ root: temporaryRoot })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ ...initial, config, demands: {}, selectedDemandId: null, sessions: [], tabs: {}, layouts: {}, mainSurface: 'board', demandPmoTabIds: {} })
-  // Only transport is substituted. UI invokes the production store methods and unique durable owner.
-  vi.spyOn(api.demands, 'create').mockImplementation(input => transport(owner.create({ ...input, id: 'goal' })))
-  vi.spyOn(api.demands, 'list').mockImplementation(() => transport(owner.list()))
-  vi.spyOn(api.demands, 'update').mockImplementation((id, patch) => transport(owner.update(id, patch)))
-  vi.spyOn(api.demands, 'confirmAlignment').mockImplementation((id, revision) => transport(owner.confirmAlignment(id, revision)))
-  vi.spyOn(api.demands, 'acceptGrounding').mockImplementation((id, revision, submission, gaps, finish) => transport(owner.acceptGrounding(id, revision, submission, gaps, finish)))
-  vi.spyOn(api.demands, 'activity').mockImplementation((id, activity) => transport(owner.addActivity(id, activity)))
-  vi.spyOn(api.demands, 'decision').mockImplementation((id, decision) => transport(owner.addDecision(id, decision)))
-  vi.spyOn(api.demands, 'linkSession').mockImplementation((id, session) => transport(owner.linkSession(id, session)))
+  // Only Electron IPC is substituted. UI invokes the production store methods, the public Goal codec and the original Host owner.
+  host = await openHostGoalTransport({ config }); owner = host.demands; temporaryRoot = owner.root
 })
-afterEach(async () => { await act(async () => root.unmount()); disposeTheme(); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true); await rm(temporaryRoot, { recursive: true, force: true }) })
+afterEach(async () => { await act(async () => root.unmount()); disposeTheme(); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true); await host.dispose() })
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 async function save(alignment?: DemandAlignmentProposal, confirmed = false, grounding?: DemandGroundingProposal) {
-  await useAppStore.getState().createDemand({ title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
+  await useAppStore.getState().createDemand({ id: 'goal', title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
   if (alignment) await useAppStore.getState().updateDemand('goal', { alignment })
   if (confirmed) await useAppStore.getState().confirmDemandGoal('goal', 1)
   if (grounding) await useAppStore.getState().updateDemand('goal', { grounding })
   useAppStore.setState({ selectedDemandId: 'goal' })
-  vi.mocked(api.demands.confirmAlignment).mockClear(); vi.mocked(api.demands.acceptGrounding).mockClear()
+  host.clear()
 }
 function button(label: string) { const action = ['Clarify goal', 'Discuss changes'].includes(label) ? '[data-goal-grill]' : label === 'Ask agent to check work' ? '[data-goal-grounding]' : null; const node = (action ? container.querySelector<HTMLButtonElement>(action) : null) ?? [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label); expect(node, label).toBeDefined(); return node! }
-async function click(label: string, waitForTransport = true) { await act(async () => { button(label).click(); for (let i = 0; waitForTransport && i < 4; i++) { await Promise.resolve(); await Promise.allSettled([...activeTransport]) } }) }
+async function click(label: string, waitForTransport = true) { await act(async () => { button(label).click(); if (waitForTransport) await host.settle() }) }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
 function next() { return container.querySelector('.goals-row__next')?.textContent }
 function expectReloadOnly() {
@@ -83,12 +75,12 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
     expect(next()).toContain('Goal ready for confirmation'); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
     let finish!: () => void
-    vi.mocked(api.demands.confirmAlignment).mockImplementationOnce((id, revision) => transport((async () => { await new Promise<void>(resolve => { finish = resolve }); return owner.confirmAlignment(id, revision) })()))
+    finish = host.once('demand.confirm', { kind: 'hold-request' }).release
     await click('Confirm goal', false)
     expect(button('Saving…').disabled).toBe(true); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
     expect(useAppStore.getState().demands.goal!.alignment!.confirmedAt).toBeNull()
-    await act(async () => { finish(); await Promise.allSettled([...activeTransport]) }); await eventually(() => expect(container.querySelector('[data-goal-confirmation-state]')?.getAttribute('data-goal-confirmation-state')).toBe('confirmed'))
-    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1)
+    await act(async () => { finish(); await host.settle() }); await eventually(() => expect(container.querySelector('[data-goal-confirmation-state]')?.getAttribute('data-goal-confirmation-state')).toBe('confirmed'))
+    expect(host.bodies('demand.confirm')).toEqual(confirmed(1))
     expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0); expect(next()).toContain('Goal agreed')
     await act(async () => useAppStore.getState().updateDemand('goal', { grounding: report() }))
     const submission = (await owner.get('goal'))!.grounding!.submissionId
@@ -106,7 +98,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(document.getElementById(semanticIconHref('status.completed').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M12 3L21 20H3Z')
     expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
     await click('Accept results'); await eventually(async () => expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeGreaterThan(0))
-    expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, submission, false, undefined)
+    expect(host.bodies('demand.accept')).toEqual([accepted(submission, false)])
     const restored = (await openDemandStore({ root: temporaryRoot }).get('goal'))!
     expect(restored).toMatchObject({ description: intent, status: 'in_progress', sessionIds: ['healthy-run'], alignment: { revision: 1, confirmedAt: expect.any(Number) }, grounding: { submissionId: submission, acceptedAt: expect.any(Number), checks: report().checks } })
     expect(container.querySelector('[data-goal-result-state]')?.getAttribute('data-goal-result-state')).toBe('accepted'); expect(next()).toBe('Accepted')
@@ -121,7 +113,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     await act(async () => artwork.dispatchEvent(new Event('error')))
     expect(artwork.hidden).toBe(true)
     expect(button('Clarify goal').disabled).toBe(false)
-    expect(api.demands.confirmAlignment).not.toHaveBeenCalled()
+    expect(host.executed('demand.confirm')).toEqual([])
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
     expect(container.querySelectorAll('.goals-clarification')).toHaveLength(1)
     expect(container.querySelector('.goals-alignment')).toBeNull(); expect(container.querySelector('.goals-grounding')).toBeNull()
@@ -171,7 +163,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.querySelector('.goals-grounding')?.textContent).toContain('Define the goal and success criteria before accepting this report.')
     expect(container.querySelector('[data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
     expect(container.querySelector('[data-goal-grill]')?.textContent).toContain('Clarify goal'); expect(container.textContent).not.toContain('vundefined')
-    expect(api.demands.acceptGrounding).not.toHaveBeenCalled()
+    expect(host.executed('demand.accept')).toEqual([])
     expect((await owner.get('goal'))!).toMatchObject({ description: intent, grounding: { checks: report().checks, acceptedAt: null } })
   })
 
@@ -215,7 +207,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(container.textContent).toContain('Reported gap'); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
     const submission = (await owner.get('goal'))!.grounding!.submissionId
     await click('Accept results, keep gaps'); await eventually(() => expect(next()).toBe('Accepted with gaps'))
-    expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, submission, true, undefined)
+    expect(host.bodies('demand.accept')).toEqual([accepted(submission, true)])
     expect((await owner.get('goal'))!.grounding!.checks).toEqual(report('gap').checks)
     expect(container.querySelector('[data-goal-result-state]')?.getAttribute('data-goal-result-state')).toBe('accepted-with-gaps')
     expect(container.textContent).toContain('Those gaps remain part of the record')
@@ -232,7 +224,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     await save(proposal, true, { ...grounding, checks: [...grounding.checks] }); await mount()
     expect(container.querySelectorAll('[data-goal-criterion-id]')).toHaveLength(2)
     expect(container.querySelector('[data-goal-accept]')).toBeNull(); expect(container.querySelector('[data-goal-accept-gaps]')).toBeNull()
-    expect(next()).toBe(expected); expect(api.demands.acceptGrounding).not.toHaveBeenCalled(); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
+    expect(next()).toBe(expected); expect(host.executed('demand.accept')).toEqual([]); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
   })
 
   it.each([
@@ -242,7 +234,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     await save({ ...alignment, criteria: [...alignment.criteria], openQuestions: [...alignment.openQuestions] }); await mount()
     expect(container.querySelector('[data-goal-confirm]')).toBeNull(); expect(container.querySelector('[data-goal-accept]')).toBeNull()
     expect(container.querySelector('[data-goal-alignment-revision]')?.getAttribute('data-goal-alignment-revision')).toBe('1')
-    expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull(); expect(api.demands.confirmAlignment).not.toHaveBeenCalled()
+    expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull(); expect(host.executed('demand.confirm')).toEqual([])
     expect(next()).toBe(expected); expect(container.querySelector('.goals-section-heading .goals-caption')?.textContent).toBe(_label === 'open questions' ? 'Decisions needed' : 'Define success criteria')
     expect([...container.querySelectorAll('.goals-detail .goals-button--primary')].map(node => node.textContent?.trim())).toEqual(['Discuss changes in goal discussion'])
   })
@@ -267,56 +259,58 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const unchanged = useAppStore.getState().demands.goal
     await openDemandStore({ root: temporaryRoot }).proposeAlignment('goal', { ...proposal, summary: 'A different target from another caller.' })
     await click('Confirm goal'); await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('changed'))
-    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1); expect(useAppStore.getState().demands.goal).toEqual(unchanged); expectReloadOnly()
-    vi.mocked(api.demands.list).mockRejectedValueOnce(new Error('Owner unavailable'))
+    expect(host.bodies('demand.confirm')).toEqual(confirmed(1)); expect(useAppStore.getState().demands.goal).toEqual(unchanged); expectReloadOnly()
+    // Reload reads the exact Goal from its original owner (demand.show); that read fails once before reaching it.
+    host.once('demand.show', { kind: 'reject', error: new Error('Owner unavailable') })
     await click('Reload current proposal'); await eventually(() => expect(container.textContent).toContain('Reload failed: Owner unavailable'))
     expect(useAppStore.getState().demands.goal).toEqual(unchanged); expectReloadOnly()
     await click('Reload current proposal'); await eventually(() => expect(container.querySelector('[data-goal-summary]')?.textContent).toBe('A different target from another caller.'))
-    expect(api.demands.confirmAlignment).toHaveBeenCalledTimes(1); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
+    expect(host.executed('demand.confirm')).toHaveLength(1); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
     expect(useAppStore.getState().demands.goal).toMatchObject({ description: intent, source: 'session', sessionIds: ['healthy-run'], alignment: { revision: 2, confirmedAt: null } })
     await click('Confirm goal'); await eventually(async () => expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0))
-    expect(vi.mocked(api.demands.confirmAlignment).mock.calls).toEqual([['goal', 1], ['goal', 2]])
+    expect(host.bodies('demand.confirm')).toEqual(confirmed(1, 2))
   })
 
   it('rejects an unread report submission and never retries approval of the replacement during reload', async () => {
     await save(proposal, true, report()); await mount(); const oldSubmission = (await owner.get('goal'))!.grounding!.submissionId
     await openDemandStore({ root: temporaryRoot }).proposeGrounding('goal', { ...report('gap'), summary: 'A newly reported gap.' })
     await click('Accept results'); await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('changed'))
-    expect(api.demands.acceptGrounding).toHaveBeenCalledExactlyOnceWith('goal', 1, oldSubmission, false, undefined); expectReloadOnly()
+    expect(host.bodies('demand.accept')).toEqual([accepted(oldSubmission, false)]); expectReloadOnly()
     expect(useAppStore.getState().demands.goal!.grounding!.acceptedAt).toBeNull()
     await click('Reload current proposal'); await eventually(() => expect(container.querySelector('[data-goal-result-summary]')?.textContent).toBe('A newly reported gap.'))
-    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
+    expect(host.executed('demand.accept')).toHaveLength(1); expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
     expect(container.querySelector('[data-goal-accept]')).toBeNull()
     await click('Accept results, keep gaps'); await eventually(async () => expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeGreaterThan(0))
-    expect(vi.mocked(api.demands.acceptGrounding).mock.calls.at(-1)).toEqual(['goal', 1, (await owner.get('goal'))!.grounding!.submissionId, true, undefined])
+    expect(host.bodies('demand.accept').at(-1)).toEqual(accepted((await owner.get('goal'))!.grounding!.submissionId, true))
   })
 
   it('retains an unconfirmed receipt, reloads and requires a new explicit acceptance of the same reviewed report', async () => {
     await save(proposal, true, report()); await mount(); const submission = (await owner.get('goal'))!.grounding!.submissionId
-    vi.mocked(api.demands.acceptGrounding).mockRejectedValueOnce(new Error('Receipt unavailable'))
+    host.once('demand.accept', { kind: 'reject', error: new Error('Receipt unavailable') })
     await click('Accept results'); await eventually(() => expect(container.textContent).toContain('Result acceptance is unconfirmed'))
     expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull(); expect(useAppStore.getState().demands.goal!.grounding!.acceptedAt).toBeNull()
     expectReloadOnly(); await click('Reload current proposal')
-    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1); expect(button('Accept results')).toBeTruthy()
+    expect(host.executed('demand.accept')).toHaveLength(1); expect(button('Accept results')).toBeTruthy()
     await click('Accept results'); await eventually(() => expect(next()).toBe('Accepted'))
-    expect(vi.mocked(api.demands.acceptGrounding).mock.calls).toEqual([['goal', 1, submission, false, undefined], ['goal', 1, submission, false, undefined]])
+    expect(host.bodies('demand.accept')).toEqual([accepted(submission, false), accepted(submission, false)])
   })
 
   it('keeps recovery primary when changed owner facts arrive while its receipt failure is retained', async () => {
     await save(proposal); await mount()
-    vi.mocked(api.demands.confirmAlignment).mockRejectedValueOnce(new Error('Receipt unavailable'))
+    host.once('demand.confirm', { kind: 'reject', error: new Error('Receipt unavailable') })
     await click('Confirm goal'); expectReloadOnly()
     await act(async () => useAppStore.getState().updateDemand('goal', { alignment: { ...proposal, openQuestions: ['Should the original Agent resume automatically?'] } }))
     expectReloadOnly(); expect(button('Discuss changes').classList.contains('goals-button--primary')).toBe(false)
     expect(button('Discuss changes').disabled).toBe(false)
     await owner.proposeAlignment('goal', proposal); await owner.confirmAlignment('goal', 3)
-    await act(async () => useAppStore.getState().updateDemand('goal', { description: intent }))
+    // Another caller changed the original Goal; the Host owner fences writes on updatedAt, so this write carries the owner's current one.
+    await act(async () => useAppStore.getState().updateDemand('goal', { description: intent }, undefined, (await owner.get('goal'))!.updatedAt))
     expectReloadOnly(); expect(button('Open discussion for Restore my work').classList.contains('goals-button--primary')).toBe(false)
     expect(button('Open discussion for Restore my work').disabled).toBe(false)
     await click('Reload current proposal')
     expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull()
     expect(next()).toBe('Goal agreed · No result report'); expect(button('Open discussion for Restore my work').classList.contains('goals-button--primary')).toBe(false)
-    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1)
+    expect(host.bodies('demand.confirm')).toEqual(confirmed(1))
     expect((await owner.get('goal'))!).toMatchObject({ description: intent, sessionIds: ['healthy-run'], alignment: { revision: 3, confirmedAt: expect.any(Number) } })
   })
 
@@ -325,11 +319,12 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const healthyRun = { id: 'healthy-run', label: 'Original Agent', hostId: 'local', providerId: 'codex', workspacePath: config.workspaces[0]!.path, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 1) } } as SessionSnapshot
     useAppStore.setState({ sessions: [healthyRun] }); await mount()
     const reviewed = useAppStore.getState().demands.goal!
-    if (kind === 'confirm') vi.mocked(api.demands.confirmAlignment).mockImplementationOnce((id, revision) => transport((async () => { await owner.confirmAlignment(id, revision); throw new Error('Receipt lost after the owner committed') })()))
-    else vi.mocked(api.demands.acceptGrounding).mockImplementationOnce((id, revision, submission, gaps) => transport((async () => { await owner.acceptGrounding(id, revision, submission, gaps); throw new Error('Receipt lost after the owner committed') })()))
+    // The original Host owner commits; only the receipt back to the renderer is lost.
+    const lost = host.once(kind === 'confirm' ? 'demand.confirm' : 'demand.accept', { kind: 'lose-receipt', error: new Error('Receipt lost after the owner committed') })
     await click(kind === 'confirm' ? 'Confirm goal' : 'Accept results')
     await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('is unconfirmed'))
     expectReloadOnly(); expect(useAppStore.getState().demands.goal).toEqual(reviewed)
+    expect((await lost.committed).operation).toBe(kind === 'confirm' ? 'demand.confirm' : 'demand.accept')
     const committed = (await openDemandStore({ root: temporaryRoot }).get('goal'))!
     const savedAt = kind === 'confirm' ? committed.alignment!.confirmedAt : committed.grounding!.acceptedAt
     expect(savedAt).toBeGreaterThan(0)
@@ -340,8 +335,8 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(next()).toBe(kind === 'confirm' ? 'Goal agreed · No result report' : 'Accepted')
     expect(container.textContent).toContain(kind === 'confirm' ? 'Confirmed by you' : 'Accepted by you')
     expect(container.querySelector('[data-goal-confirm], [data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
-    expect(api.demands.confirmAlignment).toHaveBeenCalledTimes(kind === 'confirm' ? 1 : 0)
-    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(kind === 'accept' ? 1 : 0)
+    expect(host.executed('demand.confirm')).toHaveLength(kind === 'confirm' ? 1 : 0)
+    expect(host.executed('demand.accept')).toHaveLength(kind === 'accept' ? 1 : 0)
     expect(useAppStore.getState().sessions).toEqual([healthyRun])
     expect((await owner.get('goal'))!).toMatchObject({ description: intent, status: 'in_progress', sessionIds: ['healthy-run'] })
     if (kind === 'accept') expect((await owner.get('goal'))!.grounding!.submissionId).toBe(reviewed.grounding!.submissionId)
@@ -386,34 +381,34 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   it('keeps a failed acknowledgement attached across navigation, then reloads before a new explicit acceptance', async () => {
     await save(proposal, true, report()); await owner.create({ id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
     const submission = (await owner.get('goal'))!.grounding!.submissionId
-    vi.mocked(api.demands.acceptGrounding).mockRejectedValueOnce(new Error('Receipt unavailable'))
+    host.once('demand.accept', { kind: 'reject', error: new Error('Receipt unavailable') })
     await click('Accept results'); await eventually(() => expect(container.textContent).toContain('Result acceptance is unconfirmed'))
     expectReloadOnly(); await click('Back to goals')
     expect(container.querySelector('.goals-detail')).toBeNull()
     expect(container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent).toBe('Acknowledgement unconfirmed')
-    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1)
+    expect(host.executed('demand.accept')).toHaveLength(1)
     await act(async () => (container.querySelector('[data-demand-id="goal"]') as HTMLElement).click())
-    expectReloadOnly(); expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1)
+    expectReloadOnly(); expect(host.executed('demand.accept')).toHaveLength(1)
     await act(async () => (container.querySelector('[data-demand-id="other"]') as HTMLElement).click())
     expect(container.querySelector('[data-goal-acknowledgement-failure]')).toBeNull()
     await act(async () => (container.querySelector('[data-demand-id="goal"]') as HTMLElement).click())
     expect(container.querySelector('[data-goal-acknowledgement-failure]')?.textContent).toContain('Receipt unavailable')
     expectReloadOnly(); await click('Reload current proposal')
-    expect(api.demands.acceptGrounding).toHaveBeenCalledTimes(1); expect(button('Accept results')).toBeTruthy()
+    expect(host.executed('demand.accept')).toHaveLength(1); expect(button('Accept results')).toBeTruthy()
     await click('Accept results'); await eventually(() => expect(next()).toBe('Accepted'))
-    expect(vi.mocked(api.demands.acceptGrounding).mock.calls).toEqual([['goal', 1, submission, false, undefined], ['goal', 1, submission, false, undefined]])
+    expect(host.bodies('demand.accept')).toEqual([accepted(submission, false), accepted(submission, false)])
   })
 
   it('keeps pending acknowledgement attached to its Goal and prevents duplicate requests when returning to it', async () => {
     await save(proposal); await owner.create({ id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
     let finish!: () => void
-    vi.mocked(api.demands.confirmAlignment).mockImplementationOnce((id, revision) => transport((async () => { await new Promise<void>(resolve => { finish = resolve }); return owner.confirmAlignment(id, revision) })()))
+    finish = host.once('demand.confirm', { kind: 'hold-request' }).release
     await click('Confirm goal', false)
     await act(async () => (container.querySelector('[data-demand-id="other"]') as HTMLElement).click())
     await act(async () => (container.querySelector('[data-demand-id="goal"]') as HTMLElement).click())
     expect(button('Saving…').disabled).toBe(true); await click('Saving…', false)
-    expect(api.demands.confirmAlignment).toHaveBeenCalledExactlyOnceWith('goal', 1)
-    await act(async () => { finish(); await Promise.allSettled([...activeTransport]) })
+    expect(host.bodies('demand.confirm')).toEqual(confirmed(1))
+    await act(async () => { finish(); await host.settle() })
     expect(next()).toBe('Goal agreed · No result report'); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
   })
 
