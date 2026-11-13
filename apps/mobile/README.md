@@ -1,6 +1,6 @@
 # AgentMux Mobile
 
-手机是 Mac Host 的 client：继续已有 Agent 的对话、终端观看与明确输入。Agent、Run 和权威历史仍由 Mac 上的 Core / ctxmux 持有。首个连接环境是同一 Wi-Fi，iPhone 优先。
+手机是 Mac Host 的 client：继续已有 Agent 的对话、终端观看与明确输入。Agent、Run 和权威历史仍由 Mac 上的 Core / ctxmux 持有。首个连接环境是同一 Wi-Fi。
 
 ## 设计与验收
 
