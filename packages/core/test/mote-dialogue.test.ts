@@ -27,6 +27,9 @@ const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(captures?: AgentInputContextCaptureReader) {
   const f = await createMoteInputFixture(); closes.push(f.close)
+  return await fixtureFrom(f, captures)
+}
+async function fixtureFrom(f: Awaited<ReturnType<typeof createMoteInputFixture>>, captures?: AgentInputContextCaptureReader) {
   const target = { spaceId: moteInputTestSource.spaceId, zoneId: moteInputTestSource.zoneId,
     expectedResource: { hostId: 'local', workspaceId: '__scratch__', workspacePath: join(f.root, 'scratch') } }
   const content = createHostContent({ configurationPath: join(f.root, 'configuration.json'), spatial: f.spatial })
@@ -548,6 +551,26 @@ it('explicit main entry preserves an unresolved non-Mote producer without starti
     await expect(f.rpc.call(method,request)).rejects.toMatchObject({code:'AGENT_CONTINUITY_OPERATION_CONFLICT'})
   expect((await f.client.readAgentSession('primary'))?.continuity).toEqual(original.continuity)
   expect(ensure).not.toHaveBeenCalled();expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+// A Main whose first Run exited before it confirmed a native conversation (for example a first-run
+// prompt nobody answered) has nothing to resume. Entry must return that fact under its own operation,
+// never an empty result that reads as "not yet read", and it starts nothing.
+it('explicit main entry records an exited Main with no native conversation as unavailable, without a Start',async()=>{
+  const f=await createMoteInputFixture(); closes.push(f.close)
+  const old=(await f.store.readMetadata('primary'))!
+  const { nativeHandle: _native, ...withoutNative } = old; await f.store.compareAndSwapMetadata(old,withoutNative)
+  await f.inner.registry.load('local')
+  const g=await fixtureFrom(f),main=await g.main.readCurrentMoteMain(g.target),request=mainEntry(main,'entry-no-native'),runtime=endedMainRuntime(g)
+  // Host maintenance already failed on this same fact, so its reading is unconfirmed, as on a real Host.
+  const read=g.quick.read.bind(g.quick)
+  vi.spyOn(g.quick,'read').mockImplementation(async input=>({...await read(input),maintenance:{status:'unconfirmed',schedule:null,
+    issue:'Original maintenance recovery is unavailable; inspect mote-maintain-original.'}}))
+  const accepted=await g.rpc.call('space.mote.dialogue.recovery.ensure',request)
+  expect(accepted.operation,JSON.stringify(accepted)).toMatchObject({kind:'unavailable',reason:'native-handle-unavailable',operationId:request.operationId,
+    moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}})
+  expect(await g.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(accepted)
+  expect(runtime.started).toEqual([]);expect(g.writes).toEqual([])
 })
 
 it('explicit main entry keeps stopped or disabled original execution and its healthy manual capabilities',async()=>{
