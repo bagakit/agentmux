@@ -44,6 +44,11 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <input id="tint" type="color" aria-label="Tint">
     <input id="agree" type="checkbox" aria-label="Agree">
   </div>
+  <div style="position:absolute;left:40px;top:300px">
+    <input id="under" aria-label="Under">
+    <span id="host"></span>
+  </div>
+  <dialog id="modal"><button>Modal button</button></dialog>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
   <div style="position:absolute;left:230px;top:20px;width:150px;height:60px;background:rgba(0,0,0,.4)"></div>
   <script>
@@ -55,6 +60,9 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
         events.push({ type, target: event.target.id || event.target.tagName, trusted: event.isTrusted })
       }, true)
     document.getElementById('form').addEventListener('submit', (event) => event.preventDefault())
+    // A web component: its fields live in an open shadow root, so document.activeElement is the host.
+    const shadow = document.getElementById('host').attachShadow({ mode: 'open' })
+    shadow.innerHTML = '<input id="sdate" type="date" aria-label="Shadow date"><input id="sname" aria-label="Shadow name">'
   </script>
 </body></html>`
 
@@ -125,6 +133,16 @@ app.whenReady().then(async () => {
     await act('stuck', 'fillInput', [ref('Stuck'), '3'], () => value('stuck'))
     await act('tint', 'fillInput', [ref('Tint'), '#FF0000'], () => value('tint'))
     await act('agree', 'fillInput', [ref('Agree'), 'x'], () => contents.executeJavaScript('document.getElementById("agree").checked'))
+    // A person is typing in Under; the Agent fills two fields of a web component and focus comes back.
+    const shadowRead = (id) => () => contents.executeJavaScript('({ value: document.getElementById("host").shadowRoot.getElementById(' + JSON.stringify(id) + ').value, focus: document.activeElement && document.activeElement.id })')
+    await contents.executeJavaScript('document.getElementById("under").focus()')
+    await act('shadowDate', 'fillInput', [ref('Shadow date'), '2026-03-04'], shadowRead('sdate'))
+    await act('shadowName', 'fillInput', [ref('Shadow name'), 'Ada'], shadowRead('sname'))
+    // A modal dialog makes the rest of the page inert; a field there cannot take focus or a value.
+    await contents.executeJavaScript('document.getElementById("modal").showModal()')
+    await act('inertDate', 'fillInput', [ref('When'), '2026-05-06'], () => value('when'))
+    await act('inertName', 'fillInput', [ref('Name'), 'Bea'], () => value('name'))
+    await contents.executeJavaScript('document.getElementById("modal").close()')
     report.notes = notes
     report.throttlingAfter = contents.getBackgroundThrottling()
     report.ok = true
@@ -281,6 +299,18 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(actions.tint, actions.tint?.error).toMatchObject({ ok: true, value: '#ff0000', notes: [] })
     expect(actions.agree, actions.agree?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: false })
     expect(actions.agree!.error).toContain('checkbox input, which takes a click')
+  }, 240_000)
+
+  it('fields inside an open shadow root take their value and give focus back; a field behind a modal dialog is refused', async () => {
+    const { actions } = await probe()
+    expect(actions.shadowDate, actions.shadowDate?.error).toMatchObject({ ok: true, value: { value: '2026-03-04', focus: 'under' } })
+    expect(actions.shadowName, actions.shadowName?.error).toMatchObject({ ok: true, value: { value: 'Ada', focus: 'under' } })
+    for (const label of ['inertDate', 'inertName'] as const) {
+      expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: false, effects: 'not-dispatched' })
+      expect(actions[label]!.error).toContain('inert (behind a modal dialog)')
+    }
+    expect(actions.inertDate!.value, 'an inert date keeps its value').toBe('2026-03-04')
+    expect(actions.inertName!.value, 'an inert text field keeps its value').toBe('Ada')
   }, 240_000)
 
   it('a covered target is refused before input and the page receives nothing; throttling is restored afterwards', async () => {
