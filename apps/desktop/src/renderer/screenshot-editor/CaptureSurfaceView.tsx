@@ -10,7 +10,7 @@ import type { ImageAnnotationInput } from '../src/components/image-annotation/ty
 export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput; api: CaptureSurfaceApi }) {
   const [busy, setBusy] = useState(false), [status, setStatus] = useState<string | null>(null)
   const [locked, setLocked] = useState(false), [decoded, setDecoded] = useState(!input.image)
-  const pending = useRef(false), claimed = useRef(false)
+  const pending = useRef(false)
   useEffect(() => api.onEvent(event => { if (event.kind === 'locked') setLocked(true); else setStatus(event.message) }), [api])
   // The editor mounts on an already decoded frame, so its first paint is the frozen image, never an empty overlay.
   useEffect(() => {
@@ -24,17 +24,16 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
     const frame = requestAnimationFrame(() => { void api.presented(input.requestId).catch(() => {}) })
     return () => cancelAnimationFrame(frame)
   }, [api, input.requestId, decoded])
+  // A display without pixels has no editor, so Esc is handled here.
   useEffect(() => {
-    if (!locked && input.image) return
+    if (input.image) return
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); void api.cancel(input.requestId) } }
     window.addEventListener('keydown', escape)
     return () => window.removeEventListener('keydown', escape)
-  }, [api, input.requestId, input.image, locked])
-  // The first press here claims this capture's one selection; Main then locks the other displays.
+  }, [api, input.requestId, input.image])
+  // A drag made a selection here: claim the capture's one selection; Main locks the other displays, and a lost race locks this one.
   function claim() {
-    if (claimed.current) return
-    claimed.current = true
-    void api.select(input.requestId).then(owned => { if (!owned) setLocked(true) }, cause => { claimed.current = false; setStatus(presentError(cause)) })
+    void api.select(input.requestId).then(owned => { if (!owned) setLocked(true) }, cause => setStatus(presentError(cause)))
   }
 
   async function output(edit: ImageAnnotationInput, kind: 'finish' | 'save' | 'pin'): Promise<boolean> {
@@ -71,12 +70,10 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
     <p><strong>This display could not be captured.</strong> {input.issue}</p>
     <p>Select on another display, or press Esc to cancel.</p>
   </main>
-  if (locked) return <main className="capture-surface capture-surface--locked" aria-label="Screenshot selection is on another display">
-    <img src={input.image.dataUrl} alt="" draggable={false} />
-  </main>
   if (!decoded) return <main className="capture-surface" />
-  return <main className="capture-surface" onPointerDownCapture={event => { if (event.button === 0) claim() }}>
+  return <main className="capture-surface">
     <ImageAnnotationEditor presentation="capture" image={input.image} busy={busy} pixelRatio={input.scale} origin={{ x: input.frame.x, y: input.frame.y }}
+      locked={locked} onSelect={claim}
       completeLabel="Done" busyLabel="Copying…" documentStatus={status ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       onComplete={edit => output(edit, 'finish')} onSavePng={edit => output(edit, 'save')} onPin={edit => output(edit, 'pin')}
       onCopyColor={hex => void copyColor(hex)} onExpand={handoff => void api.expand(input.requestId, handoff).catch(cause => setStatus(presentError(cause)))}

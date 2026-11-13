@@ -67,9 +67,6 @@ html:has(.screenshot-countdown), html:has(.screenshot-countdown) body { backgrou
 /* Capture surface: one transparent overlay per display; the shared editor paints the frozen frame and its dim. */
 html:has(.capture-surface), html:has(.capture-surface) body { background: transparent; }
 .capture-surface { position: fixed; inset: 0; overflow: hidden; user-select: none; cursor: crosshair; }
-.capture-surface > img { position: absolute; inset: 0; width: 100%; height: 100%; }
-.capture-surface--locked { cursor: default; }
-.capture-surface--locked::after { content: ''; position: absolute; inset: 0; background: rgb(0 0 0 / .45); }
 .capture-surface--issue { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px;
   background: rgb(0 0 0 / .62); color: #fff; font: var(--fs-body)/1.45 var(--font-sans); text-align: center; cursor: default; }
 .capture-surface--issue p { margin: 0; max-width: 520px; }
