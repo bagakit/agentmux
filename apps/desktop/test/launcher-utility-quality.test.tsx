@@ -31,6 +31,7 @@ async function activate(owner: string, label: string) {
   expect(button).not.toBeNull(); await act(async () => { button!.focus(); button!.click() })
 }
 function focusLabel() { return document.activeElement?.getAttribute('aria-label') }
+function iconOf(label: string) { return dom.container.querySelector(`[aria-label="${label}"] [data-semantic-icon]`)?.getAttribute('data-semantic-icon') }
 async function saveBody() {
   const button = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-owner="input"] button')].find(node => node.textContent?.includes('Save & open note'))!
   expect(button).toBeDefined(); await act(async () => { button.focus(); button.click() })
@@ -71,6 +72,7 @@ describe('Launcher utility intent and local focus', () => {
   it.each(['header', 'body'] as const)('%s saves the complete draft through the real file owner and reveals the same written Note', async origin => {
     const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved' })
     await dom.render(<Utility />)
+    expect(iconOf('Go to Browser address or search')).toBe('action.submit')
     if (origin === 'header') await activate('input', 'Save and open note draft'); else await saveBody()
     expect(write).toHaveBeenCalledOnce(); const [workspaceId, request] = write.mock.calls[0]!
     expect(workspaceId).toBe('workspace'); expect(request.expectedRevision).toBeNull()

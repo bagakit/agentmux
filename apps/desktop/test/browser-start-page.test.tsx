@@ -222,6 +222,7 @@ it('keeps toolbar and central drafts synchronized and submits through the origin
   expect(center.value).toBe(top.value)
   await input(center, 'shared draft search')
   expect(top.value).toBe('shared draft search')
+  expect(host.querySelector('[aria-label="Search or open page"] [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('action.submit')
   await click('[aria-label="Search or open page"]')
   expect(navigate).toHaveBeenLastCalledWith(target.browserId, 'shared draft search')
   expect(record).toHaveBeenLastCalledWith(target, 'shared draft search')
