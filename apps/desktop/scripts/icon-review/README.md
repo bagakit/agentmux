@@ -1,4 +1,4 @@
-# 图标语义工作台
+# 品牌与图标工作台
 
 长期开发入口，从仓库根目录运行：
 
@@ -7,6 +7,8 @@ pnpm icons:dev
 ```
 
 打开输出的 `http://127.0.0.1:4186/` 即可预览当前源码。修改目录、字形、共享呈现或消费源码会自动刷新，沿原语义 ID 恢复草稿；存储失败时保留内存修改并提示先导出。`--open` 可打开系统浏览器，`--port` 可指定端口（占用时不自动漂移），`--context` 仅提供旧注释；`--help` 查看入口。进程停止后该开发 URL 暂不可用，重新运行同一命令即可继续。
+
+页面默认打开「品牌」视图：五个境的 App 图标与实际尺寸、各境在启动和 Launcher／Settings 概览上显示的大图（与产品走同一个 `resolveBrandHero`，借原境的画会标明）、所有境共用的工坊插画、Mote 头像系列和各家 Agent 的标志。条目来自 `packages/client-ui/brand/brand-manifest.json`，页面不维护第二份清单；方向键在各境之间切换。品牌规则见[品牌架构](../../../../docs/design/presentation/brand-identity.md)，素材操作见[品牌素材指南](../../../../docs/guides/brand-assets.md)。
 
 开发使用和扩展步骤见[语义图标指南](../../../../docs/guides/semantic-icons.md)。`catalog.mjs` 的 `createReviewCatalog` 同时供开发服务和静态构建投影当前共享 owner；Vite 加载原生预览与主题运行时，不维护第二目录。
 
@@ -24,7 +26,7 @@ node apps/desktop/scripts/icon-review/build.mjs --out .local/icon-review/site
 
 静态浏览器构建显式固定生产 `NODE_ENV`，让 React 的 JSX runtime 不依赖 Node 全局变量；不在页面注入 `process`。发布前执行真实产物的无 Node 启动回归，并在发布地址实际核对目录就绪和交互，资源请求成功不能替代页面启动。
 
-构建消费共享 `getSemanticIconCatalog`，页面使用 `createSemanticIconElement`、共享 sprite、根主题 runtime 和原主题文件 schema。生成文件留本机，用 Pageville 原 `agentmux-icon-matrix` 页面身份发布新版本。
+构建消费共享 `getSemanticIconCatalog`，页面使用 `createSemanticIconElement`、共享 sprite、根主题 runtime 和原主题文件 schema。静态构建把品牌与头像图片作为文件放在页面旁边，按相对路径引用，避免把大图内联进脚本；构建产物里出现 `import.meta` 会直接报错。生成文件留本机，用 amux Capsule 常驻发布：首次 `amux capsule create`，之后对同一个页面身份 `amux capsule update`。
 
 可选 `--context <先前 catalog.json>` 只保留同语义 ID 的中文审阅说明；图形、默认映射、目录与当前引用重新取自源码。静态引用是审阅线索，不证明某一 Run 状态或全部动态消费。
 
