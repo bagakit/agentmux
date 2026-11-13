@@ -163,6 +163,21 @@ describe('Browser page continuity across release and cold start', () => {
     ] } } })
   })
 
+  it('remembers the icon with another address of the page that keeps it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { store, manager, contents } = owner()
+    await manager.create('page', 'https://pages.invalid/one', 'workspace', 'personal')
+    contents().session.fetch.mockImplementation(async () => new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents().emit('page-favicon-updated', ['https://pages.invalid/icon.svg'])
+    await manager.navigate('page', 'https://pages.invalid/two')
+    await vi.waitFor(() => expect(contents().session.fetch).toHaveBeenCalledTimes(2))
+    await vi.waitFor(async () => expect((await manager.create('page', 'about:blank')).faviconDataUrl).toMatch(/^data:image\/svg\+xml;base64,/))
+    vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS)
+    vi.useRealTimers(); await store.flush()
+    expect(await store.readPage(scope)).toMatchObject({ status: 'available', memory: { url: 'https://pages.invalid/two',
+      favicon: { dataUrl: expect.stringMatching(/^data:image\/svg\+xml;base64,/) } } })
+  })
+
   it('reopens remembered entries on cold start only while they still describe the saved address', async () => {
     const first = owner()
     await visitTwoPagesAndGoBack(first.manager)

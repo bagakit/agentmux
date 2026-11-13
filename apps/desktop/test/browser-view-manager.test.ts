@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { runInNewContext } from 'node:vm'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
 import { createBrowserProfileProxyAuth } from '../src/main/browser-profile-proxy-auth.js'
 
@@ -2658,6 +2659,15 @@ it('native chrome demand follows successful physical Browser owner bounds and re
 })
 
 
+/** Main's icon check runs as page script: answer it as the page at the current address would, with these icon links. */
+function declareIcons(contents: InstanceType<typeof fakeElectron.FakeWebContentsView>['webContents'], links: Record<string, string[]>) {
+  contents.executeJavaScript.mockImplementation(async (code: string) => {
+    const page = new URL(contents.getURL())
+    return runInNewContext(code, { document: { querySelectorAll: () => (links[page.href] ?? []).map(href => ({ href })) },
+      location: { protocol: page.protocol, origin: page.origin } })
+  })
+}
+
 describe('reported Browser favicon ownership', () => {
   it('fetches relative SVG and absolute PNG through the original Profile session and publishes only data artwork', async () => {
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
@@ -2682,6 +2692,7 @@ describe('reported Browser favicon ownership', () => {
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
     await manager.create('late-icon', 'https://page.example/old')
     const contents = fixture.children[0]!.webContents
+    declareIcons(contents, { 'https://page.example/old': ['https://page.example/slow.svg'] })
     let finish!: (response: Response) => void
     contents.session.fetch.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
     contents.emit('page-favicon-updated', ['https://page.example/slow.svg'])
@@ -2741,13 +2752,54 @@ it('clears a cached reported favicon when the original Browser changes document'
   try {
     await manager.create('new-document-icon', 'https://page.example/first')
     const contents = fixture.children[0]!.webContents
+    declareIcons(contents, { 'https://page.example/first': ['https://page.example/icon.svg'], 'https://other.example/second': ['https://other.example/own.svg'] })
     contents.session.fetch.mockResolvedValue(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
     contents.emit('page-favicon-updated', ['https://page.example/icon.svg'])
     await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
     const next = await manager.navigate('new-document-icon', 'https://other.example/second')
     expect(next.faviconDataUrl).toBeUndefined(); expect(next.error).toBeNull()
     expect(next.url).toBe('https://other.example/second')
+    await vi.waitFor(() => expect(contents.executeJavaScript).toHaveBeenCalledOnce())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect((await manager.create('new-document-icon', 'about:blank')).faviconDataUrl).toBeUndefined()
+    expect(contents.session.fetch).toHaveBeenCalledOnce()
   } finally { manager.close('new-document-icon') }
+})
+
+it('reobserves a still-declared native favicon on another address of the page without another icon event', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  try {
+    await manager.create('site-icon', 'https://page.example/first')
+    const contents = fixture.children[0]!.webContents
+    declareIcons(contents, { 'https://page.example/first': ['https://page.example/real.svg'], 'https://page.example/second': ['https://page.example/real.svg'] })
+    contents.session.fetch.mockImplementation(async () => new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/real.svg'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    await manager.navigate('site-icon', 'https://page.example/second')
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { url: 'https://page.example/second', faviconDataUrl: expect.any(String) } }))
+    expect(contents.session.fetch).toHaveBeenCalledTimes(2)
+    expect(contents.session.fetch.mock.calls.at(-1)![0]).toBe('https://page.example/real.svg')
+  } finally { manager.close('site-icon') }
+})
+
+it('keeps the origin default favicon across addresses that declare no icon, and not on another origin', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  try {
+    await manager.create('default-icon', 'https://page.example/first')
+    const contents = fixture.children[0]!.webContents
+    declareIcons(contents, {})
+    contents.session.fetch.mockImplementation(async () => new Response(png(), { headers: { 'content-type': 'image/png' } }))
+    contents.emit('page-favicon-updated', ['https://page.example/favicon.ico'])
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { faviconDataUrl: expect.any(String) } }))
+    await manager.navigate('default-icon', 'https://page.example/second')
+    await vi.waitFor(() => expect(fixture.sent.at(-1)).toMatchObject({ browser: { url: 'https://page.example/second', faviconDataUrl: expect.any(String) } }))
+    await manager.navigate('default-icon', 'https://other.example/')
+    await vi.waitFor(() => expect(contents.executeJavaScript).toHaveBeenCalledTimes(2))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const current = await manager.create('default-icon', 'about:blank')
+    expect(current.url).toBe('https://other.example/'); expect(current.faviconDataUrl).toBeUndefined(); expect(current.error).toBeNull()
+    expect(contents.session.fetch).toHaveBeenCalledTimes(2)
+  } finally { manager.close('default-icon') }
 })
 
 
