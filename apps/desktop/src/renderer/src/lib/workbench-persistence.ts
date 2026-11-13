@@ -33,6 +33,7 @@ import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-
  * A missing viewport in an older record is unknown; hydration retains the former display default.
  */
 export type PersistedBrowserSurface = {
+  taskCreationInputs?: BrowserWorkbenchSurface['taskCreationInputs']
   regionId: string
   kind: 'browser'
   workspaceId: string
@@ -88,6 +89,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     kind: 'browser',
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
+    ...(surface.taskCreationInputs ? { taskCreationInputs: structuredClone(surface.taskCreationInputs) } : {}),
     ...(agent === undefined ? {} : { agent }),
     ...(surface.agentCreationRequestId ? { agentCreationRequestId: surface.agentCreationRequestId } : {}),
     ...(surface.source ? { source: surface.source } : {}),
@@ -118,6 +120,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
 function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): PersistedBrowserSurface {
   const agent = surface.control ? surface.control.agent : surface.agent
   const association = { ...(agent === undefined ? {} : { agent }),
+    ...(surface.taskCreationInputs ? { taskCreationInputs: structuredClone(surface.taskCreationInputs) } : {}),
     ...(surface.source ? { source: surface.source } : {}),
     ...(surface.agentCreationRequestId ? { agentCreationRequestId: surface.agentCreationRequestId } : {}) }
   if (surface.mode === 'private') return {

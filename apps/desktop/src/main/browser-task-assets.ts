@@ -3,6 +3,8 @@ import { AgentMuxError } from '@agentmux/core'
 import type { NameChangeAudit } from './name-change-audit.js'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
+import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '../shared/browser-task-creation.js'
 import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, durableWriteFile } from '@agentmux/core'
 import type { BrowserDemonstrationDraft } from '../shared/browser-demonstration.js'
 import type { BrowserReplayStep, BrowserReplayTarget } from '../shared/browser-operation.js'
@@ -197,9 +199,21 @@ export class BrowserTaskAssets {
     return { status: 'not-recorded' }
   }
 
-  /** Called with the actual Main-owned recording, never a Renderer-supplied replacement. */
-  async importRecording(recording: BrowserDemonstrationDraft, name = 'Demonstrated task'): Promise<BrowserTaskAsset> {
+  /** The loader is the original Main recorder; a client supplies only the frozen metadata intent. */
+  async importRecording(input: BrowserTaskCreateInput, readRecording: () => Promise<BrowserDemonstrationDraft | null>): Promise<BrowserTaskAsset> {
+    const request = parseBrowserTaskCreateInput(input)
     return this.change(async () => {
+      if (this.loadUnavailable) throw new AgentMuxError(this.warning ?? 'Original task creation receipts could not be read. Existing data is kept; check the original request after repairing storage.', 'BROWSER_TASK_CREATE_UNAVAILABLE')
+      const existing = creationAsset(this.document, request)
+      if (existing) {
+        const saved = await this.readCreation(request)
+        if (saved.status !== 'created') await this.persistCreation(request)
+        return copy(existing)
+      }
+      const recording = await readRecording()
+      if (!recording || recording.id !== request.sourceRecordingId || recording.browserId !== request.browserId || recording.revision !== request.sourceRevision || !['stopped', 'interrupted'].includes(recording.status)) {
+        throw new AgentMuxError('The exact stopped demonstration changed or is unavailable. The original recording and task data are kept.', 'BROWSER_TASK_CREATE_SOURCE_CONFLICT')
+      }
       const at = this.now()
       const steps: BrowserTaskStep[] = recording.steps.map(step => ({
         id: identity(step.id), kind: step.method === 'fillInput' ? 'fill' : step.method === 'gotoUrl' ? 'navigate' : 'click',
@@ -209,14 +223,49 @@ export class BrowserTaskAssets {
       }))
       const keys = [...new Set(steps.flatMap(step => step.parameterKey ? [step.parameterKey] : []))]
       const asset: BrowserTaskAsset = {
-        id: this.allocateId(), browserId: identity(recording.browserId), sourceRecordingId: identity(recording.id),
-        revision: 1, draft: content({ name, url: steps[0]?.url ?? safeUrl(recording.url), steps,
+        id: request.assetId, browserId: identity(recording.browserId), sourceRecordingId: identity(recording.id), creation: copy(request),
+        revision: 1, draft: content({ name: request.name, url: steps[0]?.url ?? safeUrl(recording.url), steps,
           parameters: keys.map(key => ({ key, label: key, secret: true })) }), versions: [], createdAt: at, updatedAt: at
       }
       this.document.assets.push(asset)
-      await this.persist(asset.browserId)
+      await this.persistCreation(request)
       return copy(asset)
     })
+  }
+
+  /** Read the original durable binding. This never creates, resumes or replays a write. */
+  async inspectCreation(input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus> {
+    const request = parseBrowserTaskCreateInput(input)
+    return this.change(() => this.readCreation(request))
+  }
+
+  private async readCreation(request: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus> {
+    const original = creationAsset(this.document, request)
+    const identity = { createOperationId: request.createOperationId, assetId: request.assetId, browserId: request.browserId }
+    try {
+      const raw = await this.store.load(), saved = raw ? normalizeDocument(raw) : { version: 1 as const, assets: [], runs: [] }
+      const confirmed = creationAsset(saved, request)
+      if (this.loadUnavailable) {
+        this.document = saved
+        this.interruptRestoredExecutions()
+        this.loadUnavailable = false; this.warning = undefined
+      }
+      else if (confirmed && !original) this.document.assets.push(copy(confirmed))
+      if (isDeepStrictEqual(this.document, saved)) this.warning = undefined
+      if (confirmed) { this.notify(request.browserId); return { ...identity, status: 'created' } }
+      return { ...identity, status: original ? 'unknown' : 'not-found', ...(original ? { warning: 'This original creation is not confirmed saved. Continue this same request to save its original asset; no new identity is needed.' } : {}) }
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'BROWSER_TASK_CREATE_CONFLICT') throw error
+      return { ...identity, status: 'unknown', warning: 'The original creation receipt could not be read. Its input, asset identity and existing data are kept. Check the same request after repairing storage.' }
+    }
+  }
+
+  private async persistCreation(request: BrowserTaskCreateInput): Promise<void> {
+    try { await this.persist(request.browserId) }
+    catch {
+      throw new AgentMuxError('Task creation saving is unconfirmed. Keep this original request and asset identity; check its receipt before continuing. Nothing is automatically created again.',
+        'BROWSER_TASK_CREATE_UNCONFIRMED', JSON.stringify({ createOperationId: request.createOperationId, assetId: request.assetId, browserId: request.browserId }))
+    }
   }
 
   async edit(assetId: string, expectedRevision: number, replacement: unknown): Promise<BrowserTaskAsset> {
@@ -624,19 +673,23 @@ export class BrowserTaskAssets {
   private async load(): Promise<void> {
     try {
       this.document = normalizeDocument(await this.store.load() ?? { version: 1, assets: [], runs: [] })
-      let changed = false
-      for (const run of this.document.runs) if (run.status === 'running') {
-        run.status = 'interrupted'; run.warning = 'Restart interrupted the Browser step. Inspect the page and its operation history; it was not automatically replayed.'
-        run.updatedAt = this.now(); changed = true
-      }
-      for (const batch of this.document.batches ?? []) if (batch.status === 'running') {
-        batch.status = 'interrupted'; batch.warning = 'Restart interrupted this batch. Original item runs remain; uncertain actions and remaining items were not replayed.'; batch.updatedAt = this.now(); changed = true
-      }
-      if (changed) await this.persist()
+      if (this.interruptRestoredExecutions()) await this.persist()
     } catch {
       this.loadUnavailable = true
       this.warning = 'Task assets could not be restored. The existing file was retained; restore storage to review it. Browser and Agent work remain available.'
     }
+  }
+  /** Storage becoming readable later still restores execution facts through the same owner. */
+  private interruptRestoredExecutions(): boolean {
+    let changed = false
+    for (const run of this.document.runs) if (run.status === 'running') {
+      run.status = 'interrupted'; run.warning = 'Restart interrupted the Browser step. Inspect the page and its operation history; it was not automatically replayed.'
+      run.updatedAt = this.now(); changed = true
+    }
+    for (const batch of this.document.batches ?? []) if (batch.status === 'running') {
+      batch.status = 'interrupted'; batch.warning = 'Restart interrupted this batch. Original item runs remain; uncertain actions and remaining items were not replayed.'; batch.updatedAt = this.now(); changed = true
+    }
+    return changed
   }
 }
 
@@ -734,6 +787,15 @@ function revisionChanged(asset: BrowserTaskAsset, expectedRevision: number): Age
   return new AgentMuxError('Task draft changed; read browser task assets and edit the current revision.', 'BROWSER_TASK_REVISION_CONFLICT',
     JSON.stringify({ browserId: asset.browserId, assetId: asset.id, expectedRevision, currentRevision: asset.revision }))
 }
+function creationAsset(document: BrowserTaskAssetDocument, request: BrowserTaskCreateInput): BrowserTaskAsset | undefined {
+  const byOperation = document.assets.find(asset => asset.creation?.createOperationId === request.createOperationId)
+  const byAsset = document.assets.find(asset => asset.id === request.assetId)
+  if ((byOperation && !isDeepStrictEqual(byOperation.creation, request)) || (byAsset && !isDeepStrictEqual(byAsset.creation, request)) ||
+      document.runs.some(run => run.id === request.assetId) || document.batches?.some(batch => batch.id === request.assetId)) {
+    throw new AgentMuxError('This task creation operation or proposed asset identity belongs to another intent. Keep the original request and inspect it.', 'BROWSER_TASK_CREATE_CONFLICT')
+  }
+  return byOperation
+}
 function draftFields(value: unknown, fields: readonly string[]): void {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Reflect.ownKeys(value).some(key => typeof key !== 'string' || !fields.includes(key) || !('value' in Object.getOwnPropertyDescriptor(value, key)!))) throw new Error('Invalid or unsupported task draft field')
@@ -817,10 +879,15 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
       const { version: _version, savedAt: _savedAt, ...definition } = version
       return { ...content(definition), version: version.version, savedAt: version.savedAt }
     })
+    const creation = asset.creation === undefined ? undefined : parseBrowserTaskCreateInput(asset.creation)
+    if (creation && (creation.assetId !== asset.id || creation.browserId !== asset.browserId || creation.sourceRecordingId !== asset.sourceRecordingId)) throw new Error('Task creation binding does not match its original asset')
     return { id: identity(asset.id), browserId: identity(asset.browserId), sourceRecordingId: identity(asset.sourceRecordingId), revision: asset.revision,
+      ...(creation ? { creation } : {}),
       draft: content(asset.draft), versions, createdAt: asset.createdAt, updatedAt: asset.updatedAt }
   })
   if (new Set(assets.map(asset => asset.id)).size !== assets.length) throw new Error('Duplicate task asset identity')
+  const creations = assets.flatMap(asset => asset.creation ? [asset.creation.createOperationId] : [])
+  if (new Set(creations).size !== creations.length) throw new Error('Duplicate task creation operation identity')
   const runs = raw.runs.map(run => {
     const asset = assets.find(item => item.id === run.assetId)
     const version = asset?.versions.find(item => item.version === run.version)

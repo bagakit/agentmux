@@ -1,5 +1,6 @@
 import type { BrowserReplayTarget } from './browser-operation.js'
 import type { BrowserOutcomeHumanFact } from './browser-outcome-criteria.js'
+import type { BrowserTaskCreateInput } from './browser-task-creation.js'
 
 export type BrowserTaskHumanCheckpoint = BrowserOutcomeHumanFact & { pendingCursor: number }
 export type BrowserTaskRunIdentity = { runId: string; browserId: string; assetId: string; version: number }
@@ -68,6 +69,8 @@ export type BrowserTaskAsset = {
   browserId: string
   sourceRecordingId: string
   revision: number
+  /** Original immutable creation binding; later draft edits do not change this intent. */
+  creation?: BrowserTaskCreateInput
   draft: BrowserTaskContent
   versions: BrowserTaskVersion[]
   createdAt: number

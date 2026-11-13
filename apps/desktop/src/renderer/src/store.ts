@@ -1,6 +1,7 @@
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
 import type { AgentSessionRecordDeleteInput } from '@agentmux/core/agent-session-record'
 import type { AgentOperationReferences } from './lib/agent-operation'
+import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput } from '../../shared/browser-task-creation'
 import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
@@ -1657,6 +1658,7 @@ export type AppState = GitReadingActions & {
   setLauncherOptionDraft(regionId: string, providerId: string, optionId: string, choiceId: string | null): void
   appendAgentComposerDraft(sessionId: string, text: string): void
   saveBrowserOpinionDraft(browserId: string, draft: BrowserOpinionDraft, flush?: boolean): Promise<void>
+  saveBrowserTaskCreationInput(browserId: string, input: BrowserTaskCreateInput | null, expectedOperationId?: string): Promise<boolean>
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
@@ -11421,6 +11423,46 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set(state => ({ browserOpinionDrafts: { ...state.browserOpinionDrafts, [browserId]: structuredClone(draft) } }))
     // Reuse the original workbench writer. Saving observations never grants an input retry.
     if (flush) await flushMessageWorkbench(true)
+  },
+  async saveBrowserTaskCreationInput(browserId, input, expectedOperationId) {
+    const next = input === null ? null : parseBrowserTaskCreateInput(input)
+    if (next && next.browserId !== browserId || !next && !expectedOperationId) throw new Error('The original Browser task creation input is required.')
+    let applied = false
+    const expected = new Map<string, BrowserTaskCreateInput[]>()
+    set(state => {
+      let tabs = state.tabs
+      for (const [tabId, tab] of Object.entries(state.tabs)) {
+        let regions = tab.regions
+        for (const surface of Object.values(tab.regions)) {
+          if (surface.kind !== 'browser' || surface.browserId !== browserId) continue
+          const inputs = surface.taskCreationInputs ?? []
+          const original = inputs.find(value => value.createOperationId === (next?.createOperationId ?? expectedOperationId))
+          if (expectedOperationId && !original) continue
+          if (next && original && JSON.stringify(parseBrowserTaskCreateInput(original)) !== JSON.stringify(next)) throw new Error('The original task import input is kept. Check it before starting another request.')
+          if (next && !original && inputs.some(value => value.assetId === next.assetId || value.sourceRecordingId === next.sourceRecordingId && value.sourceRevision === next.sourceRevision)) throw new Error('The original task import input is kept. Check or continue that exact request instead of creating another proposal for the same source.')
+          if (regions === tab.regions) regions = { ...regions }
+          const pending = next ? original ? inputs : [...inputs, structuredClone(next)] : inputs.filter(value => value.createOperationId !== expectedOperationId)
+          const { taskCreationInputs: _old, ...retained } = surface
+          regions[surface.regionId] = pending.length ? { ...surface, taskCreationInputs: pending } : retained
+          expected.set(surface.regionId, pending)
+          applied = true
+        }
+        if (regions !== tab.regions) { if (tabs === state.tabs) tabs = { ...tabs }; tabs[tabId] = { ...tab, regions } }
+      }
+      return tabs === state.tabs ? state : { tabs }
+    })
+    if (applied) {
+      // Browser metadata belongs to Core's Region resource once spatial storage is
+      // ready. A local user-document ACK alone cannot confirm this frozen input.
+      await checkpointSpatialWorkbench()
+      for (const [regionId, inputs] of expected) {
+        const saved = coreSpatialPersistence?.current?.graph.resources['region:' + regionId]
+        const values = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved.taskCreationInputs ?? [] : null
+        if (!sameSpatialValue(values, inputs)) throw new Error('The original task import input is not confirmed in its Browser Region. Current input and page are kept; retry saving the same request.')
+      }
+      await flushMessageWorkbench(false)
+    }
+    return applied
   },
   appendAgentComposerDraft(sessionId, text) {
     if (!text.trim()) return

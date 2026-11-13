@@ -1,5 +1,8 @@
 import { BrowserSitePermissions } from './BrowserSitePermissions'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { browserTaskCreateInput, type BrowserTaskCreateInput } from '../../../shared/browser-task-creation'
+import { submitBrowserTaskCreation, inspectBrowserTaskCreation, type BrowserTaskCreationPorts } from '../lib/browser-task-creation'
+import { BrowserTaskCreationNotice } from './BrowserTaskCreationNotice'
 import { BrowserProfileChip } from './BrowserProfileChip'
 import { BrowserAgentCreationOptionsDialog } from './BrowserAgentCreationOptions'
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
@@ -1026,7 +1029,7 @@ function BrowserPaneContent({
     }
   }
 
-  const taskAsset = tab.taskAssets?.assets.find(asset => asset.id === selectedTaskAssetId) ?? tab.taskAssets?.assets.at(-1) ?? null
+  const taskAsset = selectedTaskAssetId ? tab.taskAssets?.assets.find(asset => asset.id === selectedTaskAssetId) ?? null : tab.taskAssets?.assets.at(-1) ?? null
   const taskRun = taskAsset ? tab.taskAssets?.runs.find(run => run.id === tab.taskAssets?.selectedRunId && run.assetId === taskAsset.id && run.browserId === tab.browserId) ?? null : null
   const loadTaskReliability = useCallback(async (input: BrowserTaskReliabilityRequest) => {
     const receipt = await executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
@@ -1044,9 +1047,26 @@ function BrowserPaneContent({
     finally { if (browserIdentity.current.id === id && taskRequest.current === request) setTaskBusy(false) }
   }
 
-  async function importTaskAsset(event: MouseEvent<HTMLButtonElement>): Promise<void> {
-    try { await taskAction(event, async () => { const asset = await api.browser.importTaskAsset(tab.browserId); setSelectedTaskAssetId(asset.id) }) }
+  const pendingTaskSource = Boolean(tab.demonstration?.draft && tab.taskCreationInputs?.some(input => input.sourceRecordingId === tab.demonstration!.draft!.id && input.sourceRevision === tab.demonstration!.draft!.revision))
+  async function importTaskAsset(event: MouseEvent<HTMLButtonElement>, originalInput?: BrowserTaskCreateInput): Promise<void> {
+    try { await taskAction(event, async () => {
+      const source = tab.demonstration?.draft
+      if (!originalInput && (!source || pendingTaskSource)) throw new Error('Use the exact original import request below, or choose a new stopped demonstration.')
+      const input = originalInput ?? browserTaskCreateInput(source!)
+      await submitBrowserTaskCreation(taskCreationPorts(input.browserId), input)
+    }) }
     catch (error) { reportError(error) }
+  }
+
+  function taskCreationPorts(browserId: string): BrowserTaskCreationPorts {
+    const generation = taskRequest.current
+    return { keep: (input, expected) => useAppStore.getState().saveBrowserTaskCreationInput(browserId, input, expected),
+      create: input => api.browser.importTaskAsset(browserId, input), inspect: input => api.browser.inspectTaskAssetCreation(browserId, input),
+      isCurrent: input => browserIdentity.current.id === input.browserId && taskRequest.current === generation, select: setSelectedTaskAssetId }
+  }
+
+  async function inspectTaskCreation(event: MouseEvent<HTMLButtonElement>, input: BrowserTaskCreateInput): Promise<void> {
+    try { await taskAction(event, () => inspectBrowserTaskCreation(taskCreationPorts(input.browserId), input)) } catch (error) { reportError(error) }
   }
 
   async function saveTaskAsset(content: BrowserTaskContent, event: MouseEvent<HTMLButtonElement>, asVersion: boolean): Promise<void> {
@@ -1648,6 +1668,10 @@ function BrowserPaneContent({
             onStop={event => void controlDemonstration(event, 'stop')}
           />
           {tab.taskAssets && tab.taskAssets.assets.length > 1 ? <label className="browser-task-asset__field"><span>Task asset</span><select aria-label="Browser task asset" value={taskAsset?.id ?? ''} onChange={event => setSelectedTaskAssetId(event.target.value)}>{tab.taskAssets.assets.map(asset => <option key={asset.id} value={asset.id}>{asset.draft.name}</option>)}</select></label> : null}
+          {tab.taskCreationInputs?.map(input => <BrowserTaskCreationNotice key={input.createOperationId} input={input} busy={taskBusy}
+            onInspect={event => void inspectTaskCreation(event, input)} onContinue={event => void importTaskAsset(event, input)} />)}
+          {taskAsset && tab.demonstration?.draft && !pendingTaskSource ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
+            disabled={taskBusy || demonstrationBusy || tab.demonstration.draft.status === 'recording'} onClick={event => void importTaskAsset(event)}>Edit current demonstration</button> : null}
           <BrowserTaskAssetEditor
             asset={taskAsset}
             {...(taskAssetReview ? { reviewRequest: taskAssetReview } : {})}
@@ -1664,7 +1688,7 @@ function BrowserPaneContent({
                   ? tab.activity.operation.outcome?.evaluation : null
               ])} /> : null}
             {...(tab.taskAssets?.warning ? { warning: tab.taskAssets.warning } : {})}
-            busy={taskBusy || tab.driving || demonstrationBusy}
+            busy={taskBusy || tab.driving || demonstrationBusy || !taskAsset && pendingTaskSource}
             onImport={event => void importTaskAsset(event)}
             onSaveDraft={(content, event) => saveTaskAsset(content, event, false)}
             onSaveVersion={(content, event) => saveTaskAsset(content, event, true)}

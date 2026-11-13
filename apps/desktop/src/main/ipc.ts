@@ -2257,10 +2257,10 @@ export async function registerIpc(args: {
   handleWithEvent('browser:controlTask', async (event, request: unknown) => {
     return await controlBrowserTask(request)
   })
-  handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
-    await ensureBrowser(id)
-    return await browsers.importTaskAsset(id, name)
+  handleWithEvent('browser:importTaskAsset', async (event, id: string, input: Parameters<BrowserViewManager['importTaskAsset']>[1]) => {
+    return await browsers.importTaskAsset(id, input)
   })
+  handleWithEvent('browser:inspectTaskAssetCreation', (_event, id: string, input: Parameters<BrowserViewManager['inspectTaskAssetCreation']>[1]) => browsers.inspectTaskAssetCreation(id, input))
   handleWithEvent('browser:saveTaskAssetDraft', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
     await ensureBrowser(id)
     return await browsers.saveTaskAssetDraft(id, assetId, revision, content)

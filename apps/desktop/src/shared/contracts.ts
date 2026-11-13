@@ -25,6 +25,7 @@ import type { BrowserDemonstrationState } from './browser-demonstration'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
 export type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistoryEntry, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskBatchInput, BrowserTaskBatchRun } from './browser-task-assets'
+import type { BrowserTaskCreateInput, BrowserTaskCreateStatus } from './browser-task-creation'
 export type { BrowserStepEvidenceRead } from './browser-step-evidence'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
 export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
@@ -2165,7 +2166,8 @@ export type AgentMuxDesktopApi = {
     getTaskAssets(id: string): Promise<BrowserTaskAssetState>
     /** Control requests never grant a trusted human checkpoint or return input control. */
     controlTask(request: BrowserTaskControlPayload): Promise<BrowserTaskControlResult>
-    importTaskAsset(id: string, name?: string): Promise<BrowserTaskAsset>
+    importTaskAsset(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset>
+    inspectTaskAssetCreation(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus>
     saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
     saveTaskAssetVersion(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
     locateTaskAssetStep(id: string, assetId: string, expectedRevision: number, stepId: string): Promise<BrowserTaskAsset>

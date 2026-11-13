@@ -1559,6 +1559,7 @@ const mockApi: AgentMuxDesktopApi = {
     getTaskAssets: async () => ({ assets: [], runs: [], warning: 'Saved Browser tasks require the desktop app.' }),
     controlTask: async () => { throw new Error('Browser task control requires the desktop app.') },
     importTaskAsset: async () => { throw new Error('Browser task assets require the desktop app.') },
+    inspectTaskAssetCreation: async () => { throw new Error('Original task creation receipts require the desktop app.') },
     saveTaskAssetDraft: async () => { throw new Error('Browser task assets require the desktop app.') },
     saveTaskAssetVersion: async () => { throw new Error('Browser task assets require the desktop app.') },
     locateTaskAssetStep: async () => { throw new Error('Browser task assets require the desktop app.') },

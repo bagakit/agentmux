@@ -1,6 +1,7 @@
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { BrowserProfileEnvironmentApplication } from '@agentmux/core/control'
+import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from '../shared/browser-task-creation.js'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
@@ -3110,12 +3111,21 @@ export class BrowserViewManager {
     return asset
   }
 
-  async importTaskAsset(id: string, name?: string): Promise<BrowserTaskAsset> {
-    this.require(id)
-    if (!this.taskAssets || !this.demonstrations) throw new Error('Saved demonstrations and task asset storage are required.')
-    const draft = await this.demonstrations.get(id)
-    if (!draft || draft.browserId !== id || draft.status === 'recording') throw new Error('Stop a real demonstration before importing it.')
-    return await this.taskAssets.importRecording(draft, name)
+  async importTaskAsset(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset> {
+    const request = parseBrowserTaskCreateInput(input)
+    if (request.browserId !== id) throw new Error('This task creation input belongs to another Browser.')
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The original creation input is kept.')
+    return await this.taskAssets.importRecording(request, async () => {
+      if (!this.demonstrations) throw new Error('The original stopped demonstration is unavailable. The creation input is kept.')
+      return this.demonstrations.get(id)
+    })
+  }
+
+  async inspectTaskAssetCreation(id: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus> {
+    const request = parseBrowserTaskCreateInput(input)
+    if (request.browserId !== id) throw new Error('This task creation input belongs to another Browser.')
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The original creation input is kept.')
+    return await this.taskAssets.inspectCreation(request)
   }
 
   async saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: unknown): Promise<BrowserTaskAsset> {
