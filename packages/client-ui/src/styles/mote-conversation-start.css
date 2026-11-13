@@ -1,15 +1,8 @@
 .mote-start { position: relative; flex: 1; width: 100%; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: clip; isolation: isolate; container: mote-start / inline-size; color: var(--text); background: var(--surface-0); }
-.mote-start__background { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; contain: layout paint; }
-.mote-start__background::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 8%, var(--surface-0) 88%); }
-.mote-start__brand-art { position: absolute; width: min(740px, 110%); aspect-ratio: 1; inset-inline-start: 50%; top: -16%; transform: translateX(-50%); opacity: .055; animation: mote-start-drift 28s ease-in-out infinite alternate; animation-play-state: paused; }
-.mote-start__brand-art > img, .mote-start__brand-art > svg { display: block; width: 100%; height: 100%; object-fit: contain; }
-.mote-start__contour { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: var(--green); stroke-width: 1; opacity: .11; transform-origin: center; animation: mote-start-contour 32s ease-in-out infinite alternate; animation-play-state: paused; }
-.mote-start[data-active='true']:has(.mote-start__portrait .mote-identity-motion[data-mote-visible='on']) .mote-start__brand-art,
-.mote-start[data-active='true']:has(.mote-start__portrait .mote-identity-motion[data-mote-visible='on']) .mote-start__contour { animation-play-state: running; }
 .mote-start__content { position: relative; box-sizing: border-box; width: min(100%, 700px); min-height: 100%; margin-inline: auto; padding: 22px clamp(20px, 5cqw, 48px) 28px; display: flex; flex-direction: column; }
 .mote-start__identity { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-start__name { color: var(--text-2); font-weight: 550; overflow-wrap: anywhere; }
-.mote-start__wordmark { flex: none; padding-inline-start: 9px; border-inline-start: 1px solid var(--line-soft); font-size: 10px; letter-spacing: .08em; }
+.mote-start__wordmark { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-inline-start: 9px; border-inline-start: 1px solid var(--line-soft); font-size: 10px; letter-spacing: .08em; }
 .mote-start__identity > :last-child:not(.mote-start__wordmark) { margin-inline-start: auto; }
 .mote-start__invitation { display: grid; justify-items: center; gap: 12px; margin-block: clamp(12px, 4vh, 44px) 24px; text-align: center; }
 .mote-start__portrait { display: grid; place-items: center; width: 172px; height: 172px; flex: none; }
@@ -25,7 +18,6 @@
 .mote-workface__period { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px 20px 24px; }
 .mote-start__notice { margin-block-start: 10px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.55; overflow-wrap: anywhere; }
 .mote-start__notice > p { margin: 0; }
-.mote-start__notice details > summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; gap: 6px; }
 .mote-start__history { margin-block-start: 28px; padding-block-start: 18px; border-block-start: 1px solid var(--line-soft); }
 .mote-start-history { min-width: 0; }
 .mote-start-history > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -59,6 +51,52 @@
   .mote-start__eyebrow { font-size: 11px; }
   .mote-start__history { margin-block-start: 18px; padding-block-start: 12px; }
 }
-@keyframes mote-start-drift { from { transform: translateX(-50%) translateY(0) rotate(-2deg); } to { transform: translateX(-50%) translateY(14px) rotate(2deg); } }
-@keyframes mote-start-contour { from { transform: translateY(0) scale(1); } to { transform: translateY(-12px) scale(1.04); } }
-@media (prefers-reduced-motion: reduce) { .mote-start__brand-art, .mote-start__contour { animation: none; } }
+
+/* Backdrop: one soft accent aura around the portrait and a faint grid that dissolves outward.
+   Pure CSS, no decoded artwork, no paint band. Only the aura breathes, on its own composited layer. */
+.mote-start { --mote-start-accent: var(--green); }
+.mote-start__backdrop { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.mote-start__aura { position: absolute; inset-inline-start: 50%; top: clamp(40px, 10vh, 120px); width: min(560px, 120%); aspect-ratio: 1; translate: -50% -22%; border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--mote-start-accent) 16%, transparent), color-mix(in srgb, var(--mote-start-accent) 5%, transparent) 55%, transparent);
+  opacity: .9; will-change: transform, opacity; transition: opacity 360ms var(--ease-enter, ease-out); }
+.mote-start__grid { position: absolute; inset: 0; opacity: .5;
+  background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px); background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 62% 46% at 50% 24%, #000 0, transparent 72%); -webkit-mask-image: radial-gradient(ellipse 62% 46% at 50% 24%, #000 0, transparent 72%);
+  transition: opacity 360ms var(--ease-enter, ease-out); }
+.mote-start[data-active='true'] .mote-start__aura { animation: mote-start-breathe 7s ease-in-out infinite alternate; }
+@keyframes mote-start-breathe { from { scale: 1; } to { scale: 1.06; } }
+.mote-start__brand-art { display: inline-flex; width: 14px; height: 14px; opacity: .8; }
+.mote-start__brand-art > img, .mote-start__brand-art > svg { width: 100%; height: 100%; object-fit: contain; }
+/* The portrait owns the focus: a thin ring and a soft halo in the same accent. */
+.mote-start__portrait { position: relative; isolation: isolate; }
+.mote-start__halo { position: absolute; inset: 8%; z-index: -1; border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--mote-start-accent) 14%, transparent), transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mote-start-accent) 18%, transparent); }
+/* The composer reads as the one primary surface on the scene. */
+.mote-start__composer .composer { border-radius: var(--radius-lg, 12px); box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent), 0 12px 32px -18px color-mix(in srgb, #000 55%, transparent); }
+/* Entrance: once, short, staggered. Hidden or re-shown scenes do not replay a heavy layer. */
+.mote-start[data-active='true'] :is(.mote-start__portrait, .mote-start__greeting, .mote-start__composer, .mote-start__history) { animation: mote-start-rise 260ms var(--ease-enter, ease-out) both; }
+.mote-start[data-active='true'] .mote-start__greeting { animation-delay: 40ms; }
+.mote-start[data-active='true'] .mote-start__composer { animation-delay: 80ms; }
+.mote-start[data-active='true'] .mote-start__history { animation-delay: 120ms; }
+@keyframes mote-start-rise { from { opacity: 0; translate: 0 6px; } }
+/* Once a question takes shape the scene recedes; text contrast and the input position stay unchanged. */
+.mote-start:has(.mote-start__composer [data-has-content]) .mote-start__aura { opacity: .45; }
+.mote-start:has(.mote-start__composer [data-has-content]) .mote-start__grid { opacity: .22; }
+/* Maintenance disclosure: a quiet text control, revealed actions as one row of soft buttons. */
+.mote-start__notice details { margin-block-start: 4px; }
+.mote-start__notice details > summary { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 8px 4px 4px; border-radius: var(--radius-sm, 6px); color: var(--text-3); cursor: pointer; list-style: none; }
+.mote-start__notice details > summary::-webkit-details-marker { display: none; }
+.mote-start__notice details > summary:hover { color: var(--text-2); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.mote-start__notice details > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mote-start__notice details[open] > :not(summary) { animation: mote-start-rise 180ms var(--ease-enter, ease-out) both; }
+.mote-start__notice details > button, .mote-start__notice details > div > button { appearance: none; display: inline-flex; align-items: center; min-height: 30px; margin: 6px 6px 0 0; padding: 0 12px;
+  border: 0; border-radius: var(--radius-sm, 6px); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--text-2); font: inherit; cursor: pointer; }
+.mote-start__notice details > button:hover, .mote-start__notice details > div > button:hover { color: var(--text); background: var(--surface-3); }
+.mote-start__notice details > button:disabled, .mote-start__notice details > div > button:disabled { opacity: .55; cursor: default; }
+.mote-start__notice details code { display: block; margin-block-start: 6px; color: var(--text-3); font-size: var(--fs-micro, 11px); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) {
+  .mote-start[data-active='true'] .mote-start__aura, .mote-start[data-active='true'] :is(.mote-start__portrait, .mote-start__greeting, .mote-start__composer, .mote-start__history),
+  .mote-start__notice details[open] > :not(summary) { animation: none; }
+  .mote-start__aura, .mote-start__grid { transition: none; }
+}

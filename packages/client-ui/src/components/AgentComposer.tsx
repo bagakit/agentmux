@@ -105,7 +105,7 @@ export function AgentComposer({
   return (
     <>
     {aboveInput}
-    <div ref={surfaceRef} className="composer" data-agent-composer="true">
+    <div ref={surfaceRef} className="composer" data-agent-composer="true" data-has-content={hasContent || undefined}>
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <ComposerCompletionEditor
         active={active}
