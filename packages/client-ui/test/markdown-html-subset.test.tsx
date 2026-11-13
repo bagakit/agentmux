@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode } from '../src/lib/agent-markdown.js'
 
 // `new URL('…', import.meta.url)` is rewritten to an http asset URL under happy-dom; resolve a file path instead.
@@ -147,6 +147,35 @@ describe('README HTML subset projection', () => {
     expect(textOf(blocks)).toBe('a<textarea>' + ' '.repeat(64_000) + 'x</textarea>')
     // An end-anchored regex backtracks for seconds on this input; the linear scan takes milliseconds.
     expect(performance.now() - started).toBeLessThan(400)
+  })
+
+  it('searches raw-text endings with linear character work in both HTML node shapes', () => {
+    // Measure actual ending searches rather than a machine-dependent wall-clock budget.
+    const exec = RegExp.prototype.exec
+    let searched = 0
+    const spy = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, value: string) {
+      const start = this.global || this.sticky ? this.lastIndex : 0
+      const match = exec.call(this, value)
+      if (this.source.replaceAll('\\/', '/').startsWith('</')) {
+        searched += match ? match.index + match[0].length - start : value.length - start
+      }
+      return match
+    })
+    try {
+      for (const tag of ['script', 'title']) for (const block of [false, true]) {
+        const body = Array.from({ length: 800 }, () => `<${tag}> text`).join(' ')
+        const source = block ? `<div> ${body} </div>` : `start ${body} **tail**`
+        searched = 0
+        const nodes = parseAgentMarkdown(source)
+        expect(textOf(nodes)).toContain(body)
+        if (!block) expect(walk(nodes).filter(node => node.kind === 'strong')).toHaveLength(1)
+        expect(searched).toBeGreaterThan(source.length)
+        expect(searched, `${tag}, block=${block}`).toBeLessThan(source.length * 16)
+      }
+    } finally { spy.mockRestore() }
+    const closed = parseAgentMarkdown('start <ScRiPt>**literal**</sCrIpT> **tail**')
+    expect(textOf(closed)).toContain('<ScRiPt>**literal**</sCrIpT>')
+    expect(walk(closed).filter(node => node.kind === 'strong')).toHaveLength(1)
   })
 
   it('a link never contains another link: a new <a> ends the open one', () => {

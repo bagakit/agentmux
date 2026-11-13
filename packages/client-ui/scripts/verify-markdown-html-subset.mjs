@@ -30,15 +30,16 @@ const mutations = [
   { mode: 'alert-label-missing', path: renderer, from: '<p className="md-alert__title"><Icon size={14} aria-hidden="true" />{label}</p>', to: '<p className="md-alert__title"><Icon size={14} aria-hidden="true" /></p>' },
   { mode: 'fragment-link-escapes-document', path: renderer, from: 'const fragment = context.documentMode && context.openWorkspaceFile ?', to: 'const fragment = context.openWorkspaceFile ?' },
   { mode: 'fragment-link-skips-root-check', path: renderer, from: 'const anchored = fragment ? classifyMarkdownLinkHref(fragment[1]!, context.workspaceRoot, context.homeDir, context.sourcePath) : null', to: "const anchored = fragment ? { index: 0, length: fragment[1]!.length, path: fragment[1]! } : null" },
-  { mode: 'unclosed-raw-text-swallows-tail', path: parser, from: "if (!rawTextEnd(source, name, end)) { emit({ kind: 'literal', source: raw, rawText: name }, start, end); return }", to: '' },
+  { mode: 'unclosed-raw-text-swallows-tail', path: parser, from: "if ((lastRawTextEnd.get(name) ?? -1) < end) { emit({ kind: 'literal', source: raw, rawText: name }, start, end); return }", to: '' },
   { mode: 'unclosed-raw-text-swallows-siblings', path: parser, from: "last.rawText && closedLater(index, last.rawText)", to: 'last.rawText' },
   { mode: 'nested-html-link-kept', path: parser, from: "if (index > 0) { for (const implied of stack.splice(index)) implied.close ??= ''; impliedAnchorEnds++ }", to: '' },
   { mode: 'link-inside-link-label', path: renderer, from: 'if (context.inLink) return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>', to: '' },
   { mode: 'link-label-keeps-nested-link', path: parser, from: 'content = unlink(children())', to: 'content = children()' },
-  { mode: 'inherited-raw-text-lookup', path: parser, from: 'const rawMode = RAW_TEXT.get(name)', to: 'const rawMode = (Object.fromEntries(RAW_TEXT) as Record<string, number>)[name]' },
   { mode: 'flattened-heading-in-outline', path: parser, from: 'align, inlineDepth === 0)]', to: 'align, true)]' },
   { mode: 'quadratic-trim', path: parser, from: 'function trimEndHtml(text: string): string { let end = text.length; while (end > 0 && isHtmlSpace(text.charCodeAt(end - 1))) end--; return text.slice(0, end) }', to: "function trimEndHtml(text: string): string { return text.replace(/[\\t\\n\\f\\r ]+$/u, '') }" },
   { mode: 'unclosed-raw-block-reflowed', path: parser, from: '  const index = nodes.findIndex(opensRawBlock)', to: '  const index = -1' },
+  { mode: 'raw-text-node-rescans-suffix', path: parser, from: 'if ((lastRawTextEnd.get(name) ?? -1) < end)', to: 'if (!new RegExp(`</${name}[\\\\t\\\\n\\\\f\\\\r />]`, \'iu\').test(source.slice(end) + \' \'))' },
+  { mode: 'raw-text-siblings-rescan-suffix', path: parser, from: 'const closedLater = (index: number, name: string) => (lastClosingNode.get(name) ?? -1) > index', to: 'const closedLater = (index: number, name: string) => nodes.slice(index + 1).some(node => node.type === \'html\' && new RegExp(`</${name}[\\\\t\\\\n\\\\f\\\\r />]`, \'iu\').test(node.value + \' \'))' },
   { mode: 'closed-details-searchable', path: renderer, from: 'if (node.kind === \'details\') return node.open ? project(node.children) : []', to: "if (node.kind === 'details') return project(node.children)" },
 ]
 
