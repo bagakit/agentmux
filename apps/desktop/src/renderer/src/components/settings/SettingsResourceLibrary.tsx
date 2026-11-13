@@ -11,7 +11,7 @@ const ScrollForwardIcon = semanticIconComponent('navigation.disclosure')
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
 
 /** A compact selector only. Drafts and resource operations stay in the owning pane. */
-export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list' }: {
+export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list', followFocus = false }: {
   label: string
   items: ResourceRow[]
   selectedId: string | null
@@ -20,6 +20,8 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   onQuery?: (query: string) => void
   focusRequest: { id: string | null } | null
   layout?: 'list' | 'horizontal'
+  /** Arrow keys also select, so the editor follows the row the keyboard is on. Only for editors that keep no unsaved draft. */
+  followFocus?: boolean
 }) {
   const list = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
@@ -75,7 +77,7 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
       <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
         {items.map((item, index) => <button type="button" key={item.id} role="option" aria-selected={selectedId === item.id}
           tabIndex={tabId === item.id ? 0 : -1} data-resource-row={item.id} title={`${item.name}\n${item.detail}`} className="settings-resource-row"
-          onFocus={() => setFocusedId(item.id)} onClick={() => onSelect(item.id)} onKeyDown={(event) => {
+          onFocus={() => { setFocusedId(item.id); if (followFocus && item.id !== selectedId) onSelect(item.id) }} onClick={() => onSelect(item.id)} onKeyDown={(event) => {
             let next: number
             switch (event.key) {
               case 'ArrowRight': if (layout !== 'horizontal') return; next = Math.min(index + 1, items.length - 1); break

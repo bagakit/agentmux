@@ -57,7 +57,10 @@ export function BrowserProfilesSettingsPane({ active }: { active: boolean }) {
   const selected = profiles.find(profile => profile.id === selectedId) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
   useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
 
-  const visible = profiles.filter(profile => !query.trim() || profile.label.toLowerCase().includes(query.trim().toLowerCase()))
+  // Find by anything a person remembers about a Profile: its name, its note, or where it came from.
+  const needle = query.trim().toLowerCase()
+  const visible = profiles.filter(profile => !needle || [profile.label, profile.notes ?? '', profile.source?.browserLabel ?? '', profile.source?.profileLabel ?? '']
+    .some(text => text.toLowerCase().includes(needle)))
   const run = async (key: string, action: () => Promise<unknown>): Promise<boolean> => {
     if (busy) return false
     setBusy(key); setError(null)
@@ -67,7 +70,10 @@ export function BrowserProfilesSettingsPane({ active }: { active: boolean }) {
   }
   const [renameRequest, setRenameRequest] = useState<string | null>(null)
   const create = async () => {
-    const label = `Profile ${profiles.length + 1}`
+    const taken = new Set(profiles.map(profile => profile.label))
+    let n = 1
+    while (taken.has(`Profile ${n}`)) n += 1
+    const label = `Profile ${n}`
     let created: BrowserProfileSummary | null = null
     if (await run('create', async () => { created = await api.browser.createProfile(label) })) {
       setSelectedId(created!.id); setView('editor'); setRenameRequest(created!.id)
@@ -88,7 +94,7 @@ export function BrowserProfilesSettingsPane({ active }: { active: boolean }) {
         <button type="button" disabled={list.reading} onClick={() => void browserProfiles.refresh()}>{list.reading ? 'Retrying…' : 'Retry'}</button>
       </p> : null}
       <div className="settings-resource-split">
-        <SettingsResourceLibrary label="Profiles" selectedId={selected?.id ?? null} query={query} onQuery={setQuery} focusRequest={returnFocus}
+        <SettingsResourceLibrary label="Profiles" selectedId={selected?.id ?? null} query={query} onQuery={setQuery} focusRequest={returnFocus} followFocus
           onSelect={id => { setSelectedId(id); setView('editor'); setError(null) }}
           items={visible.map(profile => {
             const open = usesOf(profile.id, surfaces).filter(use => use.state === 'open').length
