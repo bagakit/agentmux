@@ -88,6 +88,10 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .goals-entry__actions { border-color: var(--line); } }
 /* Page header: the one brand moment and the place that answers what waits on you. */
 .goals-page-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-6); flex: none; padding: var(--sp-6) var(--sp-6) var(--sp-5); background: radial-gradient(ellipse 60% 140% at 0% 0%, color-mix(in srgb, var(--green) 9%, transparent), transparent 70%), var(--surface-0); border-bottom: 1px solid var(--line-soft); }
+.goals-page-header__art { flex: none; width: 139px; height: 96px; margin: calc(-1 * var(--sp-4)) 0 calc(-1 * var(--sp-5)) calc(-1 * var(--sp-3)); object-fit: contain; pointer-events: none; filter: drop-shadow(0 6px 14px color-mix(in srgb, var(--green) 14%, transparent)); }
+.goals-page-header__art[hidden] { display: none; }
+.goals-page-header:has(.goals-page-header__art) .goals-page-header__summary { flex-basis: 220px; }
+@container (max-width: 640px) { .goals-page-header__art { width: 92px; height: 64px; } }
 .goals-page-header__title { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
 .goals-page-header__mark { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius); color: var(--green-text); background: linear-gradient(180deg, color-mix(in srgb, var(--green) 20%, var(--surface-2)), color-mix(in srgb, var(--green) 9%, var(--surface-1))); box-shadow: var(--hl-strong); }
 .goals-page-header h1 { margin: 0; color: var(--text); font: 650 var(--fs-display)/1.2 var(--font-sans); letter-spacing: -.03em; }

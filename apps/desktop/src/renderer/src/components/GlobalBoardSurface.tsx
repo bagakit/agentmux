@@ -23,6 +23,7 @@ import { SelectionField } from './SelectionField'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
 import goalsArtUrl from '../assets/settings/goals-companions.png'
+import goalsHeaderArtUrl from '../assets/goals/goals-companions-header.png'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -160,6 +161,7 @@ export function GlobalBoardSurface() {
   }}>
     <div className="goals-layout"><div className="goals-index">
       <header className="goals-page-header">
+        {projectedDemands.length && !selectedDemandId ? <img className="goals-page-header__art" src={goalsHeaderArtUrl} alt="" aria-hidden="true" width={139} height={96} draggable={false} onError={event => { event.currentTarget.hidden = true }} /> : null}
         <div className="goals-page-header__title"><span className="goals-page-header__mark" aria-hidden="true"><ThemeObjectGoalIcon size={16} /></span><h1>Goals</h1></div>
         <p className="goals-page-header__summary" aria-live="polite">{projectedDemands.length === 0 ? <span data-goal-summary-clear>No goals yet</span> : summaryGroups.length ? summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>) : null}{projectedDemands.length > 0 && !groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p>
         <div className="goals-page-header__actions">
