@@ -188,7 +188,7 @@ app.whenReady().then(async()=>{try {
  ipcMain.handle('ui:publishNativeOverlays',async(_event,regions)=>nativeChrome.update(regions))
  for(const method of ['registerPresentation','updatePresentation','removePresentation','armPresentationCapture','ackPresentationCapture','activatePresentation'])ipcMain.handle('browser:'+method,(event,...args)=>browsers[method](event.sender,event.senderFrame,...args))
  for(const method of ['create','navigate','back','forward','reload','setBounds','release','restore','close','cancelElementSelection','setAnnotationMarkers'])ipcMain.handle('browser:'+method,(_event,...args)=>browsers[method](...args))
- ipcMain.handle('browser:listProfiles',()=>profiles.listProfiles())
+ ipcMain.handle('browser:listProfiles',()=>native.ipcResult(()=>profiles.listProfiles()))
  ipcMain.handle('browser:listInputHistory',()=>({status:'unavailable',reason:'Private proof does not exercise input history'}))
  win.webContents.on('console-message',(_event,_level,message)=>{report.consoleMessages.push(message);console.error('RENDERER '+message)})
  win.webContents.on('render-process-gone',(_event,details)=>console.error('PRIVATE_RENDERER_GONE '+JSON.stringify(details)))

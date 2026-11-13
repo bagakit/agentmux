@@ -150,6 +150,30 @@ describe('Settings › Browser Profiles', () => {
     expect($<HTMLButtonElement>('button.small-button')!.disabled).toBe(false)
   })
 
+  it('offers Reload by the refusal code, not by its wording', async () => {
+    const editNotes = async (text: string) => {
+      await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+      const notes = $<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(notes, text)
+        notes.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      await act(async () => notes.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+    }
+    const reload = () => [...container.querySelectorAll<HTMLButtonElement>('[role="alert"] button')].find(button => button.textContent === 'Reload')
+    // A conflict with entirely different wording still offers Reload.
+    port.updateProfile.mockRejectedValueOnce(Object.assign(new Error('Someone else saved first.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
+    await editNotes('First try')
+    expect($('[role="alert"]')?.textContent).toContain('Someone else saved first.')
+    expect(reload()).toBeDefined()
+    await act(async () => container.querySelector('textarea[aria-label="Notes"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    // A different refusal that happens to say "changed since" offers no Reload.
+    port.updateProfile.mockRejectedValueOnce(Object.assign(new Error('Disk changed since the last check; nothing was written.'), { code: 'EIO' }))
+    await editNotes('Second try')
+    expect($('[role="alert"]')?.textContent).toContain('changed since')
+    expect(reload()).toBeUndefined()
+  })
+
   it('a failed refresh keeps the last list and every action available', async () => {
     port.readProfiles.mockRejectedValueOnce(new Error('EACCES'))
     await act(async () => { await browserProfiles.refresh() })

@@ -10,6 +10,7 @@ import { WorkspaceFiles } from '../../../src/main/workspace-files'
 import { readBookmark } from '../../../src/main/bookmark-file'
 import { bookmarkKindForPath } from '../../../src/shared/bookmark-file'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
+import { ipcResult } from '../../../src/shared/ipc-result'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
@@ -379,7 +380,7 @@ try {
   })
   ipcMain.handle('browser:reload', async (_event, id) => { await ensure(id); const capsuleId = browsers.capsuleId(id); return capsuleId ? await browsers.reloadCapsule(id, await owner.call('capsule.inspect', { capsuleId })) : await browsers.reload(id) })
   for (const method of ['setBounds', 'release', 'close', 'cancelElementSelection', 'setAnnotationMarkers'] as const) ipcMain.handle('browser:' + method, (_event, ...args) => (browsers[method] as any)(...args))
-  ipcMain.handle('browser:listProfiles', () => profiles.listProfiles())
+  ipcMain.handle('browser:listProfiles', () => ipcResult(() => profiles.listProfiles()))
   const inputHistory = new BrowserInputHistoryStore(join(profile, 'input-history'))
   const historyScope = (target: any) => { const scope = browsers.inputHistoryScope(target.browserId, target.profileId); assert.ok(scope); return scope }
   ipcMain.handle('browser:listInputHistory', (_event, target) => { const scope = historyScope(target); return scope.profileId === null ? { scope, entries: [] } : inputHistory.list(scope) })

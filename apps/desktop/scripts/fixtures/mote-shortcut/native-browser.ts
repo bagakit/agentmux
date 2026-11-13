@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { app, ipcMain, BrowserWindow, type IpcMainInvokeEvent, type IpcMainEvent, type WebContents, type WebContentsView } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
+import { ipcResult } from '../../../src/shared/ipc-result'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
@@ -175,7 +176,7 @@ export async function installMoteNative(options: Options) {
   handle('browser:back', (id: string) => browsers.back(id))
   handle('browser:forward', (id: string) => browsers.forward(id))
   handle('browser:reload', (id: string) => browsers.reload(id))
-  handle('browser:listProfiles', () => profiles.listProfiles())
+  handle('browser:listProfiles', () => ipcResult(() => profiles.listProfiles()))
   handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => {
     receipt.bounds.push({ at: Date.now(), browserId: id, bounds: clone(bounds) })

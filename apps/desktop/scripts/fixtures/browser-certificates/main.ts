@@ -170,7 +170,7 @@ app.whenReady().then(async () => {
   assert.equal(pending('sibling'), undefined, 'The disclosed same-Profile connection reuse really occurs')
   receipt.cases.push('trusted-ipc-accepts-original-and-discloses-profile-reuse')
 
-  const separateProfile = await evaluate(`globalThis.agentmux.browser.createProfile('Independent certificate proof')`)
+  const separateProfile = await evaluate(`globalThis.agentmux.browser.createProfile('Independent certificate proof').then((r=>{if(!r.ok)throw Object.assign(new Error(r.error.message),r.error);return r.value}))`)
   await manager!.create('separate-profile', urls.first, 'certificate-workspace', separateProfile.id)
   await until(() => pending('separate-profile') || false, 'independent Profile keeps default TLS')
   deny('separate-profile')

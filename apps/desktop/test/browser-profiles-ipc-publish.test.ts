@@ -10,6 +10,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() }, session: { fromPa
 
 import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
+import { ipcResult, unwrapIpcResult, type IpcResult } from '../src/shared/ipc-result.js'
 
 const DEFAULT_ID = '11111111-1111-4111-8111-111111111111'
 const WORK_ID = '22222222-2222-4222-8222-222222222222'
@@ -54,7 +55,10 @@ describe('Main publishes the committed Profile list after every change', () => {
     const sent: Array<[string, { revision: number; profiles: { id: string; label: string; isDefault: boolean }[] }]> = []
     let destroyed = false
     const contents = { isDestroyed: () => destroyed, send: (channel: string, payload: never) => sent.push([channel, payload]) }
-    const h = productionWiring(['browser:readProfiles', 'browser:createProfile', 'browser:updateProfile', 'browser:setDefaultProfile'], { browserProfiles, contents })
+    const wired = productionWiring(['browser:readProfiles', 'browser:createProfile', 'browser:updateProfile', 'browser:setDefaultProfile'], { browserProfiles, contents, ipcResult })
+    // Handlers return the IPC envelope; unwrap as the Renderer api does so refusals keep their code.
+    const h = Object.fromEntries(Object.entries(wired).map(([channel, handler]) => [channel,
+      async (...args: unknown[]) => unwrapIpcResult(await handler(...args) as IpcResult<unknown>)])) as typeof wired
 
     expect(await h['browser:readProfiles']!({})).toMatchObject({ revision: 0 })
     expect(sent).toHaveLength(0)
@@ -78,6 +82,19 @@ describe('Main publishes the committed Profile list after every change', () => {
     destroyed = true
     await h['browser:createProfile']!({}, 'After close')
     expect(sent).toHaveLength(3)
+    await browserProfiles.dispose()
+  })
+
+  it('returns each production handler refusal as plain data that keeps its code across a structured copy', async () => {
+    const browserProfiles = await manager()
+    const contents = { isDestroyed: () => false, send: () => {} }
+    const h = productionWiring(['browser:readProfiles', 'browser:updateProfile', 'browser:setDefaultProfile'], { browserProfiles, contents, ipcResult })
+    // Electron copies handler results with the structured clone algorithm and drops an Error's code; data survives.
+    const refused = structuredClone(await h['browser:updateProfile']!({}, WORK_ID, { label: 'Late' }, 7))
+    expect(refused).toEqual({ ok: false, error: { code: 'BROWSER_PROFILE_REVISION_CONFLICT', message: expect.stringContaining('current revision is 0') } })
+    expect(() => unwrapIpcResult(refused as IpcResult<unknown>)).toThrowError(expect.objectContaining({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
+    expect(structuredClone(await h['browser:readProfiles']!({}))).toMatchObject({ ok: true, value: { revision: 0 } })
+    expect(await h['browser:setDefaultProfile']!({}, WORK_ID)).toEqual({ ok: true, value: undefined })
     await browserProfiles.dispose()
   })
 })

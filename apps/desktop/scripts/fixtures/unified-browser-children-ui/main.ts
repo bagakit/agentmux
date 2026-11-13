@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { app, BrowserWindow, ipcMain, desktopCapturer, screen, nativeImage } from 'electron'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
+import { ipcResult } from '../../../src/shared/ipc-result'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
@@ -214,7 +215,7 @@ async function run() {
   })
   for (const method of ['updatePresentation', 'removePresentation', 'armPresentationCapture', 'ackPresentationCapture', 'activatePresentation']) handle('browser:' + method, (event, ...args) => (browsers as any)[method](event.sender, event.senderFrame, ...args))
   for (const method of ['setBounds', 'close', 'release', 'navigate', 'reload', 'back', 'forward', 'takeControl', 'returnControl', 'listOperationHistory', 'getOperation', 'getStepEvidence', 'getDemonstration', 'getTaskAssets', 'setAnnotationMarkers', 'setOperatorAvatar', 'cancelElementSelection']) handle('browser:' + method, (_event, ...args) => (browsers as any)[method](...args))
-  handle('browser:listProfiles', () => profiles.listProfiles())
+  handle('browser:listProfiles', () => ipcResult(() => profiles.listProfiles()))
   handle('browser:listTargets', () => ({ targets: browsers.targets(), coverage: 'complete' }))
   handle('browser:getRecoveryPreview', () => ({ status: 'missing' }))
   handle('browser:listInputHistory', (_event, target) => ({ scope: browsers.inputHistoryScope(target.browserId, target.profileId), entries: [] }))

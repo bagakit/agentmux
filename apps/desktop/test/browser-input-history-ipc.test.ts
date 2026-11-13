@@ -2,6 +2,7 @@ import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
+import { BROWSER_PROFILE_RESULT_METHODS, unwrapIpcResultMethods } from '../src/shared/ipc-result.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
@@ -9,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
-import type { AgentMuxPreloadApi, BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserProfileSummary } from '../src/shared/contracts.js'
+import type { AgentMuxDesktopApi, AgentMuxPreloadApi, BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserProfileSummary } from '../src/shared/contracts.js'
 
 type TestOwner = { workspaceId: string | null; storage: { mode: 'normal' | 'private'; profileId: string | null }; url: string }
 const bridge = vi.hoisted(() => ({
@@ -91,7 +92,9 @@ async function fixture() {
   }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => structuredClone(await invoke(channel, values)))
   expect(bridge.api).not.toBeNull()
-  const profiles = await bridge.api!.browser.listProfiles()
+  // The Renderer api layer restores typed Profile refusals from the preload envelope; use the same unwrap.
+  const browserApi = unwrapIpcResultMethods<AgentMuxDesktopApi['browser'], typeof BROWSER_PROFILE_RESULT_METHODS[number]>(bridge.api!.browser as never, BROWSER_PROFILE_RESULT_METHODS)
+  const profiles = await browserApi.listProfiles()
   expect(profiles.length).toBeGreaterThan(0)
   const defaultProfile = profiles.find(profile => profile.isDefault)
   expect(defaultProfile).toBeDefined()
@@ -107,7 +110,7 @@ async function fixture() {
       throw error
     }
   }
-  return {  root, config, sender, invoke, api: bridge.api!.browser, target, scope, path, dispose: complete }
+  return {  root, config, sender, invoke, api: browserApi, target, scope, path, dispose: complete }
 }
 
 describe('actual preload and registered Main input-history path', () => {

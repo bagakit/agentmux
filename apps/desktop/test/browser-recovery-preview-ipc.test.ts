@@ -8,10 +8,11 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
-import type { AgentMuxPreloadApi, BrowserProfileDeleteApproval } from '../src/shared/contracts.js'
+import type { AgentMuxDesktopApi, AgentMuxPreloadApi, BrowserProfileDeleteApproval } from '../src/shared/contracts.js'
 import type { BrowserRecoveryPreview, BrowserRecoveryPreviewScope } from '../src/shared/browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
+import { BROWSER_PROFILE_RESULT_METHODS, unwrapIpcResultMethods } from '../src/shared/ipc-result.js'
 
 type NativeOwner = { workspaceId: string | null; storage: { mode: 'normal'; profileId: string } | { mode: 'private'; profileId: null } }
 const bridge = vi.hoisted(() => ({
@@ -105,7 +106,9 @@ async function fixture() {
     return await handler!({ senderFrame: Reflect.get(source as object, 'mainFrame'), sender: source } as IpcMainInvokeEvent, ...values)
   }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => structuredClone(await invoke(channel, values)))
-  const api = bridge.api!.browser, profiles = await api.listProfiles(), defaultProfile = profiles.find(value => value.isDefault)!
+  // The Renderer api layer restores typed Profile refusals from the preload envelope; use the same unwrap.
+  const api = unwrapIpcResultMethods<AgentMuxDesktopApi['browser'], typeof BROWSER_PROFILE_RESULT_METHODS[number]>(bridge.api!.browser as never, BROWSER_PROFILE_RESULT_METHODS)
+  const profiles = await api.listProfiles(), defaultProfile = profiles.find(value => value.isDefault)!
   const manager = bridge.manager as BrowserViewManager
   const acquire = [vi.spyOn(manager, 'ensure'), vi.spyOn(manager, 'create'), vi.spyOn(manager, 'restore')]
   const scope: BrowserRecoveryPreviewScope = { browserId: 'original-browser', workspaceId: 'workspace', mode: 'normal', profileId: defaultProfile.id }

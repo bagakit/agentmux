@@ -49,7 +49,7 @@ export async function reviewCollaboration(ctx) {
     const initial = { tab: { id: opened.region.tabId }, surface: opened.region }
     const bid = initial.surface.browserId
     await ctx.nativeFrameReady(ctx.urls[0])
-    const profile = await probe.cdp.evaluate('window.agentmux.browser.createProfile("Original collaboration profile")')
+    const profile = await probe.cdp.evaluate('window.agentmux.browser.createProfile("Original collaboration profile").then((r=>{if(!r.ok)throw Object.assign(new Error(r.error.message),r.error);return r.value}))')
     await probe.cdp.evaluate(`window.agentmux.browser.switchProfile(${q(bid)},${q(profile.id)})`)
     await ctx.nativeFrameReady(ctx.urls[0])
     await probe.cdp.evaluate(`window.agentmux.browser.setViewport(${q(bid)},'tablet')`)
@@ -144,7 +144,7 @@ export async function reviewCollaboration(ctx) {
     assert.equal(browser.control.inputIsolation, 'inactive')
     assert.equal(browser.profileId, profile.id); assert.equal(browser.viewport, 'tablet')
     assert.equal((await nativeOwner(ctx, probe, ctx.urls[0])).contentsId, nativeBeforeRead.contentsId)
-    const currentProfile = (await probe.cdp.evaluate('window.agentmux.browser.listProfiles()')).find(value => value.id === profile.id)
+    const currentProfile = (await probe.cdp.evaluate('window.agentmux.browser.listProfiles().then((r=>{if(!r.ok)throw Object.assign(new Error(r.error.message),r.error);return r.value}))')).find(value => value.id === profile.id)
     assert.deepEqual(currentProfile, profile)
     assert.equal(graphAfter.graph.resources['region:' + initial.surface.regionId].profileId, profile.id)
     result.recovered = { graph: graphAfter, session: recovered.current, draft: recovered.state.browserOpinionDrafts[bid], queue: sameQueue, frozen, run: afterRun, previewSha256: image.sha256, oldSelection, oldOperation, browser, nativeBeforeRead }

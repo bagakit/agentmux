@@ -21,6 +21,7 @@ import { RuntimeController } from '../src/main/runtime-controller.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
+import { unwrapIpcResult, type IpcResult } from '../src/shared/ipc-result.js'
 import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 
 const roots: string[] = []
@@ -53,16 +54,17 @@ it.each(['json', 'schema', 'io'] as const)('keeps host IPC available on actual o
     expect(fixture.handlers.has('sessions:snapshot')).toBe(true); expect(fixture.handlers.has('sessions:write')).toBe(true)
     expect(await invoke('providers:list')).toEqual(await runtime.providerCatalog()); expect(runtimeDispose).not.toHaveBeenCalled()
     await expect(invoke('browser:create', 'original-browser', 'https://example.invalid/', 'resource', id)).rejects.toThrow('Browser Profiles could not be loaded')
-    await expect(invoke('browser:listProfiles')).rejects.toThrow('Original profile data is kept')
+    // Profile handlers return refusals as data; the Renderer api unwraps them into coded Errors.
+    await expect(invoke('browser:listProfiles').then(result => unwrapIpcResult(result as IpcResult<unknown>))).rejects.toThrow('Original profile data is kept')
     if (shape === 'io') { expect(await readFile(join(path, 'kept'), 'utf8')).toBe('original unmodified bytes'); await rm(path, { recursive: true }) }
     else expect(await readFile(path, 'utf8')).toBe(broken)
     await writeFile(path, valid) // Explicit fixture repair preserves the original stable Profile identity.
     let retryError: unknown = null
-    const profiles = await invoke('browser:listProfiles').catch(error => { retryError = error; return [] }) as { id: string }[]
+    const profiles = await invoke('browser:listProfiles').then(result => unwrapIpcResult(result as IpcResult<{ id: string }[]>)).catch(error => { retryError = error; return [] }) as { id: string }[]
     expect(retryError, 'The explicit Profile retry must re-read the repaired original file').toBeNull()
     expect(profiles.map(profile => profile.id)).toEqual([id]); expect(await readFile(path, 'utf8')).toBe(valid)
     const read = vi.spyOn(BrowserProfileStore.prototype, 'listProfiles')
-    expect(await invoke('browser:listProfiles')).toEqual(profiles); expect(read).not.toHaveBeenCalled()
+    expect(unwrapIpcResult(await invoke('browser:listProfiles') as IpcResult<unknown>)).toEqual(profiles); expect(read).not.toHaveBeenCalled()
     expect(await invoke('config:get')).toEqual(config); expect(runtimeDispose).not.toHaveBeenCalled()
   } finally { await dispose!() }
 })
@@ -102,7 +104,7 @@ it('does not wait for an unconfirmed Profile read to expose healthy host APIs', 
     let settled = false
     const requested = Promise.resolve(list({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as IpcMainInvokeEvent)).then(result => { settled = true; return result })
     await new Promise(done => setTimeout(done, 15)); expect(settled).toBe(false); expect(read).toHaveBeenCalledTimes(1)
-    allowRead(); expect((await requested as { id: string }[]).map(value => value.id)).toEqual([id]); expect(await readFile(path, 'utf8')).toBe(valid)
+    allowRead(); expect(unwrapIpcResult(await requested as IpcResult<{ id: string }[]>).map(value => value.id)).toEqual([id]); expect(await readFile(path, 'utf8')).toBe(valid)
     expect(runtimeDispose).not.toHaveBeenCalled()
   } finally {
     allowRead(); await started

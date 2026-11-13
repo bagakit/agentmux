@@ -36,7 +36,7 @@ async function type(ctx, selector, text) {
   await ctx.probe.cdp.call('Input.insertText',{text})
 }
 async function config(ctx) { return ctx.probe.cdp.evaluate('window.agentmux.config.get()') }
-async function profiles(ctx) { return ctx.probe.cdp.evaluate('window.agentmux.browser.listProfiles()') }
+async function profiles(ctx) { return ctx.probe.cdp.evaluate('window.agentmux.browser.listProfiles().then((r=>{if(!r.ok)throw Object.assign(new Error(r.error.message),r.error);return r.value}))') }
 async function rows(ctx) {
   return ctx.probe.cdp.evaluate(`Array.from(document.querySelectorAll('[aria-label="Browser annotations"] article')).map(element=>({text:element.textContent,stale:element.classList.contains('stale')}))`)
 }

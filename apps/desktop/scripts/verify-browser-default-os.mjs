@@ -167,7 +167,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     }
     const attachPage = async () => { const target = await eventually(rootTarget, 'Actual bundled workbench target'); page = await cdp(target.webSocketDebuggerUrl); return target }
     let target = await attachPage()
-    const profiles = await page.evaluate('window.agentmux.browser.listProfiles()'), defaultProfiles = profiles.filter(profile => profile.isDefault)
+    const profiles = await page.evaluate('window.agentmux.browser.listProfiles().then((r=>{if(!r.ok)throw Object.assign(new Error(r.error.message),r.error);return r.value}))'), defaultProfiles = profiles.filter(profile => profile.isDefault)
     assert.equal(defaultProfiles.length, 1, 'The actual normal Profile owner must confirm one default')
     const expectedProfileId = defaultProfiles[0].id
     receipt.originalProfiles = profiles
