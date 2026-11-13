@@ -1,33 +1,52 @@
 import { idleInputMutations } from './fixtures/a2a-idle-input-proof.mjs'
 import { defineConfig } from 'vitest/config'
-import { readFileSync } from 'node:fs'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { resolve, relative } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { bundleIdentityRuntime } from '../../identity/scripts/runtime-bundle.mjs'
 const root = resolve(import.meta.dirname, '../../..')
-const identitySourcePath = resolve(root, 'packages/identity/dist/runtime-source.js')
-const identityArtifact = await import(pathToFileURL(identitySourcePath).href)
-// This generated export has no src/runtime-source.ts. Qualify the original artifact
-// against its non-writing build recipe before reusing it in the source consumer graph.
-if (identityArtifact.identityRuntimeSource !== (await bundleIdentityRuntime()).source)
-  throw new Error('The identity runtime source artifact does not match its original build recipe')
+// A fixed-source proof selects one frozen repository-shaped tree for every workspace package it compiles.
+// Only this suite and its helpers remain in the live checkout.
+const sourceRoot = resolve(process.env.AGENTMUX_IDLE_INPUT_SOURCE_ROOT || root), fixed = sourceRoot !== root
+const livePackages = resolve(root, 'packages'), harness = resolve(livePackages, 'core/test'), packages = resolve(sourceRoot, 'packages')
+const inside = (parent: string, path: string) => {
+  const name = relative(parent, path)
+  return name !== '' && !name.startsWith('..') && !isAbsolute(name)
+}
+const liveProduct = (path: string) => inside(livePackages, path) && !inside(harness, path)
+const identityRuntimeSource = '\0agentmux-identity-runtime-source'
+let identityRuntime: Promise<string> | undefined
 const mutations: Record<string, [string, string, string]> = idleInputMutations
-export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', resolveId(id) {
-  if (id === '@agentmux/identity/runtime-source') return identitySourcePath
+export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', async resolveId(id, importer) {
+  if (id === '@agentmux/identity/runtime-source') return identityRuntimeSource
+  if (fixed && (isAbsolute(id) || id.startsWith('.') && importer)) {
+    const requested = resolve(importer ? dirname(importer.split('?')[0]!) : root, id)
+    if (liveProduct(requested)) {
+      const selected = await this.resolve(resolve(sourceRoot, relative(root, requested)), importer, { skipSelf: true })
+      if (!selected) throw new Error('The fixed source import is unavailable: ' + relative(root, requested))
+      return selected
+    }
+  }
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
   if (!match) return
-  const directory = resolve(root, 'packages', match[1]!)
+  const directory = resolve(packages, match[1]!)
   const entry = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')).exports?.[match[2] ? '.' + match[2] : '.']?.import
   if (typeof entry === 'string' && entry.startsWith('./dist/')) return resolve(directory, entry.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
+}, async load(id) {
+  if (id !== identityRuntimeSource) return
+  // This export is generated and has no src file; its original recipe rebuilds it from the selected identity sources.
+  identityRuntime ??= import(pathToFileURL(resolve(packages, 'identity/scripts/runtime-bundle.mjs')).href)
+    .then(recipe => recipe.bundleIdentityRuntime()).then(result => result.source)
+  return `export const identityRuntimeSource = ${JSON.stringify(await identityRuntime)};\n`
 }, transform(code, id) {
-  const file = relative(resolve(root, 'packages/core/src'), id.split('?')[0]!)
-  if (file.startsWith('..') || !file.endsWith('.ts')) return
+  const actual = id.split('?')[0]!
+  if (fixed && liveProduct(actual)) throw new Error('A fixed source proof loaded a live workspace file: ' + relative(root, actual))
+  if (!inside(packages, actual) || !/^[^/]+\/(?:src\/.+|package\.json)$/u.test(relative(packages, actual))) return
+  const file = relative(sourceRoot, actual)
   const mutation = process.env.AGENTMUX_IDLE_INPUT_MUTATION
   if (mutation && !mutations[mutation]) throw new Error('Unknown idle input mutation')
   const change = mutation && mutations[mutation], before = code
-  if (change && file === change[0]) {
+  if (change && file === 'packages/core/src/' + change[0]) {
     if (code.split(change[1]).length !== 2) throw new Error('Idle input mutation anchor is not unique: ' + mutation)
     code = code.replace(change[1], change[2])
   }

@@ -4,9 +4,9 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { launchPrivateA2aProof } from './lib/a2a-private-model-proof.mjs'
-import { referenceProofSha as sha, verifyReferenceDeliveryProof, assertJoinedReferenceCandidate, assertReferenceProductCandidate } from './lib/a2a-reference-proof.mjs'
+import { referenceProofSha as sha, verifyReferenceDeliveryProof, assertJoinedReferenceCandidate, assertReferenceProductCandidate, isReferenceProductSource } from './lib/a2a-reference-proof.mjs'
 
-const sourceInputs = ['packages/core/bin/amux', 'packages/core/bin/agentmux-hook.js', ...[
+const sourceInputs = ['packages/core/package.json', 'packages/core/bin/amux', 'packages/core/bin/agentmux-hook.js', ...[
   'index', 'client', 'agent-capability', 'agent-global-message-queue', 'agent-message-journal', 'agent-message-query',
   'agent-message-notification', 'agent-message-notifications', 'ctxmux-run-adapter', 'agent-message-render', 'agent-outbound-message', 'agent-messaging-guidance',
   'agentmux', 'agentmux-cli-commands', 'agentmux-cli-help', 'agentmux-cli-module-skills', 'agent-skills', 'agent-self-context',
@@ -40,7 +40,7 @@ async function readingProof(delivery) {
   let fixedCoreSources
   if (product.preparation.kind === 'prepared-artifact') {
     // Immutable source provenance is distinct from compiler-loaded events.
-    const paths = [...new Set([...sourceInputs, ...Object.keys(delivery.sources)].filter(path => /^packages\/core\/(?:src\/|guides\/|bin\/)/u.test(path)))]
+    const paths = [...new Set([...sourceInputs, ...Object.keys(delivery.sources)].filter(isReferenceProductSource))]
     fixedCoreSources = Object.fromEntries(await Promise.all(paths.map(async path => {
       const result = await promisify(execFile)('git', ['show', product.preparation.identity.sourceCommit + ':' + path], { cwd: root, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024 })
       return [path, sha(result.stdout)]

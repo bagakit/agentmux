@@ -19,7 +19,7 @@ const compiled = await runA2aProof({
   name: 'a2a-reference-delivery', freezeTests: true, preparedArtifact,
   frozenSupport: ['test/fixture-values.mjs', 'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/helpers/fixture-values.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'], tests: [...journal, ...native],
   environment: ({ label, evidence, dist, url }) => ({ AGENTMUX_TEST_REFERENCE_FACTS: join(evidence, label + '-native-facts.jsonl'), AGENTMUX_TEST_REFERENCE_CORE: url('index.js'), AGENTMUX_TEST_REFERENCE_CLI: join(dist, 'agentmux.js') }),
-  sourceInputs: ['packages/core/src/index.ts', 'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-global-message-queue.ts',
+  sourceInputs: ['packages/core/package.json', 'packages/core/src/index.ts', 'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-global-message-queue.ts',
     ...idleInputOwners.map(file => 'packages/core/src/' + file), 'packages/core/test/fixtures/a2a-idle-input-proof.mjs',
     'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-message-query.ts', 'packages/core/src/agent-message-notification.ts',
     'packages/core/src/agent-message-notifications.ts', 'packages/core/src/agent-provider.ts', 'packages/core/src/providers/codex-native-input.ts', 'packages/core/src/native-input-adoption.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/prompt-submission-record.ts',
@@ -74,10 +74,11 @@ const compiled = await runA2aProof({
 
 // The actual CLI/Runtime chain above cannot stand in for the Codex adapter's
 // source contract; compose its owning gate and require identical shared inputs.
-const result = await promisify(execFile)(process.execPath, [join(import.meta.dirname, 'verify-a2a-idle-input.mjs')], { maxBuffer: 1024 * 1024 })
+const compiledReceipt = JSON.parse(await readFile(compiled.receipt, 'utf8'))
+const nativeArgs = compiledReceipt.preparation ? ['--prepared-source', compiledReceipt.preparation.path] : []
+const result = await promisify(execFile)(process.execPath, [join(import.meta.dirname, 'verify-a2a-idle-input.mjs'), ...nativeArgs], { maxBuffer: 1024 * 1024 })
 const nativeGate = JSON.parse(result.stdout.trim().split('\n').at(-1))
 assert.equal(nativeGate.passed, true); assert.equal(nativeGate.sourceOnly, true)
-const compiledReceipt = JSON.parse(await readFile(compiled.receipt, 'utf8'))
 const nativeReceipt = JSON.parse(await readFile(nativeGate.receipt, 'utf8'))
 assert.equal(nativeReceipt.passed, true); assert.ok(nativeReceipt.cases.length > 0)
 const shared = Object.keys(nativeReceipt.sourceBefore).filter(path => path in compiledReceipt.sourceBefore)

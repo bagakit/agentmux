@@ -3,10 +3,13 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { idleInputMutations, idleInputOwners } from '../../test/fixtures/a2a-idle-input-proof.mjs'
+import { a2aFixedSource, a2aSourceCompileInputs, isA2aSourcePath, readA2aFixedSourceBlobs } from './a2a-prepared-source.mjs'
 
 export const referenceProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const indexPath = root => join(root, '.tmp/a2a-reference-delivery/current.json')
+/** Core product files that compiled consumers read from the prepared commit rather than the checkout. */
+export const isReferenceProductSource = path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)
 const edits = ['default-managed-inbox-producer', 'notice-does-not-become-user-request', 'frozen-notice-run-boundary',
   'retained-notice-uses-current-formatter', 'retained-notice-sender-is-unchecked', 'retained-notice-mid-order-is-unchecked',
   'retained-notice-count-is-unchecked', 'retained-notice-context-is-unchecked', 'submitted-reference-leaves-pending-index',
@@ -24,11 +27,17 @@ function local(root, path) {
 async function inputs(root, expected, preparation) {
   assert.ok(expected && Object.keys(expected).length > 0, 'Nonempty original proof inputs')
   for (const [path, digest] of Object.entries(expected)) {
-    if (preparation && /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)) {
+    if (preparation && isReferenceProductSource(path)) {
       assert.ok(Object.hasOwn(preparation.sourceSnapshot.files, path), 'Declared fixed product source: ' + path)
       assert.equal(preparation.sourceSnapshot.files[path], digest, 'Original prepared product source: ' + path)
     } else assert.equal(referenceProofSha(await readFile(join(root, path))), digest, 'Current harness or source-build input: ' + path)
   }
+}
+const coreSource = 'packages/core/src/'
+/** Loaded records name repository files; the shared mutation table names Core source files. */
+export function nativeMutationTarget(mutation) {
+  const file = idleInputMutations[mutation]?.[0]; assert.ok(file, 'Declared native mutation: ' + mutation)
+  return coreSource + file
 }
 /** One coherent set of observed compiler conditions; the target alone may be edited. */
 export function nativeSourceConditions(records, targetFile) {
@@ -40,8 +49,8 @@ export function nativeSourceConditions(records, targetFile) {
     assert.ok(Number.isSafeInteger(item.bytes) && item.bytes > 0)
     if (item.mutation) {
       assert.equal(item.file, targetFile)
-      assert.equal(idleInputMutations[item.mutation]?.[0], targetFile)
-      assert.ok(idleInputOwners.includes(item.file)); assert.notEqual(item.sha256, item.originalSHA256)
+      assert.equal(nativeMutationTarget(item.mutation), targetFile)
+      assert.ok(idleInputOwners.includes(item.file.slice(coreSource.length))); assert.notEqual(item.sha256, item.originalSHA256)
     } else assert.equal(item.sha256, item.originalSHA256)
     const condition = { sourceSHA256: item.originalSHA256,
       ...(item.file === targetFile ? {} : { compilerSHA256: item.sha256, bytes: item.bytes }) }
@@ -50,8 +59,25 @@ export function nativeSourceConditions(records, targetFile) {
   }
   return Object.fromEntries([...conditions].sort(([left], [right]) => left.localeCompare(right)))
 }
+/** Every loaded record is its selected source, or that source with its one declared mutation. A complete
+ * selection (a fixed commit) also refuses any loaded file it does not hold. */
+export function assertLoadedNativeSources(records, { files, hashes, complete }) {
+  for (const item of records) {
+    const source = files.get(item.file)
+    if (source === undefined) {
+      assert.equal(complete, false, 'A fixed-source run loaded a file outside the fixed commit: ' + item.file)
+      continue
+    }
+    if (Object.hasOwn(hashes, item.file)) assert.equal(item.originalSHA256, hashes[item.file], 'Original owning source candidate: ' + item.file)
+    assert.equal(referenceProofSha(source), item.originalSHA256, 'Selected native source: ' + item.file)
+    const edit = item.mutation && idleInputMutations[item.mutation]
+    if (edit) assert.equal(source.split(edit[1]).length, 2)
+    const compiled = edit ? source.replace(edit[1], edit[2]) : source
+    assert.equal(referenceProofSha(compiled), item.sha256); assert.equal(Buffer.byteLength(compiled), item.bytes)
+  }
+}
 export function assertNativeSourcePair(red, restored, mutation) {
-  const target = idleInputMutations[mutation]?.[0]; assert.ok(target)
+  const target = nativeMutationTarget(mutation)
   assert.deepEqual(nativeSourceConditions(red, target), nativeSourceConditions(restored, target), 'Only the selected compilation may differ between mutation and restoration')
 }
 async function testRun(root, directory, run, red, artifacts, nativeSources) {
@@ -73,16 +99,7 @@ async function testRun(root, directory, run, red, artifacts, nativeSources) {
     const loadedPath = local(root, join(directory, run.loaded)); artifacts.add(loadedPath)
     const loaded = (await readFile(loadedPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
     nativeSourceConditions(loaded, red ? run.transformed[0]?.file : undefined)
-    for (const item of loaded) {
-      if (!idleInputOwners.includes(item.file)) continue
-      const path = 'packages/core/src/' + item.file, source = await readFile(join(root, path), 'utf8')
-      assert.equal(item.originalSHA256, nativeSources[path], 'Original owning source candidate: ' + item.file)
-      assert.equal(referenceProofSha(source), item.originalSHA256, 'Current owning native source: ' + item.file)
-      const edit = item.mutation && idleInputMutations[item.mutation]
-      if (edit) assert.equal(source.split(edit[1]).length, 2)
-      const compiled = edit ? source.replace(edit[1], edit[2]) : source
-      assert.equal(referenceProofSha(compiled), item.sha256); assert.equal(Buffer.byteLength(compiled), item.bytes)
-    }
+    assertLoadedNativeSources(loaded, nativeSources)
     assert.deepEqual(loaded.filter(item => item.mutation), run.transformed)
     assert.equal(loaded.some(item => item.mutation), red)
   }
@@ -119,14 +136,34 @@ async function deliveryFacts({ root, receipt }) {
   assert.deepEqual(compiled.cases.map(item => item.label), edits)
   for (const item of compiled.cases) assert.deepEqual(await testRun(root, directory, item.red, true, artifacts), await testRun(root, directory, item.restored, false, artifacts))
   assert.equal(native.passed, true); assert.equal(native.sourceOnly, true); assert.equal(native.sharedTreeMutations, 0)
-  assert.deepEqual(native.sourceBefore, native.sourceAfter); await inputs(root, native.sourceBefore)
+  assert.deepEqual(native.sourceBefore, native.sourceAfter)
+  let nativeSources
+  if (preparation) {
+    // The fixed commit alone names the source closure, its compiler configuration and its lockfile.
+    const fixed = await a2aFixedSource(root, { commit: preparation.identity.sourceCommit, tree: preparation.identity.sourceTree })
+    assert.deepEqual(native.sourceOrigin, fixed.origin, 'The native gate compiled the same fixed source closure')
+    assert.equal(native.cleanup.sourceCopyRemoved, true)
+    for (const path of a2aSourceCompileInputs(fixed.closure)) assert.ok(path in native.sourceBefore, 'Fixed compiler input is bound: ' + path)
+    const { blobs, digests } = await readA2aFixedSourceBlobs(root, fixed), harness = {}
+    for (const [path, digest] of Object.entries(native.sourceBefore)) {
+      if (isA2aSourcePath(path, fixed.closure)) assert.equal(digest, digests[path], 'Native product input is its fixed blob: ' + path)
+      else harness[path] = digest
+    }
+    await inputs(root, harness)
+    nativeSources = { complete: true, hashes: native.sourceBefore, files: new Map([...blobs].map(([path, bytes]) => [path, bytes.toString()])) }
+  } else {
+    await inputs(root, native.sourceBefore)
+    assert.deepEqual(native.sourceOrigin, { kind: 'captured-checkout' })
+    nativeSources = { complete: false, hashes: native.sourceBefore, files: new Map(await Promise.all(idleInputOwners.map(async file =>
+      ['packages/core/src/' + file, await readFile(join(root, 'packages/core/src', file), 'utf8')]))) }
+  }
   for (const file of idleInputOwners) assert.ok(native.sourceBefore['packages/core/src/' + file], 'Required native input contract owner: ' + file)
   assert.deepEqual(native.cases.map(item => item.mutation), nativeEdits)
-  const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, native.sourceBefore)
-  assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, native.sourceBefore)).length, 30)
+  const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, nativeSources)
+  assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, nativeSources)).length, 30)
   for (const item of native.cases) {
-    assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, native.sourceBefore), nativeBaseline)
-    assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, native.sourceBefore), nativeBaseline)
+    assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, nativeSources), nativeBaseline)
+    assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, nativeSources), nativeBaseline)
     assert.ok(item.red.transformed.every(record => record.mutation === item.mutation))
     const loaded = async run => (await readFile(local(root, join(nativeDirectory, run.loaded)), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
     assertNativeSourcePair(await loaded(item.red), await loaded(item.restored), item.mutation)
@@ -204,7 +241,7 @@ export function assertJoinedReferenceCandidate({ delivery, product, model, model
   if (prepared) {
     assert.ok(Object.keys(fixedCoreSources).length >= 30)
     for (const inputs of [delivery.sources, model.sourceBefore, product.sources]) {
-      for (const [path, digest] of Object.entries(inputs)) if (/^packages\/core\/(?:src\/|guides\/|bin\/)/u.test(path)) {
+      for (const [path, digest] of Object.entries(inputs)) if (isReferenceProductSource(path)) {
         assert.ok(Object.hasOwn(fixedCoreSources, path), 'The immutable source join must cover every relevant production input: ' + path)
         assert.equal(digest, fixedCoreSources[path], 'Original immutable product source: ' + path)
       }
