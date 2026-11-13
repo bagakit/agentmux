@@ -101,6 +101,8 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
   restoredViewportUnknown?: true
   /** Confirmed native destruction; never a budget request. Transient. */
   nativeOwnerReleased?: true
+  /** faviconDataUrl is the last-seen icon at this address, not the current document's. Transient. */
+  faviconRemembered?: true
   regionId: string
   kind: 'browser'
   workspaceId: string

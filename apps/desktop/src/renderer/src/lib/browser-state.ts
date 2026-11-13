@@ -73,17 +73,22 @@ export function reduceBrowserEvent(
       for (const surface of Object.values(tab.regions)) {
         if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
         if (expectedNavigationId !== undefined && surface.navigationId !== expectedNavigationId) continue
+        // A parked page keeps the icon last seen at the same address until its own document reports one.
+        const remembered = !event.browser.faviconDataUrl && surface.faviconDataUrl && surface.url === event.browser.url &&
+          (surface.nativeOwnerDeferred || surface.nativeOwnerReleased || surface.faviconRemembered) ? surface.faviconDataUrl : undefined
         if (!surface.nativeOwnerUnavailable && !surface.nativeOwnerDeferred && !surface.nativeOwnerReleased && surface.objectLink === event.browser.objectLink && Object.entries(event.browser).every(([key, value]) => key === 'viewport'
           ? browserViewportsEqual(surface.viewport, event.browser.viewport)
+          : key === 'faviconDataUrl' && remembered ? true
           : Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
         if (regions === tab.regions) regions = { ...regions }
-        const { nativeOwnerUnavailable: _unavailable, nativeOwnerDeferred: _deferred, nativeOwnerReleased: _released, restoredViewportUnknown: _unknownViewport, objectLink: _objectLink, privateSessionEnded, ...availableSurface } = surface
+        const { nativeOwnerUnavailable: _unavailable, nativeOwnerDeferred: _deferred, nativeOwnerReleased: _released, restoredViewportUnknown: _unknownViewport, objectLink: _objectLink, faviconRemembered: _remembered, privateSessionEnded, ...availableSurface } = surface
         // Main cleared an Agent association because Core retired that Session. The creation request that
         // made it is finished history, so this Browser offers a new Agent instead of re-reading it.
         const released = Boolean(surface.control?.agent) && event.browser.control?.agent === null
         const { agentCreationRequestId: _finished, ...withoutCreation } = availableSurface
         regions[surface.regionId] = { ...(released ? withoutCreation : availableSurface), ...event.browser, regionId: surface.regionId,
-          ...(privateSessionEnded && event.browser.mode === 'private' && event.browser.url === 'about:blank' ? { privateSessionEnded } : {}) }
+          ...(privateSessionEnded && event.browser.mode === 'private' && event.browser.url === 'about:blank' ? { privateSessionEnded } : {}),
+          ...(remembered ? { faviconDataUrl: remembered, faviconRemembered: true as const } : {}) }
       }
       if (regions === tab.regions) continue
       if (tabs === state.tabs) tabs = { ...tabs }
