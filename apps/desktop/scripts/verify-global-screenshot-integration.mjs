@@ -30,7 +30,7 @@ async function proof(directory, schema) {
 }
 
 const receipt = { schema: 'agentmux.global-screenshot-integration.v1', passed: false,
-  boundary: 'Real Main capture, exact original-frame attachment and independent editor owners with controlled Electron/native IO; consumes source-bound AppKit and real independent Renderer proofs plus independent image review. No physical shortcut, WindowServer, TCC or installed-app claim.' }
+  boundary: 'Real Main capture, capture surface, exact original-frame attachment and independent editor owners with controlled Electron/native IO; consumes source-bound native frame and real independent Renderer proofs plus independent image review. No physical shortcut, WindowServer layering, non-activating focus, Spaces, TCC or installed-app claim.' }
 try {
   if (proofKind) {
     const reviewName = proofKind === 'native' ? 'visual-review-native.md' : 'visual-review-editor.md'
@@ -71,14 +71,14 @@ try {
     }
     const test = 'apps/desktop/test/global-screenshot-integration.test.ts', config = 'apps/desktop/test/global-screenshot-integration.config.mts'
     const inputs = Object.fromEntries(await Promise.all([test, config, 'apps/desktop/scripts/verify-global-screenshot-integration.mjs',
-      'apps/desktop/src/main/global-screenshot.ts', 'apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/main/system-screenshot-editor.ts']
+      'apps/desktop/src/main/global-screenshot.ts', 'apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/main/capture-surface.ts', 'apps/desktop/src/main/system-screenshot-editor.ts']
       .map(async file => [file, sha(await readFile(join(root, file)))])))
     const result = spawnSync(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config,
       '--reporter=json', '--outputFile=' + join(output, 'tests.json')], { cwd: root, encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024 })
     await writeFile(join(output, 'tests.log'), result.stdout + result.stderr)
     assert.equal(result.error, undefined); assert.equal(result.status, 0, result.stdout + result.stderr)
     const tests = await readJson(join(output, 'tests.json'))
-    assert.equal(tests.numPassedTests, 4); assert.equal(tests.numFailedTests, 0); assert.equal(tests.numPendingTests, 0)
+    assert.equal(tests.numPassedTests, 5); assert.equal(tests.numFailedTests, 0); assert.equal(tests.numPendingTests, 0)
     await current(inputs)
     receipt.inputs = inputs
     receipt.proofs = { shortcut: { file: shortcut.file, sha256: shortcut.sha256 }, editor: { file: editor.file, sha256: editor.sha256 },
