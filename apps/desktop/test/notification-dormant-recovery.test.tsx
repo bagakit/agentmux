@@ -5,6 +5,7 @@ import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-r
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
 import { dormantByRecoveryPolicy } from '../src/renderer/src/lib/continuity-supervision'
+import { runEndedByRuntimeRestart } from '../src/renderer/src/lib/session-recovery-banner'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { currentNotificationRows, selectNotificationView, toggleNotificationCenter } from './helpers/notification-center'
@@ -42,9 +43,11 @@ const listed = async () => {
 }
 
 it('an Agent left unresumed by the idle policy raises nothing in Current, and keeps its notice on its own surface', async () => {
-  const dormant = [agent('idle-expired'), agent('idle-unknown', { reason: 'idle-unknown' }), agent('exited-idle', {}, 'exited')]
+  const restarted: Agent = { ...agent('runtime-restarted'), interruptionReason: 'daemon_restart' }
+  const dormant = [agent('idle-expired'), agent('idle-unknown', { reason: 'idle-unknown' }), agent('exited-idle', {}, 'exited'), restarted]
   useAppStore.setState({ sessions: dormant })
-  expect(dormant.map(dormantByRecoveryPolicy)).toEqual([true, true, true])
+  expect(dormant.map(dormantByRecoveryPolicy)).toEqual([true, true, true, true])
+  expect(runEndedByRuntimeRestart(restarted)).toBe(true)
   expect(await listed()).toEqual([])
   // The Agent's own work surface consumes the same Session notices directly: Resume stays reachable there.
   for (const session of dormant) expect(sessionServiceNotices(session).map(item => item.id)).toContain('continuity-supervision')
