@@ -284,8 +284,10 @@ test('capture outcome is a machine string, not string-coerced display data', asy
 
 test('display frames keep each display exact and isolate a failed one', async () => {
   const pixels = { png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }
-  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, ...pixels }
-  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, issue: 'display_not_found: gone' }
+  const editor = { windowId: 11, frame: { x: 10, y: 10, width: 100, height: 80 }, owner: 'Editor' }
+  const across = { windowId: 15, frame: { x: -150, y: -40, width: 300, height: 120 } }
+  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, windows: [editor, across], ...pixels }
+  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, windows: [across], issue: 'display_not_found: gone' }
   const frames = { state: 'captured', capturedAt: 1000, displays: [main, failed] }
   await fixture(async ({ connection, calls }) => {
     const desktop = new NativeDesktop({})
@@ -315,7 +317,15 @@ test('display frames keep each display exact and isolate a failed one', async ()
     { ...frames, displays: [main, { ...failed, issue: '' }] },
     { ...frames, displays: [{ ...main, engine: undefined }] },
     { ...frames, displays: [{ ...main, width: 2 }] },
-    { ...frames, displays: [{ ...main, png: 'not-png' }] }
+    { ...frames, displays: [{ ...main, png: 'not-png' }] },
+    { ...frames, displays: [{ ...main, windows: undefined }] },
+    { ...frames, displays: [{ ...main, windows: [editor, editor] }] },
+    { ...frames, displays: [{ ...main, windows: [{ ...editor, windowId: 0 }] }] },
+    { ...frames, displays: [{ ...main, windows: [{ ...editor, windowId: 1.5 }] }] },
+    { ...frames, displays: [{ ...main, windows: [{ ...editor, frame: { ...editor.frame, y: 'top' } }] }] },
+    { ...frames, displays: [{ ...main, windows: [{ ...editor, frame: { ...editor.frame, height: 0 } }] }] },
+    { ...frames, displays: [{ ...main, windows: [{ ...editor, owner: 7 }] }] },
+    { ...frames, displays: [{ ...main, windows: [null] }] }
   ]) {
     await fixture(async ({ connection }) => {
       const desktop = new NativeDesktop({})
@@ -328,7 +338,7 @@ test('display frames keep each display exact and isolate a failed one', async ()
 
 test('display capture waits past the default request timeout for slow grabs', async () => {
   // The fixture connection times requests out after 1000 ms; native may grab several displays for longer.
-  const frames = { state: 'captured', capturedAt: 1000, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 }, scale: 1,
+  const frames = { state: 'captured', capturedAt: 1000, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 }, scale: 1, windows: [],
     png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }] }
   await fixture(async ({ connection }) => {
     const desktop = new NativeDesktop({})
