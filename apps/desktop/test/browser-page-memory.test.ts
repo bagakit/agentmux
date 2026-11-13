@@ -4,7 +4,7 @@ import { mkdtemp, readdir, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
-import { BROWSER_PAGE_MEMORY_MAX_ENTRIES, type BrowserPageMemory } from '../src/shared/browser-page-memory.js'
+import { BROWSER_PAGE_MEMORY_MAX_ENTRIES, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH, browserPageMemory, type BrowserPageMemory } from '../src/shared/browser-page-memory.js'
 import type { BrowserRecoveryPreviewScope } from '../src/shared/browser-recovery-preview.js'
 
 const scope: BrowserRecoveryPreviewScope = { browserId: 'original-browser', profileId: 'original-profile', mode: 'normal', workspaceId: 'original-workspace' }
@@ -80,5 +80,30 @@ describe('Browser page memory in the last-seen appearance owner', () => {
     await mkdir(join(f.directory, hash(scope.profileId!)), { recursive: true })
     await writeFile(f.pagePath, '{"version":1,"memory":{"broken":true}}\n')
     expect((await f.store.readPage(scope)).status).toBe('unavailable')
+  })
+})
+
+describe('bounding one native page observation into a record', () => {
+  const entries = Array.from({ length: 60 }, (_, index) => ({ url: `https://page.invalid/${index}`, title: `Page ${index}` }))
+
+  it('keeps the current entry with up to ten forward entries inside the entry budget', () => {
+    const late = browserPageMemory(scope, entries[55]!.url, icon, { index: 55, entries })!
+    expect(late.history!.entries).toHaveLength(BROWSER_PAGE_MEMORY_MAX_ENTRIES)
+    expect(late.history!.entries[late.history!.index]).toEqual(entries[55])
+    expect(late.history!.entries.at(-1)).toEqual(entries[59])
+    const early = browserPageMemory(scope, entries[5]!.url, icon, { index: 5, entries })!
+    expect(early.history).toEqual({ index: 5, entries: entries.slice(0, BROWSER_PAGE_MEMORY_MAX_ENTRIES) })
+    const middle = browserPageMemory(scope, entries[45]!.url, undefined, { index: 45, entries })!
+    expect(middle.history!.entries[0]).toEqual(entries[6]); expect(middle.history!.entries.at(-1)).toEqual(entries[55])
+  })
+
+  it('shortens long titles and omits a favicon or history that does not fit instead of the whole record', () => {
+    const long = browserPageMemory(scope, entries[0]!.url, icon, { index: 0, entries: [{ url: entries[0]!.url, title: 'x'.repeat(5000) }] })!
+    expect(long.history!.entries[0]!.title).toHaveLength(BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH)
+    expect(browserPageMemory(scope, entries[1]!.url, 'javascript:alert(1)', { index: 0, entries: [entries[1]!] }))
+      .toEqual({ scope, url: entries[1]!.url, history: { index: 0, entries: [entries[1]!] } })
+    expect(browserPageMemory(scope, entries[1]!.url, icon, { index: 0, entries: [{ url: 'x'.repeat(9000), title: '' }] }))
+      .toEqual({ scope, url: entries[1]!.url, favicon: { dataUrl: icon } })
+    expect(browserPageMemory(scope, 'x'.repeat(9000), icon, undefined)).toBeNull()
   })
 })
