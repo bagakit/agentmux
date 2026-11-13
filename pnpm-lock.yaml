@@ -228,9 +228,6 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.4(@types/react@19.2.18)
-      '@types/tar-stream':
-        specifier: 3.1.4
-        version: 3.1.4
       '@types/three':
         specifier: 0.180.0
         version: 0.180.0
@@ -3090,9 +3087,6 @@ packages:
 
   '@types/stats.js@0.17.4':
     resolution: {integrity: sha512-jIBvWWShCvlBqBNIZt0KAshWpvSjhkwkEu4ZUcASoAvhmrgAUI2t1dXrjSL4xXVLB4FznPrIsX3nKXFl/Dt4vA==}
-
-  '@types/tar-stream@3.1.4':
-    resolution: {integrity: sha512-921gW0+g29mCJX0fRvqeHzBlE/XclDaAG0Ousy1LCghsOhvaKacDeRGEVzQP9IPfKn8Vysy7FEXAIxycpc/CMg==}
 
   '@types/three@0.180.0':
     resolution: {integrity: sha512-ykFtgCqNnY0IPvDro7h+9ZeLY+qjgUWv+qEvUt84grhenO60Hqd4hScHE7VTB9nOQ/3QM8lkbNE+4vKjEpUxKg==}
@@ -7434,10 +7428,6 @@ snapshots:
   '@types/slice-ansi@4.0.0': {}
 
   '@types/stats.js@0.17.4': {}
-
-  '@types/tar-stream@3.1.4':
-    dependencies:
-      '@types/node': 24.13.3
 
   '@types/three@0.180.0':
     dependencies:
