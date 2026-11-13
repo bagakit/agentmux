@@ -8,7 +8,7 @@ import { allStyles } from './helpers/styles.js'
  * 等待态只有两档，且各自只有一份实现。
  *
  * 密度合同 :183 与 :897 定的规矩：**行内**等待（按钮里、行首、面板 header 这类 11–16px 的位置）
- * 用全 App 唯一那条通用 spinner `.spin`；**占满一格/一块/整页**的等待用 `FullPageLoadingSurface`
+ * 用全 App 唯一那条通用 spinner：语义图标声明的 `spin-body` 部件，由 `semantic-icon-spin` 驱动；**占满一格/一块/整页**的等待用 `FullPageLoadingSurface`
  * 的品牌语言。理由写在合同里：十六处行内加载各自长出一个品牌动画等于没有品牌，而把最显眼的
  * 位置让给通用转圈则是把门面让给了最没有信息的图形。
  *
@@ -42,10 +42,13 @@ describe('等待态的两档语汇', () => {
     const rotations = frames
       .filter(([, , body]) => /\brotate\(\s*-?360deg\s*\)/u.test(body!))
       .map(([, name]) => name!)
+    // 语义图标 owner 持有唯一的转圈：spin 只转图形声明的 spin-body 部件，orbit 是运行中工作流的环绕弧。
+    // 别处再写一条整图旋转，就是同一个决定做了第二遍。
     expect(
-      rotations,
-      `旋转动画不止一条：${rotations.join(', ')}。行内等待只用 .spin——第二条转圈是同一个决定做了两遍`
-    ).toEqual(['spin'])
+      rotations.filter((name) => !name.startsWith('semantic-icon-')),
+      `旋转动画不止语义图标 owner 一处：${rotations.join(', ')}。行内等待只用 animation="spin"——第二条转圈是同一个决定做了两遍`
+    ).toEqual([])
+    expect(rotations, '语义图标 owner 的 spin 没被扫到——上面的「其余为空」可能只是扫描没读到它').toContain('semantic-icon-spin')
   })
 
   /**
@@ -113,14 +116,14 @@ describe('等待态的两档语汇', () => {
     const { WorkflowStatusGlyph } = await import('../src/renderer/src/components/workflow/WorkflowStatusGlyph.js')
 
     const markup = renderToStaticMarkup(createElement(WorkflowStatusGlyph, { status: 'running' }))
-    const classes = /class="([^"]*)"/u.exec(markup)?.[1]?.split(/\s+/u) ?? []
-    // 非空见证：一个类都没读到时，下面的计数会是 0，"不重复"就成了恒真的白绿。
-    expect(classes.length, '渲染结果里一个 class 都没读到——这条判据在空转').toBeGreaterThan(0)
-    expect(classes, 'running 状态下没挂上通用转圈类').toContain('spin')
+    // 动画由语义图标 owner 的一层包装持有：data-icon-animation 只出现一次，就是这一个决定只做了一次。
+    const animations = [...markup.matchAll(/data-icon-animation="([^"]*)"/gu)].map(([, name]) => name)
+    // 非空见证：一处都没读到时，下面的「只有一处」会恒真地落在空集合上。
+    expect(animations.length, 'running 状态下没有挂上任何图标动画——这条判据在空转').toBeGreaterThan(0)
     expect(
-      classes.filter((name) => name === 'spin').length,
-      `转圈类挂了不止一次（${classes.join(' ')}）：调用方和组件各判了一次 running，` +
+      animations,
+      `图标动画挂了不止一层（${animations.join(' ')}）：调用方和组件各判了一次 running，` +
         '这个决定该只归组件所有'
-    ).toBe(1)
+    ).toEqual(['orbit'])
   })
 })
