@@ -444,10 +444,11 @@ function isHeadUnborn(stderr: string): boolean {
 
 /** The largest blob or worktree file held as diffable text; anything larger is reported as binary. */
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
-const MAX_COMPARISON_FILES = 1_000
+/** Git's inexact rename search (`-l`) is quadratic in changed files; past this many it skips that search and
+ * warns, and the full file list is still returned. It never limits how many changed files are read. */
+const RENAME_DETECTION_LIMIT = 1_000
 const FULL_COMMIT_OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u
 
-const MAX_HISTORY_REFS = 2_000
 const MAX_HISTORY_PAGE = 100
 
 // Reuse only immutable first-page bytes. Each read still observes this runner's
@@ -538,9 +539,6 @@ function parseBranchChanges(output: string): GitBranchChange[] {
       }
     }
     entries.push({ path, origPath, change })
-    if (entries.length > MAX_COMPARISON_FILES) {
-      throw new Error(`Comparison exceeds the ${MAX_COMPARISON_FILES}-file limit; narrow the selected branches`)
-    }
   }
   return entries
 }
@@ -736,8 +734,7 @@ export class GitRepository {
     if (input.cursor) {
       snapshot = input.cursor.snapshot
       if (!snapshot || snapshot.hostId !== workspace.hostId || snapshot.repoPath !== repoPath ||
-        !Array.isArray(snapshot.refs) || snapshot.refs.length > MAX_HISTORY_REFS + 1 ||
-        !Array.isArray(snapshot.roots) || snapshot.roots.length > MAX_HISTORY_REFS + 1 ||
+        !Array.isArray(snapshot.refs) || !Array.isArray(snapshot.roots) ||
         !Number.isFinite(snapshot.checkedAt) || (input.ref !== undefined && input.ref !== snapshot.selectedRef)) {
         throw new Error('History cursor does not belong to this repository and reference')
       }
@@ -785,12 +782,11 @@ export class GitRepository {
 
   private async observedRefs(host: GitCommandRunner, repoPath: string, commitOid?: string): Promise<{ refs: GitHistoryRef[]; cacheable: boolean; graftPath: string }> {
       const [enumerated, head] = await Promise.all([this.comparisonGit(host, repoPath,
-        ['for-each-ref', `--count=${MAX_HISTORY_REFS + 1}`, ...(commitOid ? [`--points-at=${commitOid}`] : []), '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)',
+        ['for-each-ref', ...(commitOid ? [`--points-at=${commitOid}`] : []), '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)',
           'refs/heads', 'refs/remotes', 'refs/tags'], 'Could not read history references'),
         host.run('git', ['-C', repoPath, 'rev-parse', '--path-format=absolute', '--git-path', 'info/grafts',
           '--is-shallow-repository', '--verify', '--quiet', 'HEAD^{commit}'], GIT_RUN_OPTIONS)])
       const records = enumerated.stdout.split('\n').filter(Boolean)
-      if (records.length > MAX_HISTORY_REFS) throw new Error('History has too many references; the complete reference snapshot exceeds the 2000-ref limit')
       const refs: GitHistoryRef[] = records.flatMap(record => {
         const [name, type, object, peeledType, peeled] = record.split('\0')
         if (!name || !type || !object || record.split('\0').length !== 5) throw new Error('Git returned invalid history references')
@@ -854,7 +850,7 @@ export class GitRepository {
     }
     const result = await this.comparisonGit(host, repoPath,
       ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M',
-        `-l${MAX_COMPARISON_FILES}`, comparisonBaseOid, targetOid, '--'], 'Could not compare the selected commits')
+        `-l${RENAME_DETECTION_LIMIT}`, comparisonBaseOid, targetOid, '--'], 'Could not compare the selected commits')
     return {
       kind: 'ready', snapshot, entries: parseBranchChanges(result.stdout),
       warnings: result.stderr.trim() ? [scrubGitCredentials(result.stderr.trim())] : []
@@ -900,8 +896,8 @@ export class GitRepository {
     const parentOid = input.parentOid === undefined ? metadata.parents[0] ?? null : this.commitOid(input.parentOid)
     this.assertCommitParent(metadata.parents, parentOid)
     const args = parentOid === null
-      ? ['diff-tree', '--root', '--no-commit-id', '-r', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', `-l${MAX_COMPARISON_FILES}`, oid, '--']
-      : ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', `-l${MAX_COMPARISON_FILES}`, parentOid, oid, '--']
+      ? ['diff-tree', '--root', '--no-commit-id', '-r', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', `-l${RENAME_DETECTION_LIMIT}`, oid, '--']
+      : ['diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '-M', `-l${RENAME_DETECTION_LIMIT}`, parentOid, oid, '--']
     const changes = await this.comparisonGit(host, repoPath, args, 'Could not read the commit files')
     const warnings = changes.stderr.trim() ? [scrubGitCredentials(changes.stderr.trim())] : []
     let refs: GitHistoryRef[] = []

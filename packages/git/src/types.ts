@@ -175,7 +175,7 @@ export type GitBranchDiffDescriptor = {
 
 export interface GitBranchComparisonApi {
   // Existing handle('git:compareBranches') -> GitService.compareBranches(workspaceId,input,config).
-  // Invalid branch / no merge base / timeout / output or row limit rejects with scrubbed error.
+  // Invalid branch / no merge base / timeout / output byte limit rejects with scrubbed error.
   // A ready empty list is exclusively a successful actual zero-change comparison.
   compareBranches(workspaceId: string, input: GitBranchCompareInput): Promise<GitBranchComparisonResult>
 
