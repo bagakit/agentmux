@@ -75,6 +75,10 @@ type EditorBase = {
   copied?: string | null
   active?: boolean
   initialState?: Pick<ScreenshotDocument, 'shapes' | 'crop'>
+  /** Whether `initialState` is already kept by its owner (a saved original or a remembered selection), or carries marks
+   * that exist nowhere else yet (marks moved here from a capture with ⌘E), which a close or retake must confirm first.
+   * A handoff with no marks has nothing to lose, so the host passes it as kept. */
+  initialStateKept?: boolean
   documentStatus?: string | null
   ownerDocument?: Document
   title?: string
@@ -130,7 +134,7 @@ type CapturePresentation = {
 }
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
-export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
+export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialStateKept = true, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS,
   locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
@@ -155,9 +159,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const capture = presentation === 'capture', label = completeLabel ?? (capture ? 'Done' : 'Copy PNG')
   // A capture opens on adjusting its selection; a window on the requested or remembered tool.
   const openingTool = useRef<AnnotationTool>(capture ? 'select' : initialTool ?? lastStyle.tool).current
-  // The opening document is already kept by its owner; only later edits need a discard confirmation.
+  // A kept opening document needs no confirmation until it changes; handed-over marks are unkept from the start.
   // What the in-place discard confirmation would do: close the editor, or retake the capture.
-  const [exported, setExported] = useState(documentState), [discarding, setDiscarding] = useState<false | 'close' | 'retake'>(false)
+  const [exported, setExported] = useState<ScreenshotDocument | null>(initialStateKept ? documentState : null)
+  const [discarding, setDiscarding] = useState<false | 'close' | 'retake'>(false)
   const [tool, setTool] = useState<AnnotationTool>(openingTool), [selectedId, setSelectedId] = useState<string | null>(null)
   const [color, setColor] = useState(lastStyle.color), [width, setWidth] = useState(lastStyle.width)
   const [fontSize, setFontSize] = useState(lastStyle.fontSize), [blockSize, setBlockSize] = useState(lastStyle.blockSize)

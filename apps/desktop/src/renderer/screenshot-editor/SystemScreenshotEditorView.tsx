@@ -95,7 +95,7 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
   }
   return <main className="system-screenshot-editor">
     <ImageAnnotationEditor key={original.generation} image={original.image} busy={busy}
-      {...(original.initialState ? { initialState: original.initialState } : input.initialState ? { initialState: input.initialState, initialTool: input.initialTool } : {})} title="Screenshot"
+      {...(original.initialState ? { initialState: original.initialState } : input.initialState ? { initialState: input.initialState, initialStateKept: input.initialState.shapes.length === 0, initialTool: input.initialTool } : {})} title="Screenshot"
       completeLabel={input.attachToDraft && !delivered ? 'Copy & attach' : 'Copy'} busyLabel="Copying…"
       documentStatus={status ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       {...(pin.uncertain ? { onCheckPin: () => void checkPin() } : {})} {...(input.retakable ? { onRetake: () => void retake() } : {})}
