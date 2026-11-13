@@ -46,13 +46,17 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
   requiredFlags = ['--no-daemon', '--ignore-user-config', '--ignore-rules', '--json'], privatePrefix = 'amux-real-a2a-', freezeCandidate = false, preparedArtifact }) {
   const authSource = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json')
   let executionCoreRoot = join(repository, 'packages/core'), executionCoordinator = coordinatorEntry
+  let preparation, preparedOwner
   const hash = value => createHash('sha256').update(value).digest('hex')
   const compiledInputs = sourceInputs.filter(path => path.includes('/src/') && path.endsWith('.ts')).map(path => path.replace('/src/', '/dist/').replace(/\.ts$/u, '.js'))
   const compiledHashes = async () => {
     const paths = freezeCandidate ? (await readdir(join(executionCoreRoot, 'dist'), { recursive: true })).filter(path => path.endsWith('.js')).map(path => 'packages/core/dist/' + path) : compiledInputs
     return Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(executionCoreRoot, path.slice('packages/core/'.length))))])))
   }
-  const sourceHashes = async () => Object.fromEntries(await Promise.all(sourceInputs.map(async path => [path, hash(await readFile(join(repository, path)))])))
+  const productSource = path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)
+  const readInput = path => preparation && productSource(path)
+    ? preparedOwner.readA2aPreparedSource(preparation, { root: repository, path }) : readFile(join(repository, path))
+  const sourceHashes = async () => Object.fromEntries(await Promise.all(sourceInputs.map(async path => [path, hash(await readInput(path))])))
   async function executablePath(name) {
     const paths = isAbsolute(name) ? [name] : (process.env.PATH ?? '').split(delimiter).map(path => resolve(path, name))
     for (const path of paths) if (await access(path, constants.X_OK).then(() => true, () => false)) return await realpath(path)
@@ -65,11 +69,11 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
   }
   const evidence = join(repository, '.tmp', name + '-' + Date.now())
   await mkdir(evidence, { recursive: true, mode: 0o700 })
-  const launcher = { schema, provisional: minimumOnly, candidateCommit: (await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: repository })).stdout.trim(), sourceBefore: await sourceHashes(), cleanup: {}, passed: false }
+  const launcher = { schema, provisional: minimumOnly, candidateCommit: (await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: repository })).stdout.trim(), cleanup: {}, passed: false }
   const parentSecrets = new Set()
   let stdout = '', stderr = ''
   const redact = value => [...parentSecrets].reduce((text, secret) => text.replaceAll(secret, '[redacted-private-credential]'), value)
-  let privateRoot, coordinator, preparation, preparedOwner, nativeProcessBirth, interrupted = false
+  let privateRoot, coordinator, nativeProcessBirth, interrupted = false
   const signalCleanup = []
   for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
     interrupted = true
@@ -82,9 +86,9 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     if (preparedArtifact) {
       assert.equal(freezeCandidate, true, 'Prepared model proofs freeze their exact harness and executable')
       preparedOwner = await import(new URL('../../../../apps/desktop/scripts/lib/a2a-prepared-artifact.mjs', import.meta.url))
-      const production = sourceInputs.filter(path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path))
+      const production = sourceInputs.filter(productSource)
       preparation = await preparedOwner.prepareA2aArtifact({ root: repository, input: preparedArtifact, privateRoot, sourcePaths: production })
-      for (const path of production) assert.equal(launcher.sourceBefore[path], preparation.sourceSnapshot.files[path], 'Model prepared production source: ' + path)
+      launcher.harnessCommit = launcher.candidateCommit; launcher.candidateCommit = preparation.identity.sourceCommit
       executionCoreRoot = preparation.execution.coreRoot
       const path = join(evidence, 'prepared-artifact.json')
       await writeFile(path, JSON.stringify(preparation, null, 2) + '\n')
@@ -93,6 +97,7 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
       const { staleDistComplaint } = await import(new URL('../../../../vitest.dist-freshness.ts', import.meta.url))
       assert.equal(await staleDistComplaint(executionCoreRoot), null, 'Build this candidate Core before running real models')
     }
+    launcher.sourceBefore = await sourceHashes()
     launcher.compiledBefore = await compiledHashes()
     if (preparation) assert.deepEqual(Object.fromEntries(Object.entries(launcher.compiledBefore).map(([path, digest]) => [path.slice('packages/core/'.length), digest])), preparation.coreGraph)
     if (freezeCandidate) {
@@ -100,7 +105,8 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
       for (const path of sourceInputs) {
         const target = join(candidate, path)
         await mkdir(resolve(target, '..'), { recursive: true })
-        await cp(join(repository, path), target)
+        if (preparation && productSource(path)) await writeFile(target, await readInput(path))
+        else await cp(join(repository, path), target)
         assert.equal(hash(await readFile(target)), launcher.sourceBefore[path], `Source changed while freezing ${path}`)
       }
       if (!preparation) {
@@ -112,6 +118,7 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
       executionCoordinator = join(candidate, relative(repository, coordinatorEntry))
       assert.deepEqual(await compiledHashes(), launcher.compiledBefore, 'Compiled candidate changed while freezing')
       launcher.frozenCandidate = { sourceSnapshot: true, compiledSnapshot: true, liveWorkingTreeUsedByModel: false }
+      if (preparation) launcher.frozenCandidate.sourceOrigins = { product: 'fixed-git', harness: 'captured-checkout' }
     }
     // Auth bytes are copied without inspection. No host config/instructions/plugin,
     // tool settings, AgentMux state or existing model Session enters the scope.
@@ -172,11 +179,16 @@ export async function launchPrivateA2aProof({ repository, sourceInputs,
     }
     launcher.cleanup.errors = errors; launcher.cleanup.noHostProcessScan = true
     if (errors.length) launcher.passed = false
-    launcher.sourceAfter = await sourceHashes()
-    if (!freezeCandidate) launcher.compiledAfter = await compiledHashes()
-    if (JSON.stringify(launcher.compiledBefore) !== JSON.stringify(launcher.compiledAfter)) { launcher.passed = false; launcher.failure = { message: 'Candidate compiled public consumers changed during real model proof' } }
-    if (freezeCandidate) launcher.liveSourceChangedDuringRun = Object.keys(launcher.sourceBefore).filter(path => launcher.sourceBefore[path] !== launcher.sourceAfter[path])
-    else if (JSON.stringify(launcher.sourceBefore) !== JSON.stringify(launcher.sourceAfter)) { launcher.passed = false; launcher.failure = { message: 'Candidate source changed during real model proof' } }
+    if (launcher.sourceBefore) launcher.sourceAfter = await attempt(sourceHashes)
+    if (launcher.compiledBefore && !freezeCandidate) launcher.compiledAfter = await attempt(compiledHashes)
+    if (launcher.compiledBefore && JSON.stringify(launcher.compiledBefore) !== JSON.stringify(launcher.compiledAfter)) {
+      launcher.passed = false; launcher.failure ??= { message: 'Candidate compiled public consumers changed during real model proof' }
+    }
+    if (launcher.sourceBefore && launcher.sourceAfter) {
+      if (freezeCandidate) launcher.liveSourceChangedDuringRun = Object.keys(launcher.sourceBefore).filter(path => launcher.sourceBefore[path] !== launcher.sourceAfter[path])
+      else if (JSON.stringify(launcher.sourceBefore) !== JSON.stringify(launcher.sourceAfter)) { launcher.passed = false; launcher.failure ??= { message: 'Candidate source changed during real model proof' } }
+    }
+    if (errors.length) launcher.passed = false
     await writeFile(join(evidence, 'coordinator.stdout.log'), redact(stdout)); await writeFile(join(evidence, 'coordinator.stderr.log'), redact(stderr))
     const inspected = await readdir(evidence)
     launcher.redaction = { exactCredentialCount: parentSecrets.size, checkedFiles: inspected.length, credentialValueFound: false }

@@ -11,6 +11,10 @@ import { PRODUCT_NAME } from '../macos-application-brand.mjs'
 const exec = promisify(execFile)
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const inside = (root, path) => path === root || path.startsWith(root + sep)
+const assertFixedGitSource = ({ commit, tree }) => {
+  assert.ok(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commit) && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(tree) && commit.length === tree.length,
+    'Prepared sources require immutable full Git objects')
+}
 
 /** Closed, finite bytes of one selected artifact; links may not borrow another installation. */
 export async function a2aArtifactInventory(root) {
@@ -61,6 +65,7 @@ export async function prepareA2aArtifact({ root, input, privateRoot, sourcePaths
   const originBundle = await realpath(origin.applicationBundle)
   const identity = await readPackageIdentity(originBundle)
   assertPackageIdentity(identity, origin.sourceIdentity)
+  assertFixedGitSource({ commit: identity.sourceCommit, tree: identity.sourceTree })
   assert.equal(identity.platform, process.platform); assert.equal(identity.arch, process.arch)
   const sourceTree = (await exec('git', ['show', '-s', '--format=%T', identity.sourceCommit], { cwd: root })).stdout.trim()
   assert.equal(sourceTree, identity.sourceTree, 'Selected artifact must name an exact retained Git source tree')
@@ -105,10 +110,26 @@ export async function prepareA2aArtifact({ root, input, privateRoot, sourcePaths
     artifact: { applicationBundle, inventory }, coreGraph, execution }
 }
 
+/** Read the declared product source, independent of later checkout edits. */
+export async function readA2aPreparedSource(preparation, { root, path }) {
+  assert.equal(preparation.kind, 'prepared-artifact')
+  assertFixedGitSource(preparation.sourceSnapshot)
+  assert.ok(typeof path === 'string' && !isAbsolute(path) && !path.split('/').includes('..'))
+  assert.ok(Object.hasOwn(preparation.sourceSnapshot.files, path), 'Prepared source was not declared: ' + path)
+  assert.equal(preparation.sourceSnapshot.commit, preparation.identity.sourceCommit)
+  assert.equal(preparation.sourceSnapshot.tree, preparation.identity.sourceTree)
+  const bytes = (await exec('git', ['show', preparation.sourceSnapshot.commit + ':' + path],
+    { cwd: root, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024 })).stdout
+  assert.equal(sha(bytes), preparation.sourceSnapshot.files[path], 'Fixed prepared source snapshot: ' + path)
+  return bytes
+}
+
 export async function verifyA2aPreparedArtifact(preparation, { root, artifact = 'execution' }) {
   root = await realpath(root)
   assert.ok(['execution', 'origin'].includes(artifact), 'Choose the exact artifact being observed; never silently fall back')
   assert.equal(preparation.kind, 'prepared-artifact')
+  assertFixedGitSource(preparation.sourceSnapshot)
+  assert.ok(Object.keys(preparation.sourceSnapshot.files).length > 0, 'The fixed source snapshot must be nonempty')
   const descriptor = JSON.parse((await reference(root, preparation.input)).bytes)
   assert.equal(descriptor.schema, 'agentmux.a2a-prepared-input.v1')
   assert.deepEqual(preparation.buildDisposition, descriptor.buildDisposition)
@@ -129,10 +150,7 @@ export async function verifyA2aPreparedArtifact(preparation, { root, artifact = 
   assertPackageIdentity(await readPackageIdentity(observedBundle), preparation.identity)
   assert.deepEqual(await a2aArtifactInventory(observedBundle), preparation.artifact.inventory,
     'The selected prepared artifact graph stayed unchanged')
-  for (const [path, digest] of Object.entries(preparation.sourceSnapshot.files)) {
-    const bytes = (await exec('git', ['show', preparation.sourceSnapshot.commit + ':' + path], { cwd: root, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024 })).stdout
-    assert.equal(sha(bytes), digest, 'Fixed prepared source snapshot: ' + path)
-  }
+  for (const path of Object.keys(preparation.sourceSnapshot.files)) await readA2aPreparedSource(preparation, { root, path })
   const prefix = relative(preparation.artifact.applicationBundle, join(preparation.execution.coreRoot, 'dist')) + sep
   const graph = Object.fromEntries(Object.entries(preparation.artifact.inventory.files).filter(([path, value]) =>
     path.startsWith(prefix) && path.endsWith('.js') && value.kind === 'file').map(([path, value]) => ['dist/' + path.slice(prefix.length), value.sha256]))

@@ -17,10 +17,13 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
   const copy = await realpath(await mkdtemp(fixtureRootPath("tmp/amx-a2a-proof-")))
   const core = join(copy, 'core'), dist = join(core, 'dist')
   const inputs = [...new Set([...sourceInputs, ...frozenSupport, ...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...callers.map(item => item.path)])]
-  const sourceHashes = async () => Object.fromEntries(await Promise.all(inputs.map(async path => [path, hash(await readFile(join(root, path)))])))
+  let preparation, preparedOwner
+  const productSource = path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path)
+  const readInput = path => preparation && productSource(path)
+    ? preparedOwner.readA2aPreparedSource(preparation, { root, path }) : readFile(join(root, path))
+  const sourceHashes = async () => Object.fromEntries(await Promise.all(inputs.map(async path => [path, hash(await readInput(path))])))
   const receipt = { schema: 'agentmux.a2a-protocol-proof.v1', name, privateCopyRoot: copy, passed: false, sharedTreeMutations: 0, cases: [] }
   const originals = new Map()
-  let preparation, preparedOwner
   const run = async (label, selectedTests = tests, testRoot = root) => {
     const outputPath = join(evidence, `${label}.json`)
     const result = await new Promise((yes, no) => {
@@ -47,22 +50,21 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
   }
   try {
     await mkdir(evidence, { recursive: true })
-    receipt.sourceBefore = await sourceHashes()
     let sourceCore = join(root, 'packages/core')
     if (preparedArtifact) {
       assert.equal(freezeTests, true, 'Prepared executable proofs freeze their actual test consumers')
       preparedOwner = await import(pathToFileURL(join(root, 'apps/desktop/scripts/lib/a2a-prepared-artifact.mjs')).href)
-      const production = inputs.filter(path => /^packages\/core\/(?:src\/|guides\/|bin\/|package\.json$)/u.test(path))
+      const production = inputs.filter(productSource)
       preparation = await preparedOwner.prepareA2aArtifact({ root, input: preparedArtifact, privateRoot: copy, sourcePaths: production })
-      for (const path of production) assert.equal(receipt.sourceBefore[path], preparation.sourceSnapshot.files[path], 'Tested prepared production source: ' + path)
       sourceCore = preparation.execution.coreRoot
       const path = join(evidence, 'prepared-artifact.json')
       await writeFile(path, JSON.stringify(preparation, null, 2) + '\n')
       receipt.preparation = { path, sha256: hash(await readFile(path)) }
     }
+    receipt.sourceBefore = await sourceHashes()
     // Every definition-excluded path below is a product caller, not a test inventory.
     receipt.callers = await Promise.all(callers.map(async ({ symbol, path }) => {
-      const source = await readFile(join(root, path), 'utf8')
+      const source = (await readInput(path)).toString()
       const lines = source.split('\n').flatMap((line, index) => line.includes(symbol) ? [{ line: index + 1, text: line.trim() }] : [])
       assert.ok(lines.length > 0, `${symbol}: no production caller in ${path}`)
       return { symbol, path, lines }
@@ -86,7 +88,8 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       for (const path of inputs) {
         const target = join(copy, 'snapshot', path)
         await mkdir(resolve(target, '..'), { recursive: true })
-        await cp(join(root, path), target)
+        if (preparation && productSource(path)) await writeFile(target, await readInput(path))
+        else await cp(join(root, path), target)
         assert.equal(hash(await readFile(target)), receipt.sourceBefore[path], `Candidate changed during freeze: ${path}`)
       }
       const testGraph = [...new Set([...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...frozenSupport])]
@@ -96,6 +99,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       }
       await writeFile(join(copy, 'vitest.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ esbuild: { jsx: 'automatic' }, server: { fs: { allow: ${JSON.stringify([copy, root])} } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([...new Set([...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? [])])])} } })\n`)
       receipt.frozenTests = { inputs: testGraph, sourceSnapshot: true, mutableWorkingTreeUsedByTests: false }
+      if (preparation) receipt.frozenTests.sourceOrigins = { product: 'fixed-git', harness: 'captured-checkout' }
       receipt.compiledInputs = Object.fromEntries(await Promise.all((await readdir(dist, { recursive: true })).filter(path => path.endsWith('.js')).map(async path => [path, hash(await readFile(join(dist, path)))])))
       if (preparation) assert.deepEqual(Object.fromEntries(Object.entries(receipt.compiledInputs).map(([path, digest]) => ['dist/' + path, digest])), preparation.coreGraph, 'The tests execute the complete selected Core graph')
     }
