@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -29,7 +30,7 @@ function setup(store = new MemoryStore()) {
   return { store, assets: new BrowserTaskAssets(store, { id: () => `asset-or-run-${++count}`, now: () => at++ }) }
 }
 async function saved(assets: BrowserTaskAssets, transform: (draft: BrowserTaskContent) => BrowserTaskContent = draft => draft): Promise<BrowserTaskAsset> {
-  const imported = await assets.importRecording(recording())
+  const imported = await importTaskRecording(assets, recording())
   const edited = await assets.edit(imported.id, imported.revision, transform({ ...imported.draft, steps: imported.draft.steps.map(step => ({ ...step, reviewed: true })) }))
   return assets.saveVersion(edited.id, edited.revision)
 }
@@ -63,7 +64,7 @@ function host() {
 
 describe('versioned Browser task assets', () => {
   it('imports semantic metadata only and never retains recording args, values or URL details', async () => {
-    const s = setup(), asset = await s.assets.importRecording(recording())
+    const s = setup(), asset = await importTaskRecording(s.assets, recording())
     expect(asset.draft.steps.map(step => step.kind)).toEqual(['click', 'fill'])
     expect(asset.draft.parameters).toEqual([{ key: 'input-2', label: 'input-2', secret: true }])
     expect(asset.draft.steps.map(step => step.reviewed)).toEqual([false, false])
@@ -71,7 +72,7 @@ describe('versioned Browser task assets', () => {
     expect(asset.draft.url).toBe('https://example.test/form')
   })
   it('keeps a deliberately empty edited draft empty, rejects stale edits and never rebuilds deleted steps from recording', async () => {
-    const s = setup(), asset = await s.assets.importRecording(recording())
+    const s = setup(), asset = await importTaskRecording(s.assets, recording())
     const edited = await s.assets.edit(asset.id, asset.revision, { ...asset.draft, steps: [] })
     await expect(s.assets.edit(asset.id, asset.revision, asset.draft)).rejects.toThrow('draft changed')
     await expect(s.assets.saveVersion(asset.id, edited.revision)).rejects.toThrow('no steps')
@@ -275,7 +276,7 @@ describe('versioned Browser task assets', () => {
       const unreadable = new BrowserTaskAssets({ load: async () => { throw new Error('Unreadable durable file') }, save: vi.fn() })
       const state = await unreadable.state()
       expect(state.warning).toContain('existing file was retained')
-      await expect(unreadable.importRecording(recording())).rejects.toThrow('could not be restored')
+      await expect(importTaskRecording(unreadable, recording())).rejects.toThrow('could not be restored')
       expect(await readFile(file, 'utf8')).toBe(source)
     } finally { await rm(path, { recursive: true, force: true }) }
   })
@@ -338,7 +339,7 @@ describe('BrowserTaskAssetEditor', () => {
   })
   it('forwards actual UI events without claiming trust and keeps unresolved targets blocked from review', async () => {
     const { target: _target, ...unknown } = recording().steps[0]!
-    const s = setup(), asset = await s.assets.importRecording({ ...recording(), steps: [unknown] }), m = await mount(asset)
+    const s = setup(), asset = await importTaskRecording(s.assets, { ...recording(), steps: [unknown] }), m = await mount(asset)
     try {
       const review = m.host.querySelector<HTMLInputElement>('[aria-label="Review task step 1"]')!
       expect(review.disabled).toBe(true)

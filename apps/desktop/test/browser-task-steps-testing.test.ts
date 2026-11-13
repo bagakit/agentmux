@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserTaskAssets, runBrowserTaskAsset, type BrowserTaskAssetHost, type BrowserTaskAssetStore } from '../src/main/browser-task-assets'
 import type { BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskStep } from '../src/shared/browser-task-assets'
@@ -16,7 +17,7 @@ function assets() {
   return new BrowserTaskAssets(new MemoryStore(), { id: () => `testing-${++sequence}`, now: () => now++ })
 }
 async function draft(owner: BrowserTaskAssets, steps: BrowserTaskStep[]) {
-  const imported = await owner.importRecording({ id: 'real-recording', browserId, navigationId: 'nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  const imported = await importTaskRecording(owner, { id: 'real-recording', browserId, navigationId: 'nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   return owner.edit(imported.id, imported.revision, { ...imported.draft, steps })
 }
 async function version(steps: BrowserTaskStep[], owner = assets()) {

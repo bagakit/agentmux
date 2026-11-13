@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
@@ -29,7 +30,7 @@ function steps(kind: 'page-url-is' | 'element-present' = 'page-url-is'): Browser
 async function fixture(source = steps()) {
   let sequence = 0, now = 20
   const store = new MemoryStore(), assets = new BrowserTaskAssets(store, { id: () => `branch-${++sequence}`, now: () => now++ })
-  const imported = await assets.importRecording({ id: 'real-human-recording', browserId, navigationId: 'recorded-nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  const imported = await importTaskRecording(assets, { id: 'real-human-recording', browserId, navigationId: 'recorded-nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const edited = await assets.edit(imported.id, imported.revision, { ...imported.draft, steps: source })
   const asset = await assets.saveVersion(edited.id, edited.revision)
   let control: 'human' | 'agent' = 'agent', navigationId: string | null = 'actual-nav', pageUrl = url

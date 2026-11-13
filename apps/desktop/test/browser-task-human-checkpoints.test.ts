@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +32,7 @@ function clocked(store: BrowserTaskAssetStore, idPrefix = 'asset-or-run') {
 async function asset(assets: BrowserTaskAssets, browserId: string, checkpoint = true) {
   const recording: BrowserDemonstrationDraft = { id: `recording-${browserId}`, browserId, navigationId: 'nav-a', url: 'https://generic.invalid/form',
     status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] }
-  const imported = await assets.importRecording(recording)
+  const imported = await importTaskRecording(assets, recording)
   const edited = await assets.edit(imported.id, imported.revision, { ...imported.draft,
     steps: [ ...(checkpoint ? [{ id: 'checkpoint-a', kind: 'checkpoint' as const, url: recording.url, reviewed: true }] : []),
       { id: 'navigate-after', kind: 'navigate', url: 'https://generic.invalid/next', reviewed: true } ] })

@@ -1,5 +1,6 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { spawn } from 'node:child_process'
+import { browserTaskCreateInput } from '../src/shared/browser-task-creation.js'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from '../src/main/browser-operation-feedback.js'
@@ -1958,7 +1959,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
     await recorder.recordBrowserDemonstration({ browserId: 'b1', navigationId: draft.navigationId,
       kind: 'click', isTrusted: true, target: { role: 'button', name: 'Review preferences', ordinal: 1, count: 1 } })
     await recorder.stop('b1')
-    const imported = await browser.manager.importTaskAsset('b1', 'Preferences task')
+    const imported = await browser.manager.importTaskAsset('b1', browserTaskCreateInput((await recorder.get('b1'))!, 'Preferences task'))
     return { ...browser, directory, journal, assets, recorder, imported,
       close: async () => { browser.manager.dispose(); await rm(directory, { recursive: true, force: true }) } }
   }

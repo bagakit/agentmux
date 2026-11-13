@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { describe, expect, it } from 'vitest'
 import { BrowserTaskAssets, type BrowserTaskAssetStore } from '../src/main/browser-task-assets'
 import type { BrowserTaskAssetDocument, BrowserTaskContent } from '../src/shared/browser-task-assets'
@@ -12,7 +13,7 @@ describe('immutable finite completion declaration', () => {
     let document: BrowserTaskAssetDocument | null = null, saves = 0
     const store: BrowserTaskAssetStore = { load: async () => structuredClone(document), save: async value => { saves++; document = structuredClone(value) } }
     const owner = new BrowserTaskAssets(store)
-    const asset = await owner.importRecording(recording)
+    const asset = await importTaskRecording(owner, recording)
     const base = { kind: 'download-readable', stepId: 'producer', path: 'artifact.bin' }
     const invalid = [null, {}, { criteria: [] }, { criteria: [base], secret: 'must-not-save' },
       { criteria: [{ ...base, secret: 'must-not-save' }] }, { criteria: [{ ...base, stepId: 'missing' }] },

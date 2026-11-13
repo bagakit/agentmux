@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
@@ -24,7 +25,7 @@ const steps: BrowserTaskStep[] = [
 async function render() {
   let sequence = 0, now = 20
   const owner = new BrowserTaskAssets(new MemoryStore(), { id: () => `editor-${++sequence}`, now: () => now++ })
-  const imported = await owner.importRecording({ id: 'real-recording', browserId, navigationId: 'nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  const imported = await importTaskRecording(owner, { id: 'real-recording', browserId, navigationId: 'nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const asset: BrowserTaskAsset = await owner.edit(imported.id, imported.revision, { ...imported.draft, steps })
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container)

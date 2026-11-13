@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 // Production Source consumers with private transport/page doubles. No Native/OS/restart claim.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { build } from 'vite'
@@ -31,7 +32,7 @@ const browserId = 'original-browser', url = 'https://generic.invalid/form'
 async function fixture(checkpoint = false, fill = false) {
   const store = new MemoryStore(); let count = 0, now = 10
   const assets = new BrowserTaskAssets(store, { id: () => `task-${++count}`, now: () => now++ })
-  const imported = await assets.importRecording({ id: 'human-recording', browserId, navigationId: 'recorded-nav', url,
+  const imported = await importTaskRecording(assets, { id: 'human-recording', browserId, navigationId: 'recorded-nav', url,
     revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const edited = await assets.edit(imported.id, imported.revision, { ...imported.draft,
     parameters: fill ? [{ key: 'fresh', label: 'Fresh input', secret: true }] : [], steps: [

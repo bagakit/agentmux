@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 // Built public CLI and private RPC transport; the Main manager and asset owner are production code.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
@@ -43,7 +44,7 @@ afterEach(() => { vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 async function fixture() {
   const store = new MemoryStore(); let next = 0, now = 10
   const assets = new BrowserTaskAssets(store, { id: () => `original-${++next}`, now: () => now++ })
-  const imported = await assets.importRecording({ id: 'real-recording', browserId, navigationId: 'recorded-navigation', url,
+  const imported = await importTaskRecording(assets, { id: 'real-recording', browserId, navigationId: 'recorded-navigation', url,
     revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const draft = await assets.edit(imported.id, imported.revision, { name: 'Original draft', url, parameters: [], steps: [
     { id: 'approval', kind: 'checkpoint', url, reviewed: true },

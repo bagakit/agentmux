@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -155,7 +156,7 @@ describe('names owned by existing Desktop objects', () => {
     let document: Parameters<BrowserTaskAssetStore['save']>[0] | null = null
     const store: BrowserTaskAssetStore = { load: async () => structuredClone(document), save: async value => { document = structuredClone(value) } }
     const records = new Records(); const assets = new BrowserTaskAssets(store, { nameAudit: new NameChangeAudit(records) })
-    const asset = await assets.importRecording({ id: 'recording', browserId: 'browser', navigationId: 'navigation', url: 'https://example.test',
+    const asset = await importTaskRecording(assets, { id: 'recording', browserId: 'browser', navigationId: 'navigation', url: 'https://example.test',
       revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
     await assets.edit(asset.id, asset.revision, { ...asset.draft, name: 'New task' })
     expect(records.rows[0]).toMatchObject({ target: { kind: 'browser-task', id: asset.id }, before: asset.draft.name,
@@ -167,7 +168,7 @@ describe('names owned by existing Desktop objects', () => {
     const save = vi.fn(async (value: Parameters<BrowserTaskAssetStore['save']>[0]) => { document = structuredClone(value) })
     const records = new Records()
     const assets = new BrowserTaskAssets({ load: async () => structuredClone(document), save }, { nameAudit: new NameChangeAudit(records) })
-    const asset = await assets.importRecording({ id: 'recording', browserId: 'browser', navigationId: 'navigation', url: 'https://example.test',
+    const asset = await importTaskRecording(assets, { id: 'recording', browserId: 'browser', navigationId: 'navigation', url: 'https://example.test',
       revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
     save.mockClear()
     await expect(nameChangeRequests.run({ context, operationId: 'stale-task-name' }, () =>

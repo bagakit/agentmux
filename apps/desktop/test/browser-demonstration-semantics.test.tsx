@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
@@ -137,7 +138,7 @@ describe('live suggestions and explicit person-owned asset correction', () => {
   it('previews the matching suggestion before explicit use without altering the edited title or secret parameter', async () => {
     const { draft, recorder } = await recorded(); await recorder.stop('browser')
     const owner = new BrowserTaskAssets({ load: async () => null, save: async () => {} })
-    const asset = await owner.importRecording((await recorder.get('browser'))!)
+    const asset = await importTaskRecording(owner, (await recorder.get('browser'))!)
     asset.draft.steps[0]!.label = 'Person-owned title'
     const projector = new BrowserDemonstrationInterpreter(() => {}); projector.update(draft); await settle()
     const props = { asset, recording: draft, suggestions: projector.state(), onImport: () => {}, onSaveDraft: async () => {}, onSaveVersion: async () => {},
@@ -163,7 +164,7 @@ describe('live suggestions and explicit person-owned asset correction', () => {
     const { draft, recorder } = await recorded(); await recorder.stop('browser')
     let document: BrowserTaskAssetDocument | null = null
     const owner = new BrowserTaskAssets({ load: async () => structuredClone(document), save: async value => { document = structuredClone(value) } })
-    const asset = await owner.importRecording((await recorder.get('browser'))!), gate = deferred<BrowserDemonstrationInterpretation>()
+    const asset = await importTaskRecording(owner, (await recorder.get('browser'))!), gate = deferred<BrowserDemonstrationInterpretation>()
     let suggestions = new BrowserDemonstrationInterpreter(() => {}).state()
     const projector = new BrowserDemonstrationInterpreter(next => { suggestions = next }, () => gate.promise)
     projector.update(draft); await settle()
@@ -183,7 +184,7 @@ describe('live suggestions and explicit person-owned asset correction', () => {
     const { draft, recorder } = await recorded(); await recorder.stop('browser')
     let document: BrowserTaskAssetDocument | null = null
     const owner = new BrowserTaskAssets({ load: async () => structuredClone(document), save: async value => { document = structuredClone(value) } })
-    let asset = await owner.importRecording((await recorder.get('browser'))!)
+    let asset = await importTaskRecording(owner, (await recorder.get('browser'))!)
     const projector = new BrowserDemonstrationInterpreter(() => {}); projector.update(draft); await settle()
     const mounted = await mount(createElement(BrowserTaskAssetEditor, { asset, recording: draft, suggestions: projector.state(), onImport: () => {},
       onSaveDraft: async next => { asset = await owner.edit(asset.id, asset.revision, next) }, onSaveVersion: async () => {}, onLocateStep: () => {}, onRun: async () => {}, onStop: () => {} }))

@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -110,7 +111,7 @@ async function fixture(kind: 'click' | 'navigate' = 'click', declared = true) {
   // A real completed prefix operation is not an input to task recovery.
   const prefix = await manager.runScript(browserId, `await gotoUrl(${JSON.stringify(url)}); const page = await snapshot(); await click(page.nodes[0].ref); return 1`)
   expect(prefix.outcome.kind).toBe('completed'); expect(contents.clicks).toBe(1)
-  const imported = await assets.importRecording({ id: 'recording-a', browserId, navigationId: 'recorded-a', url,
+  const imported = await importTaskRecording(assets, { id: 'recording-a', browserId, navigationId: 'recorded-a', url,
     status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
   const draft: BrowserTaskContent = { ...imported.draft, steps: [
     { id: 'current-a', kind, url: kind === 'navigate' ? 'https://generic.invalid/next' : url, reviewed: true,

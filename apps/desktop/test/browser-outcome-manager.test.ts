@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -99,7 +100,7 @@ async function fixture(beforeTaskSave?: (value: BrowserTaskAssetDocument) => Pro
 }
 
 async function savedCheckpoint(assets: BrowserTaskAssets) {
-  const imported = await assets.importRecording({ id: 'recording-a', browserId: 'browser-a', navigationId: 'navigation-a',
+  const imported = await importTaskRecording(assets, { id: 'recording-a', browserId: 'browser-a', navigationId: 'navigation-a',
     url: 'https://generic.invalid/form', status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
   const edited = await assets.edit(imported.id, imported.revision, { ...imported.draft, steps: [
     { id: 'checkpoint-a', kind: 'checkpoint', url: imported.draft.url, reviewed: true },
@@ -290,7 +291,7 @@ describe('the existing trusted task action records confirmation before returning
 describe('declared task completion consumes the actual asset owner through Main', () => {
   it('registers the immutable version and actual run before the producer, reads trusted Continue, and verifies after owner rebuild without replay', async () => {
     const f = await fixture()
-    const imported = await f.taskAssets.importRecording({ id: 'recording-contract', browserId: 'browser-a', navigationId: 'nav-original',
+    const imported = await importTaskRecording(f.taskAssets, { id: 'recording-contract', browserId: 'browser-a', navigationId: 'nav-original',
       url: 'https://generic.invalid/form', status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
     const edited = await f.taskAssets.edit(imported.id, imported.revision, { ...imported.draft, steps: [
       { id: 'producer', kind: 'navigate', url: 'https://generic.invalid/next', reviewed: true },
@@ -333,7 +334,7 @@ describe('declared task completion consumes the actual asset owner through Main'
         failOnce = false; throw new Error('Optional binding save failed')
       }
     })
-    const imported = await f.taskAssets.importRecording({ id: 'recording-unknown', browserId: 'browser-a', navigationId: 'nav-original',
+    const imported = await importTaskRecording(f.taskAssets, { id: 'recording-unknown', browserId: 'browser-a', navigationId: 'nav-original',
       url: 'https://generic.invalid/form', status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
     const edited = await f.taskAssets.edit(imported.id, imported.revision, { ...imported.draft, steps: [
       { id: 'producer', kind: 'navigate', url: 'https://generic.invalid/next', reviewed: true },

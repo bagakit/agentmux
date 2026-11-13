@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
@@ -15,7 +16,7 @@ const browserId = 'batch-original-browser', url = 'https://fixture.invalid/form'
 async function fixture(options: { checkpoint?: boolean; branch?: boolean; steps?: number } = {}) {
   const store = new MemoryStore(); let id = 0, time = 1, operation = 0, control: 'agent' | 'human' = 'agent'
   const assets = new BrowserTaskAssets(store, { id: () => `actual-task-${++id}`, now: () => time++ })
-  const imported = await assets.importRecording({ id: 'original-recording', browserId, navigationId: 'actual-nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  const imported = await importTaskRecording(assets, { id: 'original-recording', browserId, navigationId: 'actual-nav', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const content: BrowserTaskContent = { ...imported.draft, name: 'Bounded original items', parameters: [{ key: 'value', label: 'Item value', secret: false }], steps: [
     ...(options.checkpoint ? [{ id: 'person', kind: 'checkpoint' as const, url, reviewed: true }] : []),
     ...(options.branch ? [{ id: 'condition', kind: 'branch' as const, url, reviewed: true, branch: { condition: { kind: 'page-url-is' as const, url }, onTrue: 'fill-0', onFalse: null } }] : []),

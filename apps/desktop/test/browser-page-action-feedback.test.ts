@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 const { fixturePath: _hygiene_fixturePath, fixtureFileUrl: _hygiene_fixtureFileUrl } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -544,7 +545,7 @@ describe('actual resolved document and sender after display', () => {
 const currentBrowser = (f: { events: any[] }) => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one').at(-1)!.browser
 async function noticeTask(f: Awaited<ReturnType<typeof managerFixture>>) {
   const url = 'https://generic.invalid/one'
-  const imported = await f.assets!.importRecording({ id: 'notice-recording', browserId: 'browser-one', navigationId: 'recorded-document', url,
+  const imported = await importTaskRecording(f.assets!, { id: 'notice-recording', browserId: 'browser-one', navigationId: 'recorded-document', url,
     status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
   const edited = await f.assets!.edit(imported.id, imported.revision, { ...imported.draft, steps: [
     { id: 'current-click', kind: 'click', url, reviewed: true, target: { role: 'button', name: 'Continue', ordinal: 1, count: 1 } },

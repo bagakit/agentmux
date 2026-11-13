@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -52,7 +53,7 @@ async function ownerFixture(mode?: 'step') {
   const owner = new BrowserTaskAssets(store, options)
   const journal = new BrowserOperationJournal({ load: async () => journalDocument,
     save: async next => { journalDocument = applyJournalChanges(journalDocument, next) } }, options)
-  const imported = await owner.importRecording(recording)
+  const imported = await importTaskRecording(owner, recording)
   const draft = { ...imported.draft, name: 'Review profile', parameters: [{ key: 'name', label: 'Name', secret: true }], steps: [
     { ...imported.draft.steps[0]!, reviewed: true },
     { id: 'human-review', kind: 'checkpoint' as const, url: recording.url, label: 'Check the profile', reviewed: true },

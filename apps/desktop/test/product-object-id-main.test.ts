@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { afterEach, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -44,7 +45,7 @@ it('allocates fixed IDs along the original recording → task → run/batch chai
   const restored = await new BrowserDemonstrationRecorder(new BrowserDemonstrationFileStore(recordings)).get(browserId)
   expect(restored).toEqual(recording)
   const assets = new BrowserTaskAssets(new BrowserTaskAssetFileStore(tasks))
-  const imported = await assets.importRecording(recording)
+  const imported = await importTaskRecording(assets, recording)
   const edited = await assets.edit(imported.id, imported.revision, { ...imported.draft, steps: imported.draft.steps.map(step => ({ ...step, reviewed: true })) })
   const asset = await assets.saveVersion(edited.id, edited.revision)
   expect(asset.id).toMatch(ID)

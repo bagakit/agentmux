@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { it, expect } from 'vitest'
 import { mkdtemp, readFile, writeFile, symlink, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -17,7 +18,7 @@ const recording = (browserId: string): BrowserDemonstrationDraft => ({
     url: 'https://fixture.invalid/ordinary', args: ['https://fixture.invalid/ordinary'] }]
 })
 async function saved(owner: BrowserTaskAssets, browser: string) {
-  const initial = await owner.importRecording(recording(browser))
+  const initial = await importTaskRecording(owner, recording(browser))
   const edited = await owner.edit(initial.id, initial.revision, { ...initial.draft, steps: initial.draft.steps.map(step => ({ ...step, reviewed: true })) })
   return owner.saveVersion(edited.id, edited.revision)
 }

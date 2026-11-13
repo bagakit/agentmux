@@ -1,3 +1,4 @@
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -114,7 +115,7 @@ async function fixture() {
     return { manager, journal, assets, downloads, contents: children[0].webContents }
   }
   const runtime = await createRuntime()
-  const imported = await runtime.assets.importRecording({ id: 'recording-a', browserId, navigationId: 'recorded-navigation',
+  const imported = await importTaskRecording(runtime.assets, { id: 'recording-a', browserId, navigationId: 'recorded-navigation',
     url, status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
   const edited = await runtime.assets.edit(imported.id, imported.revision, { ...imported.draft, steps: [
     { id: 'download-a', kind: 'click', url, reviewed: true, target: { role: 'link', name: 'Download file', ordinal: 1, count: 1 } }
