@@ -61,6 +61,12 @@ same bound-identity owner. Arbitrary CLI credential inheritance is not provided.
 request entry for supported operations; report an exact format or permission gap when needed,
 while keeping other authorized work available. Never copy Host credentials into a CLI profile.
 
+## Reply in a connected conversation
+
+Each new message from a connected chat carries this note in its platform guidance, selected by the original adapter's direct or group conversation kind and frozen with that input. The connector never shortens, summarizes or withholds a reply; the note only guides writing.
+
+[Channel instant reply](../shared/channel/instant-reply.md "amux:include")
+
 ## Inspect the original connection
 
 The original authenticated user/device can inspect native receiver lifecycle with
