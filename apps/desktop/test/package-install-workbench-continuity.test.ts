@@ -388,6 +388,18 @@ it('a relaunched GUI that answers after the former 30-second window still commit
   expect(result.ui.status).toBe('committed')
   expect(io.reads).toBe(2)
 })
+it('a Region that had no confirmed Run before the update keeps the activated GUI and reports it unconfirmed', async () => {
+  const f = await fixture()
+  for (const side of [io.before!.workbench, after()]) {
+    const region = side.tabs[0]!.regions[0]! as { control: unknown; phase: string; regionId: string }
+    region.control = null; region.phase = 'launching'
+  }
+  const result = await install(f)
+  expect(result.ui.status).toBe('unknown')
+  expect(result.ui.reason).toContain(io.before!.workbench.tabs[0]!.regions[0]!.regionId)
+  expect(result.ui.continuity).toEqual({ before: io.before, after: io.after })
+  expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+})
 it('unavailable activation never invents an after observation', async () => {
   const f = await fixture(); io.failEveryRead = true
   const error = await install(f).catch(error => error)
