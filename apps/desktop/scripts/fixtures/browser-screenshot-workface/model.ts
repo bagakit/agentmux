@@ -198,12 +198,6 @@ async function decode(dataUrl: string) {
   const outlinedCover = withOutline<CoverShape>({ id: 'wand-cover', kind: 'cover', color: '#111827', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
   const outlinedPixels = withOutline<PixelateShape>({ id: 'wand-pixels', kind: 'pixelate', color: '#000', blockSize: 10, from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
   const coverPaint = paintOutput([outlinedCover]), pixelPaint = paintOutput([outlinedPixels])
-  const regionHighlight = withOutline<RegionHighlightShape>({ id: 'highlight-region', kind: 'region-highlight', color: '#facc15', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
-  const highlighted = paintOutput([regionHighlight]), originalStripe = context.getImageData(62, 70, 1, 1).data, highlightedStripe = highlighted.getImageData(62, 70, 1, 1).data
-  check(highlightedStripe[0]! > originalStripe[0]! + 30 && highlightedStripe[0]! < 200 && highlightedStripe[3] === 255,
-    'region highlight must tint the source while keeping its stripe visible, never paint an opaque cover')
-  check(unchangedOutside(highlighted), 'region highlight must leave its hole, notch and every outside pixel unchanged')
-  check(await sameAsExport([regionHighlight]), 'region highlight preview and exported PNG must share the same pixels')
 
   check(coverPaint.getImageData(60, 70, 1, 1).data[0]! < 30, 'outlined cover must paint inside its fill')
   // Outside the L's notch only an unclipped mask paints; inside the hole a nonzero clip paints too.
@@ -272,6 +266,13 @@ async function decode(dataUrl: string) {
   const lensRow = (target: CanvasRenderingContext2D) => target.getImageData(calloutBubble(lens).x + 6, calloutBubble(lens).y + 6, 4, 1).data.filter((_, index) => index % 4 === 0)
   const lifted = lensRow(paintOutput([lens, brighterSource])), plain = lensRow(paintOutput([lens]))
   check(lifted.every((value, index) => value >= plain[index]!) && lifted.some((value, index) => value > plain[index]!), 'callout must magnify the adjusted pixels')
+  const regionHighlight = withOutline<RegionHighlightShape>({ id: 'highlight-region', kind: 'region-highlight', color: '#facc15', from: { x: 0, y: 0 }, to: { x: 1, y: 1 } }, L)
+  const highlighted = paintOutput([regionHighlight]), originalStripe = context.getImageData(62, 70, 1, 1).data, highlightedStripe = highlighted.getImageData(62, 70, 1, 1).data
+  check(highlightedStripe[0]! > originalStripe[0]! + 30 && highlightedStripe[0]! < 200 && highlightedStripe[3] === 255,
+    'region highlight must tint the source while keeping its stripe visible, never paint an opaque cover')
+  check(unchangedOutside(highlighted), 'region highlight must leave its hole, notch and every outside pixel unchanged')
+  check(await sameAsExport([regionHighlight]), 'region highlight preview and exported PNG must share the same pixels')
+
   return { passed: true, pointing: ['blur-stripe-contrast', 'blur-outside-untouched', 'blur-edge-opacity', 'spotlight-after-masks', 'callout-enlarges-source', 'callout-masked-preview', 'callout-masked-PNG'],
     wand: ['outline-cover-inside', 'outline-notch', 'outline-cover-outside', 'outline-pixelate-outside', 'outline-hole', 'outline-PNG-equality', 'outline-note-filter',
       'outline-fractional-preview-opacity', 'outline-fractional-PNG-opacity', 'outline-live-ink-protection', 'outline-live-ink-notch', 'adjust-brightness', 'adjust-region-outside', 'adjust-region-inside', 'adjust-PNG-equality', 'adjust-under-callout', 'highlight-translucent-tint', 'highlight-outside-and-holes', 'highlight-PNG-equality'], cases: ['actual-pixel-blocks', 'crop-dimensions', 'preview-export-pixel-equality', 'outside-scaled-pixelation', 'identity-move-erase-undo', 'ellipse-ink-distance', 'pixelation-failure',
