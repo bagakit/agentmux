@@ -6,6 +6,7 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { consumeConversationWindowPage, type AgentConversationReadPage, type ConversationWindowAssembly } from '../src/conversation.js'
 import { conversationReaderCli } from './helpers/conversation-reader-cli.js'
 import { ConversationReaderState } from '../src/conversation-reader.js'
+import type { AgentMuxClient } from '../src/client.js'
 
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -20,10 +21,10 @@ async function fixture(body = 'Original complete body') {
 type Fixture = Awaited<ReturnType<typeof fixture>>
 function holdPages(f: Fixture) {
   // The selected native source enters this original logical reader, not the public convenience method.
-  const reader = f.client as unknown as { readSessionHistoryPage: typeof f.client.sessionHistoryPage }
+  const reader = f.client as unknown as { readSessionHistoryPage: AgentMuxClient['sessionHistoryPage'] }
   const original = reader.readSessionHistoryPage.bind(f.client), gates: Array<{ resolve(): void; reject(error: Error): void }> = []
   const pending: Promise<unknown>[] = []
-  const spy = vi.spyOn(reader, 'readSessionHistoryPage').mockImplementation(async (...args) => {
+  const spy = vi.spyOn(reader, 'readSessionHistoryPage').mockImplementation(async (...args: Parameters<typeof original>) => {
     // Delay delivery only after the actual Provider operation has completed.
     // Seventeen logical reads never bypass its physical read concurrency limit.
     const page = await original(...args), signal = args[1]?.signal
@@ -82,10 +83,10 @@ it('every original parked window survives unrelated completed reads until its ex
 it('cancelled and failed original reads return their qualification and explicit release never resurrects an in-flight view', async () => {
   const f = await fixture(), page = await f.client.readAgentConversation(f.ref)
   const controller = new AbortController()
-  const reader = f.client as unknown as { nativeHistoryChangesPage: typeof f.client.readSessionHistoryChanges }
+  const reader = f.client as unknown as { nativeHistoryChangesPage: AgentMuxClient['readSessionHistoryChanges'] }
   const native = reader.nativeHistoryChangesPage.bind(f.client)
   let entered = false
-  const changes = vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args) => {
+  const changes = vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args: Parameters<typeof native>) => {
     const result = await native(...args); entered = true
     await new Promise<void>((resolve, reject) => {
       const signal = args[1]!.signal!, abort = () => reject(signal.reason)
@@ -108,7 +109,7 @@ it('cancelled and failed original reads return their qualification and explicit 
 
   const released = await f.client.readAgentConversation(f.ref)
   let ready = false, releaseRead!: () => void
-  const source = vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args) => {
+  const source = vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args: Parameters<typeof native>) => {
     const result = await native(...args); ready = true
     await new Promise<void>(resolve => { releaseRead = resolve })
     return result
