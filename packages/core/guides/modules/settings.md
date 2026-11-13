@@ -74,6 +74,50 @@ A recognized older remote Core owner protocol requires an explicit Core update,
 not a fallback to an older contract, Session replacement or automatic operation replay.
 Private Tailcat addresses, key paths and raw process errors are never connection labels.
 
+## Review a remote Core update
+
+In Desktop **Settings → Remote → Hosts → Connection**, the Core maintenance
+section compares the current deployment with the candidate bundled in this App.
+It is not an online latest-version check. Package versions, source commits,
+deployment digests, Core owner API protocol and required Native Runtime protocol
+are different facts. Missing current facts remain unknown; protocol numbers and
+commit hashes do not stand in for a package version.
+
+Read `settings hosts upgrade-check --help` for the exact input. The check reads
+the exact supplied or saved Host and its original maintenance owner without
+upgrading it. Applying an update still requires that exact target to be saved. Its current
+observation and bundled candidate are separate from any historical operation.
+Only a qualified ready result includes the pinned expected facts for an upgrade.
+In Desktop, review the exact target and maintenance effect, then explicitly confirm
+that same candidate. Cancelling review does not upgrade. A changed candidate or
+target must be checked and reviewed again, not silently substituted after confirmation.
+
+Upgrade and reconnect require the original transport-approved user/device, without
+a managed Agent caller; command parameters cannot supply that identity. Read-only
+checks and original result inspection retain their diagnostic scope.
+
+Read `settings hosts upgrade --help` before an explicitly authorized update. Keep
+the original input, expected and operationId. A lost or unknown receipt does not
+mean the operation did not happen. Use `settings hosts upgrade-inspect` with that
+original operationId to inspect its result; this query does not adopt a new
+connection configuration or repeat deployment. Historical operations retain their
+original candidate digest; an old receipt without version metadata stays unknown
+rather than borrowing this App's current candidate.
+
+A completed deployment and this client's connection adoption are separate results.
+For a completed original operation, `settings hosts upgrade-reconnect` explicitly
+adopts its verified remote command and checks that exact saved Host, retaining
+the original operationId. It does not run the upgrade again. A pending or failed
+connection check leaves the completed deployment fact intact and provides the
+original retry path. All maintenance keeps the existing Runtime, Native process,
+Session and Run preservation contract.
+
+This path supports an already installed Linux x64 headless Core that meets the
+maintenance owner's exact qualification. It does not install AgentMux on another
+Mac, start an absent service, authorize a new target or upgrade healthy work when
+merely opening settings. Tailcat replaces a carrier; it does not extend that
+maintenance qualification.
+
 ## Local readable protocol reference
 
 Documentation → amux Protocols shows this app version's formats and original wire

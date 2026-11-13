@@ -68,7 +68,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 ## 入口与观察范围
 
-Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 将 Remote 作为独立分组，Hosts 与 Remote execution 是同层入口：前者管理环境，后者管理跨 Host 执行的开始与原工作理解。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
+Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 将 Remote 作为独立分组，Hosts 与 Remote Agents 是同层入口：前者管理环境，后者管理跨 Host 执行的开始与原工作理解。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
 
 同一 Host 工作台按总览与监控、项目、应用与访问、连接配置组织任务。切换任务仍持有同一个准确 Host、原草稿与已访问操作，不建立三套选择器、清单或配置副本。总览承接拓扑与分源观察；连接配置承接原编辑、Test 与 Core 维护；应用与访问承接该 Host 的真实执行器盘点及跨 Host 来源核验、真人批准。全局模板不冒充远端已安装应用。
 
@@ -78,11 +78,13 @@ Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、H
 
 “所有环境”必须说明它是已配置环境，不能冒充扫描发现的全部机器。筛选可按名称、地址、项目和明确的待处理状态收敛；筛选只改变可见范围，摘要说明过滤条件与观测覆盖，不把被过滤或读取失败的对象算成不存在。
 
-设备也可从 Space 的名称入口直接进入其 [home 工作面](spaces-and-layout.md#设备主目录工作面)，无需先手动建立项目；项目式 Remote execution 继续承接下面的双端资源选择。
+设备也可从 Space 的名称入口直接进入其 [home 工作面](spaces-and-layout.md#设备主目录工作面)，无需先手动建立项目；Remote Agents 继续承接下面的双端资源选择。
 
 ## 独立 Remote execution 工作台
 
-Remote execution 的页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
+用户可见页面名为 **Remote Agents**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
+
+主路径表达“任务和文件留在本机，Agent 在所选设备运行”：先明确当前本机普通项目，再选择 Agent 运行设备，准备动作带着准确两端进入原 Launcher，由用户在那里选择配置、输入任务并启动。默认 Agent 启动目录取该 Host 权威 home，复用普通目录登记；不猜 `~`、不选任意远端项目，也不导航到远端工作面。没有当前本机项目时要求明确选择。异步准备结果只作用于原输入，不覆盖后来的设备、项目或草稿。高级入口保留反向和其他受支持组合，Agent 启动目录不再被叫作要开发的项目。
 
 日常项目工作沿 Space 中的[原 Launcher](workface-launcher.md#agent-运行端与项目工具端)开始，Settings 同时保留准备原 Launcher 与管理已有绑定的入口。操作正文唯一在[Core 使用指南](../../../packages/core/guides/actions/remote-execution.md)，由设置页和原 CLI 帮助同源消费。指南覆盖登记环境与目录、选择准确两端、显式启动和继续原工作，说明浏览一台机器与选定其项目是两个动作；不在本页或 UI 另写一套步骤及能力清单。
 
@@ -200,7 +202,9 @@ Session 的工作、等待、权限请求、未知等状态沿[Core 语义与 Pr
 
 连接检查失败的总览给出进入同一准确 Host 连接配置的动作，保留本次检查输入与原原因；不按错误文案猜处理路径，也不阻断原 Session。Native 能力按原适配器声明逐项呈现，说明来源读取时间与当前或保留的证据；声明不代签某个 Run 的状态或授权。当前协议六项能力均为必需声明，不制造“不支持”的虚构分支；没有来源则未确认。
 
-已有 Core 升级与原操作查询在主阅读层呈现原回执当前阶段及更新时间，不推算百分比、已完成步骤或预计耗时。原操作查询沿维护 owner，准确资格、原 Runtime 与 Native 保全规则只见[远端恢复与维护合同](session-recovery.md#联邦-runtime-与远端恢复边界)。未知回执保留原 operation，详情优先提供原结果查询；刷新当前连接不能变成重做升级。自动部署、服务托管、批量重启、远端清理和批量信任不属于本次拓扑方向自动授权的能力。
+已有 Core 升级在主阅读层区分当前部署、当前 App 携带的候选、原维护操作和本机连接采用。当前版本、候选版本、来源与读取时间各取准确部署／制品；缺失字段保持未知，不把源码哈希或协议号当版本。Core owner 协议与 Native Runtime 协议分别具名。原操作固定其原候选，不能用当前 App 候选补写历史事实；旧未决操作不遮掉安全可读的当前信息。
+
+只读检查后先呈升级目标、准确 Host 和维护影响，再由用户明确确认同一份候选与 expected；确认前不执行升级，输入或候选变化须重新检查。只有原升级 owner 判定的部署结果能改变部署状态，本机连接配置采用未确认不能把已完成部署改成 unknown，也不成为另一已资格候选升级的额外门禁；未知原部署仍沿原 operation 查询。原操作查询保持只读；重新连接并采用原成功部署是独立明确动作，保原 operationId，不再次部署。主阅读层呈现原回执当前阶段及更新时间，不推算百分比、已完成步骤或预计耗时。原操作查询沿维护 owner，准确资格、原 Runtime 与 Native 保全规则只见[远端恢复与维护合同](session-recovery.md#联邦-runtime-与远端恢复边界)。未知回执保留原 operation，详情优先提供原结果查询；刷新当前连接不能变成重做升级。自动部署、服务托管、批量重启、远端清理和批量信任不属于本次拓扑方向自动授权的能力。
 
 来源信任沿本页[连接配置与测试](#连接配置与测试)及其引用的 A2A owner；节点选择、Test 或展示不代签批准。Phone / Devices 仍沿[设备接入合同](public-control.md#手机版-relay-连接)，不把“可信来源能创建 Agent”混写成“此设备有所有远端管理权限”。
 
@@ -231,7 +235,7 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 | 应用授权同步 | [应用授权 owner](../../../packages/core/src/application-access-owner.ts)、[Desktop 执行绑定](../../../apps/desktop/src/main/application-access-owner.ts)、[HostApplicationAccessPanel](../../../apps/desktop/src/renderer/src/components/settings/HostApplicationAccessPanel.tsx) | 用户配置连接器，GUI 与 CLI 共用配置、比较、显式执行、目标验真和原操作查询；准确范围与未知恢复归[应用授权同步合同](remote-application-access.md)，不代签任意外部应用支持迁移 |
 | 所选 Host 的只读运行观察 | [分源观察](../../../packages/core/src/host-runtime-observation.ts)、[公共 Host 方法](../../../packages/core/src/public-rpc-host-settings.ts)、[HostRuntimePanel](../../../apps/desktop/src/renderer/src/components/settings/HostRuntimePanel.tsx) | 原 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot 由公共服务按准确 Host 组合；GUI 与 `settings hosts inspect` 消费同一结果。只观察当前已连接来源，缺失按来源报告，不冷启动 Native |
 | 所选 Host 的只读网络观察 | [原 Owner 接口事实](../../../packages/core/src/runtime-network.ts)、[Host 分源组合](../../../packages/core/src/host-network-observation.ts)、[HostNetworkPanel](../../../apps/desktop/src/renderer/src/components/settings/HostNetworkPanel.tsx)、[HostNetworkMap](../../../apps/desktop/src/renderer/src/components/settings/HostNetworkMap.tsx) | 新鲜 Owner 请求耗时、观察进程与目标 Owner 的接口、当前 SSH 保活配置和 ProxyJump 顺序分别读取；GUI 的 Read link / Refresh 与 `settings hosts network` 共用原服务，不轮询。聚合先认证原调用者，固定只读叶借原 Host 传输，不将来源 Agent 凭据当成目标身份；原 runtime 域授权保持不变 |
-| 跨 Host 执行的创建与服务观察 | [Remote execution 设置页](../../../apps/desktop/src/renderer/src/components/settings/RemoteExecutionSettingsPane.tsx)、[NewTabSurface](../../../apps/desktop/src/renderer/src/components/NewTabSurface.tsx)、[AgentToolExecutionNotice](../../../apps/desktop/src/renderer/src/components/AgentToolExecutionNotice.tsx)、[Core execution coordinator](../../../packages/core/src/agent-execution-coordinator.ts) | 设置页消费原 Launcher 双端选择、当前客户端保留的 Session 绑定与原观察；工具连接和分项 Provider notices 同源呈现，不证明任意 Provider／工作区模式已经支持 |
+| 跨 Host 执行的创建与服务观察 | [Remote Agents 设置页](../../../apps/desktop/src/renderer/src/components/settings/RemoteExecutionSettingsPane.tsx)、[NewTabSurface](../../../apps/desktop/src/renderer/src/components/NewTabSurface.tsx)、[AgentToolExecutionNotice](../../../apps/desktop/src/renderer/src/components/AgentToolExecutionNotice.tsx)、[Core execution coordinator](../../../packages/core/src/agent-execution-coordinator.ts) | 设置页消费原 Launcher 双端选择、当前客户端保留的 Session 绑定与原观察；工具连接和分项 Provider notices 同源呈现，不证明任意 Provider／工作区模式已经支持 |
 | Core 维护与原结果查询 | [remote-core-upgrade](../../../packages/core/src/remote-core-upgrade.ts)、[HostUpgradePanel](../../../apps/desktop/src/renderer/src/components/settings/HostUpgradePanel.tsx) | 管理台复用原检查、升级、operation 查询及诊断，保留已访问维护面及未决回执，不另写流程 |
 | 无限画布 | [Desktop 依赖](../../../apps/desktop/package.json)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | 复用 `@xyflow/react`，缩放 / 平移仅改变投影；窄窗自动使用同对象列表，不新增持久画布配置 |
 

@@ -15,9 +15,9 @@
 
 ## Agent 运行端与项目工具端
 
-初始页直接提供三种常用工作意图：**Local development** 在本机项目使用本机 Agent；**Remote development** 在明确选择的远端项目上使用同端 Agent；**Remote Agent** 将项目与工具留在本机，选择远端 Agent 环境与工作目录。预设组合已有的项目端与 Agent 端字段，不新建模式协议或第二份创建状态；**Custom** 可显式组合任意已支持的两端，包括反向、两个远端、同 Host 不同 cwd 及显式同目录 binding。组合事实取自原字段，不能因 Host 相同而取消显式绑定。
+初始页以 **Agent runs on** 直接选择 Agent 运行设备，项目／工具仍是当前准确项目。选择另一设备默认采用其已确认 home 作为 Agent 启动目录；home 查询、普通目录登记沿原公共能力，不猜路径、不导航或启动 Agent。提交后同时清楚显示项目与 Agent 两端，设备浏览、取消和失败不改变原目标；异步结果不得覆盖用户后选目标。高级展开提供 Files & tools 与 Agent startup directory，保留反向、两个远端、同 Host 不同 cwd 及显式同目录 binding。组合事实来自原字段，不新增模式协议或第二份创建状态。
 
-选择预设只安排新工作，不启动 Agent。已有准确目标可立即选择；尚缺 Host、项目或运行目录时就在当前起点补齐，浏览和取消不修改原目标，最后选择才一次提交准确两端。Agent 运行目录复用已登记 Workspace，但表述为运行环境与工作目录，不要求另一份项目副本。Executor 仍从准确运行 Host 的原配置来源和 revision 选择，不能按名称继承另一来源的配置。
+Agent 启动目录是配置与 Skills 的运行来源，不要求项目副本。Executor 仍从准确运行 Host 的原配置来源和 revision 选择，不能按名称继承另一来源配置。设置中的 Remote Agents 只准备这两个原字段，Provider、Prompt 与最终启动仍由同一个 Launcher 完成。
 
 同一项目中切运行安排，保持原 Region、完整 Prompt、名称、Provider 选项、辅助工具草稿与原操作回执。真正选择另一项目时，进入那个项目的实际工作面，使 Files、Git、Terminal 与 Launcher 使用同一项目；打开或复用目标项目自己的 Launcher 和草稿，明确来源稿保留在原项目。不把旧项目相对文件引用、Browser／Note 稿或已有创建／未知回执复制到新目录，不迁移旧 Tab、Run 或会话。准确目标、Launcher 和必要导航由原 Store 一次提交，不先跳项目再异步补运行端。空 Zone 同资源建立原 Region 仍沿原输入认领链保全。
 
