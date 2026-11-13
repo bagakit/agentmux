@@ -70,8 +70,9 @@ export type AgentSessionRecoveryPorts = {
     workspacePath: string,
     agentSessionId: string,
     env: Readonly<Record<string, string>>,
-    endpoint?: { url: string; token: string }
-  ): Promise<void>;
+    endpoint?: { url: string; token: string },
+    launchIssue?: { code: string; message: string }
+  ): Promise<boolean>;
     prepareOwnedWorkspaceTrust(provider: AgentProvider, workspacePath: string, agentSessionId: string, env: Readonly<Record<string, string>>): Promise<void>;
     requireHookIngressOwner(): Promise<void>;
     settleHookRestore(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run'>): void;
@@ -83,7 +84,8 @@ export type AgentSessionRecoveryPorts = {
     executorId: AgentExecutorId,
     binding: AgentHookBinding,
     lifecycleOperationId: string,
-    capability: string
+    capability: string,
+    launchHooksReady?: boolean
   ): Record<string, string>;
   };
   input: {

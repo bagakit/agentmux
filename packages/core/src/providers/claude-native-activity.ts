@@ -1,7 +1,8 @@
 import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { AgentManagedHookMutation } from '../managed-hook-installer.js'
-import { defaultAgentMuxStateDirectory, resolveCoreBinPath } from '../runtime-paths.js'
+import { defaultAgentMuxStateDirectory } from '../runtime-paths.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from './shared.js'
 import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../types.js'
 
@@ -93,14 +94,6 @@ export function claudeNativeActivity(
     ...(state === 'idle' ? { interruption: payload.isAborted ? 'interrupted' as const : 'not-interrupted' as const } : {}) }
 }
 
-/**
- * A Provider-owned native observer; classic hooks retain input, permission and history ownership.
- * It lives in AgentMux's own state directory and is loaded by --plugin-dir, never written into the
- * user's workspace. Its content does not depend on the workspace, so one copy serves every Run.
- */
-export function claudeNativeActivityDirectory(): string {
-  return join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'native-activity')
-}
 
 /**
  * Claude mods run without Node globals. The public process API launches the existing passive Hook
@@ -124,6 +117,18 @@ let delivery = Promise.resolve()
 let mainTurn
 const ASKED_END = ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}
 
+// The launching Core names its own runner in the Run environment, so these files carry no install path.
+// --launch-scoped marks a call this launch declared; the runner ignores unmarked leftovers in such a Run.
+let runnerArgv
+async function runner($) {
+  if (!runnerArgv) {
+    const node = await $.env.get('AGENTMUX_HOOK_NODE'), script = await $.env.get('AGENTMUX_HOOK_RUNNER')
+    if (!node || !script) throw new Error('The AgentMux Hook runner is not named in this Run environment.')
+    runnerArgv = [node, script, '--launch-scoped']
+  }
+  return runnerArgv
+}
+
 async function captureActor($) {
   if (actorCaptured) return
   actorCaptured = true
@@ -136,7 +141,7 @@ async function captureActor($) {
 // The authenticated runner exits after Core has decided; stderr or a nonzero exit means unconfirmed.
 async function send($, payload) {
   const result = await $.process.run(
-    ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+    await runner($),
     { stdin: JSON.stringify(payload),
       env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
       timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
@@ -179,6 +184,7 @@ async function deliver($, eventName, event, sourceSequence) {
     if (!await send($, payload)) confirmed = false
   }
   if (!confirmed) {
+
     deliveryGapThrough = Math.max(deliveryGapThrough, sourceSequence)
     await $.ui.log('AgentMux activity observation delivery unconfirmed; the Agent remains available.', { to: 'debug' })
   }
@@ -201,7 +207,7 @@ function canonical(value) {
 async function askTurnEndNotice($, turnId) {
   try {
     const asked = await $.process.run(
-      ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+      await runner($),
       { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_TURN_END_EVENT)}, session_id: initialSessionId, turnId, reason: 'answer' }),
         env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
         timeoutMs: ${HOOK_COMMAND_TIMEOUT_SECONDS * 1_000} }
@@ -213,7 +219,7 @@ async function askTurnEndNotice($, turnId) {
     try { result = await $.prompt.submit({ text: notice.text }) }
     catch (error) { result = { drop: 'the native queue refused this prompt: ' + String(error && error.message || error).slice(0, 200) } }
     await $.process.run(
-      ${JSON.stringify([process.execPath, resolveCoreBinPath('agentmux-hook.js')])},
+      await runner($),
       { stdin: JSON.stringify({ hook_event_name: ${JSON.stringify(CLAUDE_NOTICE_ADMISSION_EVENT)}, session_id: initialSessionId,
           notificationId: notice.notificationId, ...(typeof result?.drop === 'string' ? { dropped: result.drop } : { entered: true }) }),
         env: { ELECTRON_RUN_AS_NODE: '1', AGENTMUX_HOOK_PROVIDER: 'claude' },
@@ -223,6 +229,7 @@ async function askTurnEndNotice($, turnId) {
     try { await $.ui.log('AgentMux could not confirm an Inbox notice; the original messages stay in the Inbox.', { to: 'debug' }) } catch {}
   }
 }
+
 
 function observe($, eventName, event) {
   const sourceSequence = ++sequence
@@ -336,22 +343,30 @@ export function register(on) {
 `
 }
 
-export function claudeNativeActivityMutations(): AgentManagedHookMutation[] {
-  const directory = claudeNativeActivityDirectory()
-  return [
-    { path: join(directory, '.claude-plugin', 'plugin.json'), mode: 0o600,
-      content: `${JSON.stringify({ name: 'agentmux-native-activity', version: '1.0.0',
-        description: 'Observe native turn activity and queue AgentMux Inbox notices through the native idle queue.',
-        author: { name: 'AgentMux' } }, null, 2)}\n` },
-    { path: join(directory, 'hooks', 'hooks.json'), mode: 0o600,
-      content: `${JSON.stringify({ modules: ['./register.js'] }, null, 2)}\n` },
-    { path: join(directory, 'hooks', 'register.js'), mode: 0o600, content: claudeNativeActivitySource() }
+/**
+ * The Claude plugin AgentMux loads with --plugin-dir: its classic command Hooks and its module.
+ * It lives in AgentMux's state directory, never in the user's workspace. No file names an install
+ * path (the Run environment names the runner), so every install writes the same bytes, and the
+ * directory is named by those bytes: a new revision is a new directory, never an edit of a folder a
+ * running Claude watches and would hot-reload.
+ */
+export function claudePlugin(classicHooks: Readonly<Record<string, readonly unknown[]>>): { directory: string; mutations: AgentManagedHookMutation[] } {
+  const files: Array<[string, string]> = [
+    [join('.claude-plugin', 'plugin.json'), `${JSON.stringify({ name: 'agentmux-native-activity', version: '1.0.0',
+      description: 'Deliver Claude Hooks to AgentMux and queue AgentMux Inbox notices through the native idle queue.',
+      author: { name: 'AgentMux' } }, null, 2)}\n`],
+    [join('hooks', 'hooks.json'), `${JSON.stringify({ modules: ['./register.js'], hooks: classicHooks }, null, 2)}\n`],
+    [join('hooks', 'register.js'), claudeNativeActivitySource()]
   ]
+  const revision = createHash('sha256')
+  for (const [path, content] of files) revision.update(path).update('\0').update(content).update('\0')
+  const directory = join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'plugins', revision.digest('hex'))
+  return { directory, mutations: files.map(([path, content]) => ({ path: join(directory, path), mode: 0o600, content })) }
 }
 
 /** The repeatable, single-value --plugin-dir follows prompts; an explicit -- keeps its meaning. */
-export function withClaudeNativeActivity(args: readonly string[]): string[] {
+export function withClaudePlugin(args: readonly string[], directory: string): string[] {
   const separator = args.indexOf('--')
   const at = separator < 0 ? args.length : separator
-  return [...args.slice(0, at), '--plugin-dir', claudeNativeActivityDirectory(), ...args.slice(at)]
+  return [...args.slice(0, at), '--plugin-dir', directory, ...args.slice(at)]
 }

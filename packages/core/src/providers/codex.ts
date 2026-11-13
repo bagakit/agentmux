@@ -12,11 +12,10 @@ import { observeCodexSessionStatus } from './codex-session-status.js'
 import { prepareCodexManagedLaunch, prepareCodexNativeInput } from './codex-native-input.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
+import { withCodexLaunchHooks } from './codex-launch-hooks.js'
+export { CODEX_HOOK_EVENTS } from './codex-launch-hooks.js'
 import { isAbsolute } from 'node:path'
-import { join, resolve } from 'node:path'
-import { AgentMuxError } from '../errors.js'
 import { codexMainNativeRecord } from './codex-native-record-role.js'
-import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from './launch-options.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { discoverAppServerNativeSession } from './app-server-native-session.js'
@@ -26,8 +25,8 @@ import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOptio
 import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { nativeHookToolCallId } from '../hook-normalizer.js'
-import type { AgentHookToolInvocation } from '../types.js'
-import { buildPromptInputPayload, catalog, managedHookCommand, sanitizeBracketedPasteText, hookCommandTimeout } from './shared.js'
+import type { AgentHookToolInvocation, AgentLaunchPlan } from '../types.js'
+import { buildPromptInputPayload, catalog, sanitizeBracketedPasteText } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -84,19 +83,8 @@ function permissionToolCallId(eventName: string, payload: Readonly<Record<string
   } catch { return undefined }
 }
 
-export const CODEX_HOOK_EVENTS = [
-  'SessionStart',
-  'PermissionRequest',
-  'PreToolUse',
-  'PostToolUse',
-  'UserPromptSubmit',
-  'SubagentStart',
-  'SubagentStop',
-  'Stop',
-  'Interrupt'
-] as const
-
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  launchCarried: true,
   lifecycle: {
     SessionStart: 'session-start',
     UserPromptSubmit: 'user-prompt-submit',
@@ -165,34 +153,13 @@ const CODEX_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
   { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: PERMISSION_ESC }
 ]
 
-export function createCodexManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
-  const workspace = resolve(workspacePath)
-  if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
-    throw new AgentMuxError('Codex Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
-  }
-  const command = managedHookCommand('codex')
-  const hooks = Object.fromEntries(CODEX_HOOK_EVENTS.map((eventName) => [eventName, [{
-    ...(eventName === 'SessionStart' ? { matcher: 'startup|resume|clear|compact' } : {}),
-    hooks: [{ type: 'command', command, ...(eventName === 'PermissionRequest' ? {} : hookCommandTimeout('codex')) }]
-  }]]))
-  return {
-    providerId: 'codex',
-    mutations: [{
-      path: join(workspace, '.codex', 'hooks.json'),
-      content: `${JSON.stringify({ description: 'AgentMux Codex lifecycle bridge.', hooks }, null, 2)}\n`,
-      mode: 0o600,
-      merge: { kind: 'json-managed-events' }
-    }]
-  }
-}
-
 export function createCodexProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const interaction = createNumberedTerminalInteractionProtocol({
     questionEvents: ['PreToolUse'], questionTools: ['request_user_input', 'askuserquestion'],
     questionCompletionEvents: ['PostToolUse'], permissionCompletionEvents: ['PostToolUse'], permissionOptions: CODEX_PERMISSION_OPTIONS
   })
   const verifyPromptExecutionTransport = createCodexPromptExecutionTransportVerifier()
-  return defineAgentProvider({
+  const provider = defineAgentProvider({
     prepareToolExecutionLaunch: (plan, context) => prepareCodexToolExecutionLaunch(plan, { workspacePath: context.binding.workspacePath, url: context.url }, { launchWorkspacePath: context.launchWorkspacePath, ...(context.invocation ? { invocation: context.invocation } : {}) }),
     prepareExecutionHelper: prepareCodexExecutionHelper,
     prepareManagedLaunch: prepareCodexManagedLaunch,
@@ -200,12 +167,11 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     planQuestionReply: planCodexQuestionReply,
     observeTerminalFrontend: observeCodexTerminalFrontend,
     reconnectTerminalFrontend: reconnectCodexTerminalFrontend,
-    planManagedHooks: ({ workspacePath }) => createCodexManagedHookPlan(workspacePath),
     catalog: catalog({
       composer: {"skillRoots": [".agents/skills", ".codex/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/status", "description": "Session and usage"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/diff", "description": "Review changes"}]},
       id: 'codex', label: 'Codex', executable: 'codex', expectedProcess: 'codex',
       promptDelivery: 'positional-argv',
-      hookStrategy: { kind: 'native', installation: 'explicit-managed' },
+      hookStrategy: { kind: 'native', installation: 'launch-carried' },
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
@@ -249,11 +215,20 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     buildForkArgs: (sessionId, _transcriptPath, prompt, args) => codexInvocation(args, ['fork', sessionId], prompt),
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => codexInvocation(args, ['resume', sessionId], prompt)
   })
+  const withHookIssue = (plan: AgentLaunchPlan, args: readonly string[]): AgentLaunchPlan => {
+    const issue = withCodexLaunchHooks(args).issue
+    return issue ? { ...plan, hookLaunchIssue: { code: 'HOOK_LAUNCH_CONFIGURATION_UNCONFIRMED', message: issue } } : plan
+  }
+  return { ...provider,
+    buildLaunch: context => withHookIssue(provider.buildLaunch(context), context.args),
+    buildResumeLaunch: context => withHookIssue(provider.buildResumeLaunch(context), context.args),
+    buildForkLaunch: context => withHookIssue(provider.buildForkLaunch!(context), context.args)
+  }
 }
 
 /** Keep the configured launcher intact. Native root options also apply to resume/fork. */
 function codexInvocation(args: readonly string[], action: readonly string[], prompt?: string): string[] {
-  return [...args,
+  return [...withCodexLaunchHooks(args).args,
     ...(args.includes('--dangerously-bypass-hook-trust') ? [] : ['--dangerously-bypass-hook-trust']),
     ...action,
     ...(prompt ? ['--', prompt] : [])]

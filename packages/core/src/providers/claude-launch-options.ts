@@ -1,0 +1,2 @@
+/** Native single-value options shared by launch readers; values remain opaque data. */
+export const claudeLaunchValueOptions = new Set(['--model', '--permission-mode', '--settings', '--setting-sources', '--system-prompt', '--system-prompt-file', '--append-system-prompt', '--append-system-prompt-file', '--agent', '--agents', '--resume', '-r', '--session-id', '--effort', '--output-format', '--input-format', '--max-turns', '--max-budget-usd', '--add-dir', '--plugin-dir', '--plugin-url'])

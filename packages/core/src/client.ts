@@ -6,6 +6,7 @@ import { parseAgentSessionUsageInput, SESSION_USAGE_UNMEASURED, type AgentSessio
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { homedir } from 'node:os'
+import { existsSync } from 'node:fs'
 import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
@@ -80,6 +81,7 @@ import { hasSelectedNativeTarget, nativeTargetSourceUnconfirmed, resolveNativeSe
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
+import { launchScopedHookEnvironment } from './providers/shared.js'
 import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource, type AgentMuxAgentForkSource } from './agent-fork.js'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled, agentInteractionRequestTarget } from './agent-interaction-state.js'
 import {
@@ -2400,7 +2402,7 @@ export class AgentMuxClient {
     try {
       const provider = this.providers.get(providerId)
       const strategy = provider.catalog.hookStrategy
-      if (strategy.kind !== 'native' || strategy.installation !== 'explicit-managed') {
+      if (strategy.kind !== 'native' || strategy.installation === 'unmanaged') {
         return skipped(strategy.kind === 'none' ? 'HOOKS_UNSUPPORTED' : 'HOOKS_NOT_MANAGED',
           strategy.kind === 'none' ? null : 'This Provider owns its Hook setup; inspect it through the Provider.')
       }
@@ -2408,10 +2410,14 @@ export class AgentMuxClient {
       const planEnv = options.env === undefined ? undefined : Object.fromEntries(
         Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
       )
+      const launchCarried = strategy.installation === 'launch-carried'
       const plan = this.managedHookPlan(provider, { workspacePath, ...(planEnv ? { env: planEnv } : {}), ...(options.endpoint ? { endpoint: options.endpoint } : {}) })
-      if (!plan) return skipped('HOOK_PLAN_CONTEXT_UNAVAILABLE', 'Provide the existing native binding context or a managed Hook plan; inspection does not create a binding.')
-      const disk = await this.hookInstaller.inspect(plan)
-      if (disk.status !== 'installed' || !provider.inspectHookActivation) return { ...disk, workspacePath }
+      if (!plan && !launchCarried) return skipped('HOOK_PLAN_CONTEXT_UNAVAILABLE', 'Provide the existing native binding context or a managed Hook plan; inspection does not create a binding.')
+      const disk: AgentManagedHookInspection = launchCarried
+        ? { providerId, checkedAt: Date.now(), status: 'partial', code: 'HOOK_NATIVE_LOADING_UNCONFIRMED',
+          action: 'Inspect the native loading of the declarations carried by this launch.', targets: [] }
+        : await this.hookInstaller.inspect(plan!)
+      if ((!launchCarried && disk.status !== 'installed') || !provider.inspectHookActivation) return { ...disk, workspacePath }
       if (this.providerReadsDisposed) return { ...disk, workspacePath, status: 'error', code: 'AGENT_HOOK_READ_CANCELLED',
         action: 'The inspection client was disposed. Inspect with an active client.' }
       if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) return { ...disk, workspacePath, status: 'error', code: 'AGENT_HOOK_READ_BUSY',
@@ -2420,9 +2426,12 @@ export class AgentMuxClient {
       const { controller } = lifetime
       let activation
       try {
+        const launch = launchCarried ? provider.buildLaunch({ workspacePath, prompt: '',
+          args: options.args ?? [], env: planEnv ?? {}, commandOverride: resolveAgentExecutable(options.command, provider.executable) }) : null
         activation = await lifetime.read(provider.inspectHookActivation({
-          plan, workspacePath, command: resolveAgentExecutable(options.command, provider.executable), args: options.args ?? [],
-          env: options.env ?? {}, signal: controller.signal
+          plan: plan ?? { providerId, mutations: [] }, workspacePath,
+          command: launch?.command ?? resolveAgentExecutable(options.command, provider.executable), args: launch?.args ?? options.args ?? [],
+          env: launch ? { ...launch.env, ...options.env } : options.env ?? {}, signal: controller.signal
         }))
         controller.signal.throwIfAborted()
       } catch {
@@ -5515,12 +5524,13 @@ export class AgentMuxClient {
         input.providerId,
         hookBindingIdentity(lifecycleOperationId)
       )
-      await this.ensureManagedHooks(
+      const launchHooksReady = await this.ensureManagedHooks(
         provider,
         input.workspacePath,
         agentSessionId,
         input.env ?? {},
-        hookBinding.endpoint
+        hookBinding.endpoint,
+        plan.hookLaunchIssue
       )
       await this.prepareOwnedWorkspaceTrust(provider, input.workspacePath, agentSessionId, input.env ?? {})
       const launchOptions = normalizeLaunchOptionSelection(input.launchOptions)
@@ -5552,7 +5562,8 @@ export class AgentMuxClient {
           executorId,
           hookBinding,
           lifecycleOperationId,
-          invocationCapability
+          invocationCapability,
+          launchHooksReady
         ),
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
@@ -5908,6 +5919,9 @@ export class AgentMuxClient {
   private managedHookPlan(provider: AgentProvider, context: AgentManagedHookPlanContext): AgentManagedHookPlan | null {
     let plan: AgentManagedHookPlan | null
     try {
+      if (provider.hook.launchCarried && !existsSync(resolveCoreBinPath('agentmux-hook.js'))) {
+        throw new AgentMuxError('The launching Core Hook runner is missing. Restore this Core installation and inspect again; the Agent remains available.', 'HOOK_RUNNER_UNAVAILABLE')
+      }
       plan = provider.planManagedHooks?.(context) ?? null
     } catch (cause) {
       if (cause instanceof AgentMuxError) throw cause
@@ -5924,14 +5938,18 @@ export class AgentMuxClient {
     workspacePath: string,
     agentSessionId: string,
     env: Readonly<Record<string, string>>,
-    endpoint?: { url: string; token: string }
-  ): Promise<void> {
+    endpoint?: { url: string; token: string },
+    launchIssue?: import('./types.js').AgentLaunchPlan['hookLaunchIssue']
+  ): Promise<boolean> {
     const hookStrategy = provider.catalog.hookStrategy
-    if (hookStrategy.kind !== 'native' || hookStrategy.installation !== 'explicit-managed') return
+    if (hookStrategy.kind !== 'native' || hookStrategy.installation === 'unmanaged') return true
     try {
+      if (launchIssue) throw new AgentMuxError(launchIssue.message, launchIssue.code)
       const plan = this.managedHookPlan(provider, { workspacePath, env, ...(endpoint ? { endpoint } : {}) })
+      if (hookStrategy.installation === 'launch-carried') return true
       if (!plan) throw new AgentMuxError('The exact managed Hook planning context is unavailable.', 'HOOK_PLAN_CONTEXT_UNAVAILABLE')
       await this.hookInstaller.ensure(plan)
+      return true
     } catch (error) {
       this.publisher.publish({
         type: 'agent-error',
@@ -5942,6 +5960,7 @@ export class AgentMuxClient {
         }`,
         evidence: { source: 'user', observedAt: Date.now() }
       })
+      return false
     }
   }
 
@@ -8771,7 +8790,8 @@ export class AgentMuxClient {
     executorId: AgentExecutorId,
     binding: AgentHookBinding,
     lifecycleOperationId: string,
-    capability: string
+    capability: string,
+    launchHooksReady = true
   ): Record<string, string> {
     const provider = this.providers.get(providerId)
     // usage 与 eventNameSource 均从 catalog/hook 声明注入轻量元数据，不让子进程导入注册表。
@@ -8793,7 +8813,8 @@ export class AgentMuxClient {
       AGENTMUX_AGENT_CAPABILITY: capability,
       ...(usage ? { AGENTMUX_USAGE_TRANSCRIPT_FORMAT: usage.transcriptFormat } : {}),
       AGENTMUX_HOOK_USAGE_EVENTS: JSON.stringify(provider.hook.usageFinalizationEvents ?? []),
-      ...(source?.kind === 'payload' ? { AGENTMUX_HOOK_PAYLOAD_KEY: source.payloadKey } : {})
+      ...(source?.kind === 'payload' ? { AGENTMUX_HOOK_PAYLOAD_KEY: source.payloadKey } : {}),
+      ...launchScopedHookEnvironment(provider.hook.launchCarried === true, launchHooksReady)
     }
     if (source?.kind !== 'payload') {
       delete resolved.AGENTMUX_HOOK_PAYLOAD_KEY

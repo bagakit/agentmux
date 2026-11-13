@@ -12,6 +12,7 @@ import type { AgentProvider } from '../agent-provider.js'
 import type { CodexManagedThreadConfiguration, CodexManagedRunPlan } from './codex-managed-run.js'
 import { connectCodexNativeActor } from './codex-native-rpc.js'
 import { prepareCodexDurableQueueInput } from './codex-native-queue.js'
+import { isCodexManagedHookConfig } from './codex-launch-hooks.js'
 
 // Persisted contract identity, not the currently installed CLI version. Both
 // qualified releases use this exact actor/input wire; old claims keep their ID.
@@ -32,7 +33,11 @@ function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; 
     if (arg === BYPASS_PERMISSIONS) {
       if (bypass) return null
       bypass = true
-    } else if (shared.has(arg)) { const value = args[++i]; if (value === undefined || value.startsWith('-')) return null; result.push(arg, value); custom ||= arg === '-c' || arg === '--config' }
+    } else if (shared.has(arg)) {
+      const value = args[++i]; if (value === undefined || value.startsWith('-')) return null
+      result.push(arg, value)
+      custom ||= (arg === '-c' || arg === '--config') && !isCodexManagedHookConfig(value)
+    }
     else if (valueFlags.has(arg)) {
       const value = args[++i]; if (value === undefined || value.startsWith('-')) return null
       // This native version explicitly rejects --profile for app-server and
@@ -54,7 +59,9 @@ function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; 
       permission ||= ['-s', '--sandbox', '-a', '--ask-for-approval'].includes(arg)
       custom ||= arg === '-p' || arg === '--profile'
     }
-    else if (arg.startsWith('--config=') || arg.startsWith('--enable=') || arg.startsWith('--disable=')) { result.push(arg); custom ||= arg.startsWith('--config=') }
+    else if (arg.startsWith('--config=') || arg.startsWith('--enable=') || arg.startsWith('--disable=')) {
+      result.push(arg); custom ||= arg.startsWith('--config=') && !isCodexManagedHookConfig(arg.slice('--config='.length))
+    }
     else if (!switches.has(arg)) return null
     else frontendArgs.push(arg)
   }
@@ -92,6 +99,13 @@ function nativeResumePlan(args: readonly string[], prompt?: string): Pick<CodexM
         if (resume.cwd !== undefined) return null
         resume.cwd = value
       }
+    } else if (arg === '-c' || arg === '--config') {
+      const value = args[++i]
+      if (!value || i >= actionIndex || !isCodexManagedHookConfig(value)) return null
+      serverConfig.push(arg, value)
+    } else if (arg.startsWith('--config=')) {
+      if (!isCodexManagedHookConfig(arg.slice('--config='.length))) return null
+      serverConfig.push(arg)
     } else if (arg === '--enable' || arg === '--disable') {
       const value = args[++i]; if (!value || value.startsWith('-') || i >= actionIndex) return null
       serverConfig.push(arg, value)
@@ -118,7 +132,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, initializationControl: true as const, launch: { command: plan.command, args: [...plan.args] } }
   const managed: CodexManagedRunPlan = { command: plan.command, serverConfig, frontendArgs,
     ...(prepared ? { resume: prepared.resume } : { create: creation!.configuration }) }
-  return { nativeActor, promptDelivery: 'post-launch', plan: { command: process.execPath,
+  return { nativeActor, promptDelivery: 'post-launch', plan: { ...plan, command: process.execPath,
     args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify(managed)],
     env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: nativeActor.token, [CODEX_ACTOR_ID_ENV]: nativeActor.actorId, [CODEX_ACTOR_LIFECYCLE_ENV]: lifecycleOperationId } } }
 }

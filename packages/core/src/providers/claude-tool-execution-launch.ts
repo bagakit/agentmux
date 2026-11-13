@@ -10,7 +10,7 @@ import { agentControlFailureCode, registerAgentExecutionInvocation } from '../ag
 
 import { prepareClaudeExecutionPolicy } from './claude-execution-policy.js'
 export const CLAUDE_EXECUTION_MCP_SERVER = 'amux_exec'
-const valueOptions = new Set(['--model', '--permission-mode', '--settings', '--setting-sources', '--system-prompt', '--system-prompt-file', '--append-system-prompt', '--append-system-prompt-file', '--agent', '--agents', '--resume', '-r', '--session-id', '--effort', '--output-format', '--input-format', '--max-turns', '--max-budget-usd', '--add-dir', '--plugin-dir', '--plugin-url'])
+import { claudeLaunchValueOptions as valueOptions } from './claude-launch-options.js'
 
 export async function qualifyClaudeExecutionExecutable(command: string, options: { env: Readonly<NodeJS.ProcessEnv>; workspacePath: string }): Promise<string> {
   const candidates = isAbsolute(command) || command.includes('/') ? [resolve(options.workspacePath, command)]

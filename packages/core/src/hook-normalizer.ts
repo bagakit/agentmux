@@ -62,6 +62,11 @@ export type AgentNativeSubagentTracking = {
 
 export type AgentNativeHookSpecification = {
   lifecycle?: AgentHookLifecycleDialect
+  /**
+   * The Provider's managed Hooks travel with its launch (a launch-loaded plugin or per-launch flags)
+   * instead of a file in the user's workspace. Its Runs then accept only calls marked by that launch.
+   */
+  launchCarried?: true
   /** Transcript sample availability is independent of final turn outcome. */
   usageFinalizationEvents?: readonly string[]
   /** Pure projection from the original native payload, only after current main-subject verification. */

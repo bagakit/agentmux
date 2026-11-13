@@ -521,11 +521,12 @@ export type AgentPromptInputPlan =
 
 export type AgentHookStrategy =
   | { kind: 'none' }
-  // `explicit-managed`: AgentMux writes and owns the provider's hook config (codex/claude/antigravity).
+  // `explicit-managed`: AgentMux owns a configuration file or plugin.
+  // `launch-carried`: AgentMux passes declarations in launch flags, without a configuration file.
   // `unmanaged`: the provider emits native hooks AgentMux understands, but its config lives on a surface
   // AgentMux does not install into yet (pi's TypeScript extension) — so hooks only fire if the user
   // wires them by hand. Distinct from `none`, which means the provider has no hooks.
-  | { kind: 'native'; installation: 'explicit-managed' | 'unmanaged' }
+  | { kind: 'native'; installation: 'explicit-managed' | 'launch-carried' | 'unmanaged' }
 
 export type AgentResumeStrategy =
   | { kind: 'none' }
@@ -2270,6 +2271,8 @@ export type AgentTimelineCommit = {
 }
 
 export type AgentLaunchPlan = {
+  /** Provider could not carry its managed Hooks; Core retains ordinary input and prior callbacks. */
+  hookLaunchIssue?: { code: string; message: string }
   command: string
   args: string[]
   env: Record<string, string>

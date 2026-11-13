@@ -557,12 +557,13 @@ export class AgentSessionRunLifecycle {
       //
       // 对写命令的那九家是幂等 no-op（内容不含 token，`ensure` 见 hash 相同便不碰盘），
       // 对 pi 也是（它运行时从自己进程的环境变量取值，token 一个字节都不落盘）。
-      await this.ports.hooks.ensureManagedHooks(
+      const launchHooksReady = await this.ports.hooks.ensureManagedHooks(
         provider,
         current.workspacePath,
         current.agentSessionId,
         input.env ?? {},
-        hookBinding.endpoint
+        hookBinding.endpoint,
+        plan.hookLaunchIssue
       )
       await this.ports.hooks.prepareOwnedWorkspaceTrust(provider, current.workspacePath, current.agentSessionId, input.env ?? {})
       if (reservation.kind === 'reopen') {
@@ -587,7 +588,7 @@ export class AgentSessionRunLifecycle {
           return null
         }) : null
       const launchEnvironment = this.ports.hooks.agentEnvironment(plan.env, current.agentSessionId, current.providerId, current.executorId,
-        hookBinding, lifecycleOperationId, invocationCapability)
+        hookBinding, lifecycleOperationId, invocationCapability, launchHooksReady)
       const launch = { program: plan.command, args: plan.args, cwd: current.workspacePath, env: launchEnvironment,
         ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows }) }
       let dispatch: AgentMuxPreparedResumeDispatch | undefined

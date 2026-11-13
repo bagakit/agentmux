@@ -1,7 +1,7 @@
 import { prepareClaudeToolExecutionLaunch } from './claude-tool-execution-launch.js'
 import { prepareClaudeExecutionHelper } from './claude-execution-helper.js'
 import { CLAUDE_USAGE_CAPABILITY } from './claude-usage.js'
-import { inspectHookDisableSetting } from './shared.js'
+import { inspectClaudeHookActivation } from './claude-hook-activation.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
@@ -10,18 +10,15 @@ import { prepareClaudeOwnedWorkspaceTrust } from './claude-workspace-trust.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   claudeNativeActivity,
-  claudeNativeActivityMutations,
+  claudePlugin,
   CLAUDE_TURN_END_DECISION,
   CLAUDE_TURN_END_EVENT,
   CLAUDE_NOTICE_ADMISSION_EVENT,
   claudeNativeObservationFailure,
   claudeNativeTurnIdentity,
-  withClaudeNativeActivity
+  withClaudePlugin
 } from './claude-native-activity.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
-import { isAbsolute } from 'node:path'
-import { join, resolve } from 'node:path'
-import { AgentMuxError } from '../errors.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CLAUDE_LAUNCH_OPTIONS } from './launch-options.js'
@@ -31,7 +28,7 @@ import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import {
   buildPromptInputPayload,
   catalog,
-  managedHookCommand,
+  launchScopedHookCommand,
   hookCommandTimeout,
   sanitizeBracketedPasteText
 } from './shared.js'
@@ -39,7 +36,7 @@ import {
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
 /**
- * 写进 `<workspace>/.claude/settings.json` 的事件名。
+ * AgentMux 插件 `hooks/hooks.json` 声明的经典事件名（随启动经 `--plugin-dir` 加载，不写进工作区）。
  *
  * 这份清单是**实际注册**的那一份，与 `CLAUDE_HOOKS.rules` 引用的名字必须一致：rules 里写了却没装的
  * 事件，Claude 压根不会发——声明看着完整，运行时永远命中不到。此前 `PostToolUseFailure`、
@@ -67,6 +64,7 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  launchCarried: true,
   // Return a decision on the original native PermissionRequest pipe. This does not
   // grant an Agent authority to answer: the common interaction owner verifies its author.
   permissionDecision: {
@@ -76,6 +74,7 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
       'reject-once': { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny' } } }
     }
   },
+
   lifecycle: {
     SessionStart: 'session-start',
     UserPromptSubmit: 'user-prompt-submit',
@@ -154,37 +153,33 @@ const CLAUDE_PERMISSION_OPTIONS: readonly TerminalPermissionOption[] = [
   { id: 'reject-once', label: 'Deny', kind: 'reject-once', tier: 'safe', input: PERMISSION_ESC }
 ]
 
-export function createClaudeManagedHookPlan(workspacePath: string): AgentManagedHookPlan {
-  const workspace = resolve(workspacePath)
-  if (!isAbsolute(workspacePath) || workspace !== workspacePath) {
-    throw new AgentMuxError('Claude Hook workspace must be an absolute normalized path.', 'INVALID_HOOK_PLAN')
-  }
-  const command = managedHookCommand('claude')
-  const hooks = Object.fromEntries(CLAUDE_HOOK_EVENTS.map((eventName) => [eventName, [{
+/**
+ * Claude's managed Hooks travel with the launch: the classic command Hooks and the module live in one
+ * plugin under AgentMux's state directory, loaded by --plugin-dir. Nothing is written into the
+ * workspace, so the plan is the same for every workspace.
+ */
+export function claudeManagedPlugin(): ReturnType<typeof claudePlugin> {
+  const command = launchScopedHookCommand('claude')
+  return claudePlugin(Object.fromEntries(CLAUDE_HOOK_EVENTS.map((eventName) => [eventName, [{
     // 三个 tool 事件按 matcher 分派（bundle 内嵌文档的 Hook Events 表里，这三行的 Matcher 列都是
     // "Tool name"）。`*` 是「所有工具」；缺了 matcher，Claude 对 tool 事件不会分派到我们这条。
-    // `PostToolUseFailure` 此前既不在清单里、自然也没有 matcher——补装时必须一起给。
     ...(eventName === 'PreToolUse' || eventName === 'PostToolUse' || eventName === 'PostToolUseFailure'
       ? { matcher: '*' }
       : {}),
     hooks: [{ type: 'command', command, ...(eventName === 'PermissionRequest' ? {} : hookCommandTimeout('claude')) }]
-  }]]))
-  return {
-    providerId: 'claude',
-    mutations: [{
-      path: join(workspace, '.claude', 'settings.json'),
-      content: `${JSON.stringify({ hooks }, null, 2)}\n`,
-      mode: 0o600,
-      merge: { kind: 'json-managed-events' }
-    }, ...claudeNativeActivityMutations()]
-  }
+  }]])))
+}
+
+export function createClaudeManagedHookPlan(): AgentManagedHookPlan {
+  return { providerId: 'claude', mutations: claudeManagedPlugin().mutations }
+
 }
 
 export function createClaudeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const provider = defineAgentProvider({
     prepareToolExecutionLaunch: prepareClaudeToolExecutionLaunch,
     prepareExecutionHelper: prepareClaudeExecutionHelper,
-    planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
+    planManagedHooks: () => createClaudeManagedHookPlan(),
     prepareOwnedWorkspaceTrust: prepareClaudeOwnedWorkspaceTrust,
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
@@ -234,7 +229,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       permissionOptions: CLAUDE_PERMISSION_OPTIONS
     }),
     hook: CLAUDE_HOOKS,
-    inspectHookActivation: context => inspectHookDisableSetting(context, 'disableAllHooks'),
+    inspectHookActivation: inspectClaudeHookActivation,
     launchOptions: CLAUDE_LAUNCH_OPTIONS,
     buildForkArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, '--fork-session', ...args, ...(prompt ? [prompt] : [])
@@ -289,15 +284,15 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     },
     buildLaunch(context) {
       const launch = provider.buildLaunch(context)
-      return { ...launch, args: withClaudeNativeActivity(launch.args) }
+      return { ...launch, args: withClaudePlugin(launch.args, claudeManagedPlugin().directory) }
     },
     buildResumeLaunch(context) {
       const launch = provider.buildResumeLaunch(context)
-      return { ...launch, args: withClaudeNativeActivity(launch.args) }
+      return { ...launch, args: withClaudePlugin(launch.args, claudeManagedPlugin().directory) }
     },
     ...(provider.buildForkLaunch ? { buildForkLaunch(context: Parameters<NonNullable<AgentProvider['buildForkLaunch']>>[0]) {
       const launch = provider.buildForkLaunch!(context)
-      return { ...launch, args: withClaudeNativeActivity(launch.args) }
+      return { ...launch, args: withClaudePlugin(launch.args, claudeManagedPlugin().directory) }
     } } : {})
   }
 }

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { resolveCoreBinPath } from '../runtime-paths.js'
+import { LAUNCH_SCOPED_HOOK_FLAG } from '../launch-scoped-hook.js'
 import type { BuiltInAgentProviderId } from '../agent-provider-id.js'
 import type { AgentCatalogEntry, AgentProviderId } from '../types.js'
 
@@ -68,6 +69,34 @@ export function managedHookCommand(providerId: AgentProviderId): string {
 export function hermesHookCommand(): string {
   const commandPath = hookRunnerPath()
   return `/usr/bin/env ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote('hermes')} ${shellQuote(process.execPath)} ${shellQuote(commandPath)}`
+}
+
+/**
+ * The command a launch-carried Hook runs. It names no install path: the launching Core puts its own
+ * Node and runner in the Run environment ({@link launchScopedHookEnvironment}), so one declaration
+ * serves every install. Outside such a Run both are unset and the shell test answers the passive `{}`
+ * (Codex requires JSON on Stop), so a session started elsewhere never reports a Hook error for it.
+ */
+export function launchScopedHookCommand(providerId: AgentProviderId): string {
+  return `[ -n "$AGENTMUX_HOOK_RUNNER" ] || { printf '{}\\n'; exit 0; }; ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ` +
+    `"$AGENTMUX_HOOK_NODE" "$AGENTMUX_HOOK_RUNNER" ${LAUNCH_SCOPED_HOOK_FLAG}`
+}
+
+/**
+ * Every Run states whether its Hooks travel with the launch. The value is written for every Provider,
+ * '0' included, because ctxmux starts a Run from Core's own process environment: a Core that itself
+ * runs inside an AgentMux Run would otherwise hand its '1' to a Provider whose Hooks are not marked.
+ * The runner is named only when it exists; a missing runner leaves the commands passive, and
+ * ensureManagedHooks reports the missing file. Preparation failure leaves the runner available
+ * for any successfully materialized plugin, while carrierReady disables only duplicate suppression.
+ */
+export function launchScopedHookEnvironment(launchScoped: boolean, carrierReady = true): Record<string, string> {
+  const runner = resolveCoreBinPath('agentmux-hook.js')
+  return {
+    AGENTMUX_HOOK_LAUNCH_SCOPED: launchScoped && carrierReady ? '1' : '0',
+    AGENTMUX_HOOK_NODE: launchScoped ? process.execPath : '',
+    AGENTMUX_HOOK_RUNNER: launchScoped && existsSync(runner) ? runner : ''
+  }
 }
 
 /**

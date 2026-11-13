@@ -13,6 +13,7 @@ import {
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
 import { usageTranscriptDecoder } from './providers/usage-transcript.js'
+import { isLeftoverHookInvocation } from './launch-scoped-hook.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
 
@@ -143,7 +144,8 @@ export async function runAgentHookCommand(): Promise<void> {
   const passive = () => {
     if (!wroteResponse) { process.stdout.write(hookResponseFor(resolveHookProvider(), flagEvent ?? envEvent)); wroteResponse = true }
   }
-  if (!isAgentMuxManagedHookEnvironment() || hookResponseFor(resolveHookProvider(), earlyEvent) !== '{}\n') passive()
+  if (!isAgentMuxManagedHookEnvironment() || isLeftoverHookInvocation(process.argv.slice(2), process.env) ||
+      hookResponseFor(resolveHookProvider(), earlyEvent) !== '{}\n') passive()
   try {
     assertAgentToolContextAvailable()
 
@@ -151,6 +153,9 @@ export async function runAgentHookCommand(): Promise<void> {
     // execute it; keep the passive stdout contract, but never let that process read AgentMux
     // credentials or send an ingress request. The marker is injected by AgentMux terminal env.
     if (!isAgentMuxManagedHookEnvironment()) return
+    // This Run's Hooks travel with its launch; an unmarked call is an AgentMux entry an earlier
+    // version wrote into the workspace, and the launch-carried Hook already delivers its event.
+    if (isLeftoverHookInvocation(process.argv.slice(2), process.env)) return
 
     const chunks: Buffer[] = []
     let bytes = 0

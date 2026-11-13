@@ -24,6 +24,7 @@ import type {
   AgentCapabilitySnapshot,
   AgentExecutableObservation,
   AgentCatalogEntry,
+  AgentHookStrategy,
   AgentProviderId,
   AgentLaunchPlan,
   AgentMuxInteractionInputPlan,
@@ -346,7 +347,8 @@ function assertManagedHookContribution(contribution: {
   planManagedHooks?: AgentProvider['planManagedHooks']
 }): void {
   const strategy = contribution.catalog.hookStrategy
-  const managed = strategy.kind === 'native' && strategy.installation === 'explicit-managed'
+  const declarations = { 'explicit-managed': true, 'launch-carried': false, unmanaged: false } satisfies Record<Extract<AgentHookStrategy, { kind: 'native' }>['installation'], boolean>
+  const managed = strategy.kind === 'native' && declarations[strategy.installation]
   if (managed ? typeof contribution.planManagedHooks !== 'function' : contribution.planManagedHooks !== undefined) {
     throw new AgentMuxError(
       `Provider ${contribution.catalog.id} must declare managed Hook planning exactly when its Hook installation is explicit-managed.`,

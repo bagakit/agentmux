@@ -665,6 +665,9 @@ importers:
       remark-parse:
         specifier: ^11.0.0
         version: 11.0.0
+      smol-toml:
+        specifier: 1.9.1
+        version: 1.9.1
       stream-json:
         specifier: 3.7.0
         version: 3.7.0

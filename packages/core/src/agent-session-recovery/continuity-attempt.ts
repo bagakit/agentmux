@@ -358,7 +358,7 @@ export async function performAgentContinuity(
             const provider = ports.providers.providers.get(value.providerId).catalog
             if (!agentSessionHasNoNativeConversation(value, {
               durabilityConfirmed: !ports.sessions.registry.isDurabilityUnconfirmed(value.agentSessionId),
-              managedIdentityChannel: provider.hookStrategy.kind === 'native' && provider.hookStrategy.installation === 'explicit-managed',
+              managedIdentityChannel: provider.hookStrategy.kind === 'native' && provider.hookStrategy.installation !== 'unmanaged',
               acceptedInputBytes: run?.acceptedInputBytes
             })) {
               absenceChanged = true
@@ -484,7 +484,7 @@ export async function performAgentContinuity(
   // authorization checks of a supervised or standing source.
   const nativeConversationAbsent = Boolean(current && run?.state !== 'running' && catalog?.resumeStrategy.kind === 'provider-native' &&
     agentSessionHasNoNativeConversation(current, { durabilityConfirmed: !ports.sessions.registry.isDurabilityUnconfirmed(current.agentSessionId),
-      managedIdentityChannel: catalog.hookStrategy.kind === 'native' && catalog.hookStrategy.installation === 'explicit-managed',
+      managedIdentityChannel: catalog.hookStrategy.kind === 'native' && catalog.hookStrategy.installation !== 'unmanaged',
       acceptedInputBytes: run?.acceptedInputBytes }))
   if (current && run?.state !== 'running') {
     if (prior?.kind === 'reattachable' && prior.frontendReconnect?.frontendId) throw new AgentMuxError(
