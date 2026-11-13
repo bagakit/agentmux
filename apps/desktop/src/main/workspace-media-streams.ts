@@ -112,7 +112,6 @@ export function resolvePlaylistReference(reference: string, playlistPath: string
     return pathname.startsWith(root) ? pathname.slice(root.length) : null
   })
   if (left === null || left === undefined || left !== right) return { state: 'outside-workspace', path: playlistPath }
-  let path: string
   try { return previewRequestPath(left) }
   catch { return { state: 'unsupported-resource', path: playlistPath } }
 }
@@ -302,7 +301,6 @@ export class WorkspaceMediaStreams {
     return true
   }
 
-  /** The resource a playlist lease's fact names played again; nothing it explained is failing now. */
   /** A clean reply clears that path's fact; any clean reply clears a transient one, since it explained a moment, not a file. */
   private clear(lease: PlaylistLease, path: string): void {
     if (lease.fact.state === 'transient' || ('path' in lease.fact && lease.fact.path === path)) lease.fact = { state: 'active' }
