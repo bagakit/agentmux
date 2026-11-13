@@ -1,0 +1,83 @@
+// Run the "no native conversation to continue" cases unmutated, then once per loaded mutant.
+// The unmutated run must pass every case; each mutant must fail its designated case.
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { createRequire, isBuiltin } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
+
+const root = resolve(import.meta.dirname, '../../..'), require = createRequire(new URL('../package.json', import.meta.url))
+const { build } = require('esbuild')
+const config = 'packages/core/test/agent-session-continuity-empty-native.mutation.config.mts'
+const variants = [
+  { name: 'candidate' },
+  { name: 'admission-before-fact', target: 'answers a startup recovery' },
+  { name: 'ignore-candidates', target: 'keeps native candidates awaiting selection' },
+  { name: 'ignore-durability', target: 'keeps an unconfirmed identity save' },
+  { name: 'public-pending', target: 'reports the dedicated reason through the public' }
+]
+const output = join(root, 'packages/core/.tmp/empty-native-continuity')
+await mkdir(output, { recursive: true })
+const attempt = await mkdtemp(join(output, 'attempt-'))
+const receipt = { schema: 'agentmux.empty-native-continuity-proof.v1', passed: false, results: [] }
+const save = () => writeFile(join(attempt, 'receipt.json'), JSON.stringify(receipt, null, 2))
+// A private compiled CLI from this checkout's source; the candidate run drives it as the real consumer.
+const alias = {}
+for (const name of await readdir(join(root, 'packages'))) {
+  let pkg; try { pkg = JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8')) } catch { continue }
+  for (const [key, value] of Object.entries(pkg.exports ?? {})) {
+    const entry = typeof value === 'string' ? value : value.import
+    if (!entry?.startsWith('./dist/')) continue
+    const source = resolve(root, 'packages', name, entry.replace(/^\.\/dist\/(?:src\/)?/, './src/').replace(/\.js$/, '.ts'))
+    try { await stat(source); alias[key === '.' ? pkg.name : pkg.name + key.slice(1)] = source } catch {}
+  }
+}
+alias['@agentmux/identity/runtime-source'] = join(root, 'packages/identity/dist/runtime-source.js')
+const cli = join(attempt, 'cli')
+await mkdir(join(cli, 'bin'), { recursive: true }); await mkdir(join(cli, 'dist'), { recursive: true })
+await writeFile(join(cli, 'package.json'), '{"type":"module"}')
+await copyFile(join(root, 'packages/core/bin/amux'), join(cli, 'bin/amux'))
+await build({ entryPoints: [join(root, 'packages/core/src/agentmux.ts')], outfile: join(cli, 'dist/agentmux.js'), bundle: true, platform: 'node', format: 'esm',
+  target: 'node24', packages: 'external', alias, logLevel: 'warning', plugins: [{ name: 'existing-dependencies', setup(plugin) {
+    // External dependencies resolve through their own package exports, as the installed CLI loads them.
+    plugin.onResolve({ filter: /^[^./]/ }, async args => {
+      if (isBuiltin(args.path) || alias[args.path]) return null
+      const resolver = createRequire(args.importer || join(root, 'packages/core/package.json'))
+      const parts = args.path.split('/'), name = args.path.startsWith('@') ? parts.splice(0, 2).join('/') : parts.shift()
+      for (const directory of resolver.resolve.paths(name) ?? []) {
+        try {
+          const manifest = join(directory, name, 'package.json'), pkg = JSON.parse(await readFile(manifest, 'utf8'))
+          const shape = pkg.exports?.[parts.length ? './' + parts.join('/') : '.'] ?? (parts.length ? undefined : pkg.exports)
+          const value = typeof shape === 'string' ? shape : shape?.import ?? shape?.default
+          if (typeof value !== 'string') continue
+          const entry = resolve(dirname(manifest), value); await stat(entry); return { path: entry, external: true }
+        } catch {}
+      }
+      return { path: resolver.resolve(args.path), external: true }
+    })
+  } }] })
+for (const variant of variants) {
+  const report = join(attempt, variant.name + '.json'), loaded = join(attempt, variant.name + '.loaded.ndjson')
+  const args = [require.resolve('vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile=' + report]
+  const result = await new Promise((yes, no) => {
+    const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, AMX_EMPTY_NATIVE_LOADED: loaded,
+        ...(variant.name === 'candidate' ? { AGENTMUX_TEST_OBJECT_CLI: join(cli, 'bin/amux') } : { AMX_EMPTY_NATIVE_MUTATION: variant.name }) } })
+    let text = ''; child.stdout.on('data', d => { text += d }); child.stderr.on('data', d => { text += d })
+    child.once('error', no); child.once('close', code => yes({ code, text }))
+  })
+  await writeFile(join(attempt, variant.name + '.log'), result.text)
+  const tests = JSON.parse(await readFile(report, 'utf8')), assertions = tests.testResults.flatMap(test => test.assertionResults)
+  const failed = assertions.filter(test => test.status === 'failed').map(test => test.fullName)
+  const loadedMutation = variant.name === 'candidate' ? true : (await readFile(loaded, 'utf8').catch(() => '')).includes(`"mutation":"${variant.name}"`)
+  receipt.results.push({ name: variant.name, code: result.code, passed: tests.numPassedTests, failed: tests.numFailedTests, loadedMutation, failures: failed })
+  await save()
+  if (variant.name === 'candidate') assert.ok(result.code === 0 && tests.numPassedTests === 9 && tests.numFailedTests === 0, 'Unmutated empty-native cases must all pass')
+  else {
+    assert.ok(loadedMutation, 'Mutation was not loaded: ' + variant.name)
+    assert.ok(result.code === 1 && failed.some(name => name.includes(variant.target)), 'Loaded mutation did not fail its designated case: ' + variant.name)
+  }
+}
+receipt.compiledCli = join(cli, 'dist/agentmux.js'); await rm(cli, { recursive: true, force: true })
+receipt.passed = true; await save()
+console.log('Empty-native continuity proof passed: ' + join(attempt, 'receipt.json'))
