@@ -10,8 +10,12 @@ import {
   type BrowserRecoveryPreview, type BrowserRecoveryPreviewReadResult, type BrowserRecoveryPreviewRecordResult,
   type BrowserRecoveryPreviewRemoveResult, type BrowserRecoveryPreviewScope
 } from '../shared/browser-recovery-preview.js'
+import {
+  BROWSER_PAGE_MEMORY_MAX_RECORD_BYTES, browserPageMemorySchema, type BrowserPageMemory, type BrowserPageMemoryReadResult
+} from '../shared/browser-page-memory.js'
 
 const documentSchema = z.object({ version: z.literal(1), preview: browserRecoveryPreviewSchema }).strict()
+const pageDocumentSchema = z.object({ version: z.literal(1), memory: browserPageMemorySchema }).strict()
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 const sameScope = (a: BrowserRecoveryPreviewScope, b: BrowserRecoveryPreviewScope) =>
   a.browserId === b.browserId && a.profileId === b.profileId && a.mode === b.mode && a.workspaceId === b.workspaceId
@@ -27,18 +31,42 @@ function checkedPreview(value: BrowserRecoveryPreview): BrowserRecoveryPreview {
   return preview
 }
 
-function warning(operation: string, error: unknown): string {
+function warning(operation: string, error: unknown, subject = 'Browser preview'): string {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
-  return `Browser preview could not be ${operation}${typeof code === 'string' ? ` (${code})` : ''}. The page and Retry remain available.`
+  return `${subject} could not be ${operation}${typeof code === 'string' ? ` (${code})` : ''}. The page and Retry remain available.`
+}
+
+/** Absent is `undefined`; any other failure, link or oversized file throws. */
+async function readBoundedFile(path: string, maxBytes: number): Promise<string | undefined> {
+  let handle
+  try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+  try {
+    const info = await handle.stat()
+    if (!info.isFile() || info.size > maxBytes) throw new Error('Browser record is not a bounded file.')
+    const bytes = Buffer.alloc(info.size + 1)
+    let length = 0
+    while (length < bytes.length) {
+      const part = await handle.read(bytes, length, bytes.length - length, length)
+      if (!part.bytesRead) break
+      length += part.bytesRead
+    }
+    if (length !== info.size) throw new Error('Browser record changed during its read.')
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length))
+  } finally { await handle.close() }
 }
 
 /**
- * One self-contained normal file per Browser/Profile, or private memory in this owner only.
- * Related Profile IO is ordered so clear cannot race a queued publication; no directory index or scan.
+ * One self-contained normal file per Browser/Profile for each record kind, or private memory in this
+ * owner only. Related Profile IO is ordered so clear cannot race a queued publication; no directory index or scan.
  */
 export class BrowserRecoveryPreviewStore {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly privatePreviews = new Map<string, BrowserRecoveryPreview>()
+  private readonly privatePages = new Map<string, BrowserPageMemory>()
   private readonly warnings = new Map<string, Map<string, string>>()
 
   constructor(private readonly directory: string) {}
@@ -96,31 +124,63 @@ export class BrowserRecoveryPreviewStore {
           const saved = this.privatePreviews.get(actual.browserId)
           preview = saved ? browserRecoveryPreviewSchema.parse(saved) : undefined
         } else {
-          let handle
-          try { handle = await open(this.path(actual), constants.O_RDONLY | constants.O_NOFOLLOW) }
-          catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing', ...noted }
-            throw error
-          }
-          try {
-            const info = await handle.stat()
-            if (!info.isFile() || info.size > BROWSER_RECOVERY_PREVIEW_MAX_RECORD_BYTES) throw new Error('Browser preview is not a bounded record.')
-            const bytes = Buffer.alloc(info.size + 1)
-            let length = 0
-            while (length < bytes.length) {
-              const part = await handle.read(bytes, length, bytes.length - length, length)
-              if (!part.bytesRead) break
-              length += part.bytesRead
-            }
-            if (length !== info.size) throw new Error('Browser preview changed during its read.')
-            preview = checkedPreview(documentSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true })
-              .decode(bytes.subarray(0, length)))).preview)
-          } finally { await handle.close() }
+          const text = await readBoundedFile(this.path(actual), BROWSER_RECOVERY_PREVIEW_MAX_RECORD_BYTES)
+          if (text === undefined) return { status: 'missing', ...noted }
+          preview = checkedPreview(documentSchema.parse(JSON.parse(text)).preview)
         }
         if (!preview) return { status: 'missing', ...noted }
         if (!sameScope(preview.scope, actual)) throw new Error('Browser preview belongs to another scope.')
         return { status: 'available', preview, ...noted }
       } catch (error) { return { status: 'unavailable', warning: warning('read', error) } }
+    })
+  }
+
+  /** Last-seen page facts share this owner's scope, ordering, private memory and removal. */
+  async recordPage(scope: BrowserRecoveryPreviewScope, value: BrowserPageMemory, isCurrent: () => boolean,
+    signal?: AbortSignal): Promise<BrowserRecoveryPreviewRecordResult> {
+    const subject = 'Browser page memory'
+    let actual: BrowserRecoveryPreviewScope, memory: BrowserPageMemory, document: string
+    try {
+      actual = browserRecoveryPreviewScopeSchema.parse(scope)
+      memory = browserPageMemorySchema.parse(value)
+      if (!sameScope(actual, memory.scope)) throw new Error('Browser page memory belongs to another scope.')
+      document = `${JSON.stringify(pageDocumentSchema.parse({ version: 1, memory }))}\n`
+      if (Buffer.byteLength(document) > BROWSER_PAGE_MEMORY_MAX_RECORD_BYTES) throw new Error('Browser page memory exceeds its record budget.')
+    } catch (error) { return { status: 'unavailable', warning: warning('saved', error, subject) } }
+    return this.enqueue(actual, async () => {
+      try {
+        if (signal?.aborted || !isCurrent()) return { status: 'skipped' }
+        if (actual.mode === 'private') this.privatePages.set(actual.browserId, memory)
+        else {
+          await mkdir(this.profileDirectory(actual.profileId), { recursive: true })
+          if (signal?.aborted || !isCurrent()) return { status: 'skipped' }
+          await durableWriteFile(this.pagePath(actual), document, { ...(signal ? { signal } : {}), requireDirectorySync: true })
+        }
+        return { status: 'recorded' }
+      } catch (error) {
+        if (signal?.aborted && (error === signal.reason || (error instanceof Error && error.cause === signal.reason))) return { status: 'skipped' }
+        return { status: 'unavailable', warning: warning('saved', error, subject) }
+      }
+    })
+  }
+
+  async readPage(scope: BrowserRecoveryPreviewScope): Promise<BrowserPageMemoryReadResult> {
+    const subject = 'Browser page memory'
+    let actual: BrowserRecoveryPreviewScope
+    try { actual = browserRecoveryPreviewScopeSchema.parse(scope) }
+    catch (error) { return { status: 'unavailable', warning: warning('read', error, subject) } }
+    return this.enqueue(actual, async () => {
+      try {
+        let memory: BrowserPageMemory | undefined
+        if (actual.mode === 'private') memory = this.privatePages.get(actual.browserId)
+        else {
+          const text = await readBoundedFile(this.pagePath(actual), BROWSER_PAGE_MEMORY_MAX_RECORD_BYTES)
+          memory = text === undefined ? undefined : pageDocumentSchema.parse(JSON.parse(text)).memory
+        }
+        if (!memory) return { status: 'missing' }
+        if (!sameScope(memory.scope, actual)) throw new Error('Browser page memory belongs to another scope.')
+        return { status: 'available', memory: browserPageMemorySchema.parse(memory) }
+      } catch (error) { return { status: 'unavailable', warning: warning('read', error, subject) } }
     })
   }
 
@@ -130,8 +190,8 @@ export class BrowserRecoveryPreviewStore {
     catch (error) { return { status: 'unavailable', warning: warning('removed', error) } }
     return this.enqueue(actual, async () => {
       try {
-        if (actual.mode === 'private') this.privatePreviews.delete(actual.browserId)
-        else await rm(this.path(actual), { force: true })
+        if (actual.mode === 'private') { this.privatePreviews.delete(actual.browserId); this.privatePages.delete(actual.browserId) }
+        else await Promise.all([rm(this.path(actual), { force: true }), rm(this.pagePath(actual), { force: true })])
         this.setWarning(actual)
         return { status: 'removed' }
       } catch (error) {
@@ -156,7 +216,7 @@ export class BrowserRecoveryPreviewStore {
   async flush(): Promise<void> { await Promise.all(this.tails.values()) }
 
   /** Called at App end after its capture producers have stopped. Normal files remain. */
-  async dispose(): Promise<void> { await this.flush(); this.privatePreviews.clear(); this.warnings.clear() }
+  async dispose(): Promise<void> { await this.flush(); this.privatePreviews.clear(); this.privatePages.clear(); this.warnings.clear() }
 
   private queueKey(scope: BrowserRecoveryPreviewScope): string {
     return scope.mode === 'normal' ? `normal:${scope.profileId}` : `private:${scope.browserId}`
@@ -186,5 +246,8 @@ export class BrowserRecoveryPreviewStore {
   private profileDirectory(profileId: string): string { return join(this.directory, digest(profileId)) }
   private path(scope: BrowserRecoveryPreviewScope & { mode: 'normal' }): string {
     return join(this.profileDirectory(scope.profileId), `${digest(scope.browserId)}.json`)
+  }
+  private pagePath(scope: BrowserRecoveryPreviewScope & { mode: 'normal' }): string {
+    return join(this.profileDirectory(scope.profileId), `${digest(scope.browserId)}.page.json`)
   }
 }
