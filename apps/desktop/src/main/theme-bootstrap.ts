@@ -7,7 +7,8 @@ export function themeBootstrap(appearance: AppearanceConfig, prefersDark: boolea
   const resolved = resolveTheme(appearance, prefersDark)
   const document = { id: resolved.id, ...resolved.value }
   serializeThemeFile(document)
-  return { status: 'available', document, appearance: appearance.appAppearance ?? 'dark', mode: resolved.mode, variables: themeCssVariables(resolved) }
+  return { status: 'available', document, appearance: appearance.appAppearance ?? 'dark', mode: resolved.mode, variables: themeCssVariables(resolved),
+    ...(appearance.appIcon === undefined ? {} : { appIcon: appearance.appIcon }) }
 }
 
 /** Every synchronous request receives a result. This handler never reads disk or awaits Runtime. */

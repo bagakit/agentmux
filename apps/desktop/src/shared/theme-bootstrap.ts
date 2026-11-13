@@ -8,4 +8,6 @@ export type ThemeBootstrap = {
   appearance: AppAppearanceId
   mode: ThemeMode
   variables: Record<string, string>
+  /** The saved App icon exactly as Main read it; the launch surface validates it before use. */
+  appIcon?: unknown
 } | { status: 'unavailable'; message: string }
