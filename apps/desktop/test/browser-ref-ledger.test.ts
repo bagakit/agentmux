@@ -86,6 +86,19 @@ describe('账本记的是内容身份，不是 backendNodeId', () => {
       .toMatch(/#2 match is gone/)
   })
 
+  it('序号没了、剩下好几个长得一样的时候，一个都不认，什么也不做', () => {
+    // 一排三个 Next，记的是第 3 个；现在只剩两个。哪个都可能是它，也都可能不是。
+    const ledger = ledgerFromSnapshot(snapshotOf([
+      node('@e1', 'button', 'Next', 11),
+      node('@e2', 'button', 'Next', 12),
+      node('@e3', 'button', 'Next', 13)
+    ]))
+    const healed = healRef(ledger, '@e3', snapshotOf([node('@e1', 'button', 'Next', 71), node('@e2', 'button', 'Next', 72)]))
+
+    expect(healed.healed, '在好几个同名元素里随手挑了一个').toBe(false)
+    expect(!healed.healed && healed.reason).toMatch(/2 others look the same, so nothing was done/)
+  })
+
   it('地址变了就是真作废，不许在另一个页面上按名字乱认', () => {
     // 两个页面各有一个「Save」是极常见的。跨页面认名字，就是在另一个页面上点了一个同名按钮。
     const ledger = ledgerFromSnapshot(snapshotOf([node('@e1', 'button', 'Save', 11)]))
