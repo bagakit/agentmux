@@ -272,8 +272,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     })
   }, [image.width, image.height, onError, ownerWindow, capture])
   /**
-   * Dims the frozen frame outside the selection and draws its border and handles. Before one exists it dims all of it
-   * and lights the window a click would select; true while that highlight still fades in.
+   * Dims the frozen frame outside the selection and draws its border and handles. Before one exists it dims all of it.
+   * Either way it lights the window a click would select, if any; true while that highlight still fades in.
    */
   function paintCaptureSelection(context: CanvasRenderingContext2D, crop: NormalizedRect | null, fit: number, time: number): boolean {
     const unit = 1 / fit
@@ -293,7 +293,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (column === 1 && row === 1) continue
       context.beginPath(); context.arc(x, y, CROP_HANDLE_SIZE / 2 * unit, 0, Math.PI * 2); context.fill(); context.stroke()
     }
-    return false
+    // A window lights beside an untouched remembered selection, which is only a suggestion.
+    return paintLitWindow(context, unit, time)
   }
   /** A faint fill and a 1 px accent outline, eased in over 90 ms from the first frame that paints it. */
   function paintLitWindow(context: CanvasRenderingContext2D, unit: number, time: number): boolean {
@@ -652,7 +653,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       return
     }
     const spot = point(event), handle = crop ? hitCropHandle(crop, spot, CROP_HANDLE_HIT / viewRef.current.scale) : null
-    lightWindow(crop ? null : windowAt(spot))
+    // An untouched opening selection is only a suggestion: outside it the window under the pointer still lights.
+    const suggested = crop !== null && opening.current !== null && documentState === opening.current
+    lightWindow(!crop || suggested && !rectContains(crop, spot) ? windowAt(spot) : null)
     setCursor(!crop ? 'crosshair' : handle ? CROP_CURSORS[handle] : !rectContains(crop, spot) ? documentState.shapes.length ? 'default' : 'crosshair' : tool === 'select' ? 'move' : 'crosshair')
   }
   /** Right-click outside the selection clears it while there are no marks to lose; with no selection it cancels. */
@@ -679,7 +682,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     resetGesture()
     if (crop) {
       // Before any selection, a press that never travelled selects the window it lit, as this display shows it.
-      const target = crop.mode === 'create' && click && !down.dragged && !crop.original ? windowAt(crop.start) : null
+      const untouched = opening.current !== null && crop.original !== null && crop.original === opening.current.crop
+      const target = crop.mode === 'create' && click && !down.dragged && (!crop.original || untouched) ? windowAt(crop.start) : null
       const box = target ? intersectRect(target, originalBounds) : cropGestureRect(crop, originalBounds)
       if (box && !(crop.mode === 'create' && click && !target) && JSON.stringify(box) !== JSON.stringify(crop.original)) {
         edit(doc => setCrop(doc, box)); if (crop.mode === 'create') onSelect?.()
