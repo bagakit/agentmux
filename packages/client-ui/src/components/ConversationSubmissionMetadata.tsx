@@ -9,17 +9,28 @@ const inputStatus: Record<AgentInputSubmissionObservation['status'], string> = {
   waiting: '已保存 · 等待 Agent', stopped: '已保存 · 已停止送达', 'terminal-confirmed': '已送入终端 · Agent 接收未确认',
   admitted: 'Agent 已接收', 'launch-carried': '恢复启动已携带消息 · Agent 接收未确认', 'not-applied': '未送达 Agent', unknown: '已保存 · 送达 Agent 未确认'
 }
+const inputAttention: Record<AgentInputSubmissionObservation['status'], string | null> = {
+  waiting: '等待 Agent', stopped: '已停止送达', 'terminal-confirmed': 'Agent 接收待核实',
+  admitted: null, 'launch-carried': 'Agent 接收待核实', 'not-applied': '未送达 Agent', unknown: '送达待核实'
+}
 
 /** Bound work to the preview; the original reader retains the complete content. */
 export const conversationSubmissionPreview = (text: string, limit = 160) => text.slice(0, limit).replace(/\s+/gu, ' ').trim()
 
 /** The same original submission facts in a native card or an independent send row. */
-export function ConversationSubmissionSummary({ record, renderClock, showTime = true }: {
-  record: ConversationSourceRecord; renderClock(time: number): string; showTime?: boolean
+export function ConversationSubmissionSummary({ record, renderClock, showTime = true, attentionOnly = false }: {
+  record: ConversationSourceRecord; renderClock(time: number): string; showTime?: boolean; attentionOnly?: boolean | undefined
 }) {
   if (record.original.kind !== 'captured') return null
   const item = record.original.item
   const refused = item.externalInput?.state === 'refused'
+  if (attentionOnly) {
+    const attention = refused ? item.externalInput?.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? '未提交 · 成员未获输入权限'
+      : item.externalInput?.code === 'INGRESS_INPUT_OUTSIDE_SCOPE' ? '未提交 · 不在触发范围' : '请求被拒绝'
+      : item.inputSubmission ? inputAttention[item.inputSubmission.status] : item.inputRef ? '接收待核实' : null
+    return attention ? <span className="conversation-submission-summary" role="status" data-status={item.status}
+      data-input-status={item.inputSubmission?.status} title="原输入状态；在消息详情中查看完整记录与回执">{attention}</span> : null
+  }
   const summary = item.inputSubmission ? inputStatus[item.inputSubmission.status] : item.inputRef ? '原输入状态未确认'
     : refused ? item.externalInput?.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? '对话已收录 · 未提交 Agent：成员未获输入权限'
       : item.externalInput?.code === 'INGRESS_INPUT_OUTSIDE_SCOPE' ? '对话已收录 · 未提交 Agent：未符合触发范围' : '对话已收录 · 本次请求被拒绝'

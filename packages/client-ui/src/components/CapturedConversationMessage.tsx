@@ -10,7 +10,7 @@ import { formatClock } from '../lib/conversation-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
-export type CapturedMessagePresentation = {
+export type CapturedMessagePresentation = Pick<ConversationMessageProps, 'detailsOnlyMetadata' | 'sourceLabelsInDetails' | 'showInputSource'> & {
   expandedContent: boolean
   inputReadPending: boolean
   renderSubmissionOriginal: NonNullable<ConversationMessageProps['renderSubmissionOriginal']>
@@ -37,7 +37,7 @@ export function CapturedConversationMessage({ item, record, replyObservation, in
   const message = <ConversationMessage {...props} {...(record?.executionHostId ? { executionHostId: record.executionHostId } : {})} sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={item.inputSubmission ? item.status : record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
     {...(input.inputContext ? { inputContext: input.inputContext, inputContextSource: input.inputContextSource } : {})}
     a2aNotificationId={a2aNotificationId} notificationRecords={record?.records} contentBoundary={a2aNotificationId ? 'wire' : item.kind === 'user_message' && input.publicContent === 'confirmed' ? 'body' : props.contentBoundary ?? 'wire'}
-    {...(originalSubmission ? { messageStatus: <><ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} showTime={false} />{inputReadPending ? <span role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}{props.messageStatus}</> } : {})}
+    {...(originalSubmission ? { messageStatus: <><ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} showTime={false} attentionOnly={props.detailsOnlyMetadata} />{inputReadPending ? <span role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}{props.messageStatus}</> } : {})}
     messageDetails={<>{originalSubmission ? <ConversationSubmissionFacts record={originalSubmission} /> : <dl className="conversation-input-details__facts">
       <dt>记录方式</dt><dd>{source.label}</dd>
       <dt>来源说明</dt><dd>{source.description}</dd>

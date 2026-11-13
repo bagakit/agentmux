@@ -154,7 +154,11 @@ export const ConversationView = memo(function ConversationView({
       && request.nativeSource.providerId === target.source.providerId && request.nativeSource.nativeSessionId === target.source.nativeSessionId)
     const sourceId = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
     const bodyExpanded = choices.get(sourceId)
-    const presentation: CapturedMessagePresentation = { expandedContent: !feed, inputReadPending: readingSubmission, renderSubmissionOriginal,
+    const presentation: CapturedMessagePresentation = {
+      ...(reading.detailsOnlyMetadata === undefined ? {} : { detailsOnlyMetadata: reading.detailsOnlyMetadata }),
+      ...(reading.sourceLabelsInDetails === undefined ? {} : { sourceLabelsInDetails: reading.sourceLabelsInDetails }),
+      ...(reading.showInputSource === undefined ? {} : { showInputSource: reading.showInputSource }),
+      expandedContent: !feed, inputReadPending: readingSubmission, renderSubmissionOriginal,
       ...(bodyExpanded === undefined ? {} : { bodyExpanded }), onBodyExpandedChange: open => setOriginalChoice(sourceId, open),
       expandedOriginals, onOriginalExpandedChange: setOriginalChoice }
     return renderCapturedRecord ? renderCapturedRecord(record, disclosure, presentation) : record.role === 'process' || record.role === 'interaction'

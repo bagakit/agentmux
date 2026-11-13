@@ -36,7 +36,7 @@ import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.j
 import { ChannelProfileAvatar } from './ChannelProfileAvatar.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
-import { ConversationSubmissionMetadata } from './ConversationSubmissionMetadata.js'
+import { ConversationSubmissionMetadata, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { ConversationSources } from '../lib/conversation-sources.js'
 
@@ -403,9 +403,11 @@ export function ConversationMessage({
     details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration
       ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
-        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
+        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{detailsOnlyMetadata ? submissionMetadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
       </ConversationInputDetails> : null,
-    metadata: <>{metadataInDetails && (messageStatus || submissionMetadata) ? <div className="log-turn__meta">{messageStatus}{submissionMetadata}</div> : null}{!metadataInDetails ? metadata : null}
+    metadata: <>{metadataInDetails && (messageStatus || submissionMetadata) ? <div className="log-turn__meta">{messageStatus}{detailsOnlyMetadata
+      ? sources?.submissions?.map(record => <ConversationSubmissionSummary key={record.id} record={record} renderClock={renderClock} attentionOnly />)
+      : submissionMetadata}</div> : null}{!metadataInDetails ? metadata : null}
       {sources && detailsOnlyMetadata && !nativeCollaboration && (!sourceLabelsInDetails || sources.main?.unread) ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
     </>,
     renderBody
@@ -453,7 +455,7 @@ export function ConversationMessage({
         {status === 'streaming' || status === 'failed' || status === 'unverified' ? <div className="conversation-a2a-originals__pending" role="status">通知 · {card.badges}</div> : null}
       </> : nativeCollaboration ? <SubagentReportCard {...card} identity={readingIdentity} collaboration={nativeCollaboration} located={located}
         preview={collaborationPreview} hasResources={collaborationHasResources} emptyText={!collaborationPreview && parts.every(part => part.kind === 'text')} />
-        : isSystemContext ? <SystemRecordCard {...card} identity={readingIdentity} title={recordTitle || '系统记录'} summary={systemSummary} hasContent={hasContent} />
+        : isSystemContext ? <SystemRecordCard {...card} identity={readingIdentity} title={recordTitle || '系统记录'} summary={detailsOnlyMetadata ? undefined : systemSummary} hasContent={hasContent} />
         : processContent ? <ConversationProcessCard {...card} />
         : <ConversationSpeechCard {...card} sender={<>
           <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>

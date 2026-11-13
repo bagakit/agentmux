@@ -253,6 +253,7 @@
 .conversation-submission[data-native-readable='true'] .message-disclosure[data-submission] .message-disclosure__preview { order: 0; flex: 1 1 0; min-width: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
 .conversation-submission .message-disclosure__action { flex-shrink: 0; }
 .conversation-submission-summary { display: inline-flex; flex-wrap: wrap; align-items: baseline; white-space: normal; font-size: var(--fs-micro); }
+.log-turn__meta:empty { display: none; }
 .conversation-submission-summary > span + span::before { content: ' · '; }
 .conversation-submission-summary[data-status='failed'] { color: var(--red-text); }
 .conversation-submission .conversation-input-details__facts { margin: var(--sp-2) 0; }
