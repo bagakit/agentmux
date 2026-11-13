@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { GitCommitDetails } from '../src/renderer/src/features/git/commit/GitCommitDetails'
 import type { GitCommitDetailsResult } from '../src/shared/git-contracts'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { installGitHistoryViewport } from './helpers/git-history-viewport'
 import { fixturePath, fixtureTime } from '../scripts/lib/fixture-values.mjs'
 
 const requests: Array<{ src: string; referrerPolicy: string; crossOrigin: string; onload: null | (() => void); onerror: null | (() => void) }> = []
@@ -21,6 +22,8 @@ async function render(email: string) {
     result={details(email)} loading={false} error={null} onReload={() => {}} onSelectParent={() => {}} onSelectFile={() => {}} />))
 }
 beforeEach(() => {
+  // The changed-file list is virtual; happy-dom has no layout, so give its scroller a height.
+  installGitHistoryViewport()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   requests.length = 0
   vi.stubGlobal('Image', class {
@@ -30,7 +33,7 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers()
+  await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers()
 })
 
 it('renders original content immediately, uses only recorded email and shares successful image lookup', async () => {

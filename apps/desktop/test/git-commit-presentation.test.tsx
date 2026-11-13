@@ -7,6 +7,7 @@ import type { GitCommitDetailsResult, GitCommitSnapshot } from '../src/shared/gi
 import { GitCommitDetails } from '../src/renderer/src/features/git/commit/GitCommitDetails'
 import { useGitCommitDetails } from '../src/renderer/src/features/git/commit/useGitCommitDetails'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { installGitHistoryViewport } from './helpers/git-history-viewport'
 
 type ReadyCommit = Extract<GitCommitDetailsResult, { kind: 'ready' }>
 const commitOid = 'a'.repeat(40)
@@ -41,6 +42,8 @@ function fixedCommit(message = 'feat(core)!: Read fixed commit details\n\nKeep t
 }
 
 beforeEach(() => {
+  // The changed-file list is virtual; happy-dom has no layout, so give its scroller a height.
+  installGitHistoryViewport()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('fetch', fetchRequest)
   onReload.mockReset(); onSelectParent.mockReset(); onSelectFile.mockReset(); fetchRequest.mockReset()
