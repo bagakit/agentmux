@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { presentError } from '@agentmux/client-ui/error-presentation'
+import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
@@ -79,6 +79,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The refusal's machine code decides recovery; the shown sentence never does.
+  const [errorCode, setErrorCode] = useState<string | null>(null)
   const selected = profiles.find(profile => profile.id === selectedId) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
   useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
 
@@ -88,9 +90,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     .some(text => text.toLowerCase().includes(needle)))
   const run = async (key: string, action: () => Promise<unknown>): Promise<boolean> => {
     if (busy) return false
-    setBusy(key); setError(null)
+    setBusy(key); setError(null); setErrorCode(null)
     try { await action(); return true }
-    catch (cause) { setError(presentError(cause)); return false }
+    catch (cause) { setError(presentError(cause)); setErrorCode(describeError(cause).code ?? null); return false }
     finally { setBusy(null) }
   }
   const [renameRequest, setRenameRequest] = useState<string | null>(null)
@@ -120,7 +122,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
       </p> : null}
       <div className="settings-resource-split">
         <SettingsResourceLibrary label="Profiles" selectedId={selected?.id ?? null} query={query} onQuery={setQuery} focusRequest={returnFocus} followFocus
-          onSelect={id => { setSelectedId(id); setView('editor'); setError(null) }}
+          onSelect={id => { setSelectedId(id); setView('editor'); setError(null); setErrorCode(null) }}
           items={visible.map(profile => {
             const open = usesOf(profile.id, surfaces).filter(use => use.state === 'open').length
             return { id: profile.id, name: profile.label, detail: detailLine(profile),
@@ -131,7 +133,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
           {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision}
-            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error}
+            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
             onDeleted={() => { setSelectedId(null); setView('library') }} />
@@ -142,13 +144,14 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, editName, onNameEdited, onDeleted, onShow, onOpen }: {
+function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, editName, onNameEdited, onDeleted, onShow, onOpen }: {
   profile: BrowserProfileSummary
   revision: number
   uses: Use[]
   busy: string | null
   run(key: string, action: () => Promise<unknown>): Promise<boolean>
   error: string | null
+  errorCode: string | null
   editName: boolean
   onNameEdited(): void
   onDeleted(): void
@@ -257,7 +260,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, editName, on
           {profile.notes || 'Add a note'}
         </button>}
 
-      {error ? <p className="browser-profile-editor__error" role="alert">{error}{/changed since/i.test(error) ? <> <button type="button" onClick={() => void browserProfiles.refresh()}>Reload</button></> : null}</p> : null}
+      {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onClick={() => void browserProfiles.refresh()}>Reload</button></> : null}</p> : null}
 
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>

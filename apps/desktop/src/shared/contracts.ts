@@ -2171,9 +2171,9 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
     network(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostNetworkObservation>>
   }
-  browser: Omit<AgentMuxDesktopApi['browser'], 'runScript'> & {
+  browser: Omit<AgentMuxDesktopApi['browser'], 'runScript' | import('./ipc-result').BrowserProfileResultMethod> & {
     runScript(...args: Parameters<AgentMuxDesktopApi['browser']['runScript']>): Promise<import('./browser-run-result').BrowserRunResult>
-  }
+  } & import('./ipc-result').IpcResultApi<Pick<AgentMuxDesktopApi['browser'], import('./ipc-result').BrowserProfileResultMethod>>
   search: {
     query(input: import('@agentmux/core/search').AgentMuxSearchInput, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/search').AgentMuxSearchPage>>
   }

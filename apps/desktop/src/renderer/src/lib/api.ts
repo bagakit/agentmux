@@ -47,6 +47,7 @@ import { createRendererSessionEvents } from './session-events'
 import { createRendererHistoryObservation } from './history-observation'
 import { createRendererSearchRead } from './search-read'
 import { unwrapBrowserRunResult } from '../../../shared/browser-run-result'
+import { BROWSER_PROFILE_RESULT_METHODS, ipcResult, unwrapIpcResultMethods } from '../../../shared/ipc-result'
 import { createRendererHistoryRead } from './history-read'
 import { createRendererHostObservation } from './host-observation'
 import {
@@ -1587,6 +1588,15 @@ const mockApi: AgentMuxDesktopApi = {
   }
 }
 
+// The web preview hands Profile results through the same envelope as the real preload and the same unwrap,
+// so a preview refusal reaches components with exactly the code a Desktop refusal carries.
+{
+  const plain = mockApi.browser
+  const wrapped = Object.fromEntries(BROWSER_PROFILE_RESULT_METHODS.map(name => [name,
+    (...args: unknown[]) => ipcResult(() => (plain[name] as (...values: unknown[]) => Promise<unknown>)(...args))]))
+  mockApi.browser = unwrapIpcResultMethods<AgentMuxDesktopApi['browser'], typeof BROWSER_PROFILE_RESULT_METHODS[number]>({ ...plain, ...wrapped } as never, BROWSER_PROFILE_RESULT_METHODS)
+}
+
 function requireDesktopApi(): AgentMuxDesktopApi {
   if (!window.agentmux) throw new Error('AgentMux preload API is unavailable')
   const preload: AgentMuxPreloadApi = window.agentmux
@@ -1609,7 +1619,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     } },
     control: createRendererControlApi(preload.control),
     browser: {
-      ...preload.browser,
+      ...unwrapIpcResultMethods<AgentMuxDesktopApi['browser'], typeof BROWSER_PROFILE_RESULT_METHODS[number]>(preload.browser as never, BROWSER_PROFILE_RESULT_METHODS),
       runScript: (...args) => preload.browser.runScript(...args).then(unwrapBrowserRunResult)
     },
     search: { query: createRendererSearchRead((input, context) => preload.search.query(input, context)) },

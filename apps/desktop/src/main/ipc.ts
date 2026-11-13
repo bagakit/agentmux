@@ -222,6 +222,7 @@ import { browserResourceLocations } from './browser-resource-directory.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
 import { browserRunResult } from '../shared/browser-run-result.js'
+import { ipcResult } from '../shared/ipc-result.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
@@ -1918,38 +1919,30 @@ export async function registerIpc(args: {
   browserProfiles.onChange(({ revision, profiles }) => {
     if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, profiles })
   })
-  handleWithEvent('browser:listProfiles', async (event) => {
+  // Profile handlers return their refusals as data so the Renderer keeps each error code.
+  handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
     return browserProfiles.listProfiles()
-  })
-  handleWithEvent('browser:readProfiles', async (event) => {
+  }))
+  handleWithEvent('browser:readProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
     return { revision: browserProfiles.listRevision(), profiles: browserProfiles.listProfiles() }
-  })
-  handleWithEvent('browser:createProfile', async (event, label: string) => {
-    return await browserProfiles.createProfile(label)
-  })
-  handleWithEvent('browser:updateProfile', async (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) => {
-    return await browserProfiles.updateProfile(profileId, edit, expectedRevision)
-  })
-  handleWithEvent('browser:setDefaultProfile', async (event, profileId: string) => {
-    await browserProfiles.setDefaultProfile(profileId)
-  })
+  }))
+  handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
+  handleWithEvent('browser:updateProfile', (event, profileId: string, edit: BrowserProfileEdit, expectedRevision: number) =>
+    ipcResult(() => browserProfiles.updateProfile(profileId, edit, expectedRevision)))
+  handleWithEvent('browser:setDefaultProfile', (event, profileId: string) => ipcResult(() => browserProfiles.setDefaultProfile(profileId)))
   const profileUsage = createBrowserProfileUsage({
     open: profileId => browsers.profileUses(profileId),
     readSaved: () => spatialState.read(),
     deleteProfile: (profileId, approval) => browserProfiles.deleteProfile(profileId, approval),
     clearPreviews: profileId => browserRecoveryPreviews.clearProfile(profileId)
   })
-  handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
-    await profileUsage.deleteProfile(profileId, approval)
-  })
-  handleWithEvent('browser:detectProfileImportSources', async (event) => {
-    return await browserProfiles.detectImportSources()
-  })
-  handleWithEvent('browser:importProfile', async (event, sourceToken: string, label: string) => {
-    return await browserProfiles.importProfile(sourceToken, label)
-  })
+  handleWithEvent('browser:deleteProfile', (event, profileId: string, approval: BrowserProfileDeleteApproval) =>
+    ipcResult(() => profileUsage.deleteProfile(profileId, approval)))
+  handleWithEvent('browser:detectProfileImportSources', (event) => ipcResult(() => browserProfiles.detectImportSources()))
+  handleWithEvent('browser:importProfile', (event, sourceToken: string, label: string) =>
+    ipcResult(() => browserProfiles.importProfile(sourceToken, label)))
   handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
     const scope = resolveInputHistoryScope(target)
     return scope.profileId === null ? { scope, entries: [] } : await browserInputHistory.list(scope)
