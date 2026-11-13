@@ -74,3 +74,24 @@ it('blocks saving an action without an instruction and names the problem', async
   expect(pane().querySelector('.settings-inline-error')!.textContent).toMatch(/instruction/i)
   expect((await f.disk()).agentDerivedActions).toBeUndefined()
 })
+
+it('keeps an unsaved hidden choice on its edited baseline, so a concurrent visibility change conflicts instead of being overwritten', async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="derived-actions" />)
+  await act(async () => row('pass-on-experience').click())
+  await act(async () => pane().querySelector<HTMLInputElement>('[data-derived-editor="pass-on-experience"] input[type="checkbox"]')!.click())
+  // The CLI hides another official action while this page holds its own unsaved choice.
+  await act(async () => { await f.owner.update(current => ({ ...current, agentDerivedActions: { hidden: ['fork'] } })) })
+  await save()
+  expect(pane().querySelector('.settings-pane-actions [role="alert"]')?.textContent).toContain('changed since you started editing')
+  // The other writer's change is kept, and the person's draft is still there to retry.
+  expect((await f.disk()).agentDerivedActions).toEqual({ hidden: ['fork'] })
+  expect(pane().querySelector<HTMLInputElement>('[data-derived-editor="pass-on-experience"] input[type="checkbox"]')!.checked).toBe(false)
+})
+
+it('adopts a committed visibility change while this page has no unsaved choice', async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="derived-actions" />)
+  await act(async () => row('fork').click())
+  await act(async () => { await f.owner.update(current => ({ ...current, agentDerivedActions: { hidden: ['fork'] } })) })
+  expect(pane().querySelector<HTMLInputElement>('[data-derived-editor="fork"] input[type="checkbox"]')!.checked).toBe(false)
+  expect(pane().querySelector('.settings-pane-actions [role="status"]')?.textContent).toBe('All changes saved')
+})
