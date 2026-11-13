@@ -655,6 +655,12 @@ async function relaunchInstalledApplication(appPath) {
 }
 
 // Tab/Region arrays are registries. Layout arrays retain their presentation order.
+function runningRegionsWithoutRun(workbench) {
+  return workbench.tabs.flatMap(tab => tab.regions.filter(region =>
+    (region.kind === 'agent' || region.kind === 'terminal') && region.processState === 'running' && !region.control)
+    .map(region => region.regionId))
+}
+
 function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSurvey = true } = {}) {
   return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
     ...(includeSurvey ? { survey: workbench.survey } : {}),
@@ -698,7 +704,9 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
         'The original workbench, Region descriptors or focus have not been restored.')
       for (const tab of before.workbench.tabs) for (const region of tab.regions) {
         const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
-        if ((region.kind === 'agent' || region.kind === 'terminal') && region.processState === 'running') {
+        // A Region that had no confirmed Run before the update has no identity to compare; it is
+        // reported as unconfirmed in the receipt rather than turning a restored workbench into a failure.
+        if ((region.kind === 'agent' || region.kind === 'terminal') && region.processState === 'running' && region.control) {
           assert(restored && restored.kind === region.kind && restored.control && region.control &&
             restored.control.run.runId === region.control.run.runId && restored.control.hostId === region.control.hostId,
           'An original healthy Run is not yet available in its restored Region.')
@@ -926,9 +934,15 @@ export async function installApplication(appPath, { intent = installIntent, home
     process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
     if (!before && (previouslyInstalled || intent === 'ui-only')) return { intent, ui: { status: 'unknown', path: destination, observation: observed, terminalRebindings,
       reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
-    if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined) return { intent, ui: {
+    const unconfirmed = []
+    if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined)
+      unconfirmed.push('Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.')
+    const unboundRegions = before ? runningRegionsWithoutRun(before.workbench) : []
+    if (unboundRegions.length > 0)
+      unconfirmed.push(`Run continuity is unconfirmed for Regions that had no confirmed Run before the update: ${unboundRegions.join(', ')}.`)
+    if (unconfirmed.length > 0) return { intent, ui: {
       status: 'unknown', path: destination, observation: observed, terminalRebindings,
-      reason: 'The candidate GUI is active. Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.',
+      reason: `The candidate GUI is active. ${unconfirmed.join(' ')}`,
       continuity: { before: structuredClone(before), after: structuredClone(observed) } }, native }
     return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed,
       terminalRebindings }, native }
