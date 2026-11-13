@@ -255,6 +255,7 @@ it('a retake after the editor already copied keeps the same consumer: the clipbo
   expect(f.receiver.complete).toHaveBeenCalledOnce()
   const retaken = editor.invoke('retake', { requestId: editor.input.requestId })
   const second = await f.overlay(2)
+  expect(second.input.attachToDraft, 'the retaken overlay no longer offers to attach to the delivered draft').toBe(false)
   expect(await second.invoke('finish', { requestId: second.input.requestId, image: original, selection })).toEqual({ status: 'completed' })
   expect(second.window.isDestroyed(), 'Done closed the overlay').toBe(true)
   expect(await retaken).toEqual({ status: 'completed' })

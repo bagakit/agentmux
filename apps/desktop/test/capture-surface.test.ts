@@ -322,6 +322,21 @@ it('the next capture opens on the last delivered selection, only on that display
   expect(next.overlays.map(row => row.input.initialCrop), 'the newest delivery replaces it').toEqual([undefined, { x: 1, y: 0, width: 1, height: 1 }])
 })
 
+it('a window editor delivery is the selection the next capture opens on', async () => {
+  await delivered()
+  const expanded = await opened()
+  await expanded.overlays[0]!.call('select')
+  await expanded.overlays[0]!.call('expand', { handoff: { shapes: [], crop: { x: 0, y: 0, width: 8, height: 6 }, tool: 'rect' } })
+  const outcome = await expanded.outcome
+  if (outcome.state !== 'expanded') throw new Error('the expand ends the surface as expanded')
+  const unchanged = await opened()
+  expect(unchanged.overlays[0]!.input.initialCrop, 'expanding alone remembers nothing new').toEqual(selection)
+  await unchanged.overlays[0]!.call('cancel'); await unchanged.outcome
+  outcome.delivered()
+  const next = await opened()
+  expect(next.overlays[0]!.input.initialCrop, 'once the window editor delivers, its selection is remembered').toEqual({ x: 0, y: 0, width: 8, height: 6 })
+})
+
 it('cancel, expand, Save PNG, Pin and a failed delivery remember nothing', async () => {
   await delivered()
   const cancelled = await opened()
