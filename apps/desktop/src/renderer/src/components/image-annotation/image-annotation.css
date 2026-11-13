@@ -42,6 +42,8 @@
 .image-annotation-editor__custom-color { color: var(--text-3); }
 .image-annotation-editor__custom-color input { width: 22px; height: 22px; padding: 2px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-1); cursor: pointer; }
 .image-annotation-editor__custom-color input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+/* Strength, dimming and zoom sliders carry the editor's one accent, like the app's other range controls. */
+.image-annotation-editor input[type='range'] { accent-color: var(--green); }
 .image-annotation-editor__mode { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--surface-1); }
 .image-annotation-editor .image-annotation-editor__mode button { height: 22px; padding-inline: 7px; border-color: transparent; }
 .image-annotation-editor__mode button[aria-pressed=true] { background: var(--surface-3); border-color: var(--line); color: var(--text); box-shadow: 0 1px 2px #0001; }
