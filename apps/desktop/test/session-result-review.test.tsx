@@ -205,6 +205,7 @@ describe('Session result review control', () => {
     await expandReview()
     const previews = [...container.querySelectorAll('button')].filter((button) => button.textContent?.includes('Preview'))
     expect(previews).toHaveLength(2)
+    expect(previews.map(button => [...button.querySelectorAll('[data-semantic-icon]')].map(icon => icon.getAttribute('data-semantic-icon')))).toEqual([['object.browser'], ['object.browser']])
     await act(async () => previews[0]!.click())
     expect(openHttpLink).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/^https?:\/\//), 'tab')
   })

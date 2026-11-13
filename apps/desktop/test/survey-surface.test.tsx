@@ -995,6 +995,7 @@ it('restores exact Zone references through storage and original Browser rebuild 
   expect(useAppStore.getState().surveyZoneSelection).toEqual(selection)
   useAppStore.setState({ loading: false }); await renderApp()
   expect(dom.container.querySelector('.workbench-zone-state')).not.toBeNull()
+  expect(dom.container.querySelector('.workbench-zone-state-action [data-semantic-icon]')).toBeNull()
   expect(dom.container.querySelector('.survey-panel-status')).toBeNull()
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig); vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
