@@ -2,14 +2,21 @@
 .settings-notifications .notification-preview figcaption { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
 .notification-preview__sample { display: grid; gap: var(--sp-3); padding: var(--sp-6); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); }
 .notification-preview__chrome > span { margin-left: auto; text-transform: none; letter-spacing: normal; }
-.notification-preview__context { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.notification-preview__context { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
 .settings-notifications .notification-preview__dwell > i { animation: none; }
-.settings-notifications .notification-dwell__description { font-size: var(--fs-meta); line-height: 1.5; }
+.settings-notifications .notification-dwell__description { font-size: var(--fs-body); line-height: 1.6; }
 .settings-notifications .notification-dwell { padding: var(--sp-4) 0; gap: var(--sp-3); }
 .settings-notifications .notification-dwell__slider { width: calc(100% - 100% / var(--notification-stops)); margin-inline: auto; }
 .settings-notifications .notification-dwell__ticks { display: grid; grid-template-columns: repeat(var(--notification-stops), minmax(0, 1fr)); gap: var(--sp-2); }
 .settings-notifications .notification-dwell__tick { padding: var(--sp-2); border-radius: var(--radius-sm); line-height: 1.4; }
 .settings-notifications .notification-dwell__tick[data-selected] { background: var(--green-bg); color: var(--green); box-shadow: inset 0 0 0 1px var(--line-soft); }
 .settings-notifications .notification-sound-toggle { padding-inline: 0; }
+.notification-settings__about { color: var(--text-2); font-size: var(--fs-body); }
+.notification-settings__about > summary { cursor: pointer; padding-block: var(--sp-3); }
+.notification-settings__about .settings-hint { padding: var(--sp-3) 0; }
 @media (max-width: 560px) { .notification-preview__sample { padding: var(--sp-5); } .settings-notifications .notification-dwell__ticks { gap: var(--sp-2); } }
 @media (prefers-reduced-motion: reduce) { .settings-notifications .notification-preview__dwell > i { transition: none; } }
+.settings-notifications { container-type: inline-size; }
+.notification-settings__workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: var(--sp-7); }
+.notification-settings__workspace > .settings-group { border-top: 0; padding-top: 0; }
+@container (max-width: 640px) { .notification-settings__workspace { grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); } }

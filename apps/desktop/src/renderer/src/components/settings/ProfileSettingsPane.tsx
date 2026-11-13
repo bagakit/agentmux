@@ -88,6 +88,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
       <button type="button" className="small-button" disabled={!ready} onClick={useCrop}>Use this photo</button>
     </section>}
     {imageError && <p className="settings-inline-error" role="alert">{imageError}</p>}
+    <div className="settings-profile__details">
     <section className="settings-profile__context" data-settings-field="profile-about">
       <header><h3><label htmlFor="profile-about">About you &amp; how you work</label></h3><p>Your work, experience and communication preferences.</p></header>
       <ComposerTextarea id="profile-about" aria-label="About you and how you work" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
@@ -102,6 +103,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
       </label>
       <p className="settings-profile__note">Saved on this Mac. Your photo stays in conversations; only text is shared. Authorized agents can also read your saved profile through the settings CLI.</p>
     </section>
+    </div>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} onSave={() => void save()} />
   </div>
 }

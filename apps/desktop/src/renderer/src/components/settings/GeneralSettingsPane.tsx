@@ -51,7 +51,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
         </FormRow>
         <figure className="general-settings__path-preview" aria-label="Project path draft preview" data-path-format={draft.value.copyPathsAsAbsolute ? 'absolute' : 'abbreviated'}>
           <figcaption>{draft.value.copyPathsAsAbsolute ? 'Full path' : 'Abbreviated path'}<small>Example</small></figcaption>
-          <code><span>{draft.value.copyPathsAsAbsolute ? 'your home folder' : '~'}</span><b aria-hidden="true"> / </b>project</code>
+          <div className="general-settings__path-object"><SemanticIcon name="object.folder" size={28} aria-hidden="true" /><code><span>{draft.value.copyPathsAsAbsolute ? 'your home folder' : '~'}</span><b aria-hidden="true"> / </b>project</code></div>
           <small>Shown in paths, tooltips and Copy Path.</small>
         </figure></div>
         <p className="general-settings__scope">Remote paths and paths belonging to another user stay complete.</p>
