@@ -343,7 +343,7 @@ Space 左侧 Folders 即使确认没有原图，也要从自动字母图标看�
 - 已有工作面只聚焦原 Tab／Region／Session。重复点击、创建完成后的打开、恢复或另一投影的挂载不能增加第二个默认 Terminal；用户主动分割或打开的多个终端保真实布局，不隐藏、清空或删除健康 Run。
 - 启动或准备沿原 loading／失败服务窗，保留 Topic 的可见工作面、原因与可重试动作。重启先恢复既有分割与引用，不重跑首次创建；后台准备固定协调对象时可明确不抢当前目标。
 - 关闭入口在当前 Tab／Region 附近可发现，复用原精确关闭／停止、未保存确认与资源处理 owner；取消或关闭另一格不影响未选健康工作。
-- Topic 列表行与 Board 行的标题、摘要和主要内容响应同一次 Topic 导航；复制、定位、头像及右键动作独立阻止冒泡，不要求命中孤立小图标。
+- Topic 列表行的标题、摘要和主要内容响应同一次 Topic 导航；复制、定位、头像及右键动作独立阻止冒泡，不要求命中孤立小图标。
 - 每件事情的 Wiki、资料、产出和 collaborators 铭牌持续保留，存在及耐久参与身份不依赖 Tab 是否打开；真实运行状态消费 Core。用户能辨认当前对象、工作面和资料／参与者归属，Scratch 的资源收纳不成为另一套产品或导航身份。
 
 ### Topic 工作面拓扑与在场状态
@@ -439,7 +439,7 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 
 - **眼前的分屏比例必须与已保存布局一致。** 用户或公开 Control 追加、重排及改变分屏比例后，已打开的原 Region 立即按同一布局显示；不能只写持久树、等重启才变成真实尺寸。拖动仍由原分隔条表达当前意图，不被过时投影拉回。同步尺寸保留 Tab、Group、Region、焦点、原内容实例与健康 Run；普通重启在同窗口尺寸与字体条件下恢复同一最终比例和终端网格。
 
-- **关闭当前格、按序号切 Tab、分屏、切换焦点格都必须能纯键盘完成**，不该只有鼠标一条路。窗口级只补这四个高价值动作，**不建 action catalog、不做用户改键**——那是预防性抽象，与"最简实现"相悖。键位跟随成熟终端/编辑器的既有惯例而非自创：关闭当前 Region 用平台的关闭键（mac `Cmd+W`／其他平台 `Ctrl+Shift+W`），按序号切 Tab 用 `Cmd/Ctrl+1..9`（第 9 键恒指最后一张），分屏用 mac `Cmd+D`（右）/`Cmd+Shift+D`（下）、其他平台 `Ctrl+Shift+E`（右）/`Ctrl+Shift+O`（下），切换焦点格用 `Cmd/Ctrl+Alt+方向键`。**平台底线：非 macOS 绝不接管裸 `Ctrl+字母`**——那些是 shell/readline 的地盘（`Ctrl+W` 删词、`Ctrl+D` 是 EOF），接管会让用户在终端里丢掉肌肉记忆；数字与 `Ctrl+Alt+方向` 不落在 readline 键上，可安全使用。新键位不得与终端作用域键（`Cmd+F/C/K`、`Shift+Enter`）冲突，冲突判断按键位比对、不靠猜。判定及落点解析共用原 owner；接线验证见[工作面键盘与地址验证](../../testing/strategy.md#工作面键盘与地址验证)。焦点格的"相邻"按屏幕几何（Region 归一化 bounds）判定，不按分屏树的父子深度，与[《对象地址、分享与方向》](public-control.md#对象地址分享与方向)中「哪个算右边」同一处轴向定义。
+- **关闭当前格、按序号切 Tab、分屏、切换焦点格都必须能纯键盘完成**，不该只有鼠标一条路。窗口级键位与其他作用域共用 [`SHORTCUT_BINDINGS`](../../../apps/desktop/src/renderer/src/lib/shortcut-registry.ts) 这一份注册表；只读手册与可配置绑定的边界见[《Settings 中的 Keyboard shortcuts》](settings-and-observation.md#settings-中的-keyboard-shortcuts)。键位跟随成熟终端/编辑器的既有惯例而非自创：关闭当前 Region 用平台的关闭键（mac `Cmd+W`／其他平台 `Ctrl+Shift+W`），按序号切 Tab 用 `Cmd/Ctrl+1..9`（第 9 键恒指最后一张），分屏用 mac `Cmd+D`（右）/`Cmd+Shift+D`（下）、其他平台 `Ctrl+Shift+E`（右）/`Ctrl+Shift+O`（下），切换焦点格用 `Cmd/Ctrl+Alt+方向键`。**平台底线：非 macOS 绝不接管裸 `Ctrl+字母`**——那些是 shell/readline 的地盘（`Ctrl+W` 删词、`Ctrl+D` 是 EOF），接管会让用户在终端里丢掉肌肉记忆；数字与 `Ctrl+Alt+方向` 不落在 readline 键上，可安全使用。新键位不得与终端作用域键（`Cmd+F/C/K`、`Shift+Enter`）冲突，冲突判断按键位比对、不靠猜。判定及落点解析共用原 owner；接线验证见[工作面键盘与地址验证](../../testing/strategy.md#工作面键盘与地址验证)。焦点格的"相邻"按屏幕几何（Region 归一化 bounds）判定，不按分屏树的父子深度，与[《对象地址、分享与方向》](public-control.md#对象地址分享与方向)中「哪个算右边」同一处轴向定义。
 
 持久布局与 Session 的恢复顺序、未知状态保留和启动边界只见[工作面持久恢复与启动边界](session-recovery.md#工作面持久恢复与启动边界)。
 
