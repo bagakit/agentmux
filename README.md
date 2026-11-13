@@ -1,293 +1,405 @@
 <div align="center">
 
-# AgentMux
+<img src="docs/assets/readme/hero.webp" alt="AgentMux — the terminal-first workbench for a team of coding agents" width="100%">
 
-**为多 Agent 协作而生的本地工作台。**
+<br>
 
-一套与宿主无关的 Agent Core，统一十余种 Coding Agent 的会话、权限、状态与恢复；<br>
-一个 Agent-first、terminal-first 的桌面工作区，让人与 Agent 在同一现场长期共事。
+**One UI-free Core that drives 13 coding-agent CLIs through a single typed API —<br>
+sessions, permissions, status and recovery included.<br>
+One agent-first, terminal-first desktop where people and agents keep working in the same place.**
 
-[设计原则](#设计原则) · [功能体系](#功能体系) · [快速开始](#快速开始) · [接入 Core](#接入-core) · [CLI](#amuxagentmux-本身就是-cli) · [架构](#架构) · [文档](docs/README.md) · [参与贡献](#参与贡献)
+<br>
+
+![Providers](https://img.shields.io/badge/built--in_providers-13-8de3ae?style=flat-square&labelColor=111419)
+![amux](https://img.shields.io/badge/amux-25_modules_·_400%2B_commands-8de3ae?style=flat-square&labelColor=111419)
+![JSON-RPC](https://img.shields.io/badge/typed_JSON--RPC-400%2B_methods-8de3ae?style=flat-square&labelColor=111419)
+![Tests](https://img.shields.io/badge/test_files-3.5k%2B-8de3ae?style=flat-square&labelColor=111419)
+![Platform](https://img.shields.io/badge/desktop-macOS_Apple_Silicon-edf1ee?style=flat-square&labelColor=111419)
+![Node](https://img.shields.io/badge/node-%E2%89%A524-edf1ee?style=flat-square&labelColor=111419)
+
+**English** · [简体中文](README.zh-CN.md)
+
+[Why](#why-agentmux) · [Highlights](#what-you-notice-first) · [Features](#feature-map) · [Architecture](#architecture-three-layers-one-owner-per-fact) · [Principles](#design-principles) · [Quick start](#quick-start) · [Core](#use-the-core) · [CLI](#amux-the-product-is-a-cli) · [Docs](docs/README.md)
 
 </div>
 
 ---
 
-## 为什么是 AgentMux
+> [!NOTE]
+> AgentMux is in active development and has no published release yet. The desktop app currently has to be [built from source](#quick-start) on an Apple Silicon Mac. The design and engineering docs are written in Chinese.
 
-一个 Agent 在一个终端里工作，问题不大。真正的难处在规模上：同时开着五个、十个 Agent，每家 CLI 的 Session 格式、权限请求、历史存储和恢复方式都不相同；哪个在等你回答、哪个已经停住、哪个做完了，只能逐个窗口去翻；应用一重启，原会话往往接不回来；而跑完的研究和经验，散落在一次次对话里，之后再也找不回来。
+## Why AgentMux
 
-AgentMux 从三个层面回应这些问题：
+One agent in one terminal is easy. The trouble starts at five or ten. Every CLI stores sessions, asks for permission, keeps history and resumes in its own way. You find out which one is waiting on you, which one stalled and which one finished by flipping through windows. Restart the app and the original sessions often don't come back. The research and lessons from all those runs end up scattered across conversations you can't find again.
 
-- **执行层**：`@agentmux/core` 把各家 Agent 的原生协议收进 Provider，对外只提供一套类型安全的 API；Session 持久化，重启后以原身份恢复。终端由独立 Runtime **ctxmux** 承载，性能不低于直接打开 CLI。
-- **组织层**：Space、Focus、Goals 组织人的注意力；Survey、Recall、Topic 积累知识；Mote 把长期合作确立为有人格的团队。
-- **连接层**：远端执行、A2A 协作、Browser、Toolkit、外部连接器与 `amux` CLI，全部经由同一公共服务，人、Agent 与程序用同一种方式操作产品。
+AgentMux works on three levels:
 
-你可以只用 Core，在自己的宿主里驱动 Agent；也可以直接使用 Desktop，获得完整的工作台。
-
-## 设计原则
-
-AgentMux 只用一个问题判断对错：**「Agent 还能干活吗」，而不是「我们的检查过了吗」。** 以下原则约束全部实现，完整表述见 [AGENTS.md](AGENTS.md)。
-
-**持久 Session 是地基。** 原 Session 能以原身份恢复，是其余一切的前提。修复、更新与资源治理都优先保全原身份和可恢复数据；新开一个进程、当前画面正常或另起空会话，都不能冒充恢复成功。Session 丢失按重大故障处理。见 [Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)。
-
-**终端不慢于裸终端。** AgentMux 在终端之上增加便利，因此打字、滚动与输出必须和直接打开 CLI 一样流畅，否则它没有存在的理由。按键与输出的热路径上不做持久化读写、进程派生或 RPC 扇出，工作量只随真正相关的 Session 增长。见 [Terminal 连续阅读](docs/design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。
-
-**流程失败不拿走健康能力。** 握手超时、探测失败或内部记账出错，而 Agent 本身健康时，保留它的全部能力，并在原工作面持续说明失败步骤、当前状态与恢复动作。新增 `throw`、早退或置灰之前，先回答 [RED-LINES.md](RED-LINES.md) 的四个问题，其中最关键的一问是：「绕过这段代码，这条路还通不通？」
-
-**分不清时，明说未知。** 观察不到的事实保持未知，既不猜正常，也不猜死亡。空快照、超时或断连都不是删除工作面的理由；只有 Core 确认的终局事实才是。未知的投递不自动重放，进程活着也不等于任务完成。
-
-**控制只依据协议事实。** 输入资格、权限、状态迁移与操作完成，以 Runtime 与 Provider 的原生协议和真实操作回执为准，从不由屏幕文案、标题、图标或颜色推断。显示怎么变，已确认的能力都不变。见 [通用机制与 Provider 适配](AGENTS.md#通用机制与-provider-适配)。
-
-**差异只留在 Provider 内。** 各 Agent 的原生协议由各自的 Provider 解释，不泄漏为 client 分支；Core、Desktop 与公共测试中不出现具体站点、产品名或厂商特例。接入新 Agent，只需新增一个 Provider。
-
-**一个事实，一个 owner。** 每项事实只有一个权威持有者，其余各层引用而不复制：ctxmux 持有 Run，Core 持有 Agent 语义与空间身份，client 持有呈现。实现取满足当前需求的最简形态，过时的实现直接删除，不留兼容层；但删除实现从不等于丢弃用户的数据、身份或工作面。
-
-## 功能体系
-
-### 注意力：Space · Focus · Goals
-
-多 Agent 工作的瓶颈不在算力，而在人的注意力。AgentMux 用三个入口组织它，合称 **Work**：
-
-| 入口 | 回答的问题 | 要点 |
-| --- | --- | --- |
-| **Space** | 我的工作在哪里？ | 持久的空间模型：Space › Zone › Tab › Region。Zone 可绑定目录、Git worktree 或 Topic；一个 Tab 是一张完整工作面，Region 承载 Agent、终端、文件、Browser 等内容。需要你处理的 Agent 状态沿导航树逐层上卷，折叠的项目也一眼可辨。 |
-| **Focus** | 现在谁需要我？ | 跨项目的执行上下文：按 Working、Attention、Results、Idle / Recovery 分组呈现全部 Agent，以项目泳道、最近上下文与底部时间音轨帮助你在多个 Session 之间切换注意力，并直接回到原工作面继续。 |
-| **Goals** | 我们要达成什么？ | 跨 Session 的持续目标：先讨论并确认目标与成功标准，再关联实际执行的 Agent，最后核验和接受结果。执行责任、停滞与下一步负责人始终可辨。底层实体为独立包 [`@agentmux/demand`](packages/demand/README.md) 中的 Demand。 |
-
-短任务直接在 Space 的工作面里交给 Agent；长任务以 Goal 承载，既可以发起一次有限的执行，也可以在你单独授权后由 Supervisor 持续推进，但自动推进从不替你确认目标或接受成果。Focus 则汇总所有执行的实时状态，告诉你注意力该落在哪里。三者共享同一份空间身份：**展示位置可以移动，Agent 的执行身份与工作目录始终不变。** 见 [空间模型](docs/design/behavior/spaces-and-layout.md#空间模型)、[Focus](docs/design/behavior/focus-context.md)、[Goals](docs/design/behavior/goals-and-demand.md)。
-
-### 知识：Survey · Recall · Topic
-
-Agent 的工作成果不应随对话一起消失。**Know** 分组把研究、记录与经验串成一条完整流程：浏览中得到的成果被显式收存，积累成知识，再回到下一次工作中。
-
-- **Survey**：研究的起点，可以直接当作日常浏览器使用。浏览中得到的成果，显式收入 Recall 或整理进某个 Topic。
-- **Recall**：知识的积累与回顾。Notebook 是持久的页面集合，Note 的正文只保存为 `.note.md` 文件，块以 `^blockID` 标记稳定身份，可用 `[[页 #块]]` 引用与嵌入；文件自足，仅凭它们即可重建索引。目录可按树、卡片或无限画布图谱浏览，关系一直追溯到原块。人与 Agent 可以同时编辑同一篇 Note，冲突时双方内容都保留。内容完整性不可妥协：任何更新、重启或读取失败都不能造成正文丢失。
-- **Topic**：围绕一件事情的知识库，自带 Wiki、资料、产出与 Agent 铭牌，Wiki 启用后注入会话上下文。相似的讨论在同一 Topic 中聚集，可复用的知识与讨论过程分开保存，并保留来源，随时回到原处继续。
-- **经验转正**：从某个 Agent Session 的真实工作中提炼可复用的做法，经你审阅、确认目标后，交给指定的 Topic 或 Mote 学习。
-
-见 [知识工作流](docs/design/behavior/knowledge-workflows.md) 与 [Note 文件格式](docs/specs/note-markdown.md)。
-
-### 伙伴：Mote 与晋升
-
-**Mote** 是具有持久人格的协作团队，可以理解为 Agent 之上的元 Agent 层：Agent 承担具体任务，Mote 承担长期职责。它的身份独立于任何一次 Session，Session 结束、更换或恢复时依然存在；人格、价值取向与行为边界写在可读可改的 `SOUL.md` 中。
-
-伙伴有两条来源：
-
-1. **从画像出发**：已经清楚需要怎样的伙伴，就按专家画像直接建立，例如负责组织目标与协作的 PMO。
-2. **从事情出发**：还不知道最终需要什么专家，就先在 Topic 里让 Agent 做具体的事。当这个方向变得重要、持续或高频，你可以把 Topic **晋升**为 Mote。
-
-晋升是你对一个准确 Topic 发起的显式操作，经一次轻量确认即完成。原 Topic 的知识、讨论历史、成果、成员 Agent 与工作面完整延续；健康的 Agent 不重启，原 Session 不替换。此后 Mote 在合作中成长：成员从具体任务中积累经验，可能逐渐承担领域专家或协调管理的职责；你的纠正经保存与读回后进入 Mote 的记忆，改进它的方法。组织晋升与成员成长分开表达，对外的团队人格从不遮蔽实际执行者。见 [伙伴从哪里来](docs/design/behavior/companions-from-work.md) 与 [Mote 合同](docs/design/behavior/motes-and-coordination.md)。
-
-### 工具集
-
-| 能力 | 作用 | 入口 |
-| --- | --- | --- |
-| **Agent 与对话** | 发现和配置 Executor，启动 Agent；同一 Session 可在终端与对话视图之间切换，查看原生历史、Trace、权限与问题请求。 | [对话视图](docs/design/behavior/conversation-mode.md)、[输入与邮箱](docs/design/behavior/conversation-input.md) |
-| **远程连接与执行** | 通过 SSH 连接远端已有的 Core，在远端创建和管理 Agent；也可以让 Agent 与模型访问在一台机器，文件与工具在另一台执行，两端角色可以互换，模型授权与资源授权各自独立。连接不部署远端服务，断连不丢 Session。分端执行当前适配 Claude Code。 | [Remote 管理](docs/design/behavior/remote-management.md)、[远程执行指南](packages/core/guides/actions/remote-execution.md) |
-| **A2A 协作** | Agent 之间相互发现、发信、一次发给一组明确的 Agent、创建子 Agent 并保留可查询的出生关系；每封信有独立身份与逐目标回执，丢回执不重投。 | [A2A 协作](docs/design/behavior/a2a-collaboration.md)、[amux 协议](docs/specs/amux-protocol.md) |
-| **Browser** | 内嵌浏览器是 Agent 的一等工作面：Agent 操作页面时不抢你的焦点，操作过程可见、可记录、可回放；人工演示可以整理成可复用的任务资产；破坏性操作需要人工批准。 | [Browser 工作面](docs/design/behavior/browser-workface.md) |
-| **Toolkit** | 在状态栏放置自己的工具：脚本、动作按钮与结果展示，可打包为本地扩展独立分发；保存和查看从不执行脚本。官方 Performance 面板本身也是一个 Toolkit，完全经由公开 CLI 取数。 | [Toolkit 合同](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
-| **连接器** | 把 Agent 对话接入飞书、Discord 等外部应用，收发消息、文件、问题与权限确认；每个受众与每次操作单独授权，回执未知时按原操作对账，不重投。Core 不依赖这个可选包。 | [`@agentmux/connectors`](packages/connectors/README.md) |
-| **Capsule** | Agent 开发的页面成为持久成果：重启后用户与 Agent 仍能找到同一页面、读取状态并继续交互，而不是只剩一个随 shell 消失的 localhost 地址。 | [Capsule PRD](docs/design/behavior/local-page-hosting.md)、[`@agentmux/capsule`](packages/capsule/README.md) |
-| **文件与 Git** | 浏览、编辑、预览工作目录中的文件，查看差异，管理工作区与 worktree。 | [文件与 Git](docs/design/behavior/files-and-git.md) |
-| **Mobile** | 在同一 Wi-Fi 下用手机继续已有 Agent 的对话、观看终端；Agent 与历史仍由 Mac 持有。 | [AgentMux Mobile](apps/mobile/README.md) |
-
-### `amux`：AgentMux 本身就是 CLI
-
-AgentMux 的目标是让产品的每一项能力都通过同一套 typed JSON-RPC 公共服务开放，Desktop、Mobile、`amux` CLI 与你的程序都是这套服务的平等消费者。传输支持 Unix socket、HTTP/SSE 与 SSH stdio。由此带来两个结果：
-
-- **Agent 操作产品，不需要模拟点击。** Agent 通过 `amux` 打开工作面、发送消息、查询状态，并用 `app inspect`、`app snapshot` 回看结果。在 AgentMux 里开一个 Agent 去优化 AgentMux 本身，是明确支持的自举路径；Agent 不通过截图和坐标点击操作产品已有的功能。
-- **能力面自描述。** `amux --skill` 与 `amux <module> --skill` 输出给 Agent 阅读的使用指南，与 [Core guides](packages/core/guides/README.md) 同源生成，按需渐进加载。
-
-新增功能时，作者必须同时判断 JSON-RPC 与 CLI 是复用、修改还是新增，只交付 GUI 不算完成。见 [对象优先 CLI](docs/design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 与 [公共能力贡献约定](docs/guides/public-capability-contributions.md)。
-
-## 架构
-
-```mermaid
-flowchart TB
-  subgraph Clients["Client · 呈现、焦点与宿主 IO"]
-    Desktop["Desktop<br/>Electron Main + Renderer"]
-    Mobile["Mobile"]
-    CLI["amux CLI"]
-    Own["你的程序"]
-  end
-
-  subgraph Core["@agentmux/core · Agent 语义"]
-    API["公共 API · typed JSON-RPC"]
-    Sem["Provider · AgentSession · Hook · Permission<br/>readiness · 语义恢复 · 空间身份与布局"]
-    API --> Sem
-  end
-
-  subgraph Runtime["ctxmux · 通用 Run Runtime"]
-    Run["PTY · 进程 · Run lifecycle<br/>有序字节 · Replay · Attachment"]
-  end
-
-  Agents["Agent CLI<br/>codex · claude · gemini · …"]
-
-  Desktop --> API
-  Mobile --> API
-  CLI --> API
-  Own --> API
-  Sem -->|唯一适配器| Run
-  Run --> Agents
-```
-
-| 层 | 唯一持有的事实 |
+| Level | What AgentMux does |
 | --- | --- |
-| **ctxmux** | PTY、进程、Run lifecycle、有序字节、Replay、Gap、Attachment 与权威 Runtime 状态 |
-| **AgentMux Core** | Provider、AgentSession、Hook、Permission、readiness、语义恢复，以及与前端无关的空间身份、拓扑和绑定 |
-| **Desktop / client** | 屏幕呈现、焦点、宿主编辑、文件、Git 与 Browser 能力；通过 Core 操作 Agent |
+| **Execution** | `@agentmux/core` keeps each agent's native protocol inside a Provider and exposes one typed API. Processes, PTYs and output bytes belong to **ctxmux**, a separate Rust runtime, not to the UI — so quitting or hot-updating the app never stops an agent mid-task. |
+| **Organization** | **Space**, **Focus** and **Goals** organize your attention. **Survey**, **Recall** and **Topic** accumulate knowledge. **Mote** turns a long-running collaboration into a partner with its own persona. |
+| **Connection** | Remote execution, agent-to-agent messaging, the embedded browser, Toolkit, external connectors and the `amux` CLI all go through one public service. People, agents and programs operate the product the same way. |
 
-Core 不依赖 Electron、React 或任何编辑器实现。三类身份严格区分：Space / Zone / Tab / Region 是**展示位置**，Project / Workspace 是**资源与工作目录**，AgentSession / Run 是**执行身份**。完整定义见 [概念词典](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)，源码机制见 [系统职责地图](docs/architecture/system-ownership.md)。ctxmux 可独立发布和使用，AgentMux 是它的高级 client。
+Use the Core alone to drive agents from your own host, or use the desktop app for the full workbench.
 
-内置 Provider：Codex、Claude、TraeX、Hermes、Pi、Grok、Gemini、Antigravity、Cursor、Kimi、Droid、Copilot、OpenCode，组合见 [Provider 入口](packages/core/src/providers/index.ts)。Provider 已注册不代表该 Agent 在本机可用，各 Provider 的真实运行覆盖分别核对。
+## What you notice first
 
-## 快速开始
+### 1 · Close the app. The agents keep working.
 
-### 环境要求
+Agent processes live in the ctxmux daemon, not in a window. Quit or restart the app, or hot-update only the UI, and healthy Runs carry on. When you come back, Core reattaches to the **same PID and PTY** and the terminal resumes from its byte cursor. If a process really has ended, Core resumes it natively through the same Session and the Provider's own session handle — **it never quietly swaps in a blank conversation**. On a cold start, agents active in the last 24 hours resume automatically; older ones get their tabs, layout, drafts and readable history back first and reconnect the first time you need them to act. After a reboot or power loss the original PTY is gone, so Core starts a new Run for the same Session from its native handle instead of pretending the old process survived.
 
-| 依赖 | 要求 | 来源 |
+> See [Durable Runtime health](docs/design/behavior/session-recovery.md#durable-runtime-健康) · [On-demand cold-start recovery](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位) · [Terminal runtime](docs/architecture/terminal-runtime.md)
+
+### 2 · You move the view, not the agent
+
+Space › Zone › Tab › Region is **where something is shown**. AgentSession / Run is **what is executing**. They never mix. Drag an agent into another tab, pop it into its own window or arrange a tab as `grid-4`: its Session, Run, host and working directory stay the same, and it keeps running. Core owns the spatial graph, so it can be read and edited without a GUI.
+
+```sh
+amux space mv --from-region '<region-id>' --expect-session '<session-id>' --new-tab
+amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 · grid-6 · grid-9
+```
+
+### 3 · See who needs you, at a glance
+
+<img src="docs/assets/readme/focus-list.webp" alt="Focus: execution contexts grouped into Attention, Working, Results and Idle, with project lanes" width="100%">
+
+**Focus** sorts every agent across every project into Attention, Working, Results and Idle / Recovery, with project lanes and a timeline track along the bottom; the original workface loads on the right. Attention also rolls up the navigation tree, so an agent waiting inside a collapsed project shows on that project's row.
+
+### 4 · Agents drive the product through a CLI, not through screenshots
+
+`amux` is the product's whole control surface: 25 object modules and 400+ commands over a typed JSON-RPC service of the same scale. Every agent AgentMux starts already has `amux` (`$AGENTMUX_CLI`). Opening an agent inside AgentMux to improve AgentMux itself is a supported, deliberate path.
+
+```sh
+amux whoami                                   # who am I, which Zone / Tab / Region, which capabilities
+amux agent open --executor codex --region '<my-region>' --split right \
+  --prompt 'Review this change and list the risks' --operation-id '<op-id>'
+amux --endpoint 'ssh://user@build-node/' agent ls   # the same command against a remote Core
+```
+
+## Feature map
+
+### Work · attention
+
+With many agents running, the bottleneck is your attention, not compute.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<img src="docs/assets/readme/art-space-workchamber.webp" alt="Space" width="100%"><br>
+<b>Space · Where is my work?</b><br>
+<sub>A durable spatial model. A Zone binds a folder, a Git worktree or a Topic; a Tab is one complete workface, split into Regions that hold agents, terminals, files, browsers or a Launcher.<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">Spatial model</a></sub>
+</td>
+<td width="33%" valign="top">
+<img src="docs/assets/readme/art-focus-workframe.webp" alt="Focus" width="100%"><br>
+<b>Focus · Who needs me now?</b><br>
+<sub>Execution context across projects, as a List or a collaboration <b>Map</b>. Hover the Focus button for counts per group and the top-priority contexts.<br><a href="docs/design/behavior/focus-context.md">Focus</a> · <a href="docs/design/behavior/collaboration-map.md">Collaboration map</a></sub>
+</td>
+<td width="33%" valign="top">
+<img src="docs/assets/readme/art-goals-companions.webp" alt="Goals" width="100%"><br>
+<b>Goals · What are we trying to achieve?</b><br>
+<sub>Agree on the goal and its success criteria first (Grill), then check results against evidence one criterion at a time (Grounding). Agents can only propose; <b>confirmation and acceptance come only from an authenticated person or device</b>.<br><a href="docs/design/behavior/goals-and-demand.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
+</td>
+</tr>
+</table>
+
+Hand short tasks to an agent right in a Space workface. Put long ones in a Goal: start one bounded run, or, once the goal is confirmed, let a Supervisor keep it moving (it checks in every 30 minutes by default). Stalled execution is visible, and one click on **PMO patrol** sends an inspection request to the responsible Supervisor. Automation never confirms a goal or accepts a result on your behalf.
+
+<img src="docs/assets/readme/goals.webp" alt="Goals list: goals, related sessions and execution bindings" width="100%">
+
+### Know · knowledge
+
+Work shouldn't disappear with the conversation that produced it. The Know group (Survey, Recall) and Topics in Space turn browsing, notes and experience into one flow.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<img src="docs/assets/readme/art-survey-prism.webp" alt="Survey" width="100%"><br>
+<b>Survey · Follow a question</b><br>
+<sub>Works as an everyday browser and can be the system default browser on macOS. Anything worth keeping goes explicitly into Recall or a Topic.</sub>
+</td>
+<td width="33%" valign="top">
+<img src="docs/assets/readme/art-recall-fold.webp" alt="Recall" width="100%"><br>
+<b>Recall · Keep what you find</b><br>
+<sub>A note is a plain <code>.note.md</code> file. <code>^blockID</code> marks a stable block and <code>[[page #^block]]</code> links to it. Browse the catalog as a tree, as cards or as an infinite-canvas graph.</sub>
+</td>
+<td width="33%" valign="top">
+<img src="docs/assets/readme/art-topic-atlas.webp" alt="Topic" width="100%"><br>
+<b>Topic · Build up one subject</b><br>
+<sub>Comes with a wiki, sources, outputs and agent name cards, organized as Category › Topic › Chat › Thread. An enabled wiki is injected into sessions started after it.</sub>
+</td>
+</tr>
+</table>
+
+- **People and agents edit the same note at the same time.** Saves are three-way merged: non-overlapping edits merge on their own; on a conflict nothing is written and the receipt returns the base, current and proposed text. Every save goes into immutable history — restore a whole page, or undo just one person's or one agent's round of edits.
+- **The index rebuilds from the files alone.** Bodies are Markdown, metadata and history are local files, and there is no database. `amux notebook scan` rebuilds outline, backlinks and full-text search straight from the files.
+- **Pass on experience.** Distill a reusable practice from a real agent session, review and revise it, then hand it to a Topic or Mote. Only your actual action in the app confirms it; an agent cannot approve itself.
+
+> See [Knowledge workflows](docs/design/behavior/knowledge-workflows.md) · [Note file format](docs/specs/note-markdown.md)
+
+### Mote · partners
+
+<table>
+<tr>
+<td width="40%" valign="top">
+<img src="docs/assets/readme/art-promotion-identity.webp" alt="An important direction becomes a long-term partner" width="100%">
+</td>
+<td valign="top">
+
+**A Mote is a team with a persona.** Agents take on tasks; a Mote takes on a standing responsibility. Its identity outlives any single session. Persona, behavior preferences and memory index live in readable, editable `SOUL.md`, `BEHAVIOR.md` and `MEMORY.md` files, loaded when a new session starts.
+
+Partners come from two places. Start from a profile — the built-in PMO, or a new Mote whose `SOUL.md` you write yourself. Or start from the work: let agents do concrete tasks in a Topic, and when that direction becomes important, ongoing or frequent, **promote** the Topic to a Mote.
+
+**Promotion doesn't restart agents.** The Topic's knowledge, discussions, outputs, member agents and workface all carry over. If a promotion is interrupted, continue it explicitly with the same operation ID.
+
+</td>
+</tr>
+</table>
+
+> See [Where partners come from](docs/design/behavior/companions-from-work.md) · [Mote contract](docs/design/behavior/motes-and-coordination.md)
+
+### Toolkit
+
+| Capability | What you can do | Where |
 | --- | --- | --- |
-| 平台 | Desktop 面向 macOS Apple Silicon；Core 随包 Runtime 支持 macOS arm64 与 Linux x64 | [Darwin manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json)、[Linux manifest](packages/core/vendor/ctxmux/linux-x64/manifest.json) |
-| Node.js | 24 或更高 | [Core package](packages/core/package.json) 的 `engines` |
-| pnpm | 根 package 声明的版本 | [根 package](package.json) 的 `packageManager` |
-| Xcode Command Line Tools | 开发 Desktop 时需要（`xcrun` / `clang`），用于构建原生工作区辅助程序 | |
-| Agent CLI | 在本机单独安装并完成登录 | 各 Agent 官方文档 |
+| **Agents and conversation** | Switch one Session between terminal and conversation views; read native history, traces, permission and question requests. Conversation, permission cards and the composer come from `@agentmux/client-ui`, shared by desktop and mobile. | [Conversation view](docs/design/behavior/conversation-mode.md) · [Input and mailbox](docs/design/behavior/conversation-input.md) |
+| **Agent-to-agent** | Agents discover each other, send messages, address an exact group, or spawn child agents with a queryable lineage. Every message has its own identity and per-target receipts; a lost receipt never triggers a resend. | [A2A collaboration](docs/design/behavior/a2a-collaboration.md) · [amux protocol](docs/specs/amux-protocol.md) |
+| **Browser** | The embedded browser is a first-class agent workface. `browser run` acts on refs from a page snapshot, not on coordinates; a human demonstration can become a reusable task asset; destructive actions need human approval. Agent automation is off by default — turn it on in Settings › Browser. | [Browser workface](docs/design/behavior/browser-workface.md) |
+| **Remote execution** | Connect over SSH or Tailcat to a Core already running elsewhere and manage agents there, or keep the agent and model on one machine while files and tools execute on another. Connecting deploys nothing remotely. | [Remote management](docs/design/behavior/remote-management.md) · [Remote execution guide](packages/core/guides/actions/remote-execution.md) |
+| **Capsule** | A page an agent builds becomes a durable artifact: after a restart, you and the agent can still find the same page, instead of a localhost URL that died with its shell. | [Capsule PRD](docs/design/behavior/local-page-hosting.md) · [`@agentmux/capsule`](packages/capsule/README.md) |
+| **Toolkit** | Put your own tools in the status bar: scripts, action buttons and result views. Saving or viewing a tool never runs its script. The built-in Performance panel is itself a Toolkit that reads everything through the public CLI. | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
+| **Connectors** | Bring agent conversations into Feishu and Discord (the two built-in adapters): messages, files, questions and permission prompts. Core doesn't depend on this optional package. | [`@agentmux/connectors`](packages/connectors/README.md) |
+| **Files and Git** | Browse, edit and preview files in the working directory, review diffs, manage workspaces and worktrees. | [Files and Git](docs/design/behavior/files-and-git.md) |
+| **Mobile** | Scan a code on your phone and continue existing agents' conversations or watch their terminals over an end-to-end encrypted Relay. Agents and history stay on the Mac. | [AgentMux Mobile](apps/mobile/README.md) |
 
-### 从源码运行 Desktop
+<img src="docs/assets/readme/focus-map.webp" alt="Focus Map: agents as nodes inside nested areas, connected by their messages" width="100%">
+
+<p align="center"><sub>Focus Map: nested areas show where agents belong, edges show real messages between them, and any node opens its original workface.</sub></p>
+
+## Architecture: three layers, one owner per fact
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/architecture-dark.svg">
+  <img src="docs/assets/readme/architecture-light.svg" alt="AgentMux in three layers: every client calls Core through one public service; Core drives ctxmux through a single adapter; ctxmux owns the agent CLI processes and PTYs" width="100%">
+</picture>
+
+| Layer | Facts it alone owns |
+| --- | --- |
+| **ctxmux** | PTYs, processes, Run lifecycle, ordered bytes, Replay, Gap, Attachment and authoritative runtime state |
+| **AgentMux Core** | Providers, AgentSession, Hooks, Permission, readiness, semantic recovery, and frontend-independent spatial identity, topology and bindings |
+| **Desktop / client** | Screen presentation, focus, host editing, files, Git and browser capabilities; operates agents through Core |
+
+Core doesn't depend on Electron, React or any editor. Three kinds of identity stay separate: Space / Zone / Tab / Region is **presentation**, Project / Workspace is **resources and working directory**, AgentSession / Run is **execution**. Full definitions live in the [concept glossary](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址); the source-level map is [system ownership](docs/architecture/system-ownership.md).
+
+Core ships a pinned ctxmux 0.1.0 (protocol 25) daemon, CLI and SDK for macOS arm64 and Linux x64, and checks every SHA-256 before installing or activating them. The ctxmux CLI can manage Runs without AgentMux; AgentMux is one of its clients.
+
+### 13 built-in Providers
+
+Every difference between agents stays inside its Provider and is declared honestly in its catalog — nothing is declared that hasn't been verified. Clients never branch on a specific agent.
+
+| Provider | Permission | Native resume | Native fork | Native history |
+| --- | :---: | :---: | :---: | :---: |
+| Codex · Claude | answers | ● | ● | ● |
+| Grok · Antigravity · Cursor · Droid · OpenCode · Kimi | observes | ● | | ● |
+| Gemini · Copilot | observes | ● | | |
+| Hermes | observes | | | ● |
+| TraeX · Pi | — | ● | | ● |
+
+<sub>Source: [`providers/index.ts`](packages/core/src/providers/index.ts) and each Provider's catalog. "Answers" means it can answer permission requests in a structured way; "observes" means it only observes them. A registered Provider doesn't mean that agent is available on your machine — each CLI is installed and signed in separately.</sub>
+
+## Design principles
+
+The full text is in [AGENTS.md](AGENTS.md). These are the ones that shape product behavior most.
+
+**When a step fails, ask one question: can the agent still work?** Not "did our check pass?"
+
+| Situation | What AgentMux does |
+| --- | --- |
+| The agent, CLI or workspace really is broken | Block, and state the authoritative fact |
+| The agent is healthy; our handshake, probe or bookkeeping failed | Keep every capability it has, and keep showing the failed step, current state and recovery action on its workface |
+| Confirmed healthy | Stay out of the way |
+| Can't tell | Say it's unknown — don't guess healthy, don't guess dead |
+
+This rule comes from a real P0 incident: an agent whose process was alive and whose PTY was still receiving bytes [could never receive another message](docs/casestudy/prompt-refused-after-readiness-consumed.md), because our own readiness bookkeeping was never renewed. Since then, every new `throw`, early return or disabled control has to answer the four questions in [RED-LINES.md](RED-LINES.md) first. The most important one: **"If this code is bypassed, does the path still work?"**
+
+**Durable sessions are the foundation.** Resuming the original Session with its original identity comes before everything else. A new process, a screen that merely looks right or a fresh empty session never counts as a successful recovery.
+
+**The terminal must not be slower than a bare terminal.** This is a P0 baseline: AgentMux adds conveniences on top of the terminal, so typing, scrolling and output must feel exactly like the CLI on its own — otherwise there is no reason for AgentMux to exist. The keystroke and output hot paths never read or write the persistent store, spawn processes, fan out RPCs or queue behind unrelated sessions. See [Continuous terminal reading](docs/design/behavior/terminal-reading.md#terminal-连续向上阅读历史).
+
+**Control decisions use protocol facts only.** Input eligibility, permissions, state transitions and operation completion come from the runtime's and Provider's native protocols and real operation receipts — never from on-screen text, titles, icons or colors.
+
+**One fact, one owner.** Every fact has exactly one authoritative owner; other layers reference it instead of copying it. Obsolete implementations are deleted outright, with no compatibility shims — but deleting code never means discarding a user's data, identity or workface.
+
+## Quick start
+
+### Requirements
+
+| Dependency | Requirement | Source |
+| --- | --- | --- |
+| Platform | Desktop: macOS on Apple Silicon. Core's bundled runtime: macOS arm64, Linux x64 | [Packaging script](apps/desktop/scripts/package-macos.mjs) · [ctxmux manifest](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) |
+| Node.js | 24 or newer (CI uses 24.14.1) | `engines` in the [Core package](packages/core/package.json) |
+| pnpm | 11.5.1 | `packageManager` in the [root package](package.json) |
+| Xcode or Command Line Tools | Needed for desktop development: clang and the Swift 6 toolchain build the native layer and workspace helper | [native-desktop](packages/native-desktop/README.md) |
+| Agent CLIs | Install and sign in to each one locally | Each agent's own docs |
+
+### Run the desktop app from source
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm --filter @agentmux/client-ui... build
-pnpm dev
+pnpm install --frozen-lockfile   # postinstall verifies the bundled ctxmux binaries' SHA-256
+pnpm dev                         # predev builds the dependency chain, Swift native layer and brand assets
 ```
 
-### 构建并安装 macOS 应用
+Development mode uses its own user data and never touches the sessions or settings of an installed app.
 
-从已提交的干净源码构建安装包：
+### Build and install the macOS app
+
+Packaging needs a clean source tree and a signing identity: set `AGENTMUX_MACOS_SIGN_IDENTITY` (a Developer ID Application certificate), or create a local signing identity once with `node apps/desktop/scripts/macos-local-signing.mjs --setup`. See [Signing identity](docs/architecture/desktop-updates.md#signing-identity).
 
 ```sh
-pnpm package:mac
-pnpm package:mac:install
+pnpm package:mac           # build AgentMux.app and a DMG (not notarized)
+pnpm package:mac:install   # build and install to ~/Applications/AgentMux.app
 ```
 
-更新已有安装：
+Updating an existing install picks a route by what changed, and never kills a healthy Run:
 
 ```sh
-pnpm update:local               # 完整更新
-pnpm update:renderer            # 仅 Renderer 的兼容更新
-pnpm update:renderer:rollback   # 回退 Renderer 更新
+pnpm update:local               # picks the route: UI-only changes hot-update; a changed shell reinstalls; a changed ctxmux stops for a compatibility review
+pnpm update:renderer            # hot-update the UI only: Main and agent Runs keep running
+pnpm update:renderer:rollback   # go back to the previous UI build
 ```
 
-安装前提、Runtime 变更与原工作面保全见 [Desktop 更新架构](docs/architecture/desktop-updates.md)，并行开发中的打包流程见 [macOS 打包指南](docs/guides/macos-packaging.md)。
+Install prerequisites, runtime handoff and workface preservation are covered in [desktop update architecture](docs/architecture/desktop-updates.md); packaging during parallel development is in the [macOS packaging guide](docs/guides/macos-packaging.md).
 
-## 接入 Core
+### Pick an icon
 
-在已安装 `@agentmux/core`、本机已安装并登录 Codex 的 Node 宿主中：
+The desktop app ships five app icons; 青篆 (Qingzhuan) is the default. Switch in Settings › Appearance, or:
+
+```sh
+amux settings set appearance.appIcon huihuan   # qingzhuan · huihuan · zheyu · lingban · classic
+```
+
+<p align="center"><img src="docs/assets/readme/app-icons.webp" alt="Five app icons: Qingzhuan (default), Huihuan, Zheyu, Lingban and Classic" width="72%"></p>
+
+## Use the Core
+
+In a Node host with `@agentmux/core` installed and Codex installed and signed in:
 
 ```ts
-import { randomUUID } from 'node:crypto'
-import { connectLocalAgentMux } from '@agentmux/core'
+import { connectLocalAgentMux, mintObjectId } from '@agentmux/core'
 
 const client = await connectLocalAgentMux()
 try {
   const { session, creation } = await client.createAgentWithDelivery({
     providerId: 'codex',
-    executorId: 'codex-full-auto',
+    executorId: 'codex',                 // the default Executor id equals the Provider id
     workspacePath: process.cwd(),
-    createOperationId: randomUUID(),
-    prompt: '检查仓库，说明当前结构和需要验证的内容'
+    injectAgentMuxGuide: true,
+    createOperationId: mintObjectId(),   // keep it: retrying with the same id returns the same Session
+    prompt: 'Inspect the repository and explain its structure and what needs verifying'
   })
   console.log(session.agentSessionId, creation.initialPrompt)
 } finally {
-  await client.dispose()
+  await client.dispose()                 // releases this client only; Runs keep going
 }
 ```
 
-- 创建回执说明初始 Prompt 的投递情况，不代表任务已经完成。
-- `dispose()` 只释放当前 client 与 attachment，不会停止 Run。
+- `creation.initialPrompt` records whether the first prompt was delivered (`confirmed`, `unconfirmed`, `unknown` or `not-requested`). It doesn't mean the task is done.
+- Retrying a creation with the same `createOperationId` returns the existing Session instead of starting a second agent.
+- For terminals only, use `connectLocalAgentMuxRuntime()`: it connects to the physical runtime without waiting for session and Provider observation.
 
-会话接回、后续 Prompt、结构化回答、停止 Agent、本地纯 Terminal 与自定义 Provider，见 [Core 接入说明](packages/core/README.md)。
+Reattaching, follow-up prompts, structured answers, terminals, attachments and recoverable input are covered in the [Core guide](packages/core/README.md#agent-调用与输入). Custom Providers extend [`defineAgentProvider`](packages/core/src/agent-provider.ts) and [plugins](packages/core/src/agent-plugin.ts); the desktop app currently lists built-in Providers only.
 
-## 用 CLI 操作 Agent
+## `amux`: the product is a CLI
 
-先运行 Desktop 或自己的服务宿主，确保 `amux` 已在 `PATH` 中，再发现实际资源：
+Every capability goes through one typed JSON-RPC public service. The CLI, mobile and your own programs call that service directly; the desktop app reuses the same business owners over trusted IPC, so the GUI and the CLI always see the same facts.
+
+- **Agents operate the product without simulated clicks.** `app inspect` reads what the main window actually shows and has selected, `app snapshot` reads a global observation across objects, and object commands do the work. Nothing the product already offers is done through screenshots and coordinates.
+- **The surface describes itself.** `amux --skill` is a module catalog of about 4 KB, and `amux <module> --skill` loads one module's guide on demand. Both are generated from the same source as the [Core guides](packages/core/guides/README.md).
+- **One flag switches transport.** Unix socket (default), HTTP/SSE (opt-in, token required), SSH stdio, Tailcat stdio and an end-to-end encrypted Relay, all selected with `--endpoint`.
+
+`amux` is already on `PATH` in agents and terminals started by AgentMux. Discover real resources first, then substitute their IDs below:
 
 ```sh
 amux --help
-amux --skill                  # 输出给 Agent 阅读的使用指南
 amux settings executors ls
 amux space ls
 amux agent ls
-amux app snapshot
-```
 
-用发现结果替换下例中的 ID。`operation-id` 由调用者为本次操作生成并保留：
-
-```sh
 amux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab \
-  --prompt '检查当前项目并给出修改建议' --operation-id '<operation-id>'
+  --prompt 'Check this project and suggest changes' --operation-id '<operation-id>'
 amux agent inspect --session '<session-id>'
-amux agent send --to-session '<session-id>' --text '继续验证这项修改'
+amux agent send --to-session '<session-id>' --text 'Keep verifying this change'
+amux agent broadcast --to-sessions '<sid-a>,<sid-b>' --text 'Sync your progress'
 ```
 
-后续操作使用创建回执返回的 Session 与空间地址，不要从名称或焦点猜测目标。回执丢失时，先用原 `operation-id` 查询这次操作，不要重建 Agent 或重发首任务。完整命令见 [对象操作指南](docs/guides/agentmux-cli-object-control.md)，准确参数以所执行版本的 `--help` / `--skill` 为准。
+Use the Session and spatial address from the creation receipt for follow-up operations; never infer a target from a name or from focus. If a receipt is lost, query the original `operation-id` before doing anything else — don't recreate the agent or resend the first task. The full command guide is [object operations](docs/guides/agentmux-cli-object-control.md); exact arguments always come from `--help` / `--skill` of the version you run.
 
-远端 Agent 的接入与授权见 [Core 远程 Runtime](packages/core/README.md#远程-runtime)，恢复约束见 [联邦 Runtime 与远端恢复边界](docs/design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。HTTP 入口默认关闭，开启时需要宿主显式配置 token。
+New features must decide whether they reuse, change or add JSON-RPC and CLI surface; shipping only a GUI doesn't count as done. See [object-first CLI](docs/design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) and the [public capability contribution rules](docs/guides/public-capability-contributions.md).
 
-## 仓库结构
+## Repository layout
 
-| 位置 | 职责 |
+| Path | Responsibility |
 | --- | --- |
-| [`packages/core`](packages/core/README.md) | 通用 Agent API、Provider、Session、Timeline、权限、恢复与公共业务服务；附带 `amux`、`agentmux-runtime` 等可执行文件 |
-| [`packages/client-ui`](packages/client-ui/README.md) | 共享的 Conversation、Composer、Trace、请求卡片与终端回放等 React 模块 |
-| [`packages/layout`](packages/layout/README.md) | 分屏树、比例与布局计算 |
-| [`packages/demand`](packages/demand/README.md) | Goal 背后的文件 Demand Store、规则与 CLI |
-| [`packages/capsule`](packages/capsule/README.md) | 与 UI 无关的持久本地页面及其 Node 托管 |
-| [`packages/connectors`](packages/connectors/README.md) | 由宿主持有的外部应用连接 |
-| [`packages/diagnostic-evidence`](packages/diagnostic-evidence/README.md) | 可移植的类型化诊断证据读取与有界查询 |
-| [`packages/native-desktop`](packages/native-desktop/README.md) | macOS 原生桌面层与框架无关的页面图像端口 |
-| `packages/git` | 与宿主无关的 Git 仓库能力 |
-| `packages/identity` | 各领域包共用的产品身份分配 |
-| `packages/relay` | 手机连接使用的端到端加密 Relay |
-| `apps/desktop` | Electron Main 与 Renderer，组合 Core 与共享包，持有宿主能力和工作面投影 |
-| [`apps/host`](apps/host/README.md) | 独立于 client 的 Node Core 宿主 |
-| [`apps/mobile`](apps/mobile/README.md) | 手机 client（Web 与 iOS / Android 原生包装） |
+| [`packages/core`](packages/core/README.md) | Agent API, Providers, Sessions, timeline, permissions, recovery and the public business service; ships `amux`, `agentmux-runtime`, `ctxmux` and `ctxmuxd` |
+| [`packages/client-ui`](packages/client-ui/README.md) | React modules shared by desktop and mobile: conversation, composer, trace, request cards and terminal replay |
+| [`packages/layout`](packages/layout/README.md) | Re-exports Core's UI-free split-pane algebra (split tree, ratios, directional addressing); holds no spatial state |
+| [`packages/demand`](packages/demand/README.md) | File-based Demand store, rules and the `agentmux-demand` CLI behind Goals |
+| [`packages/capsule`](packages/capsule/README.md) | UI-independent durable local pages and their Node hosting |
+| [`packages/connectors`](packages/connectors/README.md) | Host-owned connections to external apps (Feishu, Discord) |
+| [`packages/diagnostic-evidence`](packages/diagnostic-evidence/README.md) | Portable, typed diagnostic evidence reading with bounded queries |
+| [`packages/native-desktop`](packages/native-desktop/README.md) | macOS native desktop layer and a framework-independent page-image port |
+| `packages/git` | Host-independent Git repository capabilities |
+| `packages/identity` | Product identity allocation shared by domain packages |
+| `packages/relay` | End-to-end encrypted Relay for mobile connections |
+| `apps/desktop` | Electron Main and Renderer; composes Core and shared packages, owns host capabilities and workface projection |
+| [`apps/host`](apps/host/README.md) | Client-independent Node Core host: public Unix endpoint, optional connector hosting, mobile web page and LAN Relay |
+| [`apps/mobile`](apps/mobile/README.md) | Mobile client (web plus iOS / Android native wrappers) |
 
-## 开发与测试
+The root also holds cross-package tests and guards (`test/`), repository-level verification scripts (`scripts/`), upstream dependency patches (`patches/`) and CI (`.github/workflows/`).
+
+## Development and testing
 
 ```sh
-pnpm typecheck    # 构建共享包并对全部包做类型检查
-pnpm test:fast    # 日常单元与集成测试
-pnpm test:native  # 打包后的 Core 消费者集成测试
+pnpm typecheck    # build the client-ui dependency chain, then type-check each package
+pnpm test:fast    # everyday unit and integration tests
+pnpm test:native  # pack and install Core offline outside the checkout, then test end to end on a real ctxmux PTY (macOS arm64 only)
+pnpm check        # typecheck + test:fast + test:native + build
 ```
 
-按改动类型选择验证，命令定义在 [根 package](package.json)。实现任务同时通过变异测试与真实产品调用链检查；视觉改动经独立 Agent 看图评审；布局或 Session 生命周期改动须验证真实进程重启后原工作面仍可恢复。见 [测试策略](docs/testing/strategy.md) 与 [视觉验收指南](docs/guides/agent-visual-e2e-review.md)。
+| Layer | Command | What it proves |
+| --- | --- | --- |
+| Reliability | `pnpm test:reliability` | 16 real Runs, concurrent attachments, recovery after SIGKILL to a live daemon, and frozen resource budgets |
+| Security / fuzz | `pnpm test:security` · `pnpm test:fuzz` | Public service, hooks, file access and browser boundaries |
+| Resources | `pnpm test:resources` | Desktop process resource measurement |
+| Nightly | `pnpm test:nightly` | All of the above, once each |
+| Real agent | `pnpm test:real-codex` | Opt-in; uses the Codex already signed in on your machine |
 
-## 参与贡献
+CI is defined in [`.github/workflows`](.github/workflows): Verify runs `pnpm check` on ubuntu-24.04 and macos-14, and Nightly runs `pnpm test:nightly` every day. The desktop build needs the macOS toolchain, and `test:native` plus the reliability tests only really execute on macOS arm64.
 
-开始之前，请先阅读：
+Pick verification by the kind of change. An implementation task counts as done only when it passes **mutation testing** (break the implementation and its test must fail) and a check of the real product call chain. Visual changes get an independent agent's review of real screenshots. Layout or session-lifecycle changes must show the original workface still recovers after a real process restart. See the [testing strategy](docs/testing/strategy.md) and the [visual review guide](docs/guides/agent-visual-e2e-review.md).
 
-1. [AGENTS.md](AGENTS.md)：目标、分层边界与交付责任，对人和 Agent 同样适用。
-2. [RED-LINES.md](RED-LINES.md)：新增拦截、早退或降级前必须回答的问题。
-3. [文档事实与维护规范](docs/guides/document-truth-and-maintenance.md)：每类文档回答什么问题、怎样维护。
+## Contributing
 
-需求从 idea 开始：先在 `docs/ideas/` 记录与整合，经确认后合入 owning 设计文档，决定执行时再登记 Tracker 任务。调研、计划、评审等过程资料留在本机，不提交，边界见 [过程资料规则](docs/process-directories.md)。每个提交只承载一个职责，验收后基于最新 `main` 以单亲提交合入。
+Before you start, read:
 
-## 文档
+1. [AGENTS.md](AGENTS.md): goals, layer boundaries and delivery responsibilities — for people and agents alike.
+2. [RED-LINES.md](RED-LINES.md): the questions to answer before adding any block, early return or degradation.
+3. [Document truth and maintenance](docs/guides/document-truth-and-maintenance.md): what each kind of document answers and how to maintain it.
 
-[文档导航](docs/README.md) 按读者任务连接设计约束、当前机制、接口、操作与验证来源：
+Requirements start as ideas: capture and consolidate them in `docs/ideas/`, merge confirmed ones into the owning design document, and register a Tracker task once execution is decided. Research, plans and reviews stay on your machine and are never committed — see the [process material rules](docs/process-directories.md). Each commit carries one responsibility and lands on the latest `main` as a single-parent commit once accepted.
 
-- [交互专题索引](docs/design/agentmux-desktop-interaction.md) 与 [呈现专题索引](docs/design/agentmux-surface-density.md)：产品行为与视觉规则
-- [系统职责地图](docs/architecture/system-ownership.md)：分层、身份与唯一事实 owner
-- [公共能力源码入口](docs/specs/public-capabilities.md)：公开 API / CLI 的实际合同
-- [事故复盘](docs/casestudy/)：重大故障的现场、证据与改进
+## Documentation
 
-功能体系一节描述的是已确认的产品设计。源码中存在某项能力，不代表它已经打包、安装或通过行为验收；各能力的当前实现范围以对应文档中的说明为准。
+The [documentation index](docs/README.md) connects design constraints, current mechanisms, interfaces, operations and verification by reader task:
 
-## 许可证与致谢
+- [Interaction topic index](docs/design/agentmux-desktop-interaction.md) and [presentation topic index](docs/design/agentmux-surface-density.md): product behavior and visual rules
+- [System ownership](docs/architecture/system-ownership.md): layers, identities and the single owner of each fact
+- [Public capability sources](docs/specs/public-capabilities.md): the actual public API / CLI contracts
+- [Incident case studies](docs/casestudy/): 13 major failures — what happened, the evidence and what changed
 
-仓库根目前没有统一的开源许可证，各包的许可以其 `package.json` 为准：多数包为 `UNLICENSED`，`packages/relay` 为 Apache-2.0。
+Feature descriptions in this README are based on confirmed product design and source wiring. A capability existing in source doesn't mean it has been packaged, installed or behavior-verified; each capability's current scope is stated in its own document. The screenshots come from capture scenes that render the real components with demo data.
 
-部分实现改编自 Orca（MIT）与 [Paseo](https://github.com/getpaseo/paseo)（Apache-2.0），上游版本与改动见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `packages/relay/NOTICE`。
+## License and acknowledgements
+
+There is no repository-wide open-source license yet; each package's license is the one in its `package.json`: the 9 publishable packages are `UNLICENSED`, `packages/relay` is Apache-2.0, and `apps/*` and `packages/client-ui` are private packages without a declared license.
+
+Parts of the implementation are adapted from or informed by Orca (MIT), Shotback (MIT) and [Paseo](https://github.com/getpaseo/paseo) (Apache-2.0), and use fs-native-extensions (Apache-2.0) and resvg-js (MPL-2.0). Upstream versions and changes are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `packages/relay/NOTICE`; the draw.io viewer bundled with the desktop app is licensed as described in [`apps/desktop/vendor/drawio`](apps/desktop/vendor/drawio/v32.4.1/LICENSE).
