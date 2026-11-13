@@ -302,3 +302,7 @@
 
 .collaboration-edge__caption { position: absolute; transform-origin: 0 0; pointer-events: none; white-space: nowrap; padding: 1px 4px; border-radius: 3px; background: var(--surface-1); color: var(--text-2); font-size: 11px; line-height: 16px; }
 .collaboration-edge__caption[data-creation-unconfirmed=true] { color: var(--text); }
+/* The count beside a merged arrowhead: routes of this kind also arriving at this face. */
+.collaboration-edge__merged { position: absolute; transform-origin: 0 0; pointer-events: none; min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--line); color: var(--text-2); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; }
+.collaboration-edge__merged[data-kind=communication] { color: var(--green); }
+.collaboration-edge__merged[data-kind=supervision] { color: var(--amber); }

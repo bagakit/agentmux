@@ -391,14 +391,36 @@ const CollaborationRelations = memo(function CollaborationRelations({ paths, act
     const left = -x / zoom - padding, top = -y / zoom - padding, right = (state.width - x) / zoom + padding, bottom = (state.height - y) / zoom + padding
     return paths.filter(({ route: { bounds }, sourceBox, targetBox }) => [bounds, sourceBox, targetBox].some(box => box.x <= right && box.x + box.width >= left && box.y <= bottom && box.y + box.height >= top))
   }, [paths]), sameItems)
-  const zoom = useStore(state => state.transform[2])
+  const zoom = useStore(state => state.transform[2]), preferences = useContext(CollaborationMapPreferences)
   const markerId = useId().replace(/:/g, '')
+  // At icon scale routes into one face clip to its small circle and their heads stack. One
+  // ordinary inbound head per target and kind is drawn; the rest of that group are counted
+  // beside it. Selected and emphasised routes always keep their own head.
+  const iconScale = collaborationMapLod(zoom, preferences).identity === 0
+  const heads = useMemo(() => {
+    const result = new Map<string, number>()
+    if (!iconScale) return result
+    const groups = new Map<string, RelationPath[]>()
+    for (const path of visible) {
+      if (path.selected || path.emphasis === 'related' || path.targetBox.kind !== 'agent') continue
+      const key = JSON.stringify([path.targetBox.id, path.relations[0]!.kind]), group = groups.get(key)
+      if (group) group.push(path); else groups.set(key, [path])
+    }
+    for (const group of groups.values()) if (group.length > 1) {
+      const [lead, ...rest] = [...group].sort((a, b) => b.weight - a.weight || a.id.localeCompare(b.id))
+      result.set(lead!.id, rest.length)
+      for (const path of rest) result.set(path.id, -1)
+    }
+    return result
+  }, [visible, iconScale])
   return <ViewportPortal><svg className="collaboration-connections" style={{ position: 'absolute', width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
     <defs>{Object.entries(colors).map(([kind, color]) => <marker key={kind} id={`${markerId}-${kind}`} viewBox="0 0 20 12" refX={19} refY={6} markerUnits="userSpaceOnUse" markerWidth={20 / zoom} markerHeight={12 / zoom} orient="auto-start-reverse" style={{ color }}><CollaborationRelationArrow kind={kind as CollaborationRelation['kind']} /></marker>)}</defs>
-    {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} zoom={zoom} active={active} onSelect={onSelect} onClear={onClear} />)}
+    {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} zoom={zoom} active={active} onSelect={onSelect} onClear={onClear} merged={heads.get(path.id) ?? 0} />)}
   </svg></ViewportPortal>
 })
-const RelationView = memo(function RelationView({ record, markerId, zoom, active, onSelect, onClear }: { record: RelationPath; markerId: string; zoom: number; active: boolean; onSelect(path: RelationPath): void; onClear(): void }) {
+const RelationView = memo(function RelationView({ record, markerId, zoom, active, onSelect, onClear, merged = 0 }: { record: RelationPath; markerId: string; zoom: number; active: boolean; onSelect(path: RelationPath): void; onClear(): void
+  /** 0 own head; -1 head drawn by the lead route into the same face; n > 0 lead with n more. */
+  merged?: number }) {
   const kind = record.relations[0]!.kind, { labelX, labelY } = record.route, motion = useContext(MapMotionContext)
   const tooltip = useWorkbenchNameTooltip(record.title, record.detail, !active, { placement: 'bottom', pointerPassThrough: true })
   const show = (event: { currentTarget: SVGGElement }) => {
@@ -429,13 +451,14 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear(); tooltip.hide() }
     }}>
-    <BaseEdge id={record.id} path={path} markerEnd={`url(#${markerId}-${kind})`} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
+    <BaseEdge id={record.id} path={path} {...merged < 0 ? {} : { markerEnd: `url(#${markerId}-${kind})` }} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
     {record.active && motion ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
     {record.active && motion && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" data-kind={kind} aria-hidden="true"
       style={{ offsetPath: `path("${path}")`, animationDelay: `${delay}ms` }} /> : null}
     {caption ? <EdgeLabelRenderer><span className="collaboration-edge__caption" data-creation-unconfirmed={record.unconfirmed} data-relation-id={record.id} aria-hidden="true"
       style={{ transform: `translate(${end.x - dx / length * 24 / zoom}px, ${end.y - dy / length * 24 / zoom}px) scale(${1 / zoom}) translate(${horizontal ? dx > 0 ? '-100%' : '0' : '-50%'}, ${horizontal ? 'calc(-100% - 5px)' : dy > 0 ? '-100%' : '0'})` }}>{record.title}</span></EdgeLabelRenderer> : null}
     {record.emphasis === 'related' && record.count > 1 && !record.selected && !tooltip.props['aria-describedby'] ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
+    {merged > 0 && end ? <EdgeLabelRenderer><span className="collaboration-edge__merged" data-kind={kind} aria-hidden="true" style={{ transform: `translate(${end.x - (length ? dx / length : 0) * 26 / zoom}px, ${end.y - (length ? dy / length : 0) * 26 / zoom}px) scale(${1 / zoom}) translate(-50%, -50%)` }}>+{merged}</span></EdgeLabelRenderer> : null}
   </g>{tooltip.content}</>
 })
 
