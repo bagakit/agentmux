@@ -18,9 +18,9 @@ export type MoteMainSnapshot = {
   transition?: import('./mote-preferences.js').MoteMainTransitionMarker
 }
 
-/** Legacy reads remain read-only. The first original CAS can retain this exact baseline generation. */
-export function moteMainRoleRevision(defaults: { conversationRevision?: string; conversation?: MoteDefaultConversation }, documentRevision: string): string {
-  return defaults.conversationRevision ?? `legacy:${documentRevision}`
+/** Legacy reads remain read-only. The first original CAS can retain this exact baseline generation; a confirmed absent MOTE.md has no revision yet. */
+export function moteMainRoleRevision(defaults: { conversationRevision?: string; conversation?: MoteDefaultConversation }, documentRevision: string | null): string {
+  return defaults.conversationRevision ?? `legacy:${documentRevision ?? 'missing'}`
 }
 
 export type MoteMainReader = {
