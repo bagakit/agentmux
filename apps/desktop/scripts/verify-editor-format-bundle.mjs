@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -19,6 +20,10 @@ const sources = {}, targets = {}
 const heavyPackage = /\/node_modules\/(?:\.pnpm\/)?(?:mermaid|@viz-js(?:\/|\+)viz|@plantuml(?:\/|\+)core|@excalidraw(?:\/|\+)excalidraw|vega(?:-lite|-interpreter)?|katex|highlight\.js|prettier|smol-toml|yaml|pdfjs-dist|djvu-rs|fflate|@zip\.js(?:\/|\+)zip\.js)(?:@|\/)/
 const report = { passed: false, sources, targets }
 try {
+  const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim()
+  report.candidate = { head: git('rev-parse', 'HEAD'), mainAtBuild: git('rev-parse', 'main') }
+  git('merge-base', '--is-ancestor', report.candidate.head, 'main')
+  assert.equal(git('diff', '--name-only', 'HEAD'), '', 'Build the admitted committed candidate without tracked edits.')
   for (const file of ['apps/desktop/scripts/verify-editor-format-bundle.mjs', 'apps/desktop/electron.vite.config.ts',
     'packages/editor-extensions/src/build/extension-notices.ts', 'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts',
     'packages/editor-extensions/src/build/file-diagram-assets.ts', 'packages/editor-extensions/src/build/excalidraw-local-fonts.ts',
@@ -119,6 +124,7 @@ try {
   assert.equal(djvuWasm.length, 2, 'Both upstream scalar and SIMD DjVu decoder variants were emitted')
   assert.ok(artifacts.some(file => /djvu\.worker-.*\.js$/.test(file)), 'The actual lazy DjVu Worker was emitted')
   report.bookReader = { entry: bookEntry.file, chunks: [...bookClosure], djvuWasm }
+  assert.equal(git('rev-parse', 'HEAD'), report.candidate.head, 'The build candidate stayed unchanged.')
   report.passed = true
 } catch (error) { report.failure = { message: error.message, stack: error.stack } }
 finally {
