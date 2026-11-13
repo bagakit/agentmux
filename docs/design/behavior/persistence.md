@@ -18,6 +18,8 @@ Agent 卡片[异步操作反馈](session-recovery.md#agent-卡片的异步操作
 
 已关闭或删除 AgentMux 记录后，独立本机输入仍须可发现、复制；准确关联、未知旧 key 与删除范围沿[《已关闭 Session 的 AgentMux 记录》](session-recovery.md#已关闭-session-的-agentmux-记录)，不另建历史 Store 或将副本搬入 Core。
 
+电子书阅读位置属于原 durable Region 及准确 Host／Workspace／文件资源上的 Desktop 展示偏好，由既有 Desktop 用户状态 owner 按视图独立持久化；Core 继续持有空间身份、布局与绑定。保存阅读进度不能遍历无关 Session、重写完整空间图或重新编码无关草稿。资源变化须隔开迟到写入；偏好读写失败保留健康 File 与当前内存位置，并提供准确恢复入口。
+
 ## 保存合同
 
 凡承诺跨重启保全的数据，都须明确唯一持久 owner、稳定存储根、保存触发、确认结果、重启读取入口与失败后的可执行动作。新数据类型与新工作面在同一竖切中完成保存和恢复消费。
