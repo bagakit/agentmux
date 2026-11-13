@@ -7,7 +7,7 @@ import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 import { CaptureHint, CaptureToolbar, CAPTURE_TOOLS } from './CaptureToolbar'
-import { captureLoupePlacement, captureToolbarPlacement, cropGestureRect, CROP_CURSORS, hitCropHandle, rectContains, shownSelection, type CropGesture } from './capture-geometry'
+import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement, cropGestureRect, CROP_CURSORS, hitCropHandle, rectContains, shownSelection, type CropGesture } from './capture-geometry'
 import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
 import { AnnotationNotes } from './AnnotationNotes'
 import { renderCommittedLayer, renderScreenshotScene } from './canvas-render'
@@ -44,8 +44,8 @@ function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish:
 /** The marks, selection and tool a capture editor hands to a separate window editor on Expand; color and other styles carry over through the editors' shared in-process style memory. */
 export type CaptureAnnotationHandoff = { shapes: ScreenshotShape[]; crop: NormalizedRect; tool: AnnotationTool }
 const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover'])
-// Selection handle hit radius and painted diameter, and the size chip's height and gap to the selection, in frame CSS pixels.
-const CROP_HANDLE_HIT = 6, CROP_HANDLE_SIZE = 7, SIZE_CHIP_HEIGHT = 20, SIZE_CHIP_GAP = 4
+// Selection handle hit radius and painted diameter, in frame CSS pixels.
+const CROP_HANDLE_HIT = 6, CROP_HANDLE_SIZE = 7
 // The loupe magnifies a square of frozen pixels around the pointer into a grid of cells, in loupe CSS pixels.
 const LOUPE_CELLS = 15, LOUPE_CELL = 8, LOUPE_GRID = LOUPE_CELLS * LOUPE_CELL, LOUPE_CENTRE = (LOUPE_CELLS - 1) / 2
 type LoupeSample = { x: number; y: number; hex: string; rgb: [number, number, number] }
@@ -698,9 +698,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     // Frame CSS pixels: the selection, its toolbar, size chip and loupe all sit on the one frozen display frame.
     const frame = { width: size.width, height: size.height }
     const shown = selection && { x: selection.x * scale, y: selection.y * scale, width: selection.width * scale, height: selection.height * scale }
-    const placement = shown && documentState.crop && gesture === null ? captureToolbarPlacement(shown, measured.bar, frame) : null
-    const chipTop = shown ? shown.y - SIZE_CHIP_GAP - SIZE_CHIP_HEIGHT : 0
-    const chip = shown && selection ? { left: Math.max(0, Math.min(shown.x, frame.width - measured.chip)), top: chipTop >= 0 ? chipTop : shown.y + SIZE_CHIP_GAP } : null
+    // The bar shows only at rest, but its side is known during a gesture too, so the size chip never swaps sides on release.
+    const placement = shown ? captureToolbarPlacement(shown, measured.bar, frame) : null
+    const bar = placement && documentState.crop && gesture === null ? placement : null
+    const chip = shown && placement ? captureSizeChipPlacement(shown, measured.chip, placement.side, frame) : null
     const loupeBox = loupe ? captureLoupePlacement(loupe.at, shown, frame) : null
     const hasProperties = showColor || showWidth || showFont || tool === 'pixelate'
     // Before a selection one line names the gestures and keys; afterwards the toolbar's tooltips carry them.
@@ -709,11 +710,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--capture" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
       <div ref={containerRef} className="image-annotation-editor__canvas-area">{canvasViewport}</div>
       {chip && selection ? <span ref={chipRef} className="image-annotation-editor__size-chip" aria-label="Selection size" style={chip}>{Math.round(selection.width)} × {Math.round(selection.height)} px</span> : null}
-      {placement ? <div ref={barRef} className="image-annotation-editor__capture-bar" data-side={placement.side} style={{ left: placement.left, top: placement.top }}>
+      {bar ? <div ref={barRef} className="image-annotation-editor__capture-bar" data-side={bar.side} style={{ left: bar.left, top: bar.top }}>
         <CaptureToolbar tool={tool} busy={busy} loaded={loaded} label={busy ? busyLabel : label} discard={discardControl}
           onTool={next => { resetGesture(); setTool(next); schedulePaint() }} onPin={() => complete('pin')} onSavePng={() => complete('save-png')}
           onExpand={expand} onCancel={requestClose} onComplete={() => complete()} />
-        {hasProperties ? <div className="image-annotation-editor__capture-properties" role="group" aria-label="Markup properties" data-side={placement.side === 'below' ? 'below' : 'above'}>{propertyControls}</div> : null}
+        {hasProperties ? <div className="image-annotation-editor__capture-properties" role="group" aria-label="Markup properties" data-side={bar.side === 'below' ? 'below' : 'above'}>{propertyControls}</div> : null}
       </div> : null}
       {hint ? <CaptureHint text={hint} onCancel={requestClose} /> : null}
       {loupe && loupeBox ? <div className="image-annotation-editor__loupe" aria-label="Pixel loupe" style={loupeBox}>

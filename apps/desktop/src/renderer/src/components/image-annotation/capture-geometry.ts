@@ -39,17 +39,31 @@ export function shownSelection(gesture: CropGesture | null, kept: NormalizedRect
   return gesture ? cropGestureRect(gesture, bounds) ?? gesture.original : kept
 }
 
-// The floating toolbar's height, its gap to the selection and its inset from the frame edge, in frame CSS pixels.
-const CAPTURE_BAR_HEIGHT = 36, CAPTURE_BAR_GAP = 8, CAPTURE_BAR_INSET = 12
-/** Right-aligned to the selection: below it, else above it, else inside its bottom-right corner; always 12 px inside the frame. */
-export function captureToolbarPlacement(selection: NormalizedRect, barWidth: number, frame: CaptureFrame): { side: 'below' | 'above' | 'inside'; left: number; top: number } {
+// The floating toolbar's height, its gap to the selection and its inset from the frame edge, and how far its property
+// popover reaches past its outer edge (a 4 px gap and the popover's fixed CSS height of 34), in frame CSS pixels.
+const CAPTURE_BAR_HEIGHT = 36, CAPTURE_BAR_GAP = 8, CAPTURE_BAR_INSET = 12, CAPTURE_PROPERTIES_REACH = 4 + 34
+export type CaptureBarSide = 'below' | 'above' | 'inside'
+/**
+ * Right-aligned to the selection: below it, else above it, else inside its bottom-right corner; always 12 px inside the
+ * frame. A side is free only with room for the property popover too, so choosing a mark never moves the bar.
+ */
+export function captureToolbarPlacement(selection: NormalizedRect, barWidth: number, frame: CaptureFrame): { side: CaptureBarSide; left: number; top: number } {
   const bottom = selection.y + selection.height, right = selection.x + selection.width
   const below = bottom + CAPTURE_BAR_GAP, above = selection.y - CAPTURE_BAR_GAP - CAPTURE_BAR_HEIGHT
-  const side = below + CAPTURE_BAR_HEIGHT <= frame.height - CAPTURE_BAR_INSET ? 'below' : above >= CAPTURE_BAR_INSET ? 'above' : 'inside'
+  const side = below + CAPTURE_BAR_HEIGHT + CAPTURE_PROPERTIES_REACH <= frame.height - CAPTURE_BAR_INSET ? 'below'
+    : above - CAPTURE_PROPERTIES_REACH >= CAPTURE_BAR_INSET ? 'above' : 'inside'
   const top = side === 'below' ? below : side === 'above' ? above : bottom - CAPTURE_BAR_INSET - CAPTURE_BAR_HEIGHT
   const end = side === 'inside' ? right - CAPTURE_BAR_INSET : right
   return { side, left: clamp(end - barWidth, CAPTURE_BAR_INSET, frame.width - CAPTURE_BAR_INSET - barWidth),
     top: clamp(top, CAPTURE_BAR_INSET, frame.height - CAPTURE_BAR_INSET - CAPTURE_BAR_HEIGHT) }
+}
+
+// The size chip's height and its gap to the selection, in frame CSS pixels.
+const SIZE_CHIP_HEIGHT = 20, SIZE_CHIP_GAP = 4
+/** At the selection's top-left on the side away from the toolbar: above it, or just inside when the toolbar or the frame edge takes that side. */
+export function captureSizeChipPlacement(selection: NormalizedRect, chipWidth: number, barSide: CaptureBarSide, frame: CaptureFrame): { left: number; top: number } {
+  const above = selection.y - SIZE_CHIP_GAP - SIZE_CHIP_HEIGHT
+  return { left: clamp(selection.x, 0, frame.width - chipWidth), top: barSide !== 'above' && above >= 0 ? above : selection.y + SIZE_CHIP_GAP }
 }
 
 export const LOUPE_WIDTH = 136, LOUPE_HEIGHT = 150
