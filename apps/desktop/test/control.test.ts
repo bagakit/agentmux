@@ -168,6 +168,25 @@ describe('Desktop Control owner', () => {
     expect(useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]).toMatchObject({ mode: 'private', profileId: null })
     expect(useAppStore.getState().tabs[original.id]).toBe(original)
   })
+  it('opens a normal Browser in the requested Profile and names that Profile {id,label} in the receipt', async () => {
+    const original = fixture()
+    const create = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank', _workspaceId, profileId, mode = 'normal') => ({
+      id, url, mode, profileId: mode === 'private' ? null : profileId ?? 'default', title: '', canGoBack: false, canGoForward: false,
+      loading: false, viewport: 'responsive', navigationId: 'profile-created-navigation', error: null, driving: false, appLinkPrompt: null
+    }))
+    vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([
+      { id: 'default', label: 'Personal', createdAt: 1, isDefault: true, source: null },
+      { id: 'work', label: 'Northwind client', createdAt: 2, isDefault: false, source: null }])
+    const result = await useAppStore.getState().executeControl(request({ operation: 'open.browser', profileId: 'work',
+      url: 'https://work.example/', destination: { kind: 'new-tab', after: { kind: 'tab', tabId: original.id } } }))
+    if (result.operation !== 'open.browser') throw new Error('Unexpected original control result')
+    expect(create).toHaveBeenCalledExactlyOnceWith(result.region.browserId, 'https://work.example/', 'workspace', 'work', undefined)
+    expect(result.region).toMatchObject({ mode: 'normal', profile: { id: 'work', label: 'Northwind client' } })
+    const opened = await useAppStore.getState().executeControl(request({ operation: 'open.browser', mode: 'private',
+      url: 'https://private.example/', destination: { kind: 'new-tab', after: { kind: 'tab', tabId: original.id } } }))
+    if (opened.operation !== 'open.browser') throw new Error('Unexpected original control result')
+    expect(opened.region).not.toHaveProperty('profile')
+  })
   it('inspects one Tab with closed Agent, Terminal, Browser, File, and Launcher projections', async () => {
     let tab = fixture([terminal('terminal-run')])
     tab = addWorkbenchRegion(tab, 'region-caller', 'right', {

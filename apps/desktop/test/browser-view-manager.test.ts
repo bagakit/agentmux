@@ -2647,3 +2647,37 @@ describe('Profile candidate native destruction receipt', () => {
     expect(() => manager.dispose()).not.toThrow()
   })
 })
+
+describe('Browser Profile reference on targets', () => {
+  // Main's committed Profile list, with the labels a person sees.
+  const labelled = { ...profiles, listProfiles: () => [{ id: 'default', label: 'Personal' }, { id: 'work', label: 'Northwind client' }] }
+  function labelledManager(window: ReturnType<typeof fakeWindow>['window'], resolver: BrowserProfileResolver = labelled) {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-bvm-profile-'))
+    privateLedgerRoots.push(root)
+    return new BrowserViewManager(window as never, resolver, new BrowserRefLedgerStore(join(root, 'ref-ledger.json')), appLinkHost())
+  }
+
+  it('opens a normal page in the requested Profile and names it {id,label}; the default when none is named', async () => {
+    const f = fakeWindow(), manager = labelledManager(f.window)
+    expect(await manager.create('in-work', 'https://example.invalid/', 'workspace-a', 'work')).toMatchObject({ profileId: 'work', mode: 'normal' })
+    await manager.create('in-default', 'https://example.invalid/', 'workspace-a')
+    const rows = Object.fromEntries(manager.targets().map(row => [row.id, row]))
+    expect(rows['in-work']!.profile).toEqual({ id: 'work', label: 'Northwind client' })
+    expect(rows['in-default']!.profile).toEqual({ id: 'default', label: 'Personal' })
+    await expect(manager.create('in-missing', 'https://example.invalid/', 'workspace-a', 'missing')).rejects.toThrow('Unknown browser profile')
+    manager.dispose()
+  })
+
+  it('names no Profile for a private page, and none when the list cannot name the id', async () => {
+    const f = fakeWindow(), manager = labelledManager(f.window, { ...profiles, listProfiles: () => { throw new Error('Profiles not confirmed') } })
+    await manager.create('private', 'https://example.invalid/', 'workspace-a', undefined, 'private')
+    await manager.create('unlabelled', 'https://example.invalid/', 'workspace-a', 'work')
+    const rows = Object.fromEntries(manager.targets().map(row => [row.id, row]))
+    expect(rows.private).not.toHaveProperty('profile')
+    // An unreadable list leaves the label unknown instead of inventing one or failing discovery.
+    expect(rows.unlabelled).not.toHaveProperty('profile')
+    expect(rows.unlabelled).toMatchObject({ mode: 'normal', status: 'ready' })
+    manager.dispose()
+  })
+})
+

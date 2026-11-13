@@ -66,6 +66,11 @@ describe('browser profile built CLI reaches the public Control owner', () => {
               { details: { browsers: [{ browserId: 'b-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
             profiles = profiles.filter(profile => profile.id !== request.profileId); revision += 1
             return { operation: request.operation, revision, profileId: request.profileId, deleted: true }
+          case 'open.browser': {
+            const used = request.mode === 'private' ? undefined : find(request.profileId ?? profiles.find(profile => profile.isDefault)!.id)
+            return { operation: request.operation, region: { tabId: 't-1', regionId: 'r-new', workspaceId: 'w-1', kind: 'browser', browserId: 'b-new',
+              mode: request.mode ?? 'normal', ...(used ? { profile: { id: used.id, label: used.label } } : {}) } }
+          }
           default: throw new Error(`Unexpected ${request.operation}`)
         }
       } })
@@ -82,6 +87,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
   }
   const requests = () => seen.map(({ request: { schemaVersion: _v, requestId: _id, ...body } }) => body)
 
+  // Seven built-CLI processes run in sequence; each pays Node startup, so this journey gets its own deadline.
   it('lists, inspects, creates, edits and moves the default through the owner, returning only Profile facts', async () => {
     const listed = await run(['ls'])
     expect(listed.code, listed.stderr).toBe(0)
@@ -111,7 +117,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
       { operation: 'browser.profile.update', profileId: WORK_ID, expectedRevision: 5, edit: { hue: null } },
       { operation: 'browser.profile.set-default', profileId: WORK_ID }
     ])
-  })
+  }, 20_000)
 
   it('carries per-reason skipped cookie counts through inspect, and rejects a count that is not a number', async () => {
     profiles[1] = { ...profiles[1]!, source: { ...profiles[1]!.source!, skippedByReason: { expired: 2, 'app-bound-encryption': 3 } } }
@@ -121,6 +127,21 @@ describe('browser profile built CLI reaches the public Control owner', () => {
       skippedByReason: { expired: 2, 'app-bound-encryption': 3 } })
     profiles[1] = { ...profiles[1]!, source: { ...profiles[1]!.source!, skippedByReason: { expired: 'two' as never } } }
     expect((await run(['inspect', '--profile', WORK_ID])).body.error).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  })
+
+  it('opens a Browser in an exact Profile and the receipt names it; private and conflicting choices do not', async () => {
+    const open = (extra: string[]) => runCompiledObjectCli(['browser', 'open', '--url', 'https://example.invalid/', '--in-region', 'r-1', ...extra], person())
+      .then(output => ({ ...output, body: objectCliReceipt(JSON.parse(output.code === 0 ? output.stdout : output.stderr)) }))
+    const inWork = await open(['--profile', WORK_ID])
+    expect(inWork.code, inWork.stderr).toBe(0)
+    expect(inWork.body.result.region).toMatchObject({ browserId: 'b-new', mode: 'normal', profile: { id: WORK_ID, label: 'Work' } })
+    expect((await open([])).body.result.region.profile).toEqual({ id: DEFAULT_ID, label: 'Personal' })
+    expect((await open(['--private'])).body.result.region).not.toHaveProperty('profile')
+    const both = await open(['--profile', WORK_ID, '--private'])
+    expect(both.code).toBe(1)
+    expect(both.body.error.code).toBe('INVALID_CLI_ARGUMENT')
+    expect(seen.map(({ request }) => request).filter(request => request.operation === 'open.browser').map(request => (request as { profileId?: string }).profileId))
+      .toEqual([WORK_ID, undefined, undefined])
   })
 
   it('rejects an owner answer about another Profile instead of reporting it as this one', async () => {
