@@ -380,7 +380,7 @@ function endedMainRuntime(f: Awaited<ReturnType<typeof fixture>>, options: {prep
   return{core,started,recovered,provider}
 }
 
-it('a captured main recovery is admitted once before a role switch and keeps the original native launch carrier and packet',async()=>{
+it('a captured main recovery serializes an attempted role switch and keeps the original native launch carrier and packet',async()=>{
   const captures=new Map<string,AgentInputContextCaptureRecord>(),f=await fixture({read:async(reference)=>({reference,record:captures.get(reference.operationId)??null,diskDurability:'confirmed'})})
   const main=await f.main.readCurrentMoteMain(f.target),base=mainPrompt(main.roleRevision!,f.target,'captured-ended-original-main')
   const capturedContext={reference:{hostId:'local',operationId:base.input.operationId},agentMuxNote:'Original ended Browser packet note'}
@@ -392,9 +392,18 @@ it('a captured main recovery is admitted once before a role switch and keeps the
   const request={...base,input:{...base.input,admissionIntent:{kind:'manual-actor' as const},capturedContext,sourceChannel:'message-tool' as const},recovery:{operationId:'original-main-input-recovery'}}
   const sending=f.rpc.call('space.mote.dialogue.input.submit',request)
   await startedPrepare
-  await switchMain(f,'member','role-switch-after-recovery-admission')
-  release()
+  const save=vi.spyOn(f.quick,'save')
+  let switched=false
+  const changing=switchMain(f,'member','role-switch-after-recovery-admission').then(result=>{switched=true;return result})
+  try {
+    // Both operations use the original role owner. A fixture must not hold recovery
+    // until after the role save that is correctly serialized behind that recovery.
+    await vi.waitFor(()=>expect(save).toHaveBeenCalledOnce())
+    expect(switched).toBe(false)
+    expect((await f.main.readCurrentMoteMain(f.target)).current).toEqual(main.current)
+  } finally { release() }
   const accepted=await sending
+  await changing
   expect(accepted.route).toMatchObject({reference:main.current,key:{expectedRun:base.input.expectedRun},recoveryOperationId:request.recovery.operationId})
   expect(accepted.recovery?.kind,JSON.stringify({reason:accepted.recovery?.reason,error:accepted.recovery?.error,errorCode:accepted.recovery?.errorCode})).toBe('resumed')
   expect(accepted.recovery).toMatchObject({agentSessionId:'primary',previousRun:base.input.expectedRun,newRun:runtime.recovered})
