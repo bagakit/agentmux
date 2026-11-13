@@ -243,3 +243,23 @@ it('switching sources drops the old window highlight and sampled RGB without ano
   expect(node.querySelector('.image-annotation-editor__loupe'), 'old source RGB is not presented as a new source sample').toBeNull()
   expect(windowOutline, 'the old window geometry is not painted over the new frozen source').not.toHaveBeenCalled()
 })
+
+
+it('a switch reply does not unlock old-frame output while the announced background still decodes', async () => {
+  const { api, key, send, input } = await mount(true)
+  let reply!: () => void, decoded!: () => void
+  api.switchBackground.mockImplementationOnce(() => new Promise<void>(resolve => { reply = resolve }))
+  vi.spyOn(HTMLImageElement.prototype, 'decode').mockResolvedValueOnce().mockImplementationOnce(() => new Promise<void>(resolve => { decoded = resolve }))
+  await key('Tab')
+  expect(api.switchBackground).toHaveBeenCalledExactlyOnceWith('original-request', 'excluded')
+  await send({ kind: 'background', background: 'excluded' })
+  await act(async () => reply())
+  expect(node.querySelector('img')!.getAttribute('src'), 'the healthy old frame remains visible until the announced frame decodes').toBe(input.backgrounds.included.image!.dataUrl)
+  await key('Enter')
+  expect(api.finish, 'the Main reply cannot release outputs before its announced frame is ready').not.toHaveBeenCalled()
+  await act(async () => decoded())
+  await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load')))
+  await paint()
+  await key('Enter')
+  expect(api.finish).toHaveBeenCalledExactlyOnceWith('original-request', 'excluded', image, remembered)
+})
