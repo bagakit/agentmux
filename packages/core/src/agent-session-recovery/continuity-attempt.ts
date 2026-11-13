@@ -301,6 +301,7 @@ export async function performAgentContinuity(
         interruptedWorking: saved.interruptedWorking, ...(saved.recoveryInputs ? { recoveryInputs: saved.recoveryInputs } : {}) } : {}) }
   }
   const record = async (result: AgentMuxAgentContinuityResult, reason?: string): Promise<AgentMuxAgentContinuityResult> => {
+    let absenceChanged = false
     receipt.kind = result.kind
     receipt.reason = reason ?? ('reason' in result ? result.reason : result.kind)
     receipt.evidence = result.evidence.kind === 'provider-native' ? result.evidence.previousRun : result.evidence
@@ -348,6 +349,19 @@ export async function performAgentContinuity(
           // lifecycle-busy result. The durable original operation remains the reconciliation owner.
           if (latest?.supervision && ((latest.kind === 'starting' && result.kind === 'conflict') ||
               latest.newRun && sameRun(latest.newRun, value.run) && !receipt.newRun)) return value
+          if (result.kind === 'unavailable' && result.reason === 'native-conversation-absent') {
+            // Identity capture can commit while Run status or this exact Store update waits.
+            // Fence the fact against the same value the receipt would replace, not an earlier read.
+            const provider = ports.providers.providers.get(value.providerId).catalog
+            if (!agentSessionHasNoNativeConversation(value, {
+              durabilityConfirmed: !ports.sessions.registry.isDurabilityUnconfirmed(value.agentSessionId),
+              managedIdentityChannel: provider.hookStrategy.kind === 'native' && provider.hookStrategy.installation === 'explicit-managed',
+              acceptedInputBytes: run?.acceptedInputBytes
+            })) {
+              absenceChanged = true
+              return value
+            }
+          }
           const supervision = frontendObservation && latest?.supervision?.attemptCount === 0 &&
             !['cancelled', 'settled'].includes(latest.supervision.phase)
             ? { ...latest.supervision, phase: 'observing' as const, activeAttemptOperationId: receipt.operationId,
@@ -365,14 +379,19 @@ export async function performAgentContinuity(
             ...(originalMessage(value) ? { messageInput: originalMessage(value)! } : {}),
             ...(supervision ? { supervision } : {}) } } }
         })
-        ports.events.publishSession(current)
+        if (!absenceChanged) ports.events.publishSession(current)
       } catch (error) {
         if (error instanceof AgentMuxError && ['AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_CONTINUITY_EXECUTOR_CONFLICT', 'AGENT_CONTINUITY_SUPERSEDED'].includes(error.code)) throw error
+        if (result.kind === 'unavailable' && result.reason === 'native-conversation-absent' && error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') {
+          // A rejected Store fence cannot certify absence from this old Session snapshot.
+          return await performAgentContinuity(context, input, intentOperationId, inputContextSource, captured)
+        }
         receipt.error = `Continuity receipt persistence is unconfirmed. ${error instanceof Error ? error.message : String(error)}`
         ports.events.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED',
           message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
       }
     }
+    if (absenceChanged) return await performAgentContinuity(context, input, intentOperationId, inputContextSource, captured)
     const cancelledWaiting = current?.continuityOperations?.[receipt.operationId]
     if (cancelledWaiting?.supervision?.phase === 'cancelled' && cancelledWaiting.supervision.attemptCount === 0) {
       return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun }, reason: 'intent-cancelled',
