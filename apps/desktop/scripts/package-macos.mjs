@@ -759,7 +759,7 @@ async function awaitUiActivation(appPath, before, runtimePlan = null) {
 }
 
 export async function installApplication(appPath, { intent = installIntent, homeDirectory = homedir(),
-  quit = quitInstalledApplication, launch = relaunchInstalledApplication } = {}) {
+  quit = quitInstalledApplication, launch = relaunchInstalledApplication, preparedApplicationPath = null } = {}) {
   const { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime } = await import('./package-runtime-upgrade.mjs')
   const { prepareSemanticHostReload, stopSemanticHostForInstall, confirmSemanticHostReload } = await import('./package-semantic-host.mjs')
   assert(intent === 'full' || intent === 'ui-only', 'Unknown installation intent.')
@@ -791,11 +791,31 @@ export async function installApplication(appPath, { intent = installIntent, home
   const previouslyInstalled = await pathExists(destination)
   const applicationsRoot = dirname(destination)
   const trashRoot = join(homeDirectory, '.Trash')
-  const next = join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`)
+  assert(preparedApplicationPath === null || typeof preparedApplicationPath === 'string' && preparedApplicationPath.length > 0,
+    'A prepared installer stage must name its retained directory; the application was not changed.')
+  const next = preparedApplicationPath === null ? join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`) : resolve(preparedApplicationPath)
   await mkdir(applicationsRoot, { recursive: true })
-  await rm(next, { recursive: true, force: true })
-  const sameVolume = (await stat(appPath)).dev === (await stat(applicationsRoot)).dev
-  await run(sameVolume ? 'cp' : 'ditto', sameVolume ? ['-cRp', appPath, next] : [appPath, next], { capture: true })
+  if (preparedApplicationPath === null) {
+    await rm(next, { recursive: true, force: true })
+    const sameVolume = (await stat(appPath)).dev === (await stat(applicationsRoot)).dev
+    await run(sameVolume ? 'cp' : 'ditto', sameVolume ? ['-cRp', appPath, next] : [appPath, next], { capture: true })
+  } else {
+    // Explicit adoption requalifies the retained object; it never copies or removes it.
+    const prefix = `.${PRODUCT_NAME}.install-`, stageName = basename(next)
+    assert(dirname(next) === resolve(applicationsRoot) && stageName.startsWith(prefix) && /^[1-9]\d*\.app$/.test(stageName.slice(prefix.length)),
+      'A prepared installer stage must be an original install directory beside the canonical application; the application was not changed.')
+    const stage = await lstat(next)
+    assert(stage.isDirectory() && !stage.isSymbolicLink() && stage.uid === process.getuid(),
+      'A prepared installer stage must be a real directory owned by this user; the application was not changed.')
+    assert(await realpath(next) === join(await realpath(applicationsRoot), stageName),
+      'A prepared installer stage must remain inside the canonical Applications directory; the application was not changed.')
+    assertPackageIdentity(await readPackageIdentity(next), await readPackageIdentity(appPath))
+    for (const artifact of [['Contents', 'MacOS', PRODUCT_NAME], ['Contents', '_CodeSignature', 'CodeResources']]) {
+      const [selectedHash, stageHash] = await Promise.all([sha256(join(appPath, ...artifact)), sha256(join(next, ...artifact))])
+      assert(/^[a-f0-9]{64}$/.test(selectedHash) && stageHash === selectedHash,
+        `Prepared installer stage ${artifact.at(-1)} does not match the selected signed application; the application was not changed.`)
+    }
+  }
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
   let runtimeUpgrade = null, uiRuntime = null, before = null, semanticHost = null
   let native = { status: 'unchanged' }
