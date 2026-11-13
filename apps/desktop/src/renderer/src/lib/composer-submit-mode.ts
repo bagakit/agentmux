@@ -23,6 +23,9 @@ export type ComposerSubmitMode = {
   placeholder: string
 }
 
+/** Send's name while a request is pending: the message waits in the queue until Core ends that request. */
+export const SEND_AFTER_REQUEST_ENDS = 'Send after the Agent request ends'
+
 /**
  * Pure: a Session snapshot and a `forceDisabled` flag in, a decision out. No Store, no Electron, and no
  * `providerId` branching — a Provider's mid-turn readiness is Core's to enforce, not the renderer's to

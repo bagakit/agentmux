@@ -21,7 +21,7 @@ import { useComposerAttachments } from '../lib/use-composer-attachments'
 import { ComposerFileReferences } from './ComposerFileReferences'
 import { expandComposerInput, expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
-import { composerSubmitMode } from '../lib/composer-submit-mode'
+import { composerSubmitMode, SEND_AFTER_REQUEST_ENDS } from '../lib/composer-submit-mode'
 import {
   caretAtFirstLine,
   caretAtLastLine
@@ -365,7 +365,7 @@ export function AgentSessionComposer({
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
         disabled={!submitMode.canSubmit}
         inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : requestPending
-          ? 'Send after the pending request ends.' : !submitMode.canSubmit ? submitMode.placeholder
+          ? `${SEND_AFTER_REQUEST_ENDS}.` : !submitMode.canSubmit ? submitMode.placeholder
             : session.processState !== 'running' || session.status.state === 'disconnected'
               ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
@@ -392,23 +392,16 @@ export function AgentSessionComposer({
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
-      {...(requestPending ? { submitLabel: 'Send after the Agent request ends' } : {})}
+      {...(requestPending ? { submitLabel: SEND_AFTER_REQUEST_ENDS } : {})}
       onHistoryRecall={historyRecall}
       {...(historyPhase ? { historyNavigation: historyPhase } : {})}
       {...(activeFile ? { activeFile } : {})}
       onChange={(value) => setAgentComposerDraft(sessionId, value)}
-      // Interrupt rides `primaryAction`, NOT `canSubmit`. They answer different questions and
-      // composer-submit-mode.ts keeps them apart on purpose ("Stop … independent of `canSubmit`"); wiring
-      // Interrupt into the submit spread collapsed them again. The state that exposed it: a `working`
-      // Agent with a pending permission card has `canSubmit:false` while `primaryAction` stays `'stop'`,
-      // so the ■ button rendered with `onInterrupt` undefined — `disabled={disabled || !onInterrupt}` —
-      // and the only UI path to interrupt a turn was dead exactly when a card was up.
-      //
-      // 原则 11 第 2 类: the daemon never stopped honouring it. store.interrupt → runtime.interrupt →
-      // client.signalAgent → kernel.interrupt(runId) carries no pendingInteraction gate and no
-      // processState gate — contrast writeAgentInput, which deliberately DOES throw
-      // AGENT_INTERACTION_PENDING. So this took away an ability the runtime still has: RED-LINES.md
-      // 判定流程 "绕过我这段代码，这条路还能不能通？→ 能" ⇒ red line.
+      // Interrupt follows `primaryAction`, never `canSubmit`: composer-submit-mode.ts answers "is a turn in
+      // flight" and "may Enter submit" separately, so Stop stays wired whatever the submit axis says,
+      // including while a request card is up. Core's interrupt path (client.signalAgent → kernel.interrupt)
+      // has no pendingInteraction or processState gate, so withholding it here would take away a capability
+      // the runtime still honours (RED-LINES.md 判定流程 question 2).
       {...(submitMode.primaryAction === 'stop' ? { onInterrupt: () => void interrupt(sessionId) } : {})}
       // Resource helpers edit the existing draft, including while a request is pending.
       // Submission eligibility stays with Core; it does not disable local drafting.
@@ -419,9 +412,10 @@ export function AgentSessionComposer({
         ...(activeFile ? { onReferenceActiveFile: () => { void attachments.referencePaths([activeFile]) } } : {})
       } : {})}
       {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
-      // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run;
-      // it cannot be buffered or replayed through that restoration boundary, and Core refuses it
-      // while a request is pending, so it is offered only when no request owns the input.
+      // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run; it cannot be
+      // buffered or replayed through that restoration boundary. Core writes it like any terminal input, so
+      // while a request is pending it would land in the open native dialog and be recorded as native input
+      // on that request, retiring the card's answer. It is offered only when no request owns the input.
       {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
