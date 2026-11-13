@@ -625,6 +625,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       ? executionWorkspace?.hostId ?? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
       : existingAgent?.control.hostId)
     let adopted: AgentMuxAgentCreationInspection | null = null
+    let adoptedLocations: AgentMuxSpaceAddress[] = []
     if (operation === 'agent.open' && (request.content.kind === 'new-agent' || request.content.kind === 'fork-agent')) {
       // A deterministic operation ID (Take over, a derived action) outlives this client's
       // request record. Core's operation binding names its only Session; a locally minted
@@ -632,6 +633,19 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       if (!executionHostId) failure('SPACE_RESOURCE_UNKNOWN', 'The original execution Host is unconfirmed. No Agent identity was reserved and nothing was started.')
       sessionId = await ports.creationSessionId(executionHostId, request.requestId)
       adopted = await operationCreation(ports, executionHostId, sessionId, request.requestId)
+      if (adopted?.kind === 'agent') {
+        // Lost client correlation does not mean lost presentation. Reuse an exact
+        // existing occurrence before reserving another workface for the same Agent.
+        catalog = spatialCatalog(ports.get(), topics)
+        const regions = new Set(catalog.regions.filter(region => region.kind === 'agent' &&
+          region.agentSessionId === sessionId && region.execution?.hostId === executionHostId).map(region => region.regionId))
+        adoptedLocations = catalog.locations.filter(location => regions.has(location.regionId))
+        const scoped = adoptedLocations.filter(location => match({ displayWorkspaceId: request.destination.displayWorkspaceId,
+          groupId: request.destination.groupId }, location))
+        const locations = scoped.length ? scoped : adoptedLocations
+        if (locations.length === 1) destination = { kind: 'empty', address: locations[0]!, anchor: locations[0]!.regionId }
+        existingAgent = observedAgent(ports.get().sessions, sessionId, executionHostId)
+      }
     }
     if (operation === 'agent.open' && request.content.kind === 'new-agent' &&
       !toolWorkspace && ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
@@ -665,10 +679,13 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       } : {}) })
     const admitted = await ports.save(false)
     if (!admitted.clientStateWritten) { report.save = admitted; failure('SPACE_INTENT_SAVE_FAILED', 'The request association could not be written; creation has not been dispatched.') }
-    // Core already holds this operation's creation: converge on it. Its reserved placement
-    // is not observed here, so reconcile reports the exact Agent or retirement as it is,
-    // without placing a Region, launching, or replaying the first input.
-    if (adopted) return { operation, ...await reconcile(ports, topics, binding) }
+    // Inspection stays read-only. This explicit open can restore presentation of an
+    // existing Session, but can never repeat its creation, resource creation or input.
+    if (adopted && (adopted.kind === 'retired-agent' || adoptedLocations.length || !destination)) {
+      const reconciled = await reconcile(ports, topics, binding)
+      if (request.focus && reconciled.to && reconciled.outcome === 'opened') ports.focus(reconciled.to)
+      return { operation, ...reconciled, save: admitted }
+    }
     if (selfMove) {
       report.outcome = 'unchanged'; report.to = from!; report.save = { ...admitted, layoutApplied: true }
       if (request.focus) { ports.focus(from!); report.save = await ports.save(true) }
@@ -703,7 +720,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     const zone = catalog.zones.find(item => item.zoneId === target.address.zoneId)
     if (!zone || !zone.hostId || !zone.directoryPath) failure('SPACE_RESOURCE_UNKNOWN', 'The original Zone resource is unavailable; its entity is retained.')
     if (forkParent && zone.hostId !== forkExecutionHostId) failure('AGENT_FORK_HOST_MISMATCH', 'Choose a display destination on the source Host. The source execution directory is retained.')
-    const surface: AgentWorkbenchSurface = sourceSurface ?? { kind: 'agent', phase: binding.createAgent ? 'launching' : 'attached',
+    const surface: AgentWorkbenchSurface = sourceSurface ?? { kind: 'agent', phase: binding.createAgent && !adopted ? 'launching' : 'attached',
       regionId: target.address.regionId, workspaceId: executionWorkspace?.id ?? target.address.workspaceId, sessionId: existingAgent?.id ?? sessionId }
     const placement = applySpatialPlacement(ports.get(), topics, target, surface, from, options?.besideTabId)
     if (from && !request.focus) ports.preserveMovedFocus?.(from)
@@ -712,8 +729,20 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     ports.patch(placement)
     report.to = target.address
     report.save = await ports.save(true)
-    if (!report.save.clientStateWritten && binding.createAgent) return await fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
+    if (!report.save.clientStateWritten && binding.createAgent && !adopted) return await fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
     if (request.focus) ports.focus(target.address)
+    if (adopted?.kind === 'agent') {
+      report.agent = agentFact(adopted, executionHostId!)
+      await ports.attach(target.address.regionId, { created: adopted, projectionFailures: [] })
+      const reconciled = await reconcile(ports, topics, binding)
+      const save = await ports.save(Boolean(reconciled.to))
+      if (save.reason) {
+        const notice = issue('save', 'SPACE_SAVE_UNCONFIRMED', save.reason)
+        reconciled.issues.push(notice); ports.notice(notice)
+        if (reconciled.outcome === 'opened') reconciled.outcome = 'partial'
+      }
+      return { operation, ...reconciled, save }
+    }
     if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session' && request.content.kind !== 'derived-action') {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
       const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
