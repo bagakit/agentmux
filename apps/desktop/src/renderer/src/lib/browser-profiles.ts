@@ -27,6 +27,7 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
   const listeners = new Set<Listener>()
   let stopPush: (() => void) | null = null
   let reading: Promise<void> | null = null
+  let pushGeneration = 0
   const set = (next: BrowserProfilesState): void => { state = next; for (const listener of listeners) listener() }
   const accept = (list: BrowserProfileList): void => {
     if (!list || !Number.isSafeInteger(list.revision) || !Number.isSafeInteger(list.sequence) || !Array.isArray(list.profiles) || !Array.isArray(list.folders) || !Array.isArray(list.views)) throw new Error('Main returned an unreadable Browser Profile list.')
@@ -35,8 +36,15 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
   }
   // Concurrent consumers and retries share one Main read.
   const read = (): Promise<void> => reading ??= (async () => {
+    const startedAtPush = pushGeneration
     set({ ...state, reading: true })
-    try { accept(await port.readProfiles()) }
+    try {
+      const list = await port.readProfiles()
+      // Native application can change without a metadata commit. At the same
+      // sequence a push after this read began is newer; a higher metadata
+      // sequence still wins, even if a native push arrived while reading.
+      if (list.sequence !== state.sequence || startedAtPush === pushGeneration) accept(list)
+    }
     catch (cause) { set({ ...state, error: presentError(cause) }) }
     finally { reading = null; set({ ...state, reading: false }) }
   })()
@@ -44,7 +52,7 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
     get: (): BrowserProfilesState => state,
     subscribe(listener: Listener): () => void {
       listeners.add(listener)
-      if (!stopPush) { stopPush = port.onProfilesChanged(list => { try { accept(list) } catch (cause) { set({ ...state, error: presentError(cause) }) } }); void read() }
+      if (!stopPush) { stopPush = port.onProfilesChanged(list => { try { accept(list); pushGeneration++ } catch (cause) { set({ ...state, error: presentError(cause) }) } }); void read() }
       return () => {
         listeners.delete(listener)
         // Without a subscriber no push arrives; the last list stays and the next consumer reads again.
