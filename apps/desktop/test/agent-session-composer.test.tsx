@@ -644,7 +644,7 @@ describe('AgentSessionComposer adapter', () => {
     expect(markup).not.toContain('Approvals')
   })
 
-  it('yields prompt entry to a pending typed Agent interaction', () => {
+  it('keeps prompt entry available while a typed Agent interaction is pending', () => {
     const waiting = agentSession({
       status: { state: 'waiting', source: 'native-hook', observedAt: 2 },
       pendingInteraction: {
@@ -663,9 +663,10 @@ describe('AgentSessionComposer adapter', () => {
     })
     fixture.state.sessions = [waiting]
 
+    // A pending request no longer makes the Agent ineligible for input; its message waits in the queue.
     expect(agentComposerAvailability(waiting)).toEqual({
-      disabled: true,
-      placeholder: 'Answer the Agent request above… Draft a steer…'
+      disabled: false,
+      placeholder: 'Answer the Agent request in its card; messages here send after it ends…'
     })
   })
 

@@ -88,7 +88,7 @@ describe('state Prompt actions mounted through the actual Session composer and S
     await act(async () => useAppStore.setState({ config: { ...composerConfig, composerShortcuts: [{ ...universal, states: [] }, other] } }))
     await open(); expect(document.querySelector('.agent-status-prompts')).toBeNull()
   })
-  it.each(['permission', 'question'] as const)('explicitly Queues during a typed %s and drains only after its real response path', async (kind) => {
+  it.each(['permission', 'question'] as const)('keeps Send during a typed %s, holds the message, and delivers only after its real response path', async (kind) => {
     const evidence = { source: 'native-hook' as const, observedAt: 2, run: composerSession().control.run }
     const request: AgentMuxInteractionRequest = kind === 'permission'
       ? { kind, id: 'request', agentSessionId: sessionId, title: 'Allow command?', options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }], evidence }
@@ -101,8 +101,9 @@ describe('state Prompt actions mounted through the actual Session composer and S
     })
     await dom.render(<AgentSessionComposer sessionId={sessionId} />)
     await open()
-    expect(buttons()[0]!.querySelector('.agent-status-prompts__intent')!.textContent).toBe('Queue')
-    expect(buttons()[0]!.getAttribute('aria-label')).toBe(`Queue ${configured('running').label}`)
+    // A pending request changes when the message goes out, not what the button is.
+    expect(buttons()[0]!.querySelector('.agent-status-prompts__intent')!.textContent).toBe('Send')
+    expect(buttons()[0]!.getAttribute('aria-label')).toBe(`Send ${configured('running').label}`)
     await click(); await drained()
     expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
     expect(reply).not.toHaveBeenCalled()
@@ -146,9 +147,9 @@ describe('state Prompt actions mounted through the actual Session composer and S
 it('omits the complete section when the current state has no matches and exposes complete long labels', async () => {
   const prompt = { ...configured('done'), label: '大白话说清楚目标与现状、完成内容质量品位，以及下一步工作的价值和重点' }
   const selected = vi.fn()
-  await dom.render(<AgentStatusPromptActions prompts={[prompt]} state="running" disabled={false} queue={false} onSelect={selected} />)
+  await dom.render(<AgentStatusPromptActions prompts={[prompt]} state="running" disabled={false} onSelect={selected} />)
   expect(dom.container.querySelector('.agent-status-prompts')).toBeNull(); expect(buttons()).toEqual([])
-  await dom.render(<AgentStatusPromptActions prompts={[prompt]} state="done" disabled={false} queue={false} onSelect={selected} />)
+  await dom.render(<AgentStatusPromptActions prompts={[prompt]} state="done" disabled={false} onSelect={selected} />)
   expect(buttons()).toHaveLength(1); expect(buttons()[0]!.getAttribute('aria-label')).toBe(`Send ${prompt.label}`)
   expect(buttons()[0]!.title).toBe(prompt.body)
   await click(); expect(selected).toHaveBeenCalledWith(prompt)
@@ -323,7 +324,7 @@ it.each([
     const compact = expectedHeight < 160
     expect(panel.dataset.compact).toBe(String(compact))
     const summary = panel.querySelector<HTMLElement>('.agent-state-face__summary')!, heading = panel.querySelector<HTMLElement>('.agent-status-prompts h3')!
-    expect(summary.textContent).toContain('Queue a message')
+    expect(summary.textContent).toContain('Send after the pending request ends.')
     expect(getComputedStyle(summary).flexDirection).toBe(compact ? 'row' : 'column')
     expect(getComputedStyle(summary).alignItems).toBe(compact ? 'baseline' : 'flex-start')
     expect(heading.textContent).toBe('User prompts')
@@ -334,7 +335,7 @@ it.each([
     expect(bounds.height).toBeGreaterThan(100)
     expect(bounds.bottom).toBeLessThanOrEqual(composerTop - 5)
     expect(bounds.bottom <= terminalBottom - 32 - 5 || bounds.top >= terminalBottom + 5).toBe(true)
-    expect(buttons()[0]!.getAttribute('aria-label')).toBe('Queue Action for running')
+    expect(buttons()[0]!.getAttribute('aria-label')).toBe('Send Action for running')
     await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Close Agent status"]')!.click())
     expect(document.querySelector('.agent-identity-popover--actions')).toBeNull()
     expect(dom.container.querySelector('.agent-interaction')).toBe(card)

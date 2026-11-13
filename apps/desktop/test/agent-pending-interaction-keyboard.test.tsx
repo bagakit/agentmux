@@ -86,12 +86,20 @@ function input(state: 'waiting' | 'blocked' | 'running', pending: boolean, suffi
   return { id, keyDown: (event: KeyboardEvent, caret: number) => editor.props.onKeyDown(event, caret, true, false) }
 }
 
-function enter(shiftKey = false) {
+function enter(shiftKey = false, metaKey = false) {
   const preventDefault = vi.fn()
   return {
-    event: { key: 'Enter', shiftKey, metaKey: false, ctrlKey: false, isComposing: false, preventDefault } as unknown as KeyboardEvent,
+    event: { key: 'Enter', shiftKey, metaKey, ctrlKey: false, isComposing: false, preventDefault } as unknown as KeyboardEvent,
     preventDefault
   }
+}
+
+/** The actual Send button and status Prompt handler the rendered composer receives. */
+function surfaces(state: 'waiting' | 'blocked' | 'running', pending: boolean, suffix: string) {
+  const { id } = input(state, pending, suffix)
+  const surface = renderComponentBoundary(AgentSessionComposer, { sessionId: id })
+  const props = surface.props as AgentComposerProps & { identity?: ReactElement<{ onSelect(prompt: unknown): boolean; disabled: boolean }> }
+  return { id, props }
 }
 
 describe('pending interaction queue keyboard path', () => {
@@ -129,6 +137,56 @@ describe('pending interaction queue keyboard path', () => {
       expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
     })
   }
+
+  for (const state of ['waiting', 'blocked'] as const) {
+    it(`${state}: the Send button stays enabled and hands the draft to the store's explicit send`, () => {
+      const { id, props } = surfaces(state, true, 'send-button')
+      expect(props.disabled).toBe(false)
+      expect(props.submitLabel).toBe('Send after the Agent request ends')
+      expect(props.onSubmit).toBeTypeOf('function')
+      props.onSubmit!()
+      // The store, not this view, keeps it unbound in the queue until Core settles the request.
+      expect(fixture.state.send).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought', expect.any(Function), 'manual', undefined, expect.any(Object))
+      expect(fixture.state.enqueueAgentSteer).not.toHaveBeenCalled()
+      expect(fixture.state.interrupt).not.toHaveBeenCalled()
+      expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought')
+    })
+
+    it(`${state}: Cmd+Enter keeps its explicit send meaning`, () => {
+      const { id, keyDown } = input(state, true, 'cmd-enter')
+      const key = enter(false, true)
+      keyDown(key.event, 17)
+      expect(key.preventDefault).toHaveBeenCalledOnce()
+      expect(fixture.state.send).toHaveBeenCalledExactlyOnceWith(id, 'keep this thought', expect.any(Function), 'manual', undefined, expect.any(Object))
+      expect(fixture.state.enqueueAgentSteer).not.toHaveBeenCalled()
+    })
+  }
+
+  it('a status Prompt button keeps its Send verb and uses the same explicit send while a request is pending', () => {
+    const { id, props } = surfaces('waiting', true, 'status-prompt')
+    const identity = props.identity
+    expect(identity?.props.disabled).toBe(false)
+    expect(identity!.props.onSelect({ id: 'p', label: 'Continue', body: 'please continue', states: ['waiting'] })).toBe(true)
+    expect(fixture.state.send).toHaveBeenCalledExactlyOnceWith(id, 'please continue', expect.any(Function), 'manual', undefined, expect.any(Object))
+    expect(fixture.state.enqueueAgentSteer).not.toHaveBeenCalled()
+    // The independently authored draft is not part of a status Prompt send.
+    expect(fixture.state.clearAgentComposerDraftIfUnchanged).not.toHaveBeenCalled()
+  })
+
+  it('hides the posture picker while a request is pending; Core refuses that raw keystroke', () => {
+    const control = { id: 'approval', label: 'Approvals', modes: [{ id: 'ask', label: 'Ask each time', tier: 'safe' }] }
+    fixture.state.providerCatalog = [{ id: 'codex', postureControl: control }] as never
+    try {
+      // The same Session offers the picker once no request owns the input, so its absence below is the gate.
+      expect(surfaces('waiting', false, 'posture-free').props.postureTool).toBeDefined()
+      expect(surfaces('waiting', true, 'posture-pending').props.postureTool).toBeUndefined()
+    } finally { fixture.state.providerCatalog = [] }
+  })
+
+  it('without a pending request Send keeps its plain name', () => {
+    const { props } = surfaces('running', false, 'plain-label')
+    expect(props.submitLabel).toBeUndefined()
+  })
 
   it('normal Enter still submits when no interaction or queue intent exists', () => {
     const { id, keyDown } = input('running', false)

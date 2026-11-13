@@ -55,7 +55,7 @@ it('actual later in-flight entry wins the summary, and preparation is not sendin
 })
 it('pending interaction and changed Run explain waiting while the existing Outbox keeps full text and actions',async()=>{
   useAppStore.setState({sessions:[{...composerSession(),pendingInteraction:{id:'request',kind:'permission',title:'Permission',body:'Confirm',options:[]} as never}],agentSteerQueues:{'agent-1':[queued('a')]}})
-  await mount();expect(strip()!.textContent).toContain('等待回答');expect(strip()!.querySelector<HTMLButtonElement>('.composer-pending__send')!.disabled).toBe(true)
+  await mount();expect(strip()!.textContent).toContain('请求结束后发送');expect(strip()!.textContent).not.toContain('先回答');expect(strip()!.querySelector<HTMLButtonElement>('.composer-pending__send')!.disabled).toBe(true)
   await act(async()=>useAppStore.setState({sessions:[composerSession()],agentSteerQueues:{'agent-1':[queued('old','old-run')]}}))
   expect(strip()!.textContent).toContain('原 Run 不可投递');expect(strip()!.querySelector<HTMLButtonElement>('.composer-pending__send')!.disabled).toBe(true)
 })

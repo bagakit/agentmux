@@ -73,25 +73,26 @@ describe('composerSubmitMode', () => {
     expect(mode.primaryAction).toBe('send')
   })
 
-  it('blocks submit while an interaction is pending, so steer cannot bypass the card', () => {
+  it('keeps Send usable while an interaction is pending; the caller queues it until the request ends', () => {
     const mode = composerSubmitMode(
       agentSession({ status: { state: 'waiting', source: 'native-hook', observedAt: 2 }, pendingInteraction })
     )
 
-    // The card is the only input surface here; the textarea shuts and no submit is offered.
+    // A pending request is a timing fact: Core still refuses input to the open dialog, and the
+    // composer routes this submit into the queue. Taking Send away here guarded nothing.
     expect(mode.canType).toBe(true)
-    expect(mode.canSubmit).toBe(false)
-    expect(mode.placeholder).toContain('Draft a steer')
+    expect(mode.canSubmit).toBe(true)
+    // The placeholder names where the answer goes, and when this message will go out.
+    expect(mode.placeholder).toBe('Answer the Agent request in its card; messages here send after it ends…')
   })
 
-  it('keeps Stop reachable even while a pending card blocks submit on a working Agent', () => {
-    // canSubmit is false (card owns input) but a turn is still in flight, so the primary action stays Stop:
-    // the two axes are independent, and folding them would strand an un-interruptible running turn.
+  it('keeps Stop reachable while a pending card is up on a working Agent', () => {
+    // A turn is still in flight, so the primary action stays Stop: Send and Stop are independent axes.
     const mode = composerSubmitMode(
       agentSession({ status: { state: 'working', source: 'native-hook', observedAt: 2 }, pendingInteraction })
     )
 
-    expect(mode.canSubmit).toBe(false)
+    expect(mode.canSubmit).toBe(true)
     expect(mode.primaryAction).toBe('stop')
   })
 
@@ -156,11 +157,10 @@ describe('composerSubmitMode', () => {
     for (const { session, forceDisabled } of cases) {
       const availability = agentComposerAvailability(session, forceDisabled)
       const mode = composerSubmitMode(session, forceDisabled)
-      // pendingInteraction 只落在 agent 变体上，先窄化再读——terminal 快照没有这个字段。
-      const pending = session?.kind === 'agent' ? session.pendingInteraction : undefined
-      // canType is the inverse of availability.disabled, and the placeholder text is identical.
-      expect(mode.canType).toBe(pending ? true : !availability.disabled)
-      expect(mode.placeholder).toBe(pending ? 'Answer the Agent request above… Draft a steer…' : availability.placeholder)
+      // canType is the inverse of availability.disabled, and the placeholder text is identical,
+      // including while a request is pending: that no longer disables the surface.
+      expect(mode.canType).toBe(!availability.disabled)
+      expect(mode.placeholder).toBe(availability.placeholder)
     }
   })
 })
