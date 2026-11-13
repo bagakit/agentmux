@@ -110,3 +110,23 @@ it('tracks lifecycle invalidation while disabled and ignores removal without an 
   await dom.render(<Catalogue />)
   expect(read).toHaveBeenCalledTimes(2); expect(catalogue.sources).toBe(retired)
 })
+
+
+it('keeps an exact confirmed deleted terminal through stale lifecycle ticks and an older in-flight body catalogue', async () => {
+  const pending = deferred(), old = { ...source('local', 'same-session', 'retired'), retiredAt: 1,
+    history: { providerId: 'codex', executorId: 'codex', workspacePath: '/private/synthetic-history' } } as AgentSessionHistoryDescriptor
+  const read = vi.spyOn(api.sessions, 'historySources').mockReturnValueOnce(pending.promise.then(sources => ({ sources, warnings: [] })))
+    .mockResolvedValue({ sources: [old], warnings: [] })
+  await dom.render(<Catalogue />)
+  const receipt = { hostId: 'local', agentSessionId: 'same-session', retiredAt: 1, persistence: 'confirmed' as const,
+    deletion: { operationId: 'original-delete', retirementRevision: '1'.repeat(64), deletedAt: 2, phase: 'pending' as const } }
+  await act(async () => catalogue.acceptDeletion(receipt))
+  await emit(active(), removed())
+  await act(async () => pending.resolve([old]))
+  expect(catalogue.sources, 'delete-terminal-survives-stale-lifecycle-and-body-catalogue').toEqual([{ hostId: receipt.hostId, agentSessionId: receipt.agentSessionId,
+    state: 'deleted', retiredAt: receipt.retiredAt, recordDeletion: receipt.deletion }])
+  expect(catalogue.sources[0]!.history, 'delete-terminal-does-not-republish-history-descriptor').toBeUndefined()
+  expect(read.mock.calls.length).toBeGreaterThan(0)
+  await emit(...Array.from({ length: 20 }, () => active()))
+  expect(catalogue.sources[0]!.state).toBe('deleted')
+})
