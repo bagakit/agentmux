@@ -53,7 +53,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
   const derived = sessionKind === 'agent' ? resolveAgentDerivedActions(derivedActions).flatMap(item => {
     if (item.kind === 'custom' && item.action.base === 'fork') return canControl && extensions.forkAction ? [<Fragment key={`custom:${item.action.id}`}>{extensions.forkAction(item.action)}</Fragment>] : []
     if (item.kind === 'custom') return canControl && onDerived ? [<Menu.Item key={`custom:${item.action.id}`} className="tab-context-menu__item"
-      data-derived-action={item.action.id} onSelect={() => onDerived(item.action)}><Derived size={14} /><span>{item.action.label}</span></Menu.Item>] : []
+      data-derived-action={item.action.id} onSelect={() => onDerived(item.action)}><Derived size={14} /><span>{item.action.label}…</span></Menu.Item>] : []
     if (item.id === 'take-over') return canControl && onTakeOver ? [<Menu.Item key="take-over" className="tab-context-menu__item" onSelect={onTakeOver}><TakeOver size={14} /><span>Take over</span></Menu.Item>] : []
     if (item.id === 'fork') return extensions.controls ? [<Fragment key="fork">{extensions.controls}</Fragment>] : []
     return canControl && onLearn ? [<Menu.Item key="pass-on-experience" className="tab-context-menu__item" onSelect={onLearn}><PassOn size={14} /><span>Pass on experience</span></Menu.Item>] : []

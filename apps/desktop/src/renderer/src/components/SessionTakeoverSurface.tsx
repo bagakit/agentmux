@@ -16,6 +16,7 @@ const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
+const ThemeDerivedActionIcon = semanticIconComponent('action.derived-action')
 
 
 /** A local workface transition. The underlying Session and editor stay mounted. */
@@ -177,13 +178,16 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, retu
       <div className="session-takeover__origin">
         <AgentAvatar executorId={source.executorId} providerId={sourceExecutor?.providerId} label={source.label} size={22} />
         <span title={source.label}>{source.label}</span><ThemeNavigationForwardIcon size={14} aria-hidden="true" />
-        <span className="session-takeover__destination">{actionLabel}</span>
+        <span className="session-takeover__destination">{source.derived ? <ThemeDerivedActionIcon size={13} aria-hidden="true" /> : null}{actionLabel}</span>
       </div>
       <header className="session-takeover__heading">
         <div><h2>{source.derived ? source.derived.label : 'Keep the work moving.'}</h2><p>{source.derived ? 'Choose an Agent to start this from the original work.' : previousRequest ? 'Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
         <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
       </header>
-      {source.derived ? <p className="session-takeover__instruction" title={source.derived.instruction}>{source.derived.instruction.trim()}</p> : null}
+      {source.derived ? <details className="session-takeover__instruction" open={source.derived.instruction.trim().length <= 220}>
+        <summary><span>Instruction</span><small>Sent to the new Agent with the original work</small></summary>
+        <p>{source.derived.instruction.trim()}</p>
+      </details> : null}
       {source.kind === 'session' ? <>
         <SelectionField label="Takeover destination" value={destinationKey} onValueChange={setDestinationKey} disabled={busy || unconfirmed || closedRequest !== null}
           options={[{ value: '', label: 'Choose an existing destination' }, ...destinations]} />

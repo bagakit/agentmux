@@ -73,6 +73,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
         onClick={() => onSelect(executor.id)}>
         <span inert aria-hidden="true"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /></span>
         <strong>{executor.label}</strong>
+        {executor.id === preferred ? <span className="agent-pick__default" role="img" aria-label="Default Agent for this action" title="Default Agent for this action" /> : null}
         {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" data-state={executor.detection?.state ?? 'idle'} aria-label={executorDetectionLabel(executor.detection)}>
           {executor.detection?.state === 'checking' ? <ThemeStatusLoadingIcon size={10} animation={active ? 'spin' : undefined} />
             : executor.detection?.state === 'error' ? <ThemeStatusWarningIcon size={10} /> : <ThemeStatusUnknownIcon size={10} />}

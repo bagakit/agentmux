@@ -8,12 +8,21 @@
 .session-takeover__origin { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 24px; color: var(--text-3); font-size: var(--fs-meta); }
 .session-takeover__origin > span:not(.agent-avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-takeover__origin > svg { flex: none; opacity: .6; }
-.session-takeover__destination { flex: none; color: var(--text-2); }
+.session-takeover__destination { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
 .session-takeover__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .session-takeover__heading h2 { margin: 0; color: var(--text); font-size: clamp(20px, 2.5vw, 25px); font-weight: 600; line-height: 1.25; letter-spacing: -.035em; }
 .session-takeover__heading p { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
-/* The exact instruction the new Agent receives; three lines in view, the whole text on hover. */
-.session-takeover__instruction { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: -8px 0 24px; padding: 10px 12px; border-left: 2px solid color-mix(in srgb, var(--green) 55%, transparent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--wash-1); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; white-space: pre-wrap; }
+/* The exact instruction the new Agent receives: a labelled card, collapsible when long. */
+.session-takeover__instruction { margin: -8px 0 24px; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.session-takeover__instruction > summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; cursor: pointer; list-style: none; color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
+.session-takeover__instruction > summary::-webkit-details-marker { display: none; }
+.session-takeover__instruction > summary small { color: var(--text-3); font-weight: 400; }
+.session-takeover__instruction > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; border-radius: var(--radius); }
+.session-takeover__instruction > p { margin: 0; padding: 0 14px 12px; color: var(--text); font-size: var(--fs-body); line-height: 1.55; white-space: pre-wrap; }
+.session-takeover__destination > svg { color: var(--green); }
+.session-takeover .agent-pick { position: relative; }
+/* The action's default Agent: a small mark on its pick, never shrinking the name. */
+.session-takeover .agent-pick__default { position: absolute; top: 5px; left: 26px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--surface-0); }
 .session-takeover__cancel { flex: none; width: 28px; height: 28px; color: var(--text-3); }
 .session-takeover .agent-catalog { max-height: none; padding-bottom: 20px; margin-bottom: 0; }
 .session-takeover .agent-picks { gap: 8px; }
