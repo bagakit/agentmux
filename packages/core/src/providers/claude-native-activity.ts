@@ -85,8 +85,12 @@ export function claudeNativeActivity(
   if (eventName === 'turn.complete' &&
       (!['answer', 'aborted', 'refusal', 'error'].includes(String(payload.reason)) ||
        typeof payload.isAborted !== 'boolean' || (payload.reason === 'aborted') !== payload.isAborted)) return
-  return { ...base, nativeTurnId: payload.turnId, state: eventName === 'turn.start' ? 'active' : 'idle',
-    ...(eventName === 'turn.complete' ? { interruption: payload.isAborted ? 'interrupted' as const : 'not-interrupted' as const } : {}) }
+  // Stop's snapshot includes ambient watchers and cannot prove current active work. Only a
+  // matching, complete empty snapshot can establish idle; missing old-module evidence is unknown.
+  const state = eventName === 'turn.start' ? 'active' :
+    payload.reason === 'answer' && payload.backgroundWork === 'none' ? 'idle' : 'unknown'
+  return { ...base, nativeTurnId: payload.turnId, state,
+    ...(state === 'idle' ? { interruption: payload.isAborted ? 'interrupted' as const : 'not-interrupted' as const } : {}) }
 }
 
 /**
@@ -117,6 +121,7 @@ let deliveryGapThrough = 0
 let pending = 0
 let overflowReported = false
 let delivery = Promise.resolve()
+let mainTurn
 const ASKED_END = ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}
 
 async function captureActor($) {
@@ -167,7 +172,8 @@ async function deliver($, eventName, event, sourceSequence) {
       ...(unavailable ? { reason: identityUnavailable ? 'source-identity-unavailable' : sourceChanged ? 'source-changed' : 'delivery-gap' } : {
         turnId: event.turnId,
         ...(event.agentId === undefined ? {} : { agent_id: event.agentId }),
-        ...(eventName === 'turn.complete' ? { reason: event.reason, isAborted: event.isAborted } : {})
+        ...(eventName === 'turn.complete' ? { reason: event.reason, isAborted: event.isAborted,
+          ...(event.agentId === undefined ? { backgroundWork: event.backgroundWork } : {}) } : {})
       })
     }
     if (!await send($, payload)) confirmed = false
@@ -259,11 +265,32 @@ export function register(on) {
     return next(event)
   }).catch(($, event, next) => next(event))
   on('turn.start', ($, event, next) => {
+    if (event?.agentId === undefined && typeof event?.turnId === 'string' && event.turnId.trim()) {
+      mainTurn = { turnId: event.turnId, backgroundWork: 'unknown' }
+    }
     observe($, 'turn.start', event)
     return next(event)
   })
+  // Claude's main run is serialized: start, awaited classic.Stop, then complete. The native
+  // producer already filters foreground/finished/memory tasks. Its wire lacks ambient membership,
+  // so nonempty means unconfirmed idle, never active. Freeze only this original main snapshot.
+  on('classic.Stop', ($, event, next) => {
+    if (mainTurn && initialSessionId && !sourceChanged && event?.session_id === initialSessionId &&
+        event?.agent_id === undefined && event?.agentId === undefined) {
+      const tasks = event.background_tasks
+      mainTurn.backgroundWork = Array.isArray(tasks) && tasks.every(task => task && typeof task === 'object' &&
+        typeof task.id === 'string' && task.id.trim() && typeof task.type === 'string' &&
+        (task.status === 'running' || task.status === 'pending'))
+        ? tasks.length === 0 ? 'none' : 'pending' : 'unknown'
+    }
+    return next(event)
+  }).catch(($, event, next) => next(event))
   on('turn.complete', ($, event, next) => {
-    observe($, 'turn.complete', event)
+    if (event?.agentId === undefined) {
+      const backgroundWork = event?.reason === 'answer' && mainTurn?.turnId === event?.turnId ? mainTurn.backgroundWork : 'unknown'
+      if (mainTurn?.turnId === event?.turnId) mainTurn = undefined
+      observe($, 'turn.complete', { ...event, backgroundWork })
+    } else observe($, 'turn.complete', event)
     // Only an answered main turn of the original session asks; the queue runs a notice as its own next turn.
     if (event?.agentId === undefined && event?.reason === 'answer' && typeof event?.turnId === 'string' && initialSessionId && !sourceChanged) {
       void askTurnEndNotice($, event.turnId)

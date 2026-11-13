@@ -114,7 +114,7 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
     { events: ['turn.start'], state: 'working', lifecycleEvent: 'turn-start',
       matches: payload => claudeNativeTurnIdentity(payload) !== undefined },
     { events: ['turn.complete'], state: 'error', lifecycleEvent: 'turn-end',
-      matches: payload => payload.reason === 'error' && claudeNativeActivity('turn.complete', payload)?.state === 'idle' },
+      matches: payload => payload.reason === 'error' && claudeNativeActivity('turn.complete', payload) !== undefined },
     { events: ['turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'], state: 'unknown', lifecycleEvent: null },
     // An Inbox notice ask and its native queue report carry no activity: they leave semantic state as it was.
     { events: [CLAUDE_TURN_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT], state: 'unknown', lifecycleEvent: null },
@@ -246,7 +246,12 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
   return {
     ...provider,
     normalizeHook(envelope, context) {
-      const normalized = provider.normalizeHook(envelope, context)
+      let normalized = provider.normalizeHook(envelope, context)
+      if (normalized.mainSubject && normalized.eventName === 'turn.complete' && normalized.currentActivity?.state === 'unknown') {
+        normalized = { ...normalized, currentActivityIssue: envelope.payload?.backgroundWork === 'pending'
+          ? 'The native turn reported background tasks, which may include ambient observers. Current idle or active is unconfirmed. The original Session, Run, results and input remain available; a later native turn with a confirmed empty task snapshot can confirm idle.'
+          : 'The native turn has no confirmed matching background-task snapshot. Current idle is unconfirmed. The original Session, Run, results and input remain available; a later native turn with a confirmed empty task snapshot can confirm idle.' }
+      }
       // Only the interaction end belongs to this observation; it is not a tool row or activity.
       if (normalized.eventName === CLAUDE_ASKED_TOOL_END_EVENT) return { ...normalized, timeline: [] }
       // An identified ask is a stage of the call PreToolUse already recorded; its tool row is that one.
@@ -267,7 +272,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
           }) }
       }
       if (normalized.eventName === 'turn.complete' && normalized.mainSubject &&
-        normalized.semanticState === 'error' && normalized.currentActivity?.state === 'idle') {
+        normalized.semanticState === 'error' && normalized.currentActivity) {
         const nativeTurnId = normalized.currentActivity.nativeTurnId
         if (!nativeTurnId) return normalized
         // The native runner identifies its error end, but exposes no original API error fields.

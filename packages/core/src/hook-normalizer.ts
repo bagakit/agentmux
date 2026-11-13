@@ -193,43 +193,6 @@ function subagentRosterKey(envelope: NativeHookEnvelope): string {
 }
 
 /**
- * Stop hook 携带的后台任务计数（按 runId）。
- *
- * Claude Code 的 Stop hook payload 中带有 `background_tasks` 字段，列出当前仍在 running/pending
- * 的后台任务（shell、workflow、monitor、subagent 等）。这些任务在主轮结束后仍在跑，Agent 实际上
- * 仍在工作；但 turn.complete 来自 mod plugin，不感知这些后台事实——不加干预会让 idle 状态错误投影。
- *
- * 计数规则（与 Claude binary 的 `IDn` 函数对齐）：
- * - status === 'running' 或 (status === 'pending' 且 notified !== true)
- * - isBackgrounded !== false（排除前台任务）
- * - type !== 'post_turn_memory'（内存整理不算工作）
- *
- * 清除时机：
- * - run 进程退出（releaseSubagentRoster 里同步清）
- * - 主 Agent 下一轮 turn-start（新一轮开始意味着后台已收口或被忽略）
- */
-const pendingBackgroundTasksCounts = new Map<string, number>()
-
-/**
- * Stop hook 到来时记录其携带的后台任务数量。count > 0 表示 Agent 仍有后台工作，
- * 不能将 turn.complete 后的活动状态投影为 idle。
- */
-export function recordStopBackgroundTasks(runId: string, count: number): void {
-  if (count > 0) pendingBackgroundTasksCounts.set(runId, count)
-  else pendingBackgroundTasksCounts.delete(runId)
-}
-
-/** 新一轮工作开始时清除上一 Stop 记录的后台计数（已收口或不再需要）。 */
-export function clearStopBackgroundTasks(runId: string): void {
-  pendingBackgroundTasksCounts.delete(runId)
-}
-
-/** 查询某 run 是否在最近一次 Stop hook 时报告了仍在运行的后台任务。 */
-export function agentHasPendingBackgroundTasks(runId: string): boolean {
-  return (pendingBackgroundTasksCounts.get(runId) ?? 0) > 0
-}
-
-/**
  * run 进程终结（exited/interrupted）时清掉它的子代理花名册。
  *
  * 为什么必须有这条路径：子代理被信号/OOM 杀死、或它的 SubagentStop 两次 fetch 都失败时，SubagentStop
@@ -238,7 +201,6 @@ export function agentHasPendingBackgroundTasks(runId: string): boolean {
  * 返回是否确实清掉了一条，供调用方判定是否需要把语义状态收敛。
  */
 export function releaseSubagentRoster(runId: string): boolean {
-  pendingBackgroundTasksCounts.delete(runId)
   return subagentRosters.delete(runId)
 }
 

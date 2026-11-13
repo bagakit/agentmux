@@ -95,7 +95,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject, recordStopBackgroundTasks, clearStopBackgroundTasks, agentHasPendingBackgroundTasks } from './hook-normalizer.js'
+import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -8540,9 +8540,6 @@ export class AgentMuxClient {
     'promptCompletionAdmission' | 'nativeSourceObservation' | 'nativeBinding'>): AgentCurrentActivity | undefined {
     const activity = this.nativeCurrentActivities.get(session.agentSessionId)
     const childrenUnconfirmed = agentSubagentActivityUnconfirmed(session.run.runId, activity?.event.sourceId)
-    // A classic Stop that reported pending background tasks (shells, workflows, monitors) means the
-    // Agent is still working even after its main turn ends. Suppress idle until the next turn-start.
-    const backgroundTasksPending = agentHasPendingBackgroundTasks(session.run.runId)
     if (activity?.fact && activity.runId === session.run.runId &&
         session.nativeHandle?.kind === 'provider' && activity.fact.nativeSessionId === session.nativeHandle.sessionId &&
         !this.endedRuns.has(session.run.runId) &&
@@ -10965,30 +10962,6 @@ export class AgentMuxClient {
       }
     }
     if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
-    // When a new main turn starts, the previous Stop's background task count is no longer relevant.
-    if (normalized.mainSubject && normalized.lifecycleEvent === 'turn-start') {
-      clearStopBackgroundTasks(envelope.runId)
-    }
-    // Stop hook payload carries background_tasks: running/pending backgrounded tasks (shells,
-    // workflows, monitors, subagents) that outlive the main turn. Record their count so that
-    // projectCurrentActivity() can suppress the idle projection until the next turn-start.
-    // Count rule mirrors Claude binary IDn(): running|(pending && !notified), isBackgrounded !== false,
-    // type !== 'post_turn_memory'. Only main-subject classic Stop from the authenticated run.
-    if (normalized.mainSubject && normalized.eventName === 'Stop' && !witnessTargetMismatch) {
-      const tasks = envelope.payload?.background_tasks
-      let pendingCount = 0
-      if (Array.isArray(tasks)) {
-        for (const task of tasks) {
-          if (!task || typeof task !== 'object') continue
-          const t = task as Record<string, unknown>
-          if (t.type === 'post_turn_memory') continue
-          if (t.isBackgrounded === false) continue
-          const status = t.status
-          if (status === 'running' || (status === 'pending' && t.notified !== true)) pendingCount++
-        }
-      }
-      recordStopBackgroundTasks(envelope.runId, pendingCount)
-    }
     // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
     //
     // 这次 status() 图的只是 `latestOutputBytes`——一个给 composer 就绪判定用的光标快照。可它在**断线
@@ -11339,7 +11312,7 @@ export class AgentMuxClient {
           const observation = { run: { ...next.run }, phase: 'binding' as const,
             ...(next.nativeHandle ? { nativeTarget: next.nativeHandle } : {}),
             code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', observedAt: receipt.observedAt,
-            message: 'The native activity source changed or lost delivery continuity. Current idle is unconfirmed; the original Session, Run, task results and input remain available. A new confirmed native turn can restore observation.' }
+            message: normalized.currentActivityIssue ?? 'The native activity source changed or lost delivery continuity. Current idle is unconfirmed; the original Session, Run, task results and input remain available. A new confirmed native turn can restore observation.' }
           this.hookIngressObservations.set(next.agentSessionId, observation)
           this.publisher.publish({ type: 'agent-error', agentSessionId: next.agentSessionId,
             code: observation.code, message: observation.message,

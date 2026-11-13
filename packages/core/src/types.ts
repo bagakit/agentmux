@@ -2378,6 +2378,8 @@ export type NormalizedHookEvent = {
   /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
   mainSubject: boolean
   currentActivity?: AgentNativeActivityEvent
+  /** Provider diagnosis accompanying an ordered unknown activity; never a control predicate. */
+  currentActivityIssue?: string
   observationFailure?: AgentHookObservationFailure
   continuity?: AgentHookContinuityObservation
   continuityObservationFailure?: AgentHookObservationFailure
