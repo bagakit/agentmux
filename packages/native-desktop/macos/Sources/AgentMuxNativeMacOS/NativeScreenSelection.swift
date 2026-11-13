@@ -21,7 +21,7 @@ final class NativeScreenSelection: NSView {
     var frozenPixels: NativeSelectionPixels? { coordinator.pixels }
     var pointerLocation: NSPoint { coordinator.pointerLocation }
     var colorCopyFeedback: String { coordinator.colorCopyFeedback }
-    var magnifierRectangle: NSRect { magnifierFrame(at: coordinator.pointerLocation) }
+    var magnifierRectangle: NSRect? { coordinator.magnifierVisible ? magnifierFrame(at: coordinator.pointerLocation) : nil }
     var loadingPixels: Bool { coordinator.pixels == nil }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -98,107 +98,128 @@ final class NativeScreenSelection: NSView {
         } else if let issue = frozen?.issue {
             NSColor(calibratedWhite: 0.09, alpha: 1).setFill()
             bounds.fill()
-            let text = "此屏幕暂时无法采图\n\(issue)\n\n其他可用屏幕仍可选择 · Esc 取消"
+            let text = "This display cannot be captured right now\n\(issue)\n\nOther displays remain selectable · Esc to cancel"
             text.draw(in: NSRect(x: 28, y: bounds.midY - 60, width: max(1, bounds.width - 56), height: 140),
                 withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.white.withAlphaComponent(0.85)])
         }
         NSColor.black.withAlphaComponent(0.28).setFill()
         bounds.fill()
-        guard let global = selection.rectangle else { drawMagnifier(); return }
-        let rect = global.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
-        if let image = frozen?.image {
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(rect: rect.intersection(bounds)).addClip()
-            NSImage(cgImage: image, size: bounds.size).draw(in: bounds)
-            NSGraphicsContext.restoreGraphicsState()
-        }
-        let border = NSBezierPath(rect: rect)
-        NSColor.black.withAlphaComponent(0.55).setStroke()
-        border.lineWidth = 3
-        border.stroke()
-        NSColor.white.setStroke()
-        border.lineWidth = 1
-        border.stroke()
-        for handle in NativeSelectionState.Handle.allCases {
-            guard let globalPoint = selection.point(for: handle) else { continue }
-            let point = NSPoint(x: globalPoint.x - viewport.minX, y: globalPoint.y - viewport.minY)
-            let dot = NSBezierPath(roundedRect: NSRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8), xRadius: 1.5, yRadius: 1.5)
-            NSColor.white.setFill()
-            dot.fill()
-            NSColor.black.withAlphaComponent(0.6).setStroke()
-            dot.lineWidth = 1
-            dot.stroke()
+        if let global = selection.rectangle {
+            let rect = global.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
+            if let image = frozen?.image {
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(rect: rect.intersection(bounds)).addClip()
+                NSImage(cgImage: image, size: bounds.size).draw(in: bounds)
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            let outer = NSBezierPath(rect: rect.insetBy(dx: -1.5, dy: -1.5))
+            outer.lineWidth = 1
+            NSColor.black.withAlphaComponent(0.35).setStroke()
+            outer.stroke()
+            let inner = NSBezierPath(rect: rect.insetBy(dx: -0.5, dy: -0.5))
+            inner.lineWidth = 1
+            NSColor.white.setStroke()
+            inner.stroke()
+            for handle in NativeSelectionState.Handle.allCases {
+                guard let globalPoint = selection.point(for: handle) else { continue }
+                let point = NSPoint(x: globalPoint.x - viewport.minX, y: globalPoint.y - viewport.minY)
+                let dot = NSBezierPath(ovalIn: NSRect(x: point.x - 3.5, y: point.y - 3.5, width: 7, height: 7))
+                NSColor.white.setFill()
+                dot.fill()
+                NSColor.black.withAlphaComponent(0.35).setStroke()
+                dot.lineWidth = 1
+                dot.stroke()
+            }
         }
         drawMagnifier()
     }
 
+    /// 15 x 15 frozen pixels at 8pt each, then colour and the two coordinate
+    /// spaces. A third row appears only while a colour copy has a receipt.
+    private static let magnifierRadius = 7
+    private static let magnifierCell: CGFloat = 8
     private func drawMagnifier() {
-        guard let pixels = coordinator.pixels, let display = pixels.display(in: viewport),
+        guard coordinator.magnifierVisible, let pixels = coordinator.pixels, let display = pixels.display(in: viewport),
               let sample = pixels.sample(at: coordinator.pointerLocation, in: display) else { return }
         let panel = magnifierFrame(at: coordinator.pointerLocation)
-        NSColor(calibratedWhite: 0.085, alpha: 0.98).setFill()
-        let outline = NSBezierPath(roundedRect: panel, xRadius: 10, yRadius: 10)
+        let outline = NSBezierPath(roundedRect: panel.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
+        NSColor(calibratedWhite: 0.08, alpha: 0.94).setFill()
         outline.fill()
-        NSColor.white.withAlphaComponent(0.18).setStroke(); outline.lineWidth = 1; outline.stroke()
-        let compact = bounds.width < 420 || bounds.height < 320
-        let cell: CGFloat = compact ? 6 : 7
-        let horizontalRadius = compact ? 9 : 14, verticalRadius = compact ? 3 : 6
-        let desired = CGRect(x: sample.x - horizontalRadius, y: sample.y - verticalRadius,
-            width: horizontalRadius * 2 + 1, height: verticalRadius * 2 + 1)
-        let lens = NSRect(x: panel.midX - desired.width * cell / 2, y: panel.minY + 76,
-            width: desired.width * cell, height: desired.height * cell)
+        NSColor.white.withAlphaComponent(0.1).setStroke(); outline.lineWidth = 1; outline.stroke()
+        let radius = Self.magnifierRadius, cell = Self.magnifierCell, count = radius * 2 + 1
+        let span = CGFloat(count) * cell
+        let lens = NSRect(x: panel.minX + 8, y: panel.maxY - 8 - span, width: span, height: span)
+        let desired = CGRect(x: sample.x - radius, y: sample.y - radius, width: count, height: count)
         let source = desired.intersection(CGRect(x: 0, y: 0, width: sample.image.width, height: sample.image.height))
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: lens, xRadius: 5, yRadius: 5).addClip()
+        NSColor.black.setFill()
+        lens.fill()
         if let crop = sample.image.cropping(to: source) {
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(roundedRect: lens, xRadius: 4, yRadius: 4).addClip()
             NSGraphicsContext.current?.imageInterpolation = .none
             let destination = NSRect(x: lens.minX + (source.minX - desired.minX) * cell,
                 y: lens.maxY - (source.maxY - desired.minY) * cell, width: source.width * cell, height: source.height * cell)
             NSImage(cgImage: crop, size: NSSize(width: crop.width, height: crop.height)).draw(in: destination)
-            NSGraphicsContext.restoreGraphicsState()
         }
-        let cx = lens.midX, cy = lens.midY
-        let cross = NSBezierPath()
-        cross.move(to: NSPoint(x: lens.minX, y: cy)); cross.line(to: NSPoint(x: lens.maxX, y: cy))
-        cross.move(to: NSPoint(x: cx, y: lens.minY)); cross.line(to: NSPoint(x: cx, y: lens.maxY))
-        NSColor.black.withAlphaComponent(0.7).setStroke(); cross.lineWidth = 2; cross.stroke()
-        NSColor.white.withAlphaComponent(0.9).setStroke(); cross.lineWidth = 0.6; cross.stroke()
-        let quartzX = coordinator.pointerLocation.x
-        let quartzY = coordinator.primaryDisplayTop - coordinator.pointerLocation.y
-        let mono = NSFont.monospacedSystemFont(ofSize: compact ? 10 : 11, weight: .medium)
-        let label: [NSAttributedString.Key: Any] = [.font: mono, .foregroundColor: NSColor.white]
-        "\(sample.hex)  RGB \(sample.red),\(sample.green),\(sample.blue)".draw(at: NSPoint(x: panel.minX + 10, y: panel.minY + 58), withAttributes: label)
-        String(format: "全局 %.0f, %.0f pt", quartzX, quartzY)
-            .draw(at: NSPoint(x: panel.minX + 10, y: panel.minY + 41), withAttributes: [.font: mono, .foregroundColor: NSColor.white.withAlphaComponent(0.6)])
-        "屏内 \(sample.x), \(sample.y) px"
-            .draw(at: NSPoint(x: panel.minX + 10, y: panel.minY + 25), withAttributes: [.font: mono, .foregroundColor: NSColor.white.withAlphaComponent(0.6)])
-        coordinator.colorCopyFeedback.draw(in: NSRect(x: panel.minX + 10, y: panel.minY + 7, width: panel.width - 20, height: 15),
-            withAttributes: [.font: mono, .foregroundColor: NSColor.white.withAlphaComponent(0.8)])
+        let grid = NSBezierPath()
+        for index in 1..<count {
+            let offset = CGFloat(index) * cell
+            grid.move(to: NSPoint(x: lens.minX + offset, y: lens.minY)); grid.line(to: NSPoint(x: lens.minX + offset, y: lens.maxY))
+            grid.move(to: NSPoint(x: lens.minX, y: lens.minY + offset)); grid.line(to: NSPoint(x: lens.maxX, y: lens.minY + offset))
+        }
+        grid.lineWidth = 0.5
+        NSColor.black.withAlphaComponent(0.16).setStroke(); grid.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+        let target = NSRect(x: lens.minX + CGFloat(radius) * cell, y: lens.minY + CGFloat(radius) * cell, width: cell, height: cell)
+        let halo = NSBezierPath(rect: target.insetBy(dx: -0.5, dy: -0.5))
+        NSColor.black.withAlphaComponent(0.6).setStroke(); halo.lineWidth = 1; halo.stroke()
+        let marker = NSBezierPath(rect: target.insetBy(dx: 0.5, dy: 0.5))
+        NSColor.white.setStroke(); marker.lineWidth = 1; marker.stroke()
+        let lensOutline = NSBezierPath(roundedRect: lens.insetBy(dx: -0.5, dy: -0.5), xRadius: 5.5, yRadius: 5.5)
+        NSColor.white.withAlphaComponent(0.12).setStroke(); lensOutline.lineWidth = 1; lensOutline.stroke()
+        let quartzX = floor(coordinator.pointerLocation.x)
+        let quartzY = floor(coordinator.primaryDisplayTop - coordinator.pointerLocation.y)
+        var rows: [(String, CGFloat)] = [("\(sample.hex)  \(sample.red),\(sample.green),\(sample.blue)", 0.95),
+            (String(format: "%.0f, %.0f pt", quartzX, quartzY) + " · \(sample.x), \(sample.y) px", 0.6)]
+        if coordinator.colorCopyStatusVisible { rows.append((coordinator.colorCopyFeedback, 0.95)) }
+        for (index, row) in rows.enumerated() {
+            // Large multi-display coordinates shrink to the lens width rather
+            // than truncate a digit away.
+            var size: CGFloat = 10
+            var attributes: [NSAttributedString.Key: Any] { [.font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .medium),
+                .foregroundColor: NSColor.white.withAlphaComponent(row.1)] }
+            while size > 8 && (row.0 as NSString).size(withAttributes: attributes).width > span { size -= 0.5 }
+            (row.0 as NSString).draw(with: NSRect(x: lens.minX, y: lens.minY - 18 - CGFloat(index) * 13, width: span, height: 13),
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+        }
     }
 
     private func magnifierFrame(at location: NSPoint) -> NSRect {
         let point = NSPoint(x: location.x - viewport.minX, y: location.y - viewport.minY)
-        let compact = bounds.width < 420 || bounds.height < 320
-        let size = compact ? NSSize(width: 172, height: 128) : NSSize(width: 224, height: 176)
+        let rows: CGFloat = coordinator.colorCopyStatusVisible ? 3 : 2
+        let size = NSSize(width: 136, height: 8 + CGFloat(Self.magnifierRadius * 2 + 1) * Self.magnifierCell + 5 + rows * 13 + 6)
         var origins = [NSPoint(x: point.x + 24, y: point.y - size.height - 24),
             NSPoint(x: point.x - size.width - 24, y: point.y - size.height - 24),
             NSPoint(x: point.x + 24, y: point.y + 24),
-            NSPoint(x: point.x - size.width - 24, y: point.y + 24),
-            NSPoint(x: bounds.minX + 12, y: bounds.maxY - size.height - 12),
-            NSPoint(x: bounds.minX + 12, y: bounds.minY + 12)]
-        if let toolbar = coordinator.toolbarFrame(in: self) {
-            origins += [NSPoint(x: bounds.minX + 12, y: toolbar.maxY + 12),
-                NSPoint(x: bounds.maxX - size.width - 12, y: toolbar.maxY + 12),
-                NSPoint(x: bounds.minX + 12, y: toolbar.minY - size.height - 12),
-                NSPoint(x: bounds.maxX - size.width - 12, y: toolbar.minY - size.height - 12)]
+            NSPoint(x: point.x - size.width - 24, y: point.y + 24)]
+        // While a selection moves the pointer is inside it; keep the loupe
+        // just outside the nearest edge rather than in a far screen corner.
+        if let rect = selection.rectangle.map({ $0.offsetBy(dx: -viewport.minX, dy: -viewport.minY) }) {
+            origins += [NSPoint(x: rect.maxX + 16, y: point.y - size.height / 2), NSPoint(x: rect.minX - size.width - 16, y: point.y - size.height / 2),
+                NSPoint(x: point.x - size.width / 2, y: rect.minY - size.height - 16), NSPoint(x: point.x - size.width / 2, y: rect.maxY + 16)]
         }
+        origins += [NSPoint(x: bounds.minX + 12, y: bounds.maxY - size.height - 12),
+            NSPoint(x: bounds.maxX - size.width - 12, y: bounds.maxY - size.height - 12),
+            NSPoint(x: bounds.minX + 12, y: bounds.minY + 12),
+            NSPoint(x: bounds.maxX - size.width - 12, y: bounds.minY + 12)]
         let candidates = origins.map { NativeSelectionState.panelFrame(size: size, preferredOrigin: $0, screen: bounds) }
-        let occupied = [coordinator.toolbarFrame(in: self), coordinator.dimensionFrame(in: self),
-            NSRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)].compactMap { $0 }
-        return candidates.first { frame in !occupied.contains { frame.intersects($0) } } ?? candidates.last!
+        var occupied = coordinator.controlFrames(in: self) + [NSRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)]
+        let selected = selection.rectangle.map { $0.offsetBy(dx: -viewport.minX, dy: -viewport.minY) }
+        if let selected { occupied.append(selected) }
+        return candidates.first { frame in !occupied.contains { frame.intersects($0) } } ?? candidates[0]
     }
     fileprivate func invalidateMagnifier(at point: NSPoint) {
-        if viewport.contains(point) { setNeedsDisplay(magnifierFrame(at: point).insetBy(dx: -2, dy: -2)) }
+        if coordinator.magnifierVisible && viewport.contains(point) { setNeedsDisplay(magnifierFrame(at: point).insetBy(dx: -2, dy: -2)) }
     }
 
     override func updateTrackingAreas() {
@@ -224,7 +245,7 @@ final class NativeScreenSelection: NSView {
                 }
             }
         }
-        if let frame = coordinator.toolbarFrame(in: self) { addCursorRect(frame, cursor: .arrow) }
+        for frame in coordinator.interactiveFrames(in: self) { addCursorRect(frame, cursor: .arrow) }
     }
 
     private func globalPoint(_ event: NSEvent) -> NSPoint {
@@ -248,6 +269,14 @@ final class NativeScreenSelection: NSView {
 /// or completion. Weak canvas references avoid a controller/window/view cycle.
 @MainActor
 fileprivate final class NativeSelectionCoordinator: NSObject {
+    private struct QuickMark { let tool: String; let label: String; let symbol: String; let key: String }
+    private static let quickMarks = [
+        QuickMark(tool: "rect", label: "Rectangle", symbol: "rectangle", key: "R"),
+        QuickMark(tool: "arrow", label: "Arrow", symbol: "arrow.up.right", key: "A"),
+        QuickMark(tool: "note", label: "Numbered note", symbol: "1.circle", key: "N"),
+        QuickMark(tool: "pixelate", label: "Pixelate", symbol: "checkerboard.rectangle", key: "M"),
+        QuickMark(tool: "text", label: "Text", symbol: "textformat", key: "T"),
+    ]
     private(set) var selection: NativeSelectionState
     let initialPoint: NSPoint
     private var preferredPoint: NSPoint
@@ -259,20 +288,30 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
     private let copyColor: (@Sendable (String) throws -> Void)?
     private var colorCopyOperation: UUID?
     private let colorCopyQueue = DispatchQueue(label: "com.agentmux.native.selection-color-copy", qos: .userInitiated)
-    private(set) var colorCopyFeedback = "C 复制 HEX"
+    private(set) var colorCopyFeedback = "C copies color"
+    /// The receipt row stays until the pointer moves away from the copied pixel.
+    private(set) var colorCopyStatusVisible = false
     private var completion: ((Result<NativeSelectionChoice?, Error>) -> Void)?
     private let views = NSHashTable<NativeScreenSelection>.weakObjects()
     private var controlsViewport: NSRect?
-    private let toolbar = NativeSelectionPanel(frame: .zero)
-    private let dimensions = NativeSelectionPanel(frame: .zero)
-    private let sizeLabel = NSTextField(labelWithString: "")
-    private let hint = NSTextField(labelWithString: "")
-    private let confirmButton = NativeSelectionButton(title: "完成", shortcut: "↵", primary: true)
-    private let cancelButton = NativeSelectionButton(title: "取消", shortcut: "esc")
-    private let editButton = NativeSelectionButton(title: "标注…", shortcut: "E", symbol: "pencil.tip.crop.circle")
+    private let toolbar = NativeSelectionPanel(style: .toolbar)
+    private let marksTray = NativeSelectionPanel(style: .toolbar)
+    private let dimensions = NativeSelectionPanel(style: .chip)
+    private let hintPanel = NativeSelectionPanel(style: .chip)
+    private let separator = NativeSelectionSeparator(frame: .zero)
+    private let confirmButton = NativeSelectionButton(label: "Done", toolTip: "Capture (Return)", shortcut: "↵", primary: true)
+    private let cancelButton = NativeSelectionButton(label: "Cancel", toolTip: "Cancel (Esc)", symbol: "xmark")
+    private let editButton = NativeSelectionButton(label: "Open full editor", toolTip: "Open full editor (E)", symbol: "arrow.up.left.and.arrow.down.right")
+    private let marksButton = NativeSelectionButton(label: "Markup", toolTip: "Markup", symbol: "scribble.variable")
+    private let markButtons = NativeSelectionCoordinator.quickMarks.map {
+        NativeSelectionButton(label: $0.label, toolTip: "\($0.label) (\($0.key))", symbol: $0.symbol)
+    }
+    private var marksTrayOpen = false
     let loading = NativeSelectionLoading()
     private(set) var pixels: NativeSelectionPixels?
     private(set) var pointerLocation: NSPoint
+    /// The loupe serves aiming: before a selection exists and while it moves.
+    var magnifierVisible: Bool { selection.rectangle == nil || selection.isInteracting || colorCopyStatusVisible }
 
     init(screenFrames: [NSRect], primaryTop: CGFloat, initialPoint: NSPoint, allowEditing: Bool,
          previousApp: NSRunningApplication? = nil, pixels: NativeSelectionPixels? = nil,
@@ -294,43 +333,50 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
     }
     func register(_ view: NativeScreenSelection) {
         views.add(view)
-        view.setAccessibilityHelp("拖动选择区域，拖动选区移动，拖动边角调整，方向键微调，C 复制指针处 HEX，Enter 完成，Esc 取消")
+        view.setAccessibilityHelp(accessibilityGuide)
         refresh()
     }
-    func toolbarFrame(in view: NativeScreenSelection) -> NSRect? { toolbar.superview === view ? toolbar.frame : nil }
-    func dimensionFrame(in view: NativeScreenSelection) -> NSRect? { dimensions.superview === view && !dimensions.isHidden ? dimensions.frame : nil }
+    private var accessibilityGuide: String {
+        "Drag to select an area. Drag inside it to move, drag a handle to resize, and use the arrow keys to nudge. C copies the color under the pointer. Return captures and Esc cancels."
+            + (allowEditing ? " E opens the full editor." : "")
+    }
+    func controlFrames(in view: NativeScreenSelection) -> [NSRect] {
+        [toolbar, marksTray, dimensions, hintPanel].filter { $0.superview === view && !$0.isHidden }.map(\.frame)
+    }
+    func interactiveFrames(in view: NativeScreenSelection) -> [NSRect] {
+        [toolbar, marksTray].filter { $0.superview === view && !$0.isHidden }.map(\.frame)
+    }
 
     private func buildControls() {
         toolbar.identifier = NSUserInterfaceItemIdentifier("native-selection-toolbar")
+        marksTray.identifier = NSUserInterfaceItemIdentifier("native-selection-marks-tray")
         dimensions.identifier = NSUserInterfaceItemIdentifier("native-selection-dimensions")
-        confirmButton.identifier = NSUserInterfaceItemIdentifier("native-selection-confirm")
-        cancelButton.identifier = NSUserInterfaceItemIdentifier("native-selection-cancel")
-        editButton.identifier = NSUserInterfaceItemIdentifier("native-selection-edit")
-        confirmButton.setAccessibilityIdentifier("native-selection-confirm")
-        cancelButton.setAccessibilityIdentifier("native-selection-cancel")
-        editButton.setAccessibilityIdentifier("native-selection-edit")
-        for button in [cancelButton, editButton, confirmButton] {
+        hintPanel.identifier = NSUserInterfaceItemIdentifier("native-selection-hint")
+        let named = [(confirmButton, "native-selection-confirm"), (cancelButton, "native-selection-cancel"),
+            (editButton, "native-selection-edit"), (marksButton, "native-selection-marks")]
+            + zip(markButtons, Self.quickMarks).map { ($0, "native-selection-mark-" + $1.tool) }
+        for (button, identifier) in named {
+            button.identifier = NSUserInterfaceItemIdentifier(identifier)
+            button.setAccessibilityIdentifier(identifier)
             button.target = self
-            if button !== editButton || allowEditing { toolbar.addSubview(button) }
         }
         confirmButton.action = #selector(confirm)
         cancelButton.action = #selector(cancel)
         editButton.action = #selector(edit)
+        marksButton.action = #selector(toggleMarks)
+        for button in markButtons { button.action = #selector(mark(_:)) }
         confirmButton.keyEquivalent = "\r"
         cancelButton.keyEquivalent = "\u{1b}"
         editButton.keyEquivalent = "e"
         editButton.keyEquivalentModifierMask = []
-        confirmButton.toolTip = "完成截图 (Enter)"
-        cancelButton.toolTip = "取消截图 (Esc)"
-        editButton.toolTip = "标注截图 (E)"
-        hint.font = .systemFont(ofSize: 12)
-        hint.textColor = NSColor.white.withAlphaComponent(0.85)
-        hint.alignment = .center
-        sizeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        sizeLabel.textColor = .white
-        sizeLabel.lineBreakMode = .byWordWrapping
-        sizeLabel.maximumNumberOfLines = 0
-        dimensions.addSubview(sizeLabel)
+        toolbar.addSubview(cancelButton)
+        toolbar.addSubview(confirmButton)
+        toolbar.isHidden = true
+        marksTray.isHidden = true
+        hintPanel.textFont = .systemFont(ofSize: 12, weight: .medium)
+        hintPanel.textPadding = 12
+        hintPanel.isPassive = true
+        dimensions.textFont = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         dimensions.isPassive = true
     }
     @objc private func confirm() { complete(action: .capture) }
@@ -338,6 +384,11 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         guard allowEditing else { return }
         complete(action: .edit)
     }
+    @objc private func mark(_ sender: NSButton) {
+        guard allowEditing, markButtons.contains(where: { $0 === sender }) else { return }
+        complete(action: .edit)
+    }
+    @objc private func toggleMarks() { marksTrayOpen.toggle(); refresh() }
     private func complete(action: NativeSelectionCompletionAction) {
         guard selection.canConfirm, let rect = selection.rectangle, let pixels else { return }
         let quartz = NativeCaptureGeometry.quartzRect(appKitRect: rect, primaryDisplayTop: primaryTop)
@@ -384,11 +435,12 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         guard point != pointerLocation else { return }
         for view in views.allObjects { view.invalidateMagnifier(at: pointerLocation) }
         pointerLocation = point
+        colorCopyStatusVisible = false
         for view in views.allObjects { view.invalidateMagnifier(at: point) }
     }
     func pointerDown(_ point: NSPoint) {
         guard pixels != nil else { return }
-        preferredPoint = point; pointerLocation = point; selection.pointerDown(point); refresh()
+        preferredPoint = point; pointerLocation = point; colorCopyStatusVisible = false; selection.pointerDown(point); refresh()
     }
     func pointerDragged(_ point: NSPoint) { pointerLocation = point; selection.pointerDragged(point); refresh() }
     func pointerUp(_ point: NSPoint) { pointerLocation = point; selection.pointerUp(point); refresh() }
@@ -408,11 +460,16 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         return true
     }
 
+    private func showColorCopy(_ feedback: String) {
+        for view in views.allObjects { view.invalidateMagnifier(at: pointerLocation) }
+        colorCopyFeedback = feedback
+        colorCopyStatusVisible = true
+        for view in views.allObjects { view.invalidateMagnifier(at: pointerLocation) }
+    }
     private func copyPointerColor() {
         guard let pixels, let display = pixels.displays.first(where: { $0.appKitFrame.contains(pointerLocation) }),
               let sample = pixels.sample(at: pointerLocation, in: display) else {
-            colorCopyFeedback = "此处没有可复制的像素 · C 重试"
-            for view in views.allObjects { view.invalidateMagnifier(at: pointerLocation) }
+            showColorCopy("No pixel here · press C to retry")
             return
         }
         let write: @Sendable (String) throws -> Void = copyColor ?? { _ in
@@ -420,8 +477,7 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         }
         let operation = UUID(), hex = sample.hex
         colorCopyOperation = operation
-        colorCopyFeedback = "正在复制 \(hex)"
-        for view in views.allObjects { view.invalidateMagnifier(at: pointerLocation) }
+        showColorCopy("Copying \(hex)")
         // The existing clipboard owner serializes on its worker. Waiting for
         // that owner on AppKit's main thread would deadlock its main dispatch.
         colorCopyQueue.async { [weak self] in
@@ -430,9 +486,10 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
             catch { failure = String(describing: error) }
             DispatchQueue.main.async {
                 guard let self, self.completion != nil, self.colorCopyOperation == operation else { return }
-                self.colorCopyFeedback = failure == nil ? "已复制 \(hex) · C" : "复制未确认 · C 重试"
+                self.colorCopyFeedback = failure == nil ? "Copied \(hex)" : "Copy unconfirmed · press C to retry"
                 for view in self.views.allObjects {
-                    view.setAccessibilityHelp(failure.map { "颜色复制未确认：\($0)。按 C 重试；选区和取消仍可用。" } ?? "已复制颜色 \(hex)。按 C 再复制；Enter 完成，Esc 取消。")
+                    view.setAccessibilityHelp(failure.map { "Color copy unconfirmed: \($0). Press C to retry; the selection and Esc remain available." }
+                        ?? "Copied color \(hex). Press C to copy again; Return captures and Esc cancels.")
                     view.invalidateMagnifier(at: self.pointerLocation)
                 }
             }
@@ -443,71 +500,110 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
         let quartz = selection.rectangle.map { NativeCaptureGeometry.quartzRect(appKitRect: $0, primaryDisplayTop: primaryTop) }
         let issue = quartz.flatMap { pixels?.issue(in: $0) }
         confirmButton.isEnabled = selection.canConfirm && pixels != nil && issue == nil
-        editButton.isEnabled = confirmButton.isEnabled
-        hint.stringValue = pixels == nil ? "正在冻结屏幕 · Esc 随时取消" : "拖动选择截图区域"
-        hint.isHidden = selection.rectangle != nil
+        for button in [editButton, marksButton] + markButtons { button.isEnabled = confirmButton.isEnabled }
+        hintPanel.text = pixels == nil ? "Freezing screen · Esc to cancel" : "Drag to select · Esc to cancel"
         let globalScreen = currentScreen()
         guard let host = views.allObjects.first(where: { $0.viewport == globalScreen }) else { return }
         if toolbar.superview !== host {
-            hint.removeFromSuperview()
-            dimensions.removeFromSuperview()
-            toolbar.removeFromSuperview()
-            host.addSubview(hint)
-            host.addSubview(dimensions)
-            host.addSubview(toolbar)
+            for panel in [hintPanel, dimensions, toolbar, marksTray] {
+                panel.removeFromSuperview()
+                host.addSubview(panel)
+            }
         }
         controlsViewport = globalScreen
         let screen = NSRect(origin: .zero, size: globalScreen.size)
         let localRectangle = selection.rectangle?.offsetBy(dx: -globalScreen.minX, dy: -globalScreen.minY)
-        let buttons = allowEditing ? [cancelButton, editButton, confirmButton] : [cancelButton, confirmButton]
-        let idealWidth: CGFloat = allowEditing ? 300 : 194
-        let width = min(idealWidth, max(0, screen.width - 24))
-        let stacked = width < (allowEditing ? 244 : 160)
-        let height: CGFloat = stacked ? CGFloat(buttons.count) * 38 + 10 : 48
-        var origin = NSPoint(x: screen.midX - width / 2, y: screen.minY + 28)
+        hintPanel.isHidden = localRectangle != nil
+        if localRectangle == nil { layoutHint(screen: screen) }
+        let toolbarVisible = localRectangle != nil && !selection.isInteracting
+        if !toolbarVisible { marksTrayOpen = false }
+        if let rect = localRectangle, toolbarVisible { layoutToolbar(around: rect, screen: screen) }
+        reveal(toolbar, visible: toolbarVisible)
+        dimensions.isHidden = localRectangle == nil
         if let rect = localRectangle {
-            origin = NSPoint(x: rect.midX - width / 2, y: rect.minY - height - 12)
-            if origin.y < screen.minY + 12 { origin.y = rect.maxY + 12 }
-        }
-        if screen.height < 320 { origin.y = screen.minY + 12 }
-        toolbar.frame = NativeSelectionState.panelFrame(size: CGSize(width: width, height: height), preferredOrigin: origin, screen: screen)
-        let actualWidth = toolbar.bounds.width, actualHeight = toolbar.bounds.height
-        hint.frame = NativeSelectionState.panelFrame(size: CGSize(width: 220, height: 18), preferredOrigin: NSPoint(x: toolbar.frame.midX - 110, y: toolbar.frame.maxY + 12), screen: screen)
-        if stacked {
-            let buttonHeight = max(0, (actualHeight - 16 - CGFloat(buttons.count - 1) * 6) / CGFloat(buttons.count))
-            for (index, button) in buttons.enumerated() {
-                button.frame = NSRect(x: 8, y: 8 + CGFloat(buttons.count - index - 1) * (buttonHeight + 6), width: max(0, actualWidth - 16), height: buttonHeight)
-            }
-        } else {
-            let compact = actualWidth < idealWidth
-            let cancelWidth: CGFloat = compact ? 66 : 84
-            let editWidth: CGFloat = compact ? 84 : 104
-            cancelButton.frame = NSRect(x: 8, y: 8, width: cancelWidth, height: 32)
-            if allowEditing { editButton.frame = NSRect(x: 14 + cancelWidth, y: 8, width: editWidth, height: 32) }
-            let confirmX: CGFloat = allowEditing ? 20 + cancelWidth + editWidth : 14 + cancelWidth
-            confirmButton.frame = NSRect(x: confirmX, y: 8, width: actualWidth - confirmX - 8, height: 32)
-        }
-        dimensions.isHidden = selection.rectangle == nil
-        if let rect = localRectangle {
-            let dimension: (CGFloat) -> String = { value in
-                if value > 0 && value < 0.01 { return "<0.01" }
-                return value.rounded() == value ? String(format: "%.0f", Double(value)) : String(format: "%.2f", Double(value))
-            }
             if let pixels, let quartz {
                 let output = pixels.geometry(in: quartz)
-                sizeLabel.stringValue = issue == nil ? "\(output.width) × \(output.height) px  ·  \(dimension(rect.width)) × \(dimension(rect.height)) pt" : "选区包含不可用屏幕"
-            } else { sizeLabel.stringValue = "\(dimension(rect.width)) × \(dimension(rect.height)) pt" }
-            sizeLabel.toolTip = issue
-            let textWidth = max(1, screen.width - 36)
-            let measured = (sizeLabel.stringValue as NSString).boundingRect(with: NSSize(width: textWidth - 20, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: sizeLabel.font!])
-            let size = NSSize(width: min(textWidth, ceil(measured.width) + 20), height: ceil(measured.height) + 14)
-            dimensions.frame = NativeSelectionState.dimensionPanelFrame(size: size, selection: rect, toolbar: toolbar.frame, screen: screen)
-            sizeLabel.frame = NSRect(x: 10, y: 7, width: max(0, dimensions.bounds.width - 20), height: max(0, dimensions.bounds.height - 14))
+                dimensions.text = issue == nil ? "\(output.width) × \(output.height) px" : "Selection includes an unavailable display"
+            } else { dimensions.text = "\(Int(rect.width.rounded())) × \(Int(rect.height.rounded())) pt" }
+            dimensions.toolTip = issue
+            var size = dimensions.fittingSize(height: 20)
+            size.width = min(max(1, screen.width - 24), size.width)
+            let toolbarFrame = toolbar.isHidden ? NSRect.null : toolbar.frame
+            dimensions.frame = NativeSelectionState.dimensionPanelFrame(size: size, selection: rect, toolbar: toolbarFrame, screen: screen)
         }
         for view in views.allObjects {
             view.window?.invalidateCursorRects(for: view)
             view.needsDisplay = true
+        }
+    }
+    private func layoutHint(screen: NSRect) {
+        let size = hintPanel.fittingSize(height: 26)
+        hintPanel.frame = NativeSelectionState.panelFrame(size: size,
+            preferredOrigin: NSPoint(x: screen.midX - size.width / 2, y: screen.minY + 40), screen: screen)
+    }
+    /// One row only: below the selection, right edges aligned; then above;
+    /// then inside its lower-right corner. Narrow space folds the marks.
+    private func layoutToolbar(around rect: NSRect, screen: NSRect) {
+        let height: CGFloat = 36, padding: CGFloat = 4, gap: CGFloat = 2, divider: CGFloat = 13
+        let exits = [cancelButton, confirmButton]
+        let width: ([NativeSelectionButton]) -> CGFloat = { group in
+            group.reduce(0) { $0 + $1.preferredWidth } + CGFloat(max(0, group.count - 1)) * gap
+        }
+        let measure: ([[NativeSelectionButton]]) -> CGFloat = { groups in
+            padding * 2 + groups.map(width).reduce(0, +) + CGFloat(max(0, groups.count - 1)) * divider
+        }
+        let full = allowEditing ? [markButtons + [editButton], exits] : [exits]
+        let available = max(0, screen.width - 24)
+        let collapsed = allowEditing && measure(full) > available
+        let groups = collapsed ? [[marksButton, editButton], exits] : full
+        let shown = groups.flatMap { $0 }
+        for button in [marksButton, editButton] + markButtons where button.superview === toolbar && !shown.contains(where: { $0 === button }) {
+            button.removeFromSuperview()
+        }
+        var x = padding
+        for (index, group) in groups.enumerated() {
+            if index > 0 {
+                if separator.superview !== toolbar { toolbar.addSubview(separator) }
+                separator.frame = NSRect(x: x + (divider - 1) / 2, y: (height - 16) / 2, width: 1, height: 16)
+                x += divider
+            }
+            for (offset, button) in group.enumerated() {
+                if offset > 0 { x += gap }
+                if button.superview !== toolbar { toolbar.addSubview(button) }
+                button.frame = NSRect(x: x, y: padding, width: button.preferredWidth, height: height - padding * 2)
+                x += button.preferredWidth
+            }
+        }
+        if groups.count < 2 { separator.removeFromSuperview() }
+        let size = CGSize(width: x + padding, height: height)
+        var origin = NSPoint(x: rect.maxX - size.width, y: rect.minY - 8 - size.height)
+        if origin.y < screen.minY + 12 {
+            origin.y = rect.maxY + 8
+            if origin.y + size.height > screen.maxY - 12 { origin = NSPoint(x: rect.maxX - 12 - size.width, y: rect.minY + 12) }
+        }
+        toolbar.frame = NativeSelectionState.panelFrame(size: size, preferredOrigin: origin, screen: screen)
+        marksTray.isHidden = !(collapsed && marksTrayOpen)
+        guard collapsed else { return }
+        var trayX = padding
+        for button in markButtons {
+            if button.superview !== marksTray { marksTray.addSubview(button) }
+            button.frame = NSRect(x: trayX, y: padding, width: button.preferredWidth, height: height - padding * 2)
+            trayX += button.preferredWidth + gap
+        }
+        let traySize = CGSize(width: trayX - gap + padding, height: height)
+        var trayOrigin = NSPoint(x: toolbar.frame.minX + marksButton.frame.minX - padding, y: toolbar.frame.minY - 4 - height)
+        if trayOrigin.y < screen.minY + 12 { trayOrigin.y = toolbar.frame.maxY + 4 }
+        marksTray.frame = NativeSelectionState.panelFrame(size: traySize, preferredOrigin: trayOrigin, screen: screen)
+    }
+    private func reveal(_ panel: NSView, visible: Bool) {
+        guard visible else { panel.isHidden = true; return }
+        guard panel.isHidden else { return }
+        panel.isHidden = false
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { panel.alphaValue = 1; return }
+        panel.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            panel.animator().alphaValue = 1
         }
     }
     private func currentScreen() -> CGRect {
@@ -527,26 +623,35 @@ fileprivate final class NativeSelectionCoordinator: NSObject {
 }
 
 /// Presentation only: keep AppKit's button action, keyboard and accessibility
-/// contracts while sharing one quiet toolbar treatment for all three actions.
+/// contracts. Secondary actions are icons; the one primary action is a label.
 private final class NativeSelectionButton: NSButton {
-    private let shortcut: String
+    private let shortcut: String?
     private let primary: Bool
     private let symbol: String?
     private var hovered = false
     private var hoverTracking: NSTrackingArea?
     override var acceptsFirstResponder: Bool { true }
 
-    init(title: String, shortcut: String, primary: Bool = false, symbol: String? = nil) {
+    init(label: String, toolTip: String, symbol: String? = nil, shortcut: String? = nil, primary: Bool = false) {
         self.shortcut = shortcut
         self.primary = primary
         self.symbol = symbol
         super.init(frame: .zero)
-        self.title = title
+        title = label
         isBordered = false
         focusRingType = .none
-        setAccessibilityLabel(title)
+        self.toolTip = toolTip
+        setAccessibilityLabel(label)
     }
     required init?(coder: NSCoder) { nil }
+    private var titleFont: NSFont { .systemFont(ofSize: 12, weight: .semibold) }
+    private var keyFont: NSFont { .systemFont(ofSize: 11, weight: .regular) }
+    var preferredWidth: CGFloat {
+        guard primary else { return 28 }
+        let label = (title as NSString).size(withAttributes: [.font: titleFont]).width
+        let key = shortcut.map { ($0 as NSString).size(withAttributes: [.font: keyFont]).width + 5 } ?? 0
+        return ceil(label + key + 24)
+    }
     override var isEnabled: Bool { didSet { needsDisplay = true } }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -560,54 +665,107 @@ private final class NativeSelectionButton: NSButton {
     override func becomeFirstResponder() -> Bool { let accepted = super.becomeFirstResponder(); needsDisplay = true; return accepted }
     override func resignFirstResponder() -> Bool { let accepted = super.resignFirstResponder(); needsDisplay = true; return accepted }
     override func draw(_ dirtyRect: NSRect) {
-        let active = isEnabled && (hovered || isHighlighted)
-        let mint = NSColor(calibratedRed: 0.66, green: 0.88, blue: 0.79, alpha: 1)
-        let surface = primary ? (isEnabled ? mint.withAlphaComponent(active ? 0.82 : 1) : NSColor.white.withAlphaComponent(0.08)) : NSColor.white.withAlphaComponent(active ? 0.10 : 0)
-        surface.setFill()
-        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-        shape.fill()
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) != .aqua
+        let accent = dark ? NSColor(srgbRed: 0x8d / 255.0, green: 0xe3 / 255.0, blue: 0xae / 255.0, alpha: 1)
+            : NSColor(srgbRed: 0x26 / 255.0, green: 0x7a / 255.0, blue: 0x48 / 255.0, alpha: 1)
+        let pressed = isEnabled && isHighlighted
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+        if primary {
+            (isEnabled ? accent.withAlphaComponent(pressed ? 0.78 : hovered ? 0.9 : 1) : NSColor.white.withAlphaComponent(0.08)).setFill()
+            shape.fill()
+        } else if isEnabled && (hovered || pressed) {
+            NSColor.white.withAlphaComponent(pressed ? 0.16 : 0.1).setFill()
+            shape.fill()
+        }
         if window?.firstResponder === self {
-            mint.setStroke()
-            shape.lineWidth = 1.5
-            shape.stroke()
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.75, dy: 0.75), xRadius: 6.5, yRadius: 6.5)
+            (primary ? NSColor.white : accent).setStroke()
+            ring.lineWidth = 1.5
+            ring.stroke()
         }
-        let color = isEnabled ? (primary ? NSColor(calibratedWhite: 0.10, alpha: 1) : .white) : NSColor.white.withAlphaComponent(0.36)
-        let font = NSFont.systemFont(ofSize: 12, weight: primary ? .semibold : .medium)
-        let keyFont = NSFont.systemFont(ofSize: 10, weight: .medium)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-        let keyAttributes: [NSAttributedString.Key: Any] = [.font: keyFont, .foregroundColor: color.withAlphaComponent(isEnabled ? 0.65 : 0.36)]
-        let label = title as NSString, key = shortcut as NSString
-        let labelSize = label.size(withAttributes: attributes), keySize = key.size(withAttributes: keyAttributes)
-        let imageWidth: CGFloat = symbol == nil ? 0 : 18
-        let start = max(7, (bounds.width - labelSize.width - keySize.width - 9 - imageWidth) / 2)
-        if let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
-            let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium).applying(.init(paletteColors: [color]))
-            image.withSymbolConfiguration(configuration)?.draw(in: NSRect(x: start, y: (bounds.height - 14) / 2, width: 14, height: 14))
+        let foreground: NSColor = !isEnabled ? NSColor.white.withAlphaComponent(0.32)
+            : primary ? (dark ? NSColor(srgbRed: 0x0c / 255.0, green: 0x0e / 255.0, blue: 0x12 / 255.0, alpha: 1) : .white)
+            : NSColor.white.withAlphaComponent(0.9)
+        if primary {
+            let label = title as NSString
+            let attributes: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: foreground]
+            let keyAttributes: [NSAttributedString.Key: Any] = [.font: keyFont, .foregroundColor: foreground.withAlphaComponent(0.7)]
+            let labelSize = label.size(withAttributes: attributes)
+            let keySize = (shortcut ?? "").size(withAttributes: keyAttributes)
+            let start = ((bounds.width - labelSize.width - (shortcut == nil ? 0 : keySize.width + 5)) / 2).rounded()
+            label.draw(at: NSPoint(x: start, y: ((bounds.height - labelSize.height) / 2).rounded()), withAttributes: attributes)
+            shortcut?.draw(at: NSPoint(x: start + labelSize.width + 5, y: ((bounds.height - keySize.height) / 2).rounded()), withAttributes: keyAttributes)
+            return
         }
-        label.draw(at: NSPoint(x: start + imageWidth, y: (bounds.height - labelSize.height) / 2), withAttributes: attributes)
-        key.draw(at: NSPoint(x: start + imageWidth + labelSize.width + 9, y: (bounds.height - keySize.height) / 2), withAttributes: keyAttributes)
+        let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium).applying(.init(paletteColors: [foreground]))
+        if let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)?.withSymbolConfiguration(configuration) {
+            let size = image.size
+            image.draw(in: NSRect(x: ((bounds.width - size.width) / 2).rounded(), y: ((bounds.height - size.height) / 2).rounded(), width: size.width, height: size.height))
+        } else {
+            let initial = String(title.prefix(1)) as NSString
+            let attributes: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: foreground]
+            let size = initial.size(withAttributes: attributes)
+            initial.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
+        }
     }
 }
 
+/// Panels draw their own fill so AppKit view caching renders them exactly.
 private final class NativeSelectionPanel: NSView {
+    enum Style { case toolbar, chip }
+    private let style: Style
     var isPassive = false
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    /// Chips measure and draw their text with one attribute set, so the
+    /// frame always fits the string it shows.
+    var text = "" { didSet { if text != oldValue { needsDisplay = true; setAccessibilityValue(text) } } }
+    var textFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    var textPadding: CGFloat = 7
+    private var textAttributes: [NSAttributedString.Key: Any] { [.font: textFont, .foregroundColor: NSColor.white.withAlphaComponent(0.94)] }
+    func fittingSize(height: CGFloat) -> NSSize {
+        NSSize(width: ceil((text as NSString).size(withAttributes: textAttributes).width) + textPadding * 2, height: height)
+    }
+    private var radius: CGFloat { style == .toolbar ? 10 : 6 }
+    init(style: Style) {
+        self.style = style
+        super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 0.96).cgColor
-        layer?.cornerRadius = 9
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
-        layer?.shadowOpacity = 0.2
-        layer?.shadowRadius = 8
+        if style == .toolbar {
+            layer?.shadowColor = NSColor.black.cgColor
+            layer?.shadowOpacity = 0.25
+            layer?.shadowRadius = 12
+            layer?.shadowOffset = CGSize(width: 0, height: -3)
+        } else {
+            setAccessibilityElement(true)
+            setAccessibilityRole(.staticText)
+        }
     }
     required init?(coder: NSCoder) { nil }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        (style == .toolbar ? NSColor(calibratedWhite: 0.11, alpha: 0.92) : NSColor.black.withAlphaComponent(0.55)).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        guard !text.isEmpty else { return }
+        let size = (text as NSString).size(withAttributes: textAttributes)
+        let origin = NSPoint(x: max(textPadding, ((bounds.width - size.width) / 2).rounded()), y: ((bounds.height - size.height) / 2).rounded())
+        (text as NSString).draw(with: NSRect(x: origin.x, y: origin.y, width: max(0, bounds.width - origin.x - textPadding / 2), height: size.height),
+            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: textAttributes)
+    }
     override func hitTest(_ point: NSPoint) -> NSView? { isPassive ? nil : super.hitTest(point) }
     // Child buttons retain normal AppKit hit testing. Empty toolbar/label
     // events end here instead of bubbling into the parent's selection gesture.
     override func mouseDown(with event: NSEvent) {}
     override func mouseDragged(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+}
+private final class NativeSelectionSeparator: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.white.withAlphaComponent(0.12).setFill()
+        bounds.fill()
+    }
 }
 private final class NativeSelectionWindow: NSWindow {
     override var canBecomeKey: Bool { true }
