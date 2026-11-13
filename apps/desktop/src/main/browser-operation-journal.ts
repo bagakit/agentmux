@@ -698,6 +698,7 @@ function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
 
 function sanitizeStep(step: BrowserOperationStep): BrowserOperationStep {
   const { effects: stored, ...rest } = step
+  const effects = normalizeBrowserStepEffects(stored)
   return {
     ...rest,
     method: clamp(step.method),
@@ -707,12 +708,8 @@ function sanitizeStep(step: BrowserOperationStep): BrowserOperationStep {
     ...(step.summary ? { summary: clampProse(step.summary) } : {}),
     ...(step.replay ? { replay: sanitizeReplay(step.replay) } : {}),
     // Read back from disk: keep only well-formed facts, never a repaired claim.
-    ...withEffects(normalizeBrowserStepEffects(stored))
+    ...(effects ? { effects } : {})
   }
-}
-
-function withEffects(effects: BrowserOperationStep['effects']): { effects?: BrowserOperationStep['effects'] } {
-  return effects ? { effects } : {}
 }
 
 function sanitizeTarget(target: BrowserReplayTarget): BrowserReplayTarget {
