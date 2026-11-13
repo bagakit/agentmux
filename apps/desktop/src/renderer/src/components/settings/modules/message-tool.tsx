@@ -2,21 +2,16 @@ import { type ComposerInputConfig } from '@agentmux/client-ui/composer-input-con
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { MessageToolInitialLayout } from '../../../../../shared/contracts'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../../../shared/contracts'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { MessageToolSettingsPane } from '../MessageToolSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 async function saveInitialLayout(messageToolInitialLayout: MessageToolInitialLayout, expected: MessageToolInitialLayout): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your layout choice is kept; retry when configuration is available.')
-  await api.config.save({ ...current, messageToolInitialLayout }, { ...current, messageToolInitialLayout: expected })
+  await saveConfigSlice((current, value: MessageToolInitialLayout) => ({ ...current, messageToolInitialLayout: value }), messageToolInitialLayout, expected)
 }
 
 async function saveCompletion(messageToolCompletion: ComposerInputConfig, expected: ComposerInputConfig): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your shortcut choices are kept; retry when configuration is available.')
-  await api.config.save({ ...current, messageToolCompletion }, { ...current, messageToolCompletion: expected })
+  await saveConfigSlice((current, value: ComposerInputConfig) => ({ ...current, messageToolCompletion: value }), messageToolCompletion, expected)
 }
 
 export const messageToolSettingsModule = {

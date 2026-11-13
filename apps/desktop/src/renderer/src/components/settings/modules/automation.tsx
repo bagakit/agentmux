@@ -1,19 +1,15 @@
 import { normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AutomationDefaults } from '../../../../../shared/automation-preferences'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { ContinuationSettingsPane } from '../ContinuationSettingsPane'
 import { AutomationDefaultsSettingsPane, AUTOMATION_DEFAULTS_SEARCH_TARGETS, automationDefaultsSavedSummary } from '../AutomationDefaultsSettingsPane'
 import { saveContinuitySettings } from '../save-continuity-settings'
 import type { SettingsModule } from '../settings-catalog'
 import { SettingsConceptSummary } from '../SettingsConceptSummary'
+import { saveConfigSlice } from '../save-config-slice'
 
 async function saveDefaults(value: AutomationDefaults, expected: AutomationDefaults): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your defaults are kept; reload configuration and retry saving.')
-  await api.config.save({ ...current, automation: { ...current.automation, ...value } },
-    { ...current, automation: { ...current.automation, ...expected } })
+  await saveConfigSlice((current, defaults: AutomationDefaults) => ({ ...current, automation: { ...current.automation, ...defaults } }), value, expected)
 }
 
 export const automationSettingsModule = {

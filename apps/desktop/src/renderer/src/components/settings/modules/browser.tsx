@@ -1,8 +1,8 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { BrowserSettingsPane, type BrowserPreferences } from '../BrowserSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 
@@ -16,12 +16,7 @@ function withPreferences(browser: import('../../../../../shared/contracts').Brow
 }
 
 async function saveBrowser(value: BrowserPreferences, expected: BrowserPreferences): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) return
-  await api.config.save(
-    { ...current, browser: withPreferences(current.browser, value) },
-    { ...current, browser: withPreferences(current.browser, expected) }
-  )
+  await saveConfigSlice((current, preferences: BrowserPreferences) => ({ ...current, browser: withPreferences(current.browser, preferences) }), value, expected)
 }
 
 export const browserSettingsModule = {

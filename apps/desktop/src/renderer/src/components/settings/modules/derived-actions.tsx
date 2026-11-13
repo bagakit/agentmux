@@ -1,21 +1,17 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AGENT_BUILT_IN_DERIVED_ACTIONS, type AgentDerivedActionsConfig } from '@agentmux/core/agent-derived-actions'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { DerivedActionsSettingsPane } from '../DerivedActionsSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const DerivedActionsIcon = semanticIconComponent('object.derived-actions')
 
 // Absent keys stay absent: no custom actions and every official action visible is the default.
 async function saveDerivedActions(next: AgentDerivedActionsConfig, expected: AgentDerivedActionsConfig): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) return
-  const write = (value: AgentDerivedActionsConfig) => {
+  await saveConfigSlice((current, value: AgentDerivedActionsConfig) => {
     const { agentDerivedActions: _drop, ...rest } = current
     return value.actions || value.hidden ? { ...rest, agentDerivedActions: value } : rest
-  }
-  await api.config.save(write(next), write(expected))
+  }, next, expected)
 }
 
 export const derivedActionsSettingsModule = {

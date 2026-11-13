@@ -4,7 +4,6 @@ import { openTopicDirectory } from '../../lib/topic-directory-navigation'
 import { useAppStore } from '../../store'
 import type { SettingsPaneProps } from './settings-catalog'
 import { TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT, TOPIC_DIRECTORY_INITIAL_VIEW_IDS, type TopicDirectoryInitialView } from '../../../../shared/contracts'
-import { api } from '../../lib/api'
 import { requestPmoTeamsTopicFloatingOpen } from '../../lib/pmo-teams-topic-floating'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
@@ -13,6 +12,7 @@ import promotionArt from '@agentmux/client-ui/brand/illustrations/concepts/promo
 import './settings-concept-intro.css'
 import '../../styles/settings-workflows.css'
 import './settings-topic.css'
+import { saveConfigSlice } from './save-config-slice'
 
 const OpenIcon = semanticIconComponent('action.open-external')
 
@@ -22,8 +22,7 @@ function TopicInitialViewSettings({ config }: Pick<SettingsPaneProps, 'config'>)
   async function commit(): Promise<void> {
     const submitted = draft.beginSave()
     submitted.finish(await save.run(async () => {
-      await api.config.save({ ...config, topicDirectoryInitialView: submitted.value },
-        { ...config, topicDirectoryInitialView: submitted.expected })
+      await saveConfigSlice((current, value: TopicDirectoryInitialView) => ({ ...current, topicDirectoryInitialView: value }), submitted.value, submitted.expected)
     }))
   }
   return <section className="settings-group settings-topic-default" data-settings-field="topic-directory-initial-view">

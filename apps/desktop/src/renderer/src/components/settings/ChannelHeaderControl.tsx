@@ -1,7 +1,7 @@
-import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
 import { useSettingDraft } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
+import { saveConfigSlice } from './save-config-slice'
 
 /** App presentation uses ConfigOwner; this control cannot change Host traffic policy. */
 export function ChannelHeaderControl({ platform }: { platform: { adapterId: string; title: string } }) {
@@ -11,12 +11,8 @@ export function ChannelHeaderControl({ platform }: { platform: { adapterId: stri
   async function submit() {
     const submitted = draft.beginSave()
     const committed = await save.run(async () => {
-      const current = useAppStore.getState().config
-      if (!current) throw new Error('App settings are not loaded. Your display choice is kept.')
-      const apply = (visible: boolean) => ({ ...current, appearance: { ...current.appearance,
-        channelHeaderVisibility: { ...current.appearance.channelHeaderVisibility, [platform.adapterId]: visible } } })
-      const saved = await api.config.save(apply(submitted.value), apply(submitted.expected))
-      if (useAppStore.getState().config === current) useAppStore.getState().setConfig(saved)
+      await saveConfigSlice((current, visible: boolean) => ({ ...current, appearance: { ...current.appearance,
+        channelHeaderVisibility: { ...current.appearance.channelHeaderVisibility, [platform.adapterId]: visible } } }), submitted.value, submitted.expected)
     })
     submitted.finish(committed)
   }

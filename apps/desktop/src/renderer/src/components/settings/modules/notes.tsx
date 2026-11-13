@@ -1,18 +1,16 @@
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../../../store'
-import { api } from '../../../lib/api'
 import { resolveNotesPreferences, type NotesPreferences } from '../../../../../shared/notes-preferences'
 import { NotesSettingsPane } from '../NotesSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const RecallIcon = semanticIconComponent('navigation.recall')
 
 
 async function saveNotes(value: Required<NotesPreferences>, expected: Required<NotesPreferences>): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your Notes choices are kept; reload configuration and retry saving.')
-  await api.config.save({ ...current, notes: { ...current.notes, ...value } }, { ...current, notes: { ...current.notes, ...expected } })
+  await saveConfigSlice((current, notes: Required<NotesPreferences>) => ({ ...current, notes: { ...current.notes, ...notes } }), value, expected)
 }
 
 export const notesSettingsModule = {

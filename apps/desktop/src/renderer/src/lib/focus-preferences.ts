@@ -1,17 +1,14 @@
 import { resolveFocusRecentActivityHours, type FocusPreferences } from '../../../shared/focus-preferences'
 import { configValuesEqual } from '../../../shared/config-edit'
-import { useAppStore } from '../store'
-import { api } from './api'
+import { saveConfigSlice } from '../components/settings/save-config-slice'
 
 /** Both the Focus editor and map control submit only their authored choices to ConfigOwner. */
 export async function saveFocusPreferences(value: Partial<FocusPreferences>, expected: Partial<FocusPreferences>): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your Focus choices are kept; reload configuration and retry saving.')
-  const nextFocus = { recentActivityHours: resolveFocusRecentActivityHours(current.focus?.recentActivityHours), ...current.focus }
-  const expectedFocus = { ...nextFocus }
-  for (const key of Object.keys(value) as (keyof FocusPreferences)[]) {
-    if (configValuesEqual(value[key], expected[key])) continue
-    Object.assign(nextFocus, { [key]: value[key] }); Object.assign(expectedFocus, { [key]: expected[key] })
-  }
-  await api.config.save({ ...current, focus: nextFocus }, { ...current, focus: expectedFocus })
+  // Only authored keys are written; each side keeps every other Focus key as the owner has it.
+  const authored = (Object.keys(value) as (keyof FocusPreferences)[]).filter(key => !configValuesEqual(value[key], expected[key]))
+  await saveConfigSlice((current, side: Partial<FocusPreferences>) => {
+    const focus = { recentActivityHours: resolveFocusRecentActivityHours(current.focus?.recentActivityHours), ...current.focus }
+    for (const key of authored) Object.assign(focus, { [key]: side[key] })
+    return { ...current, focus }
+  }, value, expected)
 }

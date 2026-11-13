@@ -1,19 +1,17 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
-import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { GoalsSettingsPane } from '../GoalsSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const GoalsIcon = semanticIconComponent('navigation.goals')
 
 
 async function saveGoals(collapsed: boolean, expected: boolean, preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your Goals choice is kept; reload configuration and retry saving.')
-  const directory = resolveGoalsCommonActions(current.goalsCommonActions)
-  await api.config.save({ ...current, goals: { ...current.goals, ...preferences }, goalsCommonActions: { ...directory, collapsed } },
-    { ...current, goals: { ...current.goals, ...expectedPreferences }, goalsCommonActions: { ...directory, collapsed: expected } })
+  await saveConfigSlice((current, value: { collapsed: boolean; preferences: Required<GoalsPreferences> }) => ({ ...current,
+    goals: { ...current.goals, ...value.preferences }, goalsCommonActions: { ...resolveGoalsCommonActions(current.goalsCommonActions), collapsed: value.collapsed } }),
+  { collapsed, preferences }, { collapsed: expected, preferences: expectedPreferences })
 }
 
 export const goalsSettingsModule = {

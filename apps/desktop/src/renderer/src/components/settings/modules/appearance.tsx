@@ -2,21 +2,15 @@ import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT } from '../../../../../shared/contracts'
 import type { AppearanceConfig } from '../../../../../shared/contracts'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { AppearanceSettingsPane } from '../AppearanceSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeAppearanceThemeIcon = semanticIconComponent('appearance.theme')
 
 
 async function saveAppearance(appearance: AppearanceConfig, expected: AppearanceConfig): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Settings have not been loaded. Your appearance draft is retained; retry after loading completes.')
-  const committed = await api.config.save({ ...current, appearance }, { ...current, appearance: expected })
-  // A retry can acknowledge a commit whose original change event was lost. A later
-  // publication always wins over this receipt; never replace a newer observation.
-  if (useAppStore.getState().config === current) useAppStore.getState().setConfig(committed)
+  await saveConfigSlice((current, value: AppearanceConfig) => ({ ...current, appearance: value }), appearance, expected)
 }
 
 export const appearanceSettingsModule = {

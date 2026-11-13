@@ -1,10 +1,9 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { requestPmoTeamsTopicFloatingOpen } from '../../../lib/pmo-teams-topic-floating'
 import { MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT } from '../../../../../shared/contracts'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { MoteDirectorySettingsPane, moteDirectoryViewLabel, type MoteDirectoryDisplay } from '../MoteDirectorySettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ClubIcon = semanticIconComponent('object.club')
 
@@ -16,10 +15,7 @@ export const moteSettingsModule = {
   savedSummary: config => `${moteDirectoryViewLabel(config.moteDirectoryView)} · ${config.moteDirectoryAvatarSize ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT}px · Profiles and SOUL`,
   Pane({ config, onClose }) {
     async function saveView(value: MoteDirectoryDisplay, expected: MoteDirectoryDisplay): Promise<void> {
-      const current = useAppStore.getState().config
-      if (!current) throw new Error('Configuration is unavailable. Your display choice is kept; reload configuration and retry saving.')
-      await api.config.save({ ...current, moteDirectoryView: value.view, moteDirectoryAvatarSize: value.avatarSize },
-        { ...current, moteDirectoryView: expected.view, moteDirectoryAvatarSize: expected.avatarSize })
+      await saveConfigSlice((current, display: MoteDirectoryDisplay) => ({ ...current, moteDirectoryView: display.view, moteDirectoryAvatarSize: display.avatarSize }), value, expected)
     }
     return <MoteDirectorySettingsPane view={config.moteDirectoryView} avatarSize={config.moteDirectoryAvatarSize} onSave={saveView}
       onOpen={() => { onClose(); requestPmoTeamsTopicFloatingOpen() }} />

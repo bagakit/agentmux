@@ -1,17 +1,14 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { SpaceSettingsPane, projectRailDensityLabel, type SpacePreferences } from '../SpaceSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const SpaceIcon = semanticIconComponent('navigation.space')
 
 
 async function savePreferences(value: SpacePreferences, expected: SpacePreferences): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your Space choices are kept; reload configuration and retry saving.')
-  const committed = await api.config.save({ ...current, ...value }, { ...current, ...expected })
-  if (useAppStore.getState().config === current) useAppStore.getState().setConfig(committed)
+  await saveConfigSlice((current, preferences: SpacePreferences) => ({ ...current, ...preferences }), value, expected)
 }
 
 export const spaceSettingsModule = {

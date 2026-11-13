@@ -1,20 +1,15 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { GeneralSettingsPane, type GeneralSettingsValues } from '../GeneralSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 
 
 async function saveGeneralSettings(value: GeneralSettingsValues, expected: GeneralSettingsValues): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) return
+  // Only an authored path choice is written; an unchanged one stays as the owner has it.
   const pathChange = value.copyPathsAsAbsolute !== expected.copyPathsAsAbsolute
-  await api.config.save({ ...current,
-    ...(pathChange ? { copyPathsAsAbsolute: value.copyPathsAsAbsolute } : {}) },
-    { ...current,
-      ...(pathChange ? { copyPathsAsAbsolute: expected.copyPathsAsAbsolute } : {}) })
+  await saveConfigSlice((current, values: GeneralSettingsValues) => ({ ...current, ...(pathChange ? { copyPathsAsAbsolute: values.copyPathsAsAbsolute } : {}) }), value, expected)
 }
 
 export const generalSettingsModule = {

@@ -1,10 +1,10 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../../../store'
-import { api } from '../../../lib/api'
 import { BrowserStartPageSettings } from '../BrowserStartPageSettings'
 import { DefaultBrowserSetting } from '../DefaultBrowserSetting'
 import type { BrowserStartPageConfig } from '../../../../../shared/browser-start-page'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const SurveyIcon = semanticIconComponent('navigation.survey')
 
@@ -32,8 +32,5 @@ export const surveySettingsModule = {
 } as const satisfies SettingsModule
 
 async function saveStartPage(value: Required<BrowserStartPageConfig>, expected: Required<BrowserStartPageConfig>): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your start page choices are kept; reload configuration and retry saving.')
-  await api.config.save({ ...current, browser: { ...current.browser, startPage: value } },
-    { ...current, browser: { ...current.browser, startPage: expected } })
+  await saveConfigSlice((current, startPage: Required<BrowserStartPageConfig>) => ({ ...current, browser: { ...current.browser, startPage } }), value, expected)
 }

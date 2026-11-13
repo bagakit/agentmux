@@ -1,19 +1,16 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveComposerShortcuts } from '../../../../../shared/composer-shortcut-library'
 import type { ComposerShortcut } from '../../../../../shared/contracts'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { ShortcutSettingsPane } from '../ShortcutSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectPromptIcon = semanticIconComponent('object.prompt')
 
 
 // An empty list is an authored deletion; never restore defaults based on length.
 async function saveComposerShortcuts(composerShortcuts: ComposerShortcut[], expected: ComposerShortcut[]): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) return
-  await api.config.save({ ...current, composerShortcuts }, { ...current, composerShortcuts: expected })
+  await saveConfigSlice((current, value: ComposerShortcut[]) => ({ ...current, composerShortcuts: value }), composerShortcuts, expected)
 }
 
 export const promptsSettingsModule = {

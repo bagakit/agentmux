@@ -1,14 +1,11 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveA2ANotifications, type A2ANotificationPreference } from '../../../../../shared/a2a-preferences'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { A2ASettingsPane } from '../A2ASettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 async function saveNotifications(notifications: A2ANotificationPreference, expected: A2ANotificationPreference): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Configuration is unavailable. Your A2A choice is kept; retry when configuration is available.')
-  await api.config.save({ ...current, a2a: { ...current.a2a, notifications } }, { ...current, a2a: { ...current.a2a, notifications: expected } })
+  await saveConfigSlice((current, value: A2ANotificationPreference) => ({ ...current, a2a: { ...current.a2a, notifications: value } }), notifications, expected)
 }
 
 export const a2aSettingsModule = {

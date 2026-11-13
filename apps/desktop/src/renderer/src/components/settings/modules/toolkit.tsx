@@ -1,30 +1,20 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { resolvePerformancePreferences, resolveMobileConnectionPreferences, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../../shared/toolkit-preferences'
 import { ToolkitSettingsPane } from '../ToolkitSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectToolsIcon = semanticIconComponent('object.tool-library')
 
 
 async function savePerformance(performance: PerformancePreferences, expected: PerformancePreferences): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Settings are not loaded. Your draft is kept.')
-  await api.config.save(
-    { ...current, toolkit: { ...current.toolkit, performance } },
-    { ...current, toolkit: { ...current.toolkit, performance: expected } }
-  )
+  await saveConfigSlice((current, value: PerformancePreferences) => ({ ...current, toolkit: { ...current.toolkit, performance: value } }), performance, expected)
 }
 
 async function saveMobileConnection(mobileConnection: MobileConnectionPreferences, expected: MobileConnectionPreferences): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Settings are not loaded. Your draft is kept.')
-  await api.config.save(
-    { ...current, toolkit: { ...current.toolkit, mobileConnection } },
-    { ...current, toolkit: { ...current.toolkit, mobileConnection: expected } }
-  )
+  await saveConfigSlice((current, value: MobileConnectionPreferences) => ({ ...current, toolkit: { ...current.toolkit, mobileConnection: value } }), mobileConnection, expected)
 }
 
 export const toolkitSettingsModule = {

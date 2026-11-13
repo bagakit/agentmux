@@ -1,18 +1,15 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTIFICATION_TIERS, resolveNotificationModeId, resolveNotificationSound } from '../../../../../shared/notification-presentation'
 import type { AppConfig } from '../../../../../shared/contracts'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { NotificationSettingsPane } from '../NotificationSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 
 
 async function saveNotifications(notifications: NonNullable<AppConfig['notifications']>, expected: NonNullable<AppConfig['notifications']>): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) return
-  await api.config.save({ ...current, notifications }, { ...current, notifications: expected })
+  await saveConfigSlice((current, value: NonNullable<AppConfig['notifications']>) => ({ ...current, notifications: value }), notifications, expected)
 }
 
 export const notificationsSettingsModule = {

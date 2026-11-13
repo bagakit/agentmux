@@ -1,17 +1,14 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveUserProfile, type UserProfile } from '../../../../../shared/user-profile'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { ProfileSettingsPane } from '../ProfileSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectUserIcon = semanticIconComponent('object.user')
 
 
 async function saveProfile(profile: UserProfile, expected: UserProfile): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Your configuration is not available. Your profile draft is kept.')
-  await api.config.save({ ...current, profile }, { ...current, profile: expected })
+  await saveConfigSlice((current, value: UserProfile) => ({ ...current, profile: value }), profile, expected)
 }
 
 export const profileSettingsModule = {

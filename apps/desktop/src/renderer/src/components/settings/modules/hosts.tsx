@@ -1,17 +1,14 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig, HostConfig, WorkspaceRecord } from '../../../../../shared/contracts'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { HostSettingsPane } from '../HostSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectHostIcon = semanticIconComponent('object.host')
 
 
 async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) return
-  await api.config.save({ ...current, hosts, workspaces }, { ...current, ...expected })
+  await saveConfigSlice((current, value: Pick<AppConfig, 'hosts' | 'workspaces'>) => ({ ...current, ...value }), { hosts, workspaces }, expected)
 }
 
 export const hostsSettingsModule = {

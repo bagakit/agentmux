@@ -1,15 +1,11 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { api } from '../../../lib/api'
-import { useAppStore } from '../../../store'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from '../../../../../shared/browser-agent-control'
 import { BrowserAgentControlSettingsPane } from '../BrowserAgentControlSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
+import { saveConfigSlice } from '../save-config-slice'
 
 async function saveAgentControl(value: BrowserAgentControlPreferences, expected: BrowserAgentControlPreferences): Promise<void> {
-  const current = useAppStore.getState().config
-  if (!current) throw new Error('Browser settings are unavailable. Your draft is kept.')
-  await api.config.save({ ...current, browser: { ...current.browser, agentControl: value } },
-    { ...current, browser: { ...current.browser, agentControl: expected } })
+  await saveConfigSlice((current, agentControl: BrowserAgentControlPreferences) => ({ ...current, browser: { ...current.browser, agentControl } }), value, expected)
 }
 
 export const browserAgentControlSettingsModule = {
