@@ -1411,8 +1411,8 @@ const mockApi: AgentMuxDesktopApi = {
       const current = mockBrowserProfiles.find((profile) => profile.id === profileId)
       if (!current) throw new Error(`Unknown Browser Profile: ${profileId}`)
       const next: BrowserProfileSummary = { ...current, ...(edit.label === undefined ? {} : { label: edit.label }) }
-      if (edit.tint === null) delete next.tint
-      else if (edit.tint !== undefined) next.tint = edit.tint
+      if (edit.hue === null) delete next.hue
+      else if (edit.hue !== undefined) next.hue = edit.hue
       if (edit.notes === '') delete next.notes
       else if (edit.notes !== undefined) next.notes = edit.notes
       mockBrowserProfiles = mockBrowserProfiles.map((profile) => profile.id === profileId ? next : profile)

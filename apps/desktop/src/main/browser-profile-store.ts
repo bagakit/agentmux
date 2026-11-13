@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
+import { clearsSemanticHues } from '../renderer/src/lib/conversation-avatar-color.js'
 import type {
   BrowserProfileEdit,
   BrowserProfileImportedSource,
@@ -26,7 +27,8 @@ const profileLabelSchema = z
   .max(BROWSER_PROFILE_LABEL_MAX_LENGTH)
   .refine((label) => label === label.trim(), 'Browser Profile label must not have surrounding whitespace')
 const nonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
-const profileTintSchema = z.string().regex(/^#[0-9a-f]{6}$/i, 'Browser Profile tint must be a #rrggbb color')
+// An identity hue, never a status color: hues near red, amber, green or blue would read as a state.
+const profileHueSchema = z.number().int().min(0).max(359).refine(clearsSemanticHues, 'Browser Profile hue must stay clear of status colors')
 const profileNotesSchema = z.string().max(BROWSER_PROFILE_NOTES_MAX_LENGTH)
 
 const importedSourceSchema = z
@@ -45,7 +47,7 @@ const profileRecordSchema = z
     label: profileLabelSchema,
     createdAt: nonNegativeSafeIntegerSchema,
     source: importedSourceSchema.nullable(),
-    tint: profileTintSchema.optional(),
+    hue: profileHueSchema.optional(),
     notes: profileNotesSchema.optional()
   })
   .strict()
@@ -124,7 +126,7 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     createdAt: profile.createdAt,
     isDefault: profile.id === defaultProfileId,
     source: cloneImportedSource(profile.source),
-    ...(profile.tint === undefined ? {} : { tint: profile.tint }),
+    ...(profile.hue === undefined ? {} : { hue: profile.hue }),
     ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes })
   }
 }
@@ -178,8 +180,8 @@ export class BrowserProfileStore {
       if (!current) throw new Error(`Unknown Browser Profile: ${validatedProfileId}`)
       const updated: BrowserProfileRecord = { ...current }
       if (edit.label !== undefined) updated.label = validateBrowserProfileLabel(edit.label)
-      if (edit.tint === null) delete updated.tint
-      else if (edit.tint !== undefined) updated.tint = profileTintSchema.parse(edit.tint)
+      if (edit.hue === null) delete updated.hue
+      else if (edit.hue !== undefined) updated.hue = profileHueSchema.parse(edit.hue)
       if (edit.notes !== undefined) {
         const notes = profileNotesSchema.parse(edit.notes)
         if (notes === '') delete updated.notes

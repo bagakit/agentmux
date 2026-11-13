@@ -1318,15 +1318,15 @@ export type BrowserProfileSummary = {
   createdAt: number
   isDefault: boolean
   source: BrowserProfileImportedSource | null
-  /** Identity color shown wherever this Profile appears; absent means derive one from the id. */
-  tint?: string
+  /** Identity hue chosen by the person; absent means the hue derived from the id. Never a status color. */
+  hue?: number
   notes?: string
 }
 
 export type BrowserProfileList = { revision: number; profiles: BrowserProfileSummary[] }
 
-/** Fields a person can change; null clears the tint, an empty string clears the notes. */
-export type BrowserProfileEdit = { label?: string; tint?: string | null; notes?: string }
+/** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
+export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string }
 
 export type BrowserProfileDeleteApproval = {
   kind: 'user-confirmed'
