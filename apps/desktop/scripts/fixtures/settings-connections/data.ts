@@ -25,6 +25,7 @@ export const deviceList: AgentMuxRpcResult<'device.ls'> = {
   devices: [{ deviceId: 'controlled-phone', name: 'Personal phone', createdAt: _hygiene_fixtureTime(-67225600000) }],
   mobileAccess: { state: 'unavailable', message: 'Controlled connection observation. Existing Sessions remain available.' }
 }
-export const deviceInvitation: AgentMuxRpcResult<'device.link'> = { hostId: deviceList.hostId, url: 'http://192.168.1.20:8443/#offer=controlled-preview',
-  pageUrl: 'http://192.168.1.20:8443/', candidates: [], relay: { endpoint: '192.168.1.20:8443', useTls: false },
-  mobileAccess: { state: 'connected', message: 'Controlled connection observation.', origin: 'http://192.168.1.20:8443' } }
+export const deviceInvitation: AgentMuxRpcResult<'device.link'> = { hostId: deviceList.hostId, url: 'http://192.168.1.20:8443/#AgControlledPreview',
+  pageUrl: 'http://192.168.1.20:8443/', relay: { endpoint: '192.168.1.20:8443', useTls: false },
+  mobileAccess: { state: 'connected', message: 'Controlled connection observation.', origin: 'http://192.168.1.20:8443' },
+  candidates: [{ address: '192.168.1.20', interface: 'en0', label: 'Wi-Fi', preferred: true }, { address: '10.69.47.238', interface: 'en9', label: 'USB 10/100/1000 LAN', preferred: false }] }

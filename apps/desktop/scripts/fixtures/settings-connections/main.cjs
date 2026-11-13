@@ -32,7 +32,7 @@ app.whenReady().then(async()=>{
       await click(`js:[...document.querySelectorAll('${pane} button')].find(node=>node.textContent.includes('Copy connection link'))`)
       await until(`document.querySelector(${JSON.stringify(pane+' [aria-label="Phone connection link"]')})`)
       assert.equal(await read('window.connectionsProof.calls.filter(call=>call.kind==="device.link").length'),1)
-      assert.equal(await read(`document.querySelector(${JSON.stringify(pane+' [aria-label="Phone connection link"]')}).value`),'http://192.168.1.20:8443/#offer=controlled-preview')
+      assert.equal(await read(`document.querySelector(${JSON.stringify(pane+' [aria-label="Phone connection link"]')}).value`),'http://192.168.1.20:8443/#AgControlledPreview')
       assert.equal(await read('window.connectionsProof.calls.some(call=>/revoke|approve|reject/.test(call.kind))'),false)
       const facts=await read(`(()=>{const p=document.querySelector(${JSON.stringify(pane)}),visible=n=>n.isConnected&&n.checkVisibility();return{theme:document.documentElement.dataset.appearance,originalDevice:p.querySelectorAll('.device-management').length,closeVisible:visible(document.querySelector('[aria-label="Close settings"]')),errors:window.connectionsProof.errors.slice(),calls:window.connectionsProof.calls.slice()}})()`)
       assert.equal(facts.originalDevice,1);assert.equal(facts.closeVisible,true);assert.deepEqual(facts.errors,[])
