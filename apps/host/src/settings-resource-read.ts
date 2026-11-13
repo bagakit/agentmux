@@ -3,14 +3,16 @@ import { AgentMuxError, type AgentMuxControlSettingsResourceFields as Fields,
   type AgentMuxControlSettingsResourceRequest as Request, type AgentMuxControlSettingsResourceResult as Result } from '@agentmux/core'
 import { getThemeCatalog, getSemanticIconCatalog, themeDocumentSchema, serializeThemeFile } from '@agentmux/client-ui/theme'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
+import { AGENT_BUILT_IN_DERIVED_ACTIONS, parseAgentDerivedActionsConfig } from '@agentmux/core/agent-derived-actions'
 
-type BasicKind = Exclude<Kind, 'themes'>
+type BasicKind = Exclude<Kind, 'themes' | 'derived-actions'>
 export type SettingsResourceReadRequest = Extract<Request, { operation: 'settings.resource.list' | 'settings.resource.get' }>
 /** The original resource slices only; no writable application configuration lives here. */
 export type SettingsResourceConfiguration = {
   executors: Record<string, unknown>
   composerShortcuts?: readonly unknown[]
   appearance: { customThemes?: Record<string, unknown> }
+  agentDerivedActions?: unknown
 }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 function fail(code: 'SETTING_RESOURCE_NOT_FOUND' | 'INVALID_SETTING_VALUE' | 'CONTROL_UNAVAILABLE', message: string): never {
@@ -42,6 +44,21 @@ export function settingsResourceItemOptional(config: SettingsResourceConfigurati
 export function settingsResourceItem(config: SettingsResourceConfiguration, resource: BasicKind, id: string): Item {
   return settingsResourceItemOptional(config, resource, id) ?? fail('SETTING_RESOURCE_NOT_FOUND', `${resource} “${id}” does not exist.`)
 }
+/** Official actions come from Core and stay readonly; the user's own follow in saved order. */
+export function derivedActionItems(config: Pick<SettingsResourceConfiguration, 'agentDerivedActions'>): Item[] {
+  let saved: ReturnType<typeof parseAgentDerivedActionsConfig>
+  try { saved = config.agentDerivedActions === undefined ? {} : parseAgentDerivedActionsConfig(config.agentDerivedActions) }
+  catch { return fail('CONTROL_UNAVAILABLE', 'The original derived action records are unreadable. Saved actions and healthy Agents are retained.') }
+  const hidden = new Set<string>(saved.hidden ?? [])
+  return [
+    ...AGENT_BUILT_IN_DERIVED_ACTIONS.map(action => ({ id: action.id, readonly: true,
+      value: { label: action.label, base: action.base, description: action.description, hidden: hidden.has(action.id) } as Fields })),
+    ...(saved.actions ?? []).map(({ id, ...value }) => ({ id, value: structuredClone(value) as Fields }))
+  ]
+}
+export function derivedActionItemOptional(config: Pick<SettingsResourceConfiguration, 'agentDerivedActions'>, id: string): Item | undefined {
+  return derivedActionItems(config).find(item => item.id === id)
+}
 export function themeResourceItem(config: Pick<SettingsResourceConfiguration, 'appearance'>, id: string): Item {
   const catalog = getThemeCatalog(config.appearance.customThemes)
   const found = catalog.items.find(candidate => candidate.id === id)
@@ -65,6 +82,11 @@ export function readSettingsResource(config: SettingsResourceConfiguration, requ
     serializeThemeFile(document)
     return { operation: request.operation, resource, item: { ...item, document: document as Fields } }
   }
+  if (resource === 'derived-actions') {
+    if (request.operation === 'settings.resource.list') return { operation: request.operation, resource, items: derivedActionItems(config), partial: true }
+    if (request.id === undefined) fail('INVALID_SETTING_VALUE', 'A derived action lookup requires its exact ID.')
+    return { operation: request.operation, resource, item: derivedActionItemOptional(config, request.id) ?? fail('SETTING_RESOURCE_NOT_FOUND', `Derived action “${request.id}” does not exist.`) }
+  }
   if (request.operation === 'settings.resource.list') return { operation: request.operation, resource, items: settingsResourceItems(config, resource), partial: true }
   const item = request.keyword === undefined ? settingsResourceItem(config, resource, request.id)
     : settingsResourceItems(config, 'prompts').find(candidate => candidate.value.keyword === request.keyword)
@@ -77,6 +99,7 @@ export function createHostSettingsResourceRead(configurationPath: string) {
     if (!record(raw) || request.resource === 'executors' && !record(raw.executors)
       || request.resource === 'prompts' && raw.composerShortcuts !== undefined && !Array.isArray(raw.composerShortcuts)
       || request.resource === 'themes' && raw.appearance !== undefined && !record(raw.appearance)) fail('CONTROL_UNAVAILABLE', 'The original Settings resource metadata is unreadable. Saved settings and healthy Agents are retained.')
-    return readSettingsResource({ executors: record(raw.executors) ? raw.executors : {}, ...(Array.isArray(raw.composerShortcuts) ? { composerShortcuts: raw.composerShortcuts } : {}), appearance: (record(raw.appearance) ? raw.appearance : {}) as SettingsResourceConfiguration['appearance'] }, request)
+    return readSettingsResource({ executors: record(raw.executors) ? raw.executors : {}, ...(Array.isArray(raw.composerShortcuts) ? { composerShortcuts: raw.composerShortcuts } : {}), appearance: (record(raw.appearance) ? raw.appearance : {}) as SettingsResourceConfiguration['appearance'],
+      ...(Object.hasOwn(raw, 'agentDerivedActions') ? { agentDerivedActions: raw.agentDerivedActions } : {}) }, request)
   }
 }

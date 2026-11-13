@@ -944,6 +944,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     settings(`settings.${resource}.update`, '<id> --input <file|->', resource === 'themes' ? 'Update a custom theme using {changes, expected}; expected is the full original value.' : 'Update using {changes, expected?}.', 1),
     settings(`settings.${resource}.delete`, resource === 'themes' ? '<id> --input <file|->' : '<id> [--input <file|->]', resource === 'themes' ? 'Delete a custom theme using {expected: originalValue}; an active theme returns atomically to the default.' : 'Delete using optional complete expected fields.', 1)
   ]),
+  settings('settings.derived-actions.ls', '', 'List official and custom derived actions in menu order. Official items are readonly; their value reports hidden.'),
+  settings('settings.derived-actions.inspect', '<id>', 'Inspect one exact derived action and its saved instruction.', 1),
+  settings('settings.derived-actions.create', '<id> --input <file|->', 'Create a custom derived action {label, base: new-agent|fork, instruction, executorId?}. IDs use lowercase letters, digits or hyphens.', 1),
+  settings('settings.derived-actions.update', '<id> --input <file|->', 'Update using {changes, expected?}. An official action accepts only {changes: {hidden}}; its label and behavior are fixed.', 1),
+  settings('settings.derived-actions.delete', '<id> [--input <file|->]', 'Delete a custom derived action using optional complete expected fields. Official actions are hidden, never deleted.', 1),
   settings('settings.executors.refresh', '<id> --host <id>', 'Refresh one Executor availability observation.', 1),
   settings('settings.executors.discover', '--host <id>', 'Discover registered and supported default Executors on the exact target Host.'),
   settings('settings.executors.register', '<id> --host <id> --input <file|->', 'Save an explicit Executor configuration on its executing Host.', 1),

@@ -1024,7 +1024,7 @@ function settingsFields(source: Record<string, unknown>, allowed: readonly strin
 }
 
 function resourceKind(value: unknown, code: string): AgentMuxControlSettingsResourceKind {
-  if (value !== 'executors' && value !== 'prompts' && value !== 'themes') throw new AgentMuxError('Settings resource is invalid.', code)
+  if (value !== 'executors' && value !== 'prompts' && value !== 'themes' && value !== 'derived-actions') throw new AgentMuxError('Settings resource is invalid.', code)
   return value
 }
 

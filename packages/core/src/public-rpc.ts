@@ -94,6 +94,9 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'settings.themes.ls': 'settings.resource.list', 'settings.themes.inspect': 'settings.resource.get',
   'settings.themes.create': 'settings.resource.add', 'settings.themes.update': 'settings.resource.update',
   'settings.themes.delete': 'settings.resource.remove',
+  'settings.derived-actions.ls': 'settings.resource.list', 'settings.derived-actions.inspect': 'settings.resource.get',
+  'settings.derived-actions.create': 'settings.resource.add', 'settings.derived-actions.update': 'settings.resource.update',
+  'settings.derived-actions.delete': 'settings.resource.remove',
   'system.crash-log.inspect': 'diagnostics.crash-log.get',
   'system.crash-log.reveal': 'diagnostics.crash-log.reveal',
   'system.metrics.get': 'metrics.get', 'system.metrics.watch': 'metrics.watch',
@@ -143,13 +146,13 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   : M extends 'goal.activity.append' | 'goal.activity.inspect' ? GoalKeys<BusinessParams<M>> & { operationId: string }
   : M extends 'settings.browser-links.forget' ? { input: unknown }
   : M extends 'settings.prompts.inspect' ? { id: string; keyword?: never } | { keyword: string; id?: never }
-  : M extends 'settings.executors.inspect' | 'settings.themes.inspect' ? { id: string }
-  : M extends `settings.${'executors' | 'prompts' | 'themes'}.update` ? { id: string; input: unknown }
-  : M extends `settings.${'executors' | 'prompts' | 'themes'}.delete` ? { id: string; input?: unknown }
+  : M extends 'settings.executors.inspect' | 'settings.themes.inspect' | 'settings.derived-actions.inspect' ? { id: string }
+  : M extends `settings.${'executors' | 'prompts' | 'themes' | 'derived-actions'}.update` ? { id: string; input: unknown }
+  : M extends `settings.${'executors' | 'prompts' | 'themes' | 'derived-actions'}.delete` ? { id: string; input?: unknown }
   : M extends 'toolkit.update' | 'toolkit.delete' | 'toolkit.run' | 'toolkit.stop' | 'toolkit.evaluate'
     ? { toolId: string; input?: unknown }
   : M extends 'toolkit.create' ? { toolId: string; value: unknown }
-  : M extends `settings.${'executors' | 'prompts' | 'themes'}.create` ? { id: string; value: unknown }
+  : M extends `settings.${'executors' | 'prompts' | 'themes' | 'derived-actions'}.create` ? { id: string; value: unknown }
   : M extends `goal.${string}` ? GoalKeys<BusinessParams<M>>
   : BusinessParams<M>
 

@@ -315,7 +315,7 @@ export type AgentMuxControlSettingsBrowserLinksRequest = RequestBase & (
   | { operation: 'settings.browser.links.list' }
   | { operation: 'settings.browser.links.forget'; scheme: string }
 )
-export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts' | 'themes'
+export type AgentMuxControlSettingsResourceKind = 'executors' | 'prompts' | 'themes' | 'derived-actions'
 export type AgentMuxControlSettingsResourceJson = null | boolean | number | string
   | AgentMuxControlSettingsResourceJson[] | { [key: string]: AgentMuxControlSettingsResourceJson }
 export type AgentMuxControlSettingsResourceFields = { [key: string]: AgentMuxControlSettingsResourceJson }

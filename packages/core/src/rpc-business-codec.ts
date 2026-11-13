@@ -86,7 +86,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     body.target = { kind: 'goal', goalId: rpcString(p.goalId, 'Goal ID') }
     body.inputPolicy = p.input ?? 'preserve'
   }
-  const resource = /^settings\.(executors|prompts|themes)\.(ls|inspect|create|update|delete)$/u.exec(method)
+  const resource = /^settings\.(executors|prompts|themes|derived-actions)\.(ls|inspect|create|update|delete)$/u.exec(method)
   if (resource) body.resource = resource[1]
   if (method.endsWith('.update') && resource || method === 'toolkit.update') {
     const p = rpcRecord(body.input, ['changes', 'expected'])

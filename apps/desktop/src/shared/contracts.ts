@@ -481,6 +481,11 @@ export type AppConfig = {
    * 补上默认」的回填都会把删掉的东西送回来——删了又回来比一开始不能删更糟。
    */
   composerShortcuts?: ComposerShortcut[]
+  /**
+   * The user's own derived actions and hidden official ones. Official actions live in Core and
+   * are never copied here; absence means no custom actions and every official action visible.
+   */
+  agentDerivedActions?: import('@agentmux/core/agent-derived-actions').AgentDerivedActionsConfig
   /** Absence shows the starter directory. An explicitly empty items list is an authored choice. */
   goalsCommonActions?: GoalsCommonActionsConfig
   /**

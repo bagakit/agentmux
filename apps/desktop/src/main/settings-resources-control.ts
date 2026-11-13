@@ -1,5 +1,6 @@
 import { settingsResourceItem as find, settingsResourceItemOptional as findOptional, readSettingsResource } from '@agentmux/host/settings-resource-read'
 import { executeSettingsThemesControl } from './settings-themes-control.js'
+import { executeSettingsDerivedActionsControl } from './settings-derived-actions-control.js'
 import { isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import type {
   AgentMuxControlErrorCode, AgentMuxControlSettingsResourceFields as Fields,
@@ -12,7 +13,7 @@ import { configValuesEqual, ConfigConflict } from '../shared/config-edit.js'
 import { composerShortcutSchema, executorIdSchema, executorSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
 
-type BasicKind = Exclude<Kind, 'themes'>
+type BasicKind = Exclude<Kind, 'themes' | 'derived-actions'>
 
 const promptFields = composerShortcutSchema.omit({ id: true })
 const schemas = { executors: executorSchema, prompts: promptFields }
@@ -75,6 +76,7 @@ function replace(config: AppConfig, resource: BasicKind, id: string, value: Fiel
 /** Fixed resource operations consume the same typed Main schema and the same short owner transaction. */
 export async function executeSettingsResourcesControl(request: Request, owner: ConfigOwner): Promise<Result> {
   if (request.resource === 'themes') return executeSettingsThemesControl(request, owner)
+  if (request.resource === 'derived-actions') return executeSettingsDerivedActionsControl(request, owner)
   const { resource } = request
   if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get') return readSettingsResource(owner.current, request)
   if (resource === 'executors' && !executorIdSchema.safeParse(request.id).success) fail('INVALID_SETTING_VALUE', `Invalid Executor identity: ${request.id}`)

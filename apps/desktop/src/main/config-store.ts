@@ -13,6 +13,7 @@ import { validateThemeConfigEdit } from './theme-config.js'
 import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile } from '@agentmux/core'
 import { normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
+import { parseAgentDerivedActionsConfig, type AgentDerivedActionsConfig } from '@agentmux/core/agent-derived-actions'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { PROMPT_REACTION_ICONS, isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import { COMPOSER_PROMPT_STATES } from '../shared/composer-shortcut-library.js'
@@ -259,6 +260,11 @@ export const composerShortcutSchema = z
   })
   .strict()
 
+/** Core owns the derived action rules; persistence reuses them instead of a second schema. */
+export const agentDerivedActionsSchema = z.custom<AgentDerivedActionsConfig>(value => {
+  try { parseAgentDerivedActionsConfig(value); return true } catch { return false }
+}, 'Derived actions are invalid.').transform(value => parseAgentDerivedActionsConfig(value))
+
 const goalsCommonActionsSchema = z.object({
   items: z.array(z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('builtin'), id: z.enum(['understand', 'ideas', 'next']) }).strict(),
@@ -368,6 +374,8 @@ const configSchema = z
     // 版本号因此不必 +1（+1 会走 retiredConfigReplacement 那条退休路径，代价大得多）。
     composerShortcuts: z.array(composerShortcutSchema).default(() => structuredClone(DEFAULT_COMPOSER_SHORTCUTS)),
     goalsCommonActions: goalsCommonActionsSchema.optional(),
+    // Absence means no custom actions and every official action visible; never backfilled.
+    agentDerivedActions: agentDerivedActionsSchema.optional(),
     // 用户就地选的 Project Rail 密度档。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
     // 没有它，写成必需会让整块判失败）——且同样**不回填**：缺席即默认档，读处一律 `?? 'default'`，
     // 不补盘。成员来自 import 进来的元组（schema-enum-ssot.test.ts），未知字符串一律判失败。
@@ -660,6 +668,7 @@ export function authoredConfigCarryOver(raw: unknown): {
   notifications: AppConfig['notifications'] | undefined
   composerShortcuts: AppConfig['composerShortcuts'] | undefined
   goalsCommonActions: AppConfig['goalsCommonActions'] | undefined
+  agentDerivedActions: AppConfig['agentDerivedActions'] | undefined
   found: number
   strandedByDamagedHost: Array<{ hostId: string; workspaceIds: string[] }>
   /**
@@ -726,7 +735,8 @@ export function authoredConfigCarryOver(raw: unknown): {
       browser: z.unknown().optional(),
       notifications: z.unknown().optional(),
       composerShortcuts: z.unknown().optional(),
-      goalsCommonActions: z.unknown().optional()
+      goalsCommonActions: z.unknown().optional(),
+      agentDerivedActions: z.unknown().optional()
     })
     .safeParse(raw)
   const rawHosts = outer.success && Array.isArray(outer.data.hosts) ? outer.data.hosts : []
@@ -896,6 +906,9 @@ export function authoredConfigCarryOver(raw: unknown): {
       AppConfig['composerShortcuts'] | undefined,
     goalsCommonActions: carried(goalsCommonActionsSchema, outer.success ? outer.data.goalsCommonActions : undefined) as
       AppConfig['goalsCommonActions'] | undefined,
+    // The user's own instructions, like Prompts, survive a retirement reset.
+    agentDerivedActions: carried(agentDerivedActionsSchema, outer.success ? outer.data.agentDerivedActions : undefined) as
+      AppConfig['agentDerivedActions'] | undefined,
     found: evidenceOfWorkspaces,
     hostsUnreadable,
     executorsUnreadable,
@@ -1024,7 +1037,8 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
     // 空列表也要带过来：`[]` 是「用户把默认那两条都删了」这个事实，而 `? :` 对空数组是真值，
     // 所以这里落在带过来那一侧——写成按长度判会让「删光」静默变回默认两条。
     ...(carried.composerShortcuts ? { composerShortcuts: carried.composerShortcuts } : {}),
-    ...(carried.goalsCommonActions ? { goalsCommonActions: carried.goalsCommonActions } : {})
+    ...(carried.goalsCommonActions ? { goalsCommonActions: carried.goalsCommonActions } : {}),
+    ...(carried.agentDerivedActions ? { agentDerivedActions: carried.agentDerivedActions } : {})
   }
 }
 

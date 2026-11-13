@@ -17,7 +17,7 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (args.length === 5 && !args[4]?.trim()) invalid('The original operation ID is required.')
     return { method: 'settings.set', params: { key: action, value: id, ...(args.length === 5 ? { operationId: args[4] } : {}) } }
   }
-  if (resource === 'executors' || resource === 'prompts' || resource === 'themes') {
+  if (resource === 'executors' || resource === 'prompts' || resource === 'themes' || resource === 'derived-actions') {
     const method = `settings.${resource}.${action}`
     if (resource === 'executors' && action === 'discover' && args.length === 4 && id === '--host' && args[3]?.length) {
       return { method, params: { hostId: args[3], refresh: true } }

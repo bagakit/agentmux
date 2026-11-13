@@ -65,6 +65,8 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'topicDirectoryInitialView') return value ?? TOPIC_DIRECTORY_INITIAL_VIEW_DEFAULT
   if (path === 'moteDirectoryAvatarSize') return value ?? MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT
   if (path === 'goalsCommonActions') return resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined)
+  // No user actions and an absent list mean the same thing; official actions never live here.
+  if (path === 'agentDerivedActions.actions' || path === 'agentDerivedActions.hidden') return value ?? []
   if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }
   if (path === 'toolkit.performance') return value ?? DEFAULT_PERFORMANCE_PREFERENCES
   if (path === 'toolkit.performance.enabled') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.enabled
@@ -101,7 +103,10 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl' || path === 'appearance.channelHeaderVisibility') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
-    } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'focus.map' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
+    } else if (path === 'agentDerivedActions') {
+      // A first edit of actions and a concurrent first edit of hidden must both survive.
+      actual = actual ?? {}; expected = expected ?? {}; requested = requested ?? {}
+    } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'focus.map' || path === 'goalsCommonActions' || path === 'agentDerivedActions.actions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
     }
     // A theme record is authored as one complete value; never synthesize variants or icon assets.
@@ -140,7 +145,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
       return requested
     }
     if (Array.isArray(expected) && Array.isArray(requested) && Array.isArray(actual) &&
-        (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts' || path === 'toolkit.tools')) {
+        (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts' || path === 'toolkit.tools' || path === 'agentDerivedActions.actions')) {
       type RecordWithId = { id: string }
       const old = new Map((expected as RecordWithId[]).map((record) => [record.id, record]))
       const next = new Map((requested as RecordWithId[]).map((record) => [record.id, record]))
