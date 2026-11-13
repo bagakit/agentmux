@@ -52,7 +52,8 @@ async function harness() {
   }
   const pending = () => client.agentSession(agentSessionId).pendingInteraction
   const stored = async () => (await store.load())[0]!.pendingInteraction
-  return { client, hook, askedEnd, pending, stored, writes,
+  const recovery = async () => (await store.load())[0]!.recoveryActivity
+  return { client, hook, askedEnd, pending, stored, recovery, writes,
     close: async () => { releaseSubagentRoster(runId); await client.dispose() } }
 }
 
@@ -179,6 +180,27 @@ describe('Claude native request lifecycle follows the actual Hook protocol', () 
       expect(h.client.agentSession(agentSessionId).semanticStatus?.state).toBe('error')
       await h.askedEnd('toolu_question', 'AskUserQuestion')
       expect(h.client.agentSession(agentSessionId).semanticStatus?.state).toBe('error')
+    } finally { await h.close() }
+  })
+
+  it.each(['answer', 'aborted'] as const)('an asked end arriving after a %s turn end settles the card and keeps the Agent idle', async reason => {
+    const h = await harness()
+    try {
+      const native = (sequence: number, extra: Record<string, unknown> = {}) => ({ sourceId: 'native-source', sequence, turnId: 'turn-A', ...extra })
+      await h.hook('turn.start', native(1))
+      await h.hook('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: question, tool_use_id: 'toolu_q' })
+      await h.hook('turn.complete', native(2, { reason, isAborted: reason === 'aborted' }))
+      expect(h.pending()?.request).toMatchObject({ kind: 'question', nativeToolCallId: 'toolu_q' })
+      expect(h.client.agentSession(agentSessionId).currentActivity).toMatchObject({ state: 'idle', nativeTurnId: 'turn-A' })
+      // The exact end comes after its own turn ended: the card goes, and the idle the turn reported stays.
+      await h.askedEnd('toolu_q', 'AskUserQuestion')
+      expect(h.pending()).toBeUndefined()
+      expect(await h.stored()).toBeUndefined()
+      expect(h.client.agentSession(agentSessionId).currentActivity).toMatchObject({ state: 'idle', sequence: 2 })
+      expect((await h.recovery())?.state).toBe('idle')
+      // A start still retires that idle.
+      await h.hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'true' }, tool_use_id: 'toolu_b' })
+      expect(h.client.agentSession(agentSessionId).currentActivity).toBeUndefined()
     } finally { await h.close() }
   })
 
