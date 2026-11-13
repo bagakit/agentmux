@@ -17,7 +17,9 @@ export type LauncherDraft = { browser: string; note: string; noteCreation?: Note
   progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
-  prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions }
+  prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
+  /** A Mote message sent while its Main was read. It stays on this device until delivered; a reopened view returns it to the prompt. */
+  heldPrompt?: { operationId: string; prompt: string; holder: string } | undefined }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
 
 type LauncherState = {
@@ -28,6 +30,10 @@ type LauncherState = {
   moteTopicId: string | null
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
+  /** Move the prompt into a held Mote message in one saved write. */
+  holdPrompt(launcherId: string, operationId: string, holder: string): boolean
+  /** End this exact held message: a delivered one is dropped; an undelivered one returns before any newer typing. */
+  settleHeldPrompt(launcherId: string, operationId: string, delivered: boolean): boolean
   setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
   setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
   setProgressUpdate(launcherId: string, request: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined): boolean
@@ -83,6 +89,23 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
   },
   setDraft(launcherId, field, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
+    catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  holdPrompt(launcherId, operationId, holder) {
+    try { set(state => {
+      const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT
+      if (draft.heldPrompt || !draft.prompt?.trim()) return state
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, prompt: '', heldPrompt: { operationId, prompt: draft.prompt, holder } } } }
+    }); return true }
+    catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  settleHeldPrompt(launcherId, operationId, delivered) {
+    try { set(state => {
+      const draft = state.drafts[launcherId], held = draft?.heldPrompt
+      if (!held || held.operationId !== operationId) return state
+      const prompt = delivered ? draft.prompt ?? '' : [held.prompt, draft.prompt ?? ''].filter(value => value.trim()).join('\n\n')
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft, prompt, heldPrompt: undefined } } }
+    }); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
   },
   setMoteIdeaDraft(launcherId, value) {

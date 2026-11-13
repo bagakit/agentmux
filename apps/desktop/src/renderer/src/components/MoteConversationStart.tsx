@@ -16,6 +16,7 @@ import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { readMoteMainAction, type MoteMainActionResult } from '../lib/mote-main-action'
 import type { MoteWorkfaceScope, MoteRolloverStart } from '../lib/mote-workface'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { moteEntryDraftKey, type MoteHeldEntryInput } from '../lib/mote-entry-hold'
 
 
 /** The first message's stage from the original setup receipt alone; no result yet is still sending. */
@@ -27,15 +28,17 @@ function desktopFirstMessageStage(result: MoteMainActionResult | null, busy: boo
 }
 
 /** The welcome uses the existing durable Launcher draft and original Main setup admission. */
-export function MoteConversationStart({ scope, active, mode, onConfigure, onOpenMain, onOpenPeriod, automatic }: {
+export function MoteConversationStart({ scope, active, mode, onConfigure, onOpenMain, onOpenPeriod, automatic, held, onHeldSettled }: {
   scope: MoteWorkfaceScope; active: boolean; mode: 'start' | 'new'; onConfigure(invoker?: HTMLElement | null): void
   onOpenMain(reference: MoteDefaultConversation): void; onOpenPeriod(source: Source): void
   automatic?: MoteRolloverStart | undefined
+  /** A message held while the role owner was read; once it confirms no Main, it is this welcome's first message. */
+  held?: MoteHeldEntryInput | null | undefined; onHeldSettled?: ((operationId: string, delivered?: boolean) => void) | undefined
 }) {
   const dialogue = useMoteDialogueView(), bindings = useAppStore(state => state.spaceZoneBindings)
   const iconTarget = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic, bindings), [scope.workspace, scope.topic, bindings])
   const icon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
-  const key = 'mote-main-start:' + JSON.stringify([scope.workspace.hostId, scope.workspace.id, scope.workspace.path, scope.topic.id, scope.rootPath])
+  const key = moteEntryDraftKey(scope)
   const draft = useLauncherState(state => state.drafts[key]?.prompt ?? ''), persistenceIssue = useLauncherState(state => state.persistenceIssue)
   const [notice, setNotice] = useState<string | null>(null), edits = useRef(0)
   const source = useRef({ key, active }); source.current = { key, active }
@@ -88,7 +91,14 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   return <MoteMainActions scope={scope} active={active} onConfigure={onConfigure} onRefresh={dialogue?.refresh}
     onResult={(result, mayNavigate) => { void confirmAutomatic(result, mayNavigate); if (submission.current) void confirmed(result, submission.current, mayNavigate) }}
     onQueryResult={(result, query, mayNavigate) => { void confirmed(result, query, mayNavigate) }}
-    renderStart={state => <><AutomaticStart automatic={automatic} state={state} active={active} /><StartScene name={scope.topic.title} active={active}
+    renderStart={state => <><AutomaticStart automatic={automatic} state={state} active={active} />
+      <HeldStart held={held} state={state} active={active && !automatic && mode === 'start' && !persistenceIssue} onStart={query => {
+        // The held text becomes this welcome's ordinary first message: back in the draft, then the same submit, confirm and clear.
+        onHeldSettled?.(query.operationId)
+        submission.current = { ...query, revision: edits.current, lifetime: lifetime.current }; setSent({ ...query, key })
+        void state.submit(query)
+      }} />
+      <StartScene name={scope.topic.title} active={active}
       mode={state.reading && !state.reading.issue ? mode : 'unconfirmed'}
       portrait={<SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
         avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={active} />}
@@ -123,6 +133,18 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
         const row = history.find(value => value.item.id === item.id); if (row) item.current ? onOpenMain(row.source.reference) : onOpenPeriod(row.source)
       }} onMore={dialogue?.page?.next ? dialogue.older : undefined} />}
     /></>} />
+}
+
+/** Sends a held message once, as the first message, only after the original role owner confirms there is no Main. */
+function HeldStart({ held, state, active, onStart }: { held?: MoteHeldEntryInput | null | undefined; state: MoteStartActions; active: boolean
+  onStart(query: { operationId: string; prompt: string }): void }) {
+  const started = useRef<string | null>(null)
+  useEffect(() => {
+    if (!held || !active || !state.ready || state.busy || state.reading?.dialogue.main.current || started.current === held.operationId) return
+    started.current = held.operationId
+    onStart({ operationId: held.operationId, prompt: held.prompt })
+  }, [held, active, state.ready, state.busy, state.reading?.dialogue.main.current])
+  return null
 }
 
 function AutomaticStart({ automatic, state, active }: { automatic?: MoteRolloverStart | undefined; state: MoteStartActions; active: boolean }) {

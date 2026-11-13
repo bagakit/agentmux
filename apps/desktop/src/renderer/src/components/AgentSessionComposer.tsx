@@ -259,6 +259,22 @@ export function AgentSessionComposer({
     useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
+  // A message the person sent while this Mote's Main was still being read. Only the Composer whose Session the role owner
+  // confirms as the current Main (moteMain) sends it, once, through the same submit as typing.
+  const held = moteWorkface?.heldInput
+  const heldStarted = useRef<string | null>(null)
+  useEffect(() => {
+    if (!held || !visible || !moteMain || !submitMode.canSubmit || heldStarted.current === held.operationId) return
+    heldStarted.current = held.operationId
+    const { text: value, inputImages } = expandComposerInput(held.prompt)
+    const accepted = send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })
+    if (accepted) {
+      useAppStore.getState().recordAgentComposerHistory(sessionId, value)
+      lastSubmitBySession.record(sessionId, value)
+    }
+    moteWorkface?.settleHeldInput?.(held.operationId, accepted)
+  }, [held?.operationId, visible, Boolean(moteMain), submitMode.canSubmit])
+
   // Enter history only at the editing boundary. Once browsing, every plain arrow navigates,
   // including a multiline entry whose editor selection is at its end.
   function historyRecall(direction: 'older' | 'newer', draft: string, caret: number): string | null {

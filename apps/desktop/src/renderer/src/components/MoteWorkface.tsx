@@ -19,6 +19,8 @@ import { MoteMainActions } from './MoteMainActions'
 import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
 import { MoteConversationStart } from './MoteConversationStart'
+import { MoteEntryReading } from './MoteEntryReading'
+import { moteEntryDraftKey, useMoteHeldEntryInput } from '../lib/mote-entry-hold'
 import { MotePeriodConversation, MoteOriginalConversation } from '@agentmux/client-ui/components/MoteConversationThreads'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { api } from '../lib/api'
@@ -26,7 +28,12 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { motePresentationContextKey, usePublishMotePresentation } from '../lib/mote-presentation-context'
 
 const ThreadsIcon = semanticIconComponent('object.conversations')
-const LoadingIcon = semanticIconComponent('status.loading')
+type ShownSelection = WorkbenchProjectionSelection | { workspaceId: string; groupId?: string | null | undefined; tabId?: string | null | undefined; regionId?: string | null | undefined }
+function sameSelection(selected: ShownSelection, reference: string): boolean {
+  const next = JSON.parse(reference) as { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
+  return ('displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId) === next.displayWorkspaceId &&
+    selected.groupId === next.groupId && selected.tabId === next.tabId && selected.regionId === next.regionId
+}
 
 type Props = {
   workspaceId: string; topicId?: string | undefined; floating?: boolean; visible?: boolean; recoverOnOpen?: boolean
@@ -58,6 +65,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   const currentLocal = local.owner === owner ? local : { owner, section: 'discussion' as const, member: false, original: false }
   const sharedFrame = !floating && frame?.topicId === scope?.topic.id ? frame : null
   const section = sharedFrame?.section === 'threads' ? 'threads' : sharedFrame?.section === 'discussion' ? 'discussion' : currentLocal.section
+  const entryHold = useMoteHeldEntryInput(scope ? moteEntryDraftKey(scope) : null, visible && section === 'discussion')
   const memberIntent = section === 'threads' && currentLocal.member
   const presentation = currentLocal.original ? 'workface' as const : 'conversation' as const
   const selectReference = useCallback((next: WorkbenchProjectionSelection, intent?: 'main' | 'member') => {
@@ -119,26 +127,29 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     session: state.tabs[currentMain.tabId]?.regions[currentMain.regionId]?.kind === 'agent'
       ? sessionPresentationById(state.sessions).get((state.tabs[currentMain.tabId]!.regions[currentMain.regionId] as {sessionId: string}).sessionId) : undefined
   } : null))
-  const mainSelection = useRef<{ key: string; cancelled: boolean; selected?: string }>({ key: '', cancelled: false })
-  // One entry may wait for original metadata. Later input or another selection wins.
+  const mainSelection = useRef<{ key: string; selected?: string; chosen?: string; ended?: boolean }>({ key: '' })
+  // The selection this entry itself makes is not the person's choice of another occurrence.
+  const landing = currentMain ? JSON.stringify({ displayWorkspaceId: currentMain.displayWorkspaceId, groupId: currentMain.groupId, tabId: currentMain.tabId, regionId: currentMain.regionId }) : null
+  // One entry may wait for original metadata. The person choosing another occurrence meanwhile wins.
   useEffect(() => {
-    const key = JSON.stringify([owner, entryToken, section])
-    if (mainSelection.current.key !== key) mainSelection.current = { key, cancelled: false }
+    const key = JSON.stringify([owner, entryToken, section]), shown = JSON.stringify(selected ?? null)
+    if (mainSelection.current.key !== key) mainSelection.current = { key, chosen: shown }
     const attempt = mainSelection.current
-    if (!visible || !recoverOnOpen || !entryToken || !scope || section !== 'discussion' || currentLocal.original) return
-    const cancel = () => { attempt.cancelled = true }
+    // Before this entry lands, a selection that changed to anything but its own Main is the person's choice; this entry then ends.
+    if (attempt.selected === undefined && attempt.chosen !== shown && !(selected && landing && sameSelection(selected, landing))) attempt.ended = true
+    if (attempt.ended || !visible || !recoverOnOpen || !entryToken || !scope || section !== 'discussion' || currentLocal.original) return
     const requested = JSON.stringify(currentMain)
-    if (currentMain && !attempt.cancelled && attempt.selected !== requested) {
+    if (currentMain && attempt.selected !== requested) {
       const next = { displayWorkspaceId: currentMain.displayWorkspaceId, groupId: currentMain.groupId, tabId: currentMain.tabId, regionId: currentMain.regionId }
       const session = mainOccurrence?.session
       if (confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) && session?.control.kind === 'agent' &&
           session.control.hostId === currentMain.hostId && session.control.agentSessionId === currentMain.sessionId) {
-        const matches = selected && ('displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId) === next.displayWorkspaceId && selected.groupId === next.groupId && selected.tabId === next.tabId && selected.regionId === next.regionId
+        const matches = Boolean(selected && sameSelection(selected, JSON.stringify(next)))
         if (matches && !onReferenceSelect || selectReference(next, 'main')) { showMoteConversation(scope, { reference: next, floating }); attempt.selected = requested }
       }
     }
-    for (const event of ['pointerdown', 'keydown', 'input', 'wheel']) document.addEventListener(event, cancel, true)
-    return () => { for (const event of ['pointerdown', 'keydown', 'input', 'wheel']) document.removeEventListener(event, cancel, true) }
+    // Reading, scrolling or typing in this Mote is not a choice of another object, so it does not cancel this entry.
+    // An explicit selection of another occurrence, a section change or closing does: the entry key or visibility changes.
   }, [visible, owner, section, main?.roleRevision, currentMain, mainOccurrence, entryToken, currentLocal.original, selectReference, selected, onReferenceSelect])
   // A later role observation does not move the original reading or active draft.
   const retainedReadingMain = useRef<{ owner: string; reference: NonNullable<typeof currentMain> } | null>(null)
@@ -155,11 +166,18 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   const roleOwned = main?.status === 'ready' && !dialogue?.unavailable && main.identity?.hostId === scope?.workspace.hostId && main.identity?.moteId === scope?.topic.id
   const entry = !scope || section !== 'discussion' || showOriginal || currentLocal.period ? null : currentLocal.start ? 'welcome' as const
     : roleOwned && !main?.current ? 'welcome' as const : currentMain ? 'current' as const : !dialogue?.page && !dialogue?.issue ? 'reading' as const : 'unconfirmed' as const
+  // A message held while reading goes to the Main the role owner then confirms, once it is shown, never to a guessed one.
+  const heldInput = entryHold.held && showOriginal && selectedMain && currentMain && readingMain?.sessionId === currentMain.sessionId
+    ? { operationId: entryHold.held.operationId, prompt: entryHold.held.prompt } : undefined
+  const settleHeldInput = entryHold.settle
+  // An unconfirmed role source sends nothing; the held text returns to the editable draft.
+  useEffect(() => { if (entry === 'unconfirmed' && entryHold.held) entryHold.release() }, [entry, entryHold.held, entryHold.release])
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal,
     showOriginalWorkface: () => setLocal(previous => ({ ...previous, owner, original: true })),
-    showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference,
+    showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference, heldInput, settleHeldInput,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
-  } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, owner, selectReference, onTabSelect, workspaceId, startRollover])
+  } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, owner, selectReference, onTabSelect, workspaceId, startRollover,
+    heldInput?.operationId, settleHeldInput])
   usePublishMotePresentation(floating && visible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined, context, dialogue)
   const issue = scope?.issue ?? defaults.issue
   const notice = issue ? <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['mote-context', scope?.workspace.hostId, workspaceId, topicId ?? scope?.topic.id]), id: 'mote-context', occurrence: issue, cause: 'mote-context-observation', visible }} notice={{ kind: 'indeterminate', notice: {
@@ -173,10 +191,11 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
         ? <button type="button" className="small-button" onClick={showNewRound}>开始新一轮</button>
         : <button type="button" className="small-button" onClick={entryRecovery.inspect}>核对原恢复</button>}</p> : null}
       {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
-      {scope && entry === 'reading' ? <div className="mote-entry-loading" role="status" aria-live="polite"><LoadingIcon size={14} animation="spin" aria-hidden="true" /><span>正在接回 {scope.topic.title} 的主对话…</span></div> : null}
-      {scope && entry === 'current' && currentMain ? <p role="status" className="mote-conversation__issue">{scope.topic.title} 已有当前主对话，原对话和草稿都在。<button type="button" className="small-button" onClick={() => openMain(currentMain)}>打开当前主对话</button></p> : null}
-      {scope && entry === 'unconfirmed' && !main?.current ? <p role="status" className="mote-conversation__issue">主对话的来源尚未确认，不会当作没有主对话而新建。原对话和草稿仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
+      {scope && entry === 'reading' ? <MoteEntryReading scope={scope} active={visible} held={entryHold.held} onHold={entryHold.hold} onRelease={entryHold.release} /> : null}
+      {scope && entry === 'current' && currentMain ? <p role="status" className="mote-conversation__issue">{scope.topic.title} 已有当前主对话，原对话和草稿都在。{entryHold.held ? '读取中写下的那条消息会在打开主对话后发出。' : null}<button type="button" className="small-button" onClick={() => openMain(currentMain)}>打开当前主对话</button></p> : null}
+      {scope && entry === 'unconfirmed' && !main?.current ? <p role="status" className="mote-conversation__issue">主对话的来源尚未确认，不会当作没有主对话而新建。原对话和草稿仍保留，读取中写下的消息没有发出。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
       {scope && entry === 'welcome' ? <MoteConversationStart scope={scope} active={visible} mode={currentLocal.start ? 'new' : 'start'} automatic={currentLocal.rollover}
+        held={!currentLocal.start ? entryHold.held : null} onHeldSettled={entryHold.settle}
         onConfigure={openSettings} onOpenMain={openMain} onOpenPeriod={period => setLocal(previous => ({ ...previous, owner, period, periodOriginal: false }))} /> : null}
       {scope && section === 'discussion' && currentLocal.period && !showOriginal ? <div className="mote-workface__period"><button type="button" className="small-button" onClick={() => setLocal(previous => {
         if (previous.periodOriginal) return { ...previous, periodOriginal: false }
