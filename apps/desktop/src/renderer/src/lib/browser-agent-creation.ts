@@ -105,8 +105,11 @@ async function createOrInspect(browserId: string, source: WorkbenchProjectionSel
   if (browser.agentCreationRequestId) {
     const requestId = browser.agentCreationRequestId
     const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'space.inspect', target: { requestId } })
-    if (result.operation !== 'space.inspect' || !result.request?.report) throw new Error(`Original request ${requestId} is unconfirmed. No second Agent was created.`)
-    return continueOriginal(requestId, result.request.report)
+    if (result.operation !== 'space.inspect') throw new Error(`The Agent request ${requestId} of this Browser could not be read, so no second Agent was created. Retry to read it again.`)
+    if (result.request?.report) return continueOriginal(requestId, result.request.report)
+    // Only Core's confirmed absence of the request, on a page Main confirms has no Agent, is a finished
+    // request; anything else may still be creating that Agent, and a second one must not be started.
+    if (result.request?.known !== false || browser.control?.agent !== null) throw new Error(`The Agent request ${requestId} of this Browser is still being confirmed, so no second Agent was created. Retry once it settles.`)
   }
   if (browser.control?.owner !== 'human' || browser.control.agent !== null || !browser.navigationId) throw new Error('The Browser has no confirmed unassociated control state. Keep this page and refresh its original connection.')
   const workspace = state.config?.workspaces.find(item => item.id === browser.workspaceId)

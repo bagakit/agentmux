@@ -78,7 +78,11 @@ export function reduceBrowserEvent(
           : Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
         if (regions === tab.regions) regions = { ...regions }
         const { nativeOwnerUnavailable: _unavailable, nativeOwnerDeferred: _deferred, nativeOwnerReleased: _released, restoredViewportUnknown: _unknownViewport, objectLink: _objectLink, privateSessionEnded, ...availableSurface } = surface
-        regions[surface.regionId] = { ...availableSurface, ...event.browser, regionId: surface.regionId,
+        // Main cleared an Agent association because Core retired that Session. The creation request that
+        // made it is finished history, so this Browser offers a new Agent instead of re-reading it.
+        const released = Boolean(surface.control?.agent) && event.browser.control?.agent === null
+        const { agentCreationRequestId: _finished, ...withoutCreation } = availableSurface
+        regions[surface.regionId] = { ...(released ? withoutCreation : availableSurface), ...event.browser, regionId: surface.regionId,
           ...(privateSessionEnded && event.browser.mode === 'private' && event.browser.url === 'about:blank' ? { privateSessionEnded } : {}) }
       }
       if (regions === tab.regions) continue
