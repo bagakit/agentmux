@@ -1,3 +1,4 @@
+import { motePresentationContextKey } from './mote-presentation-context'
 import type { MoteRecentAgent } from './mote-quick-preferences'
 import { sessionPresentationById } from './session-presentation'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -272,6 +273,7 @@ export function pmoTeamsTopicFloatingViewTargets(
   const heldRegion = floating.reference ? heldTab?.regions[floating.reference.regionId] : undefined
   const heldSession = heldRegion?.kind === 'agent' ? sessionPresentationById(current.sessions).get(heldRegion.sessionId) : undefined
   if (pmoTeamsTopicFloatingAgentIssue(floating, heldTab, heldSession)) return undefined
+  const moteContextKey = floating.agentTarget ? undefined : motePresentationContextKey(pmoTeamsTopicFloatingTargetTopicId(floating, tabs), floating.conversationEntry)
   if (projection) {
     const current = useAppStore.getState()
     const projected = projectWorkbenchProjection(current.layouts[projection.displayWorkspaceId], tabs, projection)
@@ -280,7 +282,7 @@ export function pmoTeamsTopicFloatingViewTargets(
     const targets: Record<string, WorkbenchViewTarget[]> = {}
     for (const reference of references) (targets[reference.tabId] ??= []).push({
       hostId: workbenchProjectionSlotId(PMO_FLOATING_TAB_SLOT_PREFIX, reference),
-      active: floating.open, visible: true, surface: 'mote', moteInputIntent: floating.agentTarget ? 'member' : floating.conversationIntent ?? 'main', reference, projection, retainedRegionId: reference.regionId,
+      active: floating.open, visible: true, surface: 'mote', moteContextKey, moteInputIntent: floating.agentTarget ? 'member' : floating.conversationIntent ?? 'main', reference, projection, retainedRegionId: reference.regionId,
       onSelectRegion: regionId => projection.onSelect({ ...reference, regionId })
     })
     return targets
@@ -291,7 +293,7 @@ export function pmoTeamsTopicFloatingViewTargets(
   if (!tab || !floating.agentTarget && (tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId)) return undefined
   // An unknown address keeps only its original entity, never a guessed occurrence.
   return { [tab.id]: [{
-    hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true, surface: 'mote', moteInputIntent: floating.agentTarget ? 'member' : floating.conversationIntent ?? 'main'
+    hostId: `${PMO_FLOATING_TAB_SLOT_PREFIX}:${tab.id}`, active: floating.open, visible: true, surface: 'mote', moteContextKey, moteInputIntent: floating.agentTarget ? 'member' : floating.conversationIntent ?? 'main'
   }] }
 
 }

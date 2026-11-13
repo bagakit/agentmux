@@ -773,7 +773,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
   return <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       visible={visible}
       retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
-      surface={target?.surface ?? parent.surface} moteInputIntent={target?.moteInputIntent ?? parent.moteInputIntent}
+      surface={target?.surface ?? parent.surface} moteInputIntent={target?.moteInputIntent ?? parent.moteInputIntent} moteContextKey={target ? target.moteContextKey : parent.moteContextKey}
       survey={target ? target.surface === 'survey' : parent.survey} controlsOpen={target?.controlsOpen ?? parent.controlsOpen}
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
       projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference} windowTarget={windowTarget}
@@ -1698,14 +1698,14 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
   return <WorkbenchBrowserTargetsContext.Provider value={targets}>
         {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionHostId && target.reference).map(target =>
           <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}
-            active={target.active} visible={target.visible !== false} surface={target.surface} moteInputIntent={target.moteInputIntent} retainedRegionId={target.reference!.regionId} reference={target.reference}>
+            active={target.active} visible={target.visible !== false} surface={target.surface} moteInputIntent={target.moteInputIntent} moteContextKey={target.moteContextKey} retainedRegionId={target.reference!.regionId} reference={target.reference}>
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
           </StableWorkbenchView>)}
         <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
           windowTarget={targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget}
           active={tabProjection?.active ?? true}
           visible={tabVisible}
-          surface={tabProjection?.surface} moteInputIntent={tabProjection?.moteInputIntent}
+          surface={tabProjection?.surface} moteInputIntent={tabProjection?.moteInputIntent} moteContextKey={tabProjection?.moteContextKey}
           survey={tabProjection?.surface === 'survey'} controlsOpen={tabProjection?.controlsOpen ?? false}
           onBrowserControlConfirmation={onBrowserControlConfirmation}
           homeNotice={tabProjection && showBorrowedNotice ? <div data-workbench-borrowed-view-notice>

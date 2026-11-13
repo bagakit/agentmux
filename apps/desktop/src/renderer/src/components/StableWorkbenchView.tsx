@@ -2,6 +2,7 @@ import { returnWorkbenchWindow, focusWorkbenchWindow, openWorkbenchWindow } from
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { Component, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { MotePresentationContext } from '../lib/mote-presentation-context'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
@@ -131,7 +132,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, moteInputIntent, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, windowTarget, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, windowTarget, kind = 'tab', children }: {
   homeId: string
   /** Only the unique primary View carries an input-retention identity. */
   primaryTabId?: string | undefined
@@ -144,6 +145,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   retainedRegionId: string | null
   surface?: import('../lib/workbench-presentation').WorkbenchViewTarget['surface']
   moteInputIntent?: 'main' | 'member' | undefined
+  moteContextKey?: string | undefined
   survey?: boolean | undefined
   controlsOpen?: boolean | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
@@ -191,8 +193,8 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const displayReference = useMemo(() => windowPlacement && frozenTarget.current && reference
     ? { ...reference, displayWorkspaceId: frozenTarget.current.displayWorkspaceId, groupId: frozenTarget.current.groupId, tabId: frozenTarget.current.tabId,
       ...(frozenTarget.current.kind === 'region' ? { regionId: frozenTarget.current.regionId } : {}) } : reference, [windowPlacement, reference])
-  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, moteInputIntent, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
-    [presentedActive, retainedRegionId, placedHostId, surface, moteInputIntent, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
+  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
+    [presentedActive, retainedRegionId, placedHostId, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
@@ -282,7 +284,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
   return <WorkbenchReadingSnapshot host={host} active={presentedActive} visible={presentedVisible}><WorkbenchDocumentContext.Provider value={documentContext}><WorkbenchPresentationContext.Provider value={presentation}>
-    <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}>{children}</DesktopClientUiProvider>, host)}
+    <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}><MotePresentationContext contextKey={moteContextKey} isolated={surface === 'mote'}>{children}</MotePresentationContext></DesktopClientUiProvider>, host)}
     {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">Original {kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.
       <button className="small-button" onClick={() => void focusWorkbenchWindow(windowPlacement.window)}>Show window</button>
       <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>Return here</button>

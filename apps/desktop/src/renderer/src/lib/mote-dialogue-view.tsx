@@ -5,7 +5,8 @@ import { moteConnectionTarget } from './mote-connection-default'
 import { useAppStore } from '../store'
 import { api } from './api'
 export type MoteDialogueView = ReturnType<typeof useMoteDialogue> & { target: ReturnType<typeof moteConnectionTarget>; active: boolean }
-const Context = createContext<MoteDialogueView | null>(null)
+export const MoteDialogueViewContext = createContext<MoteDialogueView | null>(null)
+const Context = MoteDialogueViewContext
 export const useMoteDialogueView = () => useContext(Context)
 /** Header, reading and input share one original main-role observation in this workface. */
 export function MoteDialogueViewProvider({ scope, active, children }: { scope: MoteWorkfaceScope | null; active: boolean; children: ReactNode }) {

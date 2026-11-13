@@ -22,6 +22,7 @@ import { MoteConversationStart } from './MoteConversationStart'
 import { MotePeriodConversation, MoteOriginalConversation } from '@agentmux/client-ui/components/MoteConversationThreads'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { api } from '../lib/api'
+import { motePresentationContextKey, usePublishMotePresentation } from '../lib/mote-presentation-context'
 
 const ThreadsIcon = semanticIconComponent('object.conversations')
 
@@ -145,6 +146,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
   } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, owner, selectReference, onTabSelect, workspaceId, startRollover])
+  usePublishMotePresentation(floating && visible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined, context, dialogue)
   const issue = scope?.issue ?? defaults.issue
   const notice = issue ? <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['mote-context', scope?.workspace.hostId, workspaceId, topicId ?? scope?.topic.id]), id: 'mote-context', occurrence: issue, cause: 'mote-context-observation', visible }} notice={{ kind: 'indeterminate', notice: {
     step: 'Mote context read incomplete', mode: issue, restore: 'Retry this Mote context. Its original Agents and drafts remain available.' } }} /> : null

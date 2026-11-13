@@ -289,7 +289,7 @@ function DesktopApp() {
         onSelectRegion: (regionId: string) => selectMoteReference({ ...held, regionId }) })) })
     }
     return retain(targets)
-  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference, moteFloating.agentTarget, moteFloating.targetAgent, moteFloating.conversationIntent,
+  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference, moteFloating.agentTarget, moteFloating.targetAgent, moteFloating.conversationIntent, moteFloating.conversationEntry,
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
   const [focusWorkfaceView, setFocusWorkfaceView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
