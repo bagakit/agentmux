@@ -14,6 +14,7 @@ export const themes = getThemeCatalog().items.filter(item => item.readonly).map(
 export { parseThemeFile, serializeThemeFile }
 export { ICON_ANIMATIONS }
 export { mountMotePreview } from './mote-preview.js'
+export { brandRealms, brandCommons, brandAvatars, providerMarks, mountProviderMarks, brandManifest } from './brand.js'
 
 /** The same native projection used by editors; the root owns all geometry. */
 export function semanticMarkup(name: SemanticIconId, size = 24, className = '', presentation: Pick<SemanticIconPresentation, 'color' | 'animation'> = {}) {

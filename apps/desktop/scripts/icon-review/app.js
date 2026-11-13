@@ -6,11 +6,11 @@ const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 const KEY = 'agentmux.icon-review.v1';
 const STATUSES = {not_started:'未评审',in_progress:'调整中',passed:'保留当前设计',needs_review:'需要讨论',blocked:'信息不足',failed:'不适合此用途'};
 const editable = ['glyph','feature','meaning','note','status'];
-let data, roleById, draft, activeId = 'status.working', category = 'all', mode = 'gallery', query = '', modifiedOnly = false;
+let data, roleById, draft, activeId = 'status.working', category = 'all', mode = 'brand', query = '', modifiedOnly = false;
 let storageAvailable = true, corruptRaw = null, toastTimer, lastTrigger = null;
 let manifest, sessionExportTime, projectedTheme;
 let motionGlyph, motionTrigger, motePreview;
-const views = ['gallery','matrix','motion','mote','future'];
+const views = ['brand','gallery','matrix','motion','mote','future'];
 const initialView = window.location.hash.slice(1);
 if(views.includes(initialView))mode=initialView;
 if (import.meta.hot) import.meta.hot.on('icon-review:source-change', () => {
@@ -132,16 +132,17 @@ function setCategory(value) {category=value;if(!['gallery','matrix'].includes(mo
 function renderInventory() {
   for(const view of views)$('#view-'+view).setAttribute('aria-pressed',mode===view);
   $('.workspace').dataset.view=mode;
-  motePreview?.dispose();motePreview=undefined;
+  motePreview?.dispose();motePreview=undefined;brandMarks?.dispose();brandMarks=undefined;
   const directory=['gallery','matrix'].includes(mode);
   if(!directory&&$('#inspector').open)$('#inspector').close();
   if(directory&&!mobile()&&!$('#inspector').open)$('#inspector').show();
-  $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;
+  $('.edited-filter').hidden=!directory;$('#mobile-category').hidden=!directory;$('.theme-preview-tools').hidden=mode==='brand';
   $('#sample-lab').hidden=!directory;$('.inventory-tools').hidden=mode==='mote';
   if(!directory){samplePresentation.animation='none';$('#preview-animation').value='none';renderSamples();}
   window.history.replaceState(null,'','#'+mode);
-  $('#search').placeholder=mode==='motion'?'搜索自绘名称、静止设计、动效或用途':mode==='future'?'搜索候选名称、用途或定义来源':'搜索图标、功能、含义或语义 ID';
+  $('#search').placeholder=mode==='brand'?'搜索插画、头像或标志':mode==='motion'?'搜索自绘名称、静止设计、动效或用途':mode==='future'?'搜索候选名称、用途或定义来源':'搜索图标、功能、含义或语义 ID';
   $('#search').setAttribute('aria-label',$('#search').placeholder);
+  if(mode==='brand'){renderBrand();return;}
   if(mode==='motion'){renderMotionInventory();return;}
   if(mode==='mote'){renderMote();return;}
   if(mode==='future'){renderFuture();return;}
@@ -160,6 +161,47 @@ function renderInventory() {
       return `<tr data-role="${r.id}" class="${r.id===activeId?'selected':''}"><td>${semantic(r.id,22)}</td><td><button class="role-name" aria-label="编辑 ${r.id}">${escape(e.meaning)}</button><small>${escape(r.id)}</small></td><td class="feature">${escape(e.feature)}<small>${escape(drawingLabel(r))}</small></td><td class="row-check">${changed(r.id)?'✎':''}</td></tr>`;
     }).join('')}</tbody></table>`;
   }
+}
+const commonsLabels={goals:'Goals 行动与澄清',concepts:'概念场景',['mote-origin']:'Mote 起源故事'};
+// One realm is in focus at a time; arrow keys move every column across realms together.
+let brandRealm, brandMarks;
+function renderBrand() {
+  const realms=ThemeBridge.brandRealms();
+  brandRealm=realms.some(realm=>realm.id===brandRealm)?brandRealm:realms.find(realm=>realm.isDefault)?.id;
+  const focus=realms.find(realm=>realm.id===brandRealm), needle=query.trim().toLowerCase();
+  const painted=realms.filter(realm=>!realm.heroes.banner.borrowed).length;
+  $('#result-count').textContent=`${realms.length} 个境 · ${painted} 个已有大图 · 其余借原境`;
+  const heroCard=(realm,surface)=>{const hero=realm.heroes[surface];
+    return `<figure class="brand-hero brand-hero--${surface}" data-realm="${hero.realm}" data-art-realm="${hero.artRealm}" data-borrowed="${hero.borrowed}"><img src="${escape(hero.art)}" alt="" loading="lazy"><figcaption class="brand-colophon">${escape(hero.colophon)}</figcaption>${hero.borrowed?'<span class="brand-hero__lineage">借原境 · 祖先的画</span>':''}</figure>`;};
+  const commons=ThemeBridge.brandCommons().map(({group,items})=>({group,items:items.filter(item=>!needle||[item.id,item.title,item.file].join(' ').toLowerCase().includes(needle))})).filter(({items})=>items.length);
+  const avatars=ThemeBridge.brandAvatars().filter(item=>!needle||[item.id,item.title,item.series].join(' ').toLowerCase().includes(needle));
+  const marks=ThemeBridge.providerMarks().filter(item=>!needle||[item.id,item.label].join(' ').toLowerCase().includes(needle));
+  $('#inventory-content').innerHTML=`<div class="brand-space">
+    <section class="brand-intro"><p class="eyebrow">ONE DRAGON · FIVE REALMS</p><h2>同一条龙，五个境。</h2>
+      <p>每个 App 图标是龙在一个境里的肖像。大图跟随所选的境；还没画到的境借原境的画，题款写明画属于哪个境。工坊插画属于所有境，从不切换。</p></section>
+    <section class="brand-realms" aria-label="五个境">
+      <div class="brand-realm-tabs" role="tablist" aria-label="选择境">${realms.map(realm=>`<button role="tab" type="button" data-brand-realm="${realm.id}" aria-selected="${realm.id===brandRealm}" tabindex="${realm.id===brandRealm?0:-1}"><img src="${escape(realm.icon)}" alt="" width="40" height="40"><span><strong>${escape(realm.label)}</strong><small>${escape(realm.realm)}</small></span>${realm.isDefault?'<em>默认</em>':''}</button>`).join('')}</div>
+      ${focus?`<article class="brand-realm" data-realm="${focus.id}" role="tabpanel">
+        <div class="brand-realm__portrait"><img src="${escape(focus.icon)}" alt="${escape(focus.label)} App 图标" width="128" height="128"><div class="brand-realm__sizes" aria-label="实际尺寸">${[16,32,64].map(size=>`<span><img src="${escape(focus.icon)}" alt="" width="${size}" height="${size}"><small>${size}</small></span>`).join('')}</div>
+          <h3>${escape(focus.label)}</h3><p>${escape(focus.material)}</p>${focus.isOrigin?'<p class="brand-realm__note">所有境的祖先，唯一画齐大图的境。</p>':''}</div>
+        <div class="brand-realm__heroes"><div><h4>启动 Launch</h4>${heroCard(focus,'launch')}</div><div><h4>Launcher · Settings 概览</h4>${heroCard(focus,'banner')}</div></div>
+      </article>`:''}
+    </section>
+    <section class="brand-commons" aria-label="工坊插画"><header><h3>工坊 · 所有境共用</h3><p>所有境的 Agent 与 Mote 在这里相遇工作。插画不随所选的境切换，也不加题款。</p></header>
+      ${commons.map(({group,items})=>`<div class="brand-commons__group"><h4>${escape(commonsLabels[group]??group)}</h4><div class="brand-art-grid">${items.map(item=>`<figure class="brand-art" data-brand-entry="${escape(item.id)}"><img src="${escape(item.url??'')}" alt="" loading="lazy"><figcaption><strong>${escape(item.title)}</strong><code>${escape(item.file)}</code></figcaption></figure>`).join('')}</div></div>`).join('')||'<p class="empty">没有匹配的插画。</p>'}
+    </section>
+    <section class="brand-ip" aria-label="Mote 的多元宇宙"><header><h3>Mote 的多元宇宙</h3><p>同一个 Mote，十二种美术方向；头像归 Mote 自己的 owner，不并入五境。</p></header>
+      <div class="brand-avatar-grid">${avatars.map(item=>`<figure class="brand-avatar"><img src="${escape(item.url??'')}" alt="" loading="lazy"><figcaption>${escape(item.title)}</figcaption></figure>`).join('')}</div>
+    </section>
+    <section class="brand-marks" aria-label="厂商标志"><header><h3>各家 Agent 的标志</h3><p>属于各自厂商，原样呈现，从不按品牌重绘。</p></header>
+      <div class="brand-mark-grid">${marks.map(item=>`<span class="brand-vendor" title="${escape(item.label)}"><span data-provider-mark="${escape(item.id)}" aria-hidden="true"></span><small>${escape(item.label)}</small></span>`).join('')}</div>
+    </section>
+  </div>`;
+  brandMarks?.dispose();brandMarks=ThemeBridge.mountProviderMarks($('.brand-mark-grid'));
+}
+function selectBrandRealm(id,focus=false) {
+  brandRealm=id;renderBrand();
+  if(focus)$(`[data-brand-realm="${CSS.escape(id)}"]`)?.focus();
 }
 function authoredRoles(glyph) {return data.roles.filter(role=>role.glyph===glyph);}
 function renderMote() {
@@ -368,6 +410,13 @@ function attachEvents() {
     a.href=url;a.download='icon-workbench.agentmux-theme.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已导出完整主题，可在 AgentMux 外观设置中导入');
   });
   $('#categories').addEventListener('click',event=>{const b=event.target.closest('[data-category]');if(b)setCategory(b.dataset.category);});
+  $('#inventory-content').addEventListener('click',event=>{const tab=event.target.closest('[data-brand-realm]');if(tab)selectBrandRealm(tab.dataset.brandRealm,true);});
+  $('#inventory-content').addEventListener('keydown',event=>{
+    if(mode!=='brand'||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)||!event.target.closest('[data-brand-realm]'))return;
+    const ids=[...document.querySelectorAll('[data-brand-realm]')].map(node=>node.dataset.brandRealm), at=ids.indexOf(brandRealm);
+    const next=event.key==='Home'?0:event.key==='End'?ids.length-1:(at+(event.key==='ArrowRight'?1:-1)+ids.length)%ids.length;
+    event.preventDefault();selectBrandRealm(ids[next],true);
+  });
   $('#mobile-category').addEventListener('change',event=>setCategory(event.target.value));
   $('#search').addEventListener('input',event=>{query=event.target.value;renderInventory();});
   $('#modified-only').addEventListener('change',event=>{modifiedOnly=event.target.checked;renderInventory();});
@@ -470,6 +519,7 @@ async function init() {
     data.glyphs=ThemeBridge.glyphs;
     if(!data.roles?.length||data.roles.length!==ThemeBridge.catalog.icons.length||data.roles.some(role=>ThemeBridge.catalog.icons.find(icon=>icon.id===role.id)?.defaultGlyph!==role.glyph))throw Error('页面目录与共享图标版本不一致，请刷新重试。原草稿仍保留。');
     ThemeBridge.startThemeRuntime();
+    $('#brand-mark').src=ThemeBridge.brandRealms().find(realm=>realm.isDefault)?.icon??'';
     roleById=new Map(data.roles.map(r=>[r.id,r]));sessionExportTime=new Date().toISOString();
     draft={schema:KEY,pageId:data.pageId,snapshot:data.snapshot,edits:{},history:[],unresolved:[],preview:{themeId:'graphite',mode:'light'}};
     try {

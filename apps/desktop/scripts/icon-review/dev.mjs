@@ -8,9 +8,9 @@ import { createReviewCatalog, root, sourceRoots } from './catalog.mjs'
 const source = import.meta.dirname
 const sharedStyles = Object.fromEntries(['semantic-icons', 'mote-identity'].map(name =>
   [`/${name}.css`, resolve(root, `packages/client-ui/src/styles/${name}.css`)]))
-const watchedRoots = [source, ...sourceRoots.map(path => resolve(root, path))]
+const watchedRoots = [source, ...sourceRoots.map(path => resolve(root, path)), resolve(root, 'packages/client-ui/brand')]
 const relevant = file => watchedRoots.some(path => file.startsWith(path + '/'))
-  && ['.ts', '.tsx', '.css', '.js', '.json'].includes(extname(file))
+  && ['.ts', '.tsx', '.css', '.js', '.json', '.png', '.avif', '.svg'].includes(extname(file))
 
 export function iconReviewConfig({ port = 4186, open = false, context } = {}) {
   return {
