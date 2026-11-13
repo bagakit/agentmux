@@ -49,6 +49,20 @@ function CollectionHeadingMenu({ lane, children, collapsed, onToggle, onChangeIc
   onChangeIcon(target: SpaceIconTarget): void; onRename(category: TopicCategory): void
 }) {
   const menu = useSpaceObjectMenu()
+  return <ContextMenu.Root onOpenChange={menu.onOpenChange}>
+    <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
+    <DocumentOverlayPortal component={ContextMenu.Portal}>
+      <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={menu.onCloseAutoFocus}>
+        <CollectionHeadingMenuItems lane={lane} collapsed={collapsed} onToggle={onToggle} onChangeIcon={onChangeIcon} onRename={onRename} changeIcon={menu.changeIcon} />
+      </ContextMenu.Content>
+    </DocumentOverlayPortal>
+  </ContextMenu.Root>
+}
+
+function CollectionHeadingMenuItems({ lane, collapsed, onToggle, onChangeIcon, onRename, changeIcon }: {
+  lane: FocusScanLane; collapsed: boolean; onToggle?: (() => void) | undefined
+  onChangeIcon(target: SpaceIconTarget): void; onRename(category: TopicCategory): void; changeIcon(callback: () => void): void
+}) {
   const config = useAppStore(state => state.config)
   const currentCategories = useAppStore(state => state.topicCategories)
   const reportError = useAppStore(state => state.reportError)
@@ -67,19 +81,14 @@ function CollectionHeadingMenu({ lane, children, collapsed, onToggle, onChangeIc
   function source(category: TopicCategory) {
     return <ContextMenu.Label className="tab-context-menu__hint">Host · {config?.hosts.find(host => host.id === category.hostId)?.label ?? category.hostId}</ContextMenu.Label>
   }
-  return <ContextMenu.Root onOpenChange={menu.onOpenChange}>
-    <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
-    <DocumentOverlayPortal component={ContextMenu.Portal}>
-      <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={menu.onCloseAutoFocus}>
-        {categories.length === 1 ? <>{source(categories[0]!)}{categoryMenuItems(ContextMenu.Item, ContextMenu.Separator, actions(categories[0]!), menu.changeIcon)}</>
-          : categories.map(category => <WorkbenchMenuSubmenu key={JSON.stringify([category.hostId, category.spaceId])}
-            label={category.title} icon={<CollectionIcon size={14} />}>
-              {source(category)}{categoryMenuItems(ContextMenu.Item, ContextMenu.Separator, actions(category), menu.changeIcon)}
-            </WorkbenchMenuSubmenu>)}
-        {onToggle ? <>{categories.length ? <ContextMenu.Separator className="tab-context-menu__separator" /> : null}
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onToggle}><DisclosureIcon size={14} /><span>{collapsed ? 'Expand Collection' : 'Collapse Collection'}</span></ContextMenu.Item>
-        </> : null}
-      </ContextMenu.Content>
-    </DocumentOverlayPortal>
-  </ContextMenu.Root>
+  return <>
+    {categories.length === 1 ? <>{source(categories[0]!)}{categoryMenuItems(ContextMenu.Item, ContextMenu.Separator, actions(categories[0]!), changeIcon)}</>
+      : categories.map(category => <WorkbenchMenuSubmenu key={JSON.stringify([category.hostId, category.spaceId])}
+        label={category.title} icon={<CollectionIcon size={14} />}>
+          {source(category)}{categoryMenuItems(ContextMenu.Item, ContextMenu.Separator, actions(category), changeIcon)}
+        </WorkbenchMenuSubmenu>)}
+    {onToggle ? <>{categories.length ? <ContextMenu.Separator className="tab-context-menu__separator" /> : null}
+      <ContextMenu.Item className="tab-context-menu__item" onSelect={onToggle}><DisclosureIcon size={14} /><span>{collapsed ? 'Expand Collection' : 'Collapse Collection'}</span></ContextMenu.Item>
+    </> : null}
+  </>
 }
