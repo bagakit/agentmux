@@ -1388,6 +1388,11 @@ export type AppState = GitReadingActions & {
   // 被点名那格的表面消费完 caret 意图后调它清除（只清自己那条 nonce，避免抹掉更晚一次导航投的新意图）。
   // reveal: 'latest' 让终端同时回到当前输出：只聚焦一块已显示的终端看不出任何变化。
   requestRegionCaretFocus(regionId: string, options?: { reveal?: 'latest' }): void
+  /**
+   * Open this Session's live terminal: its view becomes the terminal, and while its Run is running that
+   * exact Region's terminal takes the caret at its live output. The caller navigates first.
+   */
+  openSessionTerminal(sessionId: string, regionId: string | null | undefined): void
   clearRegionCaretFocus(nonce: number): void
   requestRegionDerivedAction(request: Omit<RegionDerivedActionRequest, 'nonce'>): void
   clearRegionDerivedAction(nonce: number): void
@@ -7634,6 +7639,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   requestRegionCaretFocus(regionId, options) {
     set({ regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce, target: 'terminal', ...(options?.reveal ? { reveal: options.reveal } : {}) } })
+  },
+  openSessionTerminal(sessionId, regionId) {
+    get().setViewMode(sessionId, 'terminal')
+    // Only a mounted live terminal consumes a caret intent. A Run that is not running shows its restore
+    // surface instead, so an intent here would outlive the click and take input after the restore.
+    if (regionId && sessionPresentationById(get().sessions).get(sessionId)?.processState === 'running') {
+      get().requestRegionCaretFocus(regionId, { reveal: 'latest' })
+    }
   },
   requestRegionDerivedAction(request) {
     set({ regionDerivedActionRequest: { ...request, nonce: ++regionCaretFocusNonce } })

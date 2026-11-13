@@ -268,12 +268,10 @@ export function SessionPane({
   const [presentationHistory, setPresentationHistory] = useState<{ displayId: string; trigger: HTMLButtonElement | null } | null>(null)
   useEffect(() => { setPresentationHistory(null) }, [activitySourceKey, viewMode])
   const openTerminal = (): void => {
-    useAppStore.getState().setViewMode(sessionId, 'terminal')
     setHistoryOpen(false)
+    // Navigation belongs to this presentation; the store owns the terminal view and its caret handoff.
     selectOwnRegion()
-    if (projectionPolicy.acceptsInput && !pendingAgentRestore && linkOrigin.regionId) {
-      useAppStore.getState().requestRegionCaretFocus(linkOrigin.regionId, { reveal: 'latest' })
-    }
+    useAppStore.getState().openSessionTerminal(sessionId, linkOrigin.regionId)
   }
   useEffect(() => {
     if (navigation.current.isCurrent && !navigation.current.isCurrent()) navigation.current.cancel?.()

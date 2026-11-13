@@ -315,11 +315,8 @@ export function AttentionRequestPanel({
       request={request}
       responseUnavailableReason={session.interactionResponseUnavailableReason}
       onOpenTerminal={() => {
-        useAppStore.getState().setViewMode(session.id, 'terminal')
-        if (!selectSession(session.id)) return
-        // Same handoff as the Session's own card: land on its live terminal output with the caret.
-        const regionId = useAppStore.getState().workbenchSpaceSelection?.regionId
-        if (regionId) useAppStore.getState().requestRegionCaretFocus(regionId, { reveal: 'latest' })
+        // Same handoff as the Session's own card, after navigating to the Region it selected.
+        if (selectSession(session.id)) useAppStore.getState().openSessionTerminal(session.id, useAppStore.getState().workbenchSpaceSelection?.regionId)
       }}
       // Same terms as the Session's own card: a request from an earlier Run stays readable but cannot be answered.
       disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting ||
