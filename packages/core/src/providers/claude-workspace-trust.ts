@@ -20,8 +20,9 @@ import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../
  *   for it or an ancestor up to that git root (any ancestor outside git). Trusting exactly the home
  *   covers its own folders but never a foreign repository nested in it: Claude stops that walk at
  *   the nested repository's root and keeps asking.
- * - Claude serializes writes with a `mkdir <file>.lock` lock (proper-lockfile, stale after 10 s)
- *   and rebuilds `projects` by merging per key, so one key changed under that lock survives.
+ * - Claude serializes writes with a `mkdir <spelled file>.lock` lock (proper-lockfile, stale after
+ *   10 s), rebuilds `projects` by merging per key, and writes a symlinked file through to its
+ *   target. One key changed under that lock, written the same way, survives and keeps the link.
  */
 
 const LOCK_STALE_MS = 10_000
@@ -79,14 +80,20 @@ async function acquireLock(lockPath: string, signal?: AbortSignal): Promise<() =
   }
 }
 
-async function writeAtomically(path: string, content: string, mode: number): Promise<void> {
-  const temporary = `${path}.agentmux-${randomUUID()}.tmp`
+/**
+ * Atomically replace the file `path` names. A symlinked path (a dotfiles link) is written through
+ * to its target, as Claude does: renaming onto the link itself would replace it with a copy.
+ */
+async function writeThrough(path: string, content: string): Promise<void> {
+  const target = await realpath(path)
+  const mode = (await stat(target)).mode & 0o777
+  const temporary = `${target}.agentmux-${randomUUID()}.tmp`
   const handle = await open(temporary, 'wx', mode)
   try {
     await handle.writeFile(content)
     await handle.sync()
   } finally { await handle.close() }
-  try { await rename(temporary, path) } catch (error) { await unlink(temporary).catch(() => undefined); throw error }
+  try { await rename(temporary, target) } catch (error) { await unlink(temporary).catch(() => undefined); throw error }
 }
 
 /**
@@ -110,8 +117,7 @@ export async function prepareClaudeOwnedWorkspaceTrust(context: AgentWorkspaceTr
       const projects = current.projects && typeof current.projects === 'object' ? current.projects : {}
       const entry = projects[trustKey] && typeof projects[trustKey] === 'object' ? projects[trustKey] : {}
       const next: ClaudeConfig = { ...current, projects: { ...projects, [trustKey]: { ...entry, hasTrustDialogAccepted: true } } }
-      const mode = (await stat(configPath)).mode & 0o777
-      await writeAtomically(configPath, JSON.stringify(next, null, 2), mode)
+      await writeThrough(configPath, JSON.stringify(next, null, 2))
       return { status: 'trusted', trustKey, configPath, code: 'CLAUDE_TRUST_RECORDED' }
     } finally { await release() }
   } catch (error) {
