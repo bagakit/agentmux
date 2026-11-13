@@ -15,12 +15,13 @@ function fixture() {
     inspectOperation(id) { return this.request('inspectOperation', { id }) }
     dispose() { return this.request('dispose') }
   }
+  let persistenceFailed = false
   const native = new NativeOwner(), prototype = Object.getPrototypeOf(native)
   const preserved = ['readClipboardImage', 'writeClipboardImage', 'captureScreenshot', 'inspectOperation', 'dispose'].map(name => [name, native[name]])
   // The same serialized installer executes inside the original Main call frame.
   const install = runInNewContext('(' + installPrivateA2aNativeClipboard.toString() + ')', { Buffer })
-  const installation = install({ native, ui: native, prototype, record: value => records.push(value), persist: value => snapshots.push(JSON.parse(JSON.stringify(value))) })
-  return { native, prototype, calls, records, snapshots, result, response, failure, preserved, installation }
+  const installation = install({ native, ui: native, prototype, record: value => records.push(value), persist: value => { if (persistenceFailed) throw new Error('Private recorder persistence failed'); snapshots.push(JSON.parse(JSON.stringify(value))) } })
+  return { native, prototype, calls, records, snapshots, result, response, failure, preserved, installation, failPersistence: () => { persistenceFailed = true } }
 }
 
 test('original native text writes record the complete value and distinct sequence without a transport acknowledgement', async () => {
@@ -46,11 +47,12 @@ test('native reads and clipboard image or raw transport bypasses are denied befo
   assert.deepEqual(f.snapshots.at(-1).blockedRequests.map(row => row.method), ['clipboardRead', 'clipboardWrite', 'clipboardRead', 'clipboardWrite'])
 })
 
-test('unrelated native capabilities keep the same instance, prototype, methods, arguments and result', async () => {
-  const f = fixture(), options = { original: true }, params = { id: 'original-operation' }
+test('unrelated native capabilities retain their original contract even when recorder persistence fails', async () => {
+  const f = fixture(), options = { original: true }, params = { id: 'original-operation' }; f.failPersistence()
   assert.equal(Object.getPrototypeOf(f.native), f.prototype)
   for (const [name, original] of f.preserved) assert.equal(f.native[name], original)
-  const response = f.native.request('inspectOperation', params, options)
+  let response
+  assert.doesNotThrow(() => { response = f.native.request('inspectOperation', params, options) }, 'Unrelated native input must not depend on clipboard recorder persistence')
   assert.equal(response, f.response); assert.equal(await response, f.result)
   assert.equal(await f.native.captureScreenshot(), f.result)
   assert.equal(f.calls[0].owner, f.native); assert.equal(f.calls[0].args[1], params); assert.equal(f.calls[0].args[2], options)
