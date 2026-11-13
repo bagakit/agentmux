@@ -162,8 +162,9 @@ it('a reply with trailing native image keeps a single footer on its last text fr
   await append(f, { type: 'assistant', sessionId: 'original-native', uuid: 'tail-image', user_message_uuid: 'image-turn', message: {
     role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: body }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }], usage: { output_tokens: 7 }
   } })
-  const all = () => f.services.publication!.store.list(f.binding, 100).filter(operation => ['speech', 'image'].includes(operation.payload.kind))
+  const all = () => f.services.publication!.store.list(f.binding, 100).filter(operation => ['speech', 'image'].includes(operation.payload.kind) && !['superseded', 'cancelled'].includes(operation.state))
   await vi.waitFor(() => expect(all().length > 2 && all().every(operation => operation.state === 'confirmed')).toBe(true), { timeout: 15000 })
+  expect(f.remote.uploads).toHaveLength(1)
   expect(all().at(-1)?.payload.kind).toBe('image')
   expect(f.operations().filter(operation => metadata(operation))).toHaveLength(1)
   expect(metadata(f.operations().at(-1)!)).toMatchObject({ metrics: { scope: 'response', usage: { outputTokens: 7 } } })

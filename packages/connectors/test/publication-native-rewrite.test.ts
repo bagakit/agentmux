@@ -13,15 +13,22 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 const assistant = (id: string, text: string) => JSON.stringify({ sessionId: 'ingress-native', uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
 const tool = (id: string, input: string) => JSON.stringify({ sessionId: 'ingress-native', uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'call-' + id, name: 'exec', input: { cmd: input } }] } }) + '\n'
 
-async function fixture(unknownText?: string, running = false, snapshots = false) {
+async function fixture(unknownText?: string, running = false, snapshots = false, owner = context, provider: 'claude' | 'codex' = 'claude') {
   const f = await ingressFixture(running, config, undefined, { publication: 'future-shared-conversation' }); cleanup.push(f.close)
-  const dispatched: Array<{ key: string; text: string }> = []
+  if (provider === 'codex') {
+    const record = (await f.store.load()).find(record => record.agentSessionId === f.session.agentSessionId)!
+    await f.store.compareAndSwap(record, { ...record, providerId: 'codex', executorId: 'codex', nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'ingress-native', transcriptPath: f.transcript }, updatedAt: record.updatedAt + 1 })
+    await writeFile(f.transcript, JSON.stringify({ type: 'session_meta', payload: { id: 'ingress-native', cwd: f.root, history_mode: 'paginated' } }) + '\n')
+    await f.inner.registry.load('local')
+  }
+  const dispatched: Array<{ key: string; text: string; metadata?: unknown }> = [], wireEffects: Array<{ key: string; body: unknown }> = []
   const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'rewrite-v1', supportedRenderVersions: ['rewrite-v1'], fragmentBytes: 8192, replyMetadata: true,
     prepare: operation => ({ adapterId: 'sample', renderVersion: 'rewrite-v1', requestKey: operation.operationId,
-      request: { method: 'POST', path: '/messages', body: JSON.stringify({ text: operation.payload.kind === 'speech' ? operation.payload.text : null }) } }),
+      request: { method: 'POST', path: '/messages', body: JSON.stringify({ kind: operation.payload.kind, effect: operation.effect, text: operation.payload.kind === 'speech' ? operation.payload.text : null, metadata: operation.payload.kind === 'speech' ? operation.payload.replyMetadata : undefined }) } }),
     dispatch: async (prepared, _target, _credential, _signal, mapping) => {
+      wireEffects.push({ key: prepared.requestKey, body: JSON.parse(prepared.request.body!) })
       const text = JSON.parse(prepared.request.body!).text
-      if (text !== null) dispatched.push({ key: prepared.requestKey, text })
+      if (text !== null) dispatched.push({ key: prepared.requestKey, text, ...(JSON.parse(prepared.request.body!).metadata ? { metadata: JSON.parse(prepared.request.body!).metadata } : {}) })
       if (text === unknownText) return { state: 'unknown', reason: 'effect-unconfirmed' }
       return { state: 'confirmed', mapping: mapping ?? { messageId: 'message-' + prepared.requestKey } }
     } }
@@ -35,9 +42,9 @@ async function fixture(unknownText?: string, running = false, snapshots = false)
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'rewrite-credential', secret: 'private-rewrite-credential' })
   await services.connections.configure({ operationId: 'rewrite-configure', expectedRevision: null, connection: { ...config, credentialRef: credential.credentialRef } })
-  const bound = await services.connections.bindings!.bind(f.input, context)
+  const bound = await services.connections.bindings!.bind({ ...f.input, expectedSource: { providerId: provider, nativeSessionId: 'ingress-native' } }, owner)
   if (bound.state !== 'applied') throw Error('Original publication Binding required')
-  expect(await services.bindings!.grant(f.grant, context)).toMatchObject({ state: 'applied' })
+  expect(await services.bindings!.grant(f.grant, owner)).toMatchObject({ state: 'applied' })
   const binding = bound.binding, input = { connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision }
   let host = services.publication!
   await vi.waitFor(async () => expect((await host.list(input)).sourceObservation?.state).toBe('ready'), { timeout: 8000 })
@@ -53,7 +60,7 @@ async function fixture(unknownText?: string, running = false, snapshots = false)
   }
   /** Ordinary reads from the original scope through one frozen upper. */
   const recoveryReads = () => reads.filter(read => read.through !== undefined || read.rewrite !== undefined).length
-  return { ...f, get host() { return host }, binding, input, dispatched, reads, idle, speech, recoveryReads, port, adapter,
+  return { ...f, get host() { return host }, get connections() { return services.connections }, owner, binding, bindInput: f.input, input, dispatched, wireEffects, reads, idle, speech, recoveryReads, port, adapter,
     receiveCurrent: (body: string) => services.ingress!.receive({ connectionId: config.connectionId, raw: JSON.stringify({ proof: 'adapter-private-witness', event: f.event({ body }) }) }, vi.fn()),
     currentIngress: () => services.ingress!,
     restart: async () => { await services.close(); services = await open(); host = services.publication! } }
@@ -378,3 +385,287 @@ it('qualifies every original effect beyond 100 identities before admitting a rec
   expect(f.dispatched.some(value => value.text === 'Unconfirmed changed last identity')).toBe(false)
   expect(f.dispatched.filter(value => value.text.startsWith('Confirmed original '))).toHaveLength(110)
 }, 35_000)
+
+
+it('owner-reviewed frozen legacy range sends nothing before exact approval and resumes automatic live delivery', async () => {
+  const f = await fixture(), prefix = await readFile(f.transcript)
+  await published(f, 'review-old', 'Already represented review reply')
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('review-before', 'Missed before owner review') + tool('review-private', 'PRIVATE TOOL BODY') + assistant('review-old', 'Already represented review reply') + assistant('review-after', 'Missed after owner review'))])); f.host.refresh(); await unavailable(f)
+  const original = structuredClone(f.speech()[0]), cut = f.host.store.retainedCheckpoint(f.binding)
+  const action = { ...f.input, review: { action: 'prepare' as const, operationId: 'review-original' } }
+  await f.host.recoverSource(action, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'review-original')?.state).toBe('ready'), { timeout: 15_000 })
+  const reviewed = await f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: 'review-original', limit: 100 } }, f.owner)
+  expect(reviewed.review).toMatchObject({ publicRecords: 3, excludedRecords: 2, unmappedEffects: 0 })
+  expect(JSON.stringify(reviewed.review)).not.toContain('PRIVATE TOOL BODY')
+  expect(reviewed.review?.items.map(item => item.disposition)).toContain('existing-effect')
+  expect(f.dispatched.filter(item => item.text.startsWith('Missed'))).toHaveLength(0)
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(cut)
+  const digest = reviewed.review!.digest!
+  await expect(f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: 'review-original', digest: '0'.repeat(64) } }, f.owner)).rejects.toMatchObject({ code: 'PUBLICATION_SOURCE_CONFLICT' })
+  await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: 'review-original', digest } }, f.owner)
+  await vi.waitFor(() => expect(f.dispatched.filter(item => item.text.startsWith('Missed'))).toHaveLength(2), { timeout: 15_000 }); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  await f.restart()
+  expect((await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: 'review-original', digest } }, f.owner)).review?.acceptedDigest).toBe(digest)
+  const reviewedBytes = await readFile(f.transcript)
+  await published(f, 'review-live', 'Live after reviewed legacy repair')
+  await writeFile(f.transcript, Buffer.concat([reviewedBytes, Buffer.from(assistant('future-before', 'Automatic future gap before prior reply') + assistant('review-live', 'Live after reviewed legacy repair') + assistant('future-after', 'Automatic future gap after prior reply'))])); f.host.refresh()
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'Automatic future gap after prior reply')).toBe(true), { timeout: 15_000 }); await f.idle()
+  expect(f.dispatched.filter(item => item.text === 'Live after reviewed legacy repair')).toHaveLength(1)
+  expect(f.dispatched.filter(item => item.text.startsWith('Missed'))).toHaveLength(2)
+}, 35_000)
+
+it('owner review refuses another actor and a managed Agent before capturing or exposing an offered range', async () => {
+  const f = await fixture(), checkpoint = vi.spyOn(f.port, 'checkpoint')
+  for (const actor of [{ kind: 'agent' as const, id: f.owner.actor.id }, { kind: 'user' as const, id: 'another-owner' }, { kind: 'device' as const, id: f.owner.actor.id }]) {
+    await expect(f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'forbidden-review' } }, { actor })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  }
+  expect(checkpoint).not.toHaveBeenCalled()
+  expect(f.host.store.nativeReview(f.binding, 'forbidden-review')).toBeNull()
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+it('owner review retains inspectable immutable evidence after the original Binding is paused and refuses approval', async () => {
+  const f = await fixture(), prefix = await readFile(f.transcript)
+  await published(f, 'pause-old', 'Confirmed before owner review pause')
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('pause-new', 'No publication after authority pause') + assistant('pause-old', 'Confirmed before owner review pause'))])); f.host.refresh(); await unavailable(f)
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'paused-range-review' } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'paused-range-review')?.state).toBe('ready'), { timeout: 15_000 })
+  const cut = f.host.store.retainedCheckpoint(f.binding), sent = f.dispatched.length
+  const review = f.host.store.nativeReview(f.binding, 'paused-range-review')!
+  expect(await f.connections.bindings!.pause({ operationId: 'pause-review-authority', bindingId: f.binding.bindingId, expectedRevision: f.binding.revision }, f.owner)).toMatchObject({ state: 'applied' }); f.host.refresh()
+  expect(await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: review.operationId, digest: review.digest! } }, f.owner)).toMatchObject({ disposition: 'disabled' })
+  const inspected = await f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: review.operationId, limit: 100 } }, f.owner)
+  expect(inspected.review?.digest).toBe(review.digest)
+  expect(inspected.review?.items.some(item => item.text === 'No publication after authority pause')).toBe(true)
+  const foreign = structuredClone(review.from); foreign.agentSessionId = 'foreign-agent'; foreign.frontier.agentSessionId = 'foreign-agent'; for (const cut of foreign.frontier.cuts) if (cut.kind === 'native') cut.checkpoint.agentSessionId = 'foreign-agent'
+  await expect(f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: review.operationId, after: foreign } }, f.owner)).rejects.toMatchObject({ code: 'PUBLICATION_SOURCE_CONFLICT' })
+  expect((await f.host.recoverSource({ ...f.input, review: { action: 'cancel', operationId: review.operationId, digest: review.digest! } }, f.owner)).review?.state).toBe('cancelled')
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(cut)
+  expect(f.host.store.nativeReview(f.binding, review.operationId)?.acceptedDigest).toBeUndefined()
+  expect(f.dispatched).toHaveLength(sent)
+})
+it('owner review cancellation keeps the original cut, exact offer and independent source capability', async () => {
+  const f = await fixture(), checkpoint = f.host.store.retainedCheckpoint(f.binding)
+  const original = f.port.changes.bind(f.port); let release!: () => void, held = false
+  const wait = new Promise<void>(done => { release = done })
+  f.port.changes = async (input, signal) => { if (input.through) { held = true; await wait }; return await original(input, signal) }
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'cancel-original' } }, f.owner)
+  await vi.waitFor(() => expect(held).toBe(true), { timeout: 10_000 })
+  expect((await f.host.recoverSource({ ...f.input, review: { action: 'cancel', operationId: 'cancel-original' } }, f.owner)).review?.state).toBe('cancelled')
+  release(); await f.idle()
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(checkpoint)
+  expect((await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'cancel-original' } }, f.owner)).review?.state).toBe('cancelled')
+  expect(f.dispatched).toHaveLength(0)
+  await published(f, 'cancel-live', 'Independent live after review cancellation')
+})
+it('owner review never treats an unmapped legacy unknown effect as absent or replays it after a new range grant', async () => {
+  const f = await fixture('Original unmapped unknown'), prefix = await readFile(f.transcript)
+  await appendFile(f.transcript, assistant('unknown-unmapped', 'Original unmapped unknown')); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('unknown')); await f.idle()
+  const original = structuredClone(f.speech()[0]!)
+  // Synthetic old-format owner record: it predates complete membership proofs.
+  const database = Reflect.get(f.host.store, 'database') as import('node:sqlite').DatabaseSync
+  const legacy = { ...original }; delete legacy.sourceProofs
+  database.prepare('UPDATE connector_publication_operation SET operation_json=? WHERE operation_id=?').run(JSON.stringify(legacy), original.operationId)
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('could-be-related', 'Ambiguous legacy candidate') + assistant('unknown-unmapped', 'Original unmapped unknown'))])); f.host.refresh(); await unavailable(f)
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'legacy-unmapped-review' } }, f.owner)
+  await vi.waitFor(() => expect(['ready', 'blocked']).toContain(f.host.store.nativeReview(f.binding, 'legacy-unmapped-review')?.state), { timeout: 15_000 })
+  const offered = await f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: 'legacy-unmapped-review', limit: 100 } }, f.owner)
+  const receipt = await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: 'legacy-unmapped-review', digest: offered.review!.digest! } }, f.owner)
+  await f.idle(); await f.restart(); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(legacy)
+  expect(f.dispatched.filter(item => item.text === 'Original unmapped unknown')).toHaveLength(1)
+  expect(f.dispatched.some(item => item.text === 'Ambiguous legacy candidate')).toBe(false)
+  expect(receipt.review?.state).toBe('blocked')
+  expect(offered.review).toMatchObject({ unmappedEffects: 1, unmappedOperations: [original.operationId] })
+  expect(offered.review?.items.every(item => item.disposition === 'unconfirmed')).toBe(true)
+}, 35_000)
+it('owner-reviewed history keeps its exact immutable range and establishes a new future cut rather than a zero historical scope', async () => {
+  const f = await fixture(), prefix = await readFile(f.transcript)
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('range-only', 'Explicitly reviewed history'))])); f.host.refresh(); await f.idle()
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'future-boundary-review' } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'future-boundary-review')?.state).toBe('ready'), { timeout: 15_000 })
+  const offered = f.host.store.nativeReview(f.binding, 'future-boundary-review')!
+  const observed = await f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: 'future-boundary-review', limit: 1 } }, f.owner)
+  expect(observed.review?.next).not.toBeNull()
+  await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: 'future-boundary-review', digest: offered.digest! } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeRecovery(f.binding)?.phase).toBe('complete'), { timeout: 15_000 }); await f.idle()
+  const known = f.dispatched.length
+  // This newly visible earlier history was not in the approved immutable range.
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('unreviewed-earlier', 'Unreviewed historical insertion') + assistant('range-only', 'Explicitly reviewed history'))])); f.host.refresh()
+  await vi.waitFor(async () => expect((await f.host.list(f.input)).sourceObservation?.code === 'AGENT_SESSION_HISTORY_SOURCE_REPAIR_REQUIRED' || f.dispatched.some(item => item.text === 'Unreviewed historical insertion')).toBe(true), { timeout: 15_000 }); await f.idle()
+  expect(f.dispatched).toHaveLength(known)
+  expect((await f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: 'future-boundary-review', limit: 100 } }, f.owner)).review?.items.some(item => item.text.includes('Unreviewed historical insertion'))).toBe(false)
+}, 35_000)
+
+import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+it.runIf(process.env.AGENTMUX_SOURCE_REVIEW_COMPILED === '1')('owner review uses the compiled CLI, original public RPC and Hosted forwarding with the same exact receipt', async () => {
+  const owner = { actor: { kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` } }
+  const f = await fixture(undefined, false, false, owner), prefix = await readFile(f.transcript)
+  await published(f, 'rpc-original', 'Original RPC effect')
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('rpc-backfill', 'Reviewed through compiled CLI') + assistant('rpc-original', 'Original RPC effect'))])); f.host.refresh(); await unavailable(f)
+  const runtime = new core.AgentMuxHostedRuntimeService(f.client, null, () => ({ runtimeId: 'review-runtime', ownerInstanceId: 'review-owner', protocolVersion: 2, processId: process.pid, availability: 'connected', ctxmux: null })); cleanup.push(() => runtime.dispose())
+  const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'review.sock'), coreClients: f.coreClients, connections: f.connections, hostedRuntime: () => runtime }); await server.start(); cleanup.push(() => server.stop())
+  const user = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => user.dispose())
+  const managed = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: f.credentials }); cleanup.push(() => managed.dispose())
+  const hosted = await core.connectHostedAgentMux({ rpc: user, waitForReady: false, forwardRpc: (method, params, call = {}) => user.call(method, params, call) }); cleanup.push(() => hosted.dispose())
+  const request = { ...f.input, review: { action: 'prepare' as const, operationId: 'compiled-original-review' } }
+  await expect(managed.call('connection.delivery.source.recover', request)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const prepared = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'source', 'recover', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(request))
+  expect(prepared.code, prepared.stdout + prepared.stderr).toBe(0)
+  expect(JSON.parse(prepared.stdout).result.review.operationId).toBe(request.review.operationId)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, request.review.operationId)?.state).toBe('ready'), { timeout: 15_000 })
+  const relinked = await f.connections.bindings!.relink({ ...f.bindInput, operationId: 'review-trigger-only', expectedRevision: f.binding.revision, scope: { ...f.bindInput.scope, input: 'all-messages' } }, f.owner)
+  expect(relinked).toMatchObject({ state: 'applied', binding: { publicationBoundary: { revision: f.binding.revision } } })
+  if (relinked.state !== 'applied') throw Error('Current trigger revision required')
+  request.bindingRevision = relinked.binding.revision
+  const inspected = await hosted.forwardRpc!('connection.delivery.source.recover', { ...request, review: { ...request.review, action: 'inspect', limit: 100 } })
+  expect(inspected.review?.target.bindingRevision).toBe(f.binding.revision)
+  expect(inspected.review?.items.find(item => item.text === 'Reviewed through compiled CLI')?.disposition).toBe('candidate')
+  expect(inspected.review?.items.find(item => item.text === 'Original RPC effect')?.disposition).toBe('existing-effect')
+  const approve = { ...request, review: { ...request.review, action: 'approve' as const, digest: inspected.review!.digest! } }
+  // Drop this confirmed owner's response. Inspection/repetition retain its one receipt.
+  await hosted.forwardRpc!('connection.delivery.source.recover', approve)
+  await vi.waitFor(() => expect(f.dispatched.filter(item => item.text === 'Reviewed through compiled CLI')).toHaveLength(1), { timeout: 15_000 })
+  const repeated = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'source', 'recover', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(approve))
+  expect(repeated.code, repeated.stdout + repeated.stderr).toBe(0)
+  expect(JSON.parse(repeated.stdout).result.review.acceptedDigest).toBe(approve.review.digest)
+  await f.idle(); expect(f.dispatched.filter(item => item.text === 'Reviewed through compiled CLI')).toHaveLength(1)
+  const custody = { hostId: 'local', agentSessionId: f.session.agentSessionId, source: { providerId: 'claude', nativeSessionId: 'ingress-native' } }
+  const before = new Set((await hosted.listConversationSnapshots(custody)).snapshots.map(snapshot => snapshot.reference))
+  await hosted.conversationCheckpoint({ hostId: custody.hostId, agentSessionId: custody.agentSessionId, nativeSnapshot: 'scope', nativeSource: custody.source })
+  const created = (await hosted.listConversationSnapshots(custody)).snapshots.find(snapshot => !before.has(snapshot.reference))!
+  expect(created).toBeDefined()
+  expect(await hosted.releaseConversationSnapshot({ ...custody, reference: created.reference })).toMatchObject({ released: true })
+}, 45_000)
+
+it('owner review rejects a different current native source and preserves the original publication frontier', async () => {
+  const f = await fixture(), original = f.host.store.retainedCheckpoint(f.binding)
+  const current = (await f.store.load()).find(record => record.agentSessionId === f.session.agentSessionId)!
+  const path = join(f.root, 'current-source-b.jsonl')
+  await writeFile(path, JSON.stringify({ sessionId: 'different-native', uuid: 'source-b', type: 'assistant', message: { role: 'assistant', content: 'Other source must not enter old audience' } }) + '\n')
+  await f.store.compareAndSwap(current, { ...current, previousNativeHandle: current.nativeHandle, nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'different-native', transcriptPath: path }, updatedAt: current.updatedAt + 1 })
+  await f.inner.registry.load('local')
+  const checkpoint = f.port.checkpoint.bind(f.port)
+  f.port.checkpoint = async (input, signal) => {
+    expect(input.nativeSource).toEqual({ providerId: 'claude', nativeSessionId: 'ingress-native' })
+    // Precisely simulate a lower client returning the current source despite the
+    // requested original selection; the Publication owner must reject this reply.
+    return await checkpoint({ ...input, nativeSource: { providerId: 'claude', nativeSessionId: 'different-native' } }, signal)
+  }
+  await expect(f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'wrong-source-review' } }, f.owner)).rejects.toThrow()
+  expect(f.host.store.nativeReview(f.binding, 'wrong-source-review')).toBeNull()
+  expect(f.host.store.retainedCheckpoint(f.binding)).toEqual(original)
+  expect(f.host.store.nativeRecovery(f.binding)).toBeNull()
+  expect(f.dispatched.some(item => item.text.includes('Other source'))).toBe(false)
+})
+it('owner review preserves the real T2 schema, staged pages and Outbox across a storage upgrade', async () => {
+  const f = await fixture(undefined, false, true), prefix = await readFile(f.transcript)
+  await published(f, 'schema-old', 'Confirmed before schema upgrade')
+  const original = structuredClone(f.speech()[0]!), changes = f.port.changes.bind(f.port)
+  let frozenReads = 0, held = false
+  f.port.changes = async (input, signal) => {
+    if (input.through && input.limit === 100 && ++frozenReads === 2) {
+      held = true
+      await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
+    }
+    return await changes(input, signal)
+  }
+  const wanted = Array.from({ length: 135 }, (_, n) => 'Schema recovered ' + n)
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(wanted.map((text, n) => assistant('schema-new-' + n, text)).join('') + assistant('schema-old', 'Confirmed before schema upgrade'))])); f.host.refresh()
+  await vi.waitFor(() => expect(held).toBe(true), { timeout: 15_000 })
+  const database = Reflect.get(f.host.store, 'database') as import('node:sqlite').DatabaseSync
+  const before = database.prepare('SELECT COUNT(*) AS n FROM connector_publication_native_recovery_record').get()!.n
+  expect(Number(before)).toBeGreaterThan(0)
+  // This is precisely the committed T2 table shape and an original in-flight phase.
+  database.exec('ALTER TABLE connector_publication_native_recovery_record DROP COLUMN identity_qualified; DROP TABLE connector_publication_native_review')
+  await f.restart()
+  const reopened = Reflect.get(f.host.store, 'database') as import('node:sqlite').DatabaseSync
+  expect(reopened.prepare('PRAGMA table_info(connector_publication_native_recovery_record)').all().some(column => column.name === 'identity_qualified')).toBe(true)
+  expect(Number(reopened.prepare('SELECT COUNT(*) AS n FROM connector_publication_native_recovery_record').get()!.n)).toBeGreaterThanOrEqual(Number(before))
+  await vi.waitFor(() => expect(f.dispatched.filter(item => wanted.includes(item.text))).toHaveLength(wanted.length), { timeout: 20_000 }); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+}, 40_000)
+
+it('owner review preserves newer confirmed reply metadata when an older nonpublic activity is reordered into the frozen range', async () => {
+  const f = await fixture(undefined, false, false, context, 'codex'), prefix = await readFile(f.transcript)
+  const message = (id: string, text: string, turn = 'metadata-turn') => JSON.stringify({ type: 'response_item', payload: { type: 'message', id, role: 'assistant', phase: 'final_answer', turn_id: turn, content: [{ type: 'output_text', text }] } }) + '\n'
+  const usage = (output: number) => JSON.stringify({ type: 'token_usage_record', payload: { id: 'same-usage-fact', turn_id: 'metadata-turn', thread_id: 'ingress-native', turn_token_usage: { input_tokens: 10, output_tokens: output, total_tokens: output + 10 } } }) + '\n'
+  await appendFile(f.transcript, message('metadata-answer', 'Answer with newer metrics') + usage(22)); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(operation => operation.payload.kind === 'speech' && operation.payload.replyMetadata?.metrics?.usage?.outputTokens === 22 && operation.state === 'confirmed')).toBe(true), { timeout: 15_000 }); await f.idle()
+  const originals = structuredClone(f.speech()), originalDispatch = f.dispatched.filter(item => item.text === 'Answer with newer metrics').length
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(usage(7) + message('metadata-answer', 'Answer with newer metrics') + message('metadata-new', 'Independent recovered metadata body', 'other-turn'))])); f.host.refresh(); await unavailable(f)
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'auxiliary-metadata-review' } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'auxiliary-metadata-review')?.state).toBe('ready'), { timeout: 15_000 })
+  const offered = f.host.store.nativeReview(f.binding, 'auxiliary-metadata-review')!
+  await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: offered.operationId, digest: offered.digest! } }, f.owner)
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'Independent recovered metadata body')).toBe(true), { timeout: 15_000 }); await f.idle()
+  expect(f.dispatched.filter(item => item.text === 'Answer with newer metrics')).toHaveLength(originalDispatch)
+  expect(f.dispatched.some(item => (item.metadata as { metrics?: { usage?: { outputTokens?: number } } })?.metrics?.usage?.outputTokens === 7)).toBe(false)
+  for (const original of originals) expect(f.host.store.inspect(original.operationId)).toEqual(original)
+}, 40_000)
+it('owner review retains the exact response metadata across frozen large-resource capability changes', async () => {
+  const f = await fixture(); Reflect.set(f.adapter, 'fragmentBytes', 128 * 1024)
+  const prefix = await readFile(f.transcript), text = 'Frozen resource body 😀 '.repeat(95_000)
+  const original = () => JSON.stringify({ sessionId: 'ingress-native', uuid: 'large-response', type: 'assistant', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text }], usage: { input_tokens: 8, output_tokens: 22 } } }) + '\n'
+  await appendFile(f.transcript, original()); f.host.refresh()
+  await vi.waitFor(() => expect(f.speech().some(operation => operation.state === 'confirmed' && operation.payload.kind === 'speech' && operation.payload.replyMetadata?.metrics?.usage?.outputTokens === 22)).toBe(true), { timeout: 30_000 }); await f.idle()
+  const effects = structuredClone(f.speech()), sent = f.dispatched.length
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('resource-new', 'New body before original large resource') + original())])); f.host.refresh(); await unavailable(f)
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'large-resource-review' } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'large-resource-review')?.state).toBe('ready'), { timeout: 15_000 })
+  const preview = await f.host.recoverSource({ ...f.input, review: { action: 'inspect', operationId: 'large-resource-review', limit: 100 } }, f.owner)
+  expect(preview.review?.items.some(item => item.resources.length > 0)).toBe(true)
+  await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: 'large-resource-review', digest: preview.review!.digest! } }, f.owner)
+  await vi.waitFor(() => expect(f.dispatched.some(item => item.text === 'New body before original large resource')).toBe(true), { timeout: 30_000 }); await f.idle()
+  expect(f.dispatched).toHaveLength(sent + 1)
+  for (const original of effects) expect(f.host.store.inspect(original.operationId)).toEqual(original)
+}, 90_000)
+
+const reviewPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII='
+const reviewMedia = (id: string) => JSON.stringify({ sessionId: 'ingress-native', uuid: id, type: 'assistant', message: { role: 'assistant', stop_reason: 'end_turn', usage: { input_tokens: 8, output_tokens: 22 }, content: [
+  { type: 'text', text: 'Confirmed text beside reviewed image' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: reviewPng } }
+] } }) + '\n'
+it('owner review preserves confirmed speech metadata when the final original fragment is media', async () => {
+  const f = await fixture(), prefix = await readFile(f.transcript)
+  Reflect.set(f.adapter, 'images', { maxBytes: 1024 * 1024, accepts: () => true, upload: async () => ({ state: 'confirmed', imageKey: 'reviewed-image-key' }) })
+  await appendFile(f.transcript, reviewMedia('text-media')); f.host.refresh()
+  await vi.waitFor(() => expect(f.host.store.list(f.binding).filter(op => op.reference.source.kind === 'native' && op.state === 'confirmed')).toHaveLength(2), { timeout: 15_000 }); await f.idle()
+  const originals = structuredClone(f.host.store.list(f.binding)), effects = structuredClone(f.wireEffects)
+  expect(originals.find(op => op.payload.kind === 'speech')?.payload).toMatchObject({ replyMetadata: { metrics: { usage: { outputTokens: 22 } } } })
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('media-new', 'Independent reply after media review') + reviewMedia('text-media'))])); f.host.refresh(); await unavailable(f)
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'media-metadata-review' } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'media-metadata-review')?.state).toBe('ready'), { timeout: 15_000 })
+  const review = f.host.store.nativeReview(f.binding, 'media-metadata-review')!
+  await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: review.operationId, digest: review.digest! } }, f.owner)
+  await vi.waitFor(() => expect(f.dispatched.some(op => op.text === 'Independent reply after media review')).toBe(true), { timeout: 15_000 }); await f.idle()
+  expect(f.wireEffects).toHaveLength(effects.length + 1)
+  expect(f.wireEffects.slice(0, effects.length)).toEqual(effects)
+  for (const original of originals) expect(f.host.store.inspect(original.operationId)).toEqual(original)
+}, 35_000)
+it('owner review retains recovery context for a pre-existing resource gap until its late original body completes', async () => {
+  const f = await fixture(), prefix = await readFile(f.transcript)
+  Reflect.set(f.adapter, 'images', { maxBytes: 1024 * 1024, accepts: () => true, upload: async () => ({ state: 'confirmed', imageKey: 'late-review-image-key' }) })
+  const resource = f.port.resource.bind(f.port); let release!: () => void, held = false
+  const wait = new Promise<void>(done => { release = done }); cleanup.push(() => release())
+  f.port.resource = async (...args) => { const response = await resource(...args); if (args[1].recordId === 'late-media') { held = true; await wait }; return response }
+  await appendFile(f.transcript, reviewMedia('late-media')); f.host.refresh()
+  await vi.waitFor(() => { expect(held).toBe(true); expect(f.speech().some(op => op.state === 'confirmed' && op.payload.kind === 'speech' && op.payload.replyMetadata?.metrics?.usage?.outputTokens === 22)).toBe(true) }, { timeout: 15_000 }); await f.idle()
+  const original = structuredClone(f.speech()[0]!), gap = f.host.store.coverage(f.binding).gaps.find(gap => gap.reason === 'resource-unavailable')!
+  expect(gap).toBeDefined()
+  await writeFile(f.transcript, Buffer.concat([prefix, Buffer.from(assistant('late-media-new', 'Independent reply beside pending original image') + reviewMedia('late-media'))])); f.host.refresh(); await unavailable(f)
+  await f.host.recoverSource({ ...f.input, review: { action: 'prepare', operationId: 'late-media-review' } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeReview(f.binding, 'late-media-review')?.state).toBe('ready'), { timeout: 15_000 })
+  const review = f.host.store.nativeReview(f.binding, 'late-media-review')!
+  await f.host.recoverSource({ ...f.input, review: { action: 'approve', operationId: review.operationId, digest: review.digest! } }, f.owner)
+  await vi.waitFor(() => expect(f.host.store.nativeRecovery(f.binding)?.phase).toBe('complete'), { timeout: 15_000 }); await f.idle()
+  const database = Reflect.get(f.host.store, 'database') as import('node:sqlite').DatabaseSync
+  const retained = database.prepare("SELECT decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.gap.gapId')=? AND json_extract(decision_json,'$.state')='unresolved'").get(gap.gapId)!
+  expect(JSON.parse(String(retained.decision_json)).nativeRecoveryId).toBe(f.host.store.nativeRecovery(f.binding)!.id)
+  release()
+  await vi.waitFor(() => expect(f.host.store.list(f.binding).some(op => op.payload.kind === 'image' && op.state === 'confirmed')).toBe(true), { timeout: 15_000 }); await f.idle()
+  expect(f.host.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched.filter(op => op.text === 'Confirmed text beside reviewed image')).toHaveLength(1)
+  expect(f.dispatched.some(op => op.text === 'Independent reply beside pending original image')).toBe(true)
+}, 45_000)
