@@ -2,7 +2,7 @@ import { createReadStream, cpSync, mkdirSync, readFileSync, statSync } from 'nod
 import { createRequire } from 'node:module'
 import { dirname, extname, join, relative, resolve, sep } from 'node:path'
 import type { Plugin, UserConfig } from 'vite'
-import { localizeExcalidrawFontUrls } from './excalidraw-local-fonts'
+import { localizeExcalidrawFontUrls } from '@agentmux/editor-extensions/build/excalidraw-local-fonts'
 
 /** Fixed official assets are local in both development and the installed private renderer. */
 export function fileDiagramAssets(): Plugin {
