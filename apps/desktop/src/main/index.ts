@@ -23,7 +23,6 @@ import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { CrashLog } from './crash-log.js'
 import { crashReporterOptions, registerCrashCapture } from './crash-capture-wiring.js'
-import { pruneCrashDumps } from './crash-dump-retention.js'
 import { registerWorkbenchStartupCapture } from './workbench-startup-capture.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
@@ -110,8 +109,6 @@ function startPrimaryInstance(): void {
   const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
   const appMemory = new AppMemoryEvidenceOwner(join(app.getPath('userData'), 'app-memory-evidence.json'))
   void app.whenReady().then(() => appMemory.start()).catch(error => console.error('Application memory observation failed:', error))
-  // Local crash dumps are never uploaded or consumed elsewhere; keep the newest ones, off the startup path.
-  void app.whenReady().then(() => pruneCrashDumps(app.getPath('crashDumps'))).catch(error => console.error('Crash dump retention failed:', error))
   app.once('will-quit', () => appMemory.dispose())
   app.once('will-quit', () => performanceScene.dispose())
   const performanceHeap = new RendererHeapSnapshotOwner(join(app.getPath('userData'), 'performance-heap'))
