@@ -16,7 +16,6 @@ import { GoalDelegationWork } from './GoalDelegationWork'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionCreateGoalIcon = semanticIconComponent('action.create-goal')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeNavigationGoalsIcon = semanticIconComponent('navigation.goals')
 
@@ -153,7 +152,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     {showAll || goals.length > visibleGoals.length ? <button type="button" className="mote-current-work__navigation mote-current-work__all" aria-expanded={showAll}
       onClick={() => { associationIntent.current = {}; setShowAll(value => !value) }}>{showAll ? 'Current summary' : 'All work'}<span>{showAll ? currentGoals.length : goals.length}<ThemeNavigationDownIcon size={12} /></span></button> : null}
     {chooser ? <div className="mote-current-work__chooser">
-      <button type="button" className="mote-current-work__navigation" onClick={() => void openGoal(null)}>Create or review in Goals<ThemeActionOpenExternalIcon size={13} /></button>
+      <button type="button" className="mote-current-work__navigation" onClick={() => void openGoal(null)}>Create or review in Goals<ThemeNavigationGoalsIcon size={13} /></button>
       <SelectionField label="Goal to associate with this Mote" value={selectedGoal}
         onValueChange={value => { associationIntent.current = {}; setSelectedGoal(value) }}
         options={[{ value: '', label: 'Choose an existing goal…' }, ...Object.values(demands).map(goal => ({ value: goal.id, label: goal.title }))]} />

@@ -11,7 +11,7 @@ import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { StatusDot } from './StatusDot'
 
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationSpaceIcon = semanticIconComponent('navigation.space')
 
 
 /** Observes existing Sessions; input and terminal size remain owned by their original Regions. */
@@ -30,7 +30,7 @@ export const SessionObservationRegions = memo(function SessionObservationRegions
       if (!session) return <section key={id} className="global-session-workspace__empty" data-session-id={id}><strong>Session awaiting recovery</strong><span>{id}</span><span>The link is preserved. Open Session to inspect recovery.</span><button type="button" onClick={() => selectSession(id)}>Open Session</button></section>
       const workspaceId = workspaceForSession(config, session, topicFacts)?.id ?? SCRATCH_WORKSPACE_ID
       return <section key={id} className="global-session-region" data-session-id={id}>
-        <header className="global-session-region__header"><span className="global-session-region__name"><StatusDot status={session.status} />{session.label}</span><button type="button" className="global-session-region__jump" onClick={() => selectSession(id)}><ThemeActionOpenExternalIcon size={12} />Open Session</button></header>
+        <header className="global-session-region__header"><span className="global-session-region__name"><StatusDot status={session.status} />{session.label}</span><button type="button" className="global-session-region__jump" onClick={() => selectSession(id)}><ThemeNavigationSpaceIcon size={12} />Open Session</button></header>
         <div className="global-session-region__body"><SessionPane sessionId={id} surfaceKind={session.kind} interactiveResize={false} readOnly visible linkOrigin={{ workspaceId, tabGroupId: `observe:${contextId}`, tabId: `observe:${contextId}`, regionId: `observe:${contextId}:${id}` }} /></div>
       </section>
     })}

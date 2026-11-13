@@ -20,7 +20,6 @@ import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 const ThemeConversationOutgoingIcon = semanticIconComponent('conversation.outgoing')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
 
 export type FocusMessageReader = {
@@ -216,7 +215,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
       workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} />{!conversationA2ANotificationId(message) && message.records && message.records.length > 1 ? <details><summary>Contributing source records</summary>{message.records.map(record => <pre key={record.id} data-original-contribution={record.id}>{JSON.stringify(record.original.item, null, 2)}</pre>)}</details> : null}</div>
     <footer className="recent-focus__navigation">
-    {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button> : null}
+    {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender</button> : null}
     <button type="button" disabled={!recipient && !onReveal} onClick={() => { void reveal() }}>Return to Context</button>
     {navigationFeedback ? <p className={navigationFeedback.kind === 'pending' ? 'recent-focus__input-coverage' : 'recent-focus__input-error'} role="status">{navigationFeedback.message}</p> : null}</footer></> : null}
   </div></WindowOverlayPortal>
