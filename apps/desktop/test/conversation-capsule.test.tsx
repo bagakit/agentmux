@@ -354,7 +354,7 @@ it('shows a failed page refresh as a quiet status with its own retry, after the 
   const issue = panel.querySelector<HTMLElement>('.capsule-chrome__issue')!
   expect(issue.getAttribute('role')).toBe('status')
   expect(issue.querySelector('svg')).not.toBeNull()
-  expect(issue.querySelector('button')?.textContent).toBe('Retry')
+  expect(issue.querySelector('button')?.textContent).toBe('Retry page details')
   const question = panel.querySelector('.capsule-question')!
   expect(question.compareDocumentPosition(issue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
