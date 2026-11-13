@@ -26,7 +26,7 @@ describe('Profile IPC results carry the refusal code as data', () => {
 
   it('makes the web preview refuse with the same codes the Desktop api restores', async () => {
     const list = await api.browser.readProfiles()
-    await expect(api.browser.updateProfile(list.profiles[0]!.id, { label: 'Late' }, list.revision + 5))
+    await expect(api.browser.updateProfile(list.profiles[0]!.id, { label: 'Late' }, 'stale-profile-token'))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
     await expect(api.browser.deleteProfile(list.profiles[0]!.id, {} as never)).rejects.toMatchObject({ code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
     // An uncoded preview refusal gets the code the Desktop envelope gives it, so components see one shape.
@@ -37,11 +37,11 @@ describe('Profile IPC results carry the refusal code as data', () => {
   it('makes the web preview store a pasted proxy line as its parsed server, as Main does', async () => {
     const list = await api.browser.readProfiles()
     const profile = await api.browser.updateProfile(list.profiles[0]!.id,
-      { network: { mode: 'proxy', server: 'socks5://proxy.example:1080', bypass: ['intranet.example'] } }, list.revision)
+      { network: { mode: 'proxy', server: 'socks5://proxy.example:1080', bypass: ['intranet.example'] } }, list.profiles[0]!.revision)
     expect(profile.network).toEqual({ mode: 'proxy', server: { scheme: 'socks5', host: 'proxy.example', port: 1080 }, bypass: ['intranet.example'] })
     // A line with credentials is refused here too, so a preview never shows a password back in the field.
     const next = await api.browser.readProfiles()
-    await expect(api.browser.updateProfile(list.profiles[0]!.id, { network: { mode: 'proxy', server: 'user:secret@proxy.example:8080' } }, next.revision))
+    await expect(api.browser.updateProfile(list.profiles[0]!.id, { network: { mode: 'proxy', server: 'user:secret@proxy.example:8080' } }, next.profiles[0]!.revision))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID' })
   })
 })

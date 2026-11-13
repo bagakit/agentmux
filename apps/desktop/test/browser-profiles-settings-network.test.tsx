@@ -14,7 +14,7 @@ import { ProfileNetworkRoute } from '../src/renderer/src/components/settings/Bro
  * what Main's parser accepts, names how many open Browsers reconnect, and a line Main would refuse
  * is said before Apply is possible.
  */
-const work: BrowserProfileSummary = { id: 'p-work', label: 'Work', createdAt: 1, isDefault: false, source: null }
+const work: BrowserProfileSummary = { revision: 'work-token', id: 'p-work', label: 'Work', createdAt: 1, isDefault: false, source: null }
 let root: Root, container: HTMLDivElement
 const run = vi.fn(async (_key: string, action: () => Promise<unknown>) => { await action(); return true })
 const $ = <T extends Element = HTMLElement>(selector: string) => container.querySelector<T>(selector)
@@ -23,7 +23,7 @@ const type = async (element: HTMLInputElement, value: string) => {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) })
 }
 async function mount(profile: BrowserProfileSummary, openBrowsers = 2) {
-  await act(async () => root.render(<ProfileNetworkRoute profile={profile} revision={7} openBrowsers={openBrowsers} run={run} />))
+  await act(async () => root.render(<ProfileNetworkRoute profile={profile} openBrowsers={openBrowsers} run={run} />))
 }
 
 beforeEach(() => {
@@ -49,7 +49,7 @@ describe('Settings › Browser Profiles network route', () => {
     expect(button('Apply network')!.textContent).toBe('Apply network · 2 open Browsers reconnect')
     await act(async () => button('Apply network')!.click())
     expect(port.updateProfile).toHaveBeenCalledExactlyOnceWith('p-work',
-      { network: { mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 }, bypass: ['*.corp.test', 'localhost'] } }, 7)
+      { network: { mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 }, bypass: ['*.corp.test', 'localhost'] } }, 'work-token')
   })
 
   it('says why a line is refused and does not let it be applied', async () => {
@@ -71,9 +71,9 @@ describe('Settings › Browser Profiles network route', () => {
     expect(button('Apply network')).toBeUndefined()
     await act(async () => button('Direct')!.click())
     await act(async () => button('Apply network')!.click())
-    expect(port.updateProfile).toHaveBeenLastCalledWith('p-work', { network: { mode: 'direct' } }, 7)
+    expect(port.updateProfile).toHaveBeenLastCalledWith('p-work', { network: { mode: 'direct' } }, 'work-token')
     await act(async () => button('System')!.click())
     await act(async () => button('Apply network')!.click())
-    expect(port.updateProfile).toHaveBeenLastCalledWith('p-work', { network: null }, 7)
+    expect(port.updateProfile).toHaveBeenLastCalledWith('p-work', { network: null }, 'work-token')
   })
 })
