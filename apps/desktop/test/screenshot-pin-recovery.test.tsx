@@ -159,7 +159,7 @@ it('Escape dismisses the actual Original menu before a second Canvas Escape canc
 })
 
 it.each([['completed', false], ['failed', true]] as const)('the actual System host closes a marked image on Escape only after a %s Copy is confirmed', async (status, failed) => {
-  const api: SystemScreenshotEditorApi = { load: vi.fn(), finish: vi.fn(async () => failed ? { status: 'failed' as const, message: 'Clipboard refused' } : { status: 'completed' as const }),
+  const api: SystemScreenshotEditorApi = { load: vi.fn(), onNotice: () => () => {}, finish: vi.fn(async () => failed ? { status: 'failed' as const, message: 'Clipboard refused' } : { status: 'completed' as const }),
     cancel: vi.fn(async () => {}), savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(),
     copyContext: vi.fn(), openOriginal: vi.fn(), saveOriginal: vi.fn(), inspectOriginal: vi.fn(), inspectOriginalOperation: vi.fn() }
   await act(async () => root.render(<SystemScreenshotEditorView input={{ requestId: 'original-request', image, attachToDraft: false,
