@@ -135,7 +135,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-item__details[open] .notification-item__disclosure { transform: rotate(90deg); }
 .notification-item__original { margin: var(--sp-2) 0 var(--sp-3); padding: var(--sp-4); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-meta); user-select: text; }
 .notification-item__original p { margin: 0 0 var(--sp-2); }
-.notification-item__original .notification-item__provenance { padding-bottom: var(--sp-3); margin-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
+.notification-item__original .notification-item__provenance { padding-top: var(--sp-3); margin-top: var(--sp-3); border-top: 1px solid var(--line-soft); color: var(--text-3); }
 .notification-item__original > span { display: block; margin-top: var(--sp-1); }
 .notification-item__original .small-button { padding: var(--sp-2) var(--sp-4); min-height: 26px; background: transparent; box-shadow: none; font-weight: 400; }
 .notification-item__original .service-window { margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }

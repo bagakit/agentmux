@@ -402,7 +402,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
             : object ? { kind: object.kind, objectKey: compactNotificationIdentity(JSON.stringify([object.kind, object.id, object.hostId, object.workspaceId])), ...(object.hostId ? { hostId: object.hostId } : {}), ...(object.workspaceId ? { workspaceId: object.workspaceId } : {}),
               ...(object.kind === 'host' ? { hostId: object.id } : object.kind === 'workspace' ? { workspaceId: object.id } : object.kind === 'tab' ? { tabId: object.id } : object.kind === 'region' ? { regionId: object.id } : {}) } : { kind: 'unknown' } },
         impact: event.context?.summary ? event.message : undefined,
-        children: provenance ? <><p className="notification-item__provenance">{provenance}</p><p>{event.message}</p></> : undefined,
+        children: provenance ? <><p>{event.message}</p><p className="notification-item__provenance">{provenance}</p></> : undefined,
         unread: unreadEventIds.has(event.id), onRead: () => eventInbox.acknowledge([event.id]),
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
