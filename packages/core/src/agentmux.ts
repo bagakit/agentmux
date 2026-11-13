@@ -14,6 +14,7 @@ import {
   type AgentMuxRpcClient, type AgentMuxRpcMethod, type AgentMuxRpcParams,
   type AgentMuxRpcStreamMethod, type AgentMuxRpcStreamParams
 } from './control-host.js'
+import { agentMuxRpcEnvironmentCredentials } from './public-rpc-client.js'
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
 import { isAgentMuxRpcMethod, isAgentMuxRpcStream } from './public-rpc.js'
 import { AgentMuxError } from './errors.js'
@@ -209,12 +210,8 @@ async function main(): Promise<number> {
   }
   if (method === 'system.endpoint') invocation.params = {}
   if (!isAgentMuxRpcMethod(method)) throw new AgentMuxError('Command has no public service method.', 'INVALID_CLI_ARGUMENT')
-  const sid = process.env.AGENTMUX_AGENT_SESSION_ID
-  const capability = process.env.AGENTMUX_AGENT_CAPABILITY
-  if ((sid !== undefined || capability !== undefined) && (!sid?.length || !capability?.length)) {
-    throw new AgentMuxError('Managed credentials require both exact Session claim and capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
-  }
-  const client = await connectAgentMuxRpc({ endpoint, ...(sid && capability ? { credentials: { agentSessionId: sid, capability } } : {}) })
+  const credentials = agentMuxRpcEnvironmentCredentials()
+  const client = await connectAgentMuxRpc({ endpoint, ...(credentials ? { credentials } : {}) })
   try {
     let callOptions: AgentMuxRpcCallOptions | undefined
     if (isConnectionCredentialMethod(method)) {
@@ -253,7 +250,7 @@ async function main(): Promise<number> {
     }
     try {
       rpcEncode({ jsonrpc: '2.0', id: mintObjectId(), method, params: { ...invocation.params,
-        ...(sid && capability ? { caller: { agentSessionId: sid, capability } } : {}) } })
+        ...(credentials ? { caller: credentials } : {}) } })
     } catch (error) {
       throw new AgentMuxError(error instanceof Error ? error.message : 'Command input is invalid.', 'INVALID_CLI_ARGUMENT')
     }

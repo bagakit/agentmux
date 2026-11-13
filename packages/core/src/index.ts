@@ -237,3 +237,5 @@ export * from './agent-session-usage.js'
 
 export type { AgentMuxBrowserLifecycleIntent, AgentMuxBrowserLifecycleReceipt } from './browser-lifecycle.js'
 export { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
+
+export * from './browser-sdk.js'

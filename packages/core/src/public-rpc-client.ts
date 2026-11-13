@@ -70,6 +70,15 @@ export interface AgentMuxRpcClient {
   dispose(): Promise<void>
 }
 export type AgentMuxRpcCallOptions = { signal?: AbortSignal; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence; forwarding?: RpcForwardingSource }
+/** The original CLI caller claim and capability travel together; absence never repairs a partial claim. */
+export function agentMuxRpcEnvironmentCredentials(env: Readonly<Record<string, string | undefined>> = process.env): AgentMuxRpcCredentials | undefined {
+  const agentSessionId = env.AGENTMUX_AGENT_SESSION_ID, capability = env.AGENTMUX_AGENT_CAPABILITY
+  if ((agentSessionId !== undefined || capability !== undefined) && (!agentSessionId?.length || !capability?.length)) {
+    throw new AgentMuxError('Managed credentials require both exact Session claim and capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
+  }
+  return agentSessionId && capability ? { agentSessionId, capability } : undefined
+}
+
 export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<string, string | undefined>> = process.env): AgentMuxRpcEndpoint {
   const value = selector ?? env.AGENTMUX_RPC_ENDPOINT
   if (!value) return { transport: 'unix', path: defaultAgentMuxControlSocketPath(env) }
