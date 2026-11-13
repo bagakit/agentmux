@@ -113,6 +113,7 @@ describe('existing Session projection navigation', () => {
     const recover = vi.spyOn(api.sessions, 'recover')
     if (label === 'Open Session') {
       await act(async () => root.render(<SessionObservationRegions sessionIds={['a']} contextId="private-board" />))
+      expect(container.querySelector('.global-session-region__jump [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.space')
     } else {
       await act(async () => {
         useAppStore.setState({ sessions: before.sessions.map(one => one.id === 'a' ? { ...one, status: { state: 'done', source: 'run-process', observedAt: 2 } } : one) })

@@ -149,6 +149,7 @@ describe('original Mote Goal composition and current-work caller', () => {
         expect(input).not.toBeNull(); await chooseField(input, value)
       }
       await moteClick(panel.querySelector('[aria-label="Choose or create a goal"]')!)
+      expect(panel.querySelector('.mote-current-work__chooser > .mote-current-work__navigation [data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('navigation.goals')
       await select('Goal to associate with this Mote', 'first-real'); await select('Mote discussion for the goal', neighborAgent.id)
       await moteClick([...panel.querySelectorAll('button')].find(item => item.textContent?.startsWith('Link this discussion'))!)
       await select('Goal to associate with this Mote', 'later-real'); await select('Mote discussion for the goal', defaultAgent.id)
