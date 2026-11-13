@@ -3,7 +3,8 @@
 .mote-start__identity { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-start__name { color: var(--text-2); font-weight: 550; overflow-wrap: anywhere; }
 .mote-start__wordmark { flex: none; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text-3); font-size: 10px; letter-spacing: .06em; }
-.mote-start__identity > :last-child:not(.mote-start__wordmark) { margin-inline-start: auto; }
+/* Only the actions slot sits at the far edge; the brand mark, name and wordmark stay together on the leading side. */
+.mote-start__actions { display: inline-flex; align-items: center; margin-inline-start: auto; }
 .mote-start__invitation { display: grid; justify-items: center; gap: 12px; margin-block: clamp(12px, 4vh, 44px) 24px; text-align: center; }
 .mote-start__portrait { display: grid; place-items: center; width: 172px; height: 172px; flex: none; }
 .mote-start__portrait > .mote-identity-motion { max-width: 100%; max-height: 100%; }
@@ -20,8 +21,10 @@
 .mote-start__pending { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; padding-block: 16px 12px; }
 .mote-start[data-pending] .mote-start__aura { opacity: .3; }
 .mote-start[data-pending] .mote-start__grid { opacity: .15; }
+.mote-start__held { display: flex; flex-direction: column; align-items: flex-end; margin-block-end: 10px; }
 .mote-start__composer { min-width: 0; width: 100%; }
-.mote-start__composer .composer { width: 100%; }
+/* The content column owns the scene's edges; the shared Composer's own gutter would shift it off them. */
+.mote-start__composer .composer { width: 100%; margin-inline: 0; box-sizing: border-box; }
 .mote-workface__period { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px 20px 24px; }
 .mote-start__notice { margin-block-start: 10px; color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.55; overflow-wrap: anywhere; }
 .mote-start__notice > p { margin: 0; }
@@ -33,6 +36,32 @@
 .mote-start-history ol { list-style: none; padding: 0; margin: 6px 0 0; }
 .mote-start-history button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm, 6px); }
 .mote-start-history > p { color: var(--text-3); font-size: var(--fs-meta, 12px); }
+/* Reading: the state itself is the heading, with one breathing mark; the welcome invitation is not shown yet. */
+/* The mark hangs in the leading gutter, so the heading and its hint share one text edge. */
+.mote-start[data-mode='reading'] .mote-start__greeting h1 { position: relative; margin: 0; font-size: clamp(20px, 3.4cqw, 26px); color: var(--text-2); }
+.mote-start[data-mode='reading'] .mote-start__reading-mark { position: absolute; inset-inline-end: calc(100% + 10px); top: 50%; translate: 0 -50%; }
+.mote-start__reading-hint { margin: 6px 0 0; color: var(--text-3); font-size: var(--fs-meta, 12px); }
+@container mote-start (max-height: 620px) { .mote-start[data-mode='reading'] .mote-start__greeting h1 { font-size: 20px; } }
+/* A still, neutral mark: reading is not a connected or working state. Only the held note's mark breathes. */
+.mote-start__reading-mark { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); animation: mote-start-reading-mark 2.4s ease-in-out infinite; }
+@keyframes mote-start-reading-mark { 50% { opacity: .35; } }
+.mote-start[data-mode='reading'] .mote-start__aura { opacity: .5; }
+/* Reading rows keep the real row's height and rhythm, so the list does not jump when its periods arrive. */
+.mote-start-history__skeleton { display: grid; gap: 2px; margin: 6px 0 0; }
+/* Same two-line shape as a real row (title, then holder and range), fading out so the last one never looks clipped. */
+.mote-start-history__skeleton { -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+.mote-start-history__skeleton > div { display: flex; align-items: center; gap: 12px; min-height: 52px; padding-inline: 4px 0; }
+.mote-start-history__skeleton > div > span:first-child { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.mote-start-history__skeleton > div > span:nth-child(2) { display: grid; gap: 7px; flex: 1; min-width: 0; }
+.mote-start-history__skeleton > div > span:last-child { flex: none; width: 56px; height: 10px; border-radius: 5px; }
+.mote-start-history__skeleton > div > span:first-child, .mote-start-history__skeleton > div > span:last-child, .mote-start-history__skeleton i { background: color-mix(in srgb, var(--text) 7%, transparent);
+  animation: mote-start-history-reading 1.6s ease-in-out infinite; }
+.mote-start-history__skeleton i { display: block; height: 10px; border-radius: 5px; width: min(220px, 60%); }
+.mote-start-history__skeleton i + i { height: 8px; width: min(140px, 40%); opacity: .7; }
+.mote-start-history__skeleton > div:nth-child(2) :is(span, i) { animation-delay: 120ms; }
+.mote-start-history__skeleton > div:nth-child(3) :is(span, i) { animation-delay: 240ms; }
+@keyframes mote-start-history-reading { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .mote-start-history__skeleton :is(span, i), .mote-start__reading-mark { animation: none; } }
 @container mote-start (max-width: 520px) {
   .mote-start__content { padding: 18px 18px 24px; }
   .mote-start__invitation { gap: 10px; margin-block: 20px; }
@@ -45,6 +74,9 @@
 @container mote-start (max-height: 620px) {
   .mote-start__invitation { grid-template-columns: 72px minmax(0, 1fr); gap: 14px; justify-items: start; align-items: center; margin-block: 12px 18px; text-align: start; }
   .mote-start__portrait { width: 72px; height: 72px; }
+  /* In the side-by-side layout the portrait's visible ring starts on the content edge, like the Composer and history
+     below it. The artwork keeps a small inner margin around its ring, so the box steps out by that margin. */
+  .mote-start__portrait { justify-self: start; place-items: center start; margin-inline-start: -4px; }
   .mote-start__greeting h1 { font-size: 22px; margin-block-start: 4px; }
   .mote-start__eyebrow { font-size: 11px; }
   .mote-start__history { margin-block-start: 18px; padding-block-start: 12px; }

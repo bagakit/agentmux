@@ -1,12 +1,24 @@
 /* The first message sits in the conversation's own message row; one quiet line under it names the stage.
-   The only motion is the message settling once; the status mark is a still dot, never a spinner loop. */
+   The message settles once; the status mark is a still dot, breathing only while the message is held. */
 .mote-first-message { display: grid; gap: 6px; animation: mote-first-message-settle 220ms var(--ease-enter, ease-out) both; }
 @keyframes mote-first-message-settle { from { opacity: 0; translate: 0 4px; } }
 .mote-first-message__status { display: flex; align-items: center; gap: 8px; margin: 0; padding-inline: 4px; min-height: 28px;
   color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-first-message__mark { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green, currentColor); opacity: .8; }
 .mote-first-message[data-stage='unconfirmed'] .mote-first-message__mark { background: var(--text-3); opacity: .6; }
+/* Held on this device while the main conversation is read: a dashed, unsigned note with a breathing mark; nothing is sent yet. */
+.mote-first-message[data-stage='held'] { justify-items: end; max-width: min(100%, 520px); }
+.mote-first-message__held-text { margin: 0; padding: 9px 13px; border: 1px dashed color-mix(in srgb, var(--text) 22%, transparent); border-radius: var(--radius-lg, 12px);
+  color: var(--text-2); font-size: var(--fs-body, 14px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mote-first-message[data-stage='held'] .mote-first-message__status { min-height: 22px; padding-inline: 2px; }
+.mote-first-message[data-stage='held'] .mote-first-message__mark { background: var(--text-3); animation: mote-first-message-wait 1.4s ease-in-out infinite; }
+/* One affordance only: a quiet underlined text action, like the panel's other inline links. */
+.mote-first-message__status .mote-first-message__inline-action { margin-inline-start: 6px; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--text-2); font: inherit;
+  text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.mote-first-message__status .mote-first-message__inline-action:hover { color: var(--text); background: none; }
+.mote-first-message__inline-action:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; border-radius: 3px; }
+@keyframes mote-first-message-wait { 50% { opacity: .25; scale: .7; } }
 .mote-first-message__status button { margin-inline-start: auto; min-height: 28px; padding: 2px 10px; border: 0; border-radius: var(--radius-sm, 6px);
   background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text-2); font: inherit; cursor: pointer; }
 .mote-first-message__status button:disabled { opacity: .55; cursor: default; }
-@media (prefers-reduced-motion: reduce) { .mote-first-message { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .mote-first-message, .mote-first-message[data-stage='held'] .mote-first-message__mark { animation: none; } }

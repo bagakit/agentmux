@@ -6,14 +6,17 @@ import '../styles/mote-conversation-start.css'
 /** A scene over the original identity, Composer and history owners; no launch or role state lives here.
  * The backdrop is pure CSS around this Mote's portrait: no decoded artwork, no paint containment band,
  * and at most one composited layer in motion. The app brand stays a small mark beside the wordmark. */
-export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, pending, mode = 'start', active = true, drafting = false }: {
+export function MoteConversationStart({ name, portrait, brand, composer, history, notice, actions, pending, held, mode = 'start', active = true, drafting = false }: {
   name: string | undefined; portrait: ReactNode; brand?: ReactNode; composer: ReactNode; history?: ReactNode
-  notice?: ReactNode; actions?: ReactNode; mode?: 'start' | 'new' | 'unconfirmed'; active?: boolean
+  notice?: ReactNode; actions?: ReactNode; mode?: 'start' | 'new' | 'unconfirmed' | 'reading'; active?: boolean
   /** True while the host's draft has text; the scene recedes without searching the composer subtree. */
   drafting?: boolean
   /** The person's first message while its Main is created. It replaces the greeting and history and sits right
    * above the composer, where the conversation shows it, so taking over does not move it. */
   pending?: ReactNode
+  /** A message kept on this device while the Main is read. Unlike pending it is not sent yet, so the identity,
+   * reading state and history stay; the message waits just above the composer. */
+  held?: ReactNode
 }) {
   // A Topic whose title is still being read has no name yet; the scene keeps the Mote wordmark alone.
   const label = typeof name === 'string' ? name.trim() : ''
@@ -26,13 +29,15 @@ export function MoteConversationStart({ name, portrait, brand, composer, history
     <div className="mote-start__backdrop" aria-hidden="true"><span className="mote-start__aura" /><span className="mote-start__grid" /></div>
     <div className="mote-start__content">
       <header className="mote-start__identity">{brand ? <span className="mote-start__brand-art" aria-hidden="true">{brand}</span> : null}
-        {label ? <span className="mote-start__name">{label}</span> : null}{label.toLowerCase() === 'mote' ? null : <span className="mote-start__wordmark">Mote</span>}{actions}</header>
+        {label ? <span className="mote-start__name">{label}</span> : null}{label.toLowerCase() === 'mote' ? null : <span className="mote-start__wordmark">Mote</span>}{actions ? <span className="mote-start__actions">{actions}</span> : null}</header>
       {pending ? <div className="mote-start__pending">{pending}</div> : <div className="mote-start__invitation">
         <div className="mote-start__portrait"><span className="mote-start__halo" aria-hidden="true" />{portrait}</div>
-        <div className="mote-start__greeting"><span className="mote-start__eyebrow">{mode === 'new' ? '同一个伙伴，新的一轮' : '你的想法，从这里开始'}</span>
+        {mode === 'reading' ? <div className="mote-start__greeting"><h1><span className="mote-start__reading-mark" aria-hidden="true" />正在接回主对话</h1>
+          {held ? null : <p className="mote-start__reading-hint">可以先写下想说的，接上后发出</p>}</div> : <div className="mote-start__greeting"><span className="mote-start__eyebrow">{mode === 'new' ? '同一个伙伴，新的一轮' : '你的想法，从这里开始'}</span>
           <h1>{mode === 'unconfirmed' ? '想法先写在这里。' : mode === 'new' ? '接下来，想聊点什么？' : '今天，想一起做点什么？'}</h1>
-        </div>
+        </div>}
       </div>}
+      {held && !pending ? <div className="mote-start__held">{held}</div> : null}
       <div className="mote-start__composer">{composer}</div>
       {notice && <div className="mote-start__notice">{notice}</div>}
       {history && !pending && <div className="mote-start__history">{history}</div>}
@@ -99,6 +104,8 @@ export function MoteConversationHistory({ items, onOpen, onMore, reading = false
         <SemanticIcon className="mote-start-history__chevron" name="navigation.disclosure" size={13} />
       </button>
     </li>)}</ol>
-    {reading && <p role="status">正在读取原对话历史…</p>}{issue}
+    {reading && !items.length ? <div className="mote-start-history__skeleton" role="status" aria-label="正在读取原对话历史…">
+      {[0, 1, 2].map(row => <div key={row} aria-hidden="true"><span /><span><i /><i /></span><span /></div>)}</div>
+      : reading ? <p role="status">正在读取原对话历史…</p> : null}{issue}
   </section>
 }
