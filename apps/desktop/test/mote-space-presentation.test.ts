@@ -68,3 +68,12 @@ it('actual compiled CLI flags reach the Desktop owner and retain nonempty strict
   expect(AGENTMUX_CLI_SKILL).toContain('amux space --skill')
   const help = await probe.run(['space', '--help']); expect(help.code).toBe(0); expect(help.stdout).toContain('--presentation')
 }, 30000)
+it('the Desktop spatial owner refuses a derived action that the Core service did not expand, and launches nothing', async () => {
+  const owner = moteAppearanceSource(), lifecycle = vi.fn(() => { throw new Error('An unexpanded derived action must not start an Agent') })
+  const ports = { get: () => owner.state, topics: async () => [owner.topic], patch: lifecycle, launch: lifecycle, creation: lifecycle, createResource: lifecycle,
+    attach: lifecycle, save: lifecycle, focus: lifecycle, isFocused: () => false, notice: lifecycle, closing: () => false } as unknown as SpatialControlPorts
+  const request = rpcControlRequest('agent.open', { operationId: 'unexpanded-derived', content: { kind: 'derived-action', actionId: 'review', source: { agentSessionId: owner.state.sessions[0]!.id } },
+    destination: { spaceId: owner.target.key, newTab: true }, focus: false })
+  await expect(executeSpatialControl(ports, request)).rejects.toThrow('expanded by the Core service')
+  expect(lifecycle).not.toHaveBeenCalled()
+})
