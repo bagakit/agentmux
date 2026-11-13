@@ -682,3 +682,40 @@ test('actual successful HTTP responses identify the current service lifetime wit
   const { instanceId: _legacyMissing, ...legacyEndpoint } = page.endpoint
   assert.throws(() => parseCapsuleResult('capsule.create', { ...page, endpoint: legacyEndpoint }))
 })
+
+test('a page created by an authenticated Agent answers to that Agent unless an exact target is given', async (t) => {
+  const { owner, source, stateDirectory } = await fixture(t)
+  const caller = { hostId: 'host-a', agentSessionId: 'creator' }
+  const own = await owner.call('capsule.create', { operationId: 'own', sourcePath: source }, { caller })
+  assert.deepEqual(own.record.target, caller)
+  const asked = await owner.call('capsule.interaction.request',
+    { capsuleId: own.record.capsuleId, operationId: 'ask', question: 'Which icon?' }, { caller })
+  assert.deepEqual(asked.interaction.target, caller)
+
+  const explicit = { hostId: 'host-b', agentSessionId: 'reviewer' }
+  const delegated = await owner.call('capsule.create', { operationId: 'delegated', sourcePath: source, target: explicit }, { caller })
+  assert.deepEqual(delegated.record.target, explicit)
+
+  // A producer's own source declaration is not an authenticated identity.
+  const declared = await owner.call('capsule.create',
+    { operationId: 'declared', sourcePath: source, source: { agentSessionId: 'claimed' } },
+    { principal: { kind: 'user', id: 'person' } })
+  assert.equal(declared.record.target, undefined)
+  const unnamed = await owner.call('capsule.create', { operationId: 'unnamed', sourcePath: source }, { caller: { hostId: 'host-a' } })
+  assert.equal(unnamed.record.target, undefined)
+
+  // An earlier page saved with only its creator stays without a recipient; nothing infers one later.
+  await owner.close()
+  const file = join(stateDirectory, 'records', `${own.record.capsuleId}.json`)
+  const saved = JSON.parse(await readFile(file, 'utf8'))
+  delete saved.record.target
+  await writeFile(file, JSON.stringify(saved))
+  const reopened = await NodeCapsuleOwner.open({ stateDirectory })
+  t.after(() => reopened.close())
+  const kept = await reopened.call('capsule.inspect', { capsuleId: own.record.capsuleId })
+  assert.equal(kept.record.target, undefined)
+  assert.deepEqual(kept.record.caller, caller)
+  const later = await reopened.call('capsule.interaction.request',
+    { capsuleId: own.record.capsuleId, operationId: 'ask-later', question: 'Still saved?' }, { caller })
+  assert.equal(later.interaction.target, undefined)
+})
