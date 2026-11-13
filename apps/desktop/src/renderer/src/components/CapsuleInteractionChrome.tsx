@@ -45,7 +45,8 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
     finally { if (generation.current === observed) setLoading(false) }
   }, [capsuleId])
   useEffect(() => { if (visible) void refresh(); return () => { generation.current++ } }, [visible, refresh])
-  const pending = questions?.filter(question => question.status === 'pending' || question.reply?.phase === 'prepared').length
+  // Only a question that can reach an exact recipient asks the person for an answer.
+  const pending = questions?.filter(question => question.target && (question.status === 'pending' || question.reply?.phase === 'prepared')).length
   // Unread is unknown, never "nothing pending"; only the original list confirms what waits for the person.
   const attention = pending === undefined ? 'unconfirmed' : pending > 0 ? 'pending' : 'none'
   const updated = (value: CapsuleInteraction): void => setQuestions(current => current?.map(question => question.interactionId === value.interactionId && value.revision >= question.revision ? value : question) ?? [value])
