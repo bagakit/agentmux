@@ -9,7 +9,7 @@ type ConnectionCheck = () => Promise<() => boolean>
 type DispatchMatch = (candidate: unknown) => boolean
 type SafetyContext = { apply(signal?: AbortSignal): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void;
   trackDispatch(key: string, match: DispatchMatch): () => void; isDispatched(key: string, candidate: unknown): boolean; attachmentOwner(): AttachmentPageOwner }
-const unavailable = '当前页面无法确认原连接；请保留工作内容并恢复原 Mac 连接后重试。'
+const unavailable = '当前页面无法确认 Mac 连接，请恢复连接后重试。'
 const Safety = createContext<SafetyContext | null>(null)
 
 /** Owners report live, document-local facts, not rendered labels or a selected Session. */
@@ -110,7 +110,7 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
           return blocked('新版入口暂时无法确认；当前页面和工作内容保留，请恢复连接后重试。')
         }
       } catch {
-        return blocked('原连接或新版入口暂时无法确认；当前页面和工作内容保留，请恢复连接及设备存储后重试。')
+        return blocked('连接或新版入口暂时无法确认，请恢复连接和设备存储后重试。')
       } finally { clearTimeout(timeout); signal?.removeEventListener('abort', cancel); abort.abort() }
       if (signal?.aborted) return blocked('本次网页重开已取消；当前页面保留。')
       const finalIssue = checkOwners()
@@ -126,7 +126,7 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
           rollback?.(); return blocked('连接或工作面发生变化；当前页面保留，请核对后重试。')
         }
         location.assign('/' + mobileUpdateFragment); return { status: 'navigating' }
-      } catch { try { rollback?.() } catch { /* Retain any unresolved handoff. */ } return blocked('原身份交接或网页重开未确认；当前页面保留，请恢复设备存储后重试。') }
+      } catch { try { rollback?.() } catch { /* Retain any unresolved handoff. */ } return blocked('网页重开前的交接未确认，请恢复设备存储后重试。') }
     }
   }), [])
   return createElement(Safety.Provider, { value: context }, children)

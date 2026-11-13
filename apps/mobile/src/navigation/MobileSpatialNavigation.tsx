@@ -82,7 +82,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         if (!client.forwardRpc) throw new Error('空间目录暂不可读；已有会话仍可在 Focus 中访问。')
         const value = await client.forwardRpc('space.ls', { target: {}, presentation: true })
         if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog; onPresentation?.(client, value.catalog.agentPresentation) }
-      } catch (error) { if (!disposed) setIssue(error instanceof Error ? error.message : '空间目录暂不可读，原记录保留。') }
+      } catch (error) { if (!disposed) setIssue(error instanceof Error ? error.message : '空间目录暂时读不到，可以刷新重试。') }
       finally { inFlight = false; if (!disposed) setPending(false) }
       if (observed) observeCatalog?.(observed)
     }
@@ -140,7 +140,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     if (retainedMetadata.current && retainedMetadata.current.client === client && retainedMetadata.current.epoch === metadataEpoch.current && retainedMetadata.current.scope === metadataScope && retainedMetadata.current.revision === revision) return previous
     let value
     try { value = { sessions: client?.agentSessions() ?? [], issue: '' } }
-    catch { value = { sessions: previous.sessions, issue: '原会话元信息目录暂不可读；原空间与已有会话引用保留，可刷新核对。' } }
+    catch { value = { sessions: previous.sessions, issue: '对话信息暂时读不到，可以刷新重试。' } }
     retainedMetadata.current = { client, epoch: metadataEpoch.current, scope: metadataScope, revision, value }
     return value
   }, [client, sessions, needsMetadataDirectory, metadataRevision, metadataScope, revision])
@@ -285,7 +285,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const openContent = (owner: Catalog['spaces'][number], tab: Catalog['tabs'][number], region: Region) => {
     const key = contentKey(owner.spaceId, tab.zoneId, region), zones = catalog?.zones.filter(zone => zone.zoneId === tab.zoneId) ?? []
     setVisited(values => values.some(value => value.key === key) ? values : [...values, { key, spaceId: owner.spaceId, spaceName: owner.name,
-      tabId: tab.tabId, tabName: tab.name || '原标签', zoneId: tab.zoneId, region: { ...region, ...(region.file ? { file: { ...region.file } } : {}) },
+      tabId: tab.tabId, tabName: tab.name || '标签', zoneId: tab.zoneId, region: { ...region, ...(region.file ? { file: { ...region.file } } : {}) },
       ...(zones.length === 1 ? { zone: { ...zones[0]! } } : {}) }])
     setSelectedKey(key); setContext({ spaceId: owner.spaceId, tabId: tab.tabId, regionId: region.regionId })
   }
@@ -333,7 +333,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       return <div className="mobile-mote-contents">
         <div className="mobile-mote-agents-heading"><h3>Agents</h3>{onCreateAgent && <IconButton className="mobile-icon-button" aria-label={`在 ${owner.name} 新建 Agent`} onClick={() => onCreateAgent({ spaceId: owner.spaceId, ...(facts?.content && ownerZones.has(facts.content.zoneId) ? { zoneId: facts.content.zoneId } : {}) })}><SemanticIcon name="action.create-agent" size={16} /></IconButton>}</div>
         <ul className="mobile-session-list mobile-mote-agents" aria-label={`${owner.name} 的 Agents`}>{[...members].map(([id, member]) => sessionRow(member.session, id, member.places.length === 1 ? member.places[0] : null, undefined, member.places))}</ul>
-        {!members.size && <p className="mobile-spatial-empty">{unconfirmedAgent ? '原 Agent 绑定尚未确认；主 Agent 入口与原工作面保留。' : '尚无已绑定 Agent；可从主 Agent 入口设置，或明确新建。'}</p>}
+        {!members.size && <p className="mobile-spatial-empty">{unconfirmedAgent ? 'Agent 绑定还没确认，主 Agent 入口仍可使用。' : '尚无已绑定 Agent；可从主 Agent 入口设置，或明确新建。'}</p>}
         {facts?.issue && <MobileNotice identity={[owner.spaceId,facts.issue]} className="mobile-spatial-notice" role="status">{facts.issue}</MobileNotice>}
       </div>
     }
@@ -355,10 +355,10 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
           return session ? occurrences.length ? occurrences.map(place => sessionRow(session, JSON.stringify(place), place, tab.regionIds.length === 1 ? tab.name : undefined)) : sessionRow(session, region.regionId, null, tab.regionIds.length === 1 ? tab.name : undefined)
             : <li key={region.regionId}>{region.kind === 'launcher' && onCreateAgent ? <button type="button" aria-label="在此启动位新建 Agent" onClick={() => onCreateAgent({ spaceId: owner.spaceId, zoneId, tabId: tab.tabId, regionId: region.regionId })}>
               <SemanticIcon name="object.launcher" size={18} /><span><strong>新建 Agent</strong><small>在此启动位开始</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
-              : ['file', 'browser'].includes(region.kind) ? <button type="button" onClick={() => openContent(owner, tab, region)}><SemanticIcon name={region.kind === 'file' ? 'object.file' : 'object.browser'} size={18} /><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看原网页'}</strong><small>{region.kind === 'file' ? region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件' : '网页'}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
+              : ['file', 'browser'].includes(region.kind) ? <button type="button" onClick={() => openContent(owner, tab, region)}><SemanticIcon name={region.kind === 'file' ? 'object.file' : 'object.browser'} size={18} /><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看网页'}</strong><small>{region.kind === 'file' ? region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件' : '网页'}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
               : <div className="mobile-spatial-resource"><SemanticIcon name={region.kind === 'launcher' ? 'object.launcher' : 'object.region'} size={18} /><span>{region.kind === 'launcher' ? 'Launcher' : region.kind}<small>{region.agentSessionId ? '会话状态尚未核实' : '此内容在 Mac 上查看'}</small></span></div>}</li>
         })}</ul></section>})}</section>)}
-      {!ownerTabs.length && <p className="mobile-spatial-empty">此空间暂无已绑定 Tab。原空间和资料仍保留。</p>}
+      {!ownerTabs.length && <p className="mobile-spatial-empty">这个空间还没有绑定 Tab。</p>}
     </>
   }
   const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
@@ -366,7 +366,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu hidden={Boolean(activeBack)} /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions"><MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
-    {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</MobileNotice>}
+    {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
       {needsYou.length > 0 && !query.trim() && <section className="mobile-needs-you" aria-label={`需要你 · ${needsYou.length}`}>
@@ -387,21 +387,21 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         if (!matchingValues.length) return null
         return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
       })}
-      {!rows.length && <p className="mobile-spatial-empty">Focus 呈现尚未确认；原会话保留。</p>}
+      {!rows.length && <p className="mobile-spatial-empty">Focus 列表还没确认，可以刷新重试。</p>}
       {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
     </> : context.regionId ? <>
       <button className="mobile-text-button" type="button" onClick={backToSpace}><SemanticIcon name="navigation.back" size={16} />返回空间内容</button>
-      <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容'}</h2>
-      <p>{selected?.spaceName ?? space?.name ?? '原空间'} · {selected?.tabName ?? '原标签'}</p>
-      {(selectionChanged || !selected) && <MobileNotice identity={[spaceId,context.tabId,context.regionId,selectionChanged]} role="status">原 Tab / Region 的当前绑定尚未重新确认；原引用、已有正文和草稿保留。可返回目录核对，不会改读别的内容。</MobileNotice>}
-      <details><summary>原工作面位置</summary><code>{context.spaceId} / {context.tabId} / {context.regionId}</code></details>
+      <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '文件' : selected?.region.kind === 'browser' ? '网页' : '内容'}</h2>
+      <p>{selected?.spaceName ?? space?.name ?? '空间'} · {selected?.tabName ?? '标签'}</p>
+      {(selectionChanged || !selected) && <MobileNotice identity={[spaceId,context.tabId,context.regionId,selectionChanged]} role="status">这个位置的绑定还没重新确认，可以返回目录核对。</MobileNotice>}
+      <details><summary>工作面位置</summary><code>{context.spaceId} / {context.tabId} / {context.regionId}</code></details>
     </> : <>
-      {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">原空间绑定尚未重新确认，原引用与工作面保留；可刷新原目录。</MobileNotice>}
+      {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null); if (owner?.kind === 'mote') onSelectMote?.(owner.spaceId) }}
         renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
         {...(home === 'mote' ? { renderPrimary: mainAction, renderProfile: owner => openProfile && <button type="button" className="mobile-mote-profile-action"
-          aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}><SemanticIcon name="status.info" size={16} /><span>Profile</span></button> } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录尚未核实，可在 Focus 中继续原会话。'}</p>}
+          aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}><SemanticIcon name="status.info" size={16} /><span>Profile</span></button> } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录还没确认，可以在 Focus 中继续对话。'}</p>}
     </>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>
       {(target.region.kind === 'file' || target.region.kind === 'browser') && <MobileRegionContent client={client} connected={connected} showTitle={false}

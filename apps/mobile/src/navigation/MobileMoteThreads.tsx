@@ -15,9 +15,9 @@ export function MobileMoteThreads({ client, dialogue, team, issue, visible, curr
   onWork(source: MobileMoteWork): void; onMain(): void; onConfigure(): void; onRefresh(): void
 }) {
   const readWork = useCallback(async (source: MobileMoteWork) => {
-    if (!client?.forwardRpc) throw new Error('原工作读取端口暂不可用；原引用保留。')
+    if (!client?.forwardRpc) throw new Error('连接暂不可用，暂时读不到这项工作。')
     const value = await client.forwardRpc('message.dispatch.read', { hostId: source.origin.hostId, sourceMessageId: source.origin.messageId })
-    if (value.hostId !== source.origin.hostId) throw new Error('原工作返回了另一执行端的记录；已有引用与对话保留。')
+    if (value.hostId !== source.origin.hostId) throw new Error('这项工作返回了另一执行端的记录，暂不显示。')
     return value
   }, [client])
   const current = dialogue.page?.main.status === 'ready' && !dialogue.unavailable ? dialogue.page.main.current : null

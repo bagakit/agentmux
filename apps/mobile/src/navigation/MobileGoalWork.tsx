@@ -54,24 +54,24 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     const token = occurrence
     try {
       const runtime = client.runtimeOwnerIdentity()
-      if (!runtime || runtime.availability !== 'connected') throw new Error('原 Host 的运行身份尚未确认，保留已有目标与原会话。')
+      if (!runtime || runtime.availability !== 'connected') throw new Error('Mac 还没确认，暂时无法读取目标。')
       const deviceHostId = owner.snapshot().record.host?.hostId ?? null
       const result = await client.forwardRpc('goal.ls', { agentSessionId })
       const ids = new Set<string>()
-      if (!Array.isArray(result.goals)) throw new Error('Host 目标目录尚未确认。')
+      if (!Array.isArray(result.goals)) throw new Error('Mac 上的目标列表还没确认。')
       for (const goal of result.goals) {
         assertGoalAssociation(goal, goal.id, agentSessionId)
-        if (ids.has(goal.id)) throw new Error('Host 目标目录存在重复引用；原选择保留。')
+        if (ids.has(goal.id)) throw new Error('Mac 上的目标列表有重复项，请刷新后重试。')
         ids.add(goal.id)
       }
       if (current.current !== token) return
-      if (client.runtimeOwnerIdentity()?.runtimeId !== runtime.runtimeId || (owner.snapshot().record.host?.hostId ?? null) !== deviceHostId) throw new Error('读取期间原 Host 身份已变化；原目标记录保留。')
+      if (client.runtimeOwnerIdentity()?.runtimeId !== runtime.runtimeId || (owner.snapshot().record.host?.hostId ?? null) !== deviceHostId) throw new Error('读取期间 Mac 已变化，请刷新后重试。')
       setGoals({ sessionId: agentSessionId, runtimeId: runtime.runtimeId, deviceHostId, rows: result.goals })
       if (selection && selection.sessionId === agentSessionId) {
-        if (selection.runtimeId !== runtime.runtimeId || selection.deviceHostId !== null && selection.deviceHostId !== deviceHostId) throw new Error('已保存的目标属于原 Host；保留原内容，不能向当前 Host 重定向。')
+        if (selection.runtimeId !== runtime.runtimeId || selection.deviceHostId !== null && selection.deviceHostId !== deviceHostId) throw new Error('已保存的目标属于另一台 Mac，不能在当前 Mac 上打开。')
         const value = await inspectGoal(client, selection.goalId, agentSessionId)
         if (current.current !== token) return
-        if (client.runtimeOwnerIdentity()?.runtimeId !== runtime.runtimeId || (owner.snapshot().record.host?.hostId ?? null) !== deviceHostId) throw new Error('读取期间原 Host 身份已变化；原目标记录保留。')
+        if (client.runtimeOwnerIdentity()?.runtimeId !== runtime.runtimeId || (owner.snapshot().record.host?.hostId ?? null) !== deviceHostId) throw new Error('读取期间 Mac 已变化，请刷新后重试。')
         setDetail({ target: goalWorkTarget(client, owner, agentSessionId, selection.goalId), value })
       }
       setPending(owner.snapshot().record.goalWork?.pending ?? [])
@@ -106,12 +106,12 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
         const retained = owner.snapshot().record.goalWork?.pending ?? []
         setPending(retained)
         setNotice(retained.some(op => op.operationId === operation.operationId)
-          ? '原开始输入的回执未知，续跑保持暂停。可检查并明确重试原操作；不会自动再发。' : owner.snapshot().issue ?? undefined)
+          ? '开始还没确认，持续推进保持暂停；可以检查后重试。' : owner.snapshot().issue ?? undefined)
       }
     } catch (error) {
       if (current.current === token) {
         setPending(owner.snapshot().record.goalWork?.pending ?? [])
-        setNotice(`${error instanceof Error ? error.message : String(error)} 原操作已保留；不会自动重发。`)
+        setNotice(`${error instanceof Error ? error.message : String(error)} 不会自动重发。`)
       }
     } finally { if (flight.current === token) flight.current = null; if (current.current === token) setWorking(null) }
   }
@@ -141,7 +141,7 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     try {
       await inspectGoal(client, goalId, agentSessionId)
       if (current.current !== token || !isCurrent()) return
-      if (!selection || !admitsGoalWorkTarget(selection, goalWorkTarget(client, owner, agentSessionId, goalId))) throw new Error('原 Host 身份已经变化，不能把原目标导航发送到当前 Host。')
+      if (!selection || !admitsGoalWorkTarget(selection, goalWorkTarget(client, owner, agentSessionId, goalId))) throw new Error('Mac 已变化，不能在当前 Mac 上打开这个目标。')
       await client.forwardRpc('goal.focus', { goalId, input: 'preserve' })
     } catch (error) { if (current.current === token) setNotice(error instanceof Error ? error.message : String(error)) }
   }
@@ -150,7 +150,7 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
           {actual.goal.activityLog?.length ? <details><summary>最近工作记录</summary>{actual.goal.activityLog.slice(-5).map((item, index) => <p key={index}>{item}</p>)}</details> : null}</section>) : null
 
   return <div className="mobile-goal-work">
-    <div className="mobile-section-heading"><div><h1>{goalId ? actual?.goal?.title ?? '原目标' : '目标与结果'}</h1>{!connected || selection && !sourceConfirmed ? <p>{!connected ? 'Mac 连接中断 · 已读内容保留' : selection && !sourceConfirmed ? '连接身份待确认 · 已读内容保留' : null}</p> : null}</div><button className="mobile-icon-button" aria-label="刷新目标状态" disabled={!connected || busy} onClick={() => { void read() }}><SemanticIcon name="action.refresh" size={18} /></button></div>
+    <div className="mobile-section-heading"><div><h1>{goalId ? actual?.goal?.title ?? '目标' : '目标与结果'}</h1>{!connected || selection && !sourceConfirmed ? <p>{!connected ? 'Mac 连接中断 · 已读内容保留' : selection && !sourceConfirmed ? '连接身份待确认 · 已读内容保留' : null}</p> : null}</div><button className="mobile-icon-button" aria-label="刷新目标状态" disabled={!connected || busy} onClick={() => { void read() }}><SemanticIcon name="action.refresh" size={18} /></button></div>
     {goalId ? <>
       <button className="mobile-text-button" onClick={showList}><SemanticIcon name="navigation.back" size={15} />全部目标</button>
       {actual?.goal ? <>
@@ -162,20 +162,20 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
         <details key="continuation" className="mobile-goal-section" open={loops.some(loop => loop.status !== 'stopped')}><summary>持续推进</summary><p className="mobile-goal-meta">Mac 在线且此对话可用时推进；关闭页面不会停止。</p>
           {loops.map(loop => <div className="mobile-goal-loop" key={loop.loopId}><strong>{statusText[loop.status]}</strong><small>每 {loop.intervalMs / 60000} 分钟检查 · v{loop.revision ?? '未确认'}</small>
             {loop.lastDecision && <p>{loop.lastDecision}</p>}
-            {loop.initialDelivery?.state !== 'confirmed' && loop.status !== 'stopped' ? <p className="mobile-goal-meta">开始回执未确认，自动推进保持暂停。</p> : null}
+            {loop.initialDelivery?.state !== 'confirmed' && loop.status !== 'stopped' ? <p className="mobile-goal-meta">开始还没确认，持续推进保持暂停。</p> : null}
             <div className="mobile-goal-actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(value => value === 'stop' ? loop.status !== 'stopped' : value === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(value => <button key={value} disabled={!sourceConfirmed || busy || saved.length > 0 || !loop.revision} onClick={() => action(loop, value)}>{actionText[value]}</button>)}
-              {!saved.length && loop.status !== 'stopped' && loop.creationOperationId && loop.initialDelivery?.state !== 'confirmed' ? <button disabled={!sourceConfirmed || busy} onClick={() => retryStart(loop)}>检查并重试原开始</button> : null}</div></div>)}
+              {!saved.length && loop.status !== 'stopped' && loop.creationOperationId && loop.initialDelivery?.state !== 'confirmed' ? <button disabled={!sourceConfirmed || busy} onClick={() => retryStart(loop)}>检查并重试开始</button> : null}</div></div>)}
           {!loops.some(loop => loop.status !== 'stopped') && !saved.length ? <form className="mobile-goal-start" onSubmit={event => { event.preventDefault(); start() }}><label>检查间隔<TextInput aria-label="目标检查间隔（分钟）" type="number" min="1" value={minutes} onChange={event => setMinutes(event.target.value)} /><span>分钟</span></label><button disabled={!sourceConfirmed || busy || actual.goal.alignment?.confirmedAt == null || actual.goal.status === 'done' || actual.goal.status === 'cancelled' || !Number.isSafeInteger(Number(minutes) * 60000) || Number(minutes) < 1}>开始并持续推进</button></form> : null}
         </details>
         {!actual.goal.grounding ? goalResults : null}
 
-      </> : <p className="mobile-spatial-notice">原目标引用保留；连接恢复后读取准确目标，不创建替代工作。</p>}
-      {saved.map(operation => <aside className="mobile-goal-pending" key={operation.operationId}><strong>原{operation.kind === 'start' ? '开始' : actionText[operation.action]}操作待确认</strong><p>重试会先核对原 Host、目标和版本，再使用同一操作 ID。</p><button disabled={!sourceConfirmed || busy} onClick={() => { void perform(operation) }}>检查并重试原{operation.kind === 'start' ? '开始' : actionText[operation.action]}</button></aside>)}
+      </> : <p className="mobile-spatial-notice">连接恢复后会读取这个目标。</p>}
+      {saved.map(operation => <aside className="mobile-goal-pending" key={operation.operationId}><strong>{operation.kind === 'start' ? '开始' : actionText[operation.action]}操作待确认</strong><p>重试会先核对目标和版本，不会重复执行。</p><button disabled={!sourceConfirmed || busy} onClick={() => { void perform(operation) }}>检查并重试{operation.kind === 'start' ? '开始' : actionText[operation.action]}</button></aside>)}
     </> : <ul className="mobile-goal-list">{goals?.sessionId === agentSessionId ? goals.rows.map(goal => <li key={goal.id}><button aria-label={`查看目标 ${goal.title}`} disabled={!connected || !listConfirmed} onClick={() => choose(goal.id)}><SemanticIcon name="object.goal" size={18} /><span><strong>{goal.title}</strong><small>{goal.alignment?.summary || goal.description || goal.status}</small></span></button></li>) : null}
       {goals?.sessionId === agentSessionId && !goals.rows.length ? <li className="mobile-spatial-empty">此对话还没有目标，可在 Mac 上关联。</li> : null}</ul>}
-    {!goalId && pending.filter(op => op.sessionId === agentSessionId).map(op => <aside className="mobile-goal-pending" key={op.operationId}><strong>原目标操作待确认</strong><p>原目标引用与操作 ID 已保留。读取和重试仍须核对原 Host 与 Agent。</p><button onClick={() => {
+    {!goalId && pending.filter(op => op.sessionId === agentSessionId).map(op => <aside className="mobile-goal-pending" key={op.operationId}><strong>目标操作待确认</strong><p>打开目标后可以核对并重试。</p><button onClick={() => {
       setSelection({ runtimeId: op.runtimeId, deviceHostId: op.deviceHostId, sessionId: op.sessionId, goalId: op.goalId })
-    }}>查看原待确认目标</button></aside>)}
+    }}>查看待确认目标</button></aside>)}
     {notice && <MobileNotice kind="feedback" identity={[agentSessionId,notice]} className="mobile-goal-notice" role="status">{notice}</MobileNotice>}
   </div>
 }

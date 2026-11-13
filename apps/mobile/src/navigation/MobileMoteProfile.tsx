@@ -42,21 +42,21 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       if (!current) return
       setQueryDiagnostic('')
       const original = value.catalog.motePresentation?.find(value => value.spaceId === spaceId)
-      if (!original) { setIssue('原 Mote 资料尚未确认；原对象、保存引用与会话保留，可刷新。'); return }
+      if (!original) { setIssue('Mote 资料还没确认，可以刷新。'); return }
       const next = original.content
       const initial = originalContent.current
       if (initial && next && ['hostId', 'workspaceId', 'workspacePath', 'zoneId'].some(key => initial[key as keyof typeof initial] !== next[key as keyof typeof next])) {
-        setIssue('原 Mote 资料映射已改变；本次原引用和已有正文（如有）保留，请重新选择准确对象。'); return
+        setIssue('Mote 资料位置已改变，请重新选择。'); return
       }
       if (next) originalContent.current = next
       setFacts({ ...original, content: next ?? originalContent.current }); setIssue('')
     }).catch(error => {
       if (current) {
         setQueryDiagnostic(error instanceof Error ? error.message : String(error))
-        setIssue('原配置查询尚未重新核实；原对象引用和已确认资料（如有）保留，可刷新原资料。')
+        setIssue('配置还没重新确认，可以刷新资料。')
       }
     })
-    else setIssue('原配置查询端口暂不可用；原对象引用和已确认资料（如有）保留。')
+    else setIssue('连接暂不可用，暂时读不到配置。')
     return () => { current = false }
   }, [client, spaceId, visible, refresh])
   const changeSource = useCallback((path: string | null) => {
@@ -76,7 +76,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
   const loadSource = useCallback(async (path: string) => {
     const token = ++intent.current
     if (!visible || !spaceId || !content || !client?.forwardRpc) {
-      setReading(false); setFileIssue('原资料读取范围或连接尚未确认；原引用与已有正文（如有）保留，正文待重新读取，可刷新或继续原会话。'); return
+      setReading(false); setFileIssue('资料的读取范围或连接还没确认，正文待重新读取；可以刷新或继续对话。'); return
     }
     setReading(true); setFileIssue('')
     try {
@@ -87,14 +87,14 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       if (token !== intent.current) return
       const currentOwner = client.runtimeOwnerIdentity?.()
       if (owner && (!currentOwner || currentOwner.runtimeId !== owner.runtimeId || currentOwner.ownerInstanceId !== owner.ownerInstanceId)) {
-        setFileIssue('原 Host 读取归属已变化；原引用与已确认正文保留，请重新核对原文件。'); return
+        setFileIssue('读取期间 Mac 已变化，请刷新文件。'); return
       }
       setObservations(previous => ({ ...previous, [path]: read }))
       if (read.result.status === 'read') {
         setFiles(previous => ({ ...previous, [path]: read }))
         setFileIssue('')
-      } else setFileIssue(`${'message' in read.result ? read.result.message : `原文件状态：${read.result.status}`}；原引用与已有正文（如有）保留，正文待重新读取。`)
-    } catch (error) { if (token === intent.current) setFileIssue(`${error instanceof Error ? error.message : String(error)}；原引用与已有正文（如有）保留，正文待重新读取，可刷新。`) }
+      } else setFileIssue(`${'message' in read.result ? read.result.message : `文件状态：${read.result.status}`}。正文待重新读取，可以刷新重试。`)
+    } catch (error) { if (token === intent.current) setFileIssue(`${error instanceof Error ? error.message : String(error)}。正文待重新读取，可以刷新重试。`) }
     finally { if (token === intent.current) setReading(false) }
   }, [client, spaceId, visible, content?.zoneId, content?.hostId, content?.workspaceId, content?.workspacePath])
   useEffect(() => {
@@ -117,27 +117,27 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
         observation: observations[selected] ?? files[selected] ?? null }} client={client} visible={visible}
       copyText={copyText ?? createBrowserPlatform().copyText} onClose={backToReading}
       onRead={() => { void loadSource(selected) }}
-      onSaved={() => { void loadSource(selected); setRefresh(value => value + 1) }} /> : selected ? <section className="mobile-mote-source" aria-label="原 Mote 文件阅读">
+      onSaved={() => { void loadSource(selected); setRefresh(value => value + 1) }} /> : selected ? <section className="mobile-mote-source" aria-label="Mote 文件阅读">
       <button type="button" className="mobile-text-button" onClick={backToProfile}>返回资料</button>
       <h3>{selected}</h3>
-      <button type="button" className="mobile-text-button" onClick={() => { void loadSource(selected) }}>刷新原文件</button>
-      {reading && <p role="status">正在读取原文件…</p>}
-      {spaceId && content && isMoteFilePath(selected) && <button type="button" className="mobile-text-button" onClick={() => setEditing(true)}>编辑原稿</button>}
+      <button type="button" className="mobile-text-button" onClick={() => { void loadSource(selected) }}>刷新文件</button>
+      {reading && <p role="status">正在读取文件…</p>}
+      {spaceId && content && isMoteFilePath(selected) && <button type="button" className="mobile-text-button" onClick={() => setEditing(true)}>编辑</button>}
       {fileIssue && <MobileNotice identity={[identity.mote?.spaceId,fileIssue]} role="status">{fileIssue}</MobileNotice>}
       {document && <><AgentMarkdown content={document.content} sourcePath={document.path} {...(read?.resource?.workspacePath ? { workspaceRoot: read.resource.workspacePath } : {})} />
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
     </section> : <>
       {spaceId && content && <MobileMoteMainActions client={client} target={{ spaceId, zoneId: content.zoneId, expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }} visible={visible} onConfigure={() => setQuickEditing(true)} onBound={() => setRefresh(value => value + 1)} onOpenMain={onOpenMain} />}
       {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置<small>Agent、主对话与自动心跳</small></span></button>}
-      <dl className="mobile-mote-profile__defaults"><dt>主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的主对话'}</span><small>{facts?.conversation ? '原展示位置已确认' : '保存引用尚未确认；原会话保留'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '原配置未确认'}</dd>
-        <dt>新对话 Agent</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '原配置未确认')}</dd>
+      <dl className="mobile-mote-profile__defaults"><dt>主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的主对话'}</span><small>{facts?.conversation ? '' : '主对话位置还没确认'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '配置未确认'}</dd>
+        <dt>新对话 Agent</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '配置未确认')}</dd>
       </dl>
-      {main && <details><summary>主对话原引用</summary><dl>{Object.entries(main).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
+      {main && <details><summary>主对话引用</summary><dl>{Object.entries(main).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
       {facts?.quickMode.status === 'unconfirmed' && <MobileNotice identity={[identity.mote?.spaceId,JSON.stringify(facts?.quickMode)]} role="status">{facts.quickMode.message}</MobileNotice>}
       {main && onOpenGoals && <button type="button" className="mobile-menu-row" onClick={() => onOpenGoals(main.sessionId)}><span>主对话的目标与结果</span></button>}
-      <div className="mobile-mote-profile__sources"><h3>原资料</h3>{moteFileSources.map(source => <button type="button" className="mobile-menu-row" key={source.path} aria-label={source.label} onClick={() => changeSource(source.path)}><span>{source.label}</span></button>)}</div>
-      <p>资料来自已保存的原文件；当前讨论保留原上下文。</p>
-      <button type="button" className="mobile-text-button" onClick={() => setRefresh(value => value + 1)}>刷新原资料</button>
+      <div className="mobile-mote-profile__sources"><h3>资料</h3>{moteFileSources.map(source => <button type="button" className="mobile-menu-row" key={source.path} aria-label={source.label} onClick={() => changeSource(source.path)}><span>{source.label}</span></button>)}</div>
+      <p>资料来自 Mote 中保存的文件。</p>
+      <button type="button" className="mobile-text-button" onClick={() => setRefresh(value => value + 1)}>刷新资料</button>
     </>}
   </section></MobileNoticeScope>
 }

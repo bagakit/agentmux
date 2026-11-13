@@ -4,7 +4,7 @@ import { parseAppearanceObservation, type AgentMuxAppearanceObservation, type Ag
 import type { ITheme } from '@xterm/xterm'
 import { DEFAULT_APP_ICON, isAppIconId, type AppIconId } from '@agentmux/client-ui/app-icon-catalog'
 
-const retained = '保留最后确认的主题、App 图标和原工作面；重新连接 Mac 后继续同步。'
+const retained = '暂用上次的主题和 App 图标，重新连接 Mac 后继续同步。'
 /** Colors are data, never CSS or xterm options. Core carries them as opaque JSON. */
 export function observedTerminalPalette(value: unknown): ITheme {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('终端配色不是有效记录。')
@@ -58,12 +58,12 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
         const choice = values.terminalTheme === 'workspace' ? 'workspace' : observedTerminalPalette(values.terminalPalette)
         const result = updateObservedTheme({ ...(values.theme as object), id: values.themeId } as ThemeDocument,
           values.appAppearance as AppAppearanceId, window)
-        if (!result.applied) throw new Error(result.reason ?? 'Host 主题格式不受支持。')
+        if (!result.applied) throw new Error(result.reason ?? 'Mac 主题格式不受支持。')
         terminalChoice.current = choice
         const palette = choice === 'workspace' ? workspaceTerminalPalette(readResolvedTheme()) : choice
         setTerminalPalette(previous => JSON.stringify(previous) === JSON.stringify(palette) ? previous : palette)
         const issues = [...snapshot.issues.filter(item => item.id !== 'app-icon' || !iconIssue).map(item => item.message), ...(iconIssue ? [iconIssue] : [])]
-        setIssue(issues.length ? `${issues.join(' ')} 原工作面仍可使用。` : null)
+        setIssue(issues.length ? `${issues.join(' ')}` : null)
       } catch (cause) {
         setIssue(`主题同步未完成。${retained} ${cause instanceof Error ? cause.message : ''}${iconIssue ? ` ${iconIssue}` : ''}`)
       }

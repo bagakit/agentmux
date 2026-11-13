@@ -30,7 +30,7 @@ export function MobileSpaceIcon({ spaceId, name, appearance, client, connected, 
         const result = await client.forwardRpc!('space.inspect', { target: { spaceId }, presentation: true })
         const original = result.catalog.appearance?.find(value => value.spaceId === spaceId)
         if (!live) return
-        if (!original) { setIssue('原对象图标尚未确认，可刷新原目录。'); return }
+        if (!original) { setIssue('图标还没确认，可以刷新目录。'); return }
         setObserved({ id: spaceId, owner: observationOwner, input: appearance, value: original }); setIssue(original.issue ?? '')
       } catch (error) { if (live) setIssue(error instanceof Error ? error.message : String(error)) }
     }

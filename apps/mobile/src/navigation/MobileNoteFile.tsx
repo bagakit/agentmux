@@ -47,24 +47,24 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
         draft.restoreRelocated(resource, noteId, result.resourceChanges ?? [], revision); setDraftIssue('')
         setConversionIssue((result.conversionIssues ?? []).filter(issue => issue.resource?.hostId === resource.hostId && issue.resource.workspaceId === resource.workspaceId && issue.resource.workspacePath === resource.workspacePath && issue.resource.path === resource.path).map(issue => issue.message).join(' '))
       }
-    }).catch(error => { if (!disposed) setDraftIssue(`原设备草稿续接尚未确认：${error instanceof Error ? error.message : String(error)}；当前笔记仍可编辑，原记录保留。`) })
+    }).catch(error => { if (!disposed) setDraftIssue(`设备草稿还没接上：${error instanceof Error ? error.message : String(error)}。当前笔记仍可编辑。`) })
     return () => { disposed = true }
   }, [visible, rpc, draft, resourceIdentity, noteId, draftLookup])
   async function readCandidate(target: NoteBlockTarget, path: string, token = ++intent.current, scope = params) {
     if (!visible) return
     const result = await rpc('file.read', { ...scope, path })
     if (token !== intent.current) return
-    if (result.result.status !== 'read') throw new Error(result.result.status === 'unknown' || result.result.status === 'error' ? result.result.message : `引用原文件状态：${result.result.status}`)
+    if (result.result.status !== 'read') throw new Error(result.result.status === 'unknown' || result.result.status === 'error' ? result.result.message : `引用文件状态：${result.result.status}`)
     const document = result.result.document
     const parsed = readNoteDocument(document.content)
-    if (parsed.status !== 'valid' || parsed.note.noteId !== target.noteId) throw new Error('所选原文件不是此引用的 Note；原引用与正文保留，请选择准确文件')
+    if (parsed.status !== 'valid' || parsed.note.noteId !== target.noteId) throw new Error('所选文件不是这条引用对应的笔记，请重新选择')
     setDocuments(previous => [...previous.filter(value => !(value.location.workspaceId === scope.expectedResource.workspaceId && value.location.path === document.path)), { location: { workspaceId: scope.expectedResource.workspaceId, path: document.path }, document }])
     setReference(null); setCandidates([]); setIssue('')
   }
   async function discover(target: NoteBlockTarget) {
     if (!visible) return
     const token = ++intent.current
-    setReference(target); setIssue('正在确认引用原文件…')
+    setReference(target); setIssue('正在确认引用的文件…')
     try {
       let pages: import('@agentmux/core/notebook-catalog').NotebookPage[] = []
       let indexIssue = ''
@@ -72,7 +72,7 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
         const notebook = await rpc('notebook.inspect', { noteId: target.noteId })
         if (token !== intent.current) return
         pages = notebook.pages.filter(page => page.noteId === target.noteId)
-      } catch (error) { indexIssue = `原笔记目录暂不可读：${error instanceof Error ? error.message : String(error)}。` }
+      } catch (error) { indexIssue = `笔记目录暂时读不到：${error instanceof Error ? error.message : String(error)}。` }
       if (token !== intent.current) return
       if (pages.length === 1) {
         const page = pages[0]!, resource = page.resource
@@ -82,13 +82,13 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
           try {
             const mapping = await rpc('file.list', { ...fileScope(scope), path: '.' })
             if (token !== intent.current) return
-            if (!mapping.resource) throw new Error('原引用的 Zone 文件映射未确认')
+            if (!mapping.resource) throw new Error('引用的文件位置还没确认')
             const path = relativePath(mapping.resource, resource.path)
-            if (path === null) throw new Error('原引用文件不在已确认的原 Zone 范围中')
+            if (path === null) throw new Error('引用的文件不在这个 Zone 中')
             await readCandidate(target, path, token, scope); return
-          } catch (error) { indexIssue += `原目录映射读取未确认：${error instanceof Error ? error.message : String(error)}。` }
-        } else indexIssue += '原笔记资源已确认，但原 Zone 引用尚不可读。'
-      } else if (pages.length > 1) indexIssue += '原 Note 身份对应多个文件，须先确认准确来源。'
+          } catch (error) { indexIssue += `目录位置还没确认：${error instanceof Error ? error.message : String(error)}。` }
+        } else indexIssue += '笔记已找到，但所在的 Zone 暂时读不到。'
+      } else if (pages.length > 1) indexIssue += '这条笔记对应多个文件，请先选择一个。'
       // Names only; standalone Note IDs are not encoded in filenames. The user chooses the exact source before its body is read.
       const directory = '.'
       if (token !== intent.current) return
@@ -96,14 +96,14 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
       if (token !== intent.current) return
       if (listing.result.status === 'unknown') throw new Error(listing.result.message)
       setCandidates(listing.result.files.filter(path => path.endsWith(NOTE_FILE_EXTENSION)).map(path => ({ path: directory === '.' ? path : directory + '/' + path, params })))
-      setIssue(`${indexIssue}请为此原块引用选择当前范围中的准确 Note 文件。${!listing.result.complete ? '原文件列表尚不完整，可刷新重试。' : ''}`)
-    } catch (error) { if (token === intent.current) setIssue(`引用读取未确认：${error instanceof Error ? error.message : String(error)}。原引用保留，可重试。`) }
+      setIssue(`${indexIssue}请为这条引用选择对应的笔记文件。${!listing.result.complete ? '文件列表还不完整，可以刷新重试。' : ''}`)
+    } catch (error) { if (token === intent.current) setIssue(`引用读取未完成：${error instanceof Error ? error.message : String(error)}。可以重试。`) }
   }
   if (read.result.status !== 'read') return null
   const document = read.result.document
   return <>
-    {conversionIssue && <MobileNotice identity={[conversionIssue]} role="status">{conversionIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>刷新原转换状态</button></MobileNotice>}
-    {draftIssue && <MobileNotice identity={[draftIssue]} role="status">{draftIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>重试原设备草稿续接</button></MobileNotice>}
+    {conversionIssue && <MobileNotice identity={[conversionIssue]} role="status">{conversionIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>刷新转换状态</button></MobileNotice>}
+    {draftIssue && <MobileNotice identity={[draftIssue]} role="status">{draftIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>重新接上设备草稿</button></MobileNotice>}
     {draft.issue && <MobileNotice identity={[draft.issue]} role="status">{draft.issue}</MobileNotice>}
     <NoteReader content={document.content} path={document.path} workspaceId={params.expectedResource.workspaceId} revision={document.revision} noteProvenance={document.noteProvenance} documents={documents} target={target}
       readReference={target => { void discover(target) }} editing={read.resource ? { initial: draft.initial, subscribe: draft.subscribe, readDeviceDraft: draft.readDevice, adoptDeviceDraft: draft.adoptDevice,
@@ -117,10 +117,10 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
         }),
         readCurrent: async () => {
           const result = await rpc('file.read', params)
-          if (result.resource && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => result.resource![key as keyof FileReadResource] !== read.resource![key as keyof FileReadResource])) throw new Error('原文件映射已改变；本次读取不是待确认保存的原文件，草稿与原保存记录保留')
+          if (result.resource && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => result.resource![key as keyof FileReadResource] !== read.resource![key as keyof FileReadResource])) throw new Error('文件位置已改变，这次读取的不是待确认保存的那个文件')
           return result
         } } : undefined} />
     {issue && <MobileNotice kind="feedback" identity={[issue]} role="status">{issue}</MobileNotice>}
-    {reference && <section aria-label="引用原文件选择"><button type="button" onClick={() => { void discover(reference) }}>刷新引用来源</button><ul>{candidates.map(({ path, params: scope }) => <li key={JSON.stringify([scope, path])}><button type="button" onClick={() => { const token = ++intent.current; void readCandidate(reference, path, token, scope).catch(error => { if (token === intent.current) setIssue(error instanceof Error ? error.message : String(error)) }) }}>{path.split('/').at(-1)}</button></li>)}</ul></section>}
+    {reference && <section aria-label="选择引用的文件"><button type="button" onClick={() => { void discover(reference) }}>刷新引用来源</button><ul>{candidates.map(({ path, params: scope }) => <li key={JSON.stringify([scope, path])}><button type="button" onClick={() => { const token = ++intent.current; void readCandidate(reference, path, token, scope).catch(error => { if (token === intent.current) setIssue(error instanceof Error ? error.message : String(error)) }) }}>{path.split('/').at(-1)}</button></li>)}</ul></section>}
   </>
 }

@@ -94,7 +94,7 @@ function loadWorkface(): { workface: Workface; presentation?: MobilePresentation
     const { record, issue } = getDeviceWorkface().snapshot()
     return { issue, ...(record.presentation ? { presentation: record.presentation } : {}), workface: { selectedSessionId: record.selectedSessionId, hostUrl: record.hostUrl, panel: record.panel } }
   } catch {
-    return { workface: empty, issue: '这台设备的导航记录暂时无法读取，原记录尚未覆盖。Mac 上的原会话不受影响；重新选择会话前请先恢复设备存储。' }
+    return { workface: empty, issue: '这台设备暂时读不到导航记录，Mac 上的对话不受影响。' }
   }
 }
 
@@ -165,7 +165,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   }), [])
   const pageName = secondary === 'topics' ? 'Topics' : secondary === 'survey' ? 'Survey' : secondary === 'goals' ? 'Goals' : home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'
   const rpc = useCallback<NonNullable<AgentMuxHostedClient['forwardRpc']>>((method, params) => {
-    if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，原工作面保留。'))
+    if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，连上 Mac 后可继续。'))
     return client.forwardRpc(method, params)
   }, [client])
   const [showSession, setShowSession] = useState(restoreWorkface ? initial.current.presentation?.showSession ?? true : true)
@@ -217,7 +217,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     setMoteDirectAgent(false)
     if (identity.mote) setMoteView({ spaceId: identity.mote.spaceId, section: 'discussion', detail: false })
     const revision = navigationRevision.current, source = client
-    if (!source || !connected) { setNotice('连接暂不可用；主 Agent 的原身份、历史与草稿保留，可连接后显式恢复。'); return }
+    if (!source || !connected) { setNotice('连接暂不可用，连上 Mac 后可以恢复主 Agent。'); return }
     void recoverMobileAgent({ client: source, agentSessionId: id, expectedHostId: hostId, mode: 'open',
       isCurrent: () => originalConnection.current.client === source && originalConnection.current.connected && navigationRevision.current === revision,
       onNotice: setNotice, quietWhenConfirmed: true })
@@ -244,7 +244,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       if (revision !== navigationRevision.current) return
       const topic = value.catalog.spaces.find(item => item.spaceId === spaceId)?.topicId
       if (topic) { setTopicsRoute({ context: { categoryId: null, topicId: topic, mode: 'discussion' }, sources: [] }); setSecondary('topics') }
-      else setNotice('原 Topic 身份尚未确认，研究与资料保留。')
+      else setNotice('这项研究对应的 Topic 还没确认，请刷新后重试。')
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
@@ -263,7 +263,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const menuTarget = rowMenu?.client === client ? rowMenu?.target : null
   const validateMenuSource = useCallback(() => {
     if (rowMenu && rowMenu.client === client && rowMenu.source === menuSource() && (!rowMenu.target.beforeAction || rowMenu.target.beforeAction())) return true
-    setMenuIssue('原菜单的 Host 或工作面来源已变化；原身份链接仍可复制。请关闭菜单，核对原来源后重新打开。')
+    setMenuIssue('菜单打开后连接或位置已变化，请关闭后重新打开。')
     return false
   }, [rowMenu, client])
   useEffect(() => { if (sheet === 'agent' && !menuTarget) setSheet(null) }, [sheet, menuTarget])
@@ -286,12 +286,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       return navigationRevision.current === revision && originalConnection.current.client === source && originalConnection.current.connected &&
         current?.runtimeId === runtime?.runtimeId && current?.ownerInstanceId === runtime?.ownerInstanceId && getDeviceWorkface().recordIdentity() === recordId
     }
-    if (!source?.forwardRpc || !connected) { setNotice('原 Mote 主对话暂未核对；原引用与草稿保留，可从 Mote 目录继续原对话或查看配置。'); return }
+    if (!source?.forwardRpc || !connected) { setNotice('暂时无法核对 Mote 主对话，可以从 Mote 目录继续对话。'); return }
     try {
       const { catalog } = await source.forwardRpc('space.ls', { target: spaceId ? { spaceId } : {}, presentation: true })
       if (!isCurrent()) return
       const owners = catalog.spaces.filter(owner => owner.kind === 'mote' && (spaceId ? owner.spaceId === spaceId : isPrimaryMoteSpace(owner)))
-      if (owners.length !== 1) { setNotice('原 Mote 身份尚未唯一确认；原对话与草稿保留，请在 Mote 目录选择原对象。'); return }
+      if (owners.length !== 1) { setNotice('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
       const owner = owners[0]!
       // This entry is for one exact object; an unbound Mote cannot borrow another Main.
       const target = mobileChatStart({ ...catalog, spaces: [owner] }, owner.spaceId)
@@ -307,7 +307,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         setMoteView({ spaceId: owner.spaceId, section: 'discussion', detail: false }); setSheet(null)
         setWorkface(value => ({ ...value, selectedSessionId: null, panel: 'conversation' })); setShowSession(true)
       }
-    } catch (error) { if (isCurrent()) setNotice(`原 Mote 主对话未能核对：${error instanceof Error ? error.message : String(error)}。原引用与草稿保留，可从原目录重试。`) }
+    } catch (error) { if (isCurrent()) setNotice(`Mote 主对话核对未完成：${error instanceof Error ? error.message : String(error)}。可以从 Mote 目录重试。`) }
   }, [client, connected, openMainAgent, openProfile, objectIdentity, identityRecipient, workface.selectedSessionId])
   const selectMote = useCallback((id: string) => { void enterMote(id) }, [enterMote])
   const [profileBack, setProfileBack] = useState<(() => void) | null>(null)
@@ -347,7 +347,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const backRef = useRef(requestBack)
   backRef.current = requestBack
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
-  const [chatStartIssue, setChatStartIssue] = useState<string | null>(restoreWorkface && !initial.current.workface.selectedSessionId ? '原工作面已接回，可选择 Mote 或已有对话。' : null)
+  const [chatStartIssue, setChatStartIssue] = useState<string | null>(restoreWorkface && !initial.current.workface.selectedSessionId ? '已回到上次的位置，可以选择 Mote 或已有对话。' : null)
   const [chatStartRevision, retryChatStart] = useState(0)
   const chatStartDone = useRef(restoreWorkface || initial.current.workface.selectedSessionId !== null)
   const chatStartExpectedRevision = useRef(0)
@@ -383,7 +383,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const [sessionRevision, setRevision] = useState(0)
   const { selected, projectionError } = useMemo(() => {
     try { return { selected: client && workface.selectedSessionId ? client.agentSession(workface.selectedSessionId) : undefined, projectionError: null } }
-    catch { return { selected: undefined, projectionError: '原会话元信息尚未核实。原身份、阅读与草稿仍保留；可核对原 Mac 的连接。' } }
+    catch { return { selected: undefined, projectionError: '对话信息还没确认，可以查看 Mac 连接。' } }
   }, [client, connection.state, workface.selectedSessionId, sessionRevision])
   const reportError = (error: unknown) => setNotice(error instanceof Error ? error.message : String(error))
 
@@ -423,9 +423,9 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     if (!chatStartDone.current && navigationRevision.current === 0) return
     if (workface === initial.current?.workface && savedPresentation.current === presentationBytes) return
     try {
-      void getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute, navigationRecord.current!.recordId).then(() => { savedPresentation.current = presentationBytes }).catch(() => { setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。') })
+      void getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute, navigationRecord.current!.recordId).then(() => { savedPresentation.current = presentationBytes }).catch(() => { setNotice('这台设备暂时无法保存导航位置，当前阅读不受影响。') })
     } catch {
-      setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。')
+      setNotice('这台设备暂时无法保存导航位置，当前阅读不受影响。')
     }
   }, [workface, presentationBytes])
 
@@ -435,8 +435,8 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       await owner.replaceUnreadableWithCurrent(workface)
       navigationRecord.current = { recordId: owner.recordIdentity() }
       setCanPersist(true)
-      setNotice('已用当前工作面替换这台设备无法读取的原记录。导航、草稿和未确认输入一起保存；Mac 上的原会话保持不变。')
-    } catch { setNotice('这台设备仍无法保存导航。原记录尚未覆盖；当前仍按临时导航继续阅读。') }
+      setNotice('已用当前工作面替换导航记录，Mac 上的对话不受影响。')
+    } catch { setNotice('这台设备仍无法保存导航，可以继续阅读，稍后再试。') }
   }
 
 
@@ -477,7 +477,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const teamReading = useMobileMoteTeam(client, teamSpaceId, connected,
     workspaceVisible && showSession && (sheet === null || sheet === 'team'))
   const readMoteDialogue = useCallback<MoteDialogueReader>(async input => {
-    if (!client?.forwardRpc) throw new Error('原 Mote 对话读取端口暂不可用；原对话与草稿保留。')
+    if (!client?.forwardRpc) throw new Error('连接暂不可用，暂时读不到 Mote 对话。')
     return client.forwardRpc('space.mote.dialogue.read', input)
   }, [client])
   const moteDialogue = useMoteDialogue(client ? readMoteDialogue : undefined, moteTarget,
@@ -508,7 +508,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       const facts = value.catalog.motePresentation?.filter(fact => fact.spaceId === target.spaceId) ?? [], fact = facts.length === 1 ? facts[0] : undefined
       const resource = fact?.content
       const qualified = resource && resource.zoneId === target.zoneId && resource.hostId === target.expectedResource.hostId && resource.workspaceId === target.expectedResource.workspaceId && resource.workspacePath === target.expectedResource.workspacePath
-      setMoteEntryIssue(qualified && fact?.quickMode.status !== 'unconfirmed' ? null : { client: original, spaceId: target.spaceId, message: fact?.quickMode.status === 'unconfirmed' ? fact.quickMode.message : '原 Mote 配置来源尚未确认；原引用和草稿保留。' })
+      setMoteEntryIssue(qualified && fact?.quickMode.status !== 'unconfirmed' ? null : { client: original, spaceId: target.spaceId, message: fact?.quickMode.status === 'unconfirmed' ? fact.quickMode.message : 'Mote 配置来源还没确认，可以刷新重试。' })
       teamReading.refresh()
     } catch (error) {
       if (currentSource()) setMoteEntryIssue({ client: original, spaceId: target.spaceId, message: error instanceof Error ? error.message : String(error) })
@@ -522,8 +522,8 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     try { current = client?.agentSession(id) } catch { /* A missing projection cannot erase an original member reference. */ }
     if (!member.hostId || !current || current.agentSessionId !== id || current.hostId !== member.hostId) {
       setNotice(!member.hostId
-        ? '这个成员的执行端尚未确认；本次未打开，已有讨论和工作面引用保留。可刷新团队或从原工作面继续。'
-        : '当前连接尚未匹配这个成员；本次未打开，已有引用和当前讨论保留。请刷新团队或接回对应的工作环境。'); return
+        ? '这个成员的执行端尚未确认，暂时无法打开；可以刷新团队后重试。'
+        : '当前连接尚未匹配这个成员，暂时无法打开；可以刷新团队后重试。'); return
     }
     openSession(id, identity); setShowGoalWork(work); setSheet(null)
   }
@@ -531,17 +531,17 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     const main = original ?? (moteDialogue.page?.main.status === 'ready' && !moteDialogue.unavailable ? moteDialogue.page.main.current : team?.main?.reference)
     const identity = team && main ? mobileMoteMainIdentity(original ? { ...team, main: { reference: original, confirmed: true } } : team)
       : original && objectIdentity?.mote && identityRecipient === workface.selectedSessionId
-        ? { name: '原主对话', project: objectIdentity.project, mote: objectIdentity.mote } : undefined
-    if (!identity || !main) { setNotice('原主对话引用尚未确认；原成员和草稿保留，可在团队中刷新或核对主 Agent。'); return }
+        ? { name: '主对话', project: objectIdentity.project, mote: objectIdentity.mote } : undefined
+    if (!identity || !main) { setNotice('主对话还没确认，可以在团队中刷新或核对主 Agent。'); return }
     let current
     try { current = client?.agentSession(main.sessionId) } catch { /* Keep the saved original target, rather than selecting another Agent. */ }
-    if (!current || current.agentSessionId !== main.sessionId || current.hostId !== main.hostId) { setNotice('当前连接尚未匹配原主对话；已有引用和当前讨论保留，请刷新或接回对应的工作环境。'); return }
+    if (!current || current.agentSessionId !== main.sessionId || current.hostId !== main.hostId) { setNotice('当前连接尚未匹配主对话，请刷新后重试。'); return }
     openSession(main.sessionId, identity); setMoteDirectAgent(false); setMoteView({ spaceId: identity.mote!.spaceId, section: 'discussion', detail: false }); setSheet(null)
   }
   const workMember = (source: MobileMoteWork) => team?.members.find(member => member.hostId === source.origin.hostId && member.sessionId === source.origin.recipientSessionId)
   const openMoteWork = (source: MobileMoteWork) => {
     const member = workMember(source)
-    if (!team || !member || member.places.length !== 1) { setNotice('原工作的成员或展示位置尚未唯一确认；原对话与引用保留，请从团队核对原位置。'); return }
+    if (!team || !member || member.places.length !== 1) { setNotice('这项工作的成员或位置还没确认，请在团队中查看。'); return }
     openTeamMember(member.sessionId, mobileMoteMemberIdentity(team, member, member.places[0]), member)
   }
   composeScope.current = { client, sessionId: workface.selectedSessionId, visible: conversationVisible && !welcomeVisible && !historyVisible, focusComposer }
@@ -556,7 +556,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       {workspaceVisible && showSession ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} {...(needsYouElsewhere ? { 'aria-description': `另有 ${needsYouElsewhere} 个需要你` } : {})} onClick={requestBack}><ThemeNavigationBackIcon size={18} /><span>{pageName}</span>{needsYouElsewhere ? <span className="mobile-back-badge" aria-hidden="true" data-count={needsYouElsewhere}>{needsYouElsewhere > 99 ? '99+' : needsYouElsewhere}</span> : null}</button>
         {objectIdentity?.mote ? <button className="mobile-mote-heading mobile-session-identity" aria-label={`${moteConversation ? moteTitle : objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={28} visible={exposed} /><span className="mobile-session-title">{moteConversation ? moteTitle : sessionTitle ?? objectIdentity.name}</span></button>
-          : <><MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '原会话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} /><span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '原会话'}</span></>}
+          : <><MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '对话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} /><span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '对话'}</span></>}
         <div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />
         {workface.selectedSessionId && !welcomeVisible && !historyVisible && terminalToggle}
         {!welcomeVisible && !historyVisible && workface.selectedSessionId ? <IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></IconButton> : menuButton}
@@ -623,7 +623,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal' || threadsVisible}>
         {!workface.selectedSessionId && !welcomeVisible && <div className="mobile-chat-start">
           <ThemeObjectConversationIcon size={24} /><h1>继续对话</h1>
-          <p>{chatStartIssue ?? '正在找回原对话…'}</p>
+          <p>{chatStartIssue ?? '正在找回对话…'}</p>
           <div><button type="button" className="mobile-text-button" onClick={() => openPrimaryWorkface('mote')}>选择 Mote</button>
             <button type="button" className="mobile-text-button" onClick={() => openPrimaryWorkface('focus')}>已有对话</button>
             {objectIdentity?.mote && <button type="button" className="mobile-text-button" onClick={() => openProfile(objectIdentity)}>查看 Profile</button>}
@@ -635,19 +635,19 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           memberName={reference => { const member = team?.members.find(member => member.hostId === reference.hostId && member.sessionId === reference.sessionId); return member && member.name !== member.sessionId ? member.name : undefined }}
           onConfigure={() => openProfile(objectIdentity)} onBound={() => { teamReading.refresh(); moteDialogue.refresh() }}
           onOpenMain={reference => openMainAgent(reference.sessionId, objectIdentity, reference.hostId)} onOpenPeriod={source => setMoteHistory(source)} />}
-        {historyVisible && moteHistory && <section className="mobile-mote-period-view" aria-label="原主对话历史"><button type="button" onClick={() => setMoteHistory(null)}>返回本次对话</button>
+        {historyVisible && moteHistory && <section className="mobile-mote-period-view" aria-label="主对话历史"><button type="button" onClick={() => setMoteHistory(null)}>返回本次对话</button>
           <ClientUiProvider platform={platform}><MotePeriodConversation source={moteHistory} client={client} visible={exposed && conversationVisible}
             name={moteTitle} onOpenOriginal={() => {
               let original
               try { original = client?.agentSession(moteHistory.reference.sessionId) } catch { /* A missing observation preserves this exact history reference. */ }
-              if (!original || original.hostId !== moteHistory.reference.hostId) { setNotice('原历史的 Host 或 Agent 尚未匹配；这段引用与当前草稿保留。'); return }
+              if (!original || original.hostId !== moteHistory.reference.hostId) { setNotice('这段历史对应的 Mac 或 Agent 还没匹配上，暂时无法打开。'); return }
               openSession(moteHistory.reference.sessionId, objectIdentity!)
             }} /></ClientUiProvider></section>}
         {!welcomeVisible && !historyVisible && moteConversation && !moteDirectAgent && moteTarget && objectIdentity && <MobileMoteStartRecovery client={client} target={moteTarget} visible={exposed && conversationVisible}
           onConfigure={() => openProfile(objectIdentity)} onBound={() => { teamReading.refresh(); moteDialogue.refresh() }} onOpenMain={reference => openMainAgent(reference.sessionId, objectIdentity, reference.hostId)} />}
         <div hidden={welcomeVisible || historyVisible} className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
 
-          {moteConversation && threadDetail ? <div className="mobile-mote-thread-return"><span>原 Agent 对话 · {sessionTitle ?? '成员'}</span><button type="button" onClick={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId!, section: 'threads', detail: false }) }}>返回 Threads</button></div> : null}
+          {moteConversation && threadDetail ? <div className="mobile-mote-thread-return"><span>Agent 对话 · {sessionTitle ?? '成员'}</span><button type="button" onClick={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId!, section: 'threads', detail: false }) }}>返回 Threads</button></div> : null}
           {workface.selectedSessionId && <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} moteMemberName={moteMemberName} moteTarget={moteTarget} moteDialogue={moteDialogue} moteDirectAgent={moteDirectAgent} moteName={moteTitle} moteAppearance={team?.appearance ?? objectIdentity?.mote?.appearance}
             moteWorkMemberName={source => workMember(source)?.name ?? source.origin.recipientSessionId} onOpenMoteWork={openMoteWork} onReturnMoteMain={returnToMoteMain}
             onMoteRolloverRequired={query => { if (teamSpaceId && moteTarget && !moteDirectAgent) { navigationRevision.current++; setMoteHistory(null); setMoteStart({ spaceId: teamSpaceId, mode: 'new', automatic: query }) } }}
@@ -666,10 +666,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         identity={[webObservation.inspection.result?.hostInstanceId, webObservation.inspection.result?.active?.digest]} className="mobile-web-update-notice" kind="feedback">
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
       </MobileNotice>}
-      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></MobileNotice>}
+      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
     </div>
     {workspaceVisible && <footer className="mobile-navigation-bar"><MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} needsYou={needsYou.length} /></footer>}
-    <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
+    <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: 'Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : ''}`} aria-describedby="mobile-sheet-description" onCloseAutoFocus={event => {
         const original = composeAfterClose.current
@@ -678,14 +678,14 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         event.preventDefault()
         const current = composeScope.current
         if (current.client !== original.client || current.sessionId !== original.sessionId || !current.visible) {
-          setNotice('已切换工作面，原聚焦操作未执行；草稿保留。')
+          setNotice('已切换到其他位置，未聚焦输入区。')
           return
         }
-        if (!current.focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。')
+        if (!current.focusComposer()) setNotice('输入区暂时未准备好，请稍后再试。')
       }}>
         <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
         {sheet === 'team' ? <>
-          <Dialog.Description id="mobile-sheet-description">原团队的当前工作与请求</Dialog.Description>
+          <Dialog.Description id="mobile-sheet-description">团队的当前工作与请求</Dialog.Description>
           <MobileMoteTeamPanel team={team} issue={teamReading.issue} currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId}
             onRefresh={() => { teamReading.refresh(); moteDialogue.refresh() }} onOpen={openTeamMember} onMain={() => returnToMoteMain()}
             onWork={(id, identity, member) => openTeamMember(id, identity, member, true)}
@@ -700,11 +700,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <label className="mobile-home-select">默认目录<select aria-label="退出对话后的默认目录" value={defaultHome} onChange={event => {
             const value = event.target.value as MobilePrimaryWorkface
             try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
-            catch { setHomeIssue('默认主页未保存；原设置和草稿保留。') }
+            catch { setHomeIssue('默认主页未保存，请重试。') }
           }}><option value="goals">Goals</option><option value="topics">Topics</option><option value="mote">Mote</option><option value="focus">Focus</option><option value="space">Space</option></select></label>
           {homeIssue && <MobileNotice identity={[homeIssue]} className="mobile-spatial-notice">{homeIssue}</MobileNotice>}
           {webObservation && <MobileWebUpdateSettings observation={webObservation} />}
-          <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断<small>{notices?.hasDismissed ? '有已收起的提醒' : '收起或恢复原提醒'}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
+          <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断<small>{notices?.hasDismissed ? '有已收起的提醒' : '收起或恢复提醒'}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
           <button className="mobile-menu-row" onClick={() => setSheet('connection')}><ThemeObjectNetworkIcon size={18} /><span>连接与设备<small>{location.host ? `${label} · ${location.host}` : label}</small></span><ThemeNavigationSubmenuIcon size={16} /></button></div>
         </> : sheet === 'notices' ? <>
           <Dialog.Description id="mobile-sheet-description">本设备的提醒呈现</Dialog.Description>
@@ -718,7 +718,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <MobileGoalOperationRecovery copyText={platform.copyText} />
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
-          <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
+          <Dialog.Description id="mobile-sheet-description">资料与当前工作</Dialog.Description>
           <MobileMoteProfile loadWhen={sheet === 'identity'} loadingReturn={false} onLoadReturn={requestBack} identity={profileIdentity} client={client} onOpenMain={() => { setSheet(null); void enterMote(profileIdentity?.mote?.spaceId ?? null) }} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
             openSession(id, profileIdentity); setShowGoalWork(true); setSheet(null)
           }} />
@@ -726,17 +726,17 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <Dialog.Description id="mobile-sheet-description">{menuTarget.identity.project}</Dialog.Description>
           {menuIssue && <MobileNotice owner={client} identity={[menuTarget.agentSessionId, menuIssue]} role="status">{menuIssue}</MobileNotice>}
           <MobileAgentActions key={menuTarget.agentSessionId} client={client} agentSessionId={menuTarget.agentSessionId} connected={connected} copyText={platform.copyText} beforeAction={validateMenuSource} statusSource={menuTarget} />
-          <button className="mobile-menu-row" onClick={() => { if (validateMenuSource()) { openSession(menuTarget.agentSessionId, menuTarget.identity); setSheet(null) } }}><ThemeObjectConversationIcon size={18} /><span>打开原对话</span></button>
+          <button className="mobile-menu-row" onClick={() => { if (validateMenuSource()) { openSession(menuTarget.agentSessionId, menuTarget.identity); setSheet(null) } }}><ThemeObjectConversationIcon size={18} /><span>打开对话</span></button>
         </> : sheet === 'actions' ? <>
-          {moteConversation && !moteDirectAgent && moteDialogue.page?.main.status === 'ready' && moteDialogue.page.main.current && <button type="button" className="mobile-menu-row" aria-label="新一轮" onClick={beginMoteRound}><ThemeObjectConversationIcon size={20} /><span>新一轮<small>保留原对话，继续同一个 Mote</small></span></button>}
-          <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? '原 Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
+          {moteConversation && !moteDirectAgent && moteDialogue.page?.main.status === 'ready' && moteDialogue.page.main.current && <button type="button" className="mobile-menu-row" aria-label="新一轮" onClick={beginMoteRound}><ThemeObjectConversationIcon size={20} /><span>新一轮<small>旧对话保留，继续同一个 Mote</small></span></button>}
+          <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? 'Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
           {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-menu-row" aria-label="撰写消息" onClick={() => { composeAfterClose.current = { client, sessionId: selected.agentSessionId }; setSheet(null) }}><ThemeActionComposeIcon size={17} /><span>撰写消息</span></button>}
           {workface.selectedSessionId && <MobileAgentActions client={client} agentSessionId={workface.selectedSessionId} connected={connected} copyText={platform.copyText} />}
           <button type="button" className="mobile-menu-row mobile-sheet-app-menu" aria-label="手机设置、提醒与诊断" onClick={() => setSheet('settings')}><ThemeActionMenuIcon size={18} /><span>手机设置、提醒与诊断<small>{label}{notices?.hasDismissed ? ' · 有已收起的提醒' : ''}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
           <p>Mac：{location.origin} · {label}</p>
-          <p className="mobile-sheet-note">Mac 保持在线即可继续使用原会话。</p>
+          <p className="mobile-sheet-note">Mac 保持在线即可继续使用对话。</p>
           {connectionPanel}
           <MobileRecoveryPanel {...(native ? { exportFile: exportNativeWorkfaceFile } : {})} />
           <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断</span><ThemeNavigationSubmenuIcon size={16} /></button>

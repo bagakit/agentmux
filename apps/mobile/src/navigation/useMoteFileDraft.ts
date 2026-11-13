@@ -24,7 +24,7 @@ function source(client: AgentMuxHostedClient | null, owner: DeviceWorkfaceStore,
 }
 function restore(draft: MoteFileDraft): MoteFileDraft {
   return { ...draft, attempts: draft.attempts.map(attempt => attempt.phase === 'sending'
-    ? { ...attempt, phase: 'unknown', issue: attempt.issue ?? '原页面的保存回执尚未确认；重开不会重发。' } : attempt) }
+    ? { ...attempt, phase: 'unknown', issue: attempt.issue ?? '上次保存还没确认，重新打开不会再次保存。' } : attempt) }
 }
 
 /** Explicit File writes after the original transaction has classified the complete input's preservation. */
@@ -71,15 +71,15 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (!next.scope) {
-        if (mounted.current && !next.scope) setStorageIssue('原 Host 身份尚未核实；当前稿可编辑和复制，尚未进入设备备份。')
+        if (mounted.current && !next.scope) setStorageIssue('Mac 还没确认，这份稿尚未进入设备备份；可以继续编辑或复制。')
         return { committed: false, canForward: false }
       }
       try {
         const ack = await owner.editMoteFileDraft(durable.current, parseMoteFileDraft(next), recordId)
-        if (ack.recordId !== recordId || owner.recordIdentity() !== recordId) throw new DeviceWorkfaceRecordChangedError('原设备记录已替换；此页不能写入新工作面。')
+        if (ack.recordId !== recordId || owner.recordIdentity() !== recordId) throw new DeviceWorkfaceRecordChangedError('这台设备的工作面已被替换，此页不能再保存。')
         if (!ack.applied) {
           conflicted.current = true
-          if (mounted.current) { setStorageConflict(true); setStorageIssue('另一页面修改了同一原稿；双方正文与请求已保全，本次未发送。可复制或采用设备原稿。') }
+          if (mounted.current) { setStorageConflict(true); setStorageIssue('另一个页面改了同一份稿，本次未发送；可以复制或采用设备上的那份。') }
           return { committed: false, canForward: false }
         }
         durable.current = ack.draft
@@ -91,8 +91,8 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
         const canForward = !knownDomainFailure && owner.recordIdentity() === recordId && owner.canRetrySave()
           && (knownCapacityGap || owner.snapshot().issue !== null)
         if (mounted.current) setStorageIssue(message(error) + (canForward
-          ? ' 本次完整请求未进入设备备份；当前原稿与冻结输入在内存保留，明确 Save 仍沿原 File 能力。'
-          : ' 当前完整正文保留；本次设备提交未确认，请复制保全。'))
+          ? ' 本次请求未进入设备备份，仍可以保存到 Mac。'
+          : ' 设备保存未确认，请复制保全。'))
         // The existing owner distinguishes an actual storage write failure from
         // record/CAS/domain uncertainty. An explicit File action can remain
         // usable, with its frozen input in memory and no fabricated backup ACK.
@@ -114,12 +114,12 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
     } else if (old.scope === null) {
       // A late original read gives a pin, never permission to replace later text.
       void retain({ ...old, scope: original.scope })
-      setChecked({ read, ...original }); setNotice('已核对当前原文件；后来正文保留，请明确采用修订。')
+      setChecked({ read, ...original }); setNotice('已核对当前文件，请确认是否采用这个版本。')
     }
   }, [target.observation, client, visible, owner, recordId])
   const edit = (body: string) => { edited.current = true; void retain({ ...current.current, body }) }
   async function chooseStored(value: MoteFileDraft) {
-    if (flight.current || adoption.current || owner.recordIdentity() !== recordId) { setNotice('原设备记录或保存状态已变化；当前稿保留。'); return }
+    if (flight.current || adoption.current || owner.recordIdentity() !== recordId) { setNotice('设备记录或保存状态已变化，请稍后重试。'); return }
     await queue.current.catch(() => {})
     if (flight.current || adoption.current || !mounted.current || owner.recordIdentity() !== recordId) return
     // The explicit adoption cannot erase a memory-only later edit or its
@@ -130,9 +130,9 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
     const snapshot = owner.snapshot()
     const canonical = snapshot.issue === null
       ? snapshot.record.moteFileDrafts?.find(item => sameMoteFileScope(item.scope, value.scope)) : value
-    if (!canonical) { setNotice('原设备稿尚未核实，当前正文保留。'); return }
+    if (!canonical) { setNotice('设备上的稿还没确认。'); return }
     durable.current = canonical; conflicted.current = false; setStorageConflict(false); setStorageIssue('')
-    setChecked(null); display(restore(canonical)); setNotice('已采用原设备稿；原冲突稿仍可复制。')
+    setChecked(null); display(restore(canonical)); setNotice('已采用设备上的稿，冲突的那份仍可复制。')
   }
   function valid(originalClient: AgentMuxHostedClient, epoch: number, original: { scope: MoteFileDraftScope; ownerInstanceId: string }) {
     const now = connection()
@@ -141,40 +141,40 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
   }
   async function inspect() {
     const old = current.current, originalClient = context.current.client, original = connection(originalClient), epoch = context.current.epoch
-    if (!old.scope) { refreshOriginal(); setNotice('正在核对原文件；当前正文仍保留。'); return }
+    if (!old.scope) { refreshOriginal(); setNotice('正在核对文件…'); return }
     if (!old.scope || !originalClient?.forwardRpc || !original || !sameMoteFileScope(old.scope, original.scope) || !valid(originalClient, epoch, original)) {
-      setNotice('核对未完成：原 Host 或记录尚未匹配；正文与原请求保留。'); return
+      setNotice('核对未完成：Mac 或设备记录还没对上。'); return
     }
     try {
       const params = moteFileReadParams(old.scope), read = parseFileReadResult(await originalClient.forwardRpc('file.read', params), params)
-      if (!read.resource || !sameMoteFileResource(read.resource, old.scope.resource)) throw new Error('原文件映射已改变；本次读取不能替代原 resource。')
-      if (valid(originalClient, epoch, original)) { setChecked({ read, ...original }); setNotice('已核对原文件当前事实；未知保存仍未确认。') }
-    } catch (error) { if (valid(originalClient, epoch, original)) setNotice('核对未完成：' + message(error) + ' 原稿与请求保留。') }
+      if (!read.resource || !sameMoteFileResource(read.resource, old.scope.resource)) throw new Error('文件位置已改变，这次读取的不是同一个文件。')
+      if (valid(originalClient, epoch, original)) { setChecked({ read, ...original }); setNotice('已核对当前文件，上次保存仍未确认。') }
+    } catch (error) { if (valid(originalClient, epoch, original)) setNotice('核对未完成：' + message(error) + '') }
   }
   async function adoptChecked() {
     const old = current.current, originalClient = context.current.client, original = connection(), epoch = context.current.epoch
     const baseline = checked ? moteFileBaseline(checked.read) : null
     if (flight.current || adoption.current || !old.scope || !checked || !baseline || !originalClient || !original
       || !sameMoteFileScope(old.scope, checked.scope) || original.ownerInstanceId !== checked.ownerInstanceId || !valid(originalClient, epoch, original)) {
-      setNotice('采用未完成：先核对同一原文件；正文与未知请求保留。'); return
+      setNotice('采用未完成，请先核对文件。'); return
     }
     // An optimistic device projection cannot authorize a new business write.
     // Keep explicit Save separate until this exact adoption has its commit ACK.
     adoption.current = true; setAdopting(true)
     try {
       const committed = await retain({ ...old, baseline, blockedAttemptId: null })
-      if (committed.committed && valid(originalClient, epoch, original)) { setChecked(null); setNotice('已采用当前修订；未知原请求和后来正文保留，下次须明确 Save。') }
+      if (committed.committed && valid(originalClient, epoch, original)) { setChecked(null); setNotice('已采用当前版本，下次需要再保存一次。') }
       else {
         if (mounted.current && owner.recordIdentity() === recordId) await retain({ ...current.current, baseline: old.baseline, blockedAttemptId: old.blockedAttemptId })
-        if (mounted.current) setNotice('采用尚未确认；原 revision、未知请求与后来正文保留。')
+        if (mounted.current) setNotice('采用还没确认，请稍后重试。')
       }
     } finally { adoption.current = false; if (mounted.current) setAdopting(false) }
   }
   async function save() {
     const old = current.current, originalClient = context.current.client, original = connection(originalClient), epoch = context.current.epoch
-    if (flight.current || adoption.current || old.blockedAttemptId) { setNotice('先核对并明确采用原文件当前修订；完整原请求与当前正文保留。'); return }
+    if (flight.current || adoption.current || old.blockedAttemptId) { setNotice('请先核对文件并采用当前版本。'); return }
     if (!old.scope || !old.baseline || !originalClient?.forwardRpc || !original || !sameMoteFileScope(old.scope, original.scope)
-      || !valid(originalClient, epoch, original)) { setNotice('保存未发送：原文件基线、Host 或记录尚未核实；正文可编辑和复制。'); return }
+      || !valid(originalClient, epoch, original)) { setNotice('保存未发送：文件版本、Mac 或设备记录还没确认。'); return }
     let attempt: MoteFileAttempt
     try {
       const common = { attemptId: randomClientRequestId(), ownerInstanceId: original.ownerInstanceId, phase: 'sending' as const, issue: null }
@@ -200,7 +200,7 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
       memoryOnly = committed.canForward && !committed.committed
       if (!committed.canForward || !active()) {
         if (mounted.current && owner.recordIdentity() === recordId) await retain(hold('failed', '本次请求未发送；完整设备意图的提交或归属未确认。'))
-        if (mounted.current) setNotice('本次保存未发送；原稿和完整请求保留。')
+        if (mounted.current) setNotice('本次保存未发送。')
         return
       }
       const result = attempt.kind === 'write'
@@ -208,22 +208,22 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
         : parseFileCreateResult(await originalClient.forwardRpc('file.create', attempt.input), attempt.input)
       if (!active()) return
       if (result.result.status !== 'written') {
-        const issue = result.result.status === 'conflict' ? '原 revision 已改变；先核对同一原文件并明确采用。'
+        const issue = result.result.status === 'conflict' ? '文件版本已改变，请先核对并采用当前版本。'
           : result.result.code + '：' + result.result.message
         await retain({ ...hold(result.result.status === 'unknown' ? 'unknown' : 'failed', issue), blockedAttemptId: attempt.attemptId })
-        if (mounted.current) setNotice(result.result.status === 'unknown' ? '保存回执未确认；原请求和后来正文保留。' : '本次保存未完成；核对原文件，正文仍可编辑。')
+        if (mounted.current) setNotice(result.result.status === 'unknown' ? '保存还没确认。' : '本次保存未完成，可以核对文件后重试。')
         return
       }
       const settled = await retain({ ...current.current, baseline: { status: 'read', content: attempt.input.content, revision: result.result.revision },
         blockedAttemptId: null, attempts: current.current.attempts.filter(value => value.attemptId !== attempt.attemptId) })
       if (!settled.committed || !valid(originalClient, epoch, original)) {
-        if (mounted.current && owner.recordIdentity() === recordId) await retain(hold('unknown', 'Host 已回应，设备回执或页面归属尚未持久确认。'))
+        if (mounted.current && owner.recordIdentity() === recordId) await retain(hold('unknown', 'Mac 已回应，这台设备还没记下结果。'))
         return
       }
-      setNotice(current.current.body === attempt.input.content ? '原文件已保存。' : '原文件已保存；后来正文尚未保存。')
+      setNotice(current.current.body === attempt.input.content ? '文件已保存。' : '文件已保存，之后的修改还没保存。')
       latest.current.onSaved()
     } catch (error) {
-      if (active()) { await retain(hold('unknown', message(error))); if (mounted.current) setNotice('保存回执未确认；原稿、完整请求与后来正文保留。') }
+      if (active()) { await retain(hold('unknown', message(error))); if (mounted.current) setNotice('保存还没确认。') }
     } finally { flight.current = false; if (mounted.current) setSaving(false) }
   }
   const canonical = owner.recordIdentity() === recordId && draft.scope

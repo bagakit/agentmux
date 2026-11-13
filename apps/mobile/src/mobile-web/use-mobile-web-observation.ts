@@ -71,7 +71,7 @@ export function useMobileWebObservation(client: AgentMuxHostedClient | null, ena
         connectionEpoch.current++
         current.current.connected = event.state === 'restored'
         setLoaded({ client, ...emptyRead })
-        setInspection(previous => ({ ...previous, issue: '连接状态已变化，正在重新核对原页面版本。' }))
+        setInspection(previous => ({ ...previous, issue: '连接状态已变化，正在重新核对页面版本。' }))
         setConsumer({ client, connected: event.state === 'restored' })
         if (event.state === 'restored') retryLoad(value => value + 1)
       }
@@ -98,16 +98,16 @@ export function useMobileWebObservation(client: AgentMuxHostedClient | null, ena
       requests.loaded = attempt; requests.loadedEpoch = epoch
     }
     void requests.loaded.then(result => {
-      if (mounted.current && current.current.requests === requests && connectionEpoch.current === epoch) setLoaded({ client, result, pending: false, issue: result.accepted ? null : '页面版本观察未被接纳；原页面可继续使用，可稍后重试报送。' })
+      if (mounted.current && current.current.requests === requests && connectionEpoch.current === epoch) setLoaded({ client, result, pending: false, issue: result.accepted ? null : '页面版本报送未被接收，可以稍后重试。' })
     }).catch(() => { if (mounted.current && current.current.requests === requests && connectionEpoch.current === epoch) setLoaded(previous => ({ client, result: previous.client === client ? previous.result : null,
-      pending: false, issue: '页面版本报送未确认；原页面可继续使用，可重试原报送。' })) })
+      pending: false, issue: '页面版本报送未确认，可以重试。' })) })
   }, [client, page, requests, connected, loadRevision])
   const refresh = useCallback(async () => {
     if (!mounted.current || current.current.requests !== requests) return
     const source = current.current, receipt = source.loaded.client === client ? source.loaded.result : null
     if (!client?.forwardRpc || !page || !receipt?.accepted || !source.connected) {
       setInspection(previous => ({ client, result: previous.client === client ? previous.result : null, pending: false,
-        issue: '尚无准确的页面报送回执或连接暂不可用；原页面保留，未猜测设备或版本。' })); return
+        issue: '页面版本报送还没确认，或连接暂不可用。' })); return
     }
     const target = receipt.producer
     const epoch = connectionEpoch.current

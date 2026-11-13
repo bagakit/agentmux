@@ -17,7 +17,7 @@ import { finishReloadIdentity, matchesReloadIdentity, mobileUpdateFragment, prep
 const OFFER_KEY = 'agentmux.connection-offer.v2'
 function reloadRecordIdentity(hostId: string): string | null {
   const { record, issue } = getDeviceWorkface().snapshot()
-  if (issue || record.host?.origin !== location.origin || record.host.hostId !== hostId) throw new Error('原设备工作面暂不可完整读取。')
+  if (issue || record.host?.origin !== location.origin || record.host.hostId !== hostId) throw new Error('这台设备的工作面记录暂时无法完整读取。')
   return record.recordId ?? null
 }
 export function MobileConnectionRoot({ platform, native, focusComposer, offer, linkIssue }: {
@@ -48,7 +48,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   }, [])
   const prepareReload = useCallback(() => {
     const original = binding.current
-    if (original?.state !== 'connected') throw new Error('原连接暂不可用')
+    if (original?.state !== 'connected') throw new Error('连接暂不可用')
     return prepareReloadIdentity(original.key, original.offer, reloadRecordIdentity(original.hostId))
   }, [])
   const mobileWeb = useMobileWebObservation(client, !native)
@@ -67,15 +67,15 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
       if (linkIssue) throw new Error(linkIssue)
       let saved: string | null
       try { saved = localStorage.getItem(OFFER_KEY) }
-      catch { throw new Error('原 Mac 连接记录暂时无法读取；请恢复这台设备的存储后重新检查，原记录保留。') }
+      catch { throw new Error('这台设备暂时读不到 Mac 连接记录，请恢复设备存储后重新检查。') }
       let original: ConnectionOffer | undefined
       if (saved) try { original = parseConnectionOffer(JSON.parse(saved)) }
-      catch { throw new Error('原 Mac 连接记录无法完整读取；原记录保留，请恢复原连接记录后重新检查。') }
+      catch { throw new Error('Mac 连接记录无法完整读取，请恢复这条记录后重新检查。') }
       selected = offer ?? original
       if (!selected) throw new Error('请在 Mac 的手机连接中复制链接，在这台设备打开。')
       const previous = getDeviceWorkface().snapshot().record.host
-      if (previous && previous.hostId !== selected.serverId) throw new Error('链接属于另一台 Mac，原会话和草稿保留。请打开原 Mac 的连接链接。')
-      if (offer && original && original.serverId === offer.serverId && original.daemonPublicKeyB64 !== offer.daemonPublicKeyB64) throw new Error('原 Mac 的加密身份发生变化，原连接记录保留。请恢复原 Mac 的身份。')
+      if (previous && previous.hostId !== selected.serverId) throw new Error('这个链接属于另一台 Mac，请打开之前那台 Mac 的连接链接。')
+      if (offer && original && original.serverId === offer.serverId && original.daemonPublicKeyB64 !== offer.daemonPublicKeyB64) throw new Error('这台 Mac 的加密身份已变化，请先在 Mac 上恢复原来的身份。')
       if (offer && (native || location.hash !== mobileUpdateFragment)) keepOffer(offer)
     } catch (error) { setConnection({ state: 'unavailable', message: error instanceof Error ? error.message : String(error) }); return }
     const connect = async () => {
@@ -85,7 +85,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
       try {
         const updating = !native && location.hash === mobileUpdateFragment
         const keyPair = updating ? await existingDeviceRelayIdentity() : await deviceRelayIdentity()
-        if (!keyPair || updating && !matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('更新后的原设备身份、工作面或 Mac 连接不匹配；原交接记录保留。请恢复原设备密钥、工作面和原 Mac 连接后重试。')
+        if (!keyPair || updating && !matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('更新网页后，设备身份、工作面或 Mac 连接对不上，请恢复后重试。')
         if (controller.signal.aborted) return
         if (updating && offer) keepOffer(offer)
         if (updating) {
@@ -93,7 +93,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
           // first read is committed inside its synchronous transaction callback.
           await withDeviceStorageLock(() => {
             if (controller.signal.aborted) return
-            if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('原工作面在重新打开期间发生变化；请恢复原工作面后重试。')
+            if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('重新打开网页期间工作面发生了变化，请恢复后重试。')
             restoreWorkface.current = true
             flushSync(() => setUpdatePending(false))
           })
@@ -103,7 +103,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal })
         if (controller.signal.aborted) { await value.dispose(); return }
         if (updating) try {
-          if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('原工作面在重连期间发生变化；原身份交接保留，请恢复原工作面后重试。')
+          if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('重新连接期间工作面发生了变化，请恢复后重试。')
         } catch (error) { await value.dispose(); throw error }
         if (updating) {
           try {
@@ -126,9 +126,9 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         release = value.onEvent(event => {
           if (event.type !== 'connection-state' || event.observationOrigin?.boundary !== 'consumer-core') return
           observation = event.state === 'restored' ? { state: 'connected', message: '已连接 Mac' }
-            : event.state === 'unrecoverable' ? { state: 'unavailable', message: '连接需要处理，自动重连已暂停；原会话与草稿保留。',
+            : event.state === 'unrecoverable' ? { state: 'unavailable', message: '连接需要处理，自动重连已暂停。',
               ...(event.diagnostic ? { issue: `${event.diagnostic.code}: ${event.diagnostic.message}` } : {}) }
-              : { state: 'disconnected', message: '连接中断，自动重连中；原会话与草稿保留。' }
+              : { state: 'disconnected', message: '连接中断，正在自动重连。' }
           publish()
         })
         try { await getDeviceWorkface().confirmHost({ origin: location.origin, hostId: selected!.serverId }) }
@@ -136,8 +136,8 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         publish()
       } catch (error) {
         if (controller.signal.aborted) return
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '此设备的授权未通过确认；原会话和草稿保留。请重新确认设备授权后连接。' }); return }
-        setConnection({ state: 'disconnected', message: `暂时无法连接，自动重试中；原会话与草稿保留。${error instanceof Error ? error.message : String(error)}` })
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '这台设备的授权未通过确认，请重新确认授权后连接。' }); return }
+        setConnection({ state: 'disconnected', message: `暂时无法连接，正在自动重试。${error instanceof Error ? error.message : String(error)}` })
         timer = setTimeout(() => { void connect() }, Math.min(30000, 1000 * 2 ** Math.min(attempt++, 5)))
       } finally { working = false }
     }
@@ -147,18 +147,18 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     return () => { controller.abort(); clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [offer, linkIssue, connectionRetry])
   if (updatePending) return <main className="mobile-chat-start mobile-update-recovery" aria-live="polite">
-    <strong>正在接回原工作面</strong><p>{connection.message}</p>
-    <p>若无法返回上一页，请恢复这台设备的原工作面、设备身份与 Mac 连接后重新检查。</p>
+    <strong>正在接回工作面</strong><p>{connection.message}</p>
+    <p>如果无法返回上一页，请恢复这台设备的工作面、身份与 Mac 连接后重新检查。</p>
     <div className="mobile-update-recovery__actions">
-      <button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查原连接</button>
-      <button type="button" onClick={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页；请恢复原工作面、设备身份与 Mac 连接，再重新检查。') }}>返回上一页</button>
+      <button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button>
+      <button type="button" onClick={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页，请恢复工作面、设备身份与 Mac 连接后重新检查。') }}>返回上一页</button>
     </div>
     {returnIssue && <p role="status">{returnIssue}</p>}
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
     <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
       {...(focusComposer ? { focusComposer } : {})} connectionPanel={connection.state === 'unavailable'
-        ? <><p>请核对原 Mac 的连接与授权。修复后可重新检查，原会话和草稿不会重发。</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查原连接</button></>
+        ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></>
         : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
   </MobileWebCatalogObservation.Provider></MobileWebUpdateSafetyProvider>
 }

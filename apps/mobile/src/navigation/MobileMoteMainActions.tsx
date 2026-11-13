@@ -27,7 +27,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
   const [issue, setIssue] = useState(''), [busy, setBusy] = useState(false), [revision, refresh] = useState(0), [intentRevision, reloadIntents] = useState(0)
   const source = useRef({ client, target, visible }); source.current = { client, target, visible }
   const flight = useRef(false), owner = getDeviceWorkface()
-  useMobileWebUpdateSafetyOwner(() => flight.current ? '原 Main 创建或核对仍在进行，请完成后再更新网页。' : null)
+  useMobileWebUpdateSafetyOwner(() => flight.current ? '主 Agent 设置还在进行，请完成后再更新网页。' : null)
   useEffect(() => {
     if (!visible || !client?.forwardRpc) return
     let live = true
@@ -37,7 +37,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
       client.forwardRpc('space.mote.dialogue.read', { target, kind: 'main' }), client.forwardRpc('space.state', {})]).then(async ([raw, dialogue, spatial]) => {
       const current = client.runtimeOwnerIdentity?.()
       if (!live) return
-      if (runtime?.runtimeId !== current?.runtimeId || runtime?.ownerInstanceId !== current?.ownerInstanceId) throw Error('原 Mac 归属已变化；保留原创建，刷新核对。')
+      if (runtime?.runtimeId !== current?.runtimeId || runtime?.ownerInstanceId !== current?.ownerInstanceId) throw Error('Mac 连接已变化，请刷新后核对。')
       const preferences = parseMotePreferencesReadResult(raw, { kind: 'quick', target })
       const device = owner.snapshot().record
       const original = (device.agentCreates ?? []).filter(item => item.runtimeId === runtime?.runtimeId && item.deviceHostId === (device.host?.hostId ?? null) && item.input.moteMain && sameMotePreferencesTarget(item.input.moteMain.target, target) && item.phase !== 'confirmed')
@@ -68,9 +68,9 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
   const baseline = reading && moteQuickBaseline(reading.preferences)
   const executor = reading?.preferences.choices.executors.find(item => item.id === reading.preferences.defaults?.executorId)
   const readIssue = !reading ? null : reading.preferences.status !== 'ready' || !baseline || reading.preferences.issue
-    ? reading.preferences.issue ?? '原 MOTE 配置尚未确认，请刷新。'
+    ? reading.preferences.issue ?? 'MOTE 配置还没确认，请刷新。'
     : reading.dialogue.main.status !== 'ready' || reading.dialogue.main.documentRevision !== (baseline.document?.revision ?? null) || !sameMoteQuickDefaults(reading.dialogue.main.current ? { conversation: reading.dialogue.main.current } : {}, baseline.defaults.conversation ? { conversation: baseline.defaults.conversation } : {})
-      ? '原主角色与配置尚未确认为同一修订，请刷新。'
+      ? '主角色与配置的版本还没对上，请刷新。'
       : !executor ? '先配置此 Mote 的默认 Executor，再新建 Main Agent。' : null
   async function run(action: 'create' | 'inspect' | 'advance', query?: MobileMoteStartQuery, selectedOperationId?: string) {
     if (!client?.forwardRpc || flight.current || !visible) return
@@ -80,9 +80,9 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     flight.current = true; setBusy(true); setIssue('')
     let id = selectedOperationId ?? operationId, intent: MobileAgentCreateIntent | undefined
     try {
-      if (!runtime?.runtimeId) throw Error('原 Mac 运行身份尚未确认；原会话与请求保留。')
+      if (!runtime?.runtimeId) throw Error('Mac 还没确认，请稍后重试。')
       if (action === 'create') {
-        if (!reading || readIssue || !baseline || !executor) throw Error(readIssue ?? '请先核对原配置。')
+        if (!reading || readIssue || !baseline || !executor) throw Error(readIssue ?? '请先核对配置。')
         if (query && !query.prompt.trim()) return
         const record = owner.snapshot().record
         const ownsDraft = (scope: { runtimeId: string; deviceHostId: string | null; origin: string }) => scope.runtimeId === runtime.runtimeId && scope.deviceHostId === deviceHostId && scope.origin === (record.host?.origin || record.hostUrl || location.origin)
@@ -91,7 +91,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
         const state = (await client.forwardRpc('space.state', {})).state
         const pending = state && pendingMoteMainCreation(state.graph, target)
         const starts = state ? pendingMoteMainStarts(state.graph, target) : []
-        if (query && (pending || starts.length)) throw Error('此 Mote 有原开始请求待核对；本次草稿保留，请明确核对原操作。')
+        if (query && (pending || starts.length)) throw Error('这个 Mote 有一次开始待核对，请先核对。')
         if (pending) id = pending.requestId
         else {
           id = query?.rollover?.creationOperationId ?? randomClientRequestId()
@@ -103,7 +103,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
           await client.forwardRpc('agent.open', intent.input)
         }
       }
-      if (!id) throw Error('原创建操作尚未确认，请刷新。')
+      if (!id) throw Error('创建还没确认，请刷新。')
       if (!current()) return
       const input = { target, creation: { hostId: 'local', operationId: id } }
       const method = action === 'inspect' ? 'space.mote.dialogue.setup.inspect' : 'space.mote.dialogue.setup.advance'
@@ -116,19 +116,19 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
       if (value.binding === 'confirmed') { onBound(); refresh(value => value + 1) }
     } catch (cause) {
       if (intent) { try { await owner.retainAgentCreate({ ...intent, phase: 'unknown' }, recordId) } catch { /* Original sending intent is retained; never create again on this failure. */ } }
-      if (current()) setIssue(message(cause) + ' 原请求与会话保留；核对同一操作，不重复创建。')
+      if (current()) setIssue(message(cause) + ' 可以核对这次创建，不会重复创建。')
     } finally { flight.current = false; if (current()) { setBusy(false); reloadIntents(value => value + 1) } }
   }
   if (renderStart) return renderStart({ reading, result, issue: issue || readIssue, busy, ready: Boolean(reading && !readIssue && !pendingIds.length), pending: pendingIds,
     submit: query => run('create', query), inspect: id => { void run('inspect', undefined, id) }, advance: id => { void run('advance', undefined, id) }, refresh: () => refresh(value => value + 1) })
   return <section className="mobile-mote-setup" aria-label="Main Agent">
     <h3>{reading?.dialogue.main.current ? '轮转 Main Agent' : '开始主对话'}</h3>
-    <p>{reading?.dialogue.main.current ? '由新 Main 承接同一个 Mote；已有 Agent 与原对话保留。' : '为同一个 Mote 创建承接主对话的 Main Agent。'}</p>
-    {(!reading && !issue) && <p role="status">正在核对原主对话与配置…</p>}
+    <p>{reading?.dialogue.main.current ? '由新的主 Agent 承接同一个 Mote，已有 Agent 与对话不受影响。' : '为同一个 Mote 创建承接主对话的 Main Agent。'}</p>
+    {(!reading && !issue) && <p role="status">正在核对主对话与配置…</p>}
     {readIssue && <p role="status">{readIssue}</p>}
     {issue && <p role="status">{issue}</p>}
-    {result && <p role="status">{result.binding === 'confirmed' ? 'Main 已绑定，可回到主对话。' : result.issue ?? '原创建已保留，主角色绑定尚未确认。'}</p>}
-    {operationId && (!result || result.binding === 'unconfirmed') ? <div><button type="button" disabled={busy} onClick={() => void run('inspect')}>核对原 Main 创建</button><button type="button" disabled={busy} onClick={() => void run('advance')}>继续原 Main 设置</button></div>
+    {result && <p role="status">{result.binding === 'confirmed' ? 'Main 已绑定，可回到主对话。' : result.issue ?? '主 Agent 已创建，绑定还没确认。'}</p>}
+    {operationId && (!result || result.binding === 'unconfirmed') ? <div><button type="button" disabled={busy} onClick={() => void run('inspect')}>核对主 Agent 创建</button><button type="button" disabled={busy} onClick={() => void run('advance')}>继续设置主 Agent</button></div>
       : reading && !readIssue && <button type="button" disabled={busy} onClick={() => void run('create')}>{busy ? '正在处理…' : reading.dialogue.main.current ? '新建并轮转 Main Agent' : '新建 Main Agent'}</button>}
     {result?.binding === 'confirmed' && onOpenMain && <button type="button" onClick={onOpenMain}>打开主对话</button>}
     <button type="button" onClick={onConfigure}>配置默认 Executor</button><button type="button" disabled={busy} onClick={() => refresh(value => value + 1)}>刷新主对话配置</button>

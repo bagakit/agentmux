@@ -20,14 +20,14 @@ export function useMobileMoteTeam(client: AgentMuxHostedClient | null, spaceId: 
       if (inFlight) { dirty = true; return }
       inFlight = true
       try {
-        if (!client.forwardRpc) throw new Error('原团队读取端口暂不可用；原对话保留。')
+        if (!client.forwardRpc) throw new Error('连接暂不可用，暂时读不到团队。')
         const owner = client.runtimeOwnerIdentity?.()
         const result = await client.forwardRpc('space.ls', { target: { spaceId }, presentation: true })
         const current = client.runtimeOwnerIdentity?.()
         if (!live) return
         if (owner?.runtimeId !== current?.runtimeId || owner?.ownerInstanceId !== current?.ownerInstanceId)
-          throw new Error('读取期间原 Mac 归属已变化，原团队引用保留，请刷新核对。')
-        if (!mobileMoteTeam(result.catalog, spaceId, client)) throw new Error('原 Mote 范围尚未确认，原成员和会话保留。')
+          throw new Error('读取期间 Mac 连接已变化，请刷新团队。')
+        if (!mobileMoteTeam(result.catalog, spaceId, client)) throw new Error('这个 Mote 的范围还没确认，请刷新团队。')
         setReading({ client, spaceId, catalog: result.catalog }); setFailure(null)
       } catch (error) { if (live) setFailure({ client, spaceId, message: error instanceof Error ? error.message : String(error) }) }
       finally { inFlight = false; if (dirty && live) { dirty = false; void read() } }
@@ -42,5 +42,5 @@ export function useMobileMoteTeam(client: AgentMuxHostedClient | null, spaceId: 
     return () => { live = false; release(); document.removeEventListener('visibilitychange', foreground) }
   }, [client, spaceId, connected, active, revision])
   return { team, issue: failure?.client === client && failure.spaceId === spaceId ? failure.message :
-    !connected ? '连接暂不可用；原团队与会话保留。' : null, refresh: () => refresh(value => value + 1) }
+    !connected ? '连接暂不可用，连上 Mac 后刷新团队。' : null, refresh: () => refresh(value => value + 1) }
 }

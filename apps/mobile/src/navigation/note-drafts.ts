@@ -43,8 +43,8 @@ function parse(raw: string): NoteEditState {
     || value.attempt && (typeof value.attempt.content !== 'string' || !revision(value.attempt.expectedRevision) || !['sending', 'unknown', 'written'].includes(value.attempt.phase) || !history(value.attempt.noteHistory) ||
       value.attempt.phase === 'written' && (!written(value.attempt.written) || value.attempt.written!.revision !== value.expectedRevision) ||
       value.attempt.phase !== 'written' && (value.attempt.written !== undefined || value.attempt.canonicalContent !== undefined) ||
-      value.attempt.canonicalContent !== undefined && (typeof value.attempt.canonicalContent !== 'string' || !written(value.attempt.written) || !revision(value.expectedRevision)))) throw new Error('原设备草稿无法完整读取')
-  if (value.attempt?.canonicalContent !== undefined && acknowledgeNoteCanonicalRead(value, { content: value.attempt.canonicalContent, revision: value.expectedRevision }) === value) throw new Error('原保存正文无法准确核对')
+      value.attempt.canonicalContent !== undefined && (typeof value.attempt.canonicalContent !== 'string' || !written(value.attempt.written) || !revision(value.expectedRevision)))) throw new Error('设备草稿无法完整读取')
+  if (value.attempt?.canonicalContent !== undefined && acknowledgeNoteCanonicalRead(value, { content: value.attempt.canonicalContent, revision: value.expectedRevision }) === value) throw new Error('已保存的正文无法核对')
   return value
 }
 /** Device-owned draft and unresolved save intent, never a filesystem truth or write queue. */
@@ -52,7 +52,7 @@ export function noteDrafts(identity: readonly string[]) {
   const key = prefix + JSON.stringify(identity)
   let observed: string | null = null, inspected: string | null = null
   let initial: NoteEditState | undefined, issue = '', readable = true, memoryOnly = false
-  const listener = (raw: string, durable = true) => { if (durable) observed = raw; else memoryOnly = true; for (const callback of callbacks) callback(parse(raw), durable ? undefined : '本机保存回执未持久保存；已确认的原文件回执与当前草稿仍保留。恢复本机存储后可核对当前原文以重试保全。') }
+  const listener = (raw: string, durable = true) => { if (durable) observed = raw; else memoryOnly = true; for (const callback of callbacks) callback(parse(raw), durable ? undefined : '这台手机没能记下保存结果，恢复设备存储后可以重新核对。') }
   const callbacks = new Set<(value: NoteEditState, issue?: string) => void>()
   const current = (raw: string): NoteEditState => {
     const value = parse(raw)
@@ -61,7 +61,7 @@ export function noteDrafts(identity: readonly string[]) {
   try {
     observed = localStorage.getItem(key)
     if (observed !== null) { initial = current(observed); latest.set(key, observed) }
-  } catch (error) { readable = false; issue = `${error instanceof Error ? error.message : String(error)}；原存储未覆盖，当前仍可编辑。` }
+  } catch (error) { readable = false; issue = `${error instanceof Error ? error.message : String(error)}。当前仍可编辑。` }
   function save(value: NoteEditState) {
     memoryOnly = true
     if (!readable) throw new Error(issue)
@@ -75,11 +75,11 @@ export function noteDrafts(identity: readonly string[]) {
   return {
     initial, issue, save,
     reloadIssue() {
-      if (pending.get(key)) return '笔记保存仍在进行；请等待原回执，再更新网页。'
+      if (pending.get(key)) return '笔记还在保存，请等保存完成后再更新网页。'
       try {
         if (readable && !memoryOnly && localStorage.getItem(key) === observed) return null
       } catch { /* Preserve the current editor when storage cannot be read. */ }
-      return '笔记草稿或原回执尚未确认保存在设备；请先保存或复制保全，再更新网页。'
+      return '笔记草稿还没保存到这台设备，请先保存或复制，再更新网页。'
     },
     /** Exact owner receipts re-key the original device draft; original records remain backups. */
     restoreRelocated(resource: FileReadResource, noteId: string, changes: readonly NotesResourceChange[], bodyRevision: string) {
@@ -102,18 +102,18 @@ export function noteDrafts(identity: readonly string[]) {
         if (origin) { const raw = localStorage.getItem(candidateKey); if (raw !== null) matches.push({ key: candidateKey, raw, origin }) }
       }
       if (!matches.length) return false
-      if (matches.length > 1) throw new Error('原设备存在多个准确资源草稿；全部保留，请先核对原工作面，未自动选择或覆盖')
+      if (matches.length > 1) throw new Error('这台设备上有多份同一文件的草稿，请先核对工作面')
       const match = matches[0]!, legacy = JSON.parse(match.raw) as NoteEditState
       const converted = convertLegacyNoteDraft(legacy.draft, noteId)
-      if (legacy.noteId !== noteId || converted.status === 'unconfirmed') throw new Error(converted.status === 'unconfirmed' ? converted.message : '原设备草稿Note身份不匹配')
-      if (converted.status === 'converted' && !match.origin.conversion) throw new Error('原格式转换回执尚未确认；旧设备草稿保留，未自动改写')
+      if (legacy.noteId !== noteId || converted.status === 'unconfirmed') throw new Error(converted.status === 'unconfirmed' ? converted.message : '设备草稿与这条笔记对不上')
+      if (converted.status === 'converted' && !match.origin.conversion) throw new Error('格式转换还没确认，旧草稿未改写')
       const retained = parse(JSON.stringify({ ...legacy, draft: converted.content }))
       const originalDraft = { draft: legacy.draft, expectedRevision: legacy.expectedRevision }
       let next: NoteEditState = { ...retained, ...(retained.attempt ? { attempt: { ...retained.attempt, phase: retained.attempt.phase === 'written' ? 'written' : 'unknown' } } : {}),
         ...(converted.status === 'converted' ? { alternates: [...retained.alternates ?? [], originalDraft] } : {}) }
       if (!next.attempt && match.origin.conversion && next.expectedRevision === match.origin.conversion.sourceRevision && bodyRevision === match.origin.conversion.targetRevision) next.expectedRevision = bodyRevision
       const currentRaw = localStorage.getItem(key)
-      if (currentRaw !== observed || localStorage.getItem(match.key) !== match.raw) throw new Error('原设备草稿在转换观察期间改变，两份均保留；请刷新核对')
+      if (currentRaw !== observed || localStorage.getItem(match.key) !== match.raw) throw new Error('转换期间设备草稿发生了变化，请刷新核对')
       if (currentRaw !== null) {
         const current = parse(currentRaw), alternates = [...current.alternates ?? []], unconfirmed = [...current.unconfirmed ?? []]
         for (const draft of [{ draft: next.draft, expectedRevision: next.expectedRevision }, ...next.alternates ?? []]) {

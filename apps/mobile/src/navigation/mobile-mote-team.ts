@@ -61,7 +61,7 @@ export function mobileMoteTeam(catalog: AgentMuxSpaceCatalog, spaceId: string, c
       const presentation = session && occurrences.get(sessionId) === 1 && rows?.length === 1 ? rows[0] : undefined
       const issue = !hostId ? '这个成员的执行端尚未确认；已有讨论和工作面引用保留，可刷新团队核对。'
         : observed && !session ? '当前连接与这个成员不匹配；已有引用保留，请接回对应的工作环境。'
-          : !session ? '这个成员的原对话尚未确认；已有引用保留，可刷新团队或从原工作面继续。' : undefined
+          : !session ? '这个成员的对话还没确认，可以刷新团队后重试。' : undefined
       const pending = !issue && hostId && session?.hostId === hostId ? session.pendingInteraction : undefined
       const request = agentInteractionActiveRequest(pending)
       const requestCurrent = request && session && request.agentSessionId === sessionId &&
@@ -83,7 +83,7 @@ export function mobileMoteMainIdentity(team: MobileMoteTeam): MobileObjectIdenti
   const member = team.members.find(value => value.sessionId === main.reference.sessionId && value.hostId === main.reference.hostId)
   const places = member?.places.filter(place => place.tabId === main.reference.tabId && place.regionId === main.reference.regionId &&
     place.displayWorkspaceId === main.reference.displayWorkspaceId && place.groupId === main.reference.groupId) ?? []
-  return { name: member?.name ?? '原主对话', project: team.name,
+  return { name: member?.name ?? '主对话', project: team.name,
     ...(main.confirmed && places.length === 1 ? { context: places[0] } : {}),
     mote: { spaceId: team.spaceId, name: team.name, facts: team.facts } }
 }

@@ -36,7 +36,7 @@ export class MobileWebReporter {
     this.fingerprints = { catalog: null, 'consumer-core': null, 'core-ctxmux': null, unknown: null }
     this.notAdmitted = { ...this.fingerprints }
     this.publish({ receipt: null, droppedCount, issue: droppedCount > this.status.droppedCount
-      ? '旧连接的待报诊断未保留；原业务和已在途诊断保持。' : null })
+      ? '旧连接上待报送的诊断未保留，其他功能不受影响。' : null })
   }
   snapshot = () => this.status
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -48,7 +48,7 @@ export class MobileWebReporter {
   }
   private dropped() {
     this.publish({ droppedCount: Math.min(Number.MAX_SAFE_INTEGER, this.status.droppedCount + 1),
-      issue: '部分诊断未保留；原提醒和业务仍可使用。可沿原业务入口继续查询。' })
+      issue: '部分诊断未保留，提醒和其他功能不受影响。' })
   }
   setConnected(connected: boolean) { this.connected = connected; if (connected) this.pump() }
   retry = () => { if (!this.stopped && this.client) { this.connected = true; this.pump() } }
@@ -99,7 +99,7 @@ export class MobileWebReporter {
   }
   private pump() {
     if (this.stopped || !this.connected || this.active || !this.waiting.length) return
-    if (!this.waiting[0]!.client.forwardRpc) { this.publish({ issue: '诊断接口暂不可达；原业务仍可使用。连接恢复后可重试诊断报送。' }); return }
+    if (!this.waiting[0]!.client.forwardRpc) { this.publish({ issue: '诊断暂时无法报送，连接恢复后可重试。' }); return }
     const entry = this.waiting.shift()!
     this.active = entry; this.publish({ issue: null })
     void entry.client.forwardRpc!('app.mobile.report', entry.report).then(receipt => {
@@ -113,7 +113,7 @@ export class MobileWebReporter {
       this.active = null
       if (!this.stopped && entry.client === this.client) {
         this.waiting.unshift(entry)
-        this.publish({ issue: '诊断报送未确认；原业务仍可使用。可重试同一份诊断，不会重试消息或上传。' })
+        this.publish({ issue: '诊断报送未确认，可以重试。' })
       } else { this.dropped(); this.pump() }
     })
   }

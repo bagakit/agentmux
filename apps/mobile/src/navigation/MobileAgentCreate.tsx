@@ -29,7 +29,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
   const localForm = useRef({ space: '', zone: '', executor: '', prompt: '', edited: false, revision: 0 }), unretained = useRef<{ intent: MobileAgentCreateIntent; recordId: string | null } | null>(null)
   const submittedForm = useRef<{ operationId: string; revision: number } | null>(null)
   useMobileWebUpdateSafetyOwner(() => {
-    if (flights.current.size || unretained.current) return '原 Agent 创建操作仍在进行或未确认保全；请先核对原操作，再更新网页。'
+    if (flights.current.size || unretained.current) return '新建 Agent 还没确认，请先核对，再更新网页。'
     const value = localForm.current
     return value.edited && (value.prompt || value.executor || value.space && value.space !== (target.spaceId ?? '') || value.zone && value.zone !== (target.zoneId ?? ''))
       ? '新建 Agent 的指令或选择仍在本页；请先完成或清空表单，再更新网页。' : null
@@ -67,9 +67,9 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
     const reportIssue = (message: string) => { if (current()) setIssue({ message, ...(inspect ? { operationId: inspect.input.operationId } : {}) }) }
     let intent = inspect
     try {
-      if (!scope.runtimeId) throw new Error('原 Host 运行身份未确认；原创建信息保留。')
+      if (!scope.runtimeId) throw new Error('Mac 还没确认，请稍后重试。')
       if (!intent) {
-        if (!catalog?.spaces.some(space => space.spaceId === spaceId) || !boundZones.some(zone => zone.zoneId === zoneId) || !executors.some(executor => executor.id === executorId)) throw new Error('请明确选择原空间、Zone 与 Executor。')
+        if (!catalog?.spaces.some(space => space.spaceId === spaceId) || !boundZones.some(zone => zone.zoneId === zoneId) || !executors.some(executor => executor.id === executorId)) throw new Error('请选择空间、Zone 与执行器。')
         intent = { runtimeId: scope.runtimeId, deviceHostId: scope.deviceHostId,
           input: { operationId: randomClientRequestId(), content: { kind: 'new-agent', executorId, ...(prompt ? { prompt } : {}) },
             destination: launcher ? { spaceId: target.spaceId!, zoneId: target.zoneId!, tabId: target.tabId!, regionId: target.regionId! } : { spaceId, zoneId, newTab: true }, focus: false }, phase: 'sending' }
@@ -81,8 +81,8 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
       }
       const report = inspect && action === 'inspect' ? (await source.forwardRpc!('space.inspect', { target: { operationId: intent.input.operationId } })).request?.report
         : await source.forwardRpc!('agent.open', intent.input)
-      if (!report || report.operationId !== intent.input.operationId) throw new Error('原创建回执尚未确认，保留原操作供核对。')
-      if (report.agent && (report.agent.executorId !== intent.input.content.executorId || report.agent.createOperationId !== intent.input.operationId)) throw new Error('回执绑定了另一创建操作；未采用该 Agent。')
+      if (!report || report.operationId !== intent.input.operationId) throw new Error('创建还没确认，可以核对上次创建。')
+      if (report.agent && (report.agent.executorId !== intent.input.content.executorId || report.agent.createOperationId !== intent.input.operationId)) throw new Error('收到的确认属于另一次创建，未采用这个 Agent。')
       const confirmed = report.outcome === 'opened' && report.agent !== null && report.save.diskDurability === 'confirmed'
       await owner.retainAgentCreate({ ...intent, phase: confirmed ? 'confirmed' : 'unknown', ...(report.agent ? { agentSessionId: report.agent.agentSessionId } : {}) }, recordId)
       const authored = localForm.current
@@ -90,29 +90,29 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
       if (confirmed && sameSource() && original.current.client === source && original.current.targetKey === form.targetKey &&
         authored.revision === submittedRevision && authored.space === intent.input.destination.spaceId && authored.zone === intent.input.destination.zoneId &&
         authored.executor === intent.input.content.executorId && authored.prompt === (intent.input.content.prompt ?? '')) authored.edited = false
-      reportIssue(confirmed ? 'Agent 已创建。可打开原对话；初始输入与任务进展以原回执为准。' : `原创建：${report.outcome}。${report.save.diskDurability !== 'confirmed' ? '工作面持久化尚未确认。' : ''}${report.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')} 保留原操作，可核对。`)
+      reportIssue(confirmed ? 'Agent 已创建，可以打开对话。' : `创建结果：${report.outcome}。${report.save.diskDurability !== 'confirmed' ? '工作面持久化尚未确认。' : ''}${report.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')} 可以核对上次创建。`)
     } catch (error) {
       if (intent && (!inspect || action === 'continue') && !unretained.current) { try { await owner.retainAgentCreate({ ...intent, phase: 'unknown' }, recordId) } catch { /* The original durable sending intent remains available for inspection. */ } }
-      reportIssue(unretained.current ? '原创建记录未保全，请求没有发起；可保留表单，放弃本次未发起的创建后重试。' : error instanceof Error ? error.message : String(error))
+      reportIssue(unretained.current ? '创建记录未保存，请求没有发起；可以放弃这次创建后重试。' : error instanceof Error ? error.message : String(error))
     } finally { flights.current.delete(form); redraw(value => value + 1) }
   }
   const feedback = issue.message && <MobileNotice kind="feedback" owner={client} identity={[target.spaceId,target.zoneId,target.tabId,target.regionId,issue.operationId,issue.message]} className="mobile-spatial-notice" role="status">{issue.message}</MobileNotice>
   return <Dialog.Root open={visible} onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={platform.overlayContainer()}>
     <Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-create" aria-describedby="mobile-create-description">
       <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>新建 Agent</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭新建 Agent"><SemanticIcon name="action.close" size={18} /></Dialog.Close></div>
-      <Dialog.Description id="mobile-create-description">{launcher ? '在选定的原启动位中创建 Agent；关闭表单不会创建。' : '选择原工作空间与执行器，在新 Tab 中开始。'}</Dialog.Description>
-      {launcher && <div className="mobile-create-target"><strong>{targetTab?.name || '原空启动位'}</strong><details><summary>查看原位置</summary><dl><dt>Space</dt><dd>{target.spaceId}</dd><dt>Zone</dt><dd>{target.zoneId}</dd><dt>Tab</dt><dd>{target.tabId}</dd><dt>Region</dt><dd>{target.regionId}</dd></dl></details></div>}
+      <Dialog.Description id="mobile-create-description">{launcher ? '在选定的启动位中创建 Agent。' : '选择工作空间与执行器，在新 Tab 中开始。'}</Dialog.Description>
+      {launcher && <div className="mobile-create-target"><strong>{targetTab?.name || '空启动位'}</strong><details><summary>查看位置</summary><dl><dt>Space</dt><dd>{target.spaceId}</dd><dt>Zone</dt><dd>{target.zoneId}</dd><dt>Tab</dt><dd>{target.tabId}</dd><dt>Region</dt><dd>{target.regionId}</dd></dl></details></div>}
       {intents.filter(intent => intent.phase !== 'confirmed' || intent === intents.at(-1) || intent.input.operationId === issue.operationId).map(intent => <section className="mobile-create-receipt" data-pending={intent.phase !== 'confirmed' || undefined} aria-label={intent.phase === 'confirmed' ? '已确认的创建' : '待核对的创建'} key={intent.input.operationId}>
         <strong>{intent.phase === 'confirmed' ? '创建已确认' : '先核对上次创建'}</strong>
-        <small>{intent.input.content.executorId} · {intent.input.destination.newTab ? '新 Tab' : catalog?.tabs.find(tab => tab.tabId === intent.input.destination.tabId)?.name || '原启动位'}{intent.phase !== 'confirmed' ? ' · 原操作待核对' : ''}</small>
-        {intent.phase !== 'confirmed' && <div className="mobile-create-recovery-actions"><button className="mobile-primary" disabled={busy || !connected} onClick={() => void run(intent)}>核对原创建操作</button>
-          <button className="mobile-secondary" disabled={busy || !connected} onClick={() => void run(intent, 'continue')}>继续原创建</button></div>}
-        {intent.agentSessionId && <button className="mobile-text-button" onClick={() => { openSession(intent.agentSessionId!); onClose() }}>打开原 Agent 对话</button>}
+        <small>{intent.input.content.executorId} · {intent.input.destination.newTab ? '新 Tab' : catalog?.tabs.find(tab => tab.tabId === intent.input.destination.tabId)?.name || '启动位'}{intent.phase !== 'confirmed' ? ' · 待核对' : ''}</small>
+        {intent.phase !== 'confirmed' && <div className="mobile-create-recovery-actions"><button className="mobile-primary" disabled={busy || !connected} onClick={() => void run(intent)}>核对上次创建</button>
+          <button className="mobile-secondary" disabled={busy || !connected} onClick={() => void run(intent, 'continue')}>继续上次创建</button></div>}
+        {intent.agentSessionId && <button className="mobile-text-button" onClick={() => { openSession(intent.agentSessionId!); onClose() }}>打开 Agent 对话</button>}
         {issue.operationId === intent.input.operationId && feedback}
-        <details><summary>原创建位置</summary><dl><dt>Space</dt><dd>{intent.input.destination.spaceId}</dd><dt>Zone</dt><dd>{intent.input.destination.zoneId}</dd>{!intent.input.destination.newTab && <><dt>Tab</dt><dd>{intent.input.destination.tabId}</dd><dt>Region</dt><dd>{intent.input.destination.regionId}</dd></>}<dt>Operation</dt><dd>{intent.input.operationId}</dd></dl></details>
+        <details><summary>创建位置</summary><dl><dt>Space</dt><dd>{intent.input.destination.spaceId}</dd><dt>Zone</dt><dd>{intent.input.destination.zoneId}</dd>{!intent.input.destination.newTab && <><dt>Tab</dt><dd>{intent.input.destination.tabId}</dd><dt>Region</dt><dd>{intent.input.destination.regionId}</dd></>}<dt>Operation</dt><dd>{intent.input.operationId}</dd></dl></details>
       </section>)}
       <label>空间<select aria-label="新 Agent 空间" disabled={launcher} value={spaceId} onChange={event => { markEdited(); localForm.current.space = event.target.value; localForm.current.zone = ''; setSpace(event.target.value); setZone('') }}><option value="">选择空间</option>{catalog?.spaces.map(space => <option key={space.spaceId} value={space.spaceId}>{space.name} · {space.hostId}</option>)}</select></label>
-      <label>Zone<select aria-label="新 Agent Zone" disabled={launcher} value={zoneId} onChange={event => { markEdited(); localForm.current.zone = event.target.value; setZone(event.target.value) }}><option value="">选择 Zone</option>{boundZones.map(zone => <option key={zone.zoneId} value={zone.zoneId}>{zone.branch ?? (launcher ? '原工作目录' : zone.directoryPath ?? zone.zoneId)}</option>)}</select></label>
+      <label>Zone<select aria-label="新 Agent Zone" disabled={launcher} value={zoneId} onChange={event => { markEdited(); localForm.current.zone = event.target.value; setZone(event.target.value) }}><option value="">选择 Zone</option>{boundZones.map(zone => <option key={zone.zoneId} value={zone.zoneId}>{zone.branch ?? (launcher ? '工作目录' : zone.directoryPath ?? zone.zoneId)}</option>)}</select></label>
       <label>执行器<select aria-label="新 Agent 执行器" value={executorId} onChange={event => { markEdited(); localForm.current.executor = event.target.value; setExecutor(event.target.value) }}><option value="">选择执行器</option>{executors.map(executor => <option key={executor.id} value={executor.id}>{typeof executor.value.name === 'string' ? executor.value.name : executor.id}</option>)}</select></label>
       <label>初始指令<textarea aria-label="新 Agent 初始指令" value={prompt} onChange={event => { markEdited(); localForm.current.prompt = event.target.value; setPrompt(event.target.value) }} placeholder="可留空" /></label>
       <button className={pending ? 'mobile-secondary' : 'mobile-primary'} disabled={busy || !connected || !client} onClick={() => void run(null)}>{busy ? '正在核对…' : pending ? '另建 Agent（保留待核对项）' : '创建 Agent'}</button>

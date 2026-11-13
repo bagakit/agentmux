@@ -49,7 +49,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
         const value = await client!.forwardRpc!('space.ls', { target: { spaceId: spaceId! }, presentation: true })
         if (!live || generation !== epoch) return
         const original = value.catalog.appearance?.find(item => item.spaceId === spaceId)
-        if (!original) { invalidateActivity(); setIssue('原头像外观尚未确认，已保存选择保留。'); return }
+        if (!original) { invalidateActivity(); setIssue('头像外观还没确认，暂用已保存的头像。'); return }
         const imageKey = original.image ? JSON.stringify([spaceId, original.image.revision ?? null]) : undefined
         const confirmed = original.image && confirmedImage.current?.source === appearanceOwner && confirmedImage.current?.spaceId === spaceId && confirmedImage.current?.revision === original.image.revision
         if (confirmed || !original.image) imageIssue = ''
@@ -60,7 +60,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
           const imageFact = detail.catalog.appearance?.find(item => item.spaceId === spaceId)
           if (!imageFact?.image?.dataUrl || imageFact.image.revision !== original.image.revision) {
             setLiveAppearance({ spaceId: spaceId!, value: original, source: appearanceOwner, owner: observationOwner, requestStartedMono })
-            imageIssue = imageFact?.issue ?? '原头像内容或修订尚未确认；已保存选择保留，可刷新原呈现。'
+            imageIssue = imageFact?.issue ?? '头像内容还没确认，暂用已保存的头像；可以刷新。'
             setIssue(imageIssue); return
           }
           const next = { spaceId: spaceId!, source: appearanceOwner, dataUrl: imageFact.image.dataUrl, revision: imageFact.image.revision }
@@ -68,7 +68,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
         }
         setLiveAppearance({ spaceId: spaceId!, value: original, source: appearanceOwner, owner: observationOwner, requestStartedMono })
         setIssue(original.issue ?? imageIssue)
-      } catch (error) { if (live && generation === epoch) { invalidateActivity(); imageIssue = error instanceof Error ? error.message : '原头像暂不可读。'; setIssue(imageIssue) } }
+      } catch (error) { if (live && generation === epoch) { invalidateActivity(); imageIssue = error instanceof Error ? error.message : '头像暂时读不到。'; setIssue(imageIssue) } }
       finally { reading = false; if (live && dirty) { dirty = false; void read() } }
     }
     const release = client.onEvent(event => {

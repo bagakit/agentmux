@@ -16,9 +16,9 @@ function fingerprint(identity: KeyPair, offer: string, recordId: string | null):
 /** This Tab retains only fingerprints, never the key or the connection offer. */
 export function prepareReloadIdentity(identity: KeyPair, offer: string, recordId: string | null): () => void {
   const expected = fingerprint(identity, offer, recordId), previous = sessionStorage.getItem(key)
-  if (previous !== null && previous !== expected) throw new Error('原更新身份交接尚未解决；请先恢复该原连接。')
+  if (previous !== null && previous !== expected) throw new Error('上次更新网页的连接交接还没完成，请先恢复那次连接。')
   if (previous === null) sessionStorage.setItem(key, expected)
-  if (sessionStorage.getItem(key) !== expected) throw new Error('原更新身份交接未保存。')
+  if (sessionStorage.getItem(key) !== expected) throw new Error('更新网页所需的连接交接未保存。')
   return () => { if (previous === null && sessionStorage.getItem(key) === expected) sessionStorage.removeItem(key) }
 }
 export function matchesReloadIdentity(identity: KeyPair, offer: string, recordId: string | null): boolean {

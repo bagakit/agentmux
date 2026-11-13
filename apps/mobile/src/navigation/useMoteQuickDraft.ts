@@ -20,8 +20,8 @@ function connection(client: AgentMuxHostedClient | null, owner: DeviceWorkfaceSt
   } catch { return null }
 }
 function restore(draft: MoteQuickDraft): MoteQuickDraft {
-  return { ...draft, ...(draft.maintenanceAttempts ? { maintenanceAttempts: draft.maintenanceAttempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown' as const, issue: a.issue ?? '原安排恢复回执尚未确认；重开不会重发。' } : a) } : {}),
-    attempts: draft.attempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown', issue: a.issue ?? '原保存回执尚未确认；重开不会重发。' } : a) }
+  return { ...draft, ...(draft.maintenanceAttempts ? { maintenanceAttempts: draft.maintenanceAttempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown' as const, issue: a.issue ?? '上次恢复心跳还没确认，重新打开不会再次恢复。' } : a) } : {}),
+    attempts: draft.attempts.map(a => a.phase === 'sending' ? { ...a, phase: 'unknown', issue: a.issue ?? '上次保存还没确认，重新打开不会再次保存。' } : a) }
 }
 export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMuxHostedClient | null, visible: boolean, onSaved: () => void) {
   const initial = useRef<{ owner: DeviceWorkfaceStore; recordId: string | null; saved: MoteQuickDraft | null } | null>(null)
@@ -54,18 +54,18 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     const revision = ++reloadRevision.current
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
-      if (!next.scope) { if (mounted.current) setStorageIssue('原 Host 尚未核实；选择仅在本页，可复制。'); return { committed: false, canForward: false } }
+      if (!next.scope) { if (mounted.current) setStorageIssue('Mac 还没确认，选择只在本页，可以复制。'); return { committed: false, canForward: false } }
       try {
         const ack = await owner.editMoteQuickDraft(durable.current, parseMoteQuickDraft(next), recordId)
-        if (owner.recordIdentity() !== recordId || ack.recordId !== recordId) throw new DeviceWorkfaceRecordChangedError('原设备记录已替换；此页不能写新工作面。')
+        if (owner.recordIdentity() !== recordId || ack.recordId !== recordId) throw new DeviceWorkfaceRecordChangedError('这台设备的工作面已被替换，此页不能再保存。')
         durable.current = ack.draft
-        if (!ack.applied) { conflicted.current = true; if (mounted.current) setStorageIssue('另一页面已改原配置；双方选择和请求保留，可复制或采用设备原稿。') }
+        if (!ack.applied) { conflicted.current = true; if (mounted.current) setStorageIssue('另一个页面改了这份配置，可以复制或采用设备上的那份。') }
         else if (mounted.current) { setStorageIssue(''); setMemoryOnly(false) }
         return { committed: ack.applied, canForward: ack.applied }
       } catch (error) {
         const domain = error instanceof DeviceWorkfaceRecordChangedError || error instanceof MoteQuickDraftInvalidError && !(error instanceof MoteQuickDraftCapacityError)
         const canForward = !domain && owner.recordIdentity() === recordId && owner.canRetrySave()
-        if (mounted.current) { setStorageIssue(`${message(error)}；本页完整选择和请求保留，尚未进入设备备份。`); setMemoryOnly(canForward) }
+        if (mounted.current) { setStorageIssue(`${message(error)}。本页选择尚未进入设备备份。`); setMemoryOnly(canForward) }
         return { committed: false, canForward }
       }
     })
@@ -79,7 +79,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   }
   async function inspect() {
     const source = connection(latest.current.client, owner, target), epoch = ++readEpoch.current, original = latest.current.client
-    if (!source || !original?.forwardRpc || !latest.current.visible) { setNotice('原 Host 暂不可核对；选择和原请求保留。'); return }
+    if (!source || !original?.forwardRpc || !latest.current.visible) { setNotice('暂时无法核对 Mac 上的配置。'); return }
     try {
       const result = parseMotePreferencesReadResult(await original.forwardRpc('space.mote.preferences.read', { kind: 'quick', target }), { kind: 'quick', target })
       const now = connection(original, owner, target)
@@ -93,7 +93,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       if (baseline && !current.current.baseline && !current.current.blockedAttemptId) {
         void retain({ ...current.current, scope: source.scope, baseline, values: changed.current ? current.current.values : baseline.defaults })
       }
-      setNotice(result.status === 'ready' ? '已核对当前配置；读取不确认旧保存。' : result.issue ?? '原配置未确认。')
+      setNotice(result.status === 'ready' ? '已核对当前配置；读取不确认旧保存。' : result.issue ?? '配置还没确认。')
     } catch (error) { if (mounted.current && epoch === readEpoch.current) setNotice(message(error)) }
   }
   useEffect(() => { if (visible) void inspect(); return () => { readEpoch.current++ } }, [client, visible])
@@ -101,15 +101,15 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     if (flight.current || adopting.current) return
     const original = latest.current.client, source = connection(original, owner, target), selected = current.current
     if (!latest.current.visible || !original?.forwardRpc || !source || !selected.scope || moteQuickDraftKey(selected.scope) !== moteQuickDraftKey(source.scope) || owner.recordIdentity() !== recordId) {
-      setNotice('原安排的连接或设备归属尚未确认；原请求与配置保留。'); return
+      setNotice('心跳安排对应的连接或设备还没确认。'); return
     }
     if (!pending && selected.maintenanceAttempts?.some(value => value.phase === 'unknown' || value.phase === 'sending')) {
-      setNotice('原恢复回执尚未确认，请先核对该原请求；不会另建恢复操作。'); return
+      setNotice('上次恢复还没确认，请先核对那一次。'); return
     }
     const schedule = read?.maintenance?.schedule, admitted = maintenanceOwner.current
     if (!pending && (!schedule || schedule.status !== 'paused' || !schedule.revision || read?.defaults?.presence?.enabled === false ||
       admitted?.client !== original || admitted.scope !== moteQuickDraftKey(source.scope) || admitted.ownerInstanceId !== source.ownerInstanceId)) {
-      setNotice('请先核对并保存启用配置，再读取原暂停安排；本次没有恢复其他安排。'); return
+      setNotice('请先核对并保存启用配置，再恢复暂停的心跳。'); return
     }
     const input = pending?.input ?? parseScheduleRpcParams('schedule.resume', { scheduleId: schedule!.loopId, expectedRevision: schedule!.revision, operationId: randomClientRequestId() })
     let operation: MoteMaintenanceAttempt = pending ?? { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
@@ -122,7 +122,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     try {
       if (!pending) {
         const ack = await retain({ ...current.current, maintenanceAttempts: [...current.current.maintenanceAttempts ?? [], operation] })
-        if (!ack.canForward || !sameSource()) { operation = { ...operation, phase: 'not-sent', issue: '原请求尚未发送；配置与安排引用保留。' }; return }
+        if (!ack.canForward || !sameSource()) { operation = { ...operation, phase: 'not-sent', issue: '请求尚未发送。' }; return }
       }
       requested = true
       const fence = { runtimeId: source.scope.runtimeId, ownerInstanceId: source.ownerInstanceId }
@@ -131,13 +131,13 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
         : validateScheduleRpcResult('schedule.resume', await original.forwardRpc('schedule.resume', input, {}, fence), input)
       if (!sameSource()) return
       if (!result.schedule || result.schedule.loopId !== input.scheduleId || result.schedule.lastMutation?.operationId !== input.operationId || result.schedule.lastMutation.action !== 'resume' || result.schedule.lastMutation.expectedRevision !== input.expectedRevision) {
-        operation = { ...operation, phase: 'unknown', issue: '尚未读到这次原恢复的准确回执；不重复恢复。' }; return
+        operation = { ...operation, phase: 'unknown', issue: '这次恢复还没确认，不会重复恢复。' }; return
       }
       operation = { ...operation, phase: pending ? 'observed' : 'confirmed', result, issue: null }
-      setNotice(pending ? '已读到原恢复记录；原写入回执与实际投递仍分别核对。' : '原安排的恢复回执已确认；主 Agent 接回和心跳投递分别核对。')
-    } catch (error) { operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: message(error) }; if (mounted.current) setNotice('原恢复回执未确认；原请求保留，可核对。') }
+      setNotice(pending ? '已读到恢复记录，心跳投递另行核对。' : '心跳已恢复，主 Agent 接回和心跳投递另行核对。')
+    } catch (error) { operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: message(error) }; if (mounted.current) setNotice('恢复还没确认，可以核对。') }
     finally {
-      if (operation.phase === 'sending') operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: '原连接或页面已变化，原请求保留；没有改投。' }
+      if (operation.phase === 'sending') operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: '连接或页面已变化，请求没有发往别处。' }
       const retained = { ...current.current, maintenanceAttempts: (current.current.maintenanceAttempts ?? []).map(value => value.input.operationId === input.operationId ? operation : value) }
       if (owner.recordIdentity() === recordId) await retain(retained); else display(retained)
       if (sameSource() && (operation.phase === 'confirmed' || operation.phase === 'observed')) void inspect()
@@ -147,7 +147,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   async function adopt() {
     const baseline = read && moteQuickBaseline(read), source = connection(latest.current.client, owner, target), old = current.current
     if (!baseline || !source || flight.current || adopting.current || conflicted.current || !latest.current.visible) return
-    if (old.scope && moteQuickDraftKey(old.scope) !== moteQuickDraftKey(source.scope)) { setNotice('当前 Host 与原请求不同；原配置保留。'); return }
+    if (old.scope && moteQuickDraftKey(old.scope) !== moteQuickDraftKey(source.scope)) { setNotice('当前 Mac 与这份配置不同，未采用。'); return }
     adopting.current = true; setAdoptionBusy(true)
     try {
       const ack = await retain({ ...old, scope: source.scope, baseline, blockedAttemptId: null })
@@ -155,7 +155,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
         // Later form edits remain; an optimistic baseline must never release an original unknown request.
         await retain({ ...current.current, baseline: old.baseline, blockedAttemptId: old.blockedAttemptId })
         if (mounted.current) setNotice('采用当前修订尚未持久完成；旧请求仍未确认。')
-      } else if (mounted.current) setNotice('已明确采用当前修订；原请求保留，下次保存须明确提交。')
+      } else if (mounted.current) setNotice('已采用当前版本，下次需要再保存一次。')
     } finally { adopting.current = false; if (mounted.current) setAdoptionBusy(false) }
   }
   async function save() {
@@ -163,7 +163,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     const original = latest.current.client, source = connection(original, owner, target), submitted = current.current
     if (!latest.current.visible || !original?.forwardRpc || !source || !submitted.scope || !submitted.baseline || submitted.blockedAttemptId || conflicted.current || !destination ||
       moteQuickDraftKey(source.scope) !== moteQuickDraftKey(submitted.scope) || owner.recordIdentity() !== recordId) {
-      setNotice('原配置、保存位置或回执尚未确认；保留选择，请先核对并明确采用当前修订。'); return
+      setNotice('配置、保存位置或上次保存还没确认，请先核对并采用当前版本。'); return
     }
     const input = parseMotePreferencesSaveParams({ kind: 'quick', target, baseline: submitted.baseline, values: submitted.values, destination,
       operationId: randomClientRequestId() }), attempt: MoteQuickAttempt = { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
@@ -175,7 +175,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
         now.ownerInstanceId !== source.ownerInstanceId || moteQuickDraftKey(now.scope) !== moteQuickDraftKey(source.scope) ||
         !current.current.attempts.some(a => a.input.operationId === input.operationId)) {
         await retain({ ...current.current, attempts: current.current.attempts.filter(a => a.input.operationId !== input.operationId), blockedAttemptId: null })
-        if (mounted.current) setNotice('本次尚未发送；原选择保留。'); return
+        if (mounted.current) setNotice('本次尚未发送。'); return
       }
       let resolved: MoteQuickAttempt
       try {
@@ -195,19 +195,19 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       if (!settled.committed && settled.canForward && confirmed && originalScope && !conflicted.current) {
         // Host's exact receipt is authoritative even when this device cannot back it up.
         // Keep its baseline for a later explicit Save; never claim a Device commit ACK.
-        setNotice('原 Host 已确认保存；尚未进入设备备份。本页选择与完整请求保留，可继续明确保存或复制。')
+        setNotice('Mac 已保存，这份选择尚未进入设备备份；可以再次保存或复制。')
         return
       }
       if (!settled.committed || !originalScope) {
         const held = { ...current.current, baseline: latestDraft.baseline, blockedAttemptId: input.operationId,
           attempts: current.current.attempts.map(a => a.input.operationId === input.operationId ? { ...resolved, phase: 'unknown' as const,
-            issue: '原 Host 已回应；设备回执或原页面归属尚未持久确认。' } : a) }
+            issue: 'Mac 已回应，这台设备还没记下结果。' } : a) }
         if (owner.recordIdentity() === recordId) await retain(held)
         else display(held)
-        if (mounted.current) setNotice(confirmed ? '原 Host 已确认保存；设备备份或页面归属未确认，原请求与后来选择保留。' : '原请求回执保留；设备备份或页面归属未确认。')
+        if (mounted.current) setNotice(confirmed ? 'Mac 已保存，这台设备还没记下结果。' : '这台设备还没记下保存结果。')
         return
       }
-      setNotice(confirmed ? '原 Quick 配置已保存；后来选择保留。' : resolved.phase === 'failed' ? '原 owner 确认尚未写入；选择保留。' : '保存回执未确认；保留原请求，可核对当前配置。')
+      setNotice(confirmed ? '快捷配置已保存。' : resolved.phase === 'failed' ? '保存未写入，可以重试。' : '保存还没确认，可以核对当前配置。')
       if (confirmed) latest.current.onSaved()
     } finally { flight.current = false; if (mounted.current) setBusy(false) }
   }
@@ -220,8 +220,8 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     setCopies(previous => [...previous, localCopy])
     const canonical = snapshot.issue === null && localCopy.scope
       ? snapshot.record.moteQuickDrafts?.find(d => moteQuickDraftKey(d.scope) === moteQuickDraftKey(localCopy.scope!)) : durable.current
-    if (!canonical) { setNotice('设备原稿尚未核实；本页完整选择和请求仍可复制。'); return }
-    durable.current = canonical; conflicted.current = false; display(restore(canonical)); setNotice('已采用设备原稿；本页另一份选择与请求仍可复制。')
+    if (!canonical) { setNotice('设备上的配置还没确认，本页选择仍可复制。'); return }
+    durable.current = canonical; conflicted.current = false; display(restore(canonical)); setNotice('已采用设备上的配置，本页的另一份选择仍可复制。')
   }
   return { draft, read, destination, setDestination, edit, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
     conflict: conflicted.current, copies, resumeMaintenance }

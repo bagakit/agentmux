@@ -10,7 +10,7 @@ export function mobileChatStart(catalog: AgentMuxSpaceCatalog, recentMoteSpaceId
   const recent = recentMoteSpaceId ? motes.filter(space => space.spaceId === recentMoteSpaceId) : []
   const primary = motes.filter(isPrimaryMoteSpace)
   const candidates = recent.length === 1 ? [...recent, ...primary.filter(space => space.spaceId !== recentMoteSpaceId)] : primary
-  if (recentMoteSpaceId && recent.length !== 1) return { sessionId: null, identity: null, issue: '最近 Mote 的原身份尚未确认，可打开 Mote 核对；原对话与草稿保留。' }
+  if (recentMoteSpaceId && recent.length !== 1) return { sessionId: null, identity: null, issue: '最近使用的 Mote 还没确认，可以打开 Mote 查看。' }
   let setupIdentity: MobileObjectIdentity | null = null
   for (const owner of candidates) {
     // More than one primary Host has no implicit winner. The recent exact object is independent.
@@ -19,7 +19,7 @@ export function mobileChatStart(catalog: AgentMuxSpaceCatalog, recentMoteSpaceId
     const fact = facts?.length === 1 ? facts[0] : undefined
     const identity: MobileObjectIdentity = { name: owner.name, project: owner.name, mote: { spaceId: owner.spaceId, name: owner.name, facts: fact } }
     setupIdentity = identity
-    if (!fact || fact.quickMode.status === 'unconfirmed') return { sessionId: null, identity, issue: fact?.quickMode.status === 'unconfirmed' ? fact.quickMode.message : '原主对话配置尚未确认，可查看 Mote 资料或选择已有对话。' }
+    if (!fact || fact.quickMode.status === 'unconfirmed') return { sessionId: null, identity, issue: fact?.quickMode.status === 'unconfirmed' ? fact.quickMode.message : '主对话配置还没确认，可以查看 Mote 资料或选择已有对话。' }
     const main = fact.quickMode.status === 'saved' ? fact.quickMode.defaults.conversation : undefined
     if (!main) continue
     const confirmed = fact.conversation
@@ -36,5 +36,5 @@ export function mobileChatStart(catalog: AgentMuxSpaceCatalog, recentMoteSpaceId
       mote: { ...identity.mote!, conversationName: row?.name } }, issue: null }
   }
   return { sessionId: null, identity: setupIdentity, issue: primary.length > 1
-    ? '有多个 Host 的主 Mote，请明确选择原 Mote 后继续。' : '尚未保存主对话，可在 Mote 中设置主 Agent，或选择已有对话。' }
+    ? '多台 Mac 上都有主 Mote，请选择一个后继续。' : '尚未保存主对话，可在 Mote 中设置主 Agent，或选择已有对话。' }
 }

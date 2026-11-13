@@ -81,7 +81,7 @@ export function MobileMoteConversationStart({ client, target, identity, platform
     const saved = await local.save()
     if (!saved) {
       if (local.drafts.get(original.source.key) === '') { local.drafts.set(original.source.key, original.raw); redraw(value => value + 1) }
-      setNotice('原首条消息已确认投递；设备清稿回执未确认，本页原稿保留。')
+      setNotice('首条消息已送达，这台手机上的草稿还没清空。')
     }
   }
   async function begin(state: MobileMoteMainStartState, automaticQuery?: AutomaticQuery) {
@@ -96,7 +96,7 @@ export function MobileMoteConversationStart({ client, target, identity, platform
     submission.current = original; submitting.current = true; setStarting(true)
     if (!automaticQuery) setSent({ operationId: original.operationId, prompt, key })
     try {
-      if (!await local.save()) { setNotice('设备尚未确认保存本次草稿；原文保留，可复制后重新核对。'); return }
+      if (!await local.save()) { setNotice('这台手机还没保存这份草稿，可以复制后重新核对。'); return }
       if (source.current.client !== original.source.client || source.current.key !== original.source.key || !source.current.visible || owner.recordIdentity() !== original.source.recordId) return
       await state.submit(query)
     } finally {
@@ -119,17 +119,17 @@ export function MobileMoteConversationStart({ client, target, identity, platform
         {...(state.ready && !state.busy && !starting && visible && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => { void begin(state) } } : {})} />}
       notice={<>
         <AutomaticStart state={state} query={automatic} begin={(value, query) => { void begin(value, query) }} />
-        {state.issue && <p role="status">本次开始尚未确认；原稿与请求保留。展开配置可核对来源或选择默认 Executor。</p>}{notice && <p role="status">{notice}</p>}
+        {state.issue && <p role="status">这次开始还没确认，可以展开配置核对或选择默认执行器。</p>}{notice && <p role="status">{notice}</p>}
         {mode === 'start' && state.reading?.dialogue.main.current && <p role="status">已有主对话可继续；这份草稿保留，可展开打开主对话，或明确选择新一轮。</p>}
-        {state.busy && <p role="status">正在核对这次原开始请求…</p>}
+        {state.busy && <p role="status">正在核对这次开始…</p>}
         {state.result && <p role="status">{agentPromptSubmissionOutcome(state.result.deferredInput?.record ?? null) === 'admitted' || agentPromptSubmissionOutcome(state.result.deferredInput?.record ?? null) === 'terminal-confirmed'
-          ? '原首条消息已确认投递。' : state.result.issue ?? '原开始意图已保留；绑定和首条消息分别核对，不重复发送。'}</p>}
-        {local.notice && <p role="status">本机草稿保存尚未确认；当前原文保留，可展开复制。</p>}
-        <details className="mobile-mote-start-details"><summary>配置与原请求{state.pending.length ? ` · ${state.pending.length}` : ''}</summary>
+          ? '首条消息已送达。' : state.result.issue ?? '这次开始还在核对，不会重复发送。'}</p>}
+        {local.notice && <p role="status">这台手机还没保存草稿，可以展开复制。</p>}
+        <details className="mobile-mote-start-details"><summary>配置与请求{state.pending.length ? ` · ${state.pending.length}` : ''}</summary>
         {state.issue && <p>{state.issue}</p>}{local.notice && <p>{local.notice}</p>}
-        {state.result?.record?.moteMain?.deferredInput && <details><summary>原首条消息</summary><pre>{state.result.record.moteMain.deferredInput.prompt}</pre></details>}
-        {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对原开始请求</button>
-          <button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续原开始请求</button><details><summary>原请求</summary><code>{id}</code></details></div>)}
+        {state.result?.record?.moteMain?.deferredInput && <details><summary>首条消息</summary><pre>{state.result.record.moteMain.deferredInput.prompt}</pre></details>}
+        {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对这次开始</button>
+          <button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续这次开始</button><details><summary>请求</summary><code>{id}</code></details></div>)}
         {(state.result?.reference ?? state.reading?.dialogue.main.current) && <button type="button" onClick={() => onOpenMain((state.result?.reference ?? state.reading!.dialogue.main.current)!)}>打开主对话</button>}
         <button type="button" onClick={onConfigure}>快捷配置</button><button type="button" disabled={state.busy} onClick={() => { state.refresh(); dialogue.refresh() }}>重新核对</button>
         {draft && <button type="button" onClick={() => { void platform.copyText(draft, error => setNotice(error instanceof Error ? error.message : String(error))) }}>复制本次草稿</button>}
@@ -147,12 +147,12 @@ export function MobileMoteStartRecovery({ client, target, visible, onConfigure, 
   onOpenMain(reference: MoteDefaultConversation): void
 }) {
   return <MobileMoteMainActions client={client} target={target} visible={visible} onConfigure={onConfigure} onBound={onBound}
-    renderStart={state => !state.pending.length ? null : <details className="mobile-mote-start-details"><summary>原开始请求待核对 · {state.pending.length}</summary>
-      <p>当前对话与草稿仍可使用。这里仅核对原开始意图，不会新建另一条 Query。</p>
+    renderStart={state => !state.pending.length ? null : <details className="mobile-mote-start-details"><summary>开始请求待核对 · {state.pending.length}</summary>
+      <p>当前对话仍可使用，这里只核对上次开始，不会另开对话。</p>
       {state.issue && <p>{state.issue}</p>}{state.result?.issue && <p>{state.result.issue}</p>}
-      {state.result?.record?.moteMain?.deferredInput && <details><summary>原首条消息</summary><pre>{state.result.record.moteMain.deferredInput.prompt}</pre></details>}
-      {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对原开始请求</button>
-        <button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续原开始请求</button></div>)}
-      {state.result?.reference && <button type="button" onClick={() => onOpenMain(state.result!.reference!)}>打开原主对话</button>}
+      {state.result?.record?.moteMain?.deferredInput && <details><summary>首条消息</summary><pre>{state.result.record.moteMain.deferredInput.prompt}</pre></details>}
+      {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对这次开始</button>
+        <button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续这次开始</button></div>)}
+      {state.result?.reference && <button type="button" onClick={() => onOpenMain(state.result!.reference!)}>打开主对话</button>}
     </details>} />
 }

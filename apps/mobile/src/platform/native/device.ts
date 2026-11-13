@@ -54,7 +54,7 @@ async function boundedBytes(stream: ReadableStream<Uint8Array>, size: number, si
       const part = await (cancelled ? Promise.race([reader.read(), cancelled]) : reader.read())
       if (part.done) break
       length += part.value.byteLength
-      if (length > FILE_UPLOAD_MAX_BYTES || length > size) throw new Error('附件在读取时变大；本次尚未上传，原会话与草稿保留。')
+      if (length > FILE_UPLOAD_MAX_BYTES || length > size) throw new Error('附件在读取时变大，本次尚未上传。')
       chunks.push(part.value)
     }
   } finally {
@@ -62,7 +62,7 @@ async function boundedBytes(stream: ReadableStream<Uint8Array>, size: number, si
     try { void reader.cancel().catch(() => {}) } catch { /* A broken source cannot retain this reader. */ }
     try { reader.releaseLock() } catch { /* A pending read may finish after cancellation. */ }
   }
-  if (length !== size) throw new Error('附件在读取时变化；本次尚未上传，请重新选择原文件。')
+  if (length !== size) throw new Error('附件在读取时发生变化，本次尚未上传；请重新选择文件。')
   const bytes = new Uint8Array(length)
   let offset = 0
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
@@ -125,10 +125,10 @@ export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePi
     if (!file.path) throw new Error('系统尚未提供所选文件的读取权限；本次尚未上传。')
     const response = signal ? await readNative(file.path, signal) : await readNative(file.path)
     if (signal?.aborted) return null
-    if (!response.ok) throw new Error('系统暂时无法读取原附件；本次尚未上传。')
+    if (!response.ok) throw new Error('系统暂时无法读取这个附件，本次尚未上传。')
     stream = response.body
   }
-  if (!stream) throw new Error('这台设备尚未提供有界文件读取；本次尚未上传，原消息仍可发送。')
+  if (!stream) throw new Error('这台设备暂时无法读取附件，本次尚未上传；消息仍可发送。')
   const bytes = await boundedBytes(stream, file.size, signal)
   return { id: randomClientRequestId(), name: file.name, mimeType, size: bytes.byteLength,
     revision: fileUploadRevision(bytes), dataBase64: base64(bytes) }

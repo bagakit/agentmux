@@ -18,7 +18,7 @@ export function useMobileWebReloadAction(active = true) {
       const result = await safety.apply(originalIntent.signal)
       if (!originalIntent.signal.aborted && result.status === 'blocked') setIssue({ message: result.message, attempt: currentAttempt })
     } catch {
-      if (!originalIntent.signal.aborted) setIssue({ message: '原页面重开尚未确认；当前工作面和内容保留，请稍后重试。', attempt: currentAttempt })
+      if (!originalIntent.signal.aborted) setIssue({ message: '网页重开尚未确认，请稍后重试。', attempt: currentAttempt })
     } finally { if (intent.current === originalIntent) { intent.current = null; setBusy(false) } }
   }
   return { busy, issue, reload, cancel }

@@ -35,14 +35,14 @@ export function MobileSurveySurface({ client, connected, visible = true, ...acti
       if (inFlight || document.visibilityState === 'hidden') return
       inFlight = true
       try {
-        if (!client.forwardRpc) throw new Error('原 Survey 公共目录端口暂不可用。')
+        if (!client.forwardRpc) throw new Error('连接暂不可用，暂时读不到研究列表。')
         const result = await client.forwardRpc('space.ls', { target: {}, presentation: true })
         if (!disposed) {
           if (result.catalog.survey) { setCatalog(result.catalog); setIssue('') }
-          else setIssue('原 Survey 呈现尚未确认，保留上次研究与选择；可刷新重试。')
+          else setIssue('研究列表还没确认，可以刷新重试。')
         }
       } catch (error) {
-        if (!disposed) setIssue(`原研究目录查询尚未重新核实：${error instanceof Error ? error.message : String(error)}。原研究、工作面与草稿保留，可刷新查询。`)
+        if (!disposed) setIssue(`研究列表读取未完成：${error instanceof Error ? error.message : String(error)}。可以刷新重试。`)
       } finally { inFlight = false }
     }
     void read()
@@ -52,7 +52,7 @@ export function MobileSurveySurface({ client, connected, visible = true, ...acti
     return () => { disposed = true; clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, visible, revision])
   return <MobileSurveyCatalog visible={visible} client={client} connected={connected} catalog={catalog} {...actions}
-    issue={!connected ? '连接暂不可用；原研究、工作面与草稿保留。' : issue} refresh={() => refresh(value => value + 1)} />
+    issue={!connected ? '连接暂不可用，连上 Mac 后可以刷新研究。' : issue} refresh={() => refresh(value => value + 1)} />
 }
 
 export function MobileSurveyCatalog({ client = null, connected = true, visible = true, catalog, openSession, openTopic, openHttpLink,
@@ -85,7 +85,7 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
   const openContent = (tab: AgentMuxSpaceCatalog['tabs'][number], region: Region) => {
     const key = targetKey(tab.zoneId, region)
     const zones = catalog?.zones.filter(zone => zone.zoneId === tab.zoneId) ?? []
-    setVisited(values => values.some(value => value.key === key) ? values : [...values, { key, zoneId: tab.zoneId, tabId: tab.tabId, region: { ...region, ...(region.file ? { file: { ...region.file } } : {}) }, tabName: tab.name || '原内容标签', zoneName: item?.name || '原研究', ...(zones.length === 1 ? { zone: { ...zones[0]! } } : {}) }])
+    setVisited(values => values.some(value => value.key === key) ? values : [...values, { key, zoneId: tab.zoneId, tabId: tab.tabId, region: { ...region, ...(region.file ? { file: { ...region.file } } : {}) }, tabName: tab.name || '内容标签', zoneName: item?.name || '研究', ...(zones.length === 1 ? { zone: { ...zones[0]! } } : {}) }])
     setSelectedKey(key); setContext({ zoneId: tab.zoneId, tabId: tab.tabId, regionId: region.regionId })
   }
   // A restored reference must resolve uniquely to this exact original Tab and Region.
@@ -106,42 +106,42 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
   }
   return <MobileNoticeScope owner={client} identity={[context.zoneId,context.tabId,context.regionId]}><section className="mobile-survey" aria-label="Survey">
     <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(activeBack)} />{activeBack && <button className="mobile-text-button" type="button" aria-label={context.regionId ? '返回研究内容' : '返回研究列表'} onClick={activeBack}><SemanticIcon name="navigation.back" size={16} /><span>{context.regionId ? '内容' : '研究'}</span></button>}
-      <h1>{context.regionId ? selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容' : context.zoneId ? item?.name ?? selected?.zoneName ?? '原选择的研究' : 'Survey'}</h1>
+      <h1>{context.regionId ? selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '文件' : selected?.region.kind === 'browser' ? '网页' : '内容' : context.zoneId ? item?.name ?? selected?.zoneName ?? '研究' : 'Survey'}</h1>
       <button type="button" className="mobile-icon-button" aria-label="刷新研究" title="刷新研究" onClick={refresh}><SemanticIcon name="action.refresh" size={18} /></button></header>
     {[issue, survey?.issue].filter(Boolean).map((message, index) => <MobileNotice owner={client} identity={[context.zoneId,message]} className="mobile-survey-issue" key={index}>{message}</MobileNotice>)}
     {!context.zoneId ? <><p className="mobile-survey-intro">已收集的研究</p>
-      {!survey ? <MobileNotice owner={client}>原研究列表尚未确认。</MobileNotice> : <nav aria-label="原研究列表"><ul>{survey.items.map(value => <li key={value.zoneId}>
+      {!survey ? <MobileNotice owner={client}>研究列表还没确认。</MobileNotice> : <nav aria-label="研究列表"><ul>{survey.items.map(value => <li key={value.zoneId}>
         <button className="mobile-menu-row" type="button" onClick={() => { setContext({ zoneId: value.zoneId, tabId: null, regionId: null }); setSelectedKey(null) }}>
-          <span><strong>{value.name || '名称未确认'}</strong>{survey.selection?.zoneId === value.zoneId && <small>原研究选择</small>}{value.issue && <small>{value.issue}</small>}</span></button>
+          <span><strong>{value.name || '名称未确认'}</strong>{survey.selection?.zoneId === value.zoneId && <small>当前选择</small>}{value.issue && <small>{value.issue}</small>}</span></button>
       </li>)}</ul>{!survey.items.length && <p>暂无明确收集的研究。</p>}</nav>}
     </> : <>
-      {!catalog?.zones.some(zone => zone.zoneId === context.zoneId) && <MobileNotice>原 Zone 暂未确认；研究引用、选择与已有正文保留，请刷新原研究。</MobileNotice>}
+      {!catalog?.zones.some(zone => zone.zoneId === context.zoneId) && <MobileNotice>这项研究的位置还没确认，请刷新研究。</MobileNotice>}
       <details className="mobile-survey-provenance"><summary>来源与选择</summary><code>{context.zoneId}</code>
-        {held && <ul>{held.selection.map(reference => <li key={JSON.stringify(reference)}><code>{reference.tabId} / {reference.regionId}</code>{held.active?.tabId === reference.tabId && held.active.regionId === reference.regionId ? ' · 原当前选择' : ''}</li>)}</ul>}
+        {held && <ul>{held.selection.map(reference => <li key={JSON.stringify(reference)}><code>{reference.tabId} / {reference.regionId}</code>{held.active?.tabId === reference.tabId && held.active.regionId === reference.regionId ? ' · 当前选择' : ''}</li>)}</ul>}
       </details>
-      {context.regionId ? <><p className="mobile-survey-context">{selected?.zoneName ?? item?.name ?? '原研究'} · {selected?.tabName ?? '原标签'}</p>
-        {(selectionChanged || !selected) && <MobileNotice>原 Tab / Region 的当前绑定尚未重新确认；原引用、已有正文和草稿保留。可返回目录核对，不会改读别的内容。</MobileNotice>}
-        <details className="mobile-survey-provenance"><summary>原工作面位置</summary><code>{context.tabId} / {context.regionId}</code>
+      {context.regionId ? <><p className="mobile-survey-context">{selected?.zoneName ?? item?.name ?? '研究'} · {selected?.tabName ?? '标签'}</p>
+        {(selectionChanged || !selected) && <MobileNotice>这个位置的绑定还没重新确认，可以返回目录核对。</MobileNotice>}
+        <details className="mobile-survey-provenance"><summary>工作面位置</summary><code>{context.tabId} / {context.regionId}</code>
           {catalog?.locations.filter(value => value.tabId === context.tabId && value.regionId === context.regionId).map(value => <code key={JSON.stringify(value)}>{value.displayWorkspaceId} / {value.groupId}{value.spaceId ? ` / ${value.spaceId}` : ''}</code>)}
         </details>
       </> : <section aria-label="研究工作面">
         {(topics.length > 0 || relationsUnknown) && <section className="mobile-survey-related" aria-label="关联 Topic"><h2>关联 Topic</h2>{topics.map(topic => <div key={topic.spaceId}>{openTopic ? <button className="mobile-menu-row" type="button" onClick={() => openTopic(topic.spaceId)}>{topic.name}</button> : <span>{topic.name}</span>}</div>)}
-          {relationsUnknown ? <MobileNotice>部分关联空间未确认，保留原关系；可刷新重试。</MobileNotice> : null}
+          {relationsUnknown ? <MobileNotice>部分关联空间还没确认，可以刷新重试。</MobileNotice> : null}
         </section>}
-        <section aria-label="原 Tab 与 Region">{tabs.map(tab => <article className="mobile-survey-tab" key={tab.tabId}><h2>{tab.name || 'Tab 名称未确认'}</h2>{tab.issue && <MobileNotice identity={[tab.tabId,tab.issue]}>{tab.issue}</MobileNotice>}
+        <section aria-label="Tab 与 Region">{tabs.map(tab => <article className="mobile-survey-tab" key={tab.tabId}><h2>{tab.name || 'Tab 名称未确认'}</h2>{tab.issue && <MobileNotice identity={[tab.tabId,tab.issue]}>{tab.issue}</MobileNotice>}
           <ul>{tab.regionIds.map(regionId => {
             const regions = catalog?.regions.filter(value => value.tabId === tab.tabId && value.regionId === regionId) ?? [], region = regions.length === 1 ? regions[0] : undefined
             const row = catalog?.agentPresentation?.find(value => value.agentSessionId === region?.agentSessionId)
             const addresses = catalog?.locations.filter(value => value.tabId === tab.tabId && value.regionId === regionId) ?? []
             return <li key={regionId} className={region?.agentSessionId ? 'mobile-agent-row' : undefined}>
-              {region?.kind === 'agent' && region.agentSessionId ? <MobileAgentRow agentSessionId={region.agentSessionId} identity={{ name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(addresses.length === 1 ? { context: addresses[0] } : {}) }} className="mobile-menu-row" onOpen={() => openAgent(region, addresses.length === 1 ? addresses[0] : undefined)}><span><strong>{row?.name ?? '名称未确认'}</strong><small>{row?.recap?.text ?? row?.detail ?? '继续原 Agent'}</small></span></MobileAgentRow>
-                : region && ['file', 'browser'].includes(region.kind) ? <button className="mobile-menu-row" type="button" onClick={() => openContent(tab, region)}><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看原网页'}</strong><small>{kindName(region)}</small></span></button>
-                  : <p>{region ? kindName(region) : 'Region 未确认'}<small>原工作面保留，此内容尚未提供手机操作。</small></p>}
+              {region?.kind === 'agent' && region.agentSessionId ? <MobileAgentRow agentSessionId={region.agentSessionId} identity={{ name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(addresses.length === 1 ? { context: addresses[0] } : {}) }} className="mobile-menu-row" onOpen={() => openAgent(region, addresses.length === 1 ? addresses[0] : undefined)}><span><strong>{row?.name ?? '名称未确认'}</strong><small>{row?.recap?.text ?? row?.detail ?? '继续这个 Agent'}</small></span></MobileAgentRow>
+                : region && ['file', 'browser'].includes(region.kind) ? <button className="mobile-menu-row" type="button" onClick={() => openContent(tab, region)}><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看网页'}</strong><small>{kindName(region)}</small></span></button>
+                  : <p>{region ? kindName(region) : 'Region 未确认'}<small>这项内容暂时不能在手机上操作。</small></p>}
               <details className="mobile-survey-provenance"><summary>位置信息</summary><code>{tab.tabId} / {regionId}</code>{addresses.map(address => <div key={JSON.stringify(address)}><code>{address.displayWorkspaceId} / {address.groupId}{address.spaceId ? ` / ${address.spaceId}` : ''}</code>
                 {region?.kind === 'agent' && addresses.length > 1 && <button type="button" onClick={() => openAgent(region, address)}>从此原位置继续对话</button>}</div>)}</details>
             </li>
           })}</ul></article>)}</section>
-        {!tabs.length && <MobileNotice>原 Tab / Region 尚未确认，请刷新原研究。</MobileNotice>}
+        {!tabs.length && <MobileNotice>这个位置还没确认，请刷新研究。</MobileNotice>}
       </section>}
     </>}
     {visited.map(target => <div key={target.key} hidden={target.key !== selectedKey || !context.regionId}>
