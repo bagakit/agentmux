@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 vi.mock('electron', () => ({ WebContentsView: class {}, app: { getPath: () => tmpdir() } }))
 
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '../src/main/browser-screenshot-source.js'
+import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/browser-screenshot-source'
 
 function png(width: number, height: number): Buffer {
   const bytes = Buffer.alloc(33)

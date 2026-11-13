@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserResultArtifactStore, readBrowserResultArtifact } from '../src/main/browser-result-artifact.js'
-import { runBrowserScript } from '../src/main/browser-script-runner.js'
-import { browserRunOutcomeFromFailure } from '../src/main/browser-run-outcome.js'
+import { BrowserResultArtifactStore, readBrowserResultArtifact } from '@agentmux/browser/browser-result-artifact'
+import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
+import { browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
 import { BROWSER_RESULT_INLINE_BYTES, BROWSER_RESULT_MAX_BYTES, BROWSER_RESULT_MAX_READ_BYTES,
-  type BrowserResultArtifactReference, type BrowserResultContext } from '../src/shared/browser-result-artifact.js'
+  type BrowserResultArtifactReference, type BrowserResultContext } from '@agentmux/browser/model/browser-result-artifact'
 
 const context: BrowserResultContext = { workspaceId: 'workspace-a', browserId: 'browser-a', operationId: 'operation-a', navigationId: 'navigation-a' }
 const owner = { workspaceId: context.workspaceId, browserId: context.browserId }

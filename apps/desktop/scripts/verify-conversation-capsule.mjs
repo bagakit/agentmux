@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -11,7 +12,7 @@ assert.ok(process.argv.slice(2).every(argument => argument === '--presentation-o
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
-const { build: bundle } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build: bundle } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const fixture = join(desktop, 'scripts/fixtures/conversation-capsule')
 const formalStyles = 'apps/desktop/src/renderer/src/styles/index.css'
 const capsuleStyles = 'packages/client-ui/src/styles/conversation-capsule.css', diagramStyles = 'packages/client-ui/src/styles/diagram-image.css'

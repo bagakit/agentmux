@@ -1,13 +1,13 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 
 const file = 'apps/desktop/src/main/browser-outcome-criteria.ts'
-const shared = 'apps/desktop/src/shared/browser-outcome-criteria.ts'
+const shared = 'packages/browser/src/model/browser-outcome-criteria.ts'
 const ui = 'apps/desktop/src/renderer/src/components/BrowserOutcomeCriteria.tsx'
 await verifyRendererSourceMutations({
   name: 'browser-outcome-criteria-mutations',
   tests: ['apps/desktop/test/browser-outcome-criteria.test.tsx'],
-  sources: [file, shared, ui, 'apps/desktop/src/main/browser-structured-output.ts', 'apps/desktop/src/shared/browser-structured-output.ts',
-    'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/main/browser-step-evidence.ts', 'apps/desktop/src/main/browser-result-artifact.ts'],
+  sources: [file, shared, ui, 'packages/browser/src/browser-structured-output.ts', 'packages/browser/src/model/browser-structured-output.ts',
+    'packages/browser/src/browser-operation-journal.ts', 'packages/browser/src/browser-step-evidence.ts', 'packages/browser/src/browser-result-artifact.ts'],
   mutations: [
     { label: 'historical-producer-reused', file, before: 'condition.producer.operationId !== registration.context.operationId', after: 'false' },
     { label: 'registration-navigation-join-removed', file, before: 'condition.producer.navigationId !== registration.context.navigationId', after: 'false' },

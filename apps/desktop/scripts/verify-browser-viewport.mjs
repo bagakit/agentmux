@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
@@ -13,7 +14,7 @@ assert.ok(args.every(arg => ['--mutations', '--return-preflight'].includes(arg))
 const preflight = args.includes('--return-preflight')
 assert.ok(!preflight || !args.includes('--mutations'), 'Return preflight observes source without claiming mutation acceptance')
 const require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const fixture = resolve('apps/desktop/scripts/fixtures/browser-viewport')
 const preflightRoot = resolve('.local/browser-viewport-return')
 if (preflight) await mkdir(preflightRoot, { recursive: true })
@@ -31,7 +32,7 @@ const inputs = [
   'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/native-overlay-surfaces.ts',
   'apps/desktop/src/main/native-overlay-focus.ts', 'apps/desktop/src/preload/native-overlay-focus.ts', 'apps/desktop/src/main/ipc.ts',
   'apps/desktop/src/shared/native-overlay.ts', 'apps/desktop/src/shared/browser-bounds.ts',
-  'apps/desktop/src/main/browser-page-dispatch.ts', 'apps/desktop/src/main/browser-script-runner.ts',
+  'packages/browser/src/browser-page-dispatch.ts', 'packages/browser/src/browser-script-runner.ts',
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx',
   'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',

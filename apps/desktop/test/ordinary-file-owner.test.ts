@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -113,7 +114,7 @@ it('the shared ordinary leaf keeps real name discovery, bounded bytes and exclus
 })
 
 it('the actual Renderer resource bridge stays browser-safe while retaining exact file mapping', async () => {
-  const {build}=createRequire(resolve('apps/host/package.json'))('esbuild') as typeof import('esbuild')
+  const {build}=browserSourceBuild(createRequire(resolve('apps/host/package.json'))('esbuild')) as typeof import('esbuild')
   const output=await build({entryPoints:['apps/desktop/src/renderer/src/lib/zone-file-resource.ts'],bundle:true,platform:'browser',format:'esm',write:false,metafile:true,logLevel:'silent',plugins:[{
     name:'original-host-pure-entries',setup(builder){builder.onResolve({filter:/^@agentmux\/host\//},args=>({path:resolve('apps/host/src',args.path.slice('@agentmux/host/'.length)+'.ts')}))}
   }]})

@@ -4,7 +4,7 @@ const file = 'apps/desktop/src/main/browser-downloads.ts'
 await verifyRendererSourceMutations({
   name: 'browser-downloads-mutations',
   tests: ['apps/desktop/test/browser-downloads.test.ts'],
-  sources: [file, 'apps/desktop/src/shared/browser-download.ts', 'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts'],
+  sources: [file, 'packages/browser/src/model/browser-download.ts', 'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts'],
   mutations: [
     { label: 'subscription-after-trigger', file, before: "session.on('will-download', received)", after: "setTimeout(() => session.on('will-download', received), 0)" },
     { label: 'received-claims-completed', file, before: "status: 'received', filename: download.getFilename()", after: "status: 'completed', filename: download.getFilename()" },

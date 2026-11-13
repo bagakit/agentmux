@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { resolve, join, dirname } from 'node:path'
@@ -7,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 
 const require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sourcePath = resolve('apps/desktop/src/main/native-overlay-surfaces.ts'), source = await readFile(sourcePath, 'utf8')
 const out = resolve('.local/browser-menu-native-input/proof'), work = await mkdtemp(join(tmpdir(), 'agentmux-browser-menu-'))
 await mkdir(out, { recursive: true })

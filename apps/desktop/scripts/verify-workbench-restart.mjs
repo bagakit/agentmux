@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
@@ -47,7 +48,7 @@ export async function verifyWorkbenchRestart({ root, evidence }) {
   const fixture = join(root, 'apps/desktop/scripts/fixtures/durable-workbench-storage')
   const require = createRequire(join(root, 'apps/desktop/package.json'))
   const { build: viteBuild } = await import(pathToFileURL(require.resolve('vite')).href)
-  const { build: esbuild, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
+  const { build: esbuild, transform } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild'))
   const temporary = await realpath(await mkdtemp('/tmp/amw-build-'))
   const renderer = join(temporary, 'renderer'), main = join(temporary, 'main.mjs')
   const inputs = {}, report = { schema: 'agentmux.workbench-native-restart.v1', passed: false,

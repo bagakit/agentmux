@@ -7,7 +7,7 @@ await verifyRendererSourceMutations({
   sources: [file],
   mutations: [
     { label: 'frame-source-identity-points-to-missing-owner', file,
-      before: "'apps/desktop/src/main/browser-selection-script.ts','packages/core/src/browser-page-capability.ts'] : []),",
+      before: "'packages/browser/src/browser-selection-script.ts','packages/core/src/browser-page-capability.ts'] : []),",
       after: "'apps/desktop/src/main/browser-element-context.ts','packages/core/src/browser-page-capability.ts'] : [])," },
     { label: 'duplicate-regions-accept-one-native-owner', file,
       before: 'if(new Set(found.map(page=>page.webContentsId)).size!==stages.length)return null;return found',

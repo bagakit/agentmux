@@ -4,15 +4,15 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_PAGE_CAPABILITIES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES } from '@agentmux/core'
-import { PREPARE_TOUCH_WITNESS_DECLARATION } from '../src/main/browser-page-input-scripts'
-import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch'
+import { PREPARE_TOUCH_WITNESS_DECLARATION } from '@agentmux/browser/browser-page-input-scripts'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
 import { compileBrowserSteps } from '../src/main/browser-replay-compiler'
 import { BrowserTaskAssets, type BrowserTaskAssetStore } from '../src/main/browser-task-assets'
-import { startBrowserOperationStep } from '../src/main/browser-operation-step'
+import { startBrowserOperationStep } from '@agentmux/browser/browser-operation-step'
 import { BrowserTaskAssetEditor } from '../src/renderer/src/components/BrowserTaskAssetEditor'
 import type { BrowserTaskAssetDocument, BrowserTaskContent } from '../src/shared/browser-task-assets'
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-function fixture(remaining = Number.POSITIVE_INFINITY) {
+function fixture(remaining = Number.POSITIVE_INFINITY, supplyBudget = true) {
   const calls: { method: string; params: any }[] = [], targets: any[] = [], listeners = new Set<any>()
   const notes: string[] = [], controller = new AbortController()
   let navigationId = 'nav-1', controlled = true, removed = false, own = false, ended = 0, moved = 0
@@ -31,7 +31,7 @@ function fixture(remaining = Number.POSITIVE_INFINITY) {
     if (method === 'Runtime.callFunctionOn') return params.returnByValue === false ? { result: { objectId: 'pointer-witness' } } : { result: { value: true } }
     return {}
   }
-  const dispatch = createBrowserPageDispatch({ remainingMillis: () => remaining, signal: controller.signal, session: { sendCommand, frames: new Map(), endedReason: null, frameDiscoveryFailure: null,
+  const dispatch = createBrowserPageDispatch({ ...(supplyBudget ? { remainingMillis: () => remaining } : {}), signal: controller.signal, session: { sendCommand, frames: new Map(), endedReason: null, frameDiscoveryFailure: null,
     observe: listener => { listeners.add(listener); return () => listeners.delete(listener) } },
     pageInfo: () => ({ url: 'https://example.test/drag', title: 'Drag', navigationId }), gotoUrl: async () => {}, captureScreenshot: async () => ({}),
     readLedger: async () => null, writeLedger: async () => {}, note: text => notes.push(text), beforeAction: () => { if (!controlled) throw new Error('Human took control') },
@@ -45,6 +45,34 @@ const touches = (f: ReturnType<typeof fixture>) => f.calls.filter(row => row.met
 const semantic = (name: string) => ({ role: 'button', name, ordinal: 1, count: 1 })
 
 describe('original native Browser touch', () => {
+  it('a hold without a host budget spans Node timer sections instead of overflowing into a 1ms completion', async () => {
+    vi.useFakeTimers({toFake:['setTimeout','clearTimeout','performance']})
+    try {
+      const f=fixture(Infinity,false), [ref]=await f.refs()
+      let settled=false
+      const held=f.dispatch('longPress',[ref,{durationMs:2**31}]).then(value=>{settled=true;return value})
+      for(let turn=0;turn<300;turn++)await Promise.resolve()
+      expect(touches(f).map(row=>row.type)).toEqual(['touchStart'])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled,'An overflowing native hold must not become a 1ms success').toBe(false)
+      await vi.advanceTimersByTimeAsync(2**31-2)
+      expect(settled,'The first timer section is not the requested whole hold').toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await held
+      expect(touches(f).map(row=>row.type)).toEqual(['touchStart','touchEnd'])
+    } finally {vi.useRealTimers()}
+  })
+  it('a hold without a host budget remains cancellable during a timer section', async () => {
+    vi.useFakeTimers({toFake:['setTimeout','clearTimeout','performance']})
+    try {
+      const f=fixture(Infinity,false), [ref]=await f.refs()
+      const held=f.dispatch('longPress',[ref,{durationMs:2**31}]).catch(error=>error)
+      for(let turn=0;turn<300;turn++)await Promise.resolve()
+      f.controller.abort(new Error('Original operation stopped'))
+      expect((await held).fact).toEqual({kind:'locator-changed',effects:'unknown'})
+      expect(touches(f).map(row=>row.type)).not.toContain('touchEnd')
+    } finally {vi.useRealTimers()}
+  })
   it('advertises four actually dispatched mutating gestures without a device-identity claim', () => {
     for (const name of ['tap', 'longPress', 'swipe', 'pinch']) {
       expect(BROWSER_PAGE_CAPABILITIES.some(row => row.name === name)).toBe(true)

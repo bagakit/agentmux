@@ -19,9 +19,9 @@
     }
   },
   "include": [
-    "../../../src/main/browser-page-transport.ts",
+    "@agentmux/browser/browser-page-transport",
     "../../../src/main/browser-cdp-session.ts",
-    "../../../src/main/browser-page-dispatch.ts",
+    "@agentmux/browser/browser-page-dispatch",
     "../../../test/browser-page-dispatch.test.ts",
     "../../../src/main/browser-external-bridge.ts",
     "../../../src/main/browser-external-target.ts",

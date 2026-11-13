@@ -8,9 +8,9 @@ import { execFileSync, spawnSync } from 'node:child_process'
 const root = path.resolve(import.meta.dirname, '../../..')
 const evidence = path.resolve(process.argv[2] ?? await fs.mkdtemp(path.join(root, '.tmp/browser-frame-mutations-')))
 const isolated = await fs.realpath(await fs.mkdtemp(path.join(tmpdir(), 'amux-frame-mutations-')))
-const snapshot = 'apps/desktop/src/main/browser-page-snapshot.ts'
-const documents = 'apps/desktop/src/main/browser-frame-documents.ts'
-const query = 'apps/desktop/src/main/browser-snapshot-query.ts'
+const snapshot = 'packages/browser/src/browser-page-snapshot.ts'
+const documents = 'packages/browser/src/browser-frame-documents.ts'
+const query = 'packages/browser/src/browser-snapshot-query.ts'
 const cdp = 'apps/desktop/src/main/browser-cdp-session.ts'
 const tests = ['apps/desktop/test/browser-frame-snapshot.test.ts', 'apps/desktop/test/browser-scoped-snapshot.test.ts', 'apps/desktop/test/browser-cdp-session.test.ts']
 const cases = [
@@ -41,7 +41,7 @@ const receipt = { passed: false, candidate: execFileSync('git', ['rev-parse', 'H
   sourceHashes: Object.fromEntries([...originals].map(([file, bytes]) => [file, hash(bytes)])), cases: [] }
 await fs.mkdir(evidence, { recursive: true })
 try {
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/shared']) await fs.cp(path.join(root, directory), path.join(isolated, directory), { recursive: true })
+  for (const directory of ['packages/browser/src', 'packages/browser/scripts', 'apps/desktop/src/main', 'apps/desktop/src/shared']) await fs.cp(path.join(root, directory), path.join(isolated, directory), { recursive: true })
   await fs.symlink(path.join(root, 'apps/desktop/resources'), path.join(isolated, 'apps/desktop/resources'), 'dir')
   await fs.mkdir(path.join(isolated, 'apps/desktop/test'), { recursive: true })
   for (const test of tests) await fs.writeFile(path.join(isolated, test), originals.get(test))
@@ -49,7 +49,7 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   await fs.writeFile(path.join(isolated, 'package.json'), '{"type":"module"}\n')
   const config = path.join(isolated, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { test: { include: ${JSON.stringify(tests)} } }\n`)
+  await fs.writeFile(config, `export default { resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname) } }, test: { include: ${JSON.stringify(tests)} } }\n`)
   const run = async name => {
     const result = spawnSync(process.execPath, [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', ...tests, '--root', isolated, '--config', config, '--maxWorkers=1'], { cwd: isolated, encoding: 'utf8', timeout: 60_000 })
     const log = `${result.stdout ?? ''}${result.stderr ?? ''}`

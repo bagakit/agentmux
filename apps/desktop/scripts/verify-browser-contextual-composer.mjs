@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { fixturePath } from './lib/fixture-values.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild'), { build: viteBuild } = require('vite')
+const { build, transform } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild')), { build: viteBuild } = require('vite')
 const captureOnly = process.argv.includes('--capture-only')
 const mutationId = process.argv.find(arg => arg.startsWith('--mutation='))?.slice('--mutation='.length)
 const presenceOnly = process.argv.includes('--presence-only')

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -9,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const root = path.resolve(import.meta.dirname, '../../..'), desktop = path.join(root, 'apps/desktop'), fixture = path.join(desktop, 'scripts/fixtures/focus-timeline-order')
 const evidence = path.resolve(process.argv[2] ?? path.join(root, (".tmp/focus-timeline-order-scene-" + (globalThis.crypto.randomUUID()) + "")))
-const require = createRequire(path.join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite'))('esbuild'), electron = require('electron')
+const require = createRequire(path.join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), electron = require('electron')
 const privateRoot = await fs.mkdtemp(_hygiene_fixturePath("tmp/amux-focus-order-")), output = path.join(privateRoot, 'renderer'), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const renderer = 'apps/desktop/src/renderer/src/'
 const paths = [`${renderer}lib/focus-history-timeline.ts`, `${renderer}components/RecentFocusTimeline.tsx`, `${renderer}components/FocusMessagePreview.tsx`, `${renderer}lib/focus-time-window.ts`, `${renderer}lib/conversation-speaker.ts`, `${renderer}components/ConversationMessage.tsx`, `${renderer}store.ts`, `${renderer}styles/focus.css`, `${renderer}styles/focus-timeline-ruler.css`, 'apps/desktop/scripts/fixtures/focus-timeline-order/entry.mjs', 'apps/desktop/scripts/fixtures/focus-timeline-order/main.cjs', 'apps/desktop/scripts/capture-focus-timeline-order.mjs']

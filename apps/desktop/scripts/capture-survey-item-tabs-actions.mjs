@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {createRequire} from 'node:module'
@@ -13,7 +14,7 @@ assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length=
 const scene=process.argv[5]??'tabs-actions'
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-survey-item-tabs-actions-')),fixture=join(desktop,'scripts/fixtures/survey-item-tabs-actions')
-const require=createRequire(join(desktop,'package.json')),{build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')),{build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
 const receipt={schema:'agentmux.survey-item-tabs-actions.v1',scene,capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
  boundary:'Actual App/GlobalSurveySurface/SurveyZoneItem/SurveyItemOptions/Store/WorkbenchZone and complete CSS. Maintained typed preview API; only SessionPane PTY/Agent, File Editor and unused diff paint leaves isolated. No user Runtime, profile, Session, ordinary restart or installation.'}

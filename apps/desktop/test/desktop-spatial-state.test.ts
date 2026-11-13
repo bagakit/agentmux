@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, afterEach, beforeAll, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild');
+const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('esbuild');
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state';
 import { admitSpatialAgentOpen } from '../../../packages/core/src/spatial-agent-open';
 import { createWorkspaceLayout, addTabOccurrence, moveTabToNewGroup } from '@agentmux/layout';

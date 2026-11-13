@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment node
 import { expect, it } from 'vitest'
@@ -12,7 +13,7 @@ it('independent second process hydrates mixed old/new Tabs, splits and focus fro
   const home=await mkdtemp(join(tmpdir(),'amux-object-restore-'))
   try {
     const worker=join(home,'worker.mjs'), state=join(home,'spatial.json'), expected=join(home,'expected.json')
-    const {build}=createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
+    const {build}=browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('esbuild')
     const alias: Record<string,string>={'@agentmux/layout':resolve('packages/layout/src/index.ts'),'@agentmux/identity':resolve('packages/identity/src/index.ts')}
     const manifest=JSON.parse(readFileSync(resolve('packages/core/package.json'),'utf8'))
     for(const [name,value] of Object.entries(manifest.exports) as [string,{import?:string}][]) {

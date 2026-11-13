@@ -4,7 +4,7 @@ const file = 'apps/desktop/src/main/browser-task-assets.ts'
 await verifyRendererSourceMutations({
   name: 'browser-task-human-checkpoints-notice-mutations',
   tests: ['apps/desktop/test/browser-task-human-checkpoints.test.ts'],
-  sources: [file, 'apps/desktop/src/shared/browser-task-assets.ts', 'apps/desktop/src/shared/browser-outcome-criteria.ts',
+  sources: [file, 'apps/desktop/src/shared/browser-task-assets.ts', 'packages/browser/src/model/browser-outcome-criteria.ts',
     'apps/desktop/src/main/browser-replay-compiler.ts'],
   mutations: [
     { label: 'agent-control-records-human-confirmation', file, before: "actual.controlBefore !== 'human'", after: 'false' },

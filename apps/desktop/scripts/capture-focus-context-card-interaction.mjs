@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -12,7 +13,7 @@ const root=resolve(import.meta.dirname,'../../..'), desktop=join(root,'apps/desk
 assert.ok(process.argv.length===2||(process.argv.length===4&&process.argv[2]==='--evidence'&&process.argv[3]),'Use optional --evidence <private evidence directory>')
 const evidence=process.argv[3]?resolve(process.argv[3]):join(root,'.bagakit/feature-tracker/focus-identity-consistency-artifacts/cards','scene-'+globalThis.crypto.randomUUID());await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-focus-card-interaction-')), fixture=join(desktop,'scripts/fixtures/focus-context-card-interaction')
-const require=createRequire(join(desktop,'package.json')), {build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
 const receipt={schema:'agentmux.focus-context-card-interaction-scene.v1',capturedPass:false,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
   boundary:'Original compiled Global/Store/projection/Row/menu/Hover/clipboard/reportError and CSS. Maintained typed preview API; only PTY, unused editor and unmounted Launcher paint isolated. No Launcher or file Region in this scene. No true Core/PTY/Run/PID, Writer, OS input, restart or user installation.'}

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -7,7 +8,7 @@ import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const directory = path.join(path.resolve(root, '../..'), (".local/state/mote-surface-repair/avatar-picker-visual-" + (globalThis.crypto.randomUUID()) + "")), compiled = path.join(directory, 'compiled')
 const selectFields = process.argv.includes('--select-fields')
 const recoveryPolicy = process.argv.includes('--recovery-policy')

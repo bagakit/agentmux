@@ -5,7 +5,7 @@ const css = 'apps/desktop/src/renderer/src/styles/browser-structured-fields.css'
 await verifyRendererSourceMutations({
   name: ("browser-structured-fields-mutations-" + (globalThis.crypto.randomUUID()) + ""),
   tests: ['apps/desktop/test/browser-structured-fields.test.tsx'],
-  sources: [file, css, 'apps/desktop/src/shared/browser-structured-output.ts', 'apps/desktop/test/helpers/styles.ts',
+  sources: [file, css, 'packages/browser/src/model/browser-structured-output.ts', 'apps/desktop/test/helpers/styles.ts',
     'apps/desktop/src/renderer/src/styles/index.css'],
   mutations: [
     { label: 'empty-zero-false-rendered-as-missing', file, before: '{JSON.stringify(field.value)}',

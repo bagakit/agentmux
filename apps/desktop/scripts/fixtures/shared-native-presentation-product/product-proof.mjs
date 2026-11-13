@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
@@ -10,7 +11,7 @@ import { runProbeProcess, listProbeProcesses } from '../../probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../../../..'), desktop = join(root, 'apps/desktop'), fixture = import.meta.dirname
 const require = createRequire(join(desktop, 'package.json'))
-const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const { build: viteBuild } = await import(pathToFileURL(require.resolve('vite')).href)
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const evidence = resolve(process.env.AGENTMUX_PRESENTATION_RESOURCE_EVIDENCE || join(root, '.tmp', 'browser-presentation-product-native-' + globalThis.crypto.randomUUID()))

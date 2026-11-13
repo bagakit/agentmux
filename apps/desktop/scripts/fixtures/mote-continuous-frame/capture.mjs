@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -7,7 +8,7 @@ import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../p
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const conversationOnly = process.argv.includes('--conversation-only')
 const evolutionOnly = process.argv.includes('--evolution-only')
 assert.ok(!(conversationOnly && evolutionOnly), 'Select one bounded real App scene set')

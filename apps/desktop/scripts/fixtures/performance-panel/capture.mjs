@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
@@ -22,7 +23,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const toolkitQualification=toolkitFixture&&!tuiFixture&&process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE==='qualification'
   const require=createRequire(path.join(desktop,'package.json')),sha=bytes=>createHash('sha256').update(bytes).digest('hex')
   const {build,loadConfigFromFile}=await import(pathToFileURL(require.resolve('vite')).href)
-  const viteRequire=createRequire(require.resolve('vite')),esbuild=viteRequire('esbuild').build
+  const viteRequire=createRequire(require.resolve('vite')),esbuild=browserSourceBuild(viteRequire('esbuild')).build
   const {runProbeProcess,listProbeProcesses}=await import(pathToFileURL(path.join(desktop,'scripts/probe-process.mjs')).href)
   const configFile=path.join(desktop,'scripts/fixtures/settings-overview/vitest.config.mts')
   const {config}=await loadConfigFromFile({command:'build',mode:'production'},configFile,root)

@@ -9,7 +9,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const evidence = resolve(process.argv[2] ?? join(root, '.tmp', ("browser-operation-feedback-mutations-" + (globalThis.crypto.randomUUID()) + "")))
 const copy = await mkdtemp(_hygiene_fixturePath("tmp/amx-operation-feedback-source-"))
 const module = 'apps/desktop/src/main/browser-operation-feedback.ts'
-const dispatcher = 'apps/desktop/src/main/browser-page-dispatch.ts'
+const dispatcher = 'packages/browser/src/browser-page-dispatch.ts'
 const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const config = 'apps/desktop/scripts/fixtures/browser-operation-feedback/vitest.owning.config.mts'
 const inputs = [module, dispatcher, manager, 'apps/desktop/test/browser-operation-feedback.test.ts',
@@ -164,7 +164,7 @@ try {
     'apps/desktop/tsconfig.json', 'packages/core/package.json']) {
     await mkdir(dirname(join(copy, file)), { recursive: true }); await cp(join(root, file), join(copy, file))
   }
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/shared', 'packages/core/src']) {
+  for (const directory of ['packages/browser/src', 'packages/browser/scripts', 'apps/desktop/src/main', 'apps/desktop/src/shared', 'packages/core/src']) {
     await cp(join(root, directory), join(copy, directory), { recursive: true })
   }
   for (const [file, bytes] of originals) { await mkdir(dirname(join(copy, file)), { recursive: true }); await writeFile(join(copy, file), bytes) }

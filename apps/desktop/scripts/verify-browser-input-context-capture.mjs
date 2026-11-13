@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
@@ -7,7 +8,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fixturePath } from './lib/fixture-values.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(import.meta.url)
-const { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
+const { build } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild'))
 const output = join(root, '.tmp/browser-input-context-capture', randomUUID())
 await mkdir(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), sources = new Map()

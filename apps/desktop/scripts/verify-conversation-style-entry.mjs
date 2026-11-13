@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -9,7 +10,7 @@ import { aliases, root, desktopRequire, installedDependency } from './fixtures/c
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 
 const { build } = await import(pathToFileURL(desktopRequire.resolve('vite')).href)
-const { build: bundle } = createRequire(desktopRequire.resolve('vite/package.json'))('esbuild')
+const { build: bundle } = browserSourceBuild(createRequire(desktopRequire.resolve('vite/package.json'))('esbuild'))
 const desktop = join(root, 'apps/desktop'), fixture = join(desktop, 'scripts/fixtures/conversation-style-entry')
 const formal = 'apps/desktop/src/renderer/src/styles/index.css'
 const capsuleCSS = 'packages/client-ui/src/styles/conversation-capsule.css', diagramCSS = 'packages/client-ui/src/styles/diagram-image.css'

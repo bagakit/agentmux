@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { spawn, execFileSync } from 'node:child_process'
@@ -7,15 +8,15 @@ import { join, resolve, dirname, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const repo = resolve(import.meta.dirname, '../../..'), require = createRequire(join(repo, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild'), electron = require('electron')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), electron = require('electron')
 const output = join(repo, '.tmp/browser-agent-collaboration/input-isolation-proof')
 const scratch = await mkdtemp(join(tmpdir(), 'amux-browser-input-'))
 await symlink(join(repo, 'apps/desktop/node_modules'), join(scratch, 'node_modules'), 'dir')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const main = 'apps/desktop/src/main/browser-view-manager.ts', shield = 'apps/desktop/src/main/browser-native-input-shield.ts', overlay = 'apps/desktop/src/main/native-overlay-surfaces.ts'
-const inputs = [main, shield, 'apps/desktop/src/main/browser-page-dispatch.ts', 'apps/desktop/src/main/browser-cdp-session.ts',
+const inputs = [main, shield, 'packages/browser/src/browser-page-dispatch.ts', 'apps/desktop/src/main/browser-cdp-session.ts',
   'apps/desktop/src/main/text-edit-context-menu.ts', 'apps/desktop/src/main/native-overlay-surfaces.ts', 'apps/desktop/src/main/browser-external-bridge.ts',
-  'apps/desktop/src/shared/browser-operation.ts', 'apps/desktop/src/shared/contracts.ts', 'packages/core/src/browser-targets.ts', 'packages/core/src/control-browser-targets.ts',
+  'packages/browser/src/model/browser-operation.ts', 'apps/desktop/src/shared/contracts.ts', 'packages/core/src/browser-targets.ts', 'packages/core/src/control-browser-targets.ts',
   'packages/core/src/control-codec.ts', 'packages/core/src/control.ts', 'packages/core/src/agentmux-cli-browser-guide.ts', 'packages/core/src/agentmux-cli-commands.ts',
   'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx', 'apps/desktop/src/renderer/src/store.ts',
   ...['main.ts', 'renderer.tsx', 'preload.ts', 'native-window-input.mm'].map(file => 'apps/desktop/scripts/fixtures/browser-agent-input-isolation/' + file),
@@ -61,7 +62,7 @@ async function run(variant) {
     plugins: [{ name: 'exact-private-native-owner', setup(builder) { builder.onLoad({ filter: /browser-view-manager\.ts$|browser-native-input-shield\.ts$|native-overlay-surfaces\.ts$/ }, async args => {
       if (variant.path && args.path === join(repo, variant.path)) return { contents: mutated, loader: 'ts', resolveDir: dirname(args.path) }
     }) } }], entryPoints: ['apps/desktop/scripts/fixtures/browser-agent-input-isolation/main.ts'], outfile: join(scratch, 'main.mjs') })
-  for (const file of [main, shield, 'apps/desktop/src/main/browser-page-dispatch.ts', 'apps/desktop/src/main/text-edit-context-menu.ts']) {
+  for (const file of [main, shield, 'packages/browser/src/browser-page-dispatch.ts', 'apps/desktop/src/main/text-edit-context-menu.ts']) {
     assert.ok(Object.keys(built.metafile.inputs).some(input => resolve(repo, input) === join(repo, file)), 'Native bundle must consume the actual owner: ' + file)
   }
   await rm(join(scratch, 'receipt.json'), { force: true })

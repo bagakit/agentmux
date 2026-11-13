@@ -1,6 +1,7 @@
+import { browserUploadPort } from '../src/main/browser-page-files.js'
 import { describe, expect, it } from 'vitest'
-import { installBrowserPageInterrupts } from '../src/main/browser-page-interrupts.js'
-import type { BrowserPageTransport } from '../src/main/browser-page-transport.js'
+import { installBrowserPageInterrupts } from '@agentmux/browser/browser-page-interrupts'
+import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
 
 /** A transport with one child frame session, recording each command with the session it went to. */
 function fakeTransport() {
@@ -81,7 +82,7 @@ describe('file choosers during a run', () => {
   })
 })
 
-import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
 import type { BrowserUploads } from '../src/main/browser-uploads.js'
 
 describe('uploadFiles(handle) fills a chooser through the existing upload owner', () => {
@@ -107,7 +108,7 @@ describe('uploadFiles(handle) fills a chooser through the existing upload owner'
       session: t.session, interrupts,
       pageInfo: () => ({ url: 'https://example.test/', title: 't', navigationId: 'nav-1' }),
       gotoUrl: async () => {}, captureScreenshot: async () => ({}), readLedger: async () => null, writeLedger: async () => {}, note: () => {},
-      uploads: { store, context: () => ({ workspaceId: 'w', browserId: 'b', operationId: 'o', navigationId: 'nav-1', documentSurvivesClient: false, currentNavigationId: () => 'nav-1' }) }
+      uploads: browserUploadPort({ store, context: () => ({ workspaceId: 'w', browserId: 'b', operationId: 'o', navigationId: 'nav-1', documentSurvivesClient: false, currentNavigationId: () => 'nav-1' }) })
     })
     return { t, interrupts, dispatch, uploads }
   }

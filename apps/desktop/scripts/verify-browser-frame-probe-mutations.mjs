@@ -7,9 +7,9 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import { dirname, join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const tests = ['apps/desktop/test/browser-frame-probe-scenario.test.ts', 'apps/desktop/test/browser-ref-resolve.test.ts']
-const sources = ['apps/desktop/scripts/browser-frame-probe-scenario.mjs', 'apps/desktop/src/main/browser-selection.ts', 'apps/desktop/src/main/browser-ref-resolve.ts',
-  'apps/desktop/src/main/browser-page-snapshot.ts', 'apps/desktop/src/main/browser-frame-documents.ts',
-  'apps/desktop/src/main/browser-snapshot-query.ts', 'apps/desktop/src/shared/browser-snapshot-query.ts',
+const sources = ['apps/desktop/scripts/browser-frame-probe-scenario.mjs', 'packages/browser/src/browser-selection.ts', 'packages/browser/src/browser-ref-resolve.ts',
+  'packages/browser/src/browser-page-snapshot.ts', 'packages/browser/src/browser-frame-documents.ts',
+  'packages/browser/src/browser-snapshot-query.ts', 'packages/browser/src/model/browser-snapshot-query.ts',
   'apps/desktop/scripts/verify-browser-frame-probe-mutations.mjs']
 const mutations = [
   {
@@ -194,7 +194,7 @@ const mutations = [
   },
   {
     "label": "actual-ref-session-route-disconnected",
-    "file": "apps/desktop/src/main/browser-ref-resolve.ts",
+    "file": "packages/browser/src/browser-ref-resolve.ts",
     "edits": [
       {
         "before": "const send = node.sessionId ? input.frames?.get(node.sessionId) : input.send",

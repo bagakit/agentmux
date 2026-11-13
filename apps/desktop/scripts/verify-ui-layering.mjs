@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -12,7 +13,7 @@ import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json')), { build } = await import('vite')
-const esbuild = createRequire(require.resolve('vite'))('esbuild')
+const esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const fixture = join(desktop, 'scripts/fixtures/ui-layering')
 const mobileOnly = process.argv.includes('--mobile-only')
 const fullscreenOnly = process.argv.includes('--fullscreen-only')

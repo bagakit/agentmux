@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
@@ -11,7 +12,7 @@ export async function captureStartupProduct({ root, evidence, rendererMutation, 
   const fixture = resolve(root, 'apps/desktop/scripts/fixtures/startup-agent-availability')
   const desktop = resolve(root, 'apps/desktop'), compiled = resolve(evidence, 'compiled')
   const require = createRequire(resolve(desktop, 'package.json')), vitePath = require.resolve('vite')
-  const { build } = await import(pathToFileURL(vitePath).href), esbuild = createRequire(vitePath)('esbuild').build
+  const { build } = await import(pathToFileURL(vitePath).href), esbuild = browserSourceBuild(createRequire(vitePath)('esbuild')).build
   const { runProbeProcess, listProbeProcesses } = await import(pathToFileURL(resolve(desktop, 'scripts/probe-process.mjs')).href)
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-startup-agents-'))
   const inputs = {}, artifacts = [], phases = [], frames = []

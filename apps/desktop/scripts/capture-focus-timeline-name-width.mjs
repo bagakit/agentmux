@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -13,7 +14,7 @@ assert.ok((await fs.readFile(path.join(root, 'package.json'))).length > 0); asse
 const { runProbeProcess, listProbeProcesses } = await import(pathToFileURL(path.join(root, 'apps/desktop/scripts/probe-process.mjs')).href)
 const argumentIndex = process.argv.indexOf('--evidence'); assert.ok(argumentIndex >= 0 && process.argv[argumentIndex + 1], 'Explicit --evidence directory')
 const evidence = path.resolve(process.argv[argumentIndex + 1])
-const require = createRequire(path.join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite'))('esbuild'), electron = require('electron')
+const require = createRequire(path.join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), electron = require('electron')
 const scrollAddendum = process.argv.includes('--scroll-addendum')
 const privateRoot = await fs.mkdtemp(_hygiene_fixturePath("tmp/amux-focus-width-")), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourcePaths = ['apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/styles/focus.css', 'apps/desktop/src/renderer/src/lib/focus-timeline-name-width.ts', 'apps/desktop/src/renderer/src/hooks/useSidebarResize.ts', 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx', 'apps/desktop/src/renderer/src/lib/focus-history-timeline.ts', 'apps/desktop/src/renderer/src/components/AgentAvatar.tsx']

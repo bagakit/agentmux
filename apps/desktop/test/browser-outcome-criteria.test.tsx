@@ -6,16 +6,16 @@ import { join } from 'node:path'
 import { act, createElement, type MouseEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/browser-operation-journal'
-import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact'
-import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence'
-import { extractBrowserStructuredOutput } from '../src/main/browser-structured-output'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
+import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
+import { extractBrowserStructuredOutput } from '@agentmux/browser/browser-structured-output'
 import { evaluateBrowserOutcomeCriteria, type BrowserOutcomeCurrent, type BrowserOutcomeHost } from '../src/main/browser-outcome-criteria'
 import { BrowserOutcomeCriteria } from '../src/renderer/src/components/BrowserOutcomeCriteria'
 import { BROWSER_OUTCOME_LIMITS, parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeHumanFact,
-  type BrowserOutcomeRegistration, type BrowserOutcomeFieldRunInput } from '../src/shared/browser-outcome-criteria'
-import type { BrowserStructuredDocument, BrowserStructuredOutputRequest } from '../src/shared/browser-structured-output'
-import type { BrowserDownloadReceipt, BrowserDownloadReference, BrowserDownloadChunk } from '../src/shared/browser-download'
+  type BrowserOutcomeRegistration, type BrowserOutcomeFieldRunInput } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserStructuredDocument, BrowserStructuredOutputRequest } from '@agentmux/browser/model/browser-structured-output'
+import type { BrowserDownloadReceipt, BrowserDownloadReference, BrowserDownloadChunk } from '@agentmux/browser/model/browser-download'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 const owned: string[] = []

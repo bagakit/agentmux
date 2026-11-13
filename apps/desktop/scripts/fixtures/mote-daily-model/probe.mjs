@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -353,7 +354,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
     }
     await writeFile(join(source, 'package.json'), '{"type":"module"}\n')
     const require = createRequire(join(repositoryRoot, 'apps/desktop/package.json'))
-    const esbuild = createRequire(require.resolve('vite'))('esbuild'), aliases = []
+    const esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), aliases = []
     // A fresh Main may declare an installed dependency absent from this old
     // worktree's links. Resolve only exact declared versions from the existing
     // private package store; never change shared node_modules or fetch packages.

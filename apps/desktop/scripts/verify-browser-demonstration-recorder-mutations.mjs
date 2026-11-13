@@ -12,10 +12,10 @@ const target = 'apps/desktop/src/main/browser-semantic-target.ts'
 const surface = 'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx'
 const tests = [test, 'apps/desktop/test/browser-demonstration-capture.test.ts', 'apps/desktop/test/browser-demonstration-surface.test.tsx']
 const inputs = [main, capture, target, surface, ...tests,
-  'apps/desktop/src/main/browser-cdp-session.ts', 'apps/desktop/src/main/browser-page-snapshot.ts',
-  'apps/desktop/src/main/browser-snapshot-query.ts', 'apps/desktop/src/main/browser-selection-script.ts',
-  'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/browser-operation.ts',
-  'apps/desktop/src/shared/browser-step-evidence.ts', 'apps/desktop/src/shared/browser-snapshot-query.ts']
+  'apps/desktop/src/main/browser-cdp-session.ts', 'packages/browser/src/browser-page-snapshot.ts',
+  'packages/browser/src/browser-snapshot-query.ts', 'packages/browser/src/browser-selection-script.ts',
+  'apps/desktop/src/shared/browser-demonstration.ts', 'packages/browser/src/model/browser-operation.ts',
+  'packages/browser/src/model/browser-step-evidence.ts', 'packages/browser/src/model/browser-snapshot-query.ts']
 const cases = [
   ['capture-time-follows-slow-storage', 'const recordedAt = this.now()\n    const gesture = this.recentGesture(input.browserId, input.navigationId)\n    return this.change(async () => {', 'return this.change(async () => {\n      const recordedAt = this.now()\n      const gesture = this.recentGesture(input.browserId, input.navigationId)'],
   ['page-synthetic-event-accepted', 'input.isTrusted !== true', 'false'],

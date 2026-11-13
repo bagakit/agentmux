@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -14,7 +15,7 @@ assert.ok(args.every((arg, index) => ['--receipt', '--baseline-only', '--prepare
 const baselineOnly = args.includes('--baseline-only'), prepareOnly = args.includes('--prepare-only')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')))
-const { transform } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { transform } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const base = join(root, '.tmp/browser-control-continuity'); await mkdir(base, { recursive: true })
 const out = await mkdtemp(join(base, 'attempt-')), projection = join(out, 'source')

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
@@ -12,7 +13,7 @@ const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'app
 const fixture = join(desktop, 'scripts/fixtures/capsule-address')
 const require = createRequire(join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
-const { build: bundle, transform } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build: bundle, transform } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 let output = '.bagakit/feature-tracker/plans/capsule-links-and-browser-address/native-address', receiptOnly = false, preflight = false
 for (let index = 2; index < process.argv.length; index++) {
   const option = process.argv[index]

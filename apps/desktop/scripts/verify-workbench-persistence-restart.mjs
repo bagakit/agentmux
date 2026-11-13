@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
@@ -220,7 +221,7 @@ async function launch(label) {
 async function loadSeedSpatialAdapter() {
   const modulePath = join(root, 'desktop-spatial-seed.mjs')
   const buildRequire = createRequire(require.resolve('vite/package.json'))
-  const built = await buildRequire('esbuild').build({
+  const built = await browserSourceBuild(buildRequire('esbuild')).build({
     entryPoints: [join(desktopRoot, 'src/renderer/src/lib/desktop-spatial-state.ts')],
     outfile: modulePath, bundle: true, platform: 'node', format: 'esm', metafile: true,
     alias: { '@agentmux/layout': join(repositoryRoot, 'packages/layout/src/index.ts') },

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -14,7 +15,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 /** Private artifacts only. Every AgentMux import is compiled from this candidate. */
 export async function buildNoteFileLibraryRecovery(output) {
   output = resolve(output)
-  const { build } = require('esbuild'), ts = require('typescript')
+  const { build } = browserSourceBuild(require('esbuild')), ts = require('typescript')
   const { bundleIdentityRuntime } = await import(pathToFileURL(join(root, 'packages/identity/scripts/runtime-bundle.mjs')).href)
   const identityRuntime = await bundleIdentityRuntime()
   const packageRoots = Object.fromEntries(['core', 'client-ui', 'layout', 'demand', 'capsule', 'connectors', 'relay', 'identity', 'diagnostic-evidence', 'git']

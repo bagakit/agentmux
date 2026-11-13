@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { copyFile, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -67,7 +68,7 @@ const native = await vi.hoisted(async () => {
 })
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, app: { getPath: () => tmpdir() } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 
 const cleanups: Array<() => Promise<unknown> | void> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
@@ -109,7 +110,7 @@ async function originalSourceCli(root: string): Promise<string> {
   await writeFile(join(directory, 'package.json'), '{"type":"module"}\n')
   await copyFile(join(core, 'bin/amux'), join(directory, 'bin/amux'))
   await symlink(join(core, 'node_modules'), join(directory, 'node_modules'), 'dir')
-  const { build } = createRequire(join(core, 'package.json'))('esbuild')
+  const { build } = browserSourceBuild(createRequire(join(core, 'package.json'))('esbuild'))
   await build({ entryPoints: [join(core, 'src/agentmux.ts')], outfile: join(directory, 'dist/agentmux.js'),
     bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'error',
     banner: { js: "import {createRequire as __createRequire} from 'node:module';const require=__createRequire(import.meta.url);" } })
@@ -174,7 +175,7 @@ it('derives stable object addresses from the original container while keeping re
   await writeFile(savedPath, JSON.stringify(graph))
   await symlink(fileURLToPath(new URL('../../../packages/core/node_modules', import.meta.url)), join(root, 'node_modules'), 'dir')
   const coreSource = fileURLToPath(new URL('../../../packages/core/src/', import.meta.url))
-  const { build } = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('esbuild')
+  const { build } = browserSourceBuild(createRequire(new URL('../../../packages/core/package.json', import.meta.url))('esbuild'))
   await build({ entryPoints: [fileURLToPath(new URL('../src/main/browser-cold-descriptor.ts', import.meta.url))], outfile: coldModule,
     bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external',
     plugins: [{ name: 'original-source-public-exports', setup(plugin: { onResolve(options: { filter: RegExp }, callback: () => { path: string }): void }) {

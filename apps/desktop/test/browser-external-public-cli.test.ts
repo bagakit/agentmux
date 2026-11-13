@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, symlink } from 'node:fs/promises'
@@ -12,7 +13,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest } from '..
 import { objectCliReceipt } from '../../../packages/core/test/helpers/object-cli-receipt.js'
 
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url))
-const { build } = require('esbuild')
+const { build } = browserSourceBuild(require('esbuild'))
 let directory: string
 let cli: string
 let server: AgentMuxControlServer

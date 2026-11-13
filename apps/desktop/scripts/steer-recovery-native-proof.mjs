@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn, execFile } from 'node:child_process'
@@ -576,7 +577,7 @@ try {
     regions: { [regionId]: { regionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: id }, [fileId]: { regionId: fileId, kind: 'file', workspaceId, path: 'neighbor.txt' } } }
   const workbench = { tabs: { [tabId]: tab }, layouts: { [workspaceId]: { root: { type: 'leaf', groupId: 'recovery-group' }, groups: [{ id: 'recovery-group', tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: 'recovery-group' } } }
   const adapterPath = join(root, 'spatial-adapter.mjs')
-  const built = await createRequire(require.resolve('vite/package.json'))('esbuild').build({ entryPoints: [join(desktop, 'src/renderer/src/lib/desktop-spatial-state.ts')], outfile: adapterPath, bundle: true, platform: 'node', format: 'esm', metafile: true, alias: { '@agentmux/layout': join(repository, 'packages/layout/src/index.ts') }, logLevel: 'silent' })
+  const built = await browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild')).build({ entryPoints: [join(desktop, 'src/renderer/src/lib/desktop-spatial-state.ts')], outfile: adapterPath, bundle: true, platform: 'node', format: 'esm', metafile: true, alias: { '@agentmux/layout': join(repository, 'packages/layout/src/index.ts') }, logLevel: 'silent' })
   assert.ok(Object.keys(built.metafile.inputs).length > 0)
   const { desktopSpatialGraph } = await import(pathToFileURL(adapterPath).href)
   await new AgentMuxSpatialStateStore().commit({ expectedRevision: 0, graph: desktopSpatialGraph({ config, sessions: [], ...workbench, spaceZoneBindings: {}, spatialRequests: {} }, []) })

@@ -24,9 +24,9 @@ vi.mock('electron', () => ({ app: Object.defineProperties(new EventEmitter(), Ob
   nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }) }))
 vi.mock('node:os', async original => ({ ...await original(), homedir: () => fixture.directory }))
 vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
-vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
+vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
-vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
+vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class {
   setPresentationWindowOwner() {}
   release() {}

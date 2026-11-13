@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -60,7 +61,7 @@ if (mode === '--callers') {
   results.push({mode,edges})
 } else {
   const require = createRequire(resolve(root,'packages/core/package.json'))
-  const { build } = require('esbuild')
+  const { build } = browserSourceBuild(require('esbuild'))
   const aliases = new Map()
   for (const name of ['core','demand','layout']) {
     const dir = resolve(root,'packages',name), pkg = JSON.parse(await readFile(resolve(dir,'package.json'),'utf8'))

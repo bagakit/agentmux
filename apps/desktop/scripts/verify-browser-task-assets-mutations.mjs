@@ -10,8 +10,8 @@ const compiler = 'apps/desktop/src/main/browser-replay-compiler.ts'
 const editor = 'apps/desktop/src/renderer/src/components/BrowserTaskAssetEditor.tsx'
 const test = 'apps/desktop/test/browser-task-assets.test.tsx'
 const inputs = [main, compiler, editor, test, 'apps/desktop/src/shared/browser-task-assets.ts',
-  'apps/desktop/src/shared/browser-demonstration.ts', 'apps/desktop/src/shared/browser-operation.ts',
-  'apps/desktop/src/shared/browser-step-evidence.ts', 'packages/core/src/durable-write.ts', 'packages/core/src/browser-page-capability.ts']
+  'apps/desktop/src/shared/browser-demonstration.ts', 'packages/browser/src/model/browser-operation.ts',
+  'packages/browser/src/model/browser-step-evidence.ts', 'packages/core/src/durable-write.ts', 'packages/core/src/browser-page-capability.ts']
 const tests = [test]
 const cases = [
   [main, 'deleted-steps-resurrected', 'asset.draft = content(replacement)', 'asset.draft = content({ ...replacement, steps: replacement.steps.length ? replacement.steps : asset.draft.steps })'],

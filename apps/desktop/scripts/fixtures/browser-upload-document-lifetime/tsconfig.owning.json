@@ -19,7 +19,7 @@
     "../../../src/main/browser-uploads.ts",
     "../../../src/main/browser-external-bridge.ts",
     "../../../src/main/browser-external-owner.ts",
-    "../../../src/main/browser-page-dispatch.ts",
+    "@agentmux/browser/browser-page-dispatch",
     "../../../test/browser-upload-document-lifetime.test.ts",
     "../../../test/browser-uploads.test.ts",
     "../../../test/browser-external-target.test.ts",

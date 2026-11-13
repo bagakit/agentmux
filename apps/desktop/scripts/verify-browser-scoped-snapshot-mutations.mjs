@@ -8,9 +8,9 @@ import { execFileSync, spawnSync } from 'node:child_process'
 const root = path.resolve(import.meta.dirname, '../../..')
 const evidence = path.resolve(process.argv[2] ?? path.join(root, '.tmp/browser-scoped-snapshot-mutations'))
 const privateRoot = await fs.mkdtemp(path.join(tmpdir(), 'amux-scoped-mutations-'))
-const dispatch = 'apps/desktop/src/main/browser-page-dispatch.ts'
-const engine = 'apps/desktop/src/main/browser-page-snapshot.ts'
-const query = 'apps/desktop/src/main/browser-snapshot-query.ts'
+const dispatch = 'packages/browser/src/browser-page-dispatch.ts'
+const engine = 'packages/browser/src/browser-page-snapshot.ts'
+const query = 'packages/browser/src/browser-snapshot-query.ts'
 const test = 'apps/desktop/test/browser-scoped-snapshot.test.ts'
 const cases = [
   ['ref-reuse', dispatch, 'nextRef: () => `@e${(refCounter! += 1)}`', "nextRef: () => '@e1'"],
@@ -22,7 +22,7 @@ const cases = [
   ['expired-ref-diagnostic-disconnected', dispatch, 'if (expired.has(ref)) throw new Error(`${ref} was superseded by a later snapshot in this run. Use a ref from the latest snapshot().`)', '']
 ]
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-const inputs = [...new Set([...cases.map(([, file]) => file), test, 'apps/desktop/src/shared/browser-snapshot-query.ts'])]
+const inputs = [...new Set([...cases.map(([, file]) => file), test, 'packages/browser/src/model/browser-snapshot-query.ts'])]
 const original = new Map(await Promise.all(inputs.map(async file => [file, await fs.readFile(path.join(root, file))])))
 const receipt = { passed: false, candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), sourceHashes: Object.fromEntries([...original].map(([file, bytes]) => [file, digest(bytes)])), cases: [] }
 await fs.mkdir(evidence, { recursive: true })
@@ -30,7 +30,7 @@ try {
   // Copy only this production import graph and its behavioral oracle. The private
   // config has no Core dist guard because this graph has no Core runtime imports.
   // No production file or shared worktree is ever mutated.
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/shared']) {
+  for (const directory of ['packages/browser/src', 'packages/browser/scripts', 'apps/desktop/src/main', 'apps/desktop/src/shared']) {
     await fs.cp(path.join(root, directory), path.join(privateRoot, directory), { recursive: true })
   }
   await fs.mkdir(path.dirname(path.join(privateRoot, test)), { recursive: true })
@@ -38,7 +38,7 @@ try {
   await fs.symlink(path.join(root, 'node_modules'), path.join(privateRoot, 'node_modules'), 'dir')
   await fs.writeFile(path.join(privateRoot, 'package.json'), '{"type":"module"}\n')
   const config = path.join(privateRoot, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { test: { include: [${JSON.stringify(test)}] } }\n`)
+  await fs.writeFile(config, `export default { resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname) } }, test: { include: [${JSON.stringify(test)}] } }\n`)
   const run = async name => {
     const result = spawnSync(process.execPath, [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--root', privateRoot, '--config', config, '--maxWorkers=1'], { cwd: privateRoot, encoding: 'utf8', timeout: 30_000 })
     const log = `${result.stdout ?? ''}${result.stderr ?? ''}`

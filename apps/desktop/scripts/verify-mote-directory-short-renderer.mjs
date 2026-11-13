@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -7,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { build as viteBuild } from 'vite'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const repo=resolve(import.meta.dirname,'../../..'),desktop=join(repo,'apps/desktop'),fixture=join(desktop,'scripts/fixtures/mote-directory-short-name'),require=createRequire(join(desktop,'package.json'))
-const esBuild=createRequire(require.resolve('vite'))('esbuild').build
+const esBuild=browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')).build
 const flag=process.argv.indexOf('--evidence-dir'),evidence=resolve(flag<0?join(repo,'.tmp/mote-directory-short-renderer',String(globalThis.crypto.randomUUID())):process.argv[flag+1]),privateRoot=await mkdtemp(join(tmpdir(),'agentmux-short-mote-'))
 const hash=b=>createHash('sha256').update(b).digest('hex'),inputs=new Map(),aliases=[]
 const receipt={schema:'agentmux.mote-directory-short-renderer.v1',passed:false,aestheticReview:'pending',userRunTouched:false,phases:[],limitations:['Original App/shared Workbench and original preload/API/Store/metadata owner, bounded real Chromium input. Other public ports use private controlled facts; no Core/ctxmux/CLI process survival or native Browser qualification.','Lightweight isolated fixture compilation, not build/package/install. Two real private Electron processes verify draft/topology retention, not a user App restart.']}

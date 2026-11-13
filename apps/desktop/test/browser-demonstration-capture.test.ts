@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
 import { BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDocument, BrowserDemonstrationDraft } from '../src/shared/browser-demonstration.js'
-import { captureBrowserPageSnapshot } from '../src/main/browser-page-snapshot.js'
+import { captureBrowserPageSnapshot } from '@agentmux/browser/browser-page-snapshot'
 
-vi.mock('../src/main/browser-page-snapshot.js', () => ({ captureBrowserPageSnapshot: vi.fn() }))
+vi.mock('@agentmux/browser/browser-page-snapshot', () => ({ captureBrowserPageSnapshot: vi.fn() }))
 const snapshot = vi.mocked(captureBrowserPageSnapshot)
 class Element {
   constructor(readonly ownerDocument: unknown, readonly backendNodeId: number) {}

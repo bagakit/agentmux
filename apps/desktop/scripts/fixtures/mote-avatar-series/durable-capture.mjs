@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _reshape_fixturePath } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
@@ -6,7 +7,7 @@ import {createRequire} from 'node:module'
 import {createHash,randomUUID} from 'node:crypto'
 import {spawn} from 'node:child_process'
 const fixture=import.meta.dirname,root=path.resolve(fixture,'../../../../..')
-const require=createRequire(path.join(root,'apps/desktop/package.json')),{build}=createRequire(require.resolve('vite'))('esbuild')
+const require=createRequire(path.join(root,'apps/desktop/package.json')),{build}=browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const directory=path.join(root,'.local/state/mote-avatar-durable',randomUUID()),compiled=path.join(directory,'compiled'),runtimeRoot=_reshape_fixturePath("private/tmp/amx-avwrite-")+randomUUID().slice(0,8)
 await fs.mkdir(compiled,{recursive:true});await fs.mkdir(path.join(directory,'home'));await fs.mkdir(runtimeRoot)
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')

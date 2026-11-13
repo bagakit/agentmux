@@ -12,7 +12,7 @@ const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const pane = 'apps/desktop/src/renderer/src/components/BrowserPane.tsx'
 const managerTest = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const paneTest = 'apps/desktop/test/browser-demonstration-wiring.test.tsx'
-const selection = 'apps/desktop/src/main/browser-selection-script.ts'
+const selection = 'packages/browser/src/browser-selection-script.ts'
 const selectionTest = 'apps/desktop/test/browser-selection-script.test.ts'
 const assets = 'apps/desktop/src/main/browser-task-assets.ts'
 const assetsTest = 'apps/desktop/test/browser-task-assets.test.tsx'
@@ -59,7 +59,7 @@ const receipt = { passed: false, candidate: execFileSync('git', ['rev-parse', 'H
   sourceHashes: Object.fromEntries([...original].map(([file, bytes]) => [file, hash(bytes)])), cases: [] }
 await fs.mkdir(evidence, { recursive: true })
 try {
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/shared', 'apps/desktop/src/renderer/src', 'apps/desktop/src/preload']) {
+  for (const directory of ['packages/browser/src', 'packages/browser/scripts', 'apps/desktop/src/main', 'apps/desktop/src/shared', 'apps/desktop/src/renderer/src', 'apps/desktop/src/preload']) {
     await fs.cp(path.join(root, directory), path.join(isolated, directory), { recursive: true })
   }
   await fs.symlink(path.join(root, 'apps/desktop/resources'), path.join(isolated, 'apps/desktop/resources'), 'dir')
@@ -69,7 +69,7 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   await fs.writeFile(path.join(isolated, 'package.json'), '{"type":"module"}\n')
   const config = path.join(isolated, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, server: { fs: { allow: ${JSON.stringify([isolated, path.join(root, 'packages/core/bin')])} } }, test: { include: ${JSON.stringify(tests)} } }\n`)
+  await fs.writeFile(config, `export default { resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname) } }, esbuild: { jsx: 'automatic' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, server: { fs: { allow: ${JSON.stringify([isolated, path.join(root, 'packages/core/bin')])} } }, test: { include: ${JSON.stringify(tests)} } }\n`)
   const run = async (name, test) => {
     const args = [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', test, '--root', isolated, '--config', config, '--maxWorkers=1']
     if (test === managerTest) args.push('-t', 'versioned task assets via')

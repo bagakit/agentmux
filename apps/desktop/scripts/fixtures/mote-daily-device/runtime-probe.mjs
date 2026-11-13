@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
@@ -46,7 +47,7 @@ export async function probeDeviceGoalRuntime({ repository, evidence, mainRef } =
       const available = await realpath(join(repo, name)).catch(error => { if (error.code !== 'ENOENT') throw error; return realpath(join(dependencyRoot, name)) })
       await mkdir(dirname(join(source, name)), { recursive: true }); await symlink(available, join(source, name))
     }
-    const require = createRequire(join(repo, 'apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild')
+    const require = createRequire(join(repo, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
     const aliases = { electron: join(source, 'apps/desktop/scripts/fixtures/agent-schedules/electron.ts') }
     await mkdir(dirname(aliases.electron), { recursive: true }); await writeFile(aliases.electron, execFileSync('git', ['show', mainRef + ':apps/desktop/scripts/fixtures/agent-schedules/electron.ts'], { cwd: repo }))
     for (const name of ['core', 'demand', 'layout', 'relay']) {

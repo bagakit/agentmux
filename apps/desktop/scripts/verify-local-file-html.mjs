@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from './lib/fixture-values.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -7,7 +8,7 @@ import { join, resolve } from 'node:path'
 import { runProbeProcess } from './probe-process.mjs'
 
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..')
-const require = createRequire(import.meta.url), esbuild = createRequire(require.resolve('vite'))('esbuild')
+const require = createRequire(import.meta.url), esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const evidence = resolve(repository, process.argv.find(value => value.startsWith('--output='))?.slice(9) ?? 'docs/reviews/evidence/local-file-preview')
 const root = await mkdtemp(_hygiene_fixturePath('tmp/amx-file-html-')), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = ['scripts/fixtures/local-file-preview/native-html.ts', 'src/main/browser-view-manager.ts', 'src/main/browser-profile-manager.ts', 'src/main/browser-profile-store.ts', 'src/main/browser-ref-ledger-store.ts']

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -13,7 +14,7 @@ const take = flag => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefi
 assert.ok(args.every((arg, index) => ['--receipt', '--prepare-only', '--baseline-only', '--prepared', '--ui-receipt', '--visual-review'].includes(arg) || ['--receipt', '--prepared', '--ui-receipt', '--visual-review'].includes(args[index - 1])), 'Unsupported unified child proof option')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')))
-const { build: esbuild, transform } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build: esbuild, transform } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const sha = value => createHash('sha256').update(value).digest('hex')
 const base = join(root, '.tmp/unified-browser-children'); await mkdir(base, { recursive: true })
 const latestFile = join(base, 'latest.json'), reviewFile = take('--visual-review') ? resolve(take('--visual-review')) : join(base, 'visual-review.json')
@@ -23,7 +24,7 @@ const receiptFile = take('--receipt') ? resolve(take('--receipt')) : join(out, '
 try { await stat(receiptFile); throw new Error('Keep the original receipt; choose another explicit output') } catch (error) { if (error.code !== 'ENOENT') throw error }
 await mkdir(dirname(receiptFile), { recursive: true }); await mkdir(compiled)
 const fixture = 'apps/desktop/scripts/fixtures/unified-browser-children/main.ts'
-const owners = ['apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-native-windows.ts', 'apps/desktop/src/main/browser-page-dispatch.ts',
+const owners = ['apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-native-windows.ts', 'packages/browser/src/browser-page-dispatch.ts',
   'apps/desktop/src/main/browser-cdp-session.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/preload/index.ts',
   'apps/desktop/src/renderer/src/store.ts', 'packages/core/src/control-browser-targets.ts', 'packages/core/src/agentmux.ts']
 const receipt = { schema: 'agentmux.unified-browser-children.proof.v1', candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim(),
@@ -80,7 +81,7 @@ const mutations = {
   'private-child-clears-parent': { file: 'apps/desktop/src/main/browser-view-manager.ts', from: 'if (entry?.nativeChild) return this.closeNativeChild(entry).then(closed => {', to: "if (entry?.nativeChild && entry.storage.mode !== 'private') return this.closeNativeChild(entry).then(closed => {", expected: 'Closing one private child preserves the original parent native page' },
   'omit-child-catalog': { file: 'apps/desktop/src/main/browser-view-manager.ts', from: 'return [...this.entries.values()].map(entry => this.projectTarget(entry))', to: 'return [...this.entries.values()].filter(entry => !entry.source).map(entry => this.projectTarget(entry))', expected: 'Every native child joins the actual Browser target catalog exactly once' },
   'omit-public-source': { file: 'packages/core/src/control-browser-targets.ts', from: '...(row.openedFrom === undefined ? {} : { openedFrom: parseBrowserSource(row.openedFrom) }),', to: '/* proof drops the original child source at the actual public receiving edge */', expected: 'Public RPC preserves the original child source relationship' },
-  'omit-cli-page-effect': { file: 'apps/desktop/src/main/browser-page-dispatch.ts', from: '          expression,\n          awaitPromise: true,', to: "          expression: 'undefined',\n          awaitPromise: true,", expected: 'Public CLI dispatch mutates the exact original child' }
+  'omit-cli-page-effect': { file: 'packages/browser/src/browser-page-dispatch.ts', from: '          expression,\n          awaitPromise: true,', to: "          expression: 'undefined',\n          awaitPromise: true,", expected: 'Public CLI dispatch mutates the exact original child' }
 }
 function applyMutation(code, name) {
   const mutation = mutations[name]

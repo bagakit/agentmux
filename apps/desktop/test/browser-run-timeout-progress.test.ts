@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { browserRunOutcomeFromFailure } from '../src/main/browser-run-outcome.js'
-import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
-import type { BrowserPageTransport } from '../src/main/browser-page-dispatch.js'
+import { browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import type { BrowserPageTransport } from '@agentmux/browser/browser-page-dispatch'
 
 /**
  * A program that runs out of time must tell its Agent where it stopped, and must not invite a rerun

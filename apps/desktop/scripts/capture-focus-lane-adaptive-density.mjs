@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {createRequire} from 'node:module'
@@ -13,7 +14,7 @@ const heightScene=process.argv[4]==='--height'
 assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||(heightScene&&process.argv.length===5)),'Use --evidence <private evidence directory> [--height]')
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-focus-lane-')),fixture=join(desktop,'scripts/fixtures/focus-lane-adaptive-density'),mainFixture=join(fixture,'main.cjs')
-const require=createRequire(join(desktop,'package.json')), {build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
 const receipt={schema:'agentmux.focus-lane-adaptive-scene.v1',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
   boundary:'Light Renderer-only actual App/Focus/Workbench/Stable/Store and installed Panel browser primary. Maintained typed preview API; only SessionPane PTY/Agent paint and unused Monaco painting leaves isolated. No Runtime/native simultaneous presentation, Writer, ordinary restart or user installation.'}

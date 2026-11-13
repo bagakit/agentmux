@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import {createRequire} from 'node:module'
@@ -6,7 +7,7 @@ import {createServer} from 'node:http'
 const root=path.resolve(import.meta.dirname,'../../../../..'),fixture=import.meta.dirname
 const captured=process.argv.includes('--captured'),entry=captured?'captured-entry':'entry'
 const proof=path.join(root,'.bagakit/feature-tracker/conversation-input-cards-artifacts/T006'),out=path.join(proof,captured?'compiled-captured':'compiled')
-const require=createRequire(path.join(root,'apps/desktop/package.json')),{build}=createRequire(require.resolve('vite'))('esbuild')
+const require=createRequire(path.join(root,'apps/desktop/package.json')),{build}=browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const loaded=[];const hash=data=>createHash('sha256').update(data).digest('hex')
 await fs.mkdir(out,{recursive:true})
 const built=await build({absWorkingDir:root,entryPoints:[path.join(fixture,entry+'.tsx')],outdir:out,bundle:true,format:'esm',platform:'browser',target:'esnext',jsx:'automatic',metafile:true,logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.woff2':'file','.woff':'file','.ttf':'file','.svg':'file','.png':'file'},plugins:[{name:'actual-compiled-source',setup(b){b.onResolve({filter:/\/(SessionObservationRegions|WorkspaceWorkbench)$/},args=>{if(args.importer.endsWith('/GlobalFocusSurface.tsx'))return {path:args.path,namespace:'private-reading-leaf'}});b.onLoad({filter:/.*/,namespace:'private-reading-leaf'},()=>({contents:'export function SessionObservationRegions(){return null} export function WorkspaceWorkbench(){return null}',loader:'js'}));b.onLoad({filter:/\.[cm]?[jt]sx?$|\.css$/},async args=>{if(!args.path.startsWith(root+'/apps/desktop/src/')&&!args.path.startsWith(fixture+'/'))return;const code=await fs.readFile(args.path,'utf8');loaded.push({path:path.relative(root,args.path),sha256:hash(code),bytes:Buffer.byteLength(code)});return{contents:code,loader:path.extname(args.path)==='.css'?'css':path.extname(args.path)==='.tsx'?'tsx':path.extname(args.path)==='.ts'?'ts':'js',resolveDir:path.dirname(args.path)}})}}]})

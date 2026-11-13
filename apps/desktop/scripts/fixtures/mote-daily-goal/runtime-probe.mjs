@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
@@ -45,7 +46,7 @@ export async function probeGoalRuntime({ repository, evidence, mainRef } = {}) {
       const available = await realpath(join(repo, name)).catch(error => { if (error.code !== 'ENOENT') throw error; return realpath(join(dependencyRoot, name)) })
       await mkdir(dirname(join(source, name)), { recursive: true }); await symlink(available, join(source, name))
     }
-    const require = createRequire(join(repo, 'apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild')
+    const require = createRequire(join(repo, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
     const aliases = { electron: join(source, 'apps/desktop/scripts/fixtures/agent-schedules/electron.ts'), '@scure/base': join(repo, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }
     for (const name of ['core', 'demand', 'layout', 'relay']) {
       const pkg = join(source, 'packages', name), manifest = JSON.parse(await readFile(join(pkg, 'package.json'), 'utf8'))

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -7,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 const root = resolve(import.meta.dirname, '../../..'), evidence = resolve(root, process.argv[2] ?? '.local/session-observation-bridge'), require = createRequire(resolve(root, 'apps/desktop/package.json'))
 process.chdir(root)
-const { build: bundle } = createRequire(require.resolve('vite'))('esbuild'), { build } = await import(require.resolve('vite')), electron = require('electron')
+const { build: bundle } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), { build } = await import(require.resolve('vite')), electron = require('electron')
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/session-observation-bridge')
 const owned = ['apps/desktop/scripts/verify-session-observation-bridge.mjs', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   ...['main.ts', 'entry.tsx', 'index.html'].map(name => relative(root, join(fixture, name)))]

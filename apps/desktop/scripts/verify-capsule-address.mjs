@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const require = createRequire(join(root, 'packages/core/package.json'))
-const { build } = require('esbuild')
+const { build } = browserSourceBuild(require('esbuild'))
 const sha = value => createHash('sha256').update(value).digest('hex')
 const tests = ['apps/desktop/test/capsule-browser.test.ts', 'apps/desktop/test/capsule-address-consumer.test.tsx',
   'apps/desktop/test/capsule-bookmark-open-consumer.test.ts', 'apps/desktop/test/bookmark-owner-ipc.test.ts',

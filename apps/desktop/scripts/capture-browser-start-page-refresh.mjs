@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -14,7 +15,7 @@ const privateRoot = await mkdtemp(join(tmpdir(), 'amux-browser-start-page-'))
 const fixture = join(desktop, 'scripts/fixtures/browser-start-page-refresh'), out = join(privateRoot, 'out')
 await mkdir(out)
 if (personalization) await symlink(join(root, 'apps/host/node_modules'), join(privateRoot, 'node_modules'), 'dir')
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], logs = []
 const receipt = { schema: 'agentmux.browser-start-page-refresh.v1', scene: personalization ? 'personalization' : 'history', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false,
   boundary: 'Actual App/GlobalSurveySurface/Workbench/BrowserPane/BrowserStartPage and complete source CSS. Typed preview API; four previews captured from local native HTTP fixtures. Unused SessionPane, EditorPane and diff paint leaves isolated. No user Runtime/profile, production Main history persistence, ordinary restart or installation.' }

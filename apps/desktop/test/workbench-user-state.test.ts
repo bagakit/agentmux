@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -27,7 +28,7 @@ beforeAll(async () => {
   const directory = resolve('.tmp/workbench-user-state-process')
   const { mkdir } = await import('node:fs/promises'); await mkdir(directory, { recursive: true })
   worker = join(directory, 'worker.mjs')
-  const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
+  const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('esbuild')
   await build({ stdin: { resolveDir: process.cwd(), contents: `
     import { WorkbenchUserStateStore } from './apps/desktop/src/main/workbench-user-state.ts';
     const owner = new WorkbenchUserStateStore(process.argv[2]);

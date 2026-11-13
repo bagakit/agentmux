@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -18,7 +19,7 @@ const mutation = { file: 'apps/desktop/src/renderer/src/styles/project-groups.cs
 async function compile(label) {
  const directory = join(evidence, label), outDir = join(directory, 'out'), isolated = {}, nodeExternals = [], workerAssets = {}
  await mkdir(outDir, { recursive: true })
- const esbuild = createRequire(require.resolve('vite'))('esbuild')
+ const esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
  const aliases = [...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({ find, replacement })), ...owning.resolve.alias]
  const output = await esbuild.build({ absWorkingDir: root, entryPoints: [join(fixture, 'entry.tsx')], outfile: join(outDir, 'entry.js'), bundle: true,
   format: 'esm', platform: 'browser', jsx: 'automatic', target: 'chrome130', metafile: true, treeShaking: true,

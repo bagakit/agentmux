@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, writeFile, rm, cp, readdir } from 'node:fs/promises'
@@ -25,7 +26,7 @@ const mutations = [
 ]
 async function compile(name) {
   const out=join(temporary,name),loaded={},changes=[]
-  const {build:bundle}=createRequire(require.resolve('vite/package.json'))('esbuild')
+  const {build:bundle}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
   const aliases=[{find:'react-dom/server',replacement:require.resolve('react-dom/server.browser')},...Object.entries(radixOverlayAliases).map(([find,replacement])=>({find,replacement})),...owning.resolve.alias.filter(alias=>alias.find!=='react'&&alias.find!=='react-dom')]
   await mkdir(out,{recursive:true})
   const product={name:'actual-source-craft',setup(builder){

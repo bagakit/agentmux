@@ -4,8 +4,8 @@ const file = 'apps/desktop/src/main/browser-view-manager.ts'
 await verifyRendererSourceMutations({
   name: ("browser-structured-glue-mutations-" + (globalThis.crypto.randomUUID()) + ""),
   tests: ['apps/desktop/test/browser-run-script-wiring.test.ts'],
-  sources: [file, 'apps/desktop/src/main/browser-page-dispatch.ts',
-    'apps/desktop/src/main/browser-result-artifact.ts', 'apps/desktop/src/shared/browser-structured-output.ts'],
+  sources: [file, 'packages/browser/src/browser-page-dispatch.ts',
+    'packages/browser/src/browser-result-artifact.ts', 'packages/browser/src/model/browser-structured-output.ts'],
   mutations: [
     { label: 'main-observation-owner-disconnected', file,
       before: 'structuredOutput: {', after: 'structuredOutput: undefined && {' },

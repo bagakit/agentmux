@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -10,7 +11,7 @@ export const SETTINGS_NAVIGATION_PRODUCT_SOURCES = ['apps/desktop/src/renderer/s
   'apps/desktop/src/renderer/src/components/SettingsPanel.tsx','apps/desktop/src/shared/desktop-focus-observation.ts']
 export async function verifySettingsNavigationNative({root,fixture,evidence,privateRoot,receipt}) {
   const require=createRequire(path.join(root,'packages/core/package.json')),desktopRequire=createRequire(path.join(root,'apps/desktop/package.json'))
-  const {build:buildNode}=require('esbuild'),{build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href)
+  const {build:buildNode}=browserSourceBuild(require('esbuild')),{build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href)
   const hash=value=>createHash('sha256').update(value).digest('hex')
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'packages/core/package.json'), 'utf8'))
   const aliases = Object.entries(manifest.exports).map(([key,value]) => ({

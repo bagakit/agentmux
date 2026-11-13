@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -6,7 +7,7 @@ import { join, resolve, relative, dirname } from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const capturePath = resolve(root, process.argv[2] ?? ''), capture = JSON.parse(await readFile(capturePath, 'utf8'))
 assert.equal(capture.passed, true, 'A failed Renderer candidate cannot supply qualified input')
 const renderer = JSON.parse(await readFile(join(dirname(capturePath), 'renderer-result.json'), 'utf8'))

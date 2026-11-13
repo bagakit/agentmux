@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
-import type { BrowserPageTransport } from '../src/main/browser-page-transport.js'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
 import { nativeInputDouble } from './browser-native-input-double.js'
 
 /**

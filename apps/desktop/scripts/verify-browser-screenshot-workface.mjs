@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _reshape_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -21,7 +22,7 @@ if (args.includes('--model')) {
 function resolvePath(path) { return resolve(path) }
 const fixture = resolve('apps/desktop/scripts/fixtures/browser-screenshot-workface')
 const require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 await mkdir(resolve('.local/browser-screenshot-workface'), { recursive: true })
 const out = process.env.AGENTMUX_SCREENSHOT_PROOF_OUT ? resolve(process.env.AGENTMUX_SCREENSHOT_PROOF_OUT) : await mkdtemp(resolve('.local/browser-screenshot-workface/run-'))
 const work = await mkdtemp(_reshape_fixturePath("tmp/agentmux-screenshot-workface-"))
@@ -38,7 +39,7 @@ const sourceInputs = [
   'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts', 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',
   'apps/desktop/src/main/native-overlay-surfaces.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/renderer/src/styles/browser.css',
-  'apps/desktop/src/main/browser-screenshot-source.ts',
+  'packages/browser/src/browser-screenshot-source.ts',
   'apps/desktop/src/main/screenshot-pins.ts', 'apps/desktop/src/main/screenshot-files.ts',
   'apps/desktop/src/shared/screenshot-pin.ts', 'apps/desktop/src/preload/screenshot-pin.ts', 'apps/desktop/src/shared/screenshot-output.ts',
   'apps/desktop/src/renderer/screenshot-pin/entry.tsx', 'apps/desktop/src/renderer/screenshot-pin/pin.css', 'apps/desktop/src/renderer/screenshot-pin/index.html',

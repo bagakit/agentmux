@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 // @vitest-environment node
 import { beforeAll, afterEach, expect, it } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile, symlink } from 'node:fs/promises'
@@ -14,7 +15,7 @@ beforeAll(async () => {
   await symlink(resolve('packages/core/node_modules'), join(output, 'node_modules'), 'dir').catch(error => { if (error.code !== 'EEXIST') throw error })
   await mkdir(resolve('.tmp/note-markdown-restore/resources/bin'), { recursive: true })
   if (process.platform === 'darwin') execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', 'apps/host/native/workspace-move.c', '-o', helper])
-  const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('../../../packages/core/node_modules/esbuild')
+  const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('../../../packages/core/node_modules/esbuild')
   const alias: Record<string, string> = { '@agentmux/layout': resolve('packages/layout/src/index.ts') }
   for (const pkg of ['core', 'demand']) {
     const manifest = JSON.parse(readFileSync(resolve('packages', pkg, 'package.json'), 'utf8'))

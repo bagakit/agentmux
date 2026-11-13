@@ -67,7 +67,7 @@ export async function consumeExternalTargetPrivateArchive(manifest, base) {
   assert.deepEqual(nonempty(receipt.sourceInputs, 'Producer fixed Main source collection is nonempty').map(productIdentity), sourceRows.map(productIdentity))
   assert.deepEqual(nonempty(build.sources, 'Actual compiler fixed Main source collection is nonempty').map(productIdentity), sourceRows.map(productIdentity))
   for (const path of ['packages/core/src/agentmux.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/control-browser-targets.ts',
-    'apps/desktop/src/main/browser-external-owner.ts', 'apps/desktop/src/main/browser-page-dispatch.ts']) {
+    'apps/desktop/src/main/browser-external-owner.ts', 'packages/browser/src/browser-page-dispatch.ts']) {
     assert.ok(sources.has(path), 'Actual public consumer and original dispatcher are bound: ' + path)
   }
   const compiled = nonempty(build.compiled, 'Actual compiled originals are nonempty'), emitted = new Set()

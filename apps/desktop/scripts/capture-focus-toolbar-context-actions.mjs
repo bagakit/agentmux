@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -38,7 +39,7 @@ const evidence = join(root, tabActionsOnly ? '.bagakit/feature-tracker/agent-men
 await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-toolbar-context-actions-'))
 const fixture = join(desktop, 'scripts/fixtures/focus-toolbar-context-actions')
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], logs = []
 const receipt = { schema: 'agentmux.focus-toolbar-context-actions-scene.v1', capturedPass: false, aestheticReview: 'pending independent full-image review',
   actualUserAppOrRunControlled: false, captureOnly: tabActionsOnly, phases: [],

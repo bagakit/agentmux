@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
@@ -15,7 +16,7 @@ const privateRoot = await fs.mkdtemp(_hygiene_fixturePath("tmp/amux-new-project-
 const run = promisify(execFile)
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build: buildRenderer } = await import(pathToFileURL(desktopRequire.resolve('vite')).href)
-const { build: buildNode } = createRequire(path.join(root, 'packages/core/package.json'))('esbuild')
+const { build: buildNode } = browserSourceBuild(createRequire(path.join(root, 'packages/core/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const ownedFiles = ['apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts',
   'apps/desktop/src/renderer/src/hooks/useWorkbenchObjectLayout.ts', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',

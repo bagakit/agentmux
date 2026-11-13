@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
@@ -64,7 +65,7 @@ async function writeReceipt() {
 await writeReceipt()
 const temporary = await mkdtemp(join(output, 'isolated-'))
 async function browserBundle(name, wrongRoot = false) {
-  const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+  const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
   const owner = join(repository, 'apps/desktop/src/renderer/src/lib/survey-system-url.ts'), original = await readFile(owner, 'utf8')
   const anchor = "from '@agentmux/core/sharing'"
   assert(original.split(anchor).length === 2, name + ': exact existing pure import must occur once')

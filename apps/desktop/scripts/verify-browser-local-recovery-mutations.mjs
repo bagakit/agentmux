@@ -8,7 +8,7 @@ import { gzipSync } from 'node:zlib'
 
 const root = resolve(import.meta.dirname, '../../..')
 const owner = 'apps/desktop/src/main/browser-local-recovery.ts'
-const dispatch = 'apps/desktop/src/main/browser-page-dispatch.ts'
+const dispatch = 'packages/browser/src/browser-page-dispatch.ts'
 const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const assets = 'apps/desktop/src/main/browser-task-assets.ts'
 const tests = ['apps/desktop/test/browser-local-recovery.test.tsx', 'apps/desktop/test/browser-page-dispatch.test.ts',
@@ -127,12 +127,12 @@ const run = async label => {
 }
 try {
   await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
-  for (const directory of ['apps/desktop', 'packages/core']) {
+  for (const directory of ['apps/desktop', 'packages/core', 'packages/browser']) {
     await mkdir(join(copy, directory), { recursive: true })
     await symlink(join(root, directory, 'node_modules'), join(copy, directory, 'node_modules'))
   }
   for (const [path, bytes] of original) { await mkdir(dirname(join(copy, path)), { recursive: true }); await writeFile(join(copy, path), bytes) }
-  await writeFile(join(copy, 'vitest.local.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ resolve: { alias: { '@agentmux/core': ${JSON.stringify(join(copy, 'packages/core/src/index.ts'))} } }, test: { include: ${JSON.stringify(tests)}, environment: 'node', globalSetup: [], setupFiles: [] } })\n`)
+  await writeFile(join(copy, 'vitest.local.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname), '@agentmux/core': ${JSON.stringify(join(copy, 'packages/core/src/index.ts'))} } }, test: { include: ${JSON.stringify(tests)}, environment: 'node', globalSetup: [], setupFiles: [] } })\n`)
   const baseline = await run('baseline-green')
   assert.equal(baseline.code, 0, baseline.output)
   receipt.baseline = { exit: baseline.code, log: baseline.log }

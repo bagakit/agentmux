@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -11,7 +12,7 @@ const root=resolve(import.meta.dirname,'../../..'), desktop=join(root,'apps/desk
 assert.ok(process.argv.length===4&&process.argv[2]==='--evidence'&&process.argv[3],'Use --evidence <private evidence directory>')
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const fixture=join(desktop,'scripts/fixtures/focus-context-recap-menu')
-const require=createRequire(join(desktop,'package.json')), {build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
 const widthMutation=process.env.AGENTMUX_FOCUS_MENU_WIDTH_MUTATION==='1'
 const shiftMutation=process.env.AGENTMUX_FOCUS_MENU_SHIFT_MUTATION==='1'

@@ -8,14 +8,14 @@ import { execFileSync, spawnSync } from 'node:child_process'
 const root = path.resolve(import.meta.dirname, '../../..')
 const evidence = path.resolve(process.argv[2] ?? path.join(root, '.tmp/browser-result-artifact-mutations'))
 const privateRoot = await fs.mkdtemp(path.join(tmpdir(), 'amux-result-mutations-'))
-const store = 'apps/desktop/src/main/browser-result-artifact.ts'
-const runner = 'apps/desktop/src/main/browser-script-runner.ts'
-const outcome = 'apps/desktop/src/main/browser-run-outcome.ts'
+const store = 'packages/browser/src/browser-result-artifact.ts'
+const runner = 'packages/browser/src/browser-script-runner.ts'
+const outcome = 'packages/browser/src/browser-run-outcome.ts'
 const test = 'apps/desktop/test/browser-result-artifact.test.ts'
 const managerTest = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const workspaceTest = 'apps/desktop/test/browser-workspace-binding.test.ts'
 const nativeTest = 'apps/desktop/test/browser-result-artifact-native.test.ts'
-const dispatch = 'apps/desktop/src/main/browser-page-dispatch.ts'
+const dispatch = 'packages/browser/src/browser-page-dispatch.ts'
 const manager = 'apps/desktop/src/main/browser-view-manager.ts'
 const binding = 'apps/desktop/src/main/browser-workspace-binding.ts'
 const cases = [
@@ -40,7 +40,7 @@ const inputs = [...new Set([...cases.map(([, file]) => file), test, managerTest,
   'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
   'packages/core/src/browser-page-capability.ts', 'packages/core/src/agentmux-cli-help.ts',
-  'apps/desktop/src/shared/browser-result-artifact.ts'])]
+  'packages/browser/src/model/browser-result-artifact.ts'])]
 const original = new Map(await Promise.all(inputs.map(async file => [file, await fs.readFile(path.join(root, file))])))
 const coreEntry = 'packages/core/dist/index.js'
 const receipt = {
@@ -52,7 +52,7 @@ await fs.mkdir(evidence, { recursive: true })
 try {
   // Mutate an isolated production graph. Core is the verified, unmodified workspace dist;
   // the owning sources and shared worktree are never edited by this proof.
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/shared']) {
+  for (const directory of ['packages/browser/src', 'packages/browser/scripts', 'apps/desktop/src/main', 'apps/desktop/src/shared']) {
     await fs.cp(path.join(root, directory), path.join(privateRoot, directory), { recursive: true })
   }
   await fs.mkdir(path.dirname(path.join(privateRoot, test)), { recursive: true })
@@ -65,7 +65,7 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(privateRoot, 'apps/desktop/node_modules'), 'dir')
   await fs.writeFile(path.join(privateRoot, 'package.json'), '{"type":"module"}\n')
   const config = path.join(privateRoot, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([test, managerTest, workspaceTest, nativeTest])} } }\n`)
+  await fs.writeFile(config, `export default { resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname) } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify([test, managerTest, workspaceTest, nativeTest])} } }\n`)
   const run = async (name, onlyTest = test) => {
     const args = [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', onlyTest, '--root', privateRoot, '--config', config, '--maxWorkers=1']
     if (onlyTest === managerTest) args.push('-t', 'durable result via the actual Manager')

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -12,7 +13,7 @@ const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'app
 const evidence = process.env.AGENTMUX_EVIDENCE_ROOT ?? join(root, '.tmp/quick-switch-craft')
 const directory = join(evidence, 'visual-' + randomUUID()), temporary = await mkdtemp(join(tmpdir(), 'amux-quick-craft-')), output = join(temporary, 'compiled')
 await mkdir(directory, { recursive: true }); await mkdir(output, { recursive: true })
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), loaded = {}, styles = {}, transformations = [], logs = []
 const config = (await loadConfigFromFile({ command: 'build', mode: 'production' }, join(desktop, 'test/vitest.ui-controls-owning.config.mts'))).config
 const aliases = [{ find: 'react-dom/server', replacement: require.resolve('react-dom/server.browser') },

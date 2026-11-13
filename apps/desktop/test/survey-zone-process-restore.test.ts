@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment node
 import { afterEach, beforeAll, expect, it } from 'vitest'
@@ -19,7 +20,7 @@ const directories: string[] = []
 beforeAll(async () => {
   worker = resolve('.tmp/durable-spatial-index/survey-restore-worker.mjs')
   await mkdir(resolve('.tmp/durable-spatial-index'), { recursive: true })
-  const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
+  const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('esbuild')
   await build({ stdin: { resolveDir: process.cwd(), contents: `
     import { readFile } from 'node:fs/promises';
     import { AgentMuxSpatialStateStore } from './packages/core/src/spatial-state.ts';

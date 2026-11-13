@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -11,7 +12,7 @@ const root = path.resolve(import.meta.dirname, '../../../../..'),
 const require = createRequire(path.join(root, 'apps/desktop/package.json')),
   {
     build
-  } = createRequire(require.resolve('vite'))('esbuild'),
+  } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')),
   loaded = [],
   sha = data => createHash('sha256').update(data).digest('hex');
 await fs.mkdir(out, {

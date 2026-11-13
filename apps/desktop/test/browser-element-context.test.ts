@@ -7,8 +7,8 @@ import {
 import {
   buildBrowserElementContextDeclaration,
   buildBrowserElementSelectionScript
-} from '../src/main/browser-selection-script.js'
-import { sanitizeBrowserElementSelection } from '../src/main/browser-selection.js'
+} from '@agentmux/browser/browser-selection-script'
+import { sanitizeBrowserElementSelection } from '@agentmux/browser/browser-selection'
 
 /**
  * Agent 发起的元素上下文，与人工选择的信任边界。

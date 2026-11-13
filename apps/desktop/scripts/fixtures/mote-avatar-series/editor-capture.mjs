@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 import { runProbeProcess } from '../../probe-process.mjs'
 import assert from 'node:assert/strict'
@@ -7,7 +8,7 @@ import { createRequire } from 'node:module'
 import { createHash, randomUUID } from 'node:crypto'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const starterOptions = ['starter', 'starter-overwrite', 'starter-create-disconnected']
 const starterScope = starterOptions.includes(process.argv[2])
 const artifactRoot = starterScope ? await fs.realpath(path.join(root, ".local/state/mote-avatar-starter")) : path.join(root, '.local/state/mote-avatar-series-editor')

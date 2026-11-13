@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -10,7 +11,7 @@ import { fixturePath } from './lib/fixture-values.mjs'
 // A current-source private consumer. It never builds, installs or restarts the user's App.
 const root = resolve(import.meta.dirname, '../../..')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
+const { build } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild'))
 const { build: viteBuild } = require('vite')
 const args = process.argv.slice(2), outputIndex = args.indexOf('--output')
 assert.ok(args.every((arg, index) => arg === '--output' || index === outputIndex + 1 && outputIndex >= 0), 'Only --output PATH is supported')

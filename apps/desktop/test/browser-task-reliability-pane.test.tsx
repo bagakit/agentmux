@@ -3,8 +3,8 @@ import { act, createElement, type MouseEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
-import type { BrowserOutcomeEvaluation } from '../src/shared/browser-outcome-criteria'
-import type { BrowserOperation } from '../src/shared/browser-operation'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
 import { getBrowserTaskReliability } from '../src/shared/browser-task-reliability'
 
 const host = vi.hoisted(() => ({ executeControl: vi.fn(), verifyOutcome: vi.fn(), operations: [] as BrowserOperation[],

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -17,7 +18,7 @@ for (let index = 2; index < process.argv.length; index += 2) {
 const evidence = evidenceArgument ? resolve(evidenceArgument) : join(root, '.bagakit/feature-tracker/activity-cascade/visual', ...(mutation ? [mutation] : []))
 await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-activity-cascade-')), fixture = join(desktop, 'scripts/fixtures/project-activity-cascade')
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], logs = []
 const receipt = { schema: 'agentmux.project-activity-cascade-scene.v1', passed: false, aestheticReview: 'not-performed', userRuntimeControlled: false, mutation: mutation ?? null,
   boundary: 'Compiled production ProjectActivity/menu/shared Agent row/reader/Store/navigation/overlay/CSS with explicit typed preview Session/timeline data. Actual Core filesystem spatial owner via private IPC, original Store initialization and execution identity consumer. Unmounted PTY/editor/Launcher paint isolated. No user application, Provider process, physical OS input, Session restart or installation.' }

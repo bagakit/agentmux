@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../packages/browser/scripts/source-build.mjs'
 import { createRequire, findPackageJSON, isBuiltin } from 'node:module'
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -27,7 +28,7 @@ export async function moteRendererImportGraph() {
   const root = resolve(import.meta.dirname, '../../../..')
   const deps = dirname(realpathSync(join(root, 'node_modules')))
   const vitestRequire = createRequire(realpathSync(join(root, 'node_modules/vitest/package.json')))
-  const { build } = createRequire(vitestRequire.resolve('vite/package.json'))('esbuild') as typeof import('esbuild')
+  const { build } = browserSourceBuild(createRequire(vitestRequire.resolve('vite/package.json'))('esbuild')) as typeof import('esbuild')
   const result = await build({ entryPoints: [join(root, 'apps/desktop/src/renderer/src/lib/mote-context-observation.ts')],
     bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true, logLevel: 'silent', external: ['zod'],
     nodePaths: [join(deps, 'packages/core/node_modules'), join(deps, 'packages/identity/node_modules')],
@@ -43,7 +44,7 @@ export async function sourceMoteDiagnosticsCli(directory: string, options: { mut
   const root = resolve(import.meta.dirname, '../../../..'), deps = dirname(realpathSync(join(root, 'node_modules')))
   const vitestRequire = createRequire(realpathSync(join(root, 'node_modules/vitest/package.json')))
   const viteRequire = createRequire(vitestRequire.resolve('vite/package.json'))
-  const { build } = viteRequire('esbuild') as typeof import('esbuild')
+  const { build } = browserSourceBuild(viteRequire('esbuild')) as typeof import('esbuild')
   const mutations = options.mutations ?? process.env.AGENTMUX_MOTE_DIAGNOSTICS_MUTATIONS
   const changed: Record<string, string> = mutations ? JSON.parse(readFileSync(mutations, 'utf8')) : {}
   const cli = join(directory, 'mote-diagnostics-cli.mjs')

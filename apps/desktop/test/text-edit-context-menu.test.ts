@@ -23,7 +23,7 @@ vi.mock('electron', () => ({
 }))
 import { installTextEditContextMenu } from '../src/main/text-edit-context-menu.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
+import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 
 const doms: Array<{ window: DomWindow }> = [], disposers: Array<() => void> = [], roots: string[] = []
 let frameId = 0

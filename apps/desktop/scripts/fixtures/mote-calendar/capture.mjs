@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash, randomUUID } from 'node:crypto'
@@ -17,7 +18,7 @@ for (const key of Object.keys(process.env)) if (key.startsWith('AGENTMUX_') || k
 Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: path.join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: path.join(directory, 'state'),
   AGENT_SESSION_STORE: path.join(directory, 'store', 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: path.join(directory, 'queue', 'private-messages.ndjson') })
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', source: {}, images: {},
   boundary: 'Current MoteFilesTool/MoteProfilePopover/MoteDetailsPanel and AgentSessionComposer, real DesktopClientUiProvider/CSS/theme/icons. Only private outer Space shell, static conversation prose and typed in-memory API replies are synthetic. No user App, preload, journal, schedule, real Session/Run, model, native scheduler, package or install claim.' }
@@ -93,7 +94,7 @@ try {
   const inputs = Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !/^original-(worker|url|raw):/.test(file))
   for (const file of inputs) assert.ok(consumed.has(path.resolve(root, file)), 'Metafile input has no actual source-byte binding: ' + file)
   receipt.source = Object.fromEntries([...consumed].map(([file, hash]) => [path.relative(root, file), hash]))
-  receipt.compiler = { esbuild: createRequire(require.resolve('vite'))('esbuild').version, sourceBinding: 'actual-onLoad-bytes', currentSource: true, standardCoreBuild: false }
+  receipt.compiler = { esbuild: browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')).version, sourceBinding: 'actual-onLoad-bytes', currentSource: true, standardCoreBuild: false }
   for (const file of ['MoteFilesTool', 'MoteProfilePopover', 'MoteDetailsPanel', 'MoteCalendar', 'AgentSessionComposer', 'DesktopClientUiProvider'])
     assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + file + '.tsx'], 'Nonempty actual product input: ' + file)
   await fs.writeFile(path.join(directory, 'compile-inputs.json'), JSON.stringify(built.metafile, null, 2))

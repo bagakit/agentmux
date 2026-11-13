@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -14,7 +15,7 @@ const sourcePath = resolve(process.argv[3]), evidence = resolve(process.argv[5])
 const sourceBytes = await readFile(sourcePath), source = JSON.parse(sourceBytes)
 assert.equal(source.passed, true); assert.equal(source.owning.passed, 8); assert.equal(source.mutations.length, 2)
 const fixture = join(desktop, 'scripts/fixtures/workface-explorer-scope'), hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-workface-explorer-')), inputs = new Map(), logs = []
 const validation = ['apps/desktop/scripts/verify-workface-explorer-scope.mjs',
   'apps/desktop/scripts/capture-workface-explorer-scope.mjs',

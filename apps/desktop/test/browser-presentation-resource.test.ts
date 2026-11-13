@@ -91,7 +91,7 @@ const native = vi.hoisted(() => {
 })
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
+import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 
 const cleanup: Array<() => void> = []
 afterEach(() => {

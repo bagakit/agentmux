@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -7,7 +8,7 @@ import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe
 
 const repository = resolve(import.meta.dirname, '../../..')
 const require = createRequire(join(repository, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const dialog = createRequire(createRequire(join(repository, 'packages/client-ui/package.json')).resolve('@radix-ui/react-dialog'))
 const alias = Object.fromEntries(['@radix-ui/react-dismissable-layer', '@radix-ui/react-focus-scope'].map(name => [name, dialog.resolve(name)]))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')

@@ -9,19 +9,20 @@ const root = path.resolve(import.meta.dirname, '../../..')
 const evidence = path.resolve(process.argv[2] ?? path.join(root, (".tmp/browser-download-glue-mutations-" + (globalThis.crypto.randomUUID()) + "")))
 const isolated = await fs.realpath(await fs.mkdtemp(path.join(tmpdir(), 'amux-download-glue-')))
 const manager = 'apps/desktop/src/main/browser-view-manager.ts'
-const dispatch = 'apps/desktop/src/main/browser-page-dispatch.ts'
+const dispatch = 'packages/browser/src/browser-page-dispatch.ts'
+const files = 'apps/desktop/src/main/browser-page-files.ts'
 const test = 'apps/desktop/test/browser-run-script-wiring.test.ts'
 const cases = [
   ['download-original-view-proof-removed', manager, "if (view !== observingView) throw new Error('The Browser view changed before download.')", 'void view'],
   ['download-owner-disconnected', manager, 'this.downloads && signal ? { downloads:', 'false && signal ? { downloads:'],
   ['download-stop-signal-disconnected', manager, 'store: this.downloads, signal, context:', 'store: this.downloads, signal: new AbortController().signal, context:'],
-  ['foreign-browser-can-read-reference', dispatch, '{ workspaceId: owner.workspaceId, browserId: owner.browserId }, options as BrowserDownloadReadOptions', '{ workspaceId: (args[0]).workspaceId, browserId: (args[0]).browserId }, options as BrowserDownloadReadOptions'],
-  ['continuation-replays-download-action', dispatch, 'const owner = context.downloads.context()', 'await callOn("@e1", "function () { this.click() }"); const owner = context.downloads.context()'],
+  ['foreign-browser-can-read-reference', files, '{ workspaceId: owner.workspaceId, browserId: owner.browserId }, options', '{ workspaceId: reference.workspaceId, browserId: reference.browserId }, options'],
+  ['continuation-replays-download-action', dispatch, 'return await context.downloads.read(', 'await nativeClick(scope, "@e1"); return await context.downloads.read('],
   ['download-warning-not-projected', dispatch, 'if (warning) context.note(warning)', 'void warning'],
   ['download-options-guard-removed', dispatch, "Object.keys(options).some(key => !['path', 'timeoutMs', 'maxBytes'].includes(key))", 'false'],
-  ['native-download-trigger-disconnected', dispatch, "async () => await callOn(ref, 'function () { this.scrollIntoView({block: \"center\"}); this.click() }')", 'async () => undefined']
+  ['native-download-trigger-disconnected', dispatch, 'async () => await nativeClick(scope, ref)', 'async () => undefined']
 ]
-const inputs = [manager, dispatch, test]
+const inputs = [manager, dispatch, files, test]
 const originals = new Map(await Promise.all(inputs.map(async file => [file, await fs.readFile(path.join(root, file))])))
 assert.equal(originals.size, inputs.length, 'Source input collection must be nonempty and exact.')
 assert.ok(cases.length > 0, 'Mutation cases must be nonempty.')
@@ -30,7 +31,7 @@ const receipt = { passed: false, candidate: execFileSync('git', ['rev-parse', 'H
   sourceHashes: Object.fromEntries([...originals].map(([file, bytes]) => [file, hash(bytes)])), cases: [] }
 await fs.mkdir(evidence, { recursive: true })
 try {
-  for (const directory of ['apps/desktop/src/main', 'apps/desktop/src/shared']) await fs.cp(path.join(root, directory), path.join(isolated, directory), { recursive: true })
+  for (const directory of ['packages/browser/src', 'packages/browser/scripts', 'apps/desktop/src/main', 'apps/desktop/src/shared']) await fs.cp(path.join(root, directory), path.join(isolated, directory), { recursive: true })
   await fs.symlink(path.join(root, 'apps/desktop/resources'), path.join(isolated, 'apps/desktop/resources'), 'dir')
   await fs.mkdir(path.join(isolated, path.dirname(test)), { recursive: true })
   await fs.writeFile(path.join(isolated, test), originals.get(test))
@@ -38,7 +39,7 @@ try {
   await fs.symlink(path.join(root, 'apps/desktop/node_modules'), path.join(isolated, 'apps/desktop/node_modules'), 'dir')
   await fs.writeFile(path.join(isolated, 'package.json'), '{"type":"module"}\n')
   const config = path.join(isolated, 'vitest.config.mjs')
-  await fs.writeFile(config, `export default { test: { include: [${JSON.stringify(test)}] } }\n`)
+  await fs.writeFile(config, `export default { resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname) } }, test: { include: [${JSON.stringify(test)}] } }\n`)
   const run = async name => {
     const result = spawnSync(process.execPath, [path.join(root, 'node_modules/vitest/vitest.mjs'), 'run', test, '-t', 'native downloads via', '--root', isolated, '--config', config, '--maxWorkers=1'], { cwd: isolated, encoding: 'utf8', timeout: 60_000 })
     const log = `${result.stdout ?? ''}${result.stderr ?? ''}`

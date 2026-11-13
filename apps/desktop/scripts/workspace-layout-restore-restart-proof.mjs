@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -180,7 +181,7 @@ try {
     [id.unboundTab]: { id: id.unboundTab, workspaceId: id.resource, titleRegionId: id.unboundRegion, layout: { root: { type: 'leaf', regionId: id.unboundRegion }, activeRegionId: id.unboundRegion }, regions: { [id.unboundRegion]: { kind: 'launcher', regionId: id.unboundRegion, workspaceId: id.resource } } }
   } }
   const adapterPath = join(root, 'seed-adapter.mjs'), tool = createRequire(require.resolve('vite/package.json'))
-  const adapterBuild = await tool('esbuild').build({ entryPoints: [join(desktopRoot, 'src/renderer/src/lib/desktop-spatial-state.ts')], outfile: adapterPath, bundle: true, platform: 'node', format: 'esm', metafile: true,
+  const adapterBuild = await browserSourceBuild(tool('esbuild')).build({ entryPoints: [join(desktopRoot, 'src/renderer/src/lib/desktop-spatial-state.ts')], outfile: adapterPath, bundle: true, platform: 'node', format: 'esm', metafile: true,
     banner: { js: "import {createRequire as privateCreateRequire} from 'node:module';const require=privateCreateRequire(import.meta.url);" },
     alias: { '@agentmux/layout': join(repositoryRoot, 'packages/layout/src/index.ts') }, logLevel: 'silent' })
   assert.ok(Object.keys(adapterBuild.metafile.inputs).length > 0)

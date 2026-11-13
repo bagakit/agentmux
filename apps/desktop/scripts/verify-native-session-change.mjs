@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath } from './lib/fixture-values.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
@@ -84,7 +85,7 @@ const privateRoot=await fs.mkdtemp(fixturePath('tmp/amux-native-target-'))
 let owner
 try{
  const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href)
- const {build:buildNode}=coreRequire('esbuild')
+ const {build:buildNode}=browserSourceBuild(coreRequire('esbuild'))
  const manifests=new Map(),onManifest=(file,bytes)=>manifests.set(path.relative(root,file),sha(bytes))
  const aliases=[...Object.entries({...radixOverlayAliases,...noteParsingAliases}).map(([find,replacement])=>({find,replacement})),candidateAlias(root,{browser:true,source:true,onManifest}),{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')}]
  const consumed=new Map()

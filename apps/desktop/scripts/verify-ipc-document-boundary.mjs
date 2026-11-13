@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import {ipcCallerInventory} from './fixtures/ipc-document-boundary/caller-inventory.mjs'
 import {domainTests} from './fixtures/ipc-document-boundary/consumers.mjs'
@@ -11,7 +12,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url)), require = createRequire(join(root, 'apps/desktop/package.json'))
-const ts = require('typescript'), { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
+const ts = require('typescript'), { build } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild'))
 const evidence = resolve(root, '.local/ipc-document-boundary'), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 await mkdir(evidence, { recursive: true })
 const ipcPath = 'apps/desktop/src/main/ipc.ts', trustPath = 'apps/desktop/src/main/ipc-sender-trust.ts'

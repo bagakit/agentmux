@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -36,7 +37,7 @@ if(process.env[reuseVariable]){
  assert.equal(saved.cleanup.removed,true);assert.deepEqual(saved.cleanup.remaining,[])
  console.log(JSON.stringify({capturedPass:true,receipt:path,exactEvidenceReused:true}));process.exit(0)
 }
-const require=createRequire(join(desktop,'package.json')),{build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')),{build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const temporary=await mkdtemp(join(tmpdir(),'amx-focus-collection-')),inputs=new Map(),transformations=[],manifests=new Map(),logs=[]
 const receipt={schema,mode,requiredScenes,capturedPass:false,aestheticReview:'not-performed',userRuntimeTouched:false,
  boundary:'Actual original current-source Global Focus/Store/cards/Collection projection and original Settings/Preview'+(headingMode?', heading object menus, shared Category Dialog, avatar Picker and original Store saved-preset feedback':'')+'. Static private typed transport; adjacent Timeline and unselected PTY/editor paint isolated. Clipboard and the one declared preset configuration save use private in-memory transport; no System clipboard, real resource write, Provider, Native Session receipt, persisted settings or user installation is represented by these images.'}

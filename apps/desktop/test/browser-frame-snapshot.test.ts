@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { captureBrowserPageSnapshot, type BrowserCdpSender } from '../src/main/browser-page-snapshot.js'
-import { discoverBrowserFrameDocuments, MAX_BROWSER_FRAME_DOCUMENTS } from '../src/main/browser-frame-documents.js'
-import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
-import { parseBrowserSnapshotQuery, projectBrowserSnapshot } from '../src/main/browser-snapshot-query.js'
+import { captureBrowserPageSnapshot, type BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
+import { discoverBrowserFrameDocuments, MAX_BROWSER_FRAME_DOCUMENTS } from '@agentmux/browser/browser-frame-documents'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { parseBrowserSnapshotQuery, projectBrowserSnapshot } from '@agentmux/browser/browser-snapshot-query'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
-import type { BrowserScopedSnapshot } from '../src/shared/browser-snapshot-query.js'
+import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
 import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
 
 function fixture(options: { failed?: string; empty?: string; changed?: string; discoveryFailed?: boolean; nestedAx?: boolean; wrongRoot?: boolean; pageInterference?: boolean; selectorInterference?: boolean; evaluationFailure?: 'exception' | 'missing-value'; realmFailed?: boolean } = {}) {

@@ -1,5 +1,5 @@
 {
   "extends": "../../../tsconfig.json",
   "compilerOptions": { "noEmit": true },
-  "include": ["../../../src/main/browser-operation-feedback.ts", "../../../src/main/browser-page-dispatch.ts", "../../../src/main/browser-view-manager.ts", "../../../test/browser-operation-feedback.test.ts", "../../../test/browser-page-action-feedback.test.ts"]
+  "include": ["../../../src/main/browser-operation-feedback.ts", "@agentmux/browser/browser-page-dispatch", "../../../src/main/browser-view-manager.ts", "../../../test/browser-operation-feedback.test.ts", "../../../test/browser-page-action-feedback.test.ts"]
 }

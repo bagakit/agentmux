@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -12,7 +13,7 @@ import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
-const require = createRequire(join(desktop, 'package.json')), esbuild = createRequire(require.resolve('vite'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const args = process.argv.slice(2), caseIndex = args.indexOf('--case'), outputIndex = args.indexOf('--output')
 const selected = args[caseIndex + 1]
 const workerLabel = process.env.AGENTMUX_MODAL_PRIVATE_WORKER

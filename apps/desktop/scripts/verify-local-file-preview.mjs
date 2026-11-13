@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -7,7 +8,7 @@ import { join, resolve, dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
-const require = createRequire(import.meta.url), { build } = await import('vite'), viteRequire = createRequire(require.resolve('vite')), esbuild = viteRequire('esbuild'), ts = require('typescript'), run = promisify(execFile)
+const require = createRequire(import.meta.url), { build } = await import('vite'), viteRequire = createRequire(require.resolve('vite')), esbuild = browserSourceBuild(viteRequire('esbuild')), ts = require('typescript'), run = promisify(execFile)
 const desktop = resolve(import.meta.dirname,'..'), repository = resolve(desktop,'../..'), sourceRoot = join(desktop,'src/renderer/src'), fixture = join(desktop,'scripts/fixtures/local-file-preview')
 const arg = name => process.argv.find(value=>value.startsWith(name+'='))?.slice(name.length+1), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const receiptPath = arg('--receipt') ? resolve(repository,arg('--receipt')) : null

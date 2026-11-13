@@ -6,16 +6,16 @@ import { dirname, join, relative, resolve } from 'node:path'
 
 // Private actual source graph: Core imports its copied source index, never a stale compiled package.
 const root = resolve(import.meta.dirname, '../../..')
-const journal = 'apps/desktop/src/main/browser-operation-journal.ts'
+const journal = 'packages/browser/src/browser-operation-journal.ts'
 const projector = 'apps/desktop/src/main/browser-completion-control.ts'
 const control = 'packages/core/src/control-host.ts'
 const leaf = 'apps/desktop/scripts/fixtures/browser-checked-stream-ack/source-proof.ts'
 const tests = [leaf, 'apps/desktop/test/browser-operation-journal.test.ts',
   'apps/desktop/test/browser-completion-control.test.ts', 'packages/core/test/browser-completion-facts.test.ts']
-const sources = [journal, projector, 'apps/desktop/src/main/browser-outcome-journal.ts',
-  'apps/desktop/src/main/browser-structured-output.ts', 'apps/desktop/src/shared/browser-operation.ts',
-  'apps/desktop/src/shared/browser-outcome-criteria.ts', 'apps/desktop/src/shared/browser-structured-output.ts',
-  'apps/desktop/src/shared/browser-result-artifact.ts']
+const sources = [journal, projector, 'packages/browser/src/browser-outcome-journal.ts',
+  'packages/browser/src/browser-structured-output.ts', 'packages/browser/src/model/browser-operation.ts',
+  'packages/browser/src/model/browser-outcome-criteria.ts', 'packages/browser/src/model/browser-structured-output.ts',
+  'packages/browser/src/model/browser-result-artifact.ts']
 const mutations = [
   { label: 'ack-barrier-removed', file: journal,
     before: 'const pending = this.enqueue(event, false)', after: 'const pending = this.enqueue(event, true)\n    this.flush(operationId)' },
@@ -112,7 +112,7 @@ try {
   await mkdir(join(copy, 'packages/core'), { recursive: true })
   await symlink(join(root, 'packages/core/node_modules'), join(copy, 'packages/core/node_modules'))
   for (const [path, bytes] of original) { await mkdir(dirname(join(copy, path)), { recursive: true }); await writeFile(join(copy, path), bytes) }
-  await writeFile(join(copy, 'vitest.ack.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ resolve: { alias: { '@agentmux/core': ${JSON.stringify(join(copy, 'packages/core/src/index.ts'))} } }, test: { include: ${JSON.stringify(tests)}, environment: 'node', globalSetup: [], setupFiles: [] } })\n`)
+  await writeFile(join(copy, 'vitest.ack.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname), '@agentmux/core': ${JSON.stringify(join(copy, 'packages/core/src/index.ts'))} } }, test: { include: ${JSON.stringify(tests)}, environment: 'node', globalSetup: [], setupFiles: [] } })\n`)
   const baseline = await run('baseline-green')
   assert.equal(baseline.code, 0, baseline.output)
   receipt.baseline = { exit: baseline.code, log: baseline.log }

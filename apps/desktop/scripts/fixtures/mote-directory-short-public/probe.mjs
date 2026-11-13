@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
@@ -51,7 +52,7 @@ export async function probePublishedPublic({ repository, evidence, mainRef } = {
       await mkdir(dirname(join(source, name)), { recursive: true }); await symlink(available, join(source, name))
     }
     await writeFile(join(source, 'package.json'), '{"type":"module"}\n')
-    const require = createRequire(join(repositoryRoot, 'apps/desktop/package.json')), esbuild = createRequire(require.resolve('vite'))('esbuild'), ts = require('typescript')
+    const require = createRequire(join(repositoryRoot, 'apps/desktop/package.json')), esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), ts = require('typescript')
     const aliases = []
     for (const name of ['core', 'demand', 'layout', 'relay', 'client-ui']) {
       const root = join(source, 'packages', name), manifestFile = join(root, 'package.json'), manifest = JSON.parse(await readFile(manifestFile, 'utf8'))

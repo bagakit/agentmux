@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -28,7 +29,7 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import './name-change-owners.test'
 // The already-installed build tool belongs to Core; Desktop does not acquire a
 // product dependency merely for this isolated source-counterfactual proof.
-const { build } = createRequire(resolve(import.meta.dirname, '../../../packages/core/package.json'))('esbuild') as typeof import('../../../packages/core/node_modules/esbuild')
+const { build } = browserSourceBuild(createRequire(resolve(import.meta.dirname, '../../../packages/core/package.json'))('esbuild')) as typeof import('../../../packages/core/node_modules/esbuild')
 
 const directoryFault = vi.hoisted(() => ({ directory: null as string | null, operationId: null as string | null, calls: 0, failAt: 1,
   beforeFailure: null as null | (() => Promise<void>) }))

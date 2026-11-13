@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -9,7 +10,7 @@ const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'app
 assert.equal(process.argv[2], '--evidence'); assert.ok(process.argv[3]); assert.equal(process.argv.length, 4)
 const evidence = resolve(process.argv[3]); await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-turn-summary-')), fixture = join(desktop, 'scripts/fixtures/native-turn-summary')
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = value => createHash('sha256').update(value).digest('hex'), inputs = new Map(), logs = []
 const receipt = { capturedPass: false, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false, transformations: [], inputs: {} }
 try {

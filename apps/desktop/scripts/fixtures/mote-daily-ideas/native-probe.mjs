@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixtureIso as _hygiene_fixtureIso } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
@@ -16,7 +17,7 @@ const output = join(repository, '.tmp/mote-daily-ideas'); await mkdir(output, { 
 const attempt = await mkdtemp(join(output, 'native-')), privateRoot = await mkdtemp(join(tmpdir(), 'ami-'))
 const state = join(privateRoot, 's'), runtime = join(privateRoot, 'r'), workspace = join(privateRoot, 'w')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex'), require = createRequire(import.meta.url)
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const receipt = { schema: 'agentmux.mote-daily-ideas-native.v1', taskId: 'T-004', passed: false, source: {}, harnessSource: {},
   calls: [], input: {}, phases: [], cleanup: { completed: false }, failure: null,
   boundary: 'One actual original Ideas/Calendar producer to typed schedule service, Core future intent and private native ctxmux input. File observations are synthetic owning Source fixtures; no real model, credential copy, user App/Run, packaging or installation.' }

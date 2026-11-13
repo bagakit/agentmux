@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -71,7 +72,7 @@ export async function verifyBrowserSettingsNative() {
     return
   }
   const require = createRequire(join(desktop, 'package.json'))
-  const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+  const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
   const fixture = import.meta.dirname, mature = join(desktop, 'scripts/fixtures/mote-shortcut')
   const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-browser-settings-'))
   const evidence = process.env.AGENTMUX_BROWSER_SETTINGS_NATIVE_EVIDENCE

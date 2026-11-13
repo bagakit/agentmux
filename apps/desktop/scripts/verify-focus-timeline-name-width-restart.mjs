@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixtureClock as _hygiene_fixtureClock, fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { execFile, spawn, spawnSync } from 'node:child_process'
@@ -139,7 +140,7 @@ async function startPrivateSemanticHost() {
 async function seedOriginalSpatialWorkface(seed) {
   stage = 'original-core-spatial-seed'
   const adapter = join(privateRoot, 'spatial-adapter.mjs')
-  const built = await createRequire(require.resolve('vite/package.json'))('esbuild').build({
+  const built = await browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild')).build({
     entryPoints: [join(desktopRoot, 'src/renderer/src/lib/desktop-spatial-state.ts')], outfile: adapter,
     bundle: true, platform: 'node', format: 'esm', metafile: true,
     banner: { js: "import{createRequire as privateRequire}from'node:module';const require=privateRequire(import.meta.url);" },

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
@@ -10,7 +11,7 @@ import { fixturePath } from './lib/fixture-values.mjs'
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
-const { build: bundle } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build: bundle } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const fixture = join(desktop, 'scripts/fixtures/diagram-preview')
 const style = 'packages/client-ui/src/styles/diagram-image.css'
 const consumerFiles = ['apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx', 'apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx']

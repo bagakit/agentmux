@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { once } from 'node:events'
@@ -219,7 +220,7 @@ const store=new AgentMuxFileAgentSessionStore(${JSON.stringify(storePath)}),clie
   tabs['browser-tab'] = { id: 'browser-tab', workspaceId, titleRegionId: 'browser-region', layout: { root: { type: 'leaf', regionId: 'browser-region' }, activeRegionId: 'browser-region' }, regions: { 'browser-region': { regionId: 'browser-region', kind: 'browser', browserId: 'private-close-browser', workspaceId,
     url: 'about:blank', title: 'Private retained page', mode: 'normal', viewport: 'responsive', agent: { hostId: browserAgent.hostId, agentSessionId: browserAgent.agentSessionId } } } }
   const layouts = { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: order, activeTabId: 'healthy-tab', recentTabIds: order }], activeGroupId: groupId } }
-  const seedAdapter = join(privateRoot, 'spatial-seed.mjs'), esbuild = createRequire(require.resolve('vite/package.json'))('esbuild')
+  const seedAdapter = join(privateRoot, 'spatial-seed.mjs'), esbuild = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
   const seedBuild = await esbuild.build({ entryPoints: [join(desktop, 'src/renderer/src/lib/desktop-spatial-state.ts')], outfile: seedAdapter,
     bundle: true, platform: 'node', format: 'esm', metafile: true,
     banner: { js: "import {createRequire as privateRequire} from 'node:module'; const require=privateRequire(import.meta.url);" },

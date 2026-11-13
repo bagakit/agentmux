@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -9,7 +10,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const fixture = join(desktop, 'scripts/fixtures/closed-agent-tabs'), evidence = join(root, '.bagakit/closed-agent-tabs/electron')
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-closed-agent-tabs-'))
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], logs = []
 const receipt = { schema: 'agentmux.closed-agent-tabs.restart.v1', passed: false, phases: [],
   boundary: 'Current production Store, WorkspaceWorkbench, Renderer spatial persistence and Core file spatial owner. Real distinct Main/Renderer PIDs and original userData/spatial.json across restart; private typed Session/Run facts, controlled stop transport and isolated PTY/editor paint. Public CLI reads the same spatial owner. No physical PTY survival, native vendor, visual-quality or user-installation claim.' }

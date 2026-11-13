@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { browserRunOutcomeFromFailure } from '../src/main/browser-run-outcome.js'
-import type { BrowserScriptFailure } from '../src/main/browser-script-runner.js'
+import { browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
+import type { BrowserScriptFailure } from '@agentmux/browser/browser-script-runner'
 
 /**
  * 从「执行器的失败」到「契约的结局」这一次翻译，以及授权闸真的在那条必经之路上。

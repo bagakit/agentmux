@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment node
 import { afterEach, beforeAll, expect, it } from 'vitest'
@@ -15,7 +16,7 @@ beforeAll(async () => {
   worker = resolve('.tmp/survey-notebook/process/worker.mjs')
   await mkdir(resolve('.tmp/survey-notebook/process'), { recursive: true })
   await symlink(resolve('packages/core/node_modules'), resolve('.tmp/survey-notebook/process/node_modules'), 'dir').catch(error => { if (error.code !== 'EEXIST') throw error })
-  const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('../../../packages/core/node_modules/esbuild')
+  const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('../../../packages/core/node_modules/esbuild')
   const alias: Record<string, string> = { '@agentmux/layout': resolve('packages/layout/src/index.ts') }
   for (const pkg of ['core', 'demand']) {
     const manifest = JSON.parse(readFileSync(resolve('packages', pkg, 'package.json'), 'utf8'))

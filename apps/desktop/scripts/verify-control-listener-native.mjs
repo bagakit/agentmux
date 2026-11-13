@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -195,7 +196,7 @@ async function nativeMain() {
 const temporary = await mkdtemp(_hygiene_fixturePath("tmp/amcp-native-"))
 try {
   report.sourceBefore = await inputs()
-  const { build, transform } = viteRequire('esbuild')
+  const { build, transform } = browserSourceBuild(viteRequire('esbuild'))
   const freshness = join(temporary, 'freshness.mjs')
   await build({ entryPoints: [join(repository, 'vitest.dist-freshness.ts')], outfile: freshness, platform: 'node', format: 'esm', bundle: true, logLevel: 'error' })
   const { staleDistComplaint } = await import('file://' + freshness)

@@ -11,9 +11,9 @@ const file = 'apps/desktop/src/main/browser-outcome-criteria.ts'
 const test = 'apps/desktop/test/browser-outcome-download-owner.test.ts'
 const inputs = [file, test, 'apps/desktop/scripts/verify-browser-outcome-download-owner-mutations.mjs',
   'apps/desktop/src/main/browser-downloads.ts', 'apps/desktop/src/main/workspace-files.ts',
-  'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/main/browser-outcome-journal.ts',
-  'apps/desktop/src/main/browser-structured-output.ts', 'apps/desktop/src/shared/browser-structured-output.ts',
-  'apps/desktop/src/shared/browser-outcome-criteria.ts', 'apps/desktop/src/shared/browser-download.ts',
+  'packages/browser/src/browser-operation-journal.ts', 'packages/browser/src/browser-outcome-journal.ts',
+  'packages/browser/src/browser-structured-output.ts', 'packages/browser/src/model/browser-structured-output.ts',
+  'packages/browser/src/model/browser-outcome-criteria.ts', 'packages/browser/src/model/browser-download.ts',
   'apps/desktop/src/shared/workspace-file-bytes.ts', 'packages/core/src/index.ts',
   'packages/core/src/durable-write.ts', 'packages/core/src/execution-host.ts',
   'packages/core/src/process-runner.ts', 'packages/core/src/errors.ts']
@@ -62,7 +62,7 @@ try {
   for (const [path, bytes] of original) { await mkdir(dirname(join(copy, path)), { recursive: true }); await writeFile(join(copy, path), bytes) }
   await writeFile(join(copy, 'vitest.owner.config.mts'), `import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
-export default defineConfig({ resolve: { alias: { '@agentmux/core': resolve(import.meta.dirname, 'packages/core/src/index.ts') } },
+export default defineConfig({ resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname), '@agentmux/core': resolve(import.meta.dirname, 'packages/core/src/index.ts') } },
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: [${JSON.stringify(test)}], setupFiles: [resolve(import.meta.dirname, 'vitest.setup.ts')] } });\n`)
   const baseline = await run('baseline-green')
   assert.equal(baseline.code, 0, baseline.output)

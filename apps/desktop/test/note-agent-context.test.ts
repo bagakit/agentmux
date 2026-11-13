@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -234,7 +235,7 @@ it('keeps this exact Note and right Launcher topology through two real Core owne
   const dir = await mkdtemp(resolve('.tmp/note-talk-restart-'))
   try {
     const worker = join(dir, 'owner.mjs'), inputFile = join(dir, 'input.json'), stateFile = join(dir, 'state.json')
-    const { build } = createRequire(resolve('packages/core/package.json'))('esbuild')
+    const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild'))
     await build({ stdin: { contents: `import {AgentMuxSpatialStateStore} from './packages/core/src/spatial-state.ts';import {readFile} from 'node:fs/promises';const owner=new AgentMuxSpatialStateStore(process.argv[2]);console.log(JSON.stringify(process.argv[3]?await owner.commit(JSON.parse(await readFile(process.argv[3],'utf8'))):await owner.read()));`, resolveDir: process.cwd() }, outfile: worker, bundle: true, platform: 'node', format: 'esm', packages: 'bundle', alias: { '@agentmux/identity': resolve('packages/identity/src/index.ts') }, logLevel: 'silent' })
     await writeFile(inputFile, JSON.stringify({ expectedRevision: 0, graph: desktopSpatialGraph(current, []) }))
     const execute = promisify(execFile)

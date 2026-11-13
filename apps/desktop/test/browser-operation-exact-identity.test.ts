@@ -7,9 +7,9 @@ import { createHash } from 'node:crypto'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserOperationFileStore, BrowserOperationJournal, browserOperationAlreadyExistsError,
-  type BrowserOperationEvent, type BrowserOperationJournalDocument } from '../src/main/browser-operation-journal.js'
+  type BrowserOperationEvent, type BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
 import { browserRunResult } from '../src/shared/browser-run-result.js'
-import type { BrowserOperation } from '../src/shared/browser-operation.js'
+import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
 import { rpcControlRequest, parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec.js'
 
 const composite = ' ' + 'x'.repeat(240) + '界'.repeat(20) + '😀'.repeat(50)

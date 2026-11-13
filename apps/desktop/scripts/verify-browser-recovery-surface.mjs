@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFile, writeFile, mkdir, mkdtemp, readdir, stat, symlink, copyFile } from 'node:fs/promises'
@@ -19,7 +20,7 @@ const reuseBytes = reuseFile ? await readFile(reuseFile) : undefined
 const reuse = reuseBytes ? JSON.parse(reuseBytes) : undefined
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build: viteBuild } = await import(pathToFileURL(require.resolve('vite')))
-const { build: esbuild, transform: syntaxTransform } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build: esbuild, transform: syntaxTransform } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const proofRoot = join(root, '.tmp/browser-recovery-surface')
 await mkdir(proofRoot, { recursive: true })

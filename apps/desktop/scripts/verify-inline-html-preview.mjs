@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -7,7 +8,7 @@ import { join, resolve } from 'node:path'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 
 const require = createRequire(import.meta.url), { build } = await import('vite')
-const viteRequire = createRequire(require.resolve('vite')), esbuild = viteRequire('esbuild'), ts = require('typescript')
+const viteRequire = createRequire(require.resolve('vite')), esbuild = browserSourceBuild(viteRequire('esbuild')), ts = require('typescript')
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..')
 const rendererRoot = join(desktop, 'src/renderer/src'), fixture = join(desktop, 'scripts/fixtures/inline-html-preview')
 const arg = name => process.argv.find(value => value.startsWith(name + '='))?.slice(name.length + 1)

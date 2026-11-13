@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -6,7 +7,7 @@ import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..'), require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const checkIn = process.argv.includes('--checkin')
-const { build } = createRequire(require.resolve('vite'))('esbuild'), sha = bytes => createHash('sha256').update(bytes).digest('hex')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = path.join(root, '.tmp/agent-schedules/ui-renderer-' + globalThis.crypto.randomUUID()), compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', source: {}, images: {}, boundary: 'Original CalendarScheduleControl/ContinuousProgressControl and Desktop styles in one isolated Electron Renderer. Controlled typed API replies, native pointer/keyboard controls; unrelated editor and PDF workers are stubbed. No user App/Run, Native lifecycle, model, package or install.' }

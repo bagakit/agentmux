@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 // @vitest-environment happy-dom
 import { appendFileSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -29,7 +30,7 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () =
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 
 const original = useAppStore.getState(), empty = (): AgentMuxSurveyOrganization => ({ ungrouped: [], groups: [] })
-const { build } = createRequire(resolve('packages/core/package.json'))('esbuild')
+const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild'))
 const exec = promisify(execFile)
 let directory: string, cli: string, fixture: Awaited<ReturnType<typeof startWorkfaceFixture>>
 let zones: string[]

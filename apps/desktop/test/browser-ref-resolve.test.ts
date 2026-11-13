@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { captureBrowserPageSnapshot, type BrowserCdpSender } from '../src/main/browser-page-snapshot.js'
-import { resolveBrowserRef } from '../src/main/browser-ref-resolve.js'
+import { captureBrowserPageSnapshot, type BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
+import { resolveBrowserRef } from '@agentmux/browser/browser-ref-resolve'
 import type { BrowserPageSnapshot } from '../src/shared/contracts.js'
 
 /**

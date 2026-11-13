@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BrowserActivityState, BrowserOperation } from '../src/shared/browser-operation'
+import type { BrowserActivityState, BrowserOperation } from '@agentmux/browser/model/browser-operation'
 
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select: (state: unknown) => unknown) => select({ sessions: {}, config: null }), { getState: () => ({}) }) }))
 

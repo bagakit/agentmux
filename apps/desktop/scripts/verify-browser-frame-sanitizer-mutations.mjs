@@ -12,9 +12,9 @@ assert.equal(process.argv.length, 3)
 const kind = selected.slice(7), expectedTests = 26
 const tests = ['apps/desktop/test/browser-frame-probe-scenario.test.ts', 'apps/desktop/test/browser-ref-resolve.test.ts']
 const helper = 'apps/desktop/scripts/browser-frame-probe-scenario.mjs'
-const sources = [helper, 'apps/desktop/src/main/browser-selection.ts', 'apps/desktop/src/main/browser-ref-resolve.ts',
-  'apps/desktop/src/main/browser-page-snapshot.ts', 'apps/desktop/src/main/browser-frame-documents.ts',
-  'apps/desktop/src/main/browser-snapshot-query.ts', 'apps/desktop/src/shared/browser-snapshot-query.ts',
+const sources = [helper, 'packages/browser/src/browser-selection.ts', 'packages/browser/src/browser-ref-resolve.ts',
+  'packages/browser/src/browser-page-snapshot.ts', 'packages/browser/src/browser-frame-documents.ts',
+  'packages/browser/src/browser-snapshot-query.ts', 'packages/browser/src/model/browser-snapshot-query.ts',
   'apps/desktop/scripts/verify-browser-frame-sanitizer-mutations.mjs']
 const mutations = {
   url: { label: 'sanitized-url-exact-join-removed', before: "    const nativeUrl = new URL(native.url)\n    nativeUrl.username = ''; nativeUrl.password = ''; nativeUrl.search = ''; nativeUrl.hash = ''\n    assert.equal(new URL(context.selection.pageUrl).href, nativeUrl.href)", after: '' },

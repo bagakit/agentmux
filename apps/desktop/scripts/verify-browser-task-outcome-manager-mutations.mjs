@@ -52,7 +52,7 @@ async function verifyManagerSourceMutations({ name, tests, sources, mutations })
     }
     for (const pkg of ['core', 'layout', 'demand']) await symlink(join(copy, 'packages', pkg), join(desktop, 'node_modules/@agentmux', pkg))
     for (const [file, bytes] of original) { await mkdir(dirname(join(copy, file)), { recursive: true }); await writeFile(join(copy, file), bytes) }
-    await writeFile(join(copy, 'vitest.mutation.config.mts'), `import { defineConfig } from 'vitest/config';\nexport default defineConfig({ resolve: { alias: { '@agentmux/core': ${JSON.stringify(join(copy, 'packages/core/src/index.ts'))} } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
+    await writeFile(join(copy, 'vitest.mutation.config.mts'), `import { defineConfig } from 'vitest/config';\nexport default defineConfig({ resolve: { alias: { '@agentmux/browser': decodeURIComponent(new URL('./packages/browser/src', import.meta.url).pathname), '@agentmux/core': ${JSON.stringify(join(copy, 'packages/core/src/index.ts'))} } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
     receipt.sourceBoundary = { electronAndCdp: 'test doubles', ownersAndFiles: 'production source', coreResolution: 'packages/core/src/index.ts', nativeTransfer: false, applicationRestart: false }
     for (const [file, bytes] of original) { await mkdir(dirname(join(evidence, 'actual-source', `${file}.txt`)), { recursive: true }); await writeFile(join(evidence, 'actual-source', `${file}.txt`), bytes) }
     const baseline = await run('baseline-green')
@@ -101,18 +101,18 @@ await verifyManagerSourceMutations({
     "apps/desktop/src/main/browser-task-assets.ts",
     "apps/desktop/src/main/browser-outcome-criteria.ts",
     "apps/desktop/src/shared/browser-task-assets.ts",
-    "apps/desktop/src/shared/browser-outcome-criteria.ts",
+    "packages/browser/src/model/browser-outcome-criteria.ts",
     "apps/desktop/src/main/browser-downloads.ts",
     "apps/desktop/src/main/workspace-files.ts",
-    "apps/desktop/src/shared/browser-download.ts",
+    "packages/browser/src/model/browser-download.ts",
     "apps/desktop/src/shared/workspace-file-bytes.ts",
-    "apps/desktop/src/main/browser-operation-journal.ts",
-    "apps/desktop/src/main/browser-outcome-journal.ts",
+    "packages/browser/src/browser-operation-journal.ts",
+    "packages/browser/src/browser-outcome-journal.ts",
     "apps/desktop/src/main/browser-completion-control.ts",
-    "apps/desktop/src/main/browser-page-dispatch.ts",
-    "apps/desktop/src/main/browser-step-evidence.ts",
-    "apps/desktop/src/main/browser-result-artifact.ts",
-    "apps/desktop/src/main/browser-ref-ledger-store.ts",
+    "packages/browser/src/browser-page-dispatch.ts",
+    "packages/browser/src/browser-step-evidence.ts",
+    "packages/browser/src/browser-result-artifact.ts",
+    "packages/browser/src/browser-ref-ledger-store.ts",
     "packages/core/src/index.ts",
     "packages/core/src/durable-write.ts",
     "packages/core/src/execution-host.ts",

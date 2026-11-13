@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 // @vitest-environment node
 import { afterEach, beforeAll, expect, it } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -19,7 +20,7 @@ beforeAll(async () => {
   worker = join(directory, 'worker.mjs')
   const coreRequire = createRequire(resolve('packages/core/package.json'))
   const desktopRequire = createRequire(resolve('apps/desktop/package.json'))
-  const { build } = coreRequire('esbuild') as typeof import('../../../packages/core/node_modules/esbuild/lib/main')
+  const { build } = browserSourceBuild(coreRequire('esbuild')) as typeof import('../../../packages/core/node_modules/esbuild/lib/main')
   await build({ entryPoints: [resolve('apps/desktop/test/fixtures/amux-object-link-process-worker.ts')],
     outfile: worker, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
     define: { __AGENTMUX_WEB_PREVIEW__: 'true' },

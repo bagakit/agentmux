@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
@@ -10,7 +11,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 export async function capturePackage({ root, evidence, bind, proofFiles }) {
   const fixture = resolve(root, 'apps/desktop/scripts/fixtures/toolkit-local-package'), desktop = resolve(root, 'apps/desktop')
   const require = createRequire(resolve(desktop, 'package.json')), vitePath = require.resolve('vite')
-  const { build } = await import(pathToFileURL(vitePath).href), esbuild = createRequire(vitePath)('esbuild').build
+  const { build } = await import(pathToFileURL(vitePath).href), esbuild = browserSourceBuild(createRequire(vitePath)('esbuild')).build
   const { runProbeProcess, listProbeProcesses } = await import(pathToFileURL(resolve(desktop, 'scripts/probe-process.mjs')).href)
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-local-package-ui-'))
   const compiled = resolve(evidence, 'compiled'), inputs = {}, artifacts = [], phases = []

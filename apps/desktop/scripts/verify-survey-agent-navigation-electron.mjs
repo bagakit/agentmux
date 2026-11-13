@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -78,7 +79,7 @@ try {
   await build({ configFile: false, root: fixture, logLevel: 'error', plugins: [provenance], resolve: { alias: mainAliases }, ssr: { noExternal: ['zod'] },
     build: { ssr: join(fixture, 'main.ts'), target: 'node22', outDir: join(output, 'main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
-  const { build: bundle } = createRequire(require.resolve('vite'))('esbuild')
+  const { build: bundle } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
   await bundle({ entryPoints: [join(import.meta.dirname, 'fixtures/space-agent-cli/preload.ts')], bundle: true, platform: 'node', format: 'cjs', external: ['electron'], outfile: join(output, 'preload.cjs'), logLevel: 'silent' })
   for (const directory of ['home', 'app-data', 'user-data', 'session-data', 'runtime/tmp', 'other', 'topics', 'node_modules/@agentmux', 'node_modules/@noble']) await fs.mkdir(join(privateRoot, directory), { recursive: true })
   await fs.symlink(join(root, 'packages/core'), join(privateRoot, 'node_modules/@agentmux/core'))

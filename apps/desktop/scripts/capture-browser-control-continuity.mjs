@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -21,7 +22,7 @@ const selectedPhases = returnControlScope ? ['human'] : ownershipScope ? ['waiti
 assert.ok(!recapture || recapture.length > 0 && new Set(recapture).size === recapture.length && recapture.every(phase => ['waiting', 'navigation', 'script', 'observe', 'completed', 'failed', 'stopped', 'human'].includes(phase)), 'Recapture only explicit original Renderer phases')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')))
-const { transform } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { transform } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const base = join(root, '.tmp/browser-control-continuity/renderer'); await mkdir(base, { recursive: true })
 const out = await mkdtemp(join(base, 'attempt-')), source = join(out, 'source'), fixture = 'apps/desktop/scripts/fixtures/browser-control-continuity'

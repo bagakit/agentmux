@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
@@ -61,7 +62,7 @@ try{
   }
  aliases.push({find:/^@agentmux\/layout$/,replacement:path.join(root,'packages/core/src/spatial-layout.ts')},{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')})
  const consumed=new Map(),rendererSourceHashes=new Map(),guard={name:'private-current-fork-source-manifest',enforce:'pre',async transform(code,id){if(id.startsWith(root+'/apps/desktop/src/')||/^packages\/(?:core|demand|relay|client-ui)\/src\//.test(path.relative(root,id))){const file=path.relative(root,id.split('?')[0]);consumed.set(file,sha(code));rendererSourceHashes.set(file,sha(await fs.readFile(path.join(root,file))))}}}
- const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href),{build:buildNode}=createRequire(path.join(root,'packages/core/package.json'))('esbuild'),renderer=path.join(evidence,'renderer')
+ const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href),{build:buildNode}=browserSourceBuild(createRequire(path.join(root,'packages/core/package.json'))('esbuild')),renderer=path.join(evidence,'renderer')
  await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},esbuild:{jsx:'automatic'},resolve:{alias:aliases},plugins:[guard],build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
  receipt.compiledRenderer=Object.fromEntries(consumed)
  receipt.rendererSourceSHA256=Object.fromEntries(rendererSourceHashes)

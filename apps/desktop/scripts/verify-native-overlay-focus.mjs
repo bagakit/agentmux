@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -7,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 
 const root = process.cwd(), require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sourcePath = resolve('apps/desktop/src/main/native-overlay-surfaces.ts'), source = await readFile(sourcePath, 'utf8')
 const out = resolve('.tmp/native-overlay-focus'), work = await mkdtemp(join(tmpdir(), 'agentmux-overlay-focus-'))
 await mkdir(out, { recursive: true })

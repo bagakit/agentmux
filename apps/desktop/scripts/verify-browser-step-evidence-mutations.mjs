@@ -1,14 +1,14 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 
 const main = 'apps/desktop/src/main/browser-view-manager.ts'
-const store = 'apps/desktop/src/main/browser-step-evidence.ts'
+const store = 'packages/browser/src/browser-step-evidence.ts'
 const component = 'apps/desktop/src/renderer/src/components/BrowserStepEvidence.tsx'
 await verifyRendererSourceMutations({
   name: 'browser-step-evidence-mutations',
   tests: ['apps/desktop/test/browser-step-evidence.test.tsx', 'apps/desktop/test/browser-run-script-wiring.test.ts', 'apps/desktop/test/browser-operation-journal.test.ts'],
-  sources: [main, store, component, 'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/shared/browser-step-evidence.ts'],
+  sources: [main, store, component, 'packages/browser/src/browser-operation-journal.ts', 'packages/browser/src/model/browser-step-evidence.ts'],
   mutations: [
-    { label: 'first-use-falsely-damaged', file: 'apps/desktop/src/main/browser-operation-journal.ts',
+    { label: 'first-use-falsely-damaged', file: 'packages/browser/src/browser-operation-journal.ts',
       before: "if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyDocument()", after: "if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null" },
     { label: 'journal-evidence-disconnected', file: main, before: 'step.evidence = first ? [reference, ...(step.evidence ?? [])] : [...(step.evidence ?? []), reference]', after: 'step.evidence = []' },
     { label: 'foreign-step-identity-accepted', file: store, before: '!sameIdentity(value.reference, reference)', after: 'false' },

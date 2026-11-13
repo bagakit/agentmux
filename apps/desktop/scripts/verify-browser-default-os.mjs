@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -74,7 +75,7 @@ async function cdp(url) {
 // public service are never bundled again or replaced by this seed producer.
 export async function seedPrivateConfiguration(repository, scope, userData) {
   const require = createRequire(join(repository, 'apps/desktop/package.json'))
-  const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+  const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
   const scratch = join(scope.directory, 'scratch'), notes = join(scope.directory, 'notes')
   await Promise.all([mkdir(userData, { recursive: true }), mkdir(scratch), mkdir(notes), mkdir(join(scope.directory, 'state'), { recursive: true })])
   const seedDirectory = join(repository, 'apps/desktop/.local/browser-default')

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { resolve, join, dirname } from 'node:path'
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 const require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sourcePaths = {
   'drawing-model.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts',
   'geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/geometry.ts',

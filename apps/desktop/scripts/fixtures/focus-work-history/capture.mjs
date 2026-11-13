@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -8,7 +9,7 @@ import { runProbeProcess, listProbeProcesses } from '../../probe-process.mjs'
 
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const output = path.join(root, '.tmp', ("focus-work-history-scene-" + (globalThis.crypto.randomUUID()) + "")); await fs.mkdir(output, { recursive: true })
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amux-focus-work-history-'))

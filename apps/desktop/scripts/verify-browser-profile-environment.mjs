@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
@@ -8,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const electron = require('electron'), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const outRoot = join(root, '.tmp/browser-profile-environment'); await mkdir(outRoot, { recursive: true })
 const out = await mkdtemp(join(outRoot, 'attempt-')), home = await mkdtemp('/tmp/amux-env-')

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
@@ -8,7 +9,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
+const { build, transform } = browserSourceBuild(createRequire(join(root, 'packages/core/package.json'))('esbuild'))
 const { build: viteBuild } = await import(pathToFileURL(require.resolve('vite')).href)
 const output = join(root, '.tmp/pasted-image-persistence', randomUUID())
 await mkdir(output, { recursive: true })

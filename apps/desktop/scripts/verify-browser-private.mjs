@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -73,7 +74,7 @@ function child(program, argv, budget = 60_000, binary = process.execPath, env = 
   })
 }
 async function nativeOwner(label, mutation) {
-  const { build } = createRequire(desktopRequire.resolve('vite'))('esbuild'), compiled = join(temporary, label), source = await readFile(manager, 'utf8')
+  const { build } = browserSourceBuild(createRequire(desktopRequire.resolve('vite'))('esbuild')), compiled = join(temporary, label), source = await readFile(manager, 'utf8')
   await mkdir(compiled); await mkdir(join(compiled, 'home')); await symlink(resolve('apps/desktop/node_modules'), join(compiled, 'node_modules'))
   const program = join(compiled, 'main.mjs'), report = join(compiled, 'receipt.json'), bootstrap = join(compiled, 'bootstrap.cjs')
   await writeFile(bootstrap, `const {app}=require('electron');const {writeFileSync}=require('node:fs');

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -10,7 +11,7 @@ assert.equal(process.argv.length, 2, 'This source verification has no optional s
 const retryMutation = process.env.SCREENSHOT_SOURCE_RETRY_MUTATION === '1'
 assert.ok(process.env.SCREENSHOT_SOURCE_RETRY_MUTATION === undefined || retryMutation, 'The retry counterexample must be selected explicitly')
 const root = process.cwd(), require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 await mkdir(resolve('.local/screenshot-sources'), { recursive: true })
 const out = await mkdtemp(resolve('.local/screenshot-sources/run-')), work = await mkdtemp(join(tmpdir(), 'amux-source-'))

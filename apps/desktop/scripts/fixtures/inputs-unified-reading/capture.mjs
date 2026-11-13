@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -10,7 +11,7 @@ const tag = process.argv.find(arg => arg.startsWith('--tag='))?.slice(6) ?? new 
 assert.match(tag, /^[a-zA-Z0-9_-]+$/)
 const evidence = path.join(artifactRoot, tag), out = path.join(evidence, 'compiled')
 await fs.mkdir(out, { recursive: true })
-const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild')
+const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const hash = value => createHash('sha256').update(value).digest('hex'), loaded = new Map()
 const packages = new Map(await Promise.all(['core', 'client-ui', 'layout', 'demand'].map(async name => [name,
   JSON.parse(await fs.readFile(path.join(root, 'packages', name, 'package.json'), 'utf8')).exports])))

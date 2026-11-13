@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -7,7 +8,7 @@ import { resolve, join } from 'node:path'
 import { createServer } from 'node:http'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from '../../probe-process.mjs'
 import { sourceAliases } from './vitest.owning.config.mts'
-const require = createRequire(import.meta.url), { build } = await import('vite'), esbuild = createRequire(require.resolve('vite'))('esbuild')
+const require = createRequire(import.meta.url), { build } = await import('vite'), esbuild = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceNames = ['src/shared/bookmark-file.ts', 'src/main/bookmark-file.ts', 'src/main/workspace-files.ts', 'src/main/pasted-image-read.ts', 'src/main/pasted-directory.ts',
   'src/main/browser-view-manager.ts', 'src/main/native-overlay-surfaces.ts', 'src/shared/native-overlay.ts', 'src/renderer/src/hooks/useNativeOverlayChrome.ts', 'src/renderer/src/lib/native-overlay-regions.ts',

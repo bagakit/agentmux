@@ -14,10 +14,10 @@ await verifyRendererSourceMutations({
     'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
     'apps/desktop/src/renderer/src/styles/browser-task-assets.css',
     'apps/desktop/src/main/browser-task-assets.ts',
-    'apps/desktop/src/main/browser-operation-journal.ts',
+    'packages/browser/src/browser-operation-journal.ts',
     'apps/desktop/src/main/browser-replay-compiler.ts',
     'apps/desktop/src/shared/browser-task-assets.ts',
-    'apps/desktop/src/shared/browser-operation.ts',
+    'packages/browser/src/model/browser-operation.ts',
     'apps/desktop/src/shared/browser-demonstration.ts',
     'packages/core/src/browser-page-capability.ts'],
   mutations: [

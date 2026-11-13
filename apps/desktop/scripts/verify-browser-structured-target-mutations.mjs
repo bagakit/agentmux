@@ -1,8 +1,8 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
-const file = 'apps/desktop/src/main/browser-structured-target.ts'
+const file = 'packages/browser/src/browser-structured-target.ts'
 await verifyRendererSourceMutations({ name: 'browser-structured-target-mutations',
   tests: ['apps/desktop/test/browser-structured-target.test.ts'],
-  sources: [file, 'apps/desktop/src/main/browser-page-snapshot.ts'],
+  sources: [file, 'packages/browser/src/browser-page-snapshot.ts'],
   mutations: [
     {label:'selector-uses-page-world',file,before:'resolveWithinSelector(send, input.within, executionContextId)',after:'resolveWithinSelector(send, input.within)'},
     {label:'sender-substituted-for-actual-document',file,before:'frameId = described.node.frameId',after:'frameId = tree.frameTree.frame.id'},

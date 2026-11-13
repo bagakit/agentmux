@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -9,7 +10,7 @@ const privateChat = process.argv.includes('--private-chat')
 const peopleOnly = privateChat && process.argv.includes('--people-only')
 const fixture = privateChat ? path.resolve(import.meta.dirname, '../mote-private-chat-history') : import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const directory = path.join(root, `${peopleOnly ? '.local/connector-entity-components/people-visual' : privateChat ? '.local/channel-protocol/T-037' : '.local/state/mote-memory-profile'}/capture-${globalThis.crypto.randomUUID()}`), compiled = path.join(directory, 'compiled')
 
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))

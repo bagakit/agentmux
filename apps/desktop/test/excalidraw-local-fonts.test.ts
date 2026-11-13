@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixtureFileUrl as _hygiene_fixtureFileUrl } from "../scripts/lib/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { createRequire } from 'node:module'
@@ -10,7 +11,7 @@ import { fileDiagramAssets } from '@agentmux/editor-extensions/build/file-diagra
 
 const require = createRequire(import.meta.url)
 const packageRoot = dirname(dirname(dirname(require.resolve('@excalidraw/excalidraw'))))
-const { build } = createRequire(require.resolve('vite/package.json'))('esbuild') as { build(options: Record<string, unknown>): Promise<{ outputFiles?: { text: string }[] }> }
+const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild')) as { build(options: Record<string, unknown>): Promise<{ outputFiles?: { text: string }[] }> }
 
 describe('bundled official Excalidraw fonts', () => {
   it('removes only the unconditional hosted fallback from both pinned official distributions', async () => {

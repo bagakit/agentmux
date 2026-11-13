@@ -36,7 +36,7 @@ const mutations = [
     before: 'if (notice && shield && notice.shield === shield)', after: 'if (false && notice && shield && notice.shield === shield)',
     oracle: 'clears only its confirmed cleanup notice' }
 ]
-const inputs = [action, owner, 'apps/desktop/src/main/browser-control-feedback.ts', 'apps/desktop/src/main/browser-page-dispatch.ts',
+const inputs = [action, owner, 'apps/desktop/src/main/browser-control-feedback.ts', 'packages/browser/src/browser-page-dispatch.ts',
   'apps/desktop/src/main/browser-operator-avatar.ts', 'apps/desktop/src/shared/browser-agent-control.ts', configuration,
   'apps/desktop/test/browser-control-feedback.test.ts', 'apps/desktop/test/browser-operation-feedback.test.ts',
   'apps/desktop/test/browser-page-action-feedback.test.ts', 'apps/desktop/scripts/verify-browser-operator-presence-unit.mjs']

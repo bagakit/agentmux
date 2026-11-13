@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -7,7 +8,7 @@ import path from 'node:path'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const root = path.resolve(import.meta.dirname, '../../..'), fixture = path.join(import.meta.dirname, 'fixtures/conversation-details-width')
-const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild')
+const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const temporary = await mkdtemp(path.join(tmpdir(), 'amux-details-width-')), renderer = path.join(temporary, 'renderer')
 const output = path.resolve(process.env.AGENTMUX_DETAILS_WIDTH_EVIDENCE ?? path.join(root, '.bagakit/evidence/conversation-details-width'))
 await mkdir(renderer); await mkdir(output, { recursive: true })

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -74,7 +75,7 @@ try {
   }
   privateRoot = await mkdtemp(join(tmpdir(), 'amux-space-agent-list-'))
   const fixture = join(desktop, 'scripts/fixtures/space-agent-list-management')
-  const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+  const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
   const observe = { name: 'actual-space-agent-list-inputs', setup(builder) {
     builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return

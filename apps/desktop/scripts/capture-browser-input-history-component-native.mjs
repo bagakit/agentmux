@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
@@ -10,7 +11,7 @@ import { gzipSync } from 'node:zlib'
 
 const repo = resolve(new URL('../../../', import.meta.url).pathname)
 const require = createRequire(join(repo, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const electron = require('electron'), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const args = process.argv.slice(2)
 if (args.length === 1 && args[0] === '--help') {

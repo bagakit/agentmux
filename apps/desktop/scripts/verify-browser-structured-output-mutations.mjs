@@ -1,10 +1,10 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 
-const file = 'apps/desktop/src/main/browser-structured-output.ts'
+const file = 'packages/browser/src/browser-structured-output.ts'
 await verifyRendererSourceMutations({
   name: 'browser-structured-output-mutations',
   tests: ['apps/desktop/test/browser-structured-output.test.ts'],
-  sources: [file, 'apps/desktop/src/shared/browser-structured-output.ts', 'apps/desktop/src/main/browser-result-artifact.ts'],
+  sources: [file, 'packages/browser/src/model/browser-structured-output.ts', 'packages/browser/src/browser-result-artifact.ts'],
   mutations: [
     { label: 'missing-filled-with-empty-default', file,
       before: "if (found.length === 0) return { ...identity, status: 'missing', detail: 'No element matched in the complete rooted scan.' }",

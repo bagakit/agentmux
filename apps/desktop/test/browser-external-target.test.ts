@@ -1,8 +1,9 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
 import { browserResourceLocations } from '../src/main/browser-resource-directory'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
-import { browserOperationAlreadyExistsError } from '../src/main/browser-operation-journal'
+import { browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -12,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isNativeInputCheck } from './browser-native-input-double.js'
 import { ExternalBrowserBridge, ExternalBrowserRequestFailure } from '../src/main/browser-external-bridge.js'
 import { attachExternalBrowserTarget, type ExternalBrowserTargetSession } from '../src/main/browser-external-target.js'
-import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
+import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
 import { isShareUrl, isTabScopedCommand, BROWSER_OPERATION_FEEDBACK_WORLD_NAME, buildOwnedFeedbackClearScript } from '../browser-extension/protocol.js'
 
 // A real production extension worker talks to the real loopback bridge. Chrome APIs are
@@ -75,7 +76,9 @@ async function fixture() {
         if (method === 'DOM.getContentQuads') return { quads: [[10, 10, 50, 10, 50, 30, 10, 30]] }
         if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
         if (method === 'Input.dispatchMouseEvent') { if (params?.type === 'mousePressed') counter++; return {} }
+        if (method === 'Runtime.callFunctionOn' && params.returnByValue === false) return { result: { objectId: 'pointer-witness' } }
         if (method === 'Runtime.callFunctionOn' && isNativeInputCheck(params)) return { result: { value: true } }
+        if (method === 'Runtime.callFunctionOn' && params.functionDeclaration?.includes('this.read()')) return { result: { value: true } }
         if (method === 'Runtime.callFunctionOn') { if (params?.functionDeclaration?.includes('this.click()')) counter++; return { result: { value: null } } }
         return {}
       }) }
@@ -489,9 +492,9 @@ async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: imp
   validateScreenshot: (image: import('../src/shared/contracts').BrowserPng) => void = () => { throw new Error('This Source fixture does not certify PNG decoding.') }) {
   const { dirname } = await import('node:path')
   const { ExternalBrowserOwner } = await import('../src/main/browser-external-owner.js')
-  const { BrowserOperationJournal, BrowserOperationFileStore } = await import('../src/main/browser-operation-journal.js')
-  const { BrowserStepEvidenceStore } = await import('../src/main/browser-step-evidence.js')
-  const { BrowserResultArtifactStore } = await import('../src/main/browser-result-artifact.js')
+  const { BrowserOperationJournal, BrowserOperationFileStore } = await import('@agentmux/browser/browser-operation-journal')
+  const { BrowserStepEvidenceStore } = await import('@agentmux/browser/browser-step-evidence')
+  const { BrowserResultArtifactStore } = await import('@agentmux/browser/browser-result-artifact')
   const directory = dirname(f.path)
   const journalFile = new BrowserOperationFileStore(join(directory, 'operations.json'))
   const journalSaves = vi.spyOn(journalFile, 'save')
@@ -505,6 +508,37 @@ async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: imp
   return { page, journal, evidence, refs, journalFile, journalSaves }
 }
 
+describe('shared dialog owner through the actual extension worker and bridge',()=>{
+  it.each(['alert','confirm','prompt','beforeunload'] as const)('answers %s from original native events through the retained owner',async kind=>{
+    const f=await fixture(),binding=await f.share(),o=await programOwner(f)
+    const previous=f.api.debugger.sendCommand.getMockImplementation()!
+    f.api.debugger.sendCommand.mockImplementation(async(target,method,params)=>{
+      if(method==='Runtime.evaluate'&&params?.expression==='open-original-dialog'){
+        f.api.debugger.onEvent.emit({tabId:target.tabId},'Page.javascriptDialogOpening',{type:kind,message:'Fixture dialog',url:binding.url})
+        return {result:{value:true}}
+      }
+      if(method==='Page.handleJavaScriptDialog')f.api.debugger.onEvent.emit({tabId:target.tabId},'Page.javascriptDialogClosed',{})
+      return await previous(target,method,params)
+    })
+    const answer=kind==='beforeunload'?`let refused=false;try{await cdp('Page.handleJavaScriptDialog',{accept:true})}catch(error){refused=error.message.includes('only the person')};await cdp('Page.handleJavaScriptDialog',{accept:false});return refused`:
+      kind==='prompt'?`await acceptDialog('typed answer');return true`:`await cdp('Page.handleJavaScriptDialog',{accept:true});return true`
+    const result=await o.page.runScript(binding.id,`try{await js('open-original-dialog')}catch{};${answer}`)
+    expect(result.result).toBe(true)
+    const commands=f.api.debugger.sendCommand.mock.calls.filter(call=>call[1]==='Page.handleJavaScriptDialog')
+    expect(commands).toHaveLength(1)
+    expect(commands[0]?.[2]).toEqual({accept:kind!=='beforeunload',...(kind==='prompt'?{promptText:'typed answer'}:{})})
+    expect(binding.status).toBe('ready')
+    expect((await o.page.runScript(binding.id,'return await pageInfo()')).outcome.kind).toBe('completed')
+  })
+  it('keeps raw file assignment behind the actual Workspace upload owner without removing its internal transport path',async()=>{
+    const f=await fixture(),binding=await f.share(),o=await programOwner(f)
+    const result=await o.page.runScript(binding.id,`try{await cdp('DOM.setFileInputFiles',{files:['/ungranted/private.txt'],backendNodeId:11});return 'sent'}catch(error){return error.message}`)
+    expect(result.outcome.kind).toBe('completed');expect(result.result).toContain('original Workspace upload owner')
+    expect(f.api.debugger.sendCommand.mock.calls.filter(call=>call[1]==='DOM.setFileInputFiles')).toEqual([])
+    expect(isTabScopedCommand('DOM.setFileInputFiles',{files:['/authorized/staged.txt'],backendNodeId:11})).toBe(true)
+  })
+})
+
 describe('native image seam for the actual shared-page program', () => {
   it('retains the original CDP pixels, target, navigation and viewport without an OS capture', async () => {
     const f = await fixture(), binding = await f.share()
@@ -513,6 +547,7 @@ describe('native image seam for the actual shared-page program', () => {
     f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
       if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 390, clientHeight: 844 } }
       if (method === 'Page.captureScreenshot') return { data }
+      if (method === 'Runtime.evaluate' && params?.expression === '({url:location.href,title:document.title})') return { result: { value: { url: binding.url, title: 'Exact shared page' } } }
       if (method === 'Runtime.evaluate' && params?.expression?.includes('url:location.href')) return { result: { value: { value: { url: binding.url, title: 'Exact shared page' }, revision: 0 } } }
       return await original(target, method, params)
     })
@@ -645,7 +680,7 @@ async function sourcePublicCli(f: Awaited<ReturnType<typeof fixture>>, o: Awaite
   const directory = dirname(f.path)
   const cli = join(directory, 'agentmux.mjs')
   await symlink(fileURLToPath(new URL('../../../packages/core/node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')
-  await require('esbuild').build({ entryPoints: [fileURLToPath(new URL('../../../packages/core/src/agentmux.ts', import.meta.url))],
+  await browserSourceBuild(require('esbuild')).build({ entryPoints: [fileURLToPath(new URL('../../../packages/core/src/agentmux.ts', import.meta.url))],
     outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent',
     plugins: [{ name: 'keep-existing-dependencies-external', setup(build: import('esbuild').PluginBuild) {
       build.onResolve({ filter: /[/\\]node_modules[/\\]/ }, args => ({ path: args.path, external: true }))

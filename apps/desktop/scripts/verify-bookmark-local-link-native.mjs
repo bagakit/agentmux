@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -9,7 +10,7 @@ import { createServer } from 'node:http'
 import { execFileSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 import { sourceAliases } from './fixtures/bookmark-local-link/vitest.owning.config.mts'
-const require=createRequire(import.meta.url),{build}=await import('vite'),esbuild=createRequire(require.resolve('vite'))('esbuild')
+const require=createRequire(import.meta.url),{build}=await import('vite'),esbuild=browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop'),fixture=join(desktop,'scripts/fixtures/bookmark-local-link')
 let consume=false,output="docs/reviews/evidence/bookmark-local-link/native"
 for(let index=2;index<process.argv.length;index++) {

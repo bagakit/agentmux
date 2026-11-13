@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -33,7 +34,7 @@ if(process.env.AGENTMUX_FOCUS_FAILED_CLOSE_RECEIPT){
 }
 const evidence=process.argv[3]?resolve(process.argv[3]):join(root,'.bagakit/feature-tracker/focus-identity-consistency-artifacts/failed-close','scene-'+globalThis.crypto.randomUUID());await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-focus-failed-close-')), fixture=join(desktop,'scripts/fixtures/focus-failed-session-close')
-const require=createRequire(join(desktop,'package.json')), {build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
 const receipt={schema:'agentmux.focus-failed-session-close-scene.v1',capturedPass:false,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
   boundary:'Original compiled Global/Attention/Store/Core lifecycle reducer and source CSS. Isolated typed API transport; real first Electron PID exit then second PID original Store initialize with no second seed. PTY and Monaco paint leaves isolated; unsaved file state remains original. Typed Session/Run references do not certify physical Runtime/PTY, OS input or user installation.'}

@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -22,7 +23,7 @@ const fixture = join(desktop, 'scripts/fixtures/focus-activity-certainty'), hash
 const seedPath = resolve(sourcePath, '..', 'public-scene-seed.json'), seedBytes = await readFile(seedPath), seed = JSON.parse(seedBytes)
 assert.equal(seed.schema, 'agentmux.activity-certainty-public-scene-seed.v1')
 assert.deepEqual(seed.rows.map(row => row.observation.semantic), ['unknown', 'unknown', 'active', 'idle'])
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-activity-certainty-')), inputs = new Map(), transformations = [], logs = []
 const receipt = { schema: 'agentmux.focus-activity-certainty-scene.v1', passed: false, authorAgentId: '/root/focus_formal_resume_intake',
   sourceQualification: { path: relative(root, sourcePath), sha256: hash(await readFile(sourcePath)), passed: source.passed,

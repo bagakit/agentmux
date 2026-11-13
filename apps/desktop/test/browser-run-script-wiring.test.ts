@@ -16,7 +16,7 @@ import type { BrowserUploadReceipt } from '../src/shared/browser-upload.js'
 import { BrowserDownloads } from '../src/main/browser-downloads.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
-import type { BrowserDownloadReceipt, BrowserDownloadChunk } from '../src/shared/browser-download.js'
+import type { BrowserDownloadReceipt, BrowserDownloadChunk } from '@agentmux/browser/model/browser-download'
 import vm from 'node:vm'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -201,19 +201,19 @@ const dispatchSpy = vi.hoisted(() => {
 })
 const dispatchCalls = dispatchSpy.calls
 const createDispatch = dispatchSpy.create
-vi.mock('../src/main/browser-page-dispatch.js', () => ({
+vi.mock('@agentmux/browser/browser-page-dispatch', () => ({
   createBrowserPageDispatch: dispatchSpy.create,
   renderBrowserSnapshotText: () => ''
 }))
 
-import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
+import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
-import { BrowserOperationFileStore, BrowserOperationJournal, browserOperationAlreadyExistsError, type BrowserOperationJournalDocument } from '../src/main/browser-operation-journal.js'
-import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
-import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.js'
-import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '../src/shared/browser-result-artifact.js'
-import type { BrowserStructuredOutputReceipt } from '../src/shared/browser-structured-output.js'
-import type { BrowserPageContext } from '../src/main/browser-page-dispatch.js'
+import { BrowserOperationFileStore, BrowserOperationJournal, browserOperationAlreadyExistsError, type BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
+import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
+import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '@agentmux/browser/model/browser-result-artifact'
+import type { BrowserStructuredOutputReceipt } from '@agentmux/browser/model/browser-structured-output'
+import type { BrowserPageContext } from '@agentmux/browser/browser-page-dispatch'
 import { isNativeInputCheck } from './browser-native-input-double.js'
 
 const profiles: BrowserProfileResolver = {
@@ -1822,7 +1822,7 @@ describe('durable result via the actual Manager → dispatch → runner chain', 
     const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-disk-failure-'))
     const blocked = join(directory, 'not-a-directory')
     await writeFile(blocked, 'keep this file')
-    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const actual = await vi.importActual<typeof import('@agentmux/browser/browser-page-dispatch')>('@agentmux/browser/browser-page-dispatch')
     createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
     let manager: BrowserViewManager | undefined
     try {
@@ -1856,7 +1856,7 @@ describe('durable result via the actual Manager → dispatch → runner chain', 
     const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-manager-'))
     const journalPath = join(directory, 'operations.json')
     const storePath = join(directory, 'results')
-    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const actual = await vi.importActual<typeof import('@agentmux/browser/browser-page-dispatch')>('@agentmux/browser/browser-page-dispatch')
     createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
     let manager: BrowserViewManager | undefined
     try {
@@ -1916,7 +1916,7 @@ describe('durable result via the actual Manager → dispatch → runner chain', 
 
   it('an unknown Workspace keeps small scripts healthy and reports large result unavailable after an action', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'agentmux-result-unknown-'))
-    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const actual = await vi.importActual<typeof import('@agentmux/browser/browser-page-dispatch')>('@agentmux/browser/browser-page-dispatch')
     createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
     let manager: BrowserViewManager | undefined
     try {
@@ -2515,7 +2515,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
     const downloads = new BrowserDownloads(join(root, 'browser-downloads'), files, resolve)
     const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'operations.json')))
     const f = await managerWithBrowser(journal, undefined, undefined, workspace.id, undefined, undefined, downloads)
-    const dispatchModule = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const dispatchModule = await vi.importActual<typeof import('@agentmux/browser/browser-page-dispatch')>('@agentmux/browser/browser-page-dispatch')
     const payload = Buffer.from([0, 255, 128, 13, 10, 2])
     let clicks = 0
     const downloadListenerBaseline = f.contents.session.listenerCount('will-download')
@@ -2718,7 +2718,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
     const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'operations.json')))
     const f = await managerWithBrowser(journal, undefined, undefined, workspace.id, undefined, undefined, undefined, uploads)
     f.contents.emitMainNavigation = true
-    const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+    const actual = await vi.importActual<typeof import('@agentmux/browser/browser-page-dispatch')>('@agentmux/browser/browser-page-dispatch')
     const payload = Buffer.from([0, 128, 255, 10])
     await writeFile(join(root, 'attachment.bin'), payload)
     let staged: string[] = []
@@ -2994,7 +2994,7 @@ describe('file upload via exact current ref and sole Workspace snapshot owner', 
 
 it('returns the reported favicon through actual Manager pageInfo dispatch and the real script runner', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'agentmux-favicon-operation-'))
-  const actual = await vi.importActual<typeof import('../src/main/browser-page-dispatch.js')>('../src/main/browser-page-dispatch.js')
+  const actual = await vi.importActual<typeof import('@agentmux/browser/browser-page-dispatch')>('@agentmux/browser/browser-page-dispatch')
   createDispatch.mockImplementation(context => actual.createBrowserPageDispatch(context))
   let manager: BrowserViewManager | undefined
   try {

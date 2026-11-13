@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   captureBrowserPageSnapshot,
   type BrowserCdpSender
-} from '../src/main/browser-page-snapshot.js'
-import { renderBrowserSnapshotText } from '../src/main/browser-page-dispatch.js'
+} from '@agentmux/browser/browser-page-snapshot'
+import { renderBrowserSnapshotText } from '@agentmux/browser/browser-page-dispatch'
 
 /**
  * 页面快照引擎：AX 树走查 + 可点元素提升 + 跨域 iframe 缺失可见。

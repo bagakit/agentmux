@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { installBrowserPageInterrupts } from '../src/main/browser-page-interrupts.js'
-import type { BrowserPageTransport } from '../src/main/browser-page-transport.js'
+import { installBrowserPageInterrupts } from '@agentmux/browser/browser-page-interrupts'
+import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
 import type { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 
 /** A transport that records commands and lets the test emit protocol events on the root session. */
@@ -29,6 +29,27 @@ function fakeTransport(options: { pageEnable?: 'ok' | 'fail' | 'held'; heldHouse
 const opening = (type: string, message = 'Are you sure?') => ({ type, message, url: 'https://example.test/' })
 
 describe('one owner for a run’s page dialogs', () => {
+  it('raw answers reuse the original dialog kind and keep cancellation available when observation is unknown', async () => {
+    const t=fakeTransport(), owner=installBrowserPageInterrupts(t.session,{signal:new AbortController().signal})
+    await owner.ready()
+    t.emit('Page.javascriptDialogOpening',opening('confirm'))
+    await expect(owner.answerRaw(true)).resolves.toEqual({})
+    t.emit('Page.javascriptDialogOpening',opening('beforeunload',''))
+    const before=t.sent.length
+    await expect(owner.answerRaw(true)).rejects.toMatchObject({fact:{effects:'not-dispatched'}})
+    expect(t.sent.slice(before)).toEqual([])
+    await owner.answerRaw(false)
+    expect(owner.current()).toBeNull()
+    await owner.dispose()
+    const unknown=fakeTransport({pageEnable:'fail'}), pending=installBrowserPageInterrupts(unknown.session,{signal:new AbortController().signal})
+    await pending.ready()
+    await expect(pending.answerRaw(true)).rejects.toThrow('kind is unknown')
+    await expect(unknown.session.sendCommand('DOM.getDocument')).resolves.toEqual({})
+    await pending.answerRaw(false)
+    expect(unknown.sent.at(-1)).toEqual({method:'Page.handleJavaScriptDialog',params:{accept:false}})
+    await pending.dispose()
+  })
+
   it('ends a page call the moment a dialog opens, with effects from Main’s own input receipt', async () => {
     const t = fakeTransport()
     const interrupts = installBrowserPageInterrupts(t.session, { signal: new AbortController().signal })

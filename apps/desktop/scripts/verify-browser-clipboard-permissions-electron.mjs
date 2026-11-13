@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
@@ -13,7 +14,7 @@ const root = resolve(import.meta.dirname, '../../..'), args = process.argv.slice
 const output = resolve(outputFlag < 0 ? join(root, '.tmp/browser-clipboard-permissions/electron-' + Date.now()) : args[outputFlag + 1])
 const interactive = args.includes('--interactive')
 for (let index = 0; index < args.length; index++) { if (args[index] === '--output') { assert.ok(args[++index]); continue }; assert.equal(args[index], '--interactive') }
-const require = createRequire(join(root, 'apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild'), exec = promisify(execFile)
+const require = createRequire(join(root, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')), exec = promisify(execFile)
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const workspacePackages = new Map()
 for (const area of ['packages', 'apps']) for (const name of await readdir(join(root, area))) {

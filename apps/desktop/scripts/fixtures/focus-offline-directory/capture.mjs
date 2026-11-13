@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
@@ -9,7 +10,7 @@ import { directorySourceBinding, directorySourceFiles, sha } from './source-bind
 
 const fixture = path.dirname(fileURLToPath(import.meta.url)), root = path.resolve(fixture, '../../../../..')
 const desktop = path.join(root, 'apps/desktop'), require = createRequire(path.join(desktop, 'package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const directory = path.join(root, (".tmp/focus-offline-directory-gui-" + (globalThis.crypto.randomUUID()) + ""))
 await fs.mkdir(directory, { recursive: true })
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-offline-directory-probe-'))

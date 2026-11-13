@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createRequire } from 'node:module'
@@ -5,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 const root = path.resolve(import.meta.dirname, '../../../../..'), fixture = import.meta.dirname
 const proof = path.join(root, '.bagakit/feature-tracker/conversation-input-cards-artifacts/T012'), out = path.join(proof, 'compiled')
-const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild')
+const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const loaded = [], hash = data => createHash('sha256').update(data).digest('hex')
 await fs.mkdir(out, { recursive: true })
 const result = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: out, bundle: true, format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', metafile: true,

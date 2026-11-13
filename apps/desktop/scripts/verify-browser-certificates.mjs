@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -12,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build: esbuild } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const { build: esbuild } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const proof = join(root, '.tmp/browser-certificates'); await mkdir(proof, { recursive: true })
 const out = await mkdtemp(join(proof, 'attempt-')), fixture = join(root, 'apps/desktop/scripts/fixtures/browser-certificates')
 const receipt = { schema: 'agentmux.browser-certificates.proof.v1', passed: false, sources: {}, runs: [], out,

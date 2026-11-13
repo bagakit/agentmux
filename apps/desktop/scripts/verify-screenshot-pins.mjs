@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -8,7 +9,7 @@ import { tmpdir } from 'node:os'
 
 assert.equal(process.argv.length, 2, 'This verification has no optional skipped slices')
 const root = process.cwd(), require = createRequire(resolve('apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const source = 'apps/desktop/src/main/screenshot-pins.ts', original = await readFile(source, 'utf8')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const mutations = [

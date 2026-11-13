@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -10,7 +11,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 assert.equal(process.argv[2], '--evidence'); assert.ok(process.argv[3])
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop'), evidence = resolve(process.argv[3])
 const fixture = join(desktop, 'scripts/fixtures/focus-disconnected-recovery')
-const require = createRequire(join(desktop, 'package.json')), { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
+const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), isolated = [], logs = []
 if (process.env.AGENTMUX_FOCUS_RECOVERY_SCENE_RECEIPT) {
   const path = resolve(process.env.AGENTMUX_FOCUS_RECOVERY_SCENE_RECEIPT), saved = JSON.parse(await readFile(path, 'utf8'))

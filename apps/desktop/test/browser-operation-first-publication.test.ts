@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -5,16 +6,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/browser-operation-journal.js'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
 
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url))
-const { build } = require('esbuild')
+const { build } = browserSourceBuild(require('esbuild'))
 const roots: string[] = [], children: ChildProcess[] = []
 let bundle: string, buildRoot: string
 beforeAll(async () => {
   buildRoot = await mkdtemp(join(tmpdir(), 'amx-browser-first-source-'))
   bundle = join(buildRoot, 'journal.mjs')
-  await build({ entryPoints: [fileURLToPath(new URL('../src/main/browser-operation-journal.ts', import.meta.url))],
+  await build({ entryPoints: [fileURLToPath(new URL('@agentmux/browser/browser-operation-journal', import.meta.url))],
     outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node24', logLevel: 'silent',
     alias: { '@agentmux/core': fileURLToPath(new URL('../../../packages/core/src/durable-write.ts', import.meta.url)) } })
 })

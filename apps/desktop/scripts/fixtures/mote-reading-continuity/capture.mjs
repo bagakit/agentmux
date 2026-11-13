@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import assert from 'node:assert/strict'
@@ -15,7 +16,7 @@ const privateRoot = await mkdtemp('/tmp/amux-mrc-'), compiled = path.join(direct
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(privateRoot, 'home'))
 const receipt = { passed: false, directory: path.relative(root, directory), source: {}, loaded: [], boundary: 'Synthetic original source only. Real App/Mote/Activity/ConversationView and Core/Unix/Main/preload/strict Renderer read. Private Chromium physical geometry; no original App IPC, Run, OS input or activation.', privateRoot }
 const { build: viteBuild } = await import(desktopRequire.resolve('vite'))
-const { build } = createRequire(desktopRequire.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(desktopRequire.resolve('vite'))('esbuild'))
 try {
   const reuse = process.env.AGENTMUX_READING_RENDERER_RECEIPT
   if (reuse) {

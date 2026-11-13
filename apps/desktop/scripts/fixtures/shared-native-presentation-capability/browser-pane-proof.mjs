@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {createRequire} from 'node:module'
@@ -8,7 +9,7 @@ import {pathToFileURL} from 'node:url'
 import {spawnSync} from 'node:child_process'
 import {runProbeProcess,listProbeProcesses} from '../../probe-process.mjs'
 const repository=resolve(import.meta.dirname,'../../../../..'),desktop=join(repository,'apps/desktop'),fixture=import.meta.dirname,mature=join(desktop,'scripts/fixtures/mote-shortcut')
-const require=createRequire(join(desktop,'package.json')),{build}=createRequire(require.resolve('vite/package.json'))('esbuild')
+const require=createRequire(join(desktop,'package.json')),{build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const digest=b=>createHash('sha256').update(b).digest('hex')
 const evidence=join(repository,'.tmp','shared-native-browser-pane-canonical-'+globalThis.crypto.randomUUID());await mkdir(evidence,{recursive:true})
 const receipt={schema:'agentmux.shared-native-browser-pane-capability-wrapper.v1',evidence,passed:false,productImplemented:false,T004Qualified:false,userAppRunRuntimeControls:0,inputs:{},transformations:[],limitations:['Research BrowserPane slot/native-bounds arbitration and mature private mote-native bridge do not constitute registered product IPC caller or multi-surface product delivery.','Same fixed viewport, original single page/profile/WebContents/native view, one stream/two videos. No any-size/cross-requester scalability claim.','Trusted CDP is not physical OS/IME/clipboard qualification; user clipboard is never read/written.','Requester/source Renderer and Native page PNGs are separate WebContents captures, not OS composition; diagnostic pixel sample is not transport.']}

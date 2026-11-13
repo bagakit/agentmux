@@ -1,3 +1,4 @@
+import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -11,7 +12,7 @@ const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../.
 const directory = path.resolve(process.argv[2] ?? path.join(root, '.local/state/mote-context-design-review/context-renderer'))
 const compiled = path.join(directory, 'compiled')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(require.resolve('vite'))('esbuild')
+const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sha = value => createHash('sha256').update(value).digest('hex')
 const sourceAliases = Object.entries(radixOverlayAliases).map(([name, replacement]) => ({ name, replacement }))
 for (const name of ['core', 'demand', 'git', 'identity', 'layout', 'client-ui']) {

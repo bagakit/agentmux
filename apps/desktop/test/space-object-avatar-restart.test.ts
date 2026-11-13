@@ -1,7 +1,8 @@
+import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 import { expect,it } from 'vitest'
 import { createRequire } from 'node:module'
 const require=createRequire(import.meta.url)
-const {build}=createRequire(require.resolve('vite/package.json'))('esbuild') as {build(options: Record<string,unknown>): Promise<unknown>}
+const {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild')) as {build(options: Record<string,unknown>): Promise<unknown>}
 import { readFile,mkdir,copyFile,rm,mkdtemp } from 'node:fs/promises'
 import { resolve,join } from 'node:path'
 import { spawnSync } from 'node:child_process'

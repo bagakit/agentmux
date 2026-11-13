@@ -4,11 +4,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.js'
+import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
 import { buildBrowserStructuredReadDeclaration, extractBrowserStructuredOutput, parseBrowserStructuredOutputDocument, parseBrowserStructuredOutputRequest,
-  type BrowserStructuredOutputContext } from '../src/main/browser-structured-output.js'
+  type BrowserStructuredOutputContext } from '@agentmux/browser/browser-structured-output'
 import { BROWSER_STRUCTURED_LIMITS, type BrowserStructuredDocument, type BrowserStructuredFieldRequest,
-  type BrowserStructuredOutputReceipt, type BrowserStructuredOutputRequest } from '../src/shared/browser-structured-output.js'
+  type BrowserStructuredOutputReceipt, type BrowserStructuredOutputRequest } from '@agentmux/browser/model/browser-structured-output'
 
 const owned: string[] = []
 beforeEach(() => { document.body.innerHTML = ''; window.location.href = 'https://observation.invalid/document' })
