@@ -10,6 +10,7 @@ vi.mock('@agentmux/core/agent-message-render', async importOriginal => {
   return { ...original, AGENTMUX_PROTOCOL_CATALOG: [...original.AGENTMUX_PROTOCOL_CATALOG, entry] }
 })
 import { AGENTMUX_PROTOCOL_CATALOG } from '@agentmux/core/agent-message-render'
+import { AGENTMUX_PROTOCOL_CATALOG as generatedGuideCatalog } from '../../../packages/core/src/agent-message-render.js'
 import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { settingsCatalog, settingsModules, settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
@@ -89,5 +90,6 @@ it('the original local CLI guide still derives its directory from Core and point
   expect(skill).toContain('Documentation → amux Protocols')
   expect(skill).toContain("this local CLI's")
   expect(skill).toContain('does not describe the connected Runtime or an older installation')
-  for (const entry of AGENTMUX_PROTOCOL_CATALOG) { expect(skill).toContain(entry.title); expect(skill).toContain(`(${entry.id}, ${entry.form})`); expect(skill).toContain(entry.description) }
+  expect(generatedGuideCatalog.length).toBeGreaterThan(0)
+  for (const entry of generatedGuideCatalog) { expect(skill).toContain(entry.title); expect(skill).toContain(`(${entry.id}, ${entry.form})`); expect(skill).toContain(entry.description) }
 })
