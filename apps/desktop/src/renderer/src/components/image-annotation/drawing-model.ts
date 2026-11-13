@@ -22,6 +22,8 @@ type Outlined = { outline?: ScreenshotOutline }
 export type PixelateShape = ShapeBase & Outlined & { kind: 'pixelate'; from: ScreenshotPoint; to: ScreenshotPoint; blockSize: number }
 export type PixelateBrushShape = ShapeBase & { kind: 'pixelate-brush'; points: ScreenshotPoint[]; width: number; blockSize: number }
 export type CoverShape = ShapeBase & Outlined & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
+/** A translucent color mark over a selected region; it never redacts text or pixels. */
+export type RegionHighlightShape = ShapeBase & Outlined & { kind: 'region-highlight'; from: ScreenshotPoint; to: ScreenshotPoint }
 /** `radius` is the Gaussian blur radius in original image pixels. */
 export type BlurShape = ShapeBase & Outlined & { kind: 'blur'; from: ScreenshotPoint; to: ScreenshotPoint; radius: number }
 /** Darkens everything outside from/to by `dim` (0..1 opacity). It points, it does not redact. */
@@ -33,7 +35,7 @@ export type CalloutShape = ShapeBase & { kind: 'callout'; from: ScreenshotPoint;
 export type AdjustShape = ShapeBase & Outlined & { kind: 'adjust'; from: ScreenshotPoint; to: ScreenshotPoint
   brightness: number; contrast: number; saturation: number; sharpen: number }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape | SpotlightShape | CalloutShape | AdjustShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | RegionHighlightShape | BlurShape | SpotlightShape | CalloutShape | AdjustShape
 export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape | BlurShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
@@ -303,6 +305,7 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
     case 'pixelate':
       return { ...shape, ...outline(shape), blockSize: shape.blockSize * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'cover':
+    case 'region-highlight':
     case 'spotlight':
     case 'adjust':
       return { ...shape, ...outline(shape), from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
@@ -333,6 +336,7 @@ export function moveShape(shape: ScreenshotShape, dx: number, dy: number): Scree
       return { ...shape, from: move(shape.from), to: move(shape.to) }
     case 'pixelate':
     case 'cover':
+    case 'region-highlight':
     case 'blur':
     case 'spotlight':
     case 'adjust':
@@ -602,7 +606,7 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
     if (shape.kind === 'note' && Math.hypot(point.x - shape.from.x, point.y - shape.from.y) <= shape.radius + tolerance) return shape
     const rect = shapeBounds(shape, textWidth)
     if (point.x < rect.x - tolerance || point.x > rect.x + rect.width + tolerance || point.y < rect.y - tolerance || point.y > rect.y + rect.height + tolerance) continue
-    if (shape.kind === 'text' || shape.kind === 'pixelate' || shape.kind === 'cover' || shape.kind === 'blur') return shape
+    if (shape.kind === 'text' || shape.kind === 'pixelate' || shape.kind === 'cover' || shape.kind === 'region-highlight' || shape.kind === 'blur') return shape
     const ink = tolerance + shape.width / 2
     if (shape.kind === 'ellipse') {
       if (distanceToEllipse(point, rect) <= ink) return shape

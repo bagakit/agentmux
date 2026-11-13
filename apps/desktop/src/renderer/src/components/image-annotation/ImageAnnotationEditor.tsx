@@ -22,7 +22,7 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
   DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM, ADJUST_FACTOR_RANGE, ADJUST_SHARPEN_RANGE, createAdjustShape, exceedsOutlineLimits, withOutline, NEUTRAL_ADJUSTMENT,
-  type AdjustParameters, type AdjustShape, type BlurShape, type CoverShape, type PixelateShape, type ScreenshotOutline, type SpotlightShape,
+  type AdjustParameters, type AdjustShape, type BlurShape, type CoverShape, type RegionHighlightShape, type PixelateShape, type ScreenshotOutline, type SpotlightShape,
   type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
 import { drawMarchingAnts, SCREENSHOT_TEXT_FONT } from './drawing-renderer'
 import { DEFAULT_MAGIC_WAND_TOLERANCE, MAGIC_WAND_TOLERANCE_RANGE, magicWandOutline, magicWandRegion, unionMagicWandRegions, type MagicWandRegion } from './magic-wand'
@@ -69,7 +69,7 @@ type MarqueeGesture = { start: ScreenshotPoint; at: ScreenshotPoint; base: Reado
 const toggled = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => { const next = new Set(ids); if (!next.delete(id)) next.add(id); return next }
 // Masks and the spotlight paint fixed colors; a magnifier's color is its frame and leader line.
 const colorable = (shape: ScreenshotShape) => !isScreenshotMask(shape) && shape.kind !== 'spotlight'
-const widthable = (shape: ScreenshotShape) => colorable(shape) && shape.kind !== 'text' && shape.kind !== 'callout'
+const widthable = (shape: ScreenshotShape) => colorable(shape) && shape.kind !== 'text' && shape.kind !== 'callout' && shape.kind !== 'region-highlight'
 // Region marks need travel; a press that moves less than this many screen pixels creates none of them.
 type AnnotationOutput = (input: ImageAnnotationInput) => ImageAnnotationOutputResult
 // The last tool and style carry over to the next editor in this Renderer.
@@ -86,7 +86,7 @@ const POINTING_STRENGTHS = {
 } as const
 type PointingKind = keyof typeof POINTING_STRENGTHS
 // The marks a wand region turns into, in the order the property row offers them.
-const REGION_ACTIONS = [['cover', 'Cover'], ['pixelate', 'Pixelate'], ['blur', 'Blur'], ['spotlight', 'Spotlight']] as const
+const REGION_ACTIONS = [['cover', 'Cover'], ['pixelate', 'Pixelate'], ['blur', 'Blur'], ['region-highlight', 'Highlight'], ['spotlight', 'Spotlight']] as const
 type RegionAction = typeof REGION_ACTIONS[number][0]
 const signedPercent = (factor: number) => { const value = Math.round((factor - 1) * 100); return (value > 0 ? '+' : '') + value + '%' }
 const ADJUST_CONTROLS = [
@@ -259,7 +259,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // The loupe shows the frozen pixel under the pointer while a selection is made or adjusted, never at rest or while drawing.
   const loupe = capture && hover?.sample && (gesture === 'selection' || (!documentState.crop && gesture === null)) ? { at: hover.at, sample: hover.sample } : null
   // The region an open adjustment edits shows as still dashes once no wand selection marches around it.
-  const outlined = wand?.outline ?? adjusting?.outline ?? null
+  const currentAdjustment = adjusting ? documentState.shapes.find(shape => shape.id === adjusting.id) : null
+  const outlined = wand?.outline ?? (currentAdjustment && 'outline' in currentAdjustment ? currentAdjustment.outline : adjusting?.outline) ?? null
   const live = useRef({ size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe, outlined })
   live.current = { size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe, outlined }
   const cache = useRef<{ document: ScreenshotDocument; shapes: ScreenshotShape[]; view: AnnotationView; size: Size; loaded: boolean;
@@ -988,7 +989,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   function convertWand(kind: RegionAction) {
     if (!wand) return
     const id = mintObjectId(), { x, y, width: across, height: down } = wand.region.bounds, from = { x, y }, to = { x: x + across, y: y + down }
-    const base: CoverShape | PixelateShape | BlurShape | SpotlightShape = kind === 'cover' ? { id, kind, color: '#111827', from, to }
+    const base: CoverShape | RegionHighlightShape | PixelateShape | BlurShape | SpotlightShape = kind === 'cover' ? { id, kind, color: '#111827', from, to }
+      : kind === 'region-highlight' ? { id, kind, color, from, to }
       : kind === 'pixelate' ? { id, kind, color, blockSize: blockSize / viewRef.current.scale, from, to }
       : kind === 'blur' ? createBlurShape(id, '#111827', from, to, strengths.blurRadius)
       : createSpotlightShape(id, '#ffffff', from, to, strengths.spotlightDim)
@@ -996,7 +998,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     edit(doc => commitShape(doc, shape)); setWand(null); selectOnly(id)
   }
   // Capture keeps its own lighter mark set, so its wand offers only the masks its toolbar offers.
-  const regionActions = REGION_ACTIONS.filter(([kind]) => !capture || CAPTURE_TOOLS.some(item => item.id === kind))
+  const regionActions = REGION_ACTIONS.filter(([kind]) => !capture || kind === 'region-highlight' || CAPTURE_TOOLS.some(item => item.id === kind))
   // Adjust marks never take a canvas press, so the Adjust panel lists them: the whole image's and each region's.
   const adjustMarks = documentState.shapes.filter((shape): shape is AdjustShape => shape.kind === 'adjust')
   const regionAdjusts = adjustMarks.filter(shape => shape.outline)

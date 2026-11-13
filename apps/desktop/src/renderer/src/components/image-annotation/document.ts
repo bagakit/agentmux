@@ -170,7 +170,7 @@ function shape(value: unknown): ScreenshotShape {
     record(value, [...fields, 'from', 'to', 'at', 'zoom'], lockable)
     return { ...common, kind, from: point(base.from), to: point(base.to), at: point(base.at), zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.') }
   }
-  if (kind === 'cover') {
+  if (kind === 'cover' || kind === 'region-highlight') {
     record(value, [...fields, 'from', 'to'], [...lockable, 'outline'])
     const from = point(base.from), to = point(base.to)
     return { ...common, kind, from, to, ...outline(base.outline, from, to) }

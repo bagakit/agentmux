@@ -55,6 +55,12 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
         break
       }
       case 'cover': drawCover(context, shape); break
+      case 'region-highlight': {
+        context.globalAlpha = HIGHLIGHT_ALPHA
+        const rect = normalizeRect(shape.from, shape.to)
+        context.fillRect(rect.x, rect.y, rect.width, rect.height)
+        break
+      }
       case 'blur': drawBlur(context, shape); break
       case 'spotlight': drawSpotlight(context, shape); break
       case 'callout': drawCallout(context, shape); break
