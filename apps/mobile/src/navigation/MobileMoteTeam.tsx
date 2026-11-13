@@ -4,7 +4,7 @@ import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
 import { MobileNotice } from '../notices/MobileNotice'
 import { mobileMoteMemberIdentity, type MobileMoteMember, type MobileMoteTeam } from './mobile-mote-team'
 import type { MobileObjectIdentity } from './MobileIdentity'
-import { ordinaryUnknownAgentStatus } from './mobile-agent-status'
+import { ordinaryUnknownAgentStatus, mobileAgentStateLabel } from './mobile-agent-status'
 import { MobileAgentStatusDetails } from './MobileAgentStatusDetails'
 import './mote-team.css'
 
@@ -53,7 +53,7 @@ export function MobileMoteTeamPanel({ team, issue, currentSessionId, currentHost
         <span className="mobile-mote-member-copy"><span><strong>{member.name}</strong>{main && <small className="mobile-mote-role">主 Agent</small>}{member.sessionId === currentSessionId && member.hostId === currentHostId && <small className="mobile-mote-role">当前</small>}</span>
           {(ambiguous || !member.hostId) && <span className="mobile-mote-member-state">{member.hostId ?? '执行端未确认'}</span>}
           {requestOnly && member.request ? <span className="mobile-mote-request"><SemanticIcon name="status.warning" size={12} />{member.request.kind === 'permission' ? '权限请求' : '等待答复'} · {member.request.kind === 'permission' ? member.request.title : member.request.questions[0]?.prompt ?? '问题'}</span>
-            : !ordinaryUnknownAgentStatus(member.presentation, Boolean(member.request)) && <span className="mobile-mote-member-state">{member.presentation?.stateMark && <FocusStateMark kind={member.presentation.stateMark} presenceUnknown={member.presentation.presenceUnknown} />}{member.presentation?.stateLabel ?? member.presentation?.detail ?? '状态未确认'}</span>}
+            : !ordinaryUnknownAgentStatus(member.presentation, Boolean(member.request)) && <span className="mobile-mote-member-state">{member.presentation?.stateMark && <FocusStateMark kind={member.presentation.stateMark} presenceUnknown={member.presentation.presenceUnknown} />}{mobileAgentStateLabel(member.presentation)}</span>}
           {!requestOnly && member.presentation?.recap && <span className="mobile-mote-member-recap" title={member.presentation.recap.source}>{member.presentation.recap.text}</span>}
         </span><SemanticIcon name="navigation.disclosure" size={14} />
       </button>

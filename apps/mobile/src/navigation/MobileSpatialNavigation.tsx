@@ -19,7 +19,7 @@ import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
 import { MobileAgentRow } from './MobileAgentRow'
 import { MobileHeaderMenu } from './MobileHeaderMenu'
-import { ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
+import { mobileAgentStateLabel, ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
 import { mobileNeedsYouReason, type MobileNeedsYouItem } from './needs-you'
 import { MobileNeedsYouAnswer } from './MobileNeedsYouAnswer'
 import { formatMobileClock } from '../presentation/time'
@@ -239,7 +239,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const object = identity(session, context), row = directory.rows.get(session.agentSessionId), status = row?.state ?? 'unknown'
     const candidates = places ?? (context === undefined ? locations(session.agentSessionId) : [])
     const providerId = row?.providerId || session.providerId
-    const stateLabel = row?.stateLabel ?? { working: '执行中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认', disconnected: '断开' }[status] ?? '状态未确认'
+    const stateLabel = row ? mobileAgentStateLabel(row) : '状态未确认'
     const refreshStatus = () => {
       const current = directorySource.current
       if (!directoryMounted.current || current.client !== client || !current.connected || current.home !== home || current.spaceId !== spaceId) return false
