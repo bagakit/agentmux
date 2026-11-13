@@ -16,6 +16,7 @@ import { request as httpRequest } from 'node:http'
 import { DiscordAdapter } from '../src/adapters/discord/index.js'
 import { publicationEffectContext, publicationInteractionText } from '../src/publication-resource.js'
 import { parseAgentMuxMessagePrefix } from '../../core/src/agent-message-render.js'
+import { imagePng } from '../../../apps/desktop/test/fixtures/mote-identity-image.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 async function nativeProof(name: string, value: unknown) {
@@ -27,7 +28,13 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function fixture(providerId = 'claude', currentSource = false) {
   const wire = await discordTransport(); cleanup.push(wire.close)
   vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(wire.http.makeRequest)
-  const f = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'original-native', transcriptPath: join(root, 'native.jsonl') } })); cleanup.push(f.close)
+  let services: Awaited<ReturnType<typeof createConnectionServices>>
+  class Owner extends core.AgentMuxClient {
+    constructor(options: ConstructorParameters<typeof core.AgentMuxClient>[0]) {
+      super({ ...options, externalConversationAuthority: { resolveConversationMessage: input => services.ingress!.recordAuthority(input) } })
+    }
+  }
+  const f = await rpcOwnerFixture(['original-agent'], { AgentMuxClient: Owner, AgentMuxFileAgentSessionStore: core.AgentMuxFileAgentSessionStore }, root => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'original-native', transcriptPath: join(root, 'native.jsonl') } })); cleanup.push(f.close)
   const transcript = join(f.root, 'native.jsonl'); await writeFile(transcript, providerId === 'codex' ? JSON.stringify({ type: 'session_meta', payload: { id: 'original-native', cwd: f.root, history_mode: 'paginated', cli_version: '0.163.0' } }) + '\n' : '')
   const provider = (f.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get(providerId)
   vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
@@ -46,8 +53,9 @@ async function fixture(providerId = 'claude', currentSource = false) {
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const serviceOptions: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connections'), bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, ingress: { core: host => host === 'local' ? f.client : undefined }, publication: createPublicationConversationPort(f.coreClients) }
-  let services = await createConnectionServices(serviceOptions); cleanup.push(() => services.close())
+  const conversation = createPublicationConversationPort(f.coreClients)
+  const serviceOptions: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connections'), bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, ingress: { core: host => host === 'local' ? f.client : undefined }, publication: conversation }
+  services = await createConnectionServices(serviceOptions); cleanup.push(() => services.close())
   expect(createBuiltinConnectionAdapters().map(adapter => adapter.adapterId)).toContain('discord')
   const credential = await services.secrets.store({ operationId: 'discord-secret', secret: 'fixture-bot-token' })
   await services.connections.configure({ operationId: 'discord-config', expectedRevision: null, connection: { ...discordConfig, credentialRef: credential.credentialRef } })
@@ -59,7 +67,7 @@ async function fixture(providerId = 'claude', currentSource = false) {
   await services.connections.bindings!.grant({ operationId: 'discord-grant', bindingId: 'discord-binding', expectedBindingRevision: 1, grantId: 'discord-user-grant', expectedRevision: null,
     actor: { application: discordConfig.application, idType: 'snowflake', userId: '400' }, capabilities: ['input'], state: 'active' }, context)
   await vi.waitFor(() => expect(wire.sessions.length).toBeGreaterThan(0))
-  return { ...f, wire, transcript, get services() { return services }, binding: result.state === 'applied' ? result.binding : (() => { throw Error('Original Binding required') })(),
+  return { ...f, wire, transcript, conversation, get services() { return services }, binding: result.state === 'applied' ? result.binding : (() => { throw Error('Original Binding required') })(),
     async restart() { services.close(); services = await createConnectionServices(serviceOptions); await vi.waitFor(() => expect(wire.sessions.at(-1)?.op).toBe(6)); return services } }
 }
 
@@ -236,8 +244,13 @@ it.each([false, true])('native question button and modal submit exact original a
   let replyError: unknown
   const reply = f.client.replySessionQuestion.bind(f.client)
   vi.spyOn(f.client, 'replySessionQuestion').mockImplementation(async (...args) => { try { return await reply(...args) } catch (error) { replyError = error; throw error } })
-  const send = vi.fn<import('../../core/src/agent-provider.js').AgentProviderPreparedNativeInput['send']>(async () => ({ outcome: 'admitted' as const, turnId: 'original-answer-turn' }))
-  f.client.providers.get('codex').prepareNativeInput = async (_context, source) => ({ plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: async () => {}, send, dispose() {} })
+  f.inner.kernel.status = vi.fn(async (runId: string) => ({ ...f.run(runId), pid: 1234 }))
+  const send = vi.fn<import('../../core/src/agent-provider.js').AgentProviderPreparedNativeInput['send']>(async () => ({ outcome: 'admitted' as const, queuedSubmissionId: 'original-answer-queue-item' }))
+  f.client.providers.get('codex').prepareNativeInput = async (native, source) => {
+    expect(native.nativeActor).toEqual(actor)
+    expect(source).toEqual({ providerId: 'codex', nativeSessionId: 'original-native', idleOnly: true })
+    return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'queue-idle' }, assertCurrent: async () => {}, send, dispose() {} }
+  }
   const event = savedQuestionEvent(); event.payload.thread_id = 'original-native'
   if (longOriginal) event.payload.item.questions[0]!.title = 'Original long question\n' + '完整原文🙂'.repeat(900) + '\nOriginal question end'
   event.payload.item.questions.push({ title: 'What follows the original work?', options: ['Proceed', 'Wait'] })
@@ -444,7 +457,7 @@ it('an explicit connection check rereads native application identity and cannot 
   expect((await f.services.connections.test({ connectionId: discordConfig.connectionId })).observation.authentication.state).toBe('unavailable')
   expect(f.wire.calls.filter(call => call.path === '/oauth2/applications/@me').length).toBeGreaterThan(before)
   await f.client.writeAgent({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, source: 'user', data: 'Original healthy local input' })
-  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.rawInput).toHaveBeenCalledExactlyOnceWith('run-original-agent', 'Original healthy local input'); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('an edited native reply preserves its original message mapping and inspects a lost PATCH receipt despite platform-assigned component IDs', async () => {
@@ -467,20 +480,39 @@ it('an edited native reply preserves its original message mapping and inspects a
 
 it.each([false, true])('mixed Markdown typed question retains its original actions and answer receipt (missing image: %s)', async missingImage => {
   const f = await fixture('codex'); await grant(f, ['input', 'answer'])
+  let replyFailure: unknown
+  const originalReply = f.client.replySessionQuestion.bind(f.client)
+  vi.spyOn(f.client, 'replySessionQuestion').mockImplementation(async (...input) => {
+    try { return await originalReply(...input) } catch (error) { replyFailure = error instanceof Error ? { name: error.name, message: error.message, code: Reflect.get(error, 'code') } : error; throw error }
+  })
   const image = join(f.root, 'question-diagram.png'), png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
   if (!missingImage) await writeFile(image, png)
   const original = (await f.store.readMetadata('original-agent'))!, actor = { protocolId: 'codex-app-server-v2-0.163', actorId: 'mixed-question-actor', lifecycleOperationId: 'mixed-question-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
   await f.store.compareAndSwap(original, { ...original, nativeActor: actor }); await f.inner.registry.load('local')
   const send = vi.fn<import('../../core/src/agent-provider.js').AgentProviderPreparedNativeInput['send']>(async () => {
     if (missingImage) throw Error('Controlled original native answer receipt loss')
-    return { outcome: 'admitted', turnId: 'mixed-answer-turn' }
+    return { outcome: 'admitted', queuedSubmissionId: 'mixed-answer-queue-item' }
   })
-  f.client.providers.get('codex').prepareNativeInput = async (_context, source) => ({ plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: async () => {}, send, dispose() {} })
+  f.inner.kernel.status = vi.fn(async (runId: string) => ({ ...f.run(runId), pid: 1234 }))
+  f.client.providers.get('codex').prepareNativeInput = async (native, source) => {
+    expect(native.nativeActor).toEqual(actor)
+    expect(source).toEqual({ providerId: 'codex', nativeSessionId: 'original-native', idleOnly: true })
+    return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'queue-idle' }, assertCurrent: async () => {}, send, dispose() {} }
+  }
   const event = savedQuestionEvent(); event.payload.thread_id = 'original-native'
   event.payload.item.content[0]!.text = `Before the original question\n\n![Original diagram](${image})\n\nAfter the original diagram`
   await appendFile(f.transcript, savedQuestionJsonl([event])); f.services.publication!.refresh()
   const question = () => f.services.publication!.store.list(f.binding).findLast(operation => operation.payload.kind === 'question')
-  await vi.waitFor(() => expect(question()?.state, 'The original typed question stays actionable beside Markdown media').toBe('confirmed'), { timeout: 10_000 })
+  await vi.waitFor(() => {
+    const current = question()
+    expect(current?.state, 'The original typed question stays actionable beside Markdown media').toBe('confirmed')
+    if (!missingImage) {
+      expect(f.wire.uploads).toEqual([png])
+      expect(current!.fragment.ordinal).toBeGreaterThan(0)
+      expect(f.services.publication!.store.list(f.binding, 100).some(operation => operation.projectionId === current!.projectionId &&
+        operation.sourceRevision === current!.sourceRevision && operation.payload.kind === 'image' && operation.state === 'confirmed' && operation.fragment.ordinal < current!.fragment.ordinal)).toBe(true)
+    }
+  }, { timeout: 10_000 })
   const published = question()!
   expect(published.payload).toMatchObject({ kind: 'question', status: 'pending', questions: [{ id: savedQuestionId }] })
   if (published.payload.kind !== 'question') throw Error('The original typed question is required')
@@ -500,7 +532,13 @@ it.each([false, true])('mixed Markdown typed question retains its original actio
   const submitted = f.wire.interaction('9101', 5, { custom_id: modal.custom_id, components: [
     { type: 18, component: { type: 3, custom_id: 'o0', values: ['0'] } }, { type: 18, component: { type: 4, custom_id: 't0', value: '' } }
   ] })
-  await vi.waitFor(() => expect(send).toHaveBeenCalledOnce(), { timeout: 10_000 })
+  try {
+    await vi.waitFor(async () => expect(send, JSON.stringify({ replyFailure, ingress: await f.services.ingress!.list({ connectionId: discordConfig.connectionId }),
+      callback: f.wire.calls.filter(call => call.path === '/interactions/9101/fixture-interaction-token/callback').map(call => JSON.parse(call.body)) })).toHaveBeenCalledOnce(), { timeout: 10_000 })
+  } catch (error) {
+    await nativeProof('mixed-question-failure-' + missingImage, { operations: f.services.publication!.store.list(f.binding, 100), coverage: f.services.publication!.store.coverage(f.binding) })
+    throw error
+  }
   expect(codexQuestionAnswers([{ type: 'text', text: send.mock.calls[0]![0] }])).toEqual([{ questionId: savedQuestionId, prompt: event.payload.item.questions[0]!.title, answer: 'Keep the original work' }])
   const record = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses[0]!
   expect(record).toMatchObject({ kind: 'action', state: 'claimed', input: { responseKind: 'question', author: { actionRef, actor: { userId: '400' } } } })
@@ -513,3 +551,92 @@ it.each([false, true])('mixed Markdown typed question retains its original actio
   expect(send).toHaveBeenCalledOnce(); expect(f.wire.uploads).toHaveLength(uploads)
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.client.agentSession('original-agent').run).toEqual(original.run)
 }, 30_000)
+
+it.each([{ multipart: false, withdrawn: false }, { multipart: true, withdrawn: false }, { multipart: false, withdrawn: true }])('an original Discord modal survives late media representation without new authority or repeated messages (multipart form: $multipart; withdrawn: $withdrawn)', async ({ multipart, withdrawn }) => {
+  const f = await fixture('codex'); await grant(f, ['input', 'answer'])
+  const original = (await f.store.readMetadata('original-agent'))!, actor = { protocolId: 'codex-app-server-v2-0.163', actorId: 'late-media-question-actor', lifecycleOperationId: 'late-media-question-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
+  await f.store.compareAndSwap(original, { ...original, nativeActor: actor }); await f.inner.registry.load('local')
+  f.inner.kernel.status = vi.fn(async (runId: string) => ({ ...f.run(runId), pid: 1234 }))
+  const send = vi.fn<import('../../core/src/agent-provider.js').AgentProviderPreparedNativeInput['send']>(async () => {
+    if (multipart) throw Error('Controlled native queue receipt loss')
+    return { outcome: 'admitted', queuedSubmissionId: 'late-media-answer-queue-item' }
+  })
+  f.client.providers.get('codex').prepareNativeInput = async (native, source) => {
+    expect(native.nativeActor).toEqual(actor)
+    expect(source).toEqual({ providerId: 'codex', nativeSessionId: 'original-native', idleOnly: true })
+    return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'queue-idle' }, assertCurrent: async () => {}, send, dispose() {} }
+  }
+  await mkdir(join(f.root, 'late-assets'), { recursive: true })
+  const imageFile = join(f.root, 'late-assets/late-question-image.png'), event = savedQuestionEvent(); event.payload.thread_id = 'original-native'
+  const png = imagePng(2, 2)
+  let release = () => {}
+  if (multipart) {
+    await writeFile(imageFile, png)
+    const held = new Promise<void>(resolve => { release = resolve }); cleanup.push(() => release())
+    const resource = f.conversation.resource.bind(f.conversation)
+    f.conversation.resource = async (...input) => { const result = await resource(...input); await held; return result }
+  }
+  event.payload.item.content[0]!.text = `Before the late original image\n\n![Late original image](${imageFile})\n\n` + (multipart ? 'Complete original explanation 中文🙂\n'.repeat(250) : 'After the late original image')
+  await appendFile(f.transcript, savedQuestionJsonl([event])); f.services.publication!.refresh()
+  const questions = () => f.services.publication!.store.list(f.binding, 100).filter(operation => operation.payload.kind === 'question')
+  await vi.waitFor(() => expect(questions().at(-1)?.state).toBe('confirmed'), { timeout: 10_000 })
+  const first = structuredClone(questions().at(-1)!), actionRef = first.payload.kind === 'question' ? first.payload.actionRef! : ''
+  const form = { connectionId: discordConfig.connectionId, application: discordConfig.application, actor: { application: discordConfig.application, idType: 'snowflake', userId: '400' }, externalConversationId: discordRoomId, sourceMessageId: first.mapping!.messageId, actionRef }
+  f.wire.interaction('9200', 3, { custom_id: 'q:' + actionRef, component_type: 2 }, first.mapping!.messageId)
+  await vi.waitFor(() => expect(f.wire.calls.some(call => call.path === '/interactions/9200/fixture-interaction-token/callback' && JSON.parse(call.body).type === 9)).toBe(true))
+  const modal = JSON.parse(f.wire.calls.find(call => call.path === '/interactions/9200/fixture-interaction-token/callback')!.body).data
+  if (multipart) release()
+  else {
+    await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }))
+    expect(f.services.publication!.store.coverage(f.binding).state).toBe('incomplete')
+    await writeFile(imageFile, png)
+  }
+  await vi.waitFor(() => {
+    expect(f.wire.uploads.some(bytes => bytes.equals(png))).toBe(true)
+    expect(questions().at(-1)?.mapping?.messageId).not.toBe(first.mapping!.messageId)
+    expect(questions().at(-1)?.state).toBe('confirmed')
+  }, { timeout: 15_000 })
+  expect(f.services.ingress!.questionForm(form)).toMatchObject({ status: 'pending' })
+  expect(f.services.ingress!.questionForm({ ...form, sourceMessageId: '999999' })).toBeNull()
+  expect(f.services.ingress!.questionForm({ ...form, actor: { ...form.actor, userId: '401' } })).toBeNull()
+  expect(f.wire.messages.has(first.mapping!.messageId)).toBe(true)
+  if (withdrawn) {
+    // Controlled rendering intention only: the real Outbox claims/prepares it,
+    // native REST deletes the exact message, and settlement consumes the real ACK.
+    const store = f.services.publication!.store, adapter = new DiscordAdapter({ http: f.wire.http })
+    const { attempt: _attempt, prepared: _prepared, mapping: _mapping, receipt: _receipt, receiptObservedAt: _observed, ...originalIntent } = first
+    const retirement = { ...originalIntent, operationId: first.operationId + '-explicit-retirement', predecessorOperationId: first.operationId, state: 'pending' as const, effect: 'withdraw' as const }
+    store.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+      .run(retirement.operationId, retirement.projectionId, retirement.sourceRevision, retirement.fragment.ordinal, retirement.bindingId, retirement.bindingRevision, JSON.stringify(retirement), retirement.state)
+    const claimed = store.claimNext(f.binding, retirement.operationId, () => f.services.ingress!.permissions.authorized(retirement), adapter.publication)!
+    expect(claimed?.state).toBe('dispatching')
+    const receipt = await adapter.publication.dispatch(claimed.prepared!, claimed.target, 'fixture-bot-token', new AbortController().signal, claimed.mapping)
+    expect(receipt).toEqual({ state: 'confirmed', mapping: first.mapping })
+    expect(store.settle(claimed.operationId, claimed.attempt!, receipt).state).toBe('confirmed')
+    expect(f.wire.messages.has(first.mapping!.messageId)).toBe(false)
+    expect(f.services.ingress!.questionForm(form)).toBeNull()
+    const current = questions().filter(operation => operation.effect === 'upsert').at(-1)!
+    expect(f.services.ingress!.questionForm({ ...form, sourceMessageId: current.mapping!.messageId })).toMatchObject({ status: 'pending' })
+    expect(send).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    adapter.close(); return
+  }
+  f.wire.interaction('9201', 5, { custom_id: modal.custom_id, components: [
+    { type: 18, component: { type: 3, custom_id: 'o0', values: ['0'] } }, { type: 18, component: { type: 4, custom_id: 't0', value: '' } }
+  ] })
+  await vi.waitFor(() => expect(send).toHaveBeenCalledOnce(), { timeout: 10_000 })
+  const ingress = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses[0]!
+  expect(ingress).toMatchObject({ kind: 'action', input: { author: { sourceMessageId: first.mapping!.messageId, actionRef, actor: { userId: '400' } } } })
+  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: ingress.ingressId })).questionReceipt?.outcome).toBe(multipart ? 'unknown' : 'submitted'))
+  const settle = () => vi.waitFor(() => {
+    const lanes = Reflect.get(f.services.publication!, 'lanes') as Map<string, { work?: unknown; inspection?: unknown; contentReads?: Map<string, unknown> }>
+    for (const lane of lanes.values()) { expect(lane.work).toBeUndefined(); expect(lane.inspection).toBeUndefined(); expect(lane.contentReads?.size ?? 0).toBe(0) }
+  }, { timeout: 15_000 })
+  await settle()
+  const count = () => f.wire.calls.filter(call => call.method === 'POST' && call.path === '/channels/300/messages').length
+  const stable = count(), originalReceipt = structuredClone((await f.services.ingress!.inspect({ ingressId: ingress.ingressId })).questionReceipt)
+  for (let n = 0; n < 3; n++) { f.services.publication!.refresh(); await settle(); expect(count()).toBe(stable) }
+  await f.restart(); await settle()
+  expect(count()).toBe(stable)
+  expect((await f.services.ingress!.inspect({ ingressId: ingress.ingressId })).questionReceipt).toEqual(originalReceipt)
+  expect(send).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)

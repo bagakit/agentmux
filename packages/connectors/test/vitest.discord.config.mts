@@ -25,7 +25,10 @@ export default defineConfig({ root, cacheDir: resolve(root, '.cache/discord-chan
       feedback: ['adapters/discord/actions.ts', 'No answer was submitted.', 'The original action is unavailable.'],
       resume: ['adapters/discord/index.ts', 'const saved = readSession(id)', 'const saved = null'],
       'history-registration': ['platform-adapters.ts', 'readHistory: async (...input) => (await discord()).readHistory(...input)', 'readHistory: undefined'],
-      'history-content': ['adapters/discord/history.ts', 'content: JSON.stringify(body)', "content: JSON.stringify({ content: 'Changed original native quote' })"]
+      'history-content': ['adapters/discord/history.ts', 'content: JSON.stringify(body)', "content: JSON.stringify({ content: 'Changed original native quote' })"],
+      'question-membership': ['conversation-actions.ts', "AND json_extract(original.operation_json,'$.mapping.messageId')=?", 'AND ? IS NOT NULL'],
+      'question-withdrawal': ['conversation-actions.ts', "retired.state='confirmed' AND retired.ordinal>original.ordinal", "retired.state='confirmed' AND 0 AND retired.ordinal>original.ordinal"],
+      'question-resource-context': ['publication-host.ts', 'adapter.replyMetadata, questions) || progressed', 'adapter.replyMetadata, undefined) || progressed']
     } as const
     const change = changes[mutant as keyof typeof changes]
     let loaded = code, mutation: string | undefined
