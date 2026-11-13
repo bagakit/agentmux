@@ -290,3 +290,45 @@ describe('Settings › Browser Profiles leads to the Browsers it describes', () 
     expect(store.createBrowser).toHaveBeenCalledExactlyOnceWith('g-1', undefined, 'about:blank', undefined, 'ws-1', 'ws-1', 'normal', undefined, 'p-client')
   })
 })
+
+describe('Settings › Browser Profiles by keyboard', () => {
+  // Radix roving focus moves focus on the next task, as in the app.
+  const key = (target: Element, name: string) => act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true })); await new Promise(resolve => setTimeout(resolve, 0)) })
+
+  it('the color picker names each color, starts on the current choice, moves with arrows without saving, and Escape returns', async () => {
+    const mark = container.querySelector<HTMLButtonElement>('.browser-profile-editor__mark')!
+    await act(async () => mark.click())
+    const group = container.querySelector('[role="radiogroup"]')!
+    expect(group.getAttribute('aria-label')).toBe('Color for Personal')
+    expect([...group.querySelectorAll('[role="radio"]')].map(radio => radio.getAttribute('aria-label'))).toEqual([...PROFILE_HUES.map(() => expect.any(String)), null])
+    expect([...group.querySelectorAll('button[style]')].every(radio => !/^Hue \d+$/.test(radio.getAttribute('aria-label') ?? ''))).toBe(true)
+    expect(document.activeElement?.textContent).toBe('Automatic')
+    await key(document.activeElement!, 'ArrowRight')
+    expect(document.activeElement).toBe(group.querySelector('button[style]'))
+    expect(port.updateProfile).not.toHaveBeenCalled()
+    await key(document.activeElement!, 'Escape')
+    expect(container.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(document.activeElement).toBe(mark)
+    expect(port.updateProfile).not.toHaveBeenCalled()
+  })
+
+  it('the delete confirmation takes focus on Cancel, and Escape closes it without deleting', async () => {
+    store.tabs = {}
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await select('Northwind client')
+    const more = container.querySelector<HTMLButtonElement>('[aria-label^="More for "]')!
+    await act(async () => {
+      more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+      more.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.startsWith('Delete Profile'))!
+    await act(async () => item.click())
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    const dialog = container.querySelector('[role="alertdialog"]')!
+    expect(document.activeElement?.textContent).toBe('Cancel')
+    await key(document.activeElement!, 'Escape')
+    expect(container.querySelector('[role="alertdialog"]')).toBeNull()
+    expect(dialog.isConnected).toBe(false)
+    expect(port.deleteProfile).not.toHaveBeenCalled()
+  })
+})
