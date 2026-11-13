@@ -2,7 +2,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { api } from './api'
 import { acceptAgentStopReceipt, agentOperationKey, beginAgentOperation, updateAgentOperation } from './agent-operation-feedback'
-import { retainUnconfirmedStop, sessionStopErrorCode, sessionStopFailedStage, STALE_STOP_CODE, type SessionStopIntent } from './session-stop-intent'
+import { sessionStopErrorCode, sessionStopFailedStage, STALE_STOP_CODE, type SessionStopIntent } from './session-stop-intent'
 
 const flights = new Map<string, { promise: Promise<boolean>; reader: object }>()
 
@@ -15,7 +15,6 @@ export function stopSessionInBackground(intent: SessionStopIntent, options: { co
   if (flight && !options.continueOriginal) return flight.promise
   beginAgentOperation(operation)
   updateAgentOperation(operation, { phase: 'pending', message: undefined, canContinue: false })
-  retainUnconfirmedStop(intent)
   const reader = {}
   const sent = Promise.resolve().then(async () => {
     try {
