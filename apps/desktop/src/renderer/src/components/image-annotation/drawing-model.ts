@@ -387,14 +387,6 @@ export function duplicateShapes(shapes: ScreenshotShape[], ids: ReadonlySet<stri
   return pasteShapes(shapes, shapes.filter(shape => ids.has(shape.id)), offset, mintId)
 }
 
-/** Locks the listed marks, or, when every one is already locked, unlocks them. */
-export function toggleShapeLock(shapes: ScreenshotShape[], ids: ReadonlySet<string>): ScreenshotShape[] {
-  const members = shapes.filter(shape => ids.has(shape.id))
-  if (!members.length) return shapes
-  const lock = members.some(shape => !shape.locked)
-  return shapes.map(shape => !ids.has(shape.id) || Boolean(shape.locked) === lock ? shape : setLocked(shape, lock))
-}
-
 /** Applies `update` to each listed mark; a mark it returns unchanged keeps its identity, and
  * when none changes the same array returns so no empty Undo step is recorded. */
 export function restyleShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>,
@@ -403,8 +395,9 @@ export function restyleShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string
   return next.every((shape, index) => shape === shapes[index]) ? shapes : next
 }
 
-export function unlockAllShapes(shapes: ScreenshotShape[]): ScreenshotShape[] {
-  return shapes.some(shape => shape.locked) ? shapes.map(shape => shape.locked ? setLocked(shape, false) : shape) : shapes
+/** Locks or unlocks the listed marks; when none changes, the same array returns. */
+export function setShapesLocked(shapes: ScreenshotShape[], ids: ReadonlySet<string>, locked: boolean): ScreenshotShape[] {
+  return restyleShapes(shapes, ids, shape => Boolean(shape.locked) === locked ? shape : setLocked(shape, locked))
 }
 
 function setLocked(shape: ScreenshotShape, locked: boolean): ScreenshotShape {

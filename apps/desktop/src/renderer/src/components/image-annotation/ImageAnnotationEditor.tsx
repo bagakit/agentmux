@@ -18,7 +18,7 @@ import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, D
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
   shapeBounds, intersectRect, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
   alignShapes, distributeShapes, duplicateShapes, groupBounds, moveShapes, pasteShapes, reorderShapes, restyleShapes,
-  toggleShapeLock, unlockAllShapes, type ShapeAlignment, type ShapeOrder,
+  setShapesLocked, type ShapeAlignment, type ShapeOrder,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
   DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM,
@@ -500,6 +500,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // One command over the marks is one Undo step; a command that changes nothing records none.
   function editShapes(next: ScreenshotShape[]) { if (next !== documentState.shapes) edit(doc => setShapes(doc, next)) }
   function addShapes(result: { shapes: ScreenshotShape[]; ids: string[] }) { editShapes(result.shapes); setSelectedIds(new Set(result.ids)) }
+  // Unlocked marks come back unselected, even when Redo locked them while they were selected.
+  function unlockShapes(ids: ReadonlySet<string>) {
+    editShapes(setShapesLocked(documentState.shapes, ids, false))
+    setSelectedIds(current => [...current].some(id => ids.has(id)) ? new Set([...current].filter(id => !ids.has(id))) : current)
+  }
   /** Marks copied with Shift stay inside this editor and never reach the system clipboard. */
   function runObjectCommand(command: ObjectCommand) {
     const shapes = documentState.shapes, distance = 10 / viewRef.current.scale
@@ -513,8 +518,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       const pasted = pasteShapes(shapes, copiedRef.current, offset, mintObjectId)
       if (pasted.ids.length) { addShapes(pasted); copiedRef.current = pasted.shapes.filter(shape => pasted.ids.includes(shape.id)) }
     }
-    // Locking keeps the ids selected but inert, so a second press unlocks them; with nothing selected it unlocks every mark.
-    else if (command === 'lock') editShapes(selectedIds.size ? toggleShapeLock(shapes, selectedIds) : unlockAllShapes(shapes))
+    // Locking takes the marks out of the selection; the lock badge under the pointer or Unlock all brings them back.
+    else if (command === 'lock') { if (groupIds.size) { editShapes(setShapesLocked(shapes, groupIds, true)); selectOnly(null) } }
     else editShapes(reorderShapes(shapes, groupIds, command))
   }
   // While shown, the editor owns the chords it names, so the window shortcut router does not split or switch tabs on them.
@@ -536,7 +541,6 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         else if (gestureActive() || panRef.current) cancelGesture()
         else if (confirmingDiscard === 'retake') setDiscarding(false)
         else if (confirmingDiscard) onCancel()
-        // Locked ids stay selected only so Command-L can unlock them again; they never consume an Escape.
         else if (groupIds.size) selectOnly(null)
         else if (tool !== openingTool) { resetGesture(); setTool(openingTool) }
         else requestClose()
@@ -995,7 +999,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             }} />
           {lockBadge ? <button ref={lockBadgeRef} type="button" className="image-annotation-editor__lock" aria-label="Unlock annotation" title="Locked · Click to unlock"
             style={lockBadge.style} disabled={busy} onPointerLeave={event => { if (event.relatedTarget !== canvasRef.current) setLockHover(null) }}
-            onClick={() => { editShapes(toggleShapeLock(documentState.shapes, new Set([lockBadge.id]))); setLockHover(null) }}><LockIcon size={11} /></button> : null}
+            onClick={() => { unlockShapes(new Set([lockBadge.id])); setLockHover(null) }}><LockIcon size={11} /></button> : null}
           {pendingText ? <Textarea key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text} wrap="off"
             aria-description="Enter inserts a new line. Command or Control plus Enter finishes. Escape discards this text edit."
             style={{ ...inlineEditorBox(pendingText.shape.at, textEditorWidth, textEditorHeight), maxHeight: Math.max(1, size.height), minWidth: 0, minHeight: 0, maxWidth: 'none',
@@ -1058,7 +1062,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       <span className="image-annotation-editor__tool-name">{ANNOTATION_TOOLS.find(item => item.id === tool)?.label}</span>
       {propertyControls}
       {arrangeControls}
-      {hasLocked ? <button type="button" disabled={busy} onClick={() => editShapes(unlockAllShapes(documentState.shapes))}><UnlockIcon size={13} />Unlock all</button> : null}
+      {hasLocked ? <button type="button" disabled={busy} onClick={() => unlockShapes(new Set(documentState.shapes.filter(shape => shape.locked).map(shape => shape.id)))}><UnlockIcon size={13} />Unlock all</button> : null}
       {tool === 'cover' || selected?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
       {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
       {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : selectedShapes.length > 1 ? selectedShapes.length + ' selected · Drag one to move all' : 'Click an annotation · Drag to select several'}</span> : null}
