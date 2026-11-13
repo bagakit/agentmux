@@ -1112,7 +1112,8 @@ export class BrowserViewManager {
    */
   private followLayoutHost(lease: PresentationLease): void {
     const entry = lease.entry, geometry = lease.geometry
-    if (!lease.occurrence.layoutHost || !geometry.visible || entry.visible || entry.inputLeaseId) return
+    // A clipped rectangle is the reading window's cut, not the page area: keep the page's size until it is whole again.
+    if (!lease.occurrence.layoutHost || !geometry.visible || geometry.inputVisible === false || entry.visible || entry.inputLeaseId) return
     const { width, height } = geometry.bounds, view = entry.view
     if (entry.bounds?.width === width && entry.bounds.height === height) return
     const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
