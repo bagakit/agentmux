@@ -174,3 +174,11 @@ describe('Goal detail reading', () => {
     expect(actions.querySelector('[data-goal-grill]')!.parentElement).toBe(actions)
   })
 })
+
+describe('Goals header with no Goals', () => {
+  it('leaves the empty fact to the empty state instead of saying it twice', async () => {
+    seed([]); await dom.render(<GlobalBoardSurface />)
+    expect(dom.container.querySelector('.goals-page-header__summary')).toBeNull()
+    expect(dom.container.querySelector('.goals-empty')!.textContent).toContain('No goals yet')
+  })
+})
