@@ -1,5 +1,15 @@
 # Mote 共同框架去重
 
+## 对话直接切换与连贯动效
+
+专项运行 `node apps/desktop/scripts/fixtures/mote-continuous-frame/capture.mjs --evolution-only`；独立于以下旧八页和 conversation-only 九页。有限来源沿原完整 App bootstrap、Mote 目录、精确 Session/Run/空间引用和 Core conversation projector/codec；同一 Mote 有 Main、等待选择的原成员、独立研究成员及各自原草稿，另一 Mote 保持隔离，另有确认零成员的起步对象。
+
+真实原控件逐项操作浮窗 Main→选择器→成员 A→成员 B→直接回 Main→Threads 的原派工与回复→完整 Space 共用入口；查找无结果和目录观察 unknown 各自有明确原事实。窄浅色长题、低高度、浏览器实际 reduced-motion、原新一轮准备和确认空 Mote 各有完整图。每步检查原 Region/Session/Run、全部未发送草稿、无输入/lifecycle writes；选择器开合和准确成员往返另核原 Reader/Composer/正文节点和阅读位置。
+
+开启用真实定向 webContents native hit/trusted click，**不等待 settle 才采样**，记录原生产动画实际运行进度与请求前后时间，捕获活动阶段完整图及自然终态；不改 CSS 时序、不 pause/seek 动画。关闭按设计即时卸载，记录前后状态和原触发点焦点返回，明确无离场动态，不将终态冒称中间帧。reduced-motion 另验原选择器与窄线程详情 computed animationName=none，不能只等待动画结束。
+
+Electron accessory/showInactive、独立 userData 与有限 API/native ports 不操作用户 live App，不请求系统焦点。capture pass 仅证明此真实 Renderer 消费和非空完整场景，独立 Agent 必须实际打开全部本轮图和动态帧，修正复拍至可交付；不复用旧图冒签，不证明真实模型主动拆工、Provider、飞书、安装版或用户原 Session 重启恢复。
+
 ## 交流面常驻身份与证据层级
 
 专项运行 `node apps/desktop/scripts/fixtures/mote-continuous-frame/capture.mjs --conversation-only`，只运行本轮交流面场景，不重复下述八页。消费[搭档界面与共享工作面](../../../../../docs/design/behavior/motes-and-coordination.md#搭档界面与共享工作面)和[消息、输入与持续状态层](../../../../../docs/design/presentation/motes-and-coordination.md#消息输入与持续状态层)。
