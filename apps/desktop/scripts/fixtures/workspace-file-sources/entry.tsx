@@ -13,7 +13,7 @@ api.files = window.agentmux.files
 useAppStore.setState({ config: boot.config, activeWorkspaceId: 'source-private', documentIssues: {}, documents: {} })
 const root = createRoot(document.getElementById('root')!)
 const surface = { kind: 'file' as const, regionId: 'original-pdf-region', workspaceId: 'source-private', path: 'large.pdf' }
-function render(visible = true) { flushSync(() => root.render(<FilePreviewPane surface={surface} visible={visible} />)) }
+function render(visible = true) { flushSync(() => root.render(<FilePreviewPane tabId="pdf-source-tab" surface={surface} visible={visible} />)) }
 // The app shell is initialized before a person opens a File; the PDF leaf stays cold until render().
 flushSync(() => root.render(<div role="status">Private file source workface ready.</div>))
 ;(window as any).fileSourceProbe = {

@@ -17,7 +17,10 @@ const mutations = {
   cancel: [owner, 'source.reads.get(readId)?.abort()', 'void source.reads.get(readId)'],
   stale: [hook, 'if (!current()) { void api.files.releaseSource(id).catch(() => {}); return }', 'if (false) { void api.files.releaseSource(id).catch(() => {}); return }'],
   prefetch: [pdf, 'disableAutoFetch: true, disableStream: true', 'disableAutoFetch: false, disableStream: true'],
-  range: [pdf, 'source.read(begin, end - begin, lifetime.signal)', 'source.read(0, end - begin, lifetime.signal)']
+  range: [pdf, 'source.read(begin, end - begin, lifetime.signal)', 'source.read(0, end - begin, lifetime.signal)'],
+  prepare: ['apps/desktop/src/renderer/src/lib/use-prepare-pdf-reader.ts', 'if (!enabled) return', 'if (true) return'],
+  'prepare-hidden': ['apps/desktop/src/renderer/src/lib/use-prepare-pdf-reader.ts', 'if (!enabled) return', 'if (false) return'],
+  'prepare-order': [pdf, "return import('pdfjs-dist').then(async engine => {\n    if (signal?.aborted) return null\n    const components = await import('pdfjs-dist/web/pdf_viewer.mjs')", "return Promise.all([import('pdfjs-dist'), import('pdfjs-dist/web/pdf_viewer.mjs')]).then(([engine, components]) => {"]
 } as const
 // This lane tests the checked-out owners, including their real workspace leaves, rather than old dist copies.
 function workspaceSources() {
@@ -52,5 +55,5 @@ export default defineConfig({ ...original,
     if (process.env.FILE_SOURCES_HITS) appendFileSync(process.env.FILE_SOURCES_HITS, JSON.stringify({ mutation, file, original: sha(source), loaded: sha(code) }) + '\n')
     return { code, map: null }
   } }],
-  test: { ...original.test, globalSetup: [], passWithNoTests: false, include: ['apps/desktop/test/workspace-file-sources.test.ts', 'apps/desktop/test/workspace-file-source-hook.test.tsx', 'apps/desktop/test/pdf-content.test.tsx'] }
+  test: { ...original.test, globalSetup: [], passWithNoTests: false, include: ['apps/desktop/test/workspace-file-sources.test.ts', 'apps/desktop/test/workspace-file-source-hook.test.tsx', 'apps/desktop/test/pdf-content.test.tsx', 'apps/desktop/test/pdf-preparation.test.tsx'] }
 })

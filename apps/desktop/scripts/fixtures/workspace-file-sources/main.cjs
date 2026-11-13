@@ -3,7 +3,7 @@ const fs = require('node:fs/promises'), path = require('node:path'), assert = re
 const [html, profile, evidence, nativeModule, workspacePath] = process.argv.slice(2)
 const paths = { home: process.env.HOME, appData: path.join(profile, 'app-data'), userData: path.join(profile, 'user-data'), sessionData: path.join(profile, 'session-data') }
 for (const [name,directory] of Object.entries(paths)) app.setPath(name,directory)
-const report = { schema:'agentmux.workspace-file-sources-process.v1', passed:false, pid:process.pid, reads:[], opens:[], releases:[], console:[], frames:[], checks:{}, observations:[] }
+const report = { schema:'agentmux.workspace-file-sources-process.v1', passed:false, pid:process.pid, mainTimeOrigin:performance.timeOrigin, reads:[], opens:[], releases:[], console:[], frames:[], checks:{}, observations:[] }
 const workspace = { id:'source-private', name:'Private PDF source', hostId:'local', path:workspacePath, kind:'folder' }
 const config = { version:9, hosts:[{id:'local',kind:'local',label:'Private'}], workspaces:[workspace], executors:{}, appearance:{terminalTheme:'graphite'} }
 let win, files, sources
@@ -78,6 +78,9 @@ app.whenReady().then(async()=>{try {
   const events=report.performance.events
   assert.equal(events.filter(item=>item.name==='reader-effect-start').length,2,'Cold and warm actual reader effects are both instrumented')
   assert.equal(events.filter(item=>item.name==='reader-module-start').length,1,'React lazy reader module stays loaded on reopen')
+  const firstPrepare=events.find(item=>item.name==='prepare-module-start'), firstConsumer=events.find(item=>item.name==='reader-module-start')
+  assert.ok(firstPrepare&&firstPrepare.at<firstConsumer.at,'Visible PDF prepares code before the original source admits its reader')
+  report.checks.preparationOverlap={prepareDemandAt:firstPrepare.at,sourceAdmittedReaderAt:firstConsumer.at,sourceOpenMs:report.opens[0].finishedAt-report.opens[0].startedAt}
   for(const reader of [1,2]) { for(const name of ['worker-ready','document-ready','first-page-get-end','page-render-start','current-page-ready'])assert.ok(events.some(item=>item.reader===reader&&item.name===name),'Nonempty real phase '+reader+': '+name) }
   assert.equal(report.opens.filter(item=>item.status==='ready').length,2,'Showing the same File acquires a new source')
   report.checks.reopenedSameFile=true

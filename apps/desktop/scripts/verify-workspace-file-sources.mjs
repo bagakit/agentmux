@@ -14,7 +14,7 @@ const outputArg=process.argv.find(value=>value.startsWith('--output='))?.slice(9
 const evidence=resolve(root,outputArg??'.tmp/workspace-file-sources')
 const temporary=await mkdtemp(join(tmpdir(),'agentmux-pdf-source-')),profile=join(temporary,'profile'),workspace=join(temporary,'workspace'),outDir=join(temporary,'renderer')
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex')
-const paths=['apps/desktop/src/main/workspace-file-sources.ts','apps/desktop/src/main/workspace-files.ts','apps/desktop/src/renderer/src/lib/use-workspace-file-source.ts',
+const paths=['apps/desktop/src/main/workspace-file-sources.ts','apps/desktop/src/main/workspace-files.ts','apps/desktop/src/renderer/src/lib/use-workspace-file-source.ts','apps/desktop/src/renderer/src/lib/use-prepare-pdf-reader.ts',
   'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx','packages/editor-extensions/src/pdf/PdfReader.tsx','packages/editor-extensions/src/bytes.ts',
   'apps/desktop/scripts/verify-workspace-file-sources.mjs','apps/desktop/scripts/lib/pdf-performance-marks.mjs','apps/desktop/test/vitest.file-sources.config.mts',...['entry.tsx','preload.ts','main.cjs','native-owner.ts','index.html'].map(file=>'apps/desktop/scripts/fixtures/workspace-file-sources/'+file)]
 const sources=async()=>Object.fromEntries(await Promise.all(paths.map(async path=>[path,sha(await readFile(join(root,path)))])))
@@ -44,7 +44,7 @@ try{
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},
     plugins:[performanceMarks,{name:'production-csp',transformIndexHtml:html=>html.replace('__PRODUCTION_CSP__',csp)}],
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true}})
-  assert.equal(performanceMarks.api.observed.length,2,'Both actual PDF consumer and reader are instrumented')
+  assert.equal(performanceMarks.api.observed.length,3,'Actual PDF consumer, preparation hook and reader are instrumented')
   receipt.instrumentedSources=performanceMarks.api.observed
   for(const item of receipt.instrumentedSources)assert.equal(item.original,receipt.sources[item.file.slice(root.length+1)],'Instrumentation binds the recorded original source')
   const pdfjs=dirname(require.resolve('pdfjs-dist/package.json'))
