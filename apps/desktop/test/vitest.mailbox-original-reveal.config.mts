@@ -11,6 +11,9 @@ const activity = 'apps/desktop/src/renderer/src/components/ActivityView.tsx'
 const view = 'packages/client-ui/src/lib/use-conversation-view.ts'
 const mutation = process.env.AGENTMUX_MAILBOX_REVEAL_MUTATION ?? ''
 const mutations: Record<string, { owner: string; edits: readonly (readonly [string, string])[] }> = {
+  'freeze-record-location': { owner: 'packages/core/src/conversation-reader.ts', edits: [
+    ['delivered = true\n        return located', "delivered = true\n        return await read({ ...request, anchor: { record, revision: view.rows.find(row => row.id === target)!.revision, frontier: located.window.checkpoint } }, port, 'inspect') as AgentConversationReadPage"]
+  ] },
   'omit-navigation-demand': { owner: pane, edits: [
     ['enabled: visible && !parked && (activityShown || activityRevealPending),', 'enabled: visible && !parked && activityShown,']
   ] },

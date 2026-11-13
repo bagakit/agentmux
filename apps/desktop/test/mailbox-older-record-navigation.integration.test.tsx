@@ -188,6 +188,11 @@ it.each(['local', 'connected-host'] as const)('an Inputs record read from the or
   const exactReads = frames.filter(receipt => receipt.input.record)
   const recordStarts = exactReads.filter(receipt => !receipt.input.cursor)
   expect(recordStarts, 'Only the target Activity may start an exact record navigation').toHaveLength(1)
+  const locatedFrame = exactReads.find(receipt => receipt.page?.window.complete)!.page!
+  expect(locatedFrame.window.anchor).toBeUndefined()
+  expect(locatedFrame.window.itemCount).toBe(8)
+  expect(dom.container.querySelector('.activity-feed [data-native-record-id="input-1"]')?.textContent).toContain('Original recorded input 1')
+  expect(dom.container.querySelector('.activity-feed [data-native-record-id="input-7"]')?.textContent).toContain('Original recorded input 7')
   for (const receipt of exactReads) {
     expect(receipt.input).toMatchObject({ hostId: route, agentSessionId: reference.agentSessionId,
       record: { ...reference, source: target } })
@@ -225,7 +230,7 @@ it('a later feed wheel cancels the original Activity record reply without replac
     await act(async () => { action.focus(); action.click() })
     await vi.waitFor(() => {
       expect(produced?.window.complete).toBe(true)
-      expect(produced?.window.itemCount).toBe(1)
+      expect(produced?.window.itemCount).toBe(8)
       expect(sample()).toMatchObject({ loading: true, inFlight: true })
     }, { timeout: 8000 })
     const feed = dom.container.querySelector<HTMLElement>('.activity-feed')!
