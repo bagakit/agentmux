@@ -75,13 +75,15 @@ function calloutPlacement(source: NormalizedRect, width: number, height: number,
   const inside = (value: number, start: number, length: number, size: number) => Math.max(start, Math.min(start + length - size, value))
   const clamped = (at: ScreenshotPoint) => ({ x: inside(at.x, bounds.x, bounds.width, width), y: inside(at.y, bounds.y, bounds.height, height) })
   const span = (start: number, size: number, from: number, length: number) => Math.min(start + size, from + length) - Math.max(start, from)
-  const overlap = (at: ScreenshotPoint) => Math.max(0, span(at.x, width, source.x, source.width)) * Math.max(0, span(at.y, height, source.y, source.height))
+  const clears = (at: ScreenshotPoint) => span(at.x, width, source.x, source.width) < 0 || span(at.y, height, source.y, source.height) < 0
+  // A place that clears the source ranks before one touching it (no room for a leader), which ranks before any overlap.
+  const cover = (at: ScreenshotPoint) => clears(at) ? -1 : span(at.x, width, source.x, source.width) * span(at.y, height, source.y, source.height)
   // Without a full fit, the first place whose width fits is kept and only moved vertically, so it stays beside or below the source.
   const sideways = (at: ScreenshotPoint) => at.x >= bounds.x && at.x + width <= bounds.x + bounds.width
   const kept = clamped(candidates.find(sideways) ?? right)
-  if (span(kept.x, width, source.x, source.width) < 0 || span(kept.y, height, source.y, source.height) < 0) return kept
+  if (clears(kept)) return kept
   // When that place would cover or touch the source, the clamped place covering least of it wins, ties in the same order.
-  return candidates.map(clamped).reduce((best, next) => overlap(next) < overlap(best) ? next : best)
+  return candidates.map(clamped).reduce((best, next) => cover(next) < cover(best) ? next : best)
 }
 export function calloutBubble(shape: CalloutShape): NormalizedRect {
   const source = normalizeRect(shape.from, shape.to)
