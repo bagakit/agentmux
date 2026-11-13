@@ -85,7 +85,7 @@ it('retains the actual SDK-only fallback row and original DOM across menu suspen
   const f = await app(false)
   const list = [...f.element.querySelectorAll<HTMLElement>('details')].find(item => item.querySelector('summary')?.textContent === '其他已有会话')!
   expect(list).toBeDefined()
-  const row = [...list.querySelectorAll<HTMLLIElement>('li')].find(item => item.querySelector('.mobile-session-state small')?.textContent === 'claude')!
+  const row = [...list.querySelectorAll<HTMLLIElement>('li')].find(item => item.querySelector('.mobile-session-state small')?.textContent === 'Claude')!
   expect(row).toBeDefined()
   const more = button(row, '名称未确认 · 更多操作'), open = row.querySelector<HTMLButtonElement>('.mobile-agent-row__open')!
   const beforeMenu = f.fullDirectory.mock.calls.length
@@ -109,7 +109,7 @@ it('retains the actual SDK-only fallback row and original DOM across menu suspen
 
 it('fills a missing public Provider from the original SDK and reuses that directory across menus and all primary workfaces', async () => {
   const f = await app('missing-provider'), row = button(f.element, '原目录 Agent · 更多操作').closest('li')!
-  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('claude')
+  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('Claude')
   const initialReads = f.fullDirectory.mock.calls.length
   expect(initialReads).toBeGreaterThan(0)
   await click(button(row, '原目录 Agent · 更多操作'))
@@ -120,7 +120,7 @@ it('fills a missing public Provider from the original SDK and reuses that direct
     await click(button(f.element.querySelector<HTMLElement>('[aria-label="手机导航"]')!, name))
     expect(f.fullDirectory).toHaveBeenCalledTimes(initialReads)
   }
-  expect(button(f.element, '原目录 Agent · 更多操作').closest('li')?.querySelector('.mobile-session-state small')?.textContent).toBe('claude')
+  expect(button(f.element, '原目录 Agent · 更多操作').closest('li')?.querySelector('.mobile-session-state small')?.textContent).toBe('Claude')
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(f.original)
   expect(f.ensure).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
@@ -135,15 +135,15 @@ it('retains hidden metadata without reading it and refreshes on return only afte
   expect(f.fullDirectory).toHaveBeenCalledTimes(initialReads)
   await navigate('Focus')
   expect(f.fullDirectory).toHaveBeenCalledTimes(initialReads)
-  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('claude')
+  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('Claude')
   await navigate('Goals')
   await act(async () => f.emit({ type: 'agent-session', session: { ...session('peer'), providerId: 'gemini', updatedAt: 3 } }))
   expect(f.fullDirectory).toHaveBeenCalledTimes(initialReads)
-  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('claude')
+  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('Claude')
   await navigate('Focus')
   expect(f.fullDirectory).toHaveBeenCalledTimes(initialReads + 1)
   expect(button(f.element, '原目录 Agent · 更多操作').closest('li')).toBe(row)
-  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('gemini')
+  expect(row.querySelector('.mobile-session-state small')?.textContent).toBe('Gemini')
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(f.original)
 })

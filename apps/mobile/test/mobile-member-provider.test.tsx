@@ -31,7 +31,7 @@ async function directory(home: 'mote' | 'space' | 'focus', emptyPresentation = f
 it.each(['mote', 'space'] as const)('resolves an initial %s member Provider without visiting Focus and caches it across menu visibility', async home => {
   const f = await directory(home)
   expect(f.pointRead).not.toHaveBeenCalled(); expect(f.fullRead).not.toHaveBeenCalled()
-  await f.expand(); expect(f.provider()).toBe('claude')
+  await f.expand(); expect(f.provider()).toBe('Claude')
   expect(f.pointRead).toHaveBeenCalledExactlyOnceWith('peer')
   for (let index = 0; index < 3; index++) {
     await click(button(f.element, 'Original member · 更多操作'))
@@ -44,23 +44,23 @@ it.each(['mote', 'space'] as const)('resolves an initial %s member Provider with
 
 it('updates an expanded initial Mote member from its exact SDK event even when the public presentation has no rows', async () => {
   const f = await directory('mote', true)
-  await f.expand(); expect(f.provider()).toBe('claude')
+  await f.expand(); expect(f.provider()).toBe('Claude')
   expect(f.pointRead).toHaveBeenCalledExactlyOnceWith('peer')
   const reads = vi.mocked(f.client.forwardRpc!).mock.calls.length
   await act(async () => f.emit({ type: 'agent-session', session: { ...session('other'), providerId: 'gemini' } }))
   expect(f.pointRead).toHaveBeenCalledTimes(1)
   await act(async () => f.emit({ type: 'agent-session', session: { ...session('peer'), providerId: 'gemini' } }))
-  expect(f.pointRead.mock.calls).toEqual([['peer'], ['peer']]); expect(f.provider()).toBe('gemini')
+  expect(f.pointRead.mock.calls).toEqual([['peer'], ['peer']]); expect(f.provider()).toBe('Gemini')
   expect(vi.mocked(f.client.forwardRpc!).mock.calls).toHaveLength(reads)
   expect(f.fullRead).not.toHaveBeenCalled()
 })
 
 it('preserves the exact SDK Provider learned in Focus when the original Mote point read is temporarily unavailable', async () => {
   const f = await directory('focus')
-  expect(f.provider()).toBe('claude')
+  expect(f.provider()).toBe('Claude')
   f.pointRead.mockImplementation(() => { throw new Error('point metadata temporarily unavailable') })
   await f.render(f.node(true, 'mote')); await f.expand()
-  expect(f.provider()).toBe('claude')
+  expect(f.provider()).toBe('Claude')
   await click(f.element.querySelector('.mobile-agent-row__open')!)
   expect(f.open).toHaveBeenCalledExactlyOnceWith('peer', expect.objectContaining({ name: 'Original member' }))
   expect(f.submit).not.toHaveBeenCalled()
