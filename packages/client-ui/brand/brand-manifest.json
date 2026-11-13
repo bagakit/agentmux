@@ -8,7 +8,7 @@
       "id": "app-icon.qingzhuan",
       "kind": "app-icon",
       "file": "app-icons/qingzhuan.png",
-      "title": "青篆 woodcut side profile",
+      "title": "青篆 · 木刻侧像",
       "realm": "qingzhuan",
       "origin": "generated",
       "followsAppIcon": true
@@ -17,7 +17,7 @@
       "id": "app-icon.huihuan",
       "kind": "app-icon",
       "file": "app-icons/huihuan.png",
-      "title": "回环 jade ring",
+      "title": "回环 · 玉璧盘龙",
       "realm": "huihuan",
       "origin": "generated",
       "followsAppIcon": true
@@ -26,7 +26,7 @@
       "id": "app-icon.zheyu",
       "kind": "app-icon",
       "file": "app-icons/zheyu.png",
-      "title": "折玉 folded jade planes",
+      "title": "折玉 · 折面玉龙",
       "realm": "zheyu",
       "origin": "generated",
       "followsAppIcon": true
@@ -35,7 +35,7 @@
       "id": "app-icon.lingban",
       "kind": "app-icon",
       "file": "app-icons/lingban.png",
-      "title": "灵伴 ceramic companion",
+      "title": "灵伴 · 陶瓷伙伴",
       "realm": "lingban",
       "origin": "generated",
       "followsAppIcon": true
@@ -44,7 +44,7 @@
       "id": "app-icon.classic",
       "kind": "app-icon",
       "file": "app-icons/classic.png",
-      "title": "Classic emerald low-poly dragon (Origin)",
+      "title": "Classic · 原境的翡翠低多边形龙",
       "realm": "classic",
       "origin": "original",
       "followsAppIcon": true
@@ -53,7 +53,7 @@
       "id": "app-icon.classic-backplate",
       "kind": "app-icon-part",
       "file": "app-icons/classic-backplate.svg",
-      "title": "Retro-future backplate composed under the Classic dragon",
+      "title": "Classic 的复古未来圆角底板",
       "realm": "classic",
       "origin": "hand-authored",
       "followsAppIcon": true
@@ -62,7 +62,7 @@
       "id": "hero.origin.launch",
       "kind": "hero",
       "file": "heroes/origin-launch.avif",
-      "title": "Origin dragon, full-bleed launch art",
+      "title": "原境龙 · 启动全屏",
       "realm": "classic",
       "origin": "generated",
       "followsAppIcon": true,
@@ -72,7 +72,7 @@
       "id": "hero.origin.banner",
       "kind": "hero",
       "file": "heroes/origin-banner.avif",
-      "title": "Origin dragon, wide banner for the Launcher and Settings Overview",
+      "title": "原境龙 · Launcher 与 Settings 宽幅",
       "realm": "classic",
       "origin": "generated",
       "followsAppIcon": true,
@@ -82,7 +82,7 @@
       "id": "illustration.goals.demand-dialogue",
       "kind": "illustration",
       "file": "illustrations/goals/demand-dialogue.png",
-      "title": "Goal clarification dialogue",
+      "title": "Goals 澄清对话",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -91,7 +91,7 @@
       "id": "illustration.goals.goal-custom",
       "kind": "illustration",
       "file": "illustrations/goals/goal-custom.png",
-      "title": "Goals: custom action",
+      "title": "自定义行动",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -100,7 +100,7 @@
       "id": "illustration.goals.goal-ideas",
       "kind": "illustration",
       "file": "illustrations/goals/goal-ideas.png",
-      "title": "Goals: turn ideas into a project",
+      "title": "把想法推进成项目",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -109,7 +109,7 @@
       "id": "illustration.goals.goal-next",
       "kind": "illustration",
       "file": "illustrations/goals/goal-next.png",
-      "title": "Goals: suggest the next step",
+      "title": "建议下一步",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -118,7 +118,7 @@
       "id": "illustration.goals.goal-understand",
       "kind": "illustration",
       "file": "illustrations/goals/goal-understand.png",
-      "title": "Goals: understand you and advise",
+      "title": "了解你并给建议",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -127,7 +127,7 @@
       "id": "illustration.goals.goals-companions-header",
       "kind": "illustration",
       "file": "illustrations/goals/goals-companions-header.png",
-      "title": "Goals header companions (display-size derivative of goals-companions)",
+      "title": "Goals 页头伙伴（显示尺寸派生图）",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -136,7 +136,7 @@
       "id": "illustration.concept.capsule-keepsake",
       "kind": "illustration",
       "file": "illustrations/concepts/capsule-keepsake.png",
-      "title": "Capsule: a page kept as a reusable tool",
+      "title": "Capsule：留存为可复用工具",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -145,7 +145,7 @@
       "id": "illustration.concept.focus-workframe",
       "kind": "illustration",
       "file": "illustrations/concepts/focus-workframe.png",
-      "title": "Focus: the focus lens object",
+      "title": "Focus：聚焦镜",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -154,7 +154,7 @@
       "id": "illustration.concept.goals-companions",
       "kind": "illustration",
       "file": "illustrations/concepts/goals-companions.png",
-      "title": "Goals: companions around one goal",
+      "title": "Goals：伙伴围绕同一目标",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -163,7 +163,7 @@
       "id": "illustration.concept.promotion-identity",
       "kind": "illustration",
       "file": "illustrations/concepts/promotion-identity.png",
-      "title": "Topic promotion: a team gains its identity",
+      "title": "Topic 晋升：团队获得身份",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -172,7 +172,7 @@
       "id": "illustration.concept.recall-fold",
       "kind": "illustration",
       "file": "illustrations/concepts/recall-fold.png",
-      "title": "Recall: the folded book",
+      "title": "Recall：折页书",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -181,7 +181,7 @@
       "id": "illustration.concept.space-workchamber",
       "kind": "illustration",
       "file": "illustrations/concepts/space-workchamber.png",
-      "title": "Space: the open work chamber",
+      "title": "Space：开放工作舱",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -190,7 +190,7 @@
       "id": "illustration.concept.survey-prism",
       "kind": "illustration",
       "file": "illustrations/concepts/survey-prism.png",
-      "title": "Survey: the exploration prism",
+      "title": "Survey：探索棱镜",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -199,7 +199,7 @@
       "id": "illustration.concept.topic-atlas",
       "kind": "illustration",
       "file": "illustrations/concepts/topic-atlas.png",
-      "title": "Topics: the atlas dial",
+      "title": "Topics：主题图集",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -208,7 +208,7 @@
       "id": "illustration.mote-origin.role-team",
       "kind": "illustration",
       "file": "illustrations/mote-origin/role-team.png",
-      "title": "Mote origin, act 1: a role brings a team",
+      "title": "第一幕：角色带来团队",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -217,7 +217,7 @@
       "id": "illustration.mote-origin.topic-work",
       "kind": "illustration",
       "file": "illustrations/mote-origin/topic-work.png",
-      "title": "Mote origin, act 2: work in an open Topic",
+      "title": "第二幕：在开放 Topic 里工作",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -226,7 +226,7 @@
       "id": "illustration.mote-origin.grown-team",
       "kind": "illustration",
       "file": "illustrations/mote-origin/grown-team.png",
-      "title": "Mote origin, act 3: the grown team",
+      "title": "第三幕：成长起来的团队",
       "realm": "commons",
       "origin": "generated",
       "followsAppIcon": false
@@ -237,7 +237,7 @@
       "id": "avatar-series.mote-silhouettes",
       "kind": "avatar-series",
       "path": "apps/desktop/resources/avatar-series/mote-silhouettes",
-      "title": "Mote in twelve art directions; Mote’s own multiverse",
+      "title": "Mote 的十二种美术方向，Mote 自己的多元宇宙",
       "owner": "Mote avatar series (read by Main at runtime)",
       "origin": "hand-authored"
     },
@@ -245,7 +245,7 @@
       "id": "avatar-series.lowpoly",
       "kind": "avatar-series",
       "path": "apps/desktop/resources/avatar-series/lowpoly",
-      "title": "Low-poly companions: dragon, wolf, owl, panther",
+      "title": "低多边形伙伴：龙、狼、鸮、豹",
       "owner": "Mote avatar series (read by Main at runtime)",
       "origin": "generated"
     },
@@ -253,7 +253,7 @@
       "id": "avatar-series.geometry",
       "kind": "avatar-series",
       "path": "apps/desktop/resources/avatar-series/geometry",
-      "title": "RobotExpressive 3D study",
+      "title": "RobotExpressive 3D 研究",
       "owner": "Mote avatar series (read by Main at runtime)",
       "origin": "third-party",
       "license": "CC0-1.0",
@@ -263,7 +263,7 @@
       "id": "identity.mote",
       "kind": "identity-mark",
       "path": "packages/client-ui/src/theme/icon-authored.ts",
-      "title": "Mote default companion glyph (semantic object.mote)",
+      "title": "Mote 默认伙伴图形（语义 object.mote）",
       "owner": "Semantic icon catalog",
       "origin": "hand-authored"
     },
@@ -271,7 +271,7 @@
       "id": "identity.providers",
       "kind": "vendor-mark",
       "path": "packages/client-ui/src/components/AgentProviderIcon.tsx",
-      "title": "Agent Provider marks",
+      "title": "各家 Agent Provider 的标志",
       "owner": "Each vendor; never restyled",
       "origin": "third-party"
     },
@@ -279,7 +279,7 @@
       "id": "identity.connectors",
       "kind": "vendor-mark",
       "path": "apps/desktop/src/renderer/src/assets/connector-icons",
-      "title": "Connector marks (Lark, Discord)",
+      "title": "渠道标志（Lark、Discord）",
       "owner": "Each vendor; never restyled",
       "origin": "third-party"
     },
@@ -287,7 +287,7 @@
       "id": "derived.readme",
       "kind": "derived-copy",
       "path": "docs/assets/readme",
-      "title": "README hero, illustration and App icon copies downscaled to WebP",
+      "title": "README 首图、插画与 App 图标的 WebP 缩小副本",
       "owner": "README",
       "origin": "derived",
       "derivedFrom": [

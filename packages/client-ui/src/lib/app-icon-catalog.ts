@@ -6,11 +6,11 @@
  * text, because Node consumers (Main, Host, the brand build) import it directly.
  */
 export const APP_ICON_CATALOG = {
-  qingzhuan: { label: '青篆', realm: '青篆 · QINGZHUAN', material: 'Woodcut ink on ivory' },
-  huihuan: { label: '回环', realm: '回环 · HUIHUAN', material: 'Jade ring on ink green' },
-  zheyu: { label: '折玉', realm: '折玉 · ZHEYU', material: 'Folded jade planes' },
-  lingban: { label: '灵伴', realm: '灵伴 · LINGBAN', material: 'Ceramic companion' },
-  classic: { label: 'Classic', realm: '原境 · ORIGIN', material: 'Faceted emerald, the first dragon' }
+  qingzhuan: { label: '青篆', realm: '青篆 · QINGZHUAN', material: '象牙底上的森林绿木刻侧像' },
+  huihuan: { label: '回环', realm: '回环 · HUIHUAN', material: '墨绿底上盘成玉璧的长龙' },
+  zheyu: { label: '折玉', realm: '折玉 · ZHEYU', material: '平面玉片折成的正面龙首' },
+  lingban: { label: '灵伴', realm: '灵伴 · LINGBAN', material: '复古未来的陶瓷伙伴头像' },
+  classic: { label: 'Classic', realm: '原境 · ORIGIN', material: '发光的翡翠低多边形龙，所有境的祖先' }
 } as const
 
 export type AppIconId = keyof typeof APP_ICON_CATALOG
