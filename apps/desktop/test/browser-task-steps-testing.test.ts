@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BrowserTaskAssets, runBrowserTaskAsset, type BrowserTaskAssetHost, type BrowserTaskAssetStore } from '../src/main/browser-task-assets'
 import type { BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskStep } from '../src/shared/browser-task-assets'
 import type { BrowserScriptRunReport } from '../src/shared/contracts'
+import { executeBrowserTaskControl } from '../src/main/browser-task-control'
 
 const url = 'https://generic.invalid/form', browserId = 'testing-browser'
 const target = (name: string) => ({ role: 'button', name, ordinal: 1, count: 1 })
@@ -259,5 +260,19 @@ describe('per-step failure handling uses only known script failures', () => {
     expect(restarted.runs.find(item => item.id === run.id)?.failedSteps).toEqual([{ stepId: 'check', operationId: 'real-operation-1' }])
     store.document!.runs[0]!.failedSteps = [{ stepId: 'check', operationId: 'real-operation-2' }]
     expect((await new BrowserTaskAssets(store).state(browserId)).warning).toContain('could not be restored')
+  })
+})
+
+describe('public browser.task run carries the recorded failure', () => {
+  it('passes a continued failure from the real run owner through the public control codec as failed with failedSteps', async () => {
+    const owner = assets(), fake = page([{ role: 'button', name: 'Next' }])
+    const saved = await version([
+      { id: 'check', kind: 'assert', url, reviewed: true, assert: { kind: 'text-present', text: 'Saved' }, onFail: 'continue' },
+      { id: 'next', kind: 'click', url, reviewed: true, target: target('Next') }
+    ], owner)
+    const result = await executeBrowserTaskControl({ operation: 'browser.task.run', browserId, assetId: saved.id, version: 1, parameters: {} }, {
+      runControlledTaskAsset: input => runBrowserTaskAsset(owner, input, fake.host)
+    } as Parameters<typeof executeBrowserTaskControl>[1], true)
+    expect(result).toMatchObject({ operation: 'browser.task.run', run: { status: 'failed', failedSteps: [{ stepId: 'check', operationId: 'real-operation-1' }] } })
   })
 })
