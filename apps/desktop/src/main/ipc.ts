@@ -215,6 +215,7 @@ import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
+import { savedBrowsersUsingProfile } from './browser-profile-usage.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
@@ -1923,6 +1924,12 @@ export async function registerIpc(args: {
   handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
     if (browsers.usesProfile(profileId)) {
       throw new Error('Browser Profile is still used by an open Browser')
+    }
+    let graph: Awaited<ReturnType<typeof spatialState.read>>
+    try { graph = await spatialState.read() }
+    catch { throw new Error('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Nothing was deleted; try again.') }
+    if (graph && savedBrowsersUsingProfile(graph.graph, profileId).length > 0) {
+      throw new Error('Browser Profile is still used by a saved Browser that has not been opened since restart')
     }
     await browserProfiles.deleteProfile(profileId, approval)
     const cleared = await browserRecoveryPreviews.clearProfile(profileId)
