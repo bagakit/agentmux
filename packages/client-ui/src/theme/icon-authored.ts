@@ -289,16 +289,16 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "media-seek-back": {
-    shapes: [["path",{"d":"M4 12a8 8 0 1 0 2.35-5.66"}],["path",{"d":"M4 4v4.5h4.5"}],["path",{"d":"M10.5 9.5v6"}],["path",{"d":"M13.5 10a1.5 1.5 0 0 1 3 0v4a1.5 1.5 0 0 1-3 0Z"}]],
+    shapes: [["path",{"d":"M3.5 12a8.5 8.5 0 1 0 2.5-6"}],["path",{"d":"M3.5 3.5v5h5"}],["path",{"d":"M12.5 9 9.5 12l3 3"}],["path",{"d":"M16.5 9l-3 3 3 3"}]],
     design: {
-      rest: "逆时针弧加数字 10，表示回退十秒",
+      rest: "逆时针弧内两道左向折线，表示回退；秒数由按钮名称与提示说明",
       motion: { kind: "still", animation: "none", description: "跳转是一次性动作，跳转结果由 seeked 事件确认。", trigger: "用户显式点击或快捷键。" }
     }
   },
   "media-seek-forward": {
-    shapes: [["path",{"d":"M20 12a8 8 0 1 1-2.35-5.66"}],["path",{"d":"M20 4v4.5h-4.5"}],["path",{"d":"M7.5 9.5v6"}],["path",{"d":"M10.5 10a1.5 1.5 0 0 1 3 0v4a1.5 1.5 0 0 1-3 0Z"}]],
+    shapes: [["path",{"d":"M20.5 12a8.5 8.5 0 1 1-2.5-6"}],["path",{"d":"M20.5 3.5v5h-5"}],["path",{"d":"M11.5 9l3 3-3 3"}],["path",{"d":"M7.5 9l3 3-3 3"}]],
     design: {
-      rest: "顺时针弧加数字 10，表示前进十秒",
+      rest: "顺时针弧内两道右向折线，表示前进；秒数由按钮名称与提示说明",
       motion: { kind: "still", animation: "none", description: "跳转是一次性动作，跳转结果由 seeked 事件确认。", trigger: "用户显式点击或快捷键。" }
     }
   },
