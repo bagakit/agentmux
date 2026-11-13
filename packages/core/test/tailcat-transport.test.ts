@@ -70,7 +70,10 @@ it.each([undefined, 'ssh', 'ssh-tailcat'] as const)('uses healthy SSH for %s wit
   const fixture = await owner()
   await carrier('ssh', fixture.server.path); await carrier('tailcat', fixture.server.path, 'fail')
   const rpc = await connect(transport)
+  expect(rpc.remoteTransportObservation()).toMatchObject({ state: 'unopened', transport: null, fallback: false, establishedAt: null })
+  expect(await calls()).toEqual([])
   expect(await rpc.call('space.ls', { target: {} })).toEqual({ catalog: fixture.catalog })
+  expect(rpc.remoteTransportObservation()).toMatchObject({ state: 'connected', transport: 'ssh', fallback: false, establishedAt: expect.any(Number) })
   expect(await rpc.call('system.endpoint', {})).toMatchObject({ connection: 'responded' })
   expect(await calls()).toEqual(['ssh'])
   expect(fixture.inner.kernel.stop).not.toHaveBeenCalled()
@@ -82,6 +85,7 @@ it('selects Tailcat only after SSH establishment fails and shares it across cons
   const results = await Promise.all([rpc.call('space.ls', { target: {} }), rpc.call('system.endpoint', {})])
   expect(results).toEqual([{ catalog: fixture.catalog }, expect.objectContaining({ connection: 'responded' })])
   expect(await calls()).toEqual(['ssh', 'tailcat'])
+  expect(rpc.remoteTransportObservation()).toMatchObject({ state: 'connected', transport: 'tailcat', fallback: true })
   expect(fixture.inner.kernel.stop).not.toHaveBeenCalled()
 })
 it('uses Tailcat only through the real Hosted connector, preserving original owner and live Run across reconnect', async () => {
@@ -89,6 +93,7 @@ it('uses Tailcat only through the real Hosted connector, preserving original own
   await carrier('ssh', scope.socketPath, 'fail'); await carrier('tailcat', scope.socketPath)
   const options = { expectedRuntimeId: scope.owner.runtimeId, target: { ...target, hostname: '', transport: 'tailcat' as const } }
   const client = await connectSshAgentMux(options); closes.push(() => client.dispose())
+  expect(client.remoteTransportObservation()).toMatchObject({ state: 'connected', transport: 'tailcat', fallback: false })
   const run = await client.createTerminal({ createOperationId: 'tailcat-preserved-run', workspacePath: scope.root,
     command: process.execPath, args: ['-e', "process.stdout.write('tailcat-original');setInterval(()=>{},1000)"] })
   await until(() => client.listRuns(), rows => rows.some(row => row.runId === run.runId && row.latestOutputBytes > 0), 'original Run emits output')
@@ -120,6 +125,9 @@ it('does not switch or replay a business operation when its SSH reply is lost af
   const requests = (await readFile(join(directory, 'requests'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(requests).toHaveLength(2)
   expect(requests[1]).toMatchObject({ method: 'connection.service.configure', params: input, id: expect.any(String) })
+  expect(await calls()).toEqual(['ssh'])
+  await vi.waitFor(() => expect(rpc.remoteTransportObservation()).toMatchObject({ state: 'disconnected', transport: 'ssh', fallback: false, establishedAt: expect.any(Number) }))
+  for (let i = 0; i < 10; i++) expect(rpc.remoteTransportObservation()?.state).toBe('disconnected')
   expect(await calls()).toEqual(['ssh'])
   expect(fixture.inner.kernel.stop).not.toHaveBeenCalled()
 })
