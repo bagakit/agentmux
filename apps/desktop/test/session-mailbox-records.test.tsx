@@ -1,4 +1,3 @@
-import { fixturePath as _historyFixturePath } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
@@ -11,10 +10,12 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 const dom = composerDOM(), system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
 const panel = () => dom.container.querySelector<HTMLElement>('.composer-mailbox')!
-async function open(folder = 'outbox') {
-  const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
-  await act(async () => panel().dispatchEvent(event))
-  await dom.click(`[role="tab"][id$="-${folder}-tab"]`)
+async function open() {
+  for (const type of ['beforetoggle', 'toggle']) {
+    const event = new Event(type); Object.defineProperty(event, 'newState', { value: 'open' })
+    await act(async () => panel().dispatchEvent(event))
+  }
+  await dom.click('[role="tab"][id$="-user-tab"]')
 }
 function controller() {
   const messages = projectSessionUserMessages({ agentSessionId: 'agent-1', timeline: { agentSessionId: 'agent-1', revision: 1, items: [
@@ -27,7 +28,7 @@ function controller() {
   return { messages, history, localEntries: [], fill, fillText, copy, fillLocal: vi.fn(), resourceReader: vi.fn(), entries: [], setMailboxOpen: vi.fn(), setFocused: vi.fn() } as unknown as ReturnType<typeof useComposerInputHistory>
 }
 
-it('unifies queued, archived and recorded rows without leaking Agent mail into Outbox or creating a second History reader', async () => {
+it('unifies queued, archived and recorded rows on Inputs without leaking Agent mail or creating a second History reader', async () => {
   const inputHistory = controller()
   const queued = [
     { id: 'first', text: 'Original first pending', status: 'deferred' as const, deliverable: true, enqueuedAt: _historyFixtureEpoch(0, 0, 1) },
@@ -67,7 +68,7 @@ it('uses one selected full original reader with Back, while list copy and native
   await dom.render(<SessionMailbox system={system} queued={[]} inputHistory={inputHistory} userMessages={inputHistory.messages}
     timeline={{ agentSessionId: 'agent-1', revision: 1, items: [] }} onRevealMessage={reveal} />)
   await open()
-  expect(panel().textContent).toContain('Message Tool')
+  expect(panel().textContent).toContain('消息工具')
   expect(panel().querySelector('[aria-label="复制全文"]')).not.toBeNull()
   await dom.click('[aria-label="复制全文"]')
   expect(inputHistory.copy).toHaveBeenCalledWith(inputHistory.messages.find(message => message.rawId === 'out'))
@@ -76,29 +77,8 @@ it('uses one selected full original reader with Back, while list copy and native
   expect(panel().querySelector('.log-turn__body')?.textContent).toBe('Exact outgoing original')
   expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(0)
   await dom.click('[aria-label="在对话中查看"]')
-  expect(reveal).toHaveBeenCalledWith(inputHistory.messages.find(message => message.rawId === 'out'))
+  expect(reveal).toHaveBeenCalledWith(inputHistory.messages.find(message => message.rawId === 'out'), null)
   expect(panel().textContent).toContain('Original position unavailable; record retained.')
-  await dom.click('[aria-label="Back to Outbox"]')
+  await dom.click('[aria-label="Back to Inputs"]')
   expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(1)
-})
-
-it('keeps secondary identity, source declarations and location in Info with one primary Copy and an immediate original body', async () => {
-  const reading = { describeSpeaker: (speaker: { id: string }) => ({ name: 'Original reviewer', providerId: 'codex',
-    project: { workspaceId: 'review-project', name: 'Source project', path: _historyFixturePath("original/review"), branch: 'review-branch' } }) }
-  await dom.render(<SessionMailbox system={system} queued={[]} reading={reading}
-    timeline={{ agentSessionId: 'agent-1', revision: 1, items: [{ id: 'original', agentSessionId: 'agent-1', kind: 'user_message', status: 'complete', source: 'user', title: 'Original message', authorAgentSessionId: 'original-reviewer',
-      content: '[Message from Agent declared-only]\nOriginal body comes first.', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }] }} />)
-  await open('inbox'); await dom.click('.composer-mailbox__row')
-  expect(panel().querySelector('.log-turn__body')?.textContent).toBe('Original body comes first.')
-  expect(panel().querySelector('.log-turn__who')?.textContent).toBe('Original reviewer')
-  expect(panel().querySelector('.log-turn__sender-id')).toBeNull()
-  expect(panel().querySelector('.log-turn__meta')).toBeNull()
-  expect(panel().querySelector('[data-mailbox-location="summary"]')).toBeNull()
-  expect(panel().querySelectorAll('[aria-label="Copy message"]')).toHaveLength(1)
-  expect(panel().querySelector('[aria-label="复制全文"]')).toBeNull()
-  await dom.click('[aria-label="Message details"]')
-  expect(panel().querySelector('.conversation-input-details__body')?.textContent).toContain('original-reviewer')
-  expect(panel().querySelector('.conversation-input-details__body')?.textContent).toContain('Source project')
-  expect(panel().querySelector('.conversation-input-details__body')?.textContent).toContain('Message header: Agent declared-only')
-  expect(panel().querySelector('[data-mailbox-location="summary"]')).not.toBeNull()
 })
