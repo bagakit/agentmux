@@ -24,6 +24,10 @@ window, then its original cursor. For folded process reading, add --process-deta
 and keep that representation on inspect/changes continuations. Deferred records retain exact
 original references and revisions; read their full body with the returned versioned anchor
 through inspect --input (omit processDetails). Speech and interactions stay complete.
+JSON record lookup instead locates the current original with its surrounding history;
+use its complete-window older/newer cursors without record. A versioned anchor remains
+frozen. Stopping a watch only parks its view: release the exact window with
+agent conversation release when finished, or let its Core owner dispose it.
 Original turnOutcome records completed, failed or interrupted independently of metrics and current
 activity; deferred headers retain it. Failed outcomes preserve the Provider diagnosis and exact
 original turn. Optional publicMessage is a safe sharing summary, not permission to publish or retry.
