@@ -68,7 +68,7 @@ it('⌘E opens the window editor on the full frozen frame with the marks, and it
   const pending = f.owner.capture(true)
   await vi.waitFor(() => expect(f.edit).toHaveBeenCalledOnce())
   expect(f.edit.mock.calls[0]![0]).toBe(image)
-  expect(f.edit.mock.calls[0]![3]).toEqual({ source, initialState: { shapes: handoff.shapes, crop: handoff.crop }, initialTool: 'arrow' })
+  expect(f.edit.mock.calls[0]![3]).toEqual({ source, initialState: { shapes: handoff.shapes, crop: handoff.crop }, initialTool: 'arrow', retake: expect.any(Function) })
   expect(f.native.writeClipboardImage, 'nothing is delivered by expanding').not.toHaveBeenCalled()
   const editedBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
   const edited = { ...image, dataUrl: 'data:image/png;base64,' + editedBytes.toString('base64'), byteLength: editedBytes.length }

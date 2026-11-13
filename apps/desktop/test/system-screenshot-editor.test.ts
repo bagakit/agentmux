@@ -45,8 +45,9 @@ beforeEach(() => {
 afterEach(() => editor.dispose())
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 type Marks = import('../src/shared/system-screenshot-editor').ScreenshotEditMarks
-async function open(complete = vi.fn(async () => {}), attachToDraft = false, marks?: Marks, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource, returnFocus = false) {
-  const closed = editor.edit(image, attachToDraft, complete, { ...(marks ?? {}), ...(source ? { source } : {}), ...(returnFocus ? { returnFocus } : {}) })
+type Retake = NonNullable<import('../src/shared/system-screenshot-editor').ScreenshotEditContext['retake']>
+async function open(complete = vi.fn(async () => {}), attachToDraft = false, marks?: Marks, source?: import('../src/shared/system-screenshot-editor').ScreenshotCaptureSource, returnFocus = false, retake?: Retake) {
+  const closed = editor.edit(image, attachToDraft, complete, { ...(marks ?? {}), ...(source ? { source } : {}), ...(returnFocus ? { returnFocus } : {}), ...(retake ? { retake } : {}) })
   await Promise.resolve()
   const window = native.windows.at(-1)
   const call = (action: string, params?: unknown, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }) =>
@@ -287,4 +288,36 @@ it('closing the last editor of a capture taken from another app returns focus to
   expect(returnFocus, 'another editor is still open').toHaveBeenCalledOnce()
   await second.call('cancel', { requestId: second.input.requestId }); await second.closed
   expect(returnFocus).toHaveBeenCalledTimes(2)
+})
+
+it('Retake keeps the same editor on a cancelled capture and closes it once the new capture takes over', async () => {
+  let answer!: (state: 'completed' | 'cancelled' | 'expanded') => void
+  const retake = vi.fn(() => new Promise<'completed' | 'cancelled' | 'expanded'>(resolve => { answer = resolve }))
+  const current = await open(undefined, true, undefined, undefined, false, retake)
+  expect(current.input.retakable, 'a region capture can be retaken').toBe(true)
+  const cancelled = current.call('retake', { requestId: current.input.requestId })
+  await vi.waitFor(() => expect(retake).toHaveBeenCalledOnce())
+  expect(current.window.dead, 'the editor waits for the new capture').toBe(false)
+  answer('cancelled')
+  expect(await cancelled).toEqual({ status: 'cancelled' })
+  expect(current.window.dead, 'a cancelled capture keeps the same editor').toBe(false)
+  expect(await current.call('load'), 'with the same request').toMatchObject({ requestId: current.input.requestId })
+  const completed = current.call('retake', { requestId: current.input.requestId })
+  await vi.waitFor(() => expect(retake).toHaveBeenCalledTimes(2))
+  answer('completed')
+  expect(await completed).toEqual({ status: 'completed' })
+  expect(current.window.dead, 'a completed capture closes the editor').toBe(true)
+  await current.closed
+})
+
+it('a retake that moves into a new window editor closes this one, and a failed retake keeps it', async () => {
+  const expanded = await open(undefined, false, undefined, undefined, false, vi.fn(async () => 'expanded' as const))
+  expect(await expanded.call('retake', { requestId: expanded.input.requestId })).toEqual({ status: 'completed' })
+  expect(expanded.window.dead, 'the new editor replaces this one').toBe(true)
+  const failing = await open(undefined, false, undefined, undefined, false, vi.fn(async () => { throw new Error('A screen capture is already in progress.') }))
+  expect(await failing.call('retake', { requestId: failing.input.requestId })).toEqual({ status: 'failed', message: 'A screen capture is already in progress.' })
+  expect(failing.window.dead, 'a failed retake keeps the editor').toBe(false)
+  const plain = await open()
+  expect(plain.input.retakable, 'a display or window capture has no region to retake').toBeUndefined()
+  await expect(plain.call('retake', { requestId: plain.input.requestId })).rejects.toThrow('cannot be retaken here')
 })

@@ -17,7 +17,7 @@ import type { BrowserPng } from '../src/shared/contracts'
 // Only Electron's lifecycle/IPC and the native physical IO are controlled.
 // The capture surface, window editor, capture and global screenshot owners, generated original-frame calls,
 // PNG validation and durable pasted-image publication/readback are the production modules.
-const electron = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[] }))
+const electron = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], workbench: [] as any[] }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   return {
@@ -32,9 +32,14 @@ vi.mock('electron', async () => {
     BrowserWindow: class extends EventEmitter {
       dead = false
       webContents = Object.assign(new EventEmitter(), { mainFrame: {}, setWindowOpenHandler: vi.fn(), send: vi.fn() })
-      show = vi.fn(); showInactive = vi.fn(); focus = vi.fn(); setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
+      visible = false; opacity = 1
+      show = vi.fn(() => { this.visible = true }); showInactive = vi.fn(() => { this.visible = true }); focus = vi.fn(); setAlwaysOnTop = vi.fn(); setVisibleOnAllWorkspaces = vi.fn(); setBounds = vi.fn()
+      setOpacity = vi.fn((value: number) => { this.opacity = value })
       static getFocusedWindow() { return null }
-      static getAllWindows() { return [] }
+      // The capture surface fades the visible windows it finds; tests that need that opt in.
+      static getAllWindows() { return electron.workbench }
+      isVisible() { return this.visible }
+      isMinimized() { return false }
       loadFile = vi.fn(async () => { this.emit('ready-to-show') })
       loadURL = this.loadFile
       constructor(readonly options: unknown) { super(); electron.windows.push(this) }
@@ -49,13 +54,13 @@ const originalBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
 const editedBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const original = pngFromBytes(originalBytes), edited = pngFromBytes(editedBytes)
 const homes: string[] = [], owners: Array<{ dispose(): void }> = []
-beforeEach(() => { electron.windows = []; electron.handlers.clear() })
+beforeEach(() => { electron.windows = []; electron.workbench = []; electron.handlers.clear() })
 afterEach(async () => {
   owners.splice(0).forEach(owner => owner.dispose())
   await Promise.all(homes.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
-async function fixture(focused = true) {
+async function fixture(focused = true, fromOtherApp = false) {
   const home = await mkdtemp(join(tmpdir(), 'amux-screenshot-composition-')); homes.push(home)
   const native = {
     captureDisplays: vi.fn(async () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 },
@@ -70,30 +75,30 @@ async function fixture(focused = true) {
   const contents = { isDestroyed: () => false, mainFrame: frame }
   const workbench = { isDestroyed: () => false, isFocused: () => true, isMinimized: () => false }
   const focusedWindow = vi.fn(() => focused ? workbench : null), reportIssue = vi.fn()
-  const editor = new SystemScreenshotEditor(), surface = new CaptureSurface({ native: () => native, appearance: () => ({ terminalTheme: 'graphite' }),
-    pin: vi.fn(), copyText: vi.fn(), returnFocus: vi.fn() })
+  const surfaceFocus = vi.fn(), editor = new SystemScreenshotEditor(), surface = new CaptureSurface({ native: () => native, appearance: () => ({ terminalTheme: 'graphite' }),
+    pin: vi.fn(), copyText: vi.fn(), returnFocus: surfaceFocus })
   owners.push(editor, surface)
-  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: editor.edit.bind(editor), present: surface.present.bind(surface), reportIssue })
+  const capture = new ScreenCapture({ home, native: () => native, appActive: () => !fromOtherApp, edit: editor.edit.bind(editor), present: surface.present.bind(surface), reportIssue })
   const action = new GlobalScreenshot({ contents, focusedWindow, windowForDocument: () => workbench,
     capture: capture.capture.bind(capture), remindPending: () => {}, reportIssue } as never)
-  async function overlay() {
-    await vi.waitFor(() => expect(electron.windows).toHaveLength(1))
-    const window = electron.windows[0]
+  async function overlay(index = 0) {
+    await vi.waitFor(() => expect(electron.windows.length).toBeGreaterThan(index))
+    const window = electron.windows[index]
     const invoke = (action: string, params?: unknown) => electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(
       { sender: window.webContents, senderFrame: window.webContents.mainFrame }, action, params)
     const input: CaptureSurfaceInput = await invoke('load')
     await invoke('select', { requestId: input.requestId })
     return { window, invoke, input }
   }
-  async function editing() {
-    await vi.waitFor(() => expect(electron.windows).toHaveLength(2))
-    const window = electron.windows[1]
+  async function editing(index = 1) {
+    await vi.waitFor(() => expect(electron.windows.length).toBeGreaterThan(index))
+    const window = electron.windows[index]
     const invoke = (action: string, params?: unknown) => electron.handlers.get(SYSTEM_SCREENSHOT_EDITOR_CHANNEL)!(
       { sender: window.webContents, senderFrame: window.webContents.mainFrame }, action, params)
     const input: SystemScreenshotEditorInput = await invoke('load')
     return { window, invoke, input }
   }
-  return { home, native, identity, receiver, frame, contents, focusedWindow, reportIssue, action, overlay, editing }
+  return { home, native, identity, receiver, frame, contents, focusedWindow, reportIssue, action, overlay, editing, surfaceFocus }
 }
 
 const selection = { x: 0, y: 0, width: 1, height: 1 }
@@ -111,6 +116,8 @@ it('Done on the overlay delivers its processed selection through clipboard, dura
   f.contents.mainFrame = laterFrame as never
   f.focusedWindow.mockReturnValue(null)
   expect(await current.invoke('finish', { requestId: current.input.requestId, image: edited, selection })).toEqual({ status: 'completed' })
+  // Checked before waiting, so a delivery that never ends the surface fails here instead of timing out.
+  expect(current.window.isDestroyed(), 'Done closed the overlay').toBe(true)
   await pending
 
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
@@ -133,6 +140,8 @@ it('a clipboard-only global screenshot copies the processed selection with no dr
   expect(current.input).toMatchObject({ image: original, attachToDraft: false })
   expect(f.frame.executeJavaScript).not.toHaveBeenCalled()
   expect(await current.invoke('finish', { requestId: current.input.requestId, image: edited, selection })).toEqual({ status: 'completed' })
+  // Checked before waiting, so a delivery that never ends the surface fails here instead of timing out.
+  expect(current.window.isDestroyed(), 'Done closed the overlay').toBe(true)
   await pending
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
   expect(f.receiver.complete).not.toHaveBeenCalled()
@@ -171,5 +180,87 @@ it.each(['overlay', 'editor'])('cancelling the %s delivers no pixels and release
   expect(f.receiver.complete).toHaveBeenCalledExactlyOnceWith(f.receiver.prepare.mock.calls[0]![0], null)
   expect(await readdir(f.home)).toEqual([])
   expect(electron.windows).toHaveLength(stage === 'editor' ? 2 : 1)
+  expect(f.reportIssue).not.toHaveBeenCalled()
+})
+
+it('Retake from the window editor captures again for the same draft and returns to the same editor on cancel', async () => {
+  const f = await fixture(), pending = f.action.run(), first = await f.overlay()
+  const handoff = { shapes: [{ id: 'mark', kind: 'rect', color: '#ff0000', width: 2, x: 0, y: 0, w: 1, h: 1 }], crop: selection, tool: 'rect' }
+  await first.invoke('expand', { requestId: first.input.requestId, handoff })
+  const editor = await f.editing()
+  expect(editor.input.retakable).toBe(true)
+  electron.workbench = [editor.window]
+  const cancelled = editor.invoke('retake', { requestId: editor.input.requestId })
+  const second = await f.overlay(2)
+  expect(editor.window.opacity, 'the old editor steps out of the new frozen frame').toBe(0)
+  expect(f.native.captureDisplays, 'a new frozen frame').toHaveBeenCalledTimes(2)
+  expect(second.input, 'the same consumer: the original draft and ⌘E').toMatchObject({ attachToDraft: true, expandable: true })
+  await second.invoke('cancel', { requestId: second.input.requestId })
+  expect(await cancelled).toEqual({ status: 'cancelled' })
+  expect([editor.window.isDestroyed(), editor.window.opacity], 'the same editor is back').toEqual([false, 1])
+  expect(await editor.invoke('load'), 'with its original marks').toMatchObject({ requestId: editor.input.requestId, initialState: { shapes: handoff.shapes, crop: selection } })
+  expect(f.receiver.complete, 'the draft is still waiting').not.toHaveBeenCalled()
+
+  const completed = editor.invoke('retake', { requestId: editor.input.requestId })
+  const third = await f.overlay(3)
+  expect(await third.invoke('finish', { requestId: third.input.requestId, image: edited, selection })).toEqual({ status: 'completed' })
+  expect(third.window.isDestroyed(), 'Done closed the overlay').toBe(true)
+  expect(await completed).toEqual({ status: 'completed' })
+  await pending
+  expect(editor.window.isDestroyed(), 'the old editor closes once the new capture delivered').toBe(true)
+  expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
+  expect(f.receiver.complete, 'one delivery to the original draft operation').toHaveBeenCalledExactlyOnceWith(f.receiver.prepare.mock.calls[0]![0], expect.any(String))
+  expect(await readFile(f.receiver.complete.mock.calls[0]![1]!)).toEqual(editedBytes)
+  expect(f.reportIssue).not.toHaveBeenCalled()
+})
+
+it('a retake that expands again replaces the old editor, and the capture ends with the new one', async () => {
+  const f = await fixture(), pending = f.action.run(), first = await f.overlay()
+  await first.invoke('expand', { requestId: first.input.requestId, handoff: { shapes: [], crop: selection, tool: 'rect' } })
+  const old = await f.editing()
+  const retaken = old.invoke('retake', { requestId: old.input.requestId })
+  const second = await f.overlay(2)
+  await second.invoke('expand', { requestId: second.input.requestId, handoff: { shapes: [], crop: selection, tool: 'arrow' } })
+  const next = await f.editing(3)
+  expect(await retaken).toEqual({ status: 'completed' })
+  expect([old.window.isDestroyed(), next.input.initialTool, next.input.retakable], 'the new editor takes over and can retake too').toEqual([true, 'arrow', true])
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(f.receiver.complete, 'the original draft still waits for the new editor').not.toHaveBeenCalled()
+  expect(await next.invoke('finish', { requestId: next.input.requestId, operationId: 'retaken-final', image: edited })).toEqual({ status: 'completed' })
+  await next.invoke('cancel', { requestId: next.input.requestId })
+  await pending
+  expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(edited)
+  expect(await readFile(f.receiver.complete.mock.calls[0]![1]!)).toEqual(editedBytes)
+})
+
+it('a retake started in the window editor gives focus back to that editor, not to the app the capture came from', async () => {
+  const f = await fixture(false, true), pending = f.action.run(), first = await f.overlay()
+  await first.invoke('expand', { requestId: first.input.requestId, handoff: { shapes: [], crop: selection, tool: 'rect' } })
+  const editor = await f.editing()
+  const retaken = editor.invoke('retake', { requestId: editor.input.requestId })
+  const second = await f.overlay(2)
+  await second.invoke('cancel', { requestId: second.input.requestId })
+  expect(await retaken).toEqual({ status: 'cancelled' })
+  expect(f.surfaceFocus, 'the cancelled retake returns to the editor, which keeps the capture').not.toHaveBeenCalled()
+  await editor.invoke('cancel', { requestId: editor.input.requestId })
+  await pending
+})
+
+it('a retake after the editor already copied keeps the same consumer: the clipboard only, no second draft file', async () => {
+  const f = await fixture(), pending = f.action.run(), first = await f.overlay()
+  await first.invoke('expand', { requestId: first.input.requestId, handoff: { shapes: [], crop: selection, tool: 'rect' } })
+  const editor = await f.editing()
+  expect(await editor.invoke('finish', { requestId: editor.input.requestId, operationId: 'first-copy', image: edited })).toEqual({ status: 'completed' })
+  await pending
+  expect(f.receiver.complete).toHaveBeenCalledOnce()
+  const retaken = editor.invoke('retake', { requestId: editor.input.requestId })
+  const second = await f.overlay(2)
+  expect(await second.invoke('finish', { requestId: second.input.requestId, image: original, selection })).toEqual({ status: 'completed' })
+  expect(second.window.isDestroyed(), 'Done closed the overlay').toBe(true)
+  expect(await retaken).toEqual({ status: 'completed' })
+  expect(editor.window.isDestroyed()).toBe(true)
+  expect(f.native.writeClipboardImage.mock.calls.map(call => call[0]), 'the retake copies like a later Copy').toEqual([edited, original])
+  expect(f.receiver.complete, 'the original draft received its one image').toHaveBeenCalledOnce()
+  expect(await readdir(pastedDirectory(f.home)), 'no second draft file').toHaveLength(1)
   expect(f.reportIssue).not.toHaveBeenCalled()
 })

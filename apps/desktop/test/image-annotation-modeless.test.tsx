@@ -32,9 +32,9 @@ function button(editor: HTMLElement, name: string): HTMLButtonElement {
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
 // initialTool null mounts without the prop, so the remembered tool decides.
-type Options = { shapes?: ScreenshotShape[]; initialTool?: AnnotationTool | null; onComplete?: ReturnType<typeof vi.fn> }
-async function mount({ shapes = [], initialTool = 'rect', onComplete = vi.fn() }: Options = {}) {
-  const props = { image, busy: false, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete, onCopyContext: vi.fn(), onSavePng: vi.fn() }
+type Options = { shapes?: ScreenshotShape[]; initialTool?: AnnotationTool | null; onComplete?: ReturnType<typeof vi.fn>; onRetake?: ReturnType<typeof vi.fn> }
+async function mount({ shapes = [], initialTool = 'rect', onComplete = vi.fn(), onRetake }: Options = {}) {
+  const props = { image, busy: false, initialState: { shapes, crop: null }, onCancel: vi.fn(), onComplete, onCopyContext: vi.fn(), onSavePng: vi.fn(), ...(onRetake ? { onRetake } : {}) }
   await act(async () => root.render(<ImageAnnotationEditor key={Math.random()} {...props} {...(initialTool ? { initialTool } : {})} />)); await frame()
   const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!, canvas = editor.querySelector('canvas')!
   canvas.setPointerCapture = vi.fn()
@@ -53,6 +53,11 @@ async function mount({ shapes = [], initialTool = 'rect', onComplete = vi.fn() }
   return { editor, canvas, gesture, key, click, copy, props }
 }
 
+async function copy(props: { onComplete: ReturnType<typeof vi.fn> }) {
+  const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!
+  await act(async () => button(editor, 'Copy PNG').click()); await frame()
+  return props.onComplete.mock.lastCall![0].shapes as ScreenshotShape[]
+}
 describe('modeless image annotation', () => {
   it('a drawing tool moves the existing mark it presses instead of drawing over it', async () => {
     const { gesture, copy } = await mount({ shapes: [arrow] })
@@ -117,6 +122,31 @@ describe('modeless image annotation', () => {
     expect(next.querySelector('.image-annotation-editor__discard')).not.toBeNull()
     await press('Escape')
     expect(nextProps.onCancel, 'second Escape on the discard bar confirms').toHaveBeenCalledOnce()
+  })
+
+  it('Retake asks in place naming the unkept marks and retakes only once confirmed', async () => {
+    const plain = await mount()
+    expect([...plain.editor.querySelectorAll('button')].some(button => button.getAttribute('aria-label') === 'Retake'), 'no Retake without a host that can retake').toBe(false)
+    const onRetake = vi.fn()
+    const { editor, gesture, key, click, props } = await mount({ onRetake })
+    expect(button(editor, 'Retake').getAttribute('aria-keyshortcuts')).toBe('Shift+Meta+R')
+    await click('Retake')
+    expect(onRetake, 'nothing to lose retakes at once').toHaveBeenCalledOnce()
+    await gesture([40, 40], [120, 100]); await gesture([200, 40], [260, 100])
+    await key('r', { metaKey: true, shiftKey: true })
+    expect(onRetake, 'actual unkept marks are confirmed before a retake').toHaveBeenCalledOnce()
+    expect(editor.querySelector('.image-annotation-editor__discard')?.textContent, 'actual retake confirmation names the marks').toContain('Discard 2 annotations and retake?')
+    await key('Escape')
+    expect([editor.querySelector('.image-annotation-editor__discard'), onRetake.mock.calls.length, props.onCancel.mock.calls.length], 'Escape keeps editing').toEqual([null, 1, 0])
+    await click('Retake'); await click('Keep editing')
+    expect(onRetake).toHaveBeenCalledOnce()
+    await click('Retake'); await click('Discard & retake')
+    expect([onRetake.mock.calls.length, props.onCancel.mock.calls.length], 'confirming retakes and does not close the editor').toEqual([2, 0])
+    expect((await copy(props)).length, 'the marks stay until the new capture takes over').toBe(2)
+    await key('r', { metaKey: true, shiftKey: true }); await key('Enter')
+    expect(onRetake, 'Enter on the retake confirmation retakes').toHaveBeenCalledTimes(3)
+    await key('r', { metaKey: true })
+    expect(editor.querySelector('.image-annotation-editor__discard'), 'Command R alone is not Retake').toBeNull()
   })
 
   it('an output the host confirms as kept lets Escape close without asking', async () => {
