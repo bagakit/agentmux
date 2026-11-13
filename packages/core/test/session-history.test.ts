@@ -26,7 +26,8 @@ async function harness(reader?: AgentProvider['readSessionHistoryPage'], hasHand
         transcriptPath: fixturePath("synthetic/ignored-fork-locator.jsonl") }
     } : {}) }
   await store.compareAndSwap(null, session)
-  const { readSessionHistoryPage: _builtin, ...base } = new AgentProviderRegistry().get('codex')
+  const { readSessionHistoryPage: _builtin, readSessionHistoryRecord: _record,
+    readConversationChanges: _changes, observeSessionHistory: _observe, ...base } = new AgentProviderRegistry().get('codex')
   const provider: AgentProvider = { ...base, ...(reader ? { readSessionHistoryPage: reader } : {}) }
   const client = new AgentMuxClient({ store, providers: [provider] })
   clients.push(client)
@@ -57,7 +58,7 @@ describe('public native Session history pages', () => {
     const { client, store, owner, session } = await harness(reader)
     const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map((name) =>
       vi.spyOn(owner.kernel, name as 'start'))
-    expect(await client.sessionHistoryPage(session.agentSessionId)).toEqual({ agentSessionId: session.agentSessionId, ...result })
+    expect(await client.sessionHistoryPage(session.agentSessionId)).toEqual({ agentSessionId: session.agentSessionId, sourceHostId: 'local', ...result })
     expect(reader).toHaveBeenCalledOnce()
     expect(reader.mock.calls[0]![0]).toMatchObject({ source, limit: 30 })
     for (const control of controls) expect(control).not.toHaveBeenCalled()
@@ -109,7 +110,7 @@ describe('public native Session history pages', () => {
       : page())
     const { client } = await harness(reader)
     const first = await client.sessionHistoryPage('main-session', { limit: 5 })
-    expect(first).toEqual({ agentSessionId: 'main-session', source, items: [], nextCursor: 'same-native-empty-page-cursor' })
+    expect(first).toEqual({ agentSessionId: 'main-session', sourceHostId: 'local', source, items: [], nextCursor: 'same-native-empty-page-cursor' })
     const second = await client.sessionHistoryPage('main-session', { limit: 5, cursor: first.nextCursor! })
     expect(second.items).toEqual([item])
     expect(reader.mock.calls[1]![0].cursor).toBe('same-native-empty-page-cursor')
@@ -223,28 +224,29 @@ describe('public native Session history pages', () => {
     vi.useFakeTimers()
     const reader = vi.fn(async () => page())
     const { client, store } = await harness(reader)
-    const originalLoad = store.load.bind(store)
-    const values = await originalLoad()
-    const resolutions: Array<(values: readonly unknown[]) => void> = []
-    const load = vi.spyOn(store, 'load').mockImplementation(async () => {
-      if ((phase === 'initial' || load.mock.calls.length > 4) && resolutions.length < 4) {
-        return await new Promise<readonly unknown[]>((resolve) => { resolutions.push(resolve) })
+    const originalRead = store.readHistorySource.bind(store)
+    const value = await originalRead('main-session')
+    const resolutions: Array<(source: typeof value) => void> = []
+    const load = vi.spyOn(store, 'readHistorySource').mockImplementation(async (...args) => {
+      // Fence the exact-Session source owner, including its check after the Provider returned.
+      if ((phase === 'initial' || reader.mock.calls.length === 4) && resolutions.length < 4) {
+        return await new Promise<typeof value>((resolve) => { resolutions.push(resolve) })
       }
-      return await originalLoad()
+      return await originalRead(...args)
     })
     const requests = Array.from({ length: 4 }, () => client.sessionHistoryPage('main-session'))
     const failures = requests.map((request) => expect(request).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TIMEOUT' }))
     await vi.waitFor(() => expect(resolutions).toHaveLength(4))
     await vi.advanceTimersByTimeAsync(10_000)
     await Promise.all(failures)
-    const expectedReads = phase === 'initial' ? 4 : 8
-    expect(load).toHaveBeenCalledTimes(expectedReads)
+    const expectedReads = load.mock.calls.length
+    expect(reader).toHaveBeenCalledTimes(phase === 'initial' ? 0 : 4)
     await expect(client.sessionHistoryPage('main-session')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_BUSY' })
     expect(load).toHaveBeenCalledTimes(expectedReads)
-    resolutions[0]!(values)
+    resolutions[0]!(value)
     await vi.advanceTimersByTimeAsync(0)
     expect((await client.sessionHistoryPage('main-session')).items).toEqual([item])
-    resolutions.slice(1).forEach((resolve) => resolve(values))
+    resolutions.slice(1).forEach((resolve) => resolve(value))
     load.mockRestore()
     vi.useRealTimers()
   })
@@ -264,7 +266,7 @@ describe('public native Session history pages', () => {
       const kernel = (client as unknown as { kernel: CtxmuxRunAdapter }).kernel
       const connect = vi.spyOn(kernel, 'connect').mockRejectedValue(new Error('Synthetic Runtime unavailable'))
       const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map((name) => vi.spyOn(kernel, name as 'start'))
-      await expect(client.sessionHistoryPage(session.agentSessionId)).resolves.toEqual({ agentSessionId: session.agentSessionId, ...page() })
+      await expect(client.sessionHistoryPage(session.agentSessionId)).resolves.toEqual({ agentSessionId: session.agentSessionId, sourceHostId: 'local', ...page() })
       expect(reader).toHaveBeenCalledOnce()
       expect(connect).not.toHaveBeenCalled()
       for (const control of controls) expect(control).not.toHaveBeenCalled()
