@@ -15,6 +15,10 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
  * in Page.javascriptDialogOpening on the root session (iframe dialogs arrive there too), and the
  * handle reply or Page.javascriptDialogClosed. No answer is decided from CDP error text or page text.
  *
+ * File choosers are the same kind of interruption: a click on a file input would open the native
+ * picker over the person's screen. During a run they are intercepted instead; the newest one is held
+ * as a handle the program can fill through the upload owner, and dropped when its document goes away.
+ *
  * Unknown stays unknown: when Page.enable fails, nothing is refused and the run keeps today's
  * behaviour; `observing()` reports false so the caller can say so.
  */
@@ -44,6 +48,9 @@ export function describeBrowserPageDialog(dialog: BrowserPageDialog): string {
   return `The page opened a ${dialog.type} dialog: ${pageMessage(dialog.message)}. While it is open the page cannot answer; ${answer}, or gotoUrl() leaves the page.`
 }
 
+/** A chooser the page opened during the run, held so a program can fill it. */
+export type BrowserPageFileChooser = { handle: string; mode: 'single' | 'multiple'; backendNodeId: number; sessionId?: string }
+
 export type BrowserPageInterrupts = ReturnType<typeof installBrowserPageInterrupts>
 
 /**
@@ -57,9 +64,21 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
   let leftOpen: BrowserPageDialog | null = null
   // Every page call in flight races this; a new dialog rejects all of them at once.
   const waiters = new Set<(dialog: BrowserPageDialog) => void>()
+  // The newest chooser the page opened; a later one replaces it, as it does for a person.
+  let chooser: BrowserPageFileChooser | null = null
+  let chooserCount = 0
 
-  const stop = session.observe((method, params) => {
+  const stop = session.observe((method, params, sessionId) => {
     if (disposed) return
+    if (method === 'Page.fileChooserOpened') {
+      const event = params as { backendNodeId?: number; mode?: string }
+      if (!Number.isInteger(event.backendNodeId)) return
+      chooser = { handle: `chooser-${++chooserCount}`, mode: event.mode === 'selectMultiple' ? 'multiple' : 'single',
+        backendNodeId: event.backendNodeId!, ...(sessionId ? { sessionId } : {}) }
+      return
+    }
+    // A new document voids every backend node id, so a held chooser points at nothing.
+    if (method === 'Page.frameNavigated' && !sessionId && !(params as { frame?: { parentId?: string } }).frame?.parentId) chooser = null
     if (method === 'Page.javascriptDialogOpening') {
       const event = params as { type?: string; message?: string; url?: string }
       if (!event.type || !DIALOG_TYPES.has(event.type)) return
@@ -70,10 +89,24 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
     if (method === 'Page.javascriptDialogClosed') open = null
   })
 
-  const ready = session.sendCommand('Page.enable', {}).then(() => { observing = true }, () => { observing = false })
+  // File choosers are intercepted, so no native picker opens over the person's screen during a run.
+  // A cross-site frame's chooser arrives on its own session, which needs its own interception.
+  const intercept = (send: BrowserPageTransport['sendCommand']) =>
+    send('Page.enable', {}).then(() => send('Page.setInterceptFileChooserDialog', { enabled: true })).catch(() => {})
+  const ready = session.sendCommand('Page.enable', {}).then(async () => {
+    observing = true
+    await session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => {})
+    await Promise.all([...session.frames.values()].map(intercept))
+  }, () => { observing = false })
 
   // A person taking control ends Agent answers: the owner stops listening and never answers again.
-  const onAbort = () => { disposed = true; stop() }
+  const onAbort = () => {
+    disposed = true
+    stop()
+    // The person now owns the page: their clicks open the native picker again. Not awaited, since a
+    // dialog the page holds open can delay the reply.
+    if (observing) void session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})
+  }
   options.signal.addEventListener('abort', onAbort, { once: true })
 
   return {
@@ -83,6 +116,12 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
     observing: () => observing,
     /** The dialog open now, if any. */
     current: (): BrowserPageDialog | null => open,
+    /** The chooser the page opened and has not been filled, as a program sees it. */
+    pendingChooser: (): { handle: string; mode: 'single' | 'multiple' } | null => chooser && { handle: chooser.handle, mode: chooser.mode },
+    /** The chooser behind a handle a program was given; null once filled, replaced or its document is gone. */
+    chooser: (handle: string): BrowserPageFileChooser | null => chooser?.handle === handle ? chooser : null,
+    /** A chooser was filled; it is no longer offered. */
+    consumeChooser(handle: string): void { if (chooser?.handle === handle) chooser = null },
 
     /**
      * Run one page call; if a dialog opens before it settles, it fails at once with a typed fact.
@@ -142,7 +181,12 @@ export function installBrowserPageInterrupts(session: BrowserPageTransport, opti
         await session.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => {})
         open = null
       }
-      if (observing) await session.sendCommand('Page.disable', {}).catch(() => {})
+      if (observing) {
+        // Without this a person's later click on a file input would open nothing.
+        await session.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})
+        await Promise.all([...session.frames.values()].map(send => send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {})))
+        await session.sendCommand('Page.disable', {}).catch(() => {})
+      }
     }
   }
 }

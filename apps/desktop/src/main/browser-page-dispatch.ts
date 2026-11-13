@@ -780,6 +780,32 @@ export function createBrowserPageDispatch(
     return undefined
   }
 
+  /**
+   * Fill a file chooser the page opened, by its handle from pageInfo().fileChooser. The chooser names
+   * the file input by backend node id on the session it opened in; that id is resolved there, never on
+   * another session, and the existing upload owner stages, assigns and verifies the files.
+   */
+  async function uploadToChooser(handle: string, paths: unknown): Promise<unknown> {
+    const chooser = context.interrupts?.chooser(handle)
+    if (!chooser) {
+      throw new BrowserLocalRecoveryFailure(`${handle} is not an open file chooser: it was filled, replaced by a newer one, or its page navigated. ` +
+        'Nothing was sent; read pageInfo().fileChooser for the current one.', 'locator-changed', 'not-dispatched')
+    }
+    const send = chooser.sessionId ? session.frames.get(chooser.sessionId) : session.sendCommand
+    if (!send) throw new BrowserLocalRecoveryFailure(`The frame that opened ${handle} went away. Nothing was sent.`, 'locator-changed', 'not-dispatched')
+    const resolved = await send('DOM.resolveNode', { backendNodeId: chooser.backendNodeId }).catch(() => null) as { object?: { objectId?: string } } | null
+    const objectId = resolved?.object?.objectId
+    if (!objectId) throw new BrowserLocalRecoveryFailure(`The file input behind ${handle} is gone. Nothing was sent.`, 'locator-changed', 'not-dispatched')
+    try {
+      const receipt = await uploadBrowserFiles(context.uploads!.store, { ...context.uploads!.context(), target: { objectId, sendCommand: send } }, paths)
+      context.interrupts?.consumeChooser(handle)
+      return receipt
+    } catch (error) {
+      if (error instanceof BrowserUploadUnconfirmedError) { context.interrupts?.consumeChooser(handle); context.note(error.message) }
+      throw error
+    }
+  }
+
   /** Set a picker's value. typeText on a picker has nothing to append to, so it is refused before anything changes. */
   async function pickerValue(ref: string, send: typeof session.sendCommand, target: string, value: string, replace: boolean, guard: () => void): Promise<undefined> {
     if (!replace) throw notDispatched(`${ref} is a picker (date, time, color, range or select), so text cannot be appended. Nothing changed; use fillInput with the whole value.`)
@@ -1021,6 +1047,8 @@ export function createBrowserPageDispatch(
       case 'uploadFiles': {
         if (!context.uploads) throw new Error('Uploads are unavailable for this Browser. Existing Browser work remains.')
         const ref = requireString(args[0], 'ref')
+        // A chooser the page opened: resolve its file input on the session it opened in, then the same upload owner.
+        if (ref.startsWith('chooser-')) return await uploadToChooser(ref, args[1])
         if (!current || !issued?.has(ref) || expired.has(ref)) {
           throw new Error('Upload requires a ref issued by the latest snapshot in this run. Take a fresh snapshot and choose the actual file input.')
         }
@@ -1059,8 +1087,11 @@ export function createBrowserPageDispatch(
         const snapshot = await publishSnapshot(parseBrowserSnapshotQuery(args[0]))
         return renderBrowserSnapshotText(snapshot, snapshot.observation)
       }
-      case 'pageInfo':
-        return context.pageInfo()
+      case 'pageInfo': {
+        // A chooser the page opened is part of what the page is showing; a program fills it with uploadFiles(handle, paths).
+        const fileChooser = context.interrupts?.pendingChooser()
+        return fileChooser ? { ...context.pageInfo(), fileChooser } : context.pageInfo()
+      }
       case 'extractStructured':
         return await extractStructured(args[0])
       case 'captureScreenshot':

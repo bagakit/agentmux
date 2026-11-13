@@ -61,7 +61,7 @@ export class BrowserUploads {
         functionDeclaration: 'function(){if(!(this instanceof HTMLInputElement)||this.type!=="file"||!this.isConnected||this.disabled)throw new Error("Current target is not an enabled file input");return {multiple:this.multiple}}'
       }) as { result?: { value?: { multiple: boolean } }; exceptionDetails?: unknown }
       requireCurrent()
-      if (result.exceptionDetails || !result.result?.value || typeof result.result.value.multiple !== 'boolean') throw new Error('The current target is unavailable or is not an enabled file input. File chooser dialogs are not supported; select an actual file input from a fresh snapshot.')
+      if (result.exceptionDetails || !result.result?.value || typeof result.result.value.multiple !== 'boolean') throw new Error('The current target is unavailable or is not an enabled file input. Select an actual file input from a fresh snapshot, or the handle in pageInfo().fileChooser after the page opened a file chooser.')
       return result.result.value
     }
     const target = await inspect()
