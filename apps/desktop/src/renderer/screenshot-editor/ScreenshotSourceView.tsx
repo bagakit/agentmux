@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ScreenshotSourceApi, ScreenshotSourceInput, ScreenshotSourceList } from '../../shared/screenshot-source'
 
 export function ScreenshotSourceView({ input, api }: { input: ScreenshotSourceInput; api: ScreenshotSourceApi }) {
@@ -9,14 +10,14 @@ export function ScreenshotSourceView({ input, api }: { input: ScreenshotSourceIn
   async function load(appKey: string | null = null) {
     const token = ++epoch.current; setBusy(true); setError(''); setQuery('')
     try { const next = await (appKey ? api.windows(input.requestId, appKey) : api.list(input.requestId)); if (epoch.current === token) { setList(next); setApp(appKey) } }
-    catch (cause) { if (epoch.current === token) setError(cause instanceof Error ? cause.message : String(cause)) }
+    catch (cause) { if (epoch.current === token) setError(presentError(cause)) }
     finally { if (epoch.current === token) setBusy(false) }
   }
-  async function cancel() { epoch.current++; try { await api.cancel(input.requestId) } catch (cause) { setError(String(cause)) } }
+  async function cancel() { epoch.current++; try { await api.cancel(input.requestId) } catch (cause) { setError(presentError(cause)) } }
   useEffect(() => { void load(); const key = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); void cancel() } }; window.addEventListener('keydown', key); return () => { epoch.current++; window.removeEventListener('keydown', key) } }, [])
   async function select(key: string) {
     if (input.kind === 'window' && app === null) { await load(key); return }
-    try { await api.select(input.requestId, key) } catch (cause) { setError(String(cause)) }
+    try { await api.select(input.requestId, key) } catch (cause) { setError(presentError(cause)) }
   }
   const choices = list.choices.filter(choice => `${choice.label} ${choice.detail}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
   return <main className="screenshot-source">
