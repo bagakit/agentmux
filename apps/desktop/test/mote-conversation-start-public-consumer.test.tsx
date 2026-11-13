@@ -109,6 +109,27 @@ it('actual Desktop welcome submits the original draft through helper and real Ho
   expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 }, 45_000)
 
+it('a message held while the role owner was read goes out once as the welcome\'s first message when there is no Main', async () => {
+  const f = await originalWelcome(), query = 'Held while the Mote was being read.'
+  // As the workface holds it: moved out of the Composer, kept with the Mote draft until it goes.
+  useLauncherState.getState().setDraft(f.key, 'prompt', query)
+  useLauncherState.getState().holdPrompt(f.key, 'held-first-message', 'reading-open')
+  const held = useLauncherState.getState().drafts[f.key]!.heldPrompt!
+  const settled = vi.fn((operationId: string) => { useLauncherState.getState().settleHeldPrompt(f.key, operationId, false) })
+  const view = await mounted(<MoteDialogueViewProvider scope={f.scope} active><MoteConversationStart scope={f.scope} active mode="start"
+    held={held} onHeldSettled={settled} onConfigure={() => {}} onOpenMain={f.opened} onOpenPeriod={() => {}} /></MoteDialogueViewProvider>)
+  await wait(() => expect(f.open).toHaveBeenCalledOnce())
+  // The held operation is the first message's own identity, so a retry can never mint a second one.
+  expect(f.open.mock.calls[0]![0].moteMain?.deferredInput).toMatchObject({ operationId: 'held-first-message', prompt: query })
+  expect(settled).toHaveBeenCalledWith('held-first-message')
+  await wait(() => expect(f.opened).toHaveBeenCalledOnce())
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe('')
+  // A rerender with the same held message never sends it again.
+  await view.render(<MoteDialogueViewProvider scope={f.scope} active><MoteConversationStart scope={f.scope} active mode="start"
+    held={held} onHeldSettled={settled} onConfigure={() => {}} onOpenMain={f.opened} onOpenPeriod={() => {}} /></MoteDialogueViewProvider>)
+  expect(f.open).toHaveBeenCalledOnce(); expect(f.h.started).toHaveLength(1)
+}, 45_000)
+
 async function originalAutomatic() {
   const f = await originalWelcome('claude')
   await f.start('auto-original-main', 'Original human query before the native turn')

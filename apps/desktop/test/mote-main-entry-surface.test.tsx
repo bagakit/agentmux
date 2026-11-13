@@ -77,23 +77,47 @@ async function boundMote(dialogueRead?: (input: Parameters<typeof api.moteDialog
   return { f, scope, current, open, read, key, elsewhere, started: () => f.h.started.length }
 }
 
-it('cold start with a current Main and an unselected main Region never offers the start welcome, even after early input', async () => {
+it('cold start shows the Mote at once while its Main is read, and a message sent meanwhile is held, never a new Main', async () => {
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   const m = await boundMote(async input => { await gate; return m.f.rpc.call('space.mote.dialogue.read', input) })
   const before = m.started()
   const element = await mounted(<MoteWorkface workspaceId={m.scope.workspace.id} topicId={m.scope.topic.id} floating visible recoverOnOpen={false}
     reference={m.elsewhere} onReferenceSelect={() => false}><textarea data-original-main defaultValue="原主对话草稿" /></MoteWorkface>)
-  // Reading: the overlay transition, never the welcome Composer.
+  // Reading: the Mote's own portrait, name and Composer, with history marked as loading; no create path.
   await wait(() => expect(m.read).toHaveBeenCalled())
-  expect(element.querySelector('.mote-entry-loading')?.textContent).toContain('正在接回')
-  expect(element.querySelector('.mote-start')).toBeNull()
-  // Early human input cancels only automatic selection; it must not open a create path.
+  const scene = element.querySelector<HTMLElement>('.mote-start')!
+  expect(scene.dataset.mode).toBe('reading')
+  expect(scene.querySelector('.mote-start__portrait')).not.toBeNull()
+  expect(scene.textContent).toContain('正在接回主对话')
+  expect(scene.querySelector('.mote-start-history__skeleton')?.getAttribute('aria-label')).toContain('正在读取原对话历史')
+  expect(buttonIn(element, '对话选项')).toBeUndefined()
+  // The draft is the Mote's own: typing in its Composer writes the Mote draft; sending only holds it on this device.
+  const editor = scene.querySelector<HTMLElement>('[contenteditable=true]')!
+  await act(async () => {
+    editor.textContent = '读取中写下的问题'
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '读取中写下的问题' }))
+  })
+  const key = Object.keys(useLauncherState.getState().drafts).find(id => useLauncherState.getState().drafts[id]?.prompt === '读取中写下的问题')!
+  expect(key).toMatch(/^mote-main-start:/)
+  await wait(() => expect(element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label=Send]')!.click())
+  await wait(() => expect(element.querySelector('.mote-first-message')?.getAttribute('data-stage')).toBe('held'))
+  // The text appears once, as a note waiting to go; the identity, reading state and Composer stay.
+  expect(element.textContent).toContain('接上主对话后发出')
+  expect(useLauncherState.getState().drafts[key]).toMatchObject({ prompt: '', heldPrompt: { prompt: '读取中写下的问题' } })
+  expect(element.querySelector('.mote-start[data-mode=reading] .mote-start__portrait')).not.toBeNull()
+  expect(element.querySelector('.mote-first-message .log-turn')).toBeNull()
+  // Withdrawing returns it to the editable draft; it was never sent.
+  await act(async () => buttonIn(element, '撤回')!.click())
+  expect(element.querySelector('.mote-first-message')).toBeNull()
+  expect(useLauncherState.getState().drafts[key]?.prompt).toBe('读取中写下的问题')
+  expect(useLauncherState.getState().drafts[key]?.heldPrompt).toBeUndefined()
+  // Reading, scrolling and typing do not cancel landing in the current Main; this reference is another member, so it offers it.
   await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })) })
   await act(async () => { release() })
   await wait(() => expect(buttonIn(element, '打开当前主对话')).toBeDefined())
   expect(element.querySelector('.mote-start')).toBeNull()
-  expect(element.querySelector('[contenteditable=true]')).toBeNull()
   expect(m.open).not.toHaveBeenCalled(); expect(m.started()).toBe(before)
   expect(element.querySelector<HTMLTextAreaElement>('[data-original-main]')?.value).toBe('原主对话草稿')
 }, 60_000)
