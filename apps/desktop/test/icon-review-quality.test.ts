@@ -93,3 +93,11 @@ it('finds native mask consumers in every stylesheet under the scanned roots, inc
     expect(sourceRoots.some((root: string) => ref.file.startsWith(root + '/')), ref.file).toBe(true)
   }
 })
+
+it('the exported review manifest names exactly the views the page offers', async () => {
+  const html = await readFile('apps/desktop/scripts/icon-review/index.html', 'utf8')
+  const manifest = JSON.parse(await readFile('apps/desktop/scripts/icon-review/review-manifest.json', 'utf8')) as { views: { id: string }[] }
+  const pageViews = [...html.matchAll(/id="view-([a-z]+)"/g)].map(match => match[1])
+  expect(pageViews.length).toBeGreaterThan(0)
+  expect(manifest.views.map(view => view.id)).toEqual(pageViews)
+})

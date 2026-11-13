@@ -37,6 +37,17 @@ it('starts the real published icon workbench bundle without Node globals', async
       const review = () => (window as unknown as {iconReview?: {ready: boolean; buildPacket(): {summary: {total_roles: number}}}}).iconReview
       await vi.waitFor(() => expect(review()?.ready, `Published page: ${document.getElementById('inventory-content')!.textContent}`).toBe(true))
       expect(JSON.parse(catalog).roles.length).toBeGreaterThan(0)
+      // The published page opens on the Brand view, with its art linked as files beside the page.
+      expect(document.getElementById('view-brand')!.getAttribute('aria-pressed')).toBe('true')
+      // Vendor marks are tiny and stay inlined; every brand image is a file next to the page.
+      const linked = [...document.querySelectorAll<HTMLImageElement>('.brand-realms img, .brand-commons img, .brand-ip img')].map(image => image.getAttribute('src')!)
+      expect(linked.length).toBeGreaterThan(0)
+      for (const src of linked) {
+        expect(src, 'Brand art is a relative file, not inlined data').toMatch(/^\.\/(brand|app-icons|avatar-series)\//)
+        await expect(readFile(join(out, src)), src).resolves.toBeInstanceOf(Buffer)
+      }
+      expect(app).not.toContain('import.meta')
+      document.getElementById('view-gallery')!.click()
       expect(document.querySelectorAll('[data-glyph]').length).toBeGreaterThan(0)
       document.getElementById('view-motion')!.click()
       expect(document.querySelectorAll('[data-motion-glyph]').length).toBe(JSON.parse(catalog).customGlyphs.length)
