@@ -61,6 +61,8 @@ type ParseContext = {
   headings: MarkdownHeading[] | null
   /** GitHub only recognizes alerts in quotes at the document level, never nested. */
   alertsAllowed: boolean
+  /** False while content is flattened into a line, so its headings take no outline entry or anchor. */
+  outline: boolean
 }
 
 /** Definitions can occur in a quote or list; CommonMark uses the first definition. */
@@ -150,6 +152,7 @@ function headingAnchor(children: readonly InlineNode[], context: ParseContext): 
 
 /** The same anchors, outline and footnote numbering serve Markdown and HTML headings. */
 function headingNode(level: number, children: InlineNode[], context: ParseContext, extra: { sourceMarker?: string; align?: HtmlAlign } = {}): MarkdownHeading {
+  if (!context.outline) return { kind: 'heading', level, anchor: '', ...extra, children }
   const heading: MarkdownHeading = { kind: 'heading', level, anchor: headingAnchor(children, context), ...extra, children }
   context.headings?.push(heading)
   return heading
@@ -157,9 +160,9 @@ function headingNode(level: number, children: InlineNode[], context: ParseContex
 
 function htmlProjection(context: ParseContext): HtmlProjection {
   return {
-    blocks: (nodes, atRoot) => blocksFrom(nodes, atRoot ? context : { ...context, alertsAllowed: false }, true),
+    blocks: (nodes, atRoot, outline = true) => blocksFrom(nodes, { ...context, ...(atRoot ? {} : { alertsAllowed: false }), outline: context.outline && outline }, true),
     inlines: nodes => inlineFrom(nodes, context),
-    heading: (level, children, align) => headingNode(level, children, context, align ? { align } : {}),
+    heading: (level, children, align, outline) => headingNode(level, children, outline ? context : { ...context, outline: false }, align ? { align } : {}),
     sourceOf: node => context.source.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0)
   }
 }
@@ -239,7 +242,7 @@ function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocume
     const tree = processor.parse(source) as Root
     const context: ParseContext = {
       source, definitions: new Map(), footnotes: new Map(), references: new Map(),
-      anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null, alertsAllowed: true
+      anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null, alertsAllowed: true, outline: true
     }
     collectDefinitions(tree, context)
     const blocks = blocksFrom(tree.children, context), notes: MarkdownFootnote[] = []
