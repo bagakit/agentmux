@@ -334,6 +334,16 @@ it('explains Core-owned first delivery after Session recovery without asking for
 })
 
 
+it('says an input waiting for its Agent to start continues on its own, not after a recovery', async () => {
+  const inputReceipt = savedInput()
+  inputReceipt.observation = 'owned'
+  inputReceipt.control.waiting = { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }
+  await render(<MessageDeliveryFailure compact error={null} inputReceipt={inputReceipt} />)
+  expect(container.querySelector('.message-delivery-failure__heading')!.textContent).toBe('已保存 · 等待启动')
+  expect(container.textContent).toContain('Agent 完成启动后自动继续首次投递')
+  expect(container.textContent).not.toContain('语义恢复')
+})
+
 it('keeps unowned recovery waiting explicit when the original author must rejoin', () => {
   const inputReceipt = savedInput()
   inputReceipt.control.waiting = { phase: 'session', reason: 'session-resume-needed', wake: 'session-restored' }

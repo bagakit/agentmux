@@ -118,3 +118,16 @@ it('preserves launch delivery and unknown native adoption in group status consum
   expect(connectorGroupDiagnostics({ report, checking: false, checkedAt: 2 }).rows.find(row => row[0] === 'Group → Agent')?.[1]).toContain('Recovery startup carried the message')
   expect(report.incoming.value!.rows[0]!.nativeAdoption).toBe('unknown')
 })
+
+it('names a private-chat input waiting for its Agent to start, not a recovery or an unknown environment', async () => {
+  const target: MoteChatTarget = { spaceId: 'mote', zoneId: 'zone', expectedResource: { hostId: 'local', workspaceId: 'workspace', workspacePath: fixturePath('repo') } }
+  const report = parseMoteChatDiagnosis({ targetKey: moteChatDiagnosisKey(target), limit: 5, configuration: null,
+    readiness: { state: 'ready', code: null }, service: { enabled: true, revision: 1 }, adapterService: null, connection: null,
+    incoming: { rows: [{ key: moteChatDiagnosisKey(target, 'starting-intake'), state: 'claimed', code: null, codeRecorded: false, preparation: 'ready',
+      input: { status: 'waiting', observation: 'observed', controlState: 'enabled', receiptObservation: 'owned',
+        waiting: { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }, preparationReason: null, failureCode: null, runtime: null } }], more: false }, publications: [], issues: [] })
+  vi.spyOn(api.moteChat, 'call').mockResolvedValue(report)
+  await dom.render(<MoteChatActivity target={target} hostingTarget={{ hostId: 'local', runtimeId: 'original-runtime' }} active revision={1} />)
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Waiting for the Agent to finish starting'))
+  expect(dom.container.textContent).not.toContain('The original input environment is not confirmed yet')
+})
