@@ -10,7 +10,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
-import { NOTE_SCHEMA, type NoteDocument } from '../src/shared/note-document'
+import { NOTE_SCHEMA, NOTE_FILE_EXTENSION, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
 import { applyConfigEdit } from '../src/shared/config-edit'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import type { AppConfig } from '../src/shared/contracts'
@@ -18,14 +18,16 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 
 const dom = composerDOM()
 const goal = (id: string, status: DemandRecord['status'] = 'todo'): DemandRecord => ({ id, title: `Goal ${id}`, description: `Original ${id} description`, priority: 'normal', status,
-  projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic' })
+  projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic',
+  ...(status === 'done' ? { alignment: { summary: 'Original agreed outcome', revision: 1, confirmedAt: 1, criteria: [{ id: 'result', text: 'Original result is accepted' }], openQuestions: [] },
+    grounding: { alignmentRevision: 1, submissionId: 'original-result', summary: 'Original result', acceptedAt: 2, checks: [{ criterionId: 'result', outcome: 'met' as const, evidence: [], note: 'Accepted original result' }] } } : {}) })
 const note: NoteDocument = { schema: NOTE_SCHEMA, noteId: 'original-note', content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: 'original-block' }, content: [{ type: 'text', text: 'Original editable finding' }] }
 ] } }
-const surface = { kind: 'file', regionId: 'original-note-region', workspaceId: 'workspace', path: 'notes/original.note.json' } as const
+const surface = { kind: 'file', regionId: 'original-note-region', workspaceId: 'workspace', path: `notes/original${NOTE_FILE_EXTENSION}` } as const
 const noteKey = documentKey(surface.workspaceId, surface.path)
 beforeEach(() => useAppStore.setState({ config: { ...structuredClone(composerConfig), goalsCommonActions: { items: [], collapsed: false } }, sessions: [composerSession('healthy')],
-  documents: { [noteKey]: { path: surface.path, content: JSON.stringify(note), revision: 'original-file-revision' } }, dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentRevealTargets: {},
+  documents: { [noteKey]: { path: surface.path, content: serializeNoteDocument(note), revision: 'original-file-revision' } }, dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentRevealTargets: {},
   demands: { active: goal('active'), finished: goal('finished', 'done'), cancelled: goal('cancelled', 'cancelled') }, selectedDemandId: null,
   agentFocus: EMPTY_AGENT_FOCUS, mainSurface: 'board', activeWorkspaceId: null, tabs: { 'original-tab': createWorkbenchTab('original-tab', surface) }, layouts: {}, loading: false, error: null, executorDetections: {},
   detectExecutors: async () => {}, checkHost: async () => {} }))
@@ -88,7 +90,7 @@ it('new Goals instance consumes saved Board/finished defaults while absent prefe
   await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, goals: { defaultView: 'board', showFinished: true } } }))
   await dom.render(<GlobalBoardSurface />)
   expect(dom.container.querySelector('.goals-board')).not.toBeNull()
-  expect(dom.container.querySelector('[aria-label="Board view"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(dom.container.querySelector('[aria-label="Board view"]')?.getAttribute('aria-selected')).toBe('true')
   expect(visibleGoalIds()).toEqual(['active', 'finished', 'cancelled'])
 })
 
@@ -116,9 +118,11 @@ it('changing saved defaults keeps the current Goal view, search, finished choice
 
 it('explicit Done and Cancelled filters remain readable even when the new default hides finished goals', async () => {
   await dom.render(<GlobalBoardSurface />); await dom.click('[aria-label="Goal filters"]')
-  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Filter work status"]')!
   for (const [status, id] of [['done', 'finished'], ['cancelled', 'cancelled']] as const) {
-    await act(async () => { select.value = status; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Filter work status"]')!
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    const choice = document.querySelector<HTMLElement>(`[role="menuitemradio"][data-value="${status}"]`)!
+    expect(choice).toBeDefined(); await act(async () => choice.click())
     expect(visibleGoalIds()).toEqual([id])
   }
   expect(useAppStore.getState().demands.finished?.status).toBe('done'); expect(useAppStore.getState().demands.cancelled?.status).toBe('cancelled')
