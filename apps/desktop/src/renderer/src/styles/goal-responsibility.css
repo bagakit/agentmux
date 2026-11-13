@@ -5,11 +5,11 @@
 .goal-responsibility__label, .goal-responsibility__manager > span:first-child, .goal-responsibility__next > span:first-child, .goal-responsibility__pending, .goal-responsibility__binding { color: var(--text-3); }
 .goal-responsibility__agent { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; text-align: left; }
 .goal-responsibility__agent > strong { min-width: 0; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.goal-responsibility__agent:hover { color: var(--text-1); text-decoration: underline; }
+.goal-responsibility__agent:hover { color: var(--text); text-decoration: underline; }
 .goal-responsibility__agent:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; border-radius: var(--radius-sm); }
 .goal-responsibility__execution { display: grid; gap: var(--sp-1); min-width: 0; }
 .goal-responsibility__phase { color: var(--text-2); }
-.goal-responsibility__phase--attention, .goal-responsibility__notice { font-weight: 550; color: var(--text-1); }
+.goal-responsibility__phase--attention, .goal-responsibility__notice { font-weight: 550; color: var(--text); }
 .goal-responsibility__reason { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 .goal-responsibility__source { color: var(--text-3); min-width: 0; }
 .goal-responsibility__source summary { cursor: pointer; }
@@ -20,7 +20,7 @@
 .goal-patrol { display: grid; gap: var(--sp-2); min-width: 0; }
 .goal-patrol__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .goal-patrol__feedback { display: grid; gap: var(--sp-1); margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
-.goal-patrol__feedback strong { color: var(--text-1); font-weight: 550; }
+.goal-patrol__feedback strong { color: var(--text); font-weight: 550; }
 .goal-patrol__source { color: var(--text-3); min-width: 0; }
 .goal-patrol__source summary { cursor: pointer; }
 .goal-patrol__source dl { margin: var(--sp-2) 0; }
