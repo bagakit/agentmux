@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxFileAgentSessionStore, loadSessionHistorySources } from '../src/agent-session-store.js'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
@@ -186,6 +187,37 @@ it('does not hide a failed reader close behind a subsequent successful open', as
     expect(await store.readMetadata('original')).toEqual(session())
   } finally {
     validation.mockRestore(); closing.mockRestore()
+    if (reader) close.call(reader)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('retains both rollback and close failures on the original primary read error', async () => {
+  const { root, store } = await fixture()
+  const cause = new Error('Original decoder failure')
+  const primary = Object.assign(new AgentMuxError('Original read failed', 'INVALID_AGENT_SESSION_STORE', 'original detail'), { cause })
+  const rollback = new Error('Original rollback failed'), closing = new Error('Original close failed')
+  const execute = DatabaseSync.prototype.exec, close = DatabaseSync.prototype.close
+  let reader: DatabaseSync | undefined, begins = 0
+  const execution = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string) {
+    if (sql === 'BEGIN') { reader = this; begins += 1; execute.call(this, sql); throw primary }
+    if (sql === 'ROLLBACK' && this === reader) throw rollback
+    return execute.call(this, sql)
+  })
+  const closure = vi.spyOn(DatabaseSync.prototype, 'close').mockImplementation(function (this: DatabaseSync) {
+    if (this === reader) throw closing
+    return close.call(this)
+  })
+  try {
+    const error = await store.readMetadata('original').catch(error => error)
+    expect(error).toBe(primary)
+    expect(error).toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE', detail: 'original detail', cause })
+    expect(error.cleanup, 'Both cleanup failures remain in occurrence order').toEqual([rollback, closing])
+    expect(begins).toBe(1)
+    execution.mockRestore(); closure.mockRestore()
+    expect(await store.readMetadata('original')).toEqual(session())
+  } finally {
+    execution.mockRestore(); closure.mockRestore()
     if (reader) close.call(reader)
     await rm(root, { recursive: true, force: true })
   }
