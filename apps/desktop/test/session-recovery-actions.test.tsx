@@ -548,3 +548,61 @@ describe('original Session identity recheck', () => {
     expect(useAppStore.getState().sessions.some(item => item.id === 'original')).toBe(false); noEffects()
   })
 })
+
+describe('a Session Core holds no native conversation for', () => {
+  beforeEach(() => {
+    vi.spyOn(api.sessions, 'recover').mockRejectedValue(new Error('Unexpected native resume'))
+    vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Unexpected input'))
+    vi.spyOn(api.sessions, 'write').mockRejectedValue(new Error('Unexpected raw input'))
+    vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValue(new Error('Unexpected launch'))
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'original' ? { ...session,
+      status: { ...session.status, continuityReason: 'native-conversation-absent' as const, detail: 'AgentMux holds no native conversation for this ended Session to continue.' } } : session) }))
+  })
+  const primary = () => [...dom.container.querySelectorAll<HTMLButtonElement>('button.primary-button')]
+  it('offers one solid action to start a new conversation and no doomed re-read or restore', async () => {
+    await mount()
+    expect(primary().map(item => item.textContent?.trim())).toEqual(['Start a new conversation here'])
+    const labels = [...dom.container.querySelectorAll('button')].map(item => item.textContent?.trim())
+    expect(labels).not.toContain('Re-read original'); expect(labels).not.toContain('Restore original')
+    expect(labels).toContain('Take over'); expect(labels).toContain('Analyze…')
+    // One plain statement of Core's fact: no failure phase, no second notice saying the same thing.
+    expect(dom.container.querySelector('.full-page-loading')?.getAttribute('data-loading-phase')).not.toBe('failed')
+    expect(dom.container.querySelectorAll('.service-window')).toHaveLength(0)
+    noLifecycle()
+  })
+  it('opens the original Executor in a new Tab beside the original, sends nothing, and keeps the original work', async () => {
+    // A later Tab in the same Group separates "beside the original" from "at the end".
+    const later = createWorkbenchTab('later-tab', { regionId: 'later-region', kind: 'launcher', workspaceId: 'workspace' })
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [later.id]: later }, layouts: { ...state.layouts, workspace: createWorkspaceLayout('original-group', ['original-tab', 'later-tab']) } }))
+    const state = useAppStore.getState(), originalTab = state.tabs['original-tab'], drafts = state.agentComposerDrafts
+    await mount(); await button('Start a new conversation here')
+    await vi.waitFor(() => expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1))
+    const input = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0]
+    expect(input).toMatchObject({ executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo") })
+    expect(input.prompt).toBeUndefined(); expect(input.agentMuxNote).toBeUndefined()
+    const binding = useAppStore.getState().spatialRequests[await recoveryOperationId(source, 'start-new')]!
+    expect(binding).toMatchObject({ operation: 'agent.open', createAgent: true, recovery: { hostId: 'local', agentSessionId: 'original', mode: 'start-new', executorId: 'codex' } })
+    expect(useAppStore.getState().layouts.workspace!.groups[0]!.tabOrder).toEqual(['original-tab', binding.tabId, 'later-tab'])
+    expect(api.sessions.recover).not.toHaveBeenCalled(); expect(api.sessions.submitPrompt).not.toHaveBeenCalled(); expect(api.sessions.write).not.toHaveBeenCalled()
+    preserved(originalTab, drafts)
+  })
+  it('repeated clicks and a remount reuse the one original creation', async () => {
+    let release!: () => void
+    vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { await new Promise<void>(resolve => { release = resolve }); return launched(input) })
+    await mount(); await button('Start a new conversation here')
+    const busy = primary()[0]!; expect(busy.disabled).toBe(true); await act(async () => { busy.click(); busy.click() })
+    expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
+    await act(async () => release()); await vi.waitFor(() => expect(primary()[0]?.disabled).toBe(false))
+    // A remount derives the same operation and only inspects the original creation.
+    await dom.render(null); await mount(); await button('Start a new conversation here')
+    expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
+    expect(Object.keys(useAppStore.getState().spatialRequests)).toEqual([await recoveryOperationId(source, 'start-new')])
+  })
+  it('keeps the re-read path for a Session whose identity is only unconfirmed', async () => {
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'original' ? { ...session,
+      status: { ...session.status, continuityReason: 'native-handle-unavailable' as const } } : session) }))
+    await mount()
+    const labels = [...dom.container.querySelectorAll('button')].map(item => item.textContent?.trim())
+    expect(labels).toContain('Re-read original'); expect(labels).not.toContain('Start a new conversation here')
+  })
+})
