@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, cp, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -14,20 +14,40 @@ const io = vi.hoisted(() => ({
   before: null as DesktopClientObservation | null,
   after: null as DesktopClientObservation | null,
   failAfterRead: false, failEveryRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0,
-  tick: 0, nativePlan: null as any, nativeConfirmation: null as any
+  tick: 0, nativePlan: null as any, nativeConfirmation: null as any,
+  copies: 0, quits: 0, signaturePaths: [] as string[], hashInputs: [] as string[], signatureFailure: false, foreignStage: '', copyTarget: '', resultFacts: null as Record<string, unknown> | null
 }))
 const roots: string[] = []
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, lstat: async (...args: Parameters<typeof actual.lstat>) => {
+    const observation = await actual.lstat(...args)
+    // Only the selected private stage's external UID observation is controlled.
+    return args[0] === io.foreignStage ? Object.assign(Object.create(observation), { uid: process.getuid!() + 1 }) : observation
+  } }
+})
 vi.mock('node:child_process', async original => {
   const actual = await original<typeof import('node:child_process')>()
   return { ...actual, spawn: (command: string, args: string[]) => {
+    if (command === 'shasum') {
+      io.hashInputs.push(args.at(-1)!)
+      expect(args.slice(0, 2)).toEqual(['-a', '256'])
+      expect(args.at(-1)?.startsWith(dirname(io.candidate) + '/')).toBe(true)
+      return actual.spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    }
     const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
     queueMicrotask(async () => {
       try {
         if (command === 'cp' || command === 'ditto') {
+          io.copies++
           expect(args.at(-2)).toBe(io.candidate)
-          expect(args.at(-1)).toBe(join(dirname(io.app), `.AgentMux.install-${process.pid}.app`))
+          expect(args.at(-1)).toBe(io.copyTarget || join(dirname(io.app), `.AgentMux.install-${process.pid}.app`))
           await cp(args.at(-2)!, args.at(-1)!, { recursive: true })
-        } else expect(command, 'No live OS operation is admitted').toBe('codesign')
+        } else {
+          expect(command, 'No live OS operation is admitted').toBe('codesign')
+          io.signaturePaths.push(args.at(-1)!)
+          if (io.signatureFailure) throw new Error('PRIVATE_SIGNATURE_INVALID')
+        }
         child.stdout.end(); child.stderr.end(); child.emit('exit', 0, null)
       } catch (error) { child.emit('error', error) }
     })
@@ -63,6 +83,9 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
 }))
 
 afterEach(async () => {
+  if (process.env.PACKAGE_STAGE_FACTS && expect.getState().currentTestName?.includes('[prepared-stage]')) {
+    await appendFile(process.env.PACKAGE_STAGE_FACTS, JSON.stringify({ test: expect.getState().currentTestName, copies: io.copies, quits: io.quits, cutovers: io.cutovers, signaturePaths: io.signaturePaths, hashInputs: io.hashInputs, result: io.resultFacts, liveSignals: [], runtimeConnections: [] }) + '\n')
+  }
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
@@ -71,12 +94,13 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-install-continuity-')); roots.push(root)
   const home = join(root, 'home'), app = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
-  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0, tick: 0, nativePlan: null, nativeConfirmation: null })
+  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, outgoingMisses: 0, outgoingReads: 0, missesAfterLaunch: 0, tick: 0, nativePlan: null, nativeConfirmation: null, copies: 0, quits: 0, signaturePaths: [], hashInputs: [], signatureFailure: false, foreignStage: '', copyTarget: '', resultFacts: null })
   const identity = { schema: 'agentmux.package-identity.v1' as const, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40),
     appVersion: '0.1.0', platform: process.platform, arch: process.arch }
   for (const [directory, sourceCommit] of [[app, 'a'.repeat(40)], [candidate, 'c'.repeat(40)]]) {
     for (const [relative, bytes] of Object.entries({
       'Contents/MacOS/AgentMux': 'Private file, never executed',
+      'Contents/_CodeSignature/CodeResources': 'Private signature seal, OS verification remains controlled',
       'Contents/Resources/app/package-identity.json': JSON.stringify({ ...identity, sourceCommit }),
       'Contents/Resources/app/out/renderer/release.json': JSON.stringify({ identity: { shell: 'same-shell', ctxmux: 'same-native' } }),
       [`Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`]: 'Same private Native artifact'
@@ -129,10 +153,11 @@ async function fixture() {
   vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('Live signals are forbidden') })
   return { home, app, candidate }
 }
-async function install(f: Awaited<ReturnType<typeof fixture>>, intent: 'ui-only' | 'full' = 'ui-only') {
+async function install(f: Awaited<ReturnType<typeof fixture>>, intent: 'ui-only' | 'full' = 'ui-only', preparedApplicationPath: string | null = null, selectedSource = f.candidate) {
   const { installApplication } = await import('../scripts/package-macos.mjs')
-  return installApplication(f.candidate, { intent, homeDirectory: f.home,
-    quit: async (_path: string, admissions: unknown[]) => { expect(io.pid).toBe(201); io.pid = 0; return { wasRunning: true, pids: [201], admissions } },
+  io.copyTarget = preparedApplicationPath ?? ''
+  return installApplication(selectedSource, { intent, homeDirectory: f.home, preparedApplicationPath,
+    quit: async (_path: string, admissions: unknown[]) => { expect(io.pid).toBe(201); io.quits++; io.pid = 0; return { wasRunning: true, pids: [201], admissions } },
     launch: async () => { io.pid = 202; io.cutovers++; expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('c'.repeat(40)); return [202] }
   })
 }
@@ -519,3 +544,86 @@ it.each(['old-running', 'old-exited', 'reason', 'new-ended', 'cwd', 'missing-cwd
     expect(io.before).toEqual(before); expect(io.after).toEqual(expected); expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
   }
 )
+
+
+it('[prepared-stage] default installation still copies and qualifies the selected candidate', async () => {
+  const f = await fixture()
+  const result = await install(f, 'full')
+  expect(result.ui.status).toBe('committed')
+  expect(io.copies).toBe(1); expect(io.quits).toBe(1); expect(io.cutovers).toBe(1)
+  expect(io.signaturePaths).toEqual([join(dirname(f.app), `.AgentMux.install-${process.pid}.app`)])
+})
+
+it('[prepared-stage] reuses the exact retained directory without copy or removal through the full install consumer', async () => {
+  const f = await fixture(), stage = join(dirname(f.app), '.AgentMux.install-73421.app')
+  await cp(f.candidate, stage, { recursive: true })
+  const original = await lstat(stage)
+  const result = await install(f, 'full', stage)
+  const activated = await lstat(f.app)
+  expect(result.ui.status).toBe('committed'); expect(result.native.status).toBe('unchanged')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(1); expect(io.cutovers).toBe(1)
+  expect(io.signaturePaths).toEqual([stage])
+  expect({ dev: activated.dev, ino: activated.ino, uid: activated.uid }).toEqual({ dev: original.dev, ino: original.ino, uid: original.uid })
+  io.resultFacts = { ui: result.ui.status, native: result.native.status, original: { dev: original.dev, ino: original.ino, uid: original.uid }, activated: { dev: activated.dev, ino: activated.ino, uid: activated.uid }, originalRunId: agent().control!.run.runId }
+  expect(agent().control!.run.runId).toBe('agent-run')
+  expect(browser().browserId).toBe('browser-id')
+  expect(JSON.parse(await readFile(join(f.candidate, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('c'.repeat(40))
+})
+
+it.each(['outside', 'wrong-name', 'symlink', 'file', 'foreign-uid'] as const)('[prepared-stage] rejects %s before quit or cutover while retaining all original directories', async kind => {
+  const f = await fixture()
+  const stage = kind === 'outside' ? join(dirname(f.home), '.AgentMux.install-73421.app')
+    : join(dirname(f.app), kind === 'wrong-name' ? 'retained.app' : '.AgentMux.install-73421.app')
+  if (kind === 'symlink') await symlink(f.candidate, stage, 'dir')
+  else if (kind === 'file') await writeFile(stage, 'Private non-directory stage')
+  else await cp(f.candidate, stage, { recursive: true })
+  if (kind === 'foreign-uid') io.foreignStage = stage
+  await expect(install(f, 'full', stage)).rejects.toThrow('prepared installer stage')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0); expect(io.signaturePaths).toEqual([])
+  expect((await lstat(stage)).isSymbolicLink()).toBe(kind === 'symlink')
+  expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('a'.repeat(40))
+})
+
+it('[prepared-stage] rejects a different package identity before quit or cutover and preserves the stage', async () => {
+  const f = await fixture(), stage = join(dirname(f.app), '.AgentMux.install-73421.app')
+  await cp(f.candidate, stage, { recursive: true })
+  const identityPath = join(stage, 'Contents/Resources/app/package-identity.json')
+  const identity = JSON.parse(await readFile(identityPath, 'utf8')); identity.sourceCommit = 'd'.repeat(40)
+  await writeFile(identityPath, JSON.stringify(identity))
+  await expect(install(f, 'full', stage)).rejects.toThrow('Package identity mismatch')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0); expect(io.signaturePaths).toEqual([])
+  expect(JSON.parse(await readFile(identityPath, 'utf8'))).toEqual(identity)
+  expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('a'.repeat(40))
+})
+
+it('[prepared-stage] still verifies the retained signature before quit or cutover', async () => {
+  const f = await fixture(), stage = join(dirname(f.app), '.AgentMux.install-73421.app')
+  await cp(f.candidate, stage, { recursive: true }); io.signatureFailure = true
+  await expect(install(f, 'full', stage)).rejects.toThrow('PRIVATE_SIGNATURE_INVALID')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0); expect(io.signaturePaths).toEqual([stage])
+  expect((await lstat(stage)).isDirectory()).toBe(true)
+  expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('a'.repeat(40))
+})
+
+
+it('[prepared-stage] adopts the same real retained object as its selected signed source without copy', async () => {
+  const f = await fixture(), stage = join(dirname(f.app), '.AgentMux.install-73421.app')
+  await cp(f.candidate, stage, { recursive: true })
+  const original = await lstat(stage)
+  const result = await install(f, 'full', stage, stage)
+  expect(result.ui.status).toBe('committed'); expect(result.native.status).toBe('unchanged')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(1); expect(io.cutovers).toBe(1); expect(io.signaturePaths).toEqual([stage])
+  expect((await lstat(f.app)).ino).toBe(original.ino)
+  io.resultFacts = { selectedSourceIsPreparedObject: true, originalInode: original.ino, activatedInode: (await lstat(f.app)).ino, ui: result.ui.status, native: result.native.status }
+})
+
+it.each(['Contents/MacOS/AgentMux', 'Contents/_CodeSignature/CodeResources'])('[prepared-stage] rejects same identity with different signed bytes in %s before quit or cutover', async artifact => {
+  const f = await fixture(), stage = join(dirname(f.app), '.AgentMux.install-73421.app')
+  await cp(f.candidate, stage, { recursive: true })
+  await writeFile(join(stage, artifact), 'Different private signed artifact bytes')
+  await expect(install(f, 'full', stage)).rejects.toThrow('does not match the selected signed application')
+  expect(io.copies).toBe(0); expect(io.quits).toBe(0); expect(io.cutovers).toBe(0); expect(io.signaturePaths).toEqual([])
+  expect(JSON.parse(await readFile(join(stage, 'Contents/Resources/app/package-identity.json'), 'utf8'))).toEqual(JSON.parse(await readFile(join(f.candidate, 'Contents/Resources/app/package-identity.json'), 'utf8')))
+  expect(await readFile(join(stage, artifact), 'utf8')).toBe('Different private signed artifact bytes')
+  expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('a'.repeat(40))
+})
