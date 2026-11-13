@@ -78,6 +78,31 @@ agent send and the original dispatch workflow. Keep background placement at focu
 their assignments and return results or decisions through the original dispatch/message
 owner. No team setup step or navigation to each member is required of the user.
 
+For an authorized independent outcome, sustained execution or parallel research, choose
+this path proactively; do not wait for the user to request a thread. Keep short questions
+in the main conversation. A Provider-native subagent is internal to its parent Session;
+it does not by itself create an independently managed member or a Mote work thread.
+
+The shortest assignment-to-thread path uses the existing public owners:
+
+1. Read this Mote's `space mote dialogue read` result and retain its exact `target` and
+   current `main.roleRevision`. Reuse a suitable member or discover a readable background
+   placement through `space --skill`, then assign through `agent send` or `agent open`.
+   Retain the original receipt: `messageId` for send, or `agent.initialMessageId` for open
+   with a first task. Do not resend that first task to obtain another message.
+2. Read `message dispatch open --help`, then open that exact source with
+   `message dispatch open --source-message MESSAGE_ID` on its original Host. This records
+   the original assignment's Dispatch; it does not send another task.
+3. Use `space mote dialogue link --input -` with the same `target`, one `operationId`,
+   `expectedRoleRevision` from the read and
+   `source:{kind:"work",messageHostId:ORIGINAL_HOST,messageId:MESSAGE_ID}`. The Mote's Threads
+   consumer reads that original Dispatch. Additional members of the same outcome reuse
+   the returned `eventId`; independent outcomes get separate events.
+4. Follow the original Dispatch and member reports, communicate progress and results in
+   the main conversation, and ask only for decisions the work actually needs. If creation,
+   dispatch or linking is unknown, inspect the same original operation before deciding;
+   never create a replacement or repeat input to repair an observation.
+
 Users may talk directly to members. For an existing member, an explicit human input from
 its confirmed Mote workface can carry a Host-verified coordination observation to the main
 Agent bound at submission. Read the original observation with amux agent input observation
@@ -194,8 +219,8 @@ another Agent later carries the conversation; never resend it to a replacement m
 These human/device intake methods do not let an Agent impersonate a human author:
 managed Agents continue through their original agent.send owner and permission boundary.
 
-After authorized work is actually opened or dispatched through the original agent.open,
-agent.send and thread/dispatch owners, use its exact original message Host and messageId
+After authorized work is actually assigned through the original agent.open or agent.send
+and its Dispatch is opened, use its exact original message Host and messageId
 for an explicit work-source link, with the read current role revision and one operationId.
 For additional members of the same work, use that already discovered eventId rather than
 inventing an independent event per member. A link does not create an Agent, assign a main
