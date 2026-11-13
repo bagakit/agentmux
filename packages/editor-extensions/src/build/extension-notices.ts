@@ -7,10 +7,14 @@ import type { Plugin } from 'vite'
 export function editorExtensionNotices(): Plugin {
   const require = createRequire(import.meta.url)
   const djvu = dirname(require.resolve('djvu-rs'))
+  const zip = dirname(require.resolve('@zip.js/zip.js'))
+  const fflate = dirname(require.resolve('fflate/package.json'))
   const pdf = dirname(require.resolve('pdfjs-dist/package.json'))
   const notices = [
     ['djvu-rs/LICENSE', join(djvu, 'LICENSE')],
     ['djvu-rs/THIRD_PARTY_NOTICES', join(djvu, 'THIRD_PARTY_NOTICES')],
+    ['zip.js/LICENSE', join(zip, 'LICENSE')],
+    ['fflate/LICENSE', join(fflate, 'LICENSE')],
     ['pdfjs/LICENSE', join(pdf, 'LICENSE')],
     ['foliate-js/LICENSE', resolve(dirname(require.resolve('@agentmux/editor-extensions/package.json')), 'src/books/vendor/foliate/LICENSE')]
   ] as const
