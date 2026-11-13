@@ -1,4 +1,5 @@
 import { sessionUsageWindow, sessionUsageMeasurement, type AgentSessionUsagePage } from './agent-session-usage.js'
+import { parseAgentSessionRecordDeletion, deletedAgentSessionRecord } from './agent-session-record.js'
 import { agentNativeTurnEnd } from './agent-session-identity.js'
 import { parseResumeResolution, type AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { assertPreparedResumeBinding, parseResumeResolutionRequest, resumeResolutionDigest, type ResumeResolutionRequest } from './agent-prepared-resume.js'
@@ -170,6 +171,8 @@ export type AgentMuxLifecycleClaim = {
 }
 
 export type AgentMuxRetiredAgentSession = {
+  /** Explicit deletion is terminal for this identity; its original correlations remain. */
+  recordDeletion?: import('./agent-session-record.js').AgentSessionRecordDeletion
   continuityControlReceipts?: Record<string, AgentMuxContinuityControlReceipt>
   agentSessionId: string
   hostId: string
@@ -249,7 +252,12 @@ export type AgentMuxAgentSessionStore = {
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(signal?: AbortSignal): Promise<readonly AgentMuxRetiredAgentSession[]>
   /** Exact original retirement authority; history descriptors cannot authorize recovery. */
-  readRetiredAgentSession(agentSessionId: string): Promise<AgentMuxRetiredAgentSession | null>
+  readRetiredAgentSession(agentSessionId: string, signal?: AbortSignal): Promise<AgentMuxRetiredAgentSession | null>
+  readRecordDeletion(agentSessionId: string, signal?: AbortSignal): Promise<import('./agent-session-record.js').AgentSessionRecordDeletion | null>
+  deleteRecord(expected: AgentMuxRetiredAgentSession, operationId: string, signal?: AbortSignal): Promise<{ retirement: AgentMuxRetiredAgentSession; admitted: boolean }>
+  confirmRecordDeletion(expected: AgentMuxRetiredAgentSession, signal?: AbortSignal): Promise<AgentMuxRetiredAgentSession>
+  /** One bounded target-only payload step; the original terminal operation remains the owner. */
+  cleanRecord(expected: AgentMuxRetiredAgentSession, signal?: AbortSignal): Promise<AgentMuxRetiredAgentSession>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
   loadReopenCorrelations(signal?: AbortSignal): Promise<readonly { expectedRetirement: AgentMuxRetiredAgentSession; operationId?: string }[]>
   /** Recover an existing creation identity by its caller operation, including no-Run reservations. */
@@ -785,7 +793,9 @@ function acceptedRetiredActivity(
   retired: readonly AgentMuxRetiredAgentSession[], mutation: AgentTimelineMutation
 ): boolean {
   if (mutation.type !== 'append' || !mutation.item.activityState) return false
-  const commit = retired.find(session => session.agentSessionId === mutation.agentSessionId)?.activityCommit
+  const original = retired.find(session => session.agentSessionId === mutation.agentSessionId)
+  if (original?.recordDeletion) return false
+  const commit = original?.activityCommit
   return [commit?.pending, commit?.latest].some(observation => observation &&
     JSON.stringify(agentActivityTimelineItem(mutation.agentSessionId, observation)) === JSON.stringify(mutation.item))
 }
@@ -801,11 +811,42 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     run: runRef(source.run),
     source: 'user',
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
+    ...(source.recordDeletion === undefined ? {} : { recordDeletion: parseAgentSessionRecordDeletion(source.recordDeletion) }),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.history === undefined ? {} : { history: normalizeSessionHistoryMetadata(source.history) }),
     ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) }),
     ...(source.stop === undefined ? {} : { stop: parseAgentStopRecord(source.stop) })
   }
+}
+
+function deletedRetirement(current: AgentMuxRetiredAgentSession | null, expected: AgentMuxRetiredAgentSession,
+  operationId: string, active: boolean, reserved: boolean): AgentMuxRetiredAgentSession {
+  if (!current || active || reserved || current.agentSessionId !== expected.agentSessionId ||
+    current.observedAt !== expected.observedAt || agentSessionRetirementRevision(current) !== agentSessionRetirementRevision(expected)) {
+    throw new AgentMuxError('The exact retirement changed or has pending lifecycle work. No AgentMux record was deleted.', 'STALE_AGENT_SESSION')
+  }
+  if (current.recordDeletion) {
+    if (current.recordDeletion.operationId !== operationId) throw new AgentMuxError(
+      'This record already has another original deletion operation. Inspect its retained terminal fact.', 'AGENT_SESSION_RECORD_OPERATION_CONFLICT')
+    return structuredClone(current)
+  }
+  return { ...current, recordDeletion: parseAgentSessionRecordDeletion({ operationId,
+    retirementRevision: agentSessionRetirementRevision(current), deletedAt: Date.now(), phase: 'pending' }) }
+}
+
+/** Only original normalized Store facts form this CAS witness; it is never authorization. */
+export function agentSessionRetirementRevision(retired: AgentMuxRetiredAgentSession): string {
+  const { recordDeletion: _deletion, ...original } = retired
+  return createHash('sha256').update(JSON.stringify(original)).digest('hex')
+}
+
+function confirmDeletedRetirement(current: AgentMuxRetiredAgentSession | null | undefined, expected: AgentMuxRetiredAgentSession) {
+  if (!current?.recordDeletion || !expected.recordDeletion || agentSessionRetirementRevision(current) !== agentSessionRetirementRevision(expected) ||
+    current.recordDeletion.operationId !== expected.recordDeletion.operationId || current.recordDeletion.deletedAt !== expected.recordDeletion.deletedAt ||
+    current.recordDeletion.retirementRevision !== expected.recordDeletion.retirementRevision || expected.recordDeletion.phase === 'complete' && current.recordDeletion.phase !== 'complete') {
+    throw new AgentMuxError('The original deletion fact changed before confirmation. Inspect its exact operation.', 'STALE_AGENT_SESSION')
+  }
+  return structuredClone(current)
 }
 
 /** The single reading projection shared by durable history and strict public decoding. */
@@ -2292,7 +2333,10 @@ function sessionHistorySources(
   return [
     ...sessions.map(session => ({ agentSessionId: session.agentSessionId, hostId: session.hostId,
       state: 'active' as const, history: sessionHistoryMetadata(session) })),
-    ...retired.filter(session => !activeIds.has(session.agentSessionId)).map(session => ({
+    ...retired.filter(session => !activeIds.has(session.agentSessionId)).map(session => session.recordDeletion ? {
+      agentSessionId: session.agentSessionId, hostId: session.hostId, state: 'deleted' as const,
+      retiredAt: session.observedAt, recordDeletion: structuredClone(session.recordDeletion)
+    } : ({
       agentSessionId: session.agentSessionId, hostId: session.hostId, state: 'retired' as const,
       retiredAt: session.observedAt,
       ...(pending.has(JSON.stringify(session)) ? { pendingReopen: {
@@ -2325,6 +2369,7 @@ function assertReservationPrecondition(
   retiredSessions: readonly AgentMuxRetiredAgentSession[]
 ): void {
   const current = sessions.find((session) => session.agentSessionId === reservation.agentSessionId)
+  if (retiredSessions.some(session => session.agentSessionId === reservation.agentSessionId && session.recordDeletion)) deletedAgentSessionRecord(reservation.agentSessionId)
   if (reservation.kind === 'reopen') {
     const retired = retiredSessions.find(session => session.agentSessionId === reservation.agentSessionId)
     if (current || !retired || JSON.stringify(retired) !== JSON.stringify(reservation.expectedRetirement)) {
@@ -2725,15 +2770,25 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   private readonly spawnQueryOwner = mintObjectId()
   private readonly promptSubmissions = new Set<string>()
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
-  private readonly promptAdmissions = new Map<string, AgentPromptSubmissionRecord>()
+  private readonly promptAdmissions = new Map<string, Map<string, AgentPromptSubmissionRecord>>()
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
   private retiredAgentSessions: AgentMuxRetiredAgentSession[] = []
   private readonly inputConversationCuts = new Map<string, import('./agent-input-conversation.js').AgentInputJournalCut>()
   private readonly timelines = new Map<string, MemoryCapturedHistory>()
 
+  private assertMemoryRecordReadable(id: string): void {
+    if (this.sessions.has(id)) return
+    if (this.retiredAgentSessions.find(value => value.agentSessionId === id)?.recordDeletion) deletedAgentSessionRecord(id)
+  }
+
   private promptRecordKey(value: AgentPromptSubmissionRecord): string {
     return JSON.stringify([value.agentSessionId, value.run.runId, promptRecordId(value)])
+  }
+  private saveMemoryPromptAdmission(value: AgentPromptSubmissionRecord): void {
+    let records = this.promptAdmissions.get(value.agentSessionId)
+    if (!records) this.promptAdmissions.set(value.agentSessionId, records = new Map())
+    records.set(this.promptRecordKey(value), value)
   }
   /** All metadata, complete and lifecycle writes pass here before moving/removing latest. */
   private setSession(id: string, next: AgentMuxStoredAgentSession | null): void {
@@ -2745,19 +2800,21 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const writes = new Map<string, AgentPromptSubmissionRecord>()
     for (const value of originals) {
       const key = this.promptRecordKey(value)
-      assertPromptRecordWrite(writes.get(key) ?? this.promptAdmissions.get(key), value)
+      assertPromptRecordWrite(writes.get(key) ?? this.promptAdmissions.get(value.agentSessionId)?.get(key), value)
       writes.set(key, value)
     }
     return () => {
-      for (const [key, value] of writes) this.promptAdmissions.set(key, value)
+      for (const value of writes.values()) this.saveMemoryPromptAdmission(value)
       if (next) this.sessions.set(id, next)
       else this.sessions.delete(id)
     }
   }
 
   async readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null> {
+    this.assertMemoryRecordReadable(agentSessionId)
+
     const originals = ['submission', 'original-slot'].flatMap(kind => {
-      const value = this.promptAdmissions.get(JSON.stringify([agentSessionId, run.runId, JSON.stringify([kind, submissionId])]))
+      const value = this.promptAdmissions.get(agentSessionId)?.get(JSON.stringify([agentSessionId, run.runId, JSON.stringify([kind, submissionId])]))
       return value ? [value] : []
     })
     if (originals.length > 1) throw new AgentMuxError('The original input location is ambiguous.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -2765,11 +2822,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
+    this.assertMemoryRecordReadable(expected.agentSessionId)
+
     signal?.throwIfAborted(); assertPromptRecordWrite(expected, next, true); assertPromptSettlement(expected, next)
-    const key = this.promptRecordKey(expected), current = this.promptAdmissions.get(key)
+    const key = this.promptRecordKey(expected), current = this.promptAdmissions.get(expected.agentSessionId)?.get(key)
     if (!isDeepStrictEqual(current, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
     const latest = this.sessions.get(expected.agentSessionId), projected = promptAdmissionRecord(latest)
-    this.promptAdmissions.set(key, structuredClone(next))
+    this.saveMemoryPromptAdmission(structuredClone(next))
     if (latest && projected && this.promptRecordKey(projected) === key) {
       this.sessions.set(latest.agentSessionId, { ...latest, promptCompletionAdmission: structuredClone(next.admission!),
         updatedAt: Math.max(latest.updatedAt, Date.now()) })
@@ -2827,6 +2886,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       reservation ? reopenCorrelations([reservation]) : [])[0] ?? null
   }
   async readCapturedUsage(id: string, input: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<AgentSessionUsagePage['captured']> {
+    this.assertMemoryRecordReadable(id)
+
     signal?.throwIfAborted()
     const timeline = this.timelines.get(id)
     if (!timeline) return { status: 'not-measured', reason: 'No existing captured stream has been observed. Native and other Core records are not measured.' }
@@ -2896,7 +2957,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
     const all = normalizeAgentSessions([...values, normalized])
     assertUnboundRetiredRuns(all, this.retiredRuns); assertRetiredAgentSessions(all, this.retiredRuns, this.retiredAgentSessions)
-    for (const original of promptAdmissionRecords(normalized)) assertPromptRecordWrite(this.promptAdmissions.get(this.promptRecordKey(original)), original)
+    for (const original of promptAdmissionRecords(normalized)) assertPromptRecordWrite(this.promptAdmissions.get(original.agentSessionId)?.get(this.promptRecordKey(original)), original)
     const intents = current?.futurePromptIntents ?? (future ? {} : undefined)
     let futureValue: AgentFuturePromptIntent | null = null
     if (future) {
@@ -2924,11 +2985,55 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return structuredClone(this.retiredAgentSessions)
   }
 
-  async readRetiredAgentSession(agentSessionId: string): Promise<AgentMuxRetiredAgentSession | null> {
+  async readRetiredAgentSession(agentSessionId: string, signal?: AbortSignal): Promise<AgentMuxRetiredAgentSession | null> {
     string(agentSessionId, 'agentSessionId')
+    signal?.throwIfAborted()
     const value = this.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)
     if (value && this.sessions.has(agentSessionId)) throw new AgentMuxError('Session is both active and retired.', 'INVALID_AGENT_SESSION_STORE')
     return value ? retiredAgentSession(value) : null
+  }
+
+  async readRecordDeletion(agentSessionId: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    if (this.sessions.has(agentSessionId)) return null
+    const fact = this.retiredAgentSessions.find(value => value.agentSessionId === agentSessionId)?.recordDeletion
+    return fact ? structuredClone(fact) : null
+  }
+
+  async deleteRecord(expected: AgentMuxRetiredAgentSession, operationId: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const index = this.retiredAgentSessions.findIndex(value => value.agentSessionId === expected.agentSessionId)
+    const next = deletedRetirement(this.retiredAgentSessions[index] ?? null, retiredAgentSession(expected), operationId,
+      this.sessions.has(expected.agentSessionId), this.reservations.has(expected.agentSessionId))
+    const stored = structuredClone(next), receipt = structuredClone(next)
+    signal?.throwIfAborted()
+    const admitted = !this.retiredAgentSessions[index]?.recordDeletion
+    this.retiredAgentSessions[index] = stored
+    return { retirement: receipt, admitted }
+  }
+
+  async confirmRecordDeletion(expected: AgentMuxRetiredAgentSession, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    return confirmDeletedRetirement(this.retiredAgentSessions.find(value => value.agentSessionId === expected.agentSessionId), expected)
+  }
+
+  async cleanRecord(expected: AgentMuxRetiredAgentSession, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const index = this.retiredAgentSessions.findIndex(value => value.agentSessionId === expected.agentSessionId)
+    const current = confirmDeletedRetirement(this.retiredAgentSessions[index], expected)
+    const next = { ...current, recordDeletion: { ...current.recordDeletion!, phase: 'complete' as const } }
+    const stored = structuredClone(next), receipt = structuredClone(next)
+    const history = this.timelines.get(expected.agentSessionId)
+    // Preserve the original stream and future-body retirement cut; terminal
+    // record fences make it unreadable, while its payload maps no longer retain bodies.
+    const retainedHistory = history ? structuredClone({ stream: history.stream, heads: new Map(), versions: [],
+      ...(history.retirementAfterSequence === undefined ? {} : { retirementAfterSequence: history.retirementAfterSequence }) }) : undefined
+    signal?.throwIfAborted()
+    if (retainedHistory) this.timelines.set(expected.agentSessionId, retainedHistory)
+    this.promptAdmissions.delete(expected.agentSessionId)
+    this.inputConversationCuts.delete(expected.agentSessionId)
+    this.retiredAgentSessions[index] = stored
+    return receipt
   }
 
   async loadReopenCorrelations(signal?: AbortSignal) {
@@ -3242,6 +3347,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   private memoryCaptured(id: string) {
+    this.assertMemoryRecordReadable(id)
+
     let history = this.timelines.get(id);
     if (!history) {
       history = { stream: { epoch: mintObjectId(), sequence: 0, revision: 0, origin: 'beginning' as const, gaps: [] }, heads: new Map(), versions: [] };
@@ -3258,6 +3365,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       pending: rows.slice(0, 100).map(({ item }) => ({ recordId: item.id, key: item.inputRef! })), next: rows.length > 100 ? rows[99]!.item.id : null })
   }
   async recordInputConversationProjection(id: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
+    this.assertMemoryRecordReadable(id)
+
     const previous = this.inputConversationCuts.get(id)
     if (previous && (previous.queueId !== cut.queueId || previous.incarnation !== cut.incarnation)) throw new AgentMuxError('The original input projection journal changed.', 'AGENT_INPUT_READ_UNCONFIRMED')
     if (!previous || previous.sequence < cut.sequence) this.inputConversationCuts.set(id, structuredClone(cut))
@@ -3297,6 +3406,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async applyTimelineMutation(mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<AgentTimelineCommit> {
     signal?.throwIfAborted()
     const canonical = normalizeAgentTimelineMutation(mutation)
+    this.assertMemoryRecordReadable(canonical.agentSessionId)
     if (!this.sessions.has(canonical.agentSessionId) && !acceptedRetiredActivity(this.retiredAgentSessions, canonical))
       throw new AgentMuxError(`Unknown Agent Session: ${canonical.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
     const staged = this.stageTimelineMutation(canonical)
@@ -3465,6 +3575,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   private database: DatabaseSync | undefined
   private dirty = false
 
+  private assertRecordReadable(db: DatabaseSync, id: string): void {
+    const fact = db.prepare("SELECT json_extract(json,'$.recordDeletion') AS fact FROM retired_sessions WHERE id=?").get(id)?.fact
+    if (fact != null) { parseAgentSessionRecordDeletion(JSON.parse(String(fact))); deletedAgentSessionRecord(id) }
+  }
+
   private async timelineMutationAllowed(mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted()
     if (this.db.prepare('SELECT 1 FROM sessions WHERE id=?').get(mutation.agentSessionId)) return true
@@ -3546,6 +3661,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private promptAdmission(db: DatabaseSync, agentSessionId: string, run: AgentMuxRunRef, submissionId: string): AgentPromptSubmissionRecord | null {
+    this.assertRecordReadable(db, agentSessionId)
+
     if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
       const rows = db.prepare('SELECT record_id,json FROM prompt_admissions WHERE session_id=? AND run_id=? AND record_id IN (?, ?)')
         .all(agentSessionId, run.runId, JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId]))
@@ -3607,6 +3724,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async readCapturedUsage(id: string, input: { cursor?: string; limit?: number }, signal?: AbortSignal): Promise<AgentSessionUsagePage['captured']> {
     await this.sessionWrites(id, signal)
     return await this.withReadDatabase(db => {
+      this.assertRecordReadable(db, id)
+
       // Inspect existing committed storage only. Do not prepare/import a captured stream.
       if (!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='captured_streams'").get())
         return { status: 'not-measured', reason: 'The existing captured store is unavailable; no history has been imported for this inspection.' }
@@ -3626,7 +3745,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
     await this.sessionWrites(agentSessionId)
-    return await this.withReadDatabase(db => this.futureIntent(db, agentSessionId, intentId),
+    return await this.withReadDatabase(db => { this.assertRecordReadable(db, agentSessionId); return this.futureIntent(db, agentSessionId, intentId) },
       document => structuredClone(document.sessions.find(session => session.agentSessionId === agentSessionId)?.futurePromptIntents?.[intentId] ?? null), undefined, true)
   }
 
@@ -3634,6 +3753,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.sessionWrites(agentSessionId)
     const limit = futurePageLimit(options.limit)
     return await this.withReadDatabase(db => {
+      this.assertRecordReadable(db, agentSessionId)
       const cursor = options.afterIntentId === undefined ? null : db.prepare(
         'SELECT ordinal FROM future_intents WHERE session_id=? AND intent_id=?').get(agentSessionId, options.afterIntentId)
       if (options.afterIntentId !== undefined && !cursor) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
@@ -3729,9 +3849,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       .map(row => retiredAgentSession(JSON.parse(String(row.json)))), document => structuredClone(document.retiredAgentSessions), signal)
   }
 
-  async readRetiredAgentSession(agentSessionId: string): Promise<AgentMuxRetiredAgentSession | null> {
+  async readRetiredAgentSession(agentSessionId: string, signal?: AbortSignal): Promise<AgentMuxRetiredAgentSession | null> {
     string(agentSessionId, 'agentSessionId')
-    await this.tail
+    await this.sessionWrites(agentSessionId, signal)
     return await this.withReadDatabase(db => {
       const row = db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
       if (!row) return null
@@ -3744,7 +3864,64 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (value && document.sessions.some(session => session.agentSessionId === agentSessionId)) throw new AgentMuxError(
         'Session is both active and retired.', 'INVALID_AGENT_SESSION_STORE')
       return value ? retiredAgentSession(value) : null
-    })
+    }, signal)
+  }
+
+  async readRecordDeletion(agentSessionId: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    // Committed terminal point only: an error/cancel observer must not wait for a queued
+    // writer. An uncommitted deletion is not evidence to purge a healthy reading view.
+    return await this.withReadDatabase(db => {
+      const row = db.prepare("SELECT json_extract(json,'$.recordDeletion') AS fact FROM retired_sessions WHERE id=?").get(agentSessionId)
+      return row?.fact == null ? null : parseAgentSessionRecordDeletion(JSON.parse(String(row.fact)))
+    }, document => {
+      const fact = document.retiredAgentSessions.find(value => value.agentSessionId === agentSessionId)?.recordDeletion
+      return fact ? parseAgentSessionRecordDeletion(fact) : null
+    }, signal, true)
+  }
+
+  async deleteRecord(expected: AgentMuxRetiredAgentSession, operationId: string, signal?: AbortSignal) {
+    let result!: AgentMuxRetiredAgentSession, admitted = false
+    await this.enqueue(async () => {
+      const original = retiredAgentSession(expected), id = original.agentSessionId
+      const current = this.retiredSession(this.db, id)
+      admitted = !current?.recordDeletion
+      result = deletedRetirement(current, original, operationId,
+        !!this.sessionMetadata(this.db, id), !!this.reservationRow(this.db, id))
+      this.db.prepare('UPDATE retired_sessions SET json=? WHERE id=?').run(JSON.stringify(result), id)
+      this.dirty = true // Also confirms a prior applied deletion whose sync ACK was lost.
+    }, signal, expected.agentSessionId)
+    return { retirement: structuredClone(result), admitted }
+  }
+
+  async confirmRecordDeletion(expected: AgentMuxRetiredAgentSession, signal?: AbortSignal) {
+    let result!: AgentMuxRetiredAgentSession
+    await this.enqueue(async () => {
+      result = confirmDeletedRetirement(this.retiredSession(this.db, expected.agentSessionId), expected)
+      this.dirty = true // Sync only the already observed original fact; no deletion is repeated.
+    }, signal, expected.agentSessionId)
+    return result
+  }
+
+  async cleanRecord(expected: AgentMuxRetiredAgentSession, signal?: AbortSignal) {
+    let result!: AgentMuxRetiredAgentSession
+    await this.enqueue(async () => {
+      const id = expected.agentSessionId
+      result = confirmDeletedRetirement(this.retiredSession(this.db, id), expected)
+      if (result.recordDeletion!.phase === 'complete') return
+      // Only known Session-owned indexed tables. Remaining original rows are the work queue;
+      // no count scan, cursor ledger, file action or cross-target rewrite is needed.
+      for (const table of ['captured_record_versions', 'captured_record_heads', 'captured_input_pending',
+        'captured_input_projection', 'captured_streams', 'prompt_admissions', 'future_intents']) {
+        if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?").get(table)) continue
+        const deleted = this.db.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE session_id=? LIMIT 128)`).run(id)
+        if (deleted.changes) { this.dirty = true; return }
+      }
+      result = { ...result, recordDeletion: { ...result.recordDeletion!, phase: 'complete' } }
+      this.db.prepare('UPDATE retired_sessions SET json=? WHERE id=?').run(JSON.stringify(result), id)
+      this.dirty = true
+    }, signal, expected.agentSessionId)
+    return structuredClone(result)
   }
 
   async loadReopenCorrelations(signal?: AbortSignal) {
@@ -4253,6 +4430,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async prepareCapturedHistory(id: string, signal?: AbortSignal): Promise<AgentCapturedTimelinePage['stream']['gaps']> {
+    if (await this.readRecordDeletion(id, signal)) deletedAgentSessionRecord(id)
+
     const pending = this.capturedPreparations.get(id);
     if (pending)
       return await pending;
@@ -4280,6 +4459,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }
       const witness = await capturedFileWitness(path);
       await this.enqueue(async () => {
+        this.assertRecordReadable(this.db, id)
+
         const row = capturedStream(this.db, id);
         if (row?.state === 'ready')
           return;
@@ -4299,6 +4480,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
           const start = index;
           index += units.length;
           await this.enqueue(async () => {
+        this.assertRecordReadable(this.db, id)
+
             const stream = capturedStream(this.db, id)!;
             if (stream.state === 'ready')
               return;
@@ -4321,9 +4504,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         gaps = imported.gaps;
         if (await capturedFileWitness(path) !== witness)
           throw new AgentMuxError('Original captured source changed during handover; no ready stream was published.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED');
+        if (await this.readRecordDeletion(id, signal)) deletedAgentSessionRecord(id)
         await archiveCapturedOriginal(path, imported.sha256);
       }
       await this.enqueue(async () => {
+        this.assertRecordReadable(this.db, id)
+
         if (capturedStream(this.db, id)?.state === 'ready') {
           this.dirty = true;
           return;
@@ -4349,18 +4535,18 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async readInputConversationProjection(id: string, after = ''): Promise<ReturnType<typeof readCapturedInputProjection>> {
     await this.timelineTails.get(id); await this.sessionWrites(id)
     await this.prepareCapturedHistory(id)
-    return this.withCapturedRead(db => readCapturedInputProjection(db, id, after))
+    return this.withCapturedRead(db => { this.assertRecordReadable(db, id); return readCapturedInputProjection(db, id, after) })
   }
   async recordInputConversationProjection(id: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
     await this.prepareCapturedHistory(id)
-    await this.enqueue(async () => { writeCapturedInputProjection(this.db, id, cut); this.dirty = true }, undefined, id)
+    await this.enqueue(async () => { this.assertRecordReadable(this.db, id); writeCapturedInputProjection(this.db, id, cut); this.dirty = true }, undefined, id)
   }
 
   async readCapturedHistory(agentSessionId: string, input: AgentCapturedTimelineRead = {}): Promise<AgentCapturedTimelinePage> {
     await this.timelineTails.get(agentSessionId);
     await this.sessionWrites(agentSessionId);
     const observedGaps = await this.prepareCapturedHistory(agentSessionId);
-    const page = await this.withCapturedRead(db => readCapturedPage(db, agentSessionId, input));
+    const page = await this.withCapturedRead(db => { this.assertRecordReadable(db, agentSessionId); return readCapturedPage(db, agentSessionId, input) });
     page.stream.gaps.push(...observedGaps);
     return page;
   }
@@ -4374,7 +4560,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (error instanceof AgentMuxError && error.code === 'UNKNOWN_AGENT_SESSION') return { agentSessionId, revision: 0, items: [] };
       throw error;
     }
-    const snapshot = await this.withCapturedRead(db => readRecentCaptured(db, agentSessionId));
+    const snapshot = await this.withCapturedRead(db => { this.assertRecordReadable(db, agentSessionId); return readRecentCaptured(db, agentSessionId) });
     snapshot.stream!.gaps.push(...observedGaps);
     return snapshot;
   }
@@ -4491,6 +4677,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     db.prepare('UPDATE sessions SET future_present=1 WHERE id=?').run(id)
   }
   private savePromptAdmission(db: DatabaseSync, value: AgentPromptSubmissionRecord, receipt = false): void {
+    this.assertRecordReadable(db, value.agentSessionId)
+
     const row = db.prepare('SELECT json FROM prompt_admissions WHERE session_id=? AND run_id=? AND record_id=?')
       .get(value.agentSessionId, value.run.runId, promptRecordId(value))
     const original = row ? JSON.parse(String(row.json)) as AgentPromptSubmissionRecord : undefined

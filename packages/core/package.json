@@ -63,6 +63,10 @@
       "types": "./dist/application-access.d.ts",
       "import": "./dist/application-access.js"
     },
+    "./agent-session-record": {
+      "types": "./dist/agent-session-record.d.ts",
+      "import": "./dist/agent-session-record.js"
+    },
     "./agent-input-mailbox": {
       "types": "./dist/agent-input-mailbox-codec.d.ts",
       "import": "./dist/agent-input-mailbox-codec.js"

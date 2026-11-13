@@ -866,7 +866,9 @@ export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
 export type AgentSessionHistoryDescriptor = {
   agentSessionId: string
   hostId: string
-  state: 'active' | 'retired'
+  state: 'active' | 'retired' | 'deleted'
+  /** A terminal header has no history locator or readable body. */
+  recordDeletion?: import('./agent-session-record.js').AgentSessionRecordDeletion
   retiredAt?: number
   /** Original durable intent; absent operationId means its correlation is unavailable, not no attempt. */
   pendingReopen?: { operationId?: string }
@@ -2018,6 +2020,7 @@ export type AgentMuxClientEvent = (
       run: AgentMuxRunRef
       evidence: AgentMuxEvidence
     }
+  | import('./agent-session-record.js').AgentSessionRecordDeletionEvent
   | {
       type: 'agent-error'
       agentSessionId?: string

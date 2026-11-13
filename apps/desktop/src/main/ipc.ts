@@ -1696,6 +1696,16 @@ export async function registerIpc(args: {
     options: Pick<import('@agentmux/core').AgentSessionUsageInput, 'cursor' | 'limit'>) => {
     return sessionInputOperationResult(() => historyReads.read(event.sender, token, signal => args.runtime.readSessionUsage(reference, options, signal)))
   })
+  handleWithEvent('sessions:inspectRecord', (event, token: string, reference: import('../shared/contracts.js').SessionHistoryReference,
+    options: Pick<import('@agentmux/core').AgentSessionRecordInput, 'operationId'>) => {
+    return sessionInputOperationResult(() => historyReads.read(event.sender, token, signal =>
+      callUserRpc('agent.history.record.inspect', { ...options, ...reference }, { signal })))
+  })
+  handleWithEvent('sessions:deleteRecord', (event, token: string, reference: import('../shared/contracts.js').SessionHistoryReference,
+    options: Omit<import('@agentmux/core').AgentSessionRecordDeleteInput, 'hostId' | 'agentSessionId'>) => {
+    return sessionInputOperationResult(() => historyReads.read(event.sender, token, signal =>
+      callUserRpc('agent.history.record.delete', { ...options, ...reference }, { signal })))
+  })
   handleWithEvent('sessions:cancelHistoryRead', (event, token: string) => {
     historyReads.cancel(event.sender.id, token)
   })

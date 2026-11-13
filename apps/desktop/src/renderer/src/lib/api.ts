@@ -52,7 +52,7 @@ import { createRendererHistoryObservation } from './history-observation'
 import { createRendererSearchRead } from './search-read'
 import { unwrapBrowserRunResult } from '../../../shared/browser-run-result'
 import { BROWSER_PROFILE_RESULT_METHODS, ipcResult, unwrapIpcResultMethods } from '../../../shared/ipc-result'
-import { createRendererHistoryRead, createRendererUsageRead } from './history-read'
+import { createRendererHistoryRead, createRendererUsageRead, createRendererRecordInspect, createRendererRecordDelete } from './history-read'
 import { createRendererHostObservation } from './host-observation'
 import {
   DEFAULT_TOPIC_WIKI,
@@ -1117,6 +1117,8 @@ const mockApi: AgentMuxDesktopApi = {
       observedAt: Date.now(), lifecycle: { state: 'retired' as const },
       captured: { status: 'not-measured' as const, reason: 'Preview does not measure the original Core store.' },
       unmeasured: ['other-core-records', 'provider-native', 'ctxmux-runtime', 'shared-database-physical'] as const }),
+    inspectRecord: async () => { throw new Error('Record inspection requires the original Desktop Core owner. Preview cannot confirm it.') },
+    deleteRecord: async () => { throw new Error('Deleting an AgentMux record requires the original Desktop Core owner. No record was deleted.') },
     readHistory: async () => {
       throw new Error('Host input history queries are unavailable in the web preview. The current draft and existing records are kept.')
     },
@@ -1694,6 +1696,8 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       readHistory: createRendererHistoryRead(preload.sessions.readHistory),
       readUsage: createRendererUsageRead(preload.sessions.readUsage),
+      inspectRecord: createRendererRecordInspect(preload.sessions.inspectRecord),
+      deleteRecord: createRendererRecordDelete(preload.sessions.deleteRecord),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
   }

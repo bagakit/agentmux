@@ -74,6 +74,10 @@ export class ConversationReaderState {
     if (view) this.get(view.id, ref, cursor.scope)
     return { viewId: cursor.viewId, released: this.views.delete(cursor.viewId) }
   }
+  forgetSession(agentSessionId: string): void {
+    // This state belongs to one semantic Core owner; routed Host labels do not duplicate an identity.
+    for (const [id, view] of this.views) if (view.agentSessionId === agentSessionId) this.views.delete(id)
+  }
   dispose(): void { this.views.clear() }
 }
 const key = randomBytes(32)

@@ -1,3 +1,5 @@
+import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
+import type { AgentSessionRecordDeleteInput } from '@agentmux/core/agent-session-record'
 import type { AgentOperationReferences } from './lib/agent-operation'
 import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
@@ -1002,6 +1004,7 @@ export type AppState = GitReadingActions & {
   /** UI intent only; original Core/spatial creation still owns the reserved Session. */
   goalAgentSelectionDrafts: Record<string, GoalAgentSelectionDraft>
   goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
+  sessionRecordDeletionRequests: Record<string, unknown>
   goalDiscussionRequests: Record<string, GoalDiscussionRequest>
   goalAgentCreationDrafts: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
@@ -3936,6 +3939,7 @@ type PersistedAppState = {
   agentOperations: AgentOperationReferences
   goalAgentSelectionDrafts?: Record<string, GoalAgentSelectionDraft>
   goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
+  sessionRecordDeletionRequests?: Record<string, unknown>
   goalDiscussionRequests?: Record<string, GoalDiscussionRequest>
   goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
@@ -4218,6 +4222,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     agentOperations: persistedAgentOperations(state.agentOperations),
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
     goalFiniteStartIntents: state.goalFiniteStartIntents,
+    sessionRecordDeletionRequests: state.sessionRecordDeletionRequests,
     goalDiscussionRequests: state.goalDiscussionRequests,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
@@ -5366,6 +5371,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentOperations: {},
   goalAgentSelectionDrafts: {},
   goalFiniteStartIntents: {},
+  sessionRecordDeletionRequests: {},
   goalDiscussionRequests: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
@@ -12771,6 +12777,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     await entry.promise
   },
   applyEvent(event) {
+    // The original history readers consume this terminal metadata event. It is not a Run
+    // removal or membership observation and must not trigger a global Session resync.
+    if (event.type === 'core' && event.event.type === 'agent-session-record-deleted') return
     const observationStarted = rendererPerformance.start()
     const observationSource = rendererSessionEventSource(event.hostId, event.event)
     try {
@@ -13148,5 +13157,44 @@ export async function saveNoteCanvasPresentation(scope: NoteCanvasScope, patch?:
     if (captured && useAppStore.getState().noteCanvasLayouts[key] !== captured) return
     useAppStore.setState(state => ({ noteCanvasSaveIssues: { ...state.noteCanvasSaveIssues,
       [key]: 'Canvas layout could not be saved. Your current positions are kept. ' + presentError(error) } }))
+  }
+}
+
+/** Save this exact destructive-action reference before its original Core call. No truth is copied here. */
+export async function retainSessionRecordDeleteRequest(request: AgentSessionRecordDeleteInput): Promise<void> {
+  const previous = retainedSessionRecordDelete(useAppStore.getState().sessionRecordDeletionRequests, request)
+  if (previous.state === 'unavailable') throw new Error(previous.issue)
+  if (previous.state === 'retained' && !sameSessionRecordDelete(previous.request, request)) throw new Error('Another original deletion request is retained. Inspect it without replacing its operation.')
+  if (previous.state === 'missing') useAppStore.setState(state => ({ sessionRecordDeletionRequests: {
+    ...state.sessionRecordDeletionRequests, [sessionRecordDeleteKey(request)]: { hostId: request.hostId, agentSessionId: request.agentSessionId,
+      operationId: request.operationId, expectedRetiredAt: request.expectedRetiredAt, expectedRetirementRevision: request.expectedRetirementRevision }
+  } }))
+  if (!workbenchWriteFence.isOpen()) throw new Error('The original saved Workbench is still being restored. Its deletion request is kept without dispatch.')
+  await checkpointWorkbenchUserState()
+  await requestWorkbenchStorageFlush(false)
+  const confirmed = retainedSessionRecordDelete(useAppStore.getState().sessionRecordDeletionRequests, request)
+  if (confirmed.state !== 'retained' || !sameSessionRecordDelete(confirmed.request, request)) throw new Error('The original saved deletion request changed. No replacement request was dispatched.')
+}
+
+/** Remove only an exactly confirmed complete request. A failed local ACK keeps its original reference. */
+export async function settleSessionRecordDeleteRequest(request: AgentSessionRecordDeleteInput): Promise<void> {
+  const previous = retainedSessionRecordDelete(useAppStore.getState().sessionRecordDeletionRequests, request)
+  if (previous.state !== 'retained' || !sameSessionRecordDelete(previous.request, request)) return
+  const key = sessionRecordDeleteKey(request), original = useAppStore.getState().sessionRecordDeletionRequests[key]
+  useAppStore.setState(state => {
+    if (state.sessionRecordDeletionRequests[key] !== original) return state
+    const sessionRecordDeletionRequests = { ...state.sessionRecordDeletionRequests }; delete sessionRecordDeletionRequests[key]
+    return { sessionRecordDeletionRequests }
+  })
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The original Workbench write remains unconfirmed.')
+    await checkpointWorkbenchUserState()
+    await requestWorkbenchStorageFlush(false)
+  }
+  catch (error) {
+    useAppStore.setState(state => Object.hasOwn(state.sessionRecordDeletionRequests, key) ? state : {
+      sessionRecordDeletionRequests: { ...state.sessionRecordDeletionRequests, [key]: original }
+    })
+    throw error
   }
 }

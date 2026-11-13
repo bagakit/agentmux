@@ -5,6 +5,7 @@ import { parseTerminalRecoveryInput } from './terminal-recovery.js'
 import { parseAgentInputChangesRead } from './agent-input-changes.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { parseConversationCheckpointInput } from './conversation-changes.js'
+import { deletedAgentSessionRecord } from './agent-session-record.js'
 import { sanitizeHostedInputInvocation } from './performance-diagnostics.js'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
@@ -286,6 +287,13 @@ export class AgentMuxHostedRuntimeService {
       const retained = await this.client.readMessage({ messageId: invocation.args[0].envelope.messageId })
       messageIntake = retained === null || retained.deliveryMode === 'reference'
     }
+    if (invocation.method === 'deleteAgentSessionRecord') {
+      if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+        throw new AgentMuxError('Deleting an AgentMux record requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      rpcString(context.principal.id, 'Transport principal')
+      await context.assertCurrent?.()
+      context.signal?.throwIfAborted(); this.assertFence(p.fence)
+    }
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction' || invocation.method === 'replySessionQuestion'
     const rawAgentInput = invocation.method === 'writeAgent' || invocation.method === 'pasteAgent'
     const rawTerminalInput = invocation.method === 'writeTerminal' || invocation.method === 'writeTerminalBytes'
@@ -295,6 +303,11 @@ export class AgentMuxHostedRuntimeService {
     // an unattached invocation must not manufacture a consumer with no owner.
     const original = this.consumers.get(id)
     context.signal?.throwIfAborted()
+    if (invocation.method === 'reopenAgent' || invocation.method === 'reconcileAgentReopen') {
+      const agentSessionId = rpcString(invocation.args[0]?.agentSessionId, 'Original Agent Session')
+      const sources = await observe(this.client.sessionHistorySources({ agentSessionId, ...(context.signal ? { signal: context.signal } : {}) }), context.signal)
+      if (sources.some(source => source.agentSessionId === agentSessionId && source.state === 'deleted')) deletedAgentSessionRecord(agentSessionId)
+    }
     const preparation = AGENTMUX_HOSTED_PREPARATION[invocation.method]
     switch (preparation) {
       case 'owner': break
@@ -321,7 +334,12 @@ export class AgentMuxHostedRuntimeService {
     }
     if (context.signal && invocation.method === 'replySessionQuestion') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource' || invocation.method === 'sessionHistoryCheckpoint' || invocation.method === 'readSessionHistoryChanges' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges' || invocation.method === 'readAgentConversation')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
-    if (context.signal && invocation.method === 'readAgentSessionHistory') invocation.args[1] = { signal: context.signal }
+    if (['readAgentSessionUsage', 'inspectAgentSessionRecord', 'deleteAgentSessionRecord'].includes(invocation.method)) {
+      if (invocation.args.length > 2) throw new AgentMuxError('Record access accepts one exact request and cancellation options.', 'INVALID_CONTROL_REQUEST')
+      record(invocation.args[1] ?? {}, [])
+    }
+    if (context.signal && (invocation.method === 'readAgentSessionHistory' || invocation.method === 'readAgentSessionUsage' ||
+      invocation.method === 'inspectAgentSessionRecord' || invocation.method === 'deleteAgentSessionRecord')) invocation.args[1] = { signal: context.signal }
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && (invocation.method === 'clientPerformanceDiagnostics' || invocation.method === 'runtimeDiagnostics' || invocation.method === 'runtimeResourceSnapshot')) invocation.args[0] = { signal: context.signal }
@@ -334,7 +352,7 @@ export class AgentMuxHostedRuntimeService {
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
-    const modifying = invocation.method === 'continueAgentCreation' || continuityControl || invocation.method === 'broadcastMessages' || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
+    const modifying = invocation.method === 'deleteAgentSessionRecord' || invocation.method === 'continueAgentCreation' || continuityControl || invocation.method === 'broadcastMessages' || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
     // Match the public human question-reply owner. Only transport-approved
     // user/device intent supplies human authorship; a wire claim cannot name an Agent.

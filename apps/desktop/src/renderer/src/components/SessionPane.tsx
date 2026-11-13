@@ -1,3 +1,4 @@
+import { LocalRetainedInputs } from './LocalRetainedInputs'
 import { SessionRecordDetails } from './SessionRecordDetails'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { MoteInputReceipt } from './MoteInputReceipt'
@@ -162,9 +163,16 @@ export function SessionPane({
     }
   }, [linkOrigin.regionId, primaryPresentation.onSelectRegion, primaryPresentation.survey, primaryPresentation.surface,
     mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId])
-  const session = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
-  const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
+  const observedSession = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
+  const historyHostId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
+  const historyCatalogue = useFocusHistorySources(!observedSession && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
+  const originalHostId = observedSession?.kind === 'agent' ? observedSession.control.hostId : historyHostId
+  const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === originalHostId)
+  // One exact Core terminal fact outranks a stale presentation. The original
+  // global Session projection and all other consumers retain their own owners.
+  const session = surfaceKind === 'agent' && retainedHistory?.state === 'deleted' ? undefined : observedSession
+  const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const storageDiagnostic = !session ? pendingAgentLaunchResourceDiagnostic(pendingLaunch, sessionId) : undefined
   const storageWait = storageDiagnostic?.code === 'AGENT_CREATION_WAITING_FOR_STORAGE'
   const retainedStorageCause = storageDiagnostic && !storageWait ? pendingLaunch?.events.slice().reverse().find(value =>
@@ -179,10 +187,7 @@ export function SessionPane({
     linkOrigin.tabId && linkOrigin.regionId ? agentRegionExecution({tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, agentSessionId: sessionId})?.hostId : undefined,
     session?.hostId, pendingLaunch?.request?.hostId, recoveryCandidate?.hostId
   ]))
-  const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
-  const historyHostId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
-  const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
-  const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && surfaceKind === 'agent' && visible && !parked && linkOrigin.tabId && linkOrigin.regionId
+  const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && retainedHistory?.state !== 'deleted' && surfaceKind === 'agent' && visible && !parked && linkOrigin.tabId && linkOrigin.regionId
     ? { agentSessionId: sessionId, tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
         ...(linkOrigin.tabGroupId ? { groupId: linkOrigin.tabGroupId } : {}) } : null
   const unobservedReference = unobservedIdentity ? unobservedRecoveryReference(unobservedIdentity) : null
@@ -191,7 +196,7 @@ export function SessionPane({
   const executionHostId = session ? session.kind === 'agent' ? session.control.hostId : session.hostId
     : unobservedReference ? unobservedReference.source?.hostId
       : pendingLaunch ? pendingLaunch.request?.hostId
-      : retainedHistory?.state === 'retired' ? retainedHistory.hostId : recoveryCandidate?.hostId
+      : retainedHistory && (retainedHistory.state === 'retired' || retainedHistory.state === 'deleted') ? retainedHistory.hostId : recoveryCandidate?.hostId
   const configuredExecutionHost = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.hosts.find(host => host.id === executionHostId))
   const runtimeHostUnavailable = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => (state.runtimeEndpointWarnings ?? []).some(
     warning => warning.hostId === executionHostId && warning.availability !== 'connected'))
@@ -860,7 +865,7 @@ export function SessionPane({
   const preSnapshotHost = session ? regionExecutionHost(session, configuredExecutionHost)
     : unobservedReference ? executionHostProjection(unobservedReference.source?.hostId, pendingLaunch?.request?.workspacePath ?? recoveryCandidate?.workspacePath, configuredExecutionHost)
       : pendingLaunch ? executionHostProjection(pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)
-      : retainedHistory?.state === 'retired' ? executionHostProjection(retainedHistory.hostId, retainedHistory.history?.workspacePath, configuredExecutionHost)
+      : retainedHistory && (retainedHistory.state === 'retired' || retainedHistory.state === 'deleted') ? executionHostProjection(retainedHistory.hostId, retainedHistory.history?.workspacePath, configuredExecutionHost)
         : executionHostProjection(recoveryCandidate?.hostId, recoveryCandidate?.workspacePath, configuredExecutionHost)
   const sessionHeader = ({ name = agentInputIdentity ?? (session?.kind === 'terminal' ? session.label : surfaceKind === 'terminal' ? 'Terminal' : agentDisplayName({ userName,
     firstPrompt: pendingLaunch?.request?.prompt, fallbackLabel: recoveryCandidate?.label ?? nameMetadata?.label ?? 'Agent · name unconfirmed',
@@ -872,12 +877,12 @@ export function SessionPane({
   } = {}) =>
     <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
-      regionId={origin.regionId} readOnly={readOnly} portalTargetId={portalTargetId} onHistory={onHistory} onTakeOver={takeOverAt(origin, displayId)}
-      onLearn={learnAt(origin, displayId)} onDerived={derivedAt(origin, displayId)}
-      recordDetails={!session && retainedHistory?.state === 'retired' ? <SessionRecordDetails target={{ hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }} /> : undefined}
+      regionId={origin.regionId} readOnly={readOnly} portalTargetId={portalTargetId} onHistory={onHistory} onTakeOver={retainedHistory?.state === 'deleted' ? undefined : takeOverAt(origin, displayId)}
+      onLearn={retainedHistory?.state === 'deleted' ? undefined : learnAt(origin, displayId)} onDerived={retainedHistory?.state === 'deleted' ? undefined : derivedAt(origin, displayId)}
+      recordDetails={!session && retainedHistory && (retainedHistory.state === 'retired' || retainedHistory.state === 'deleted') ? <SessionRecordDetails key={JSON.stringify([retainedHistory.hostId, retainedHistory.agentSessionId])} target={{ hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }} deleted={retainedHistory.state === 'deleted'} onDeleted={historyCatalogue.acceptDeletion} /> : undefined}
       currentConversationActions={currentConversationActions(origin)} forkAction={action => currentConversationActions(origin, { id: action.id, label: action.label, instruction: action.instruction })} resultReview={resultReview}
       onRefreshObservation={session?.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined} refreshing={refreshing}
-      nativeSession={session?.kind === 'agent' ? session : recoveryCandidate ? {
+      nativeSession={retainedHistory?.state === 'deleted' ? undefined : session?.kind === 'agent' ? session : recoveryCandidate ? {
         id: recoveryCandidate.agentSessionId, ...projectNativeSourceFacts(recoveryCandidate),
         control: { kind: 'agent', hostId: recoveryCandidate.hostId, agentSessionId: recoveryCandidate.agentSessionId, run: recoveryCandidate.run }
       } : undefined} />
@@ -930,7 +935,7 @@ export function SessionPane({
         visible={false} {...(tabName ? { tabName } : {})} /> } : {})} />) : null}
     {primary}
   </>
-  if (!session && acceptedLaunch) {
+  if (!session && acceptedLaunch && retainedHistory?.state !== 'deleted') {
     const acceptedSurface = <FullPageLoadingSurface scope="region" phase="parked"
         eyebrow="Original Session" title="Session created"
         detail="Creation is confirmed. Current process and input availability are not yet confirmed."
@@ -942,6 +947,19 @@ export function SessionPane({
       <div className="agent-body">{acceptedSurface}</div>
       {!readOnly ? <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>)
+  }
+
+  if (!session && retainedHistory?.state === 'deleted') {
+    const target = { hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }
+    return <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="deleted-record">
+      {sessionHeader()}
+      <div className="agent-body session-record-deleted" role="status">
+        <h3>AgentMux record deleted</h3>
+        <p>Core confirmed deletion of this original closed Session record. Its original Tab and Region are kept.</p>
+        <p className="muted">Provider originals and Runtime resources remain with their owners. No physical disk recovery is claimed.</p>
+        <LocalRetainedInputs target={target} />
+      </div>
+    </section>
   }
 
   // Retirement is Core's terminal fact, not a missing Runtime observation. Its native history

@@ -1,3 +1,5 @@
+export { parseAgentSessionRecordInput, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt } from './agent-session-record.js'
+export type { AgentSessionRecordInput, AgentSessionRecordDeleteInput, AgentSessionRecordInspection, AgentSessionRecordDeletion, AgentSessionRecordDeletionReceipt } from './agent-session-record.js'
 export { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
 export * from './author-profile.js'
 export * from './agent-terminal-frontend.js'

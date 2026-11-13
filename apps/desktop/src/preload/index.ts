@@ -617,6 +617,18 @@ const api: AgentMuxPreloadApi = {
       const release = context?.onAbort?.(() => { void ipcRenderer.invoke('sessions:cancelHistoryRead', token).catch(() => {}) })
       try { return await pending } finally { release?.() }
     },
+    inspectRecord: async (reference, options, context) => {
+      const token = mintObjectId()
+      const pending = ipcRenderer.invoke('sessions:inspectRecord', token, reference, options)
+      const release = context?.onAbort?.(() => { void ipcRenderer.invoke('sessions:cancelHistoryRead', token).catch(() => {}) })
+      try { return await pending } finally { release?.() }
+    },
+    deleteRecord: async (reference, options, context) => {
+      const token = mintObjectId()
+      const pending = ipcRenderer.invoke('sessions:deleteRecord', token, reference, options)
+      const release = context?.onAbort?.(() => { void ipcRenderer.invoke('sessions:cancelHistoryRead', token).catch(() => {}) })
+      try { return await pending } finally { release?.() }
+    },
     historyResource: (session, input) => ipcRenderer.invoke('sessions:historyResource', session, input),
     observeHistory: async (session, listener, options) => {
       const token = mintObjectId()

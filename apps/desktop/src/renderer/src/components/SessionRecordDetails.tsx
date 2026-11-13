@@ -3,6 +3,8 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentSessionUsagePage } from '@agentmux/core'
 import { api } from '../lib/api'
+import { SessionRecordDelete } from './SessionRecordDelete'
+import type { AgentSessionRecordDeletionReceipt } from '@agentmux/core/agent-session-record'
 import { LocalRetainedInputs } from './LocalRetainedInputs'
 import type { LocalInputTarget } from '../lib/local-retained-inputs'
 
@@ -54,8 +56,9 @@ function Usage({ target }: { target: LocalInputTarget }) {
   </section>
 }
 
-export function SessionRecordDetails({ target }: { target: LocalInputTarget }) {
+export function SessionRecordDetails({ target, deleted = false, onDeleted }: { target: LocalInputTarget; deleted?: boolean; onDeleted?(receipt: AgentSessionRecordDeletionReceipt): void }) {
   const [open, setOpen] = useState(false)
+  const [confirmedDeleted, setConfirmedDeleted] = useState(deleted)
   const identity = JSON.stringify([target.hostId, target.agentSessionId])
   return <Dialog.Root open={open} onOpenChange={setOpen}>
     <Dialog.Trigger asChild><button type="button" className="small-button session-record-details-trigger">Record details</button></Dialog.Trigger>
@@ -66,7 +69,8 @@ export function SessionRecordDetails({ target }: { target: LocalInputTarget }) {
         <Dialog.Description>Original Session records. Reading does not restore an Agent.</Dialog.Description>
         {open ? <div key={identity} className="session-record-details__body">
           <dl className="session-record-details__facts"><div><dt>Host</dt><dd>{target.hostId}</dd></div><div><dt>Session</dt><dd>{target.agentSessionId}</dd></div><div><dt>Owner</dt><dd>AgentMux Core · captured body JSON</dd></div></dl>
-          <Usage target={target} />
+          {!deleted && !confirmedDeleted ? <Usage target={target} /> : null}
+          <SessionRecordDelete target={target} onDeleted={receipt => { setConfirmedDeleted(true); onDeleted?.(receipt) }} />
           <details><summary>Saved local inputs</summary><LocalRetainedInputs target={target} /></details>
         </div> : null}
       </Dialog.Content>

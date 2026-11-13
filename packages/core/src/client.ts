@@ -1,8 +1,12 @@
+import { agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
 import { decodeNativeSnapshotCursor } from './native-snapshot-cursor.js'
 import { NativeSourceSnapshots } from './native-source-snapshot.js'
 import { parseConversationSnapshotInput, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput, type ConversationSnapshotPage, type ConversationSnapshotReleaseResult } from './conversation-snapshot.js'
 import { parseAgentSessionUsageInput, SESSION_USAGE_UNMEASURED, type AgentSessionUsageInput, type AgentSessionUsagePage } from './agent-session-usage.js'
+import { parseAgentSessionRecordInput, deletedAgentSessionRecord,
+  type AgentSessionRecordInput, type AgentSessionRecordDeleteInput, type AgentSessionRecordInspection, type AgentSessionRecordDeletionReceipt } from './agent-session-record.js'
+import { setImmediate as yieldRecordWriter } from 'node:timers/promises'
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
 import { homedir } from 'node:os'
@@ -1041,6 +1045,7 @@ export class AgentMuxClient {
   private readonly agentInputLanes = new Map<string, AgentInputLane>()
   private readonly rawInputAdmissions = new Map<string, Promise<void>>()
   private readonly providerReads = new Set<AbortController>()
+  private readonly providerReadSubjects = new WeakMap<AbortController, string>()
   private readonly conversationReadState = new ConversationReaderState()
   private readingDiagnosticSource: CoreReadingDiagnosticSource | undefined
   private readonly startupDiagnostics: CoreStartupDiagnosticJournal
@@ -2483,16 +2488,18 @@ export class AgentMuxClient {
 
   /** Exact durable identity, without inventory, adoption or a Run probe. */
   async readAgentSession(agentSessionId: string): Promise<AgentMuxAgentSession | null> {
-    safeId(agentSessionId, 'Agent Session id')
-    let canonical!: AgentMuxStoredAgentSession | null
-    await this.registry.readMetadata(agentSessionId, session => { canonical = session })
-    if (canonical) {
-      if (canonical.agentSessionId !== agentSessionId) throw new AgentMuxError(
-        'The original Session metadata belongs to another identity. Existing Runs are retained.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
-      return this.projectSession(await this.registry.readStartedResume(canonical))
-    }
-    const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
-    return started?.creation?.persistence === 'unconfirmed' ? this.projectSession(started) : null
+    return await this.withSessionRecordRead(agentSessionId, async () => {
+      safeId(agentSessionId, 'Agent Session id')
+      let canonical!: AgentMuxStoredAgentSession | null
+      await this.registry.readMetadata(agentSessionId, session => { canonical = session })
+      if (canonical) {
+        if (canonical.agentSessionId !== agentSessionId) throw new AgentMuxError(
+          'The original Session metadata belongs to another identity. Existing Runs are retained.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+        return this.projectSession(await this.registry.readStartedResume(canonical))
+      }
+      const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
+      return started?.creation?.persistence === 'unconfirmed' ? this.projectSession(started) : null
+    })
   }
 
   /** Current durable identities, without replacing the active registry or probing Runs. */
@@ -2529,15 +2536,19 @@ export class AgentMuxClient {
 
   /** Retained body by exact identity; absence is explicit, never inferred from a control projection. */
   async readAgentFuturePromptIntent(agentSessionId: string, intentId: string): Promise<import('./types.js').AgentFuturePromptIntent | null> {
-    safeId(intentId, 'Future message intent id')
-    const session = this.requireAgentSession(agentSessionId)
-    return await this.store.readFuturePromptIntent(session.agentSessionId, intentId)
+    return await this.withSessionRecordRead(agentSessionId, async () => {
+      safeId(intentId, 'Future message intent id')
+      const session = this.requireAgentSession(agentSessionId)
+      return await this.store.readFuturePromptIntent(session.agentSessionId, intentId)
+    })
   }
 
   /** A bounded read window over all original future identities, including inactive history. */
   async listAgentFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<import('./agent-session-store.js').AgentMuxFuturePromptPage> {
-    const session = this.requireAgentSession(agentSessionId)
-    return await this.store.listFuturePromptIntents(session.agentSessionId, options)
+    return await this.withSessionRecordRead(agentSessionId, async () => {
+      const session = this.requireAgentSession(agentSessionId)
+      return await this.store.listFuturePromptIntents(session.agentSessionId, options)
+    })
   }
 
   /** Resolve durable creation bindings before choosing an identity for a new operation. No process or input is started. */
@@ -2849,8 +2860,10 @@ export class AgentMuxClient {
   }
 
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
-    const descriptor = await this.historyDescriptor(agentSessionId)
-    return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: descriptor.hostId }
+    return await this.withSessionRecordRead(agentSessionId, async () => {
+      const descriptor = await this.historyDescriptor(agentSessionId)
+      return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: descriptor.hostId }
+    })
   }
 
   /** Current-head callers cannot interpret a missing body as an absent original. */
@@ -2862,25 +2875,118 @@ export class AgentMuxClient {
 
   /** Query the original semantic Host's retained history; no Runtime connection or input authority. */
   async readAgentSessionHistory(input: AgentSessionHistoryReadInput, options: { signal?: AbortSignal } = {}): Promise<AgentSessionHistoryReadPage> {
-    // The receiver is already the selected semantic Host. Its route-local namespace
-    // is distinct from the execution Host retained in its own durable descriptor.
-    const descriptor = input.hostId === 'local' ? await this.historyDescriptor(input.agentSessionId) : undefined
-    const page = await readAgentSessionHistory(this, descriptor ? { ...input, hostId: descriptor.hostId } : input,
-      { ...options, resolveSource: id => this.historyDescriptor(id), readCapturedHistory: (id, query) => this.store.readCapturedHistory(id, query) })
-    return descriptor ? { ...page, hostId: input.hostId } : page
+    return await this.withSessionRecordRead(input.agentSessionId, async () => {
+      // The receiver is already the selected semantic Host. Its route-local namespace
+      // is distinct from the execution Host retained in its own durable descriptor.
+      const descriptor = input.hostId === 'local' ? await this.historyDescriptor(input.agentSessionId) : undefined
+      const page = await readAgentSessionHistory(this, descriptor ? { ...input, hostId: descriptor.hostId } : input,
+        { ...options, resolveSource: id => this.historyDescriptor(id), readCapturedHistory: (id, query) => this.store.readCapturedHistory(id, query) })
+      return descriptor ? { ...page, hostId: input.hostId } : page
+    })
+  }
+
+  /** Read or reconcile this exact record, without a Start, Stop or deletion replay. */
+  async inspectAgentSessionRecord(value: AgentSessionRecordInput, options: { signal?: AbortSignal } = {}): Promise<AgentSessionRecordInspection> {
+    const input = parseAgentSessionRecordInput(value), signal = options.signal
+    signal?.throwIfAborted()
+    const retired = await this.store.readRetiredAgentSession(input.agentSessionId, signal)
+    const active = await this.store.readMetadata(input.agentSessionId)
+    if (input.hostId !== 'local' && (retired?.hostId ?? active?.hostId) !== input.hostId) throw new AgentMuxError('The exact record Host is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    const base = { hostId: input.hostId, agentSessionId: input.agentSessionId, observedAt: Date.now() }
+    if (retired?.recordDeletion) {
+      const confirmed = await this.store.confirmRecordDeletion(retired, signal)
+      this.releaseSessionRecordReaders(input.agentSessionId)
+      this.publishSessionRecordDeletion(confirmed)
+      return { ...base, state: 'deleted', receipt: this.sessionRecordDeletionReceipt(input.hostId, confirmed),
+        ...(input.operationId === undefined ? {} : { operationIdMatched: input.operationId === confirmed.recordDeletion!.operationId }) }
+    }
+    if (active) return { ...base, state: 'active' }
+    if (!retired) return { ...base, state: 'absent' }
+    const pending = await this.store.readLifecycleReservation(input.agentSessionId)
+    signal?.throwIfAborted()
+    return { ...base, state: 'retired', retiredAt: retired.observedAt,
+      retirementRevision: agentSessionRetirementRevision(retired), pendingLifecycle: pending !== null }
+  }
+
+  /** Delete only this original AgentMux record; other owners and unsent client content are retained. */
+  async deleteAgentSessionRecord(value: AgentSessionRecordDeleteInput, options: { signal?: AbortSignal } = {}): Promise<AgentSessionRecordDeletionReceipt> {
+    const input = parseAgentSessionRecordInput(value, true) as AgentSessionRecordDeleteInput, signal = options.signal
+    signal?.throwIfAborted()
+    const retired = await this.store.readRetiredAgentSession(input.agentSessionId, signal)
+    if (!retired || input.hostId !== 'local' && retired.hostId !== input.hostId || retired.observedAt !== input.expectedRetiredAt ||
+      agentSessionRetirementRevision(retired) !== input.expectedRetirementRevision) throw new AgentMuxError(
+      'The exact original retirement changed. No record was deleted; inspect its current facts.', 'STALE_AGENT_SESSION')
+    if (input.continue && !retired.recordDeletion) throw new AgentMuxError(
+      'Cleanup requires the confirmed original deletion. Inspect this operation first.', 'AGENT_SESSION_RECORD_UNCONFIRMED')
+    const result = await this.store.deleteRecord(retired, input.operationId, signal)
+    let record = result.retirement
+    this.releaseSessionRecordReaders(input.agentSessionId)
+    this.publishSessionRecordDeletion(record)
+    // A repeated or lost-reply request does not replay cleanup. Only a new admission or
+    // explicit completion of the already confirmed same operation enters these short steps.
+    if (result.admitted || input.continue) {
+      while (record.recordDeletion!.phase === 'pending') {
+        signal?.throwIfAborted()
+        record = await this.store.cleanRecord(record, signal)
+        await yieldRecordWriter(undefined, signal ? { signal } : undefined)
+      }
+    }
+    if (record.recordDeletion!.phase === 'complete') this.publishSessionRecordDeletion(record)
+    return this.sessionRecordDeletionReceipt(input.hostId, record)
+  }
+
+  private publishSessionRecordDeletion(retired: import('./agent-session-store.js').AgentMuxRetiredAgentSession): void {
+    if (retired.recordDeletion) this.publisher.publish({ type: 'agent-session-record-deleted', agentSessionId: retired.agentSessionId,
+      retiredAt: retired.observedAt, recordDeletion: { ...retired.recordDeletion } })
+  }
+
+  private sessionRecordDeletionReceipt(hostId: string, retired: import('./agent-session-store.js').AgentMuxRetiredAgentSession): AgentSessionRecordDeletionReceipt {
+    if (!retired.recordDeletion) throw new AgentMuxError('The original deletion fact is unavailable.', 'AGENT_SESSION_RECORD_UNCONFIRMED')
+    return { hostId, agentSessionId: retired.agentSessionId, retiredAt: retired.observedAt, deletion: { ...retired.recordDeletion }, persistence: 'confirmed' }
+  }
+
+  private releaseSessionRecordReaders(agentSessionId: string): void {
+    this.conversationReadState.forgetSession(agentSessionId)
+    for (const id of this.inputWaitingByRecipient.get(agentSessionId) ?? []) this.inputWaitingContexts.get(id)?.controller.abort()
+    for (const resource of this.historyObservationControllers.get(agentSessionId) ?? []) resource.controller.abort(new AgentMuxError('The original AgentMux record was deleted.', 'AGENT_SESSION_RECORD_DELETED'))
+    for (const controller of this.providerReads) if (this.providerReadSubjects.get(controller) === agentSessionId) controller.abort(new AgentMuxError('The original AgentMux record was deleted.', 'AGENT_SESSION_RECORD_DELETED'))
+  }
+
+  private async assertSessionRecordReadable(agentSessionId: string): Promise<void> {
+    if (await this.store.readRecordDeletion(agentSessionId)) {
+      this.releaseSessionRecordReaders(agentSessionId)
+      deletedAgentSessionRecord(agentSessionId)
+    }
+  }
+
+  private async withSessionRecordRead<T>(agentSessionId: string, read: () => Promise<T>): Promise<T> {
+    await this.assertSessionRecordReadable(agentSessionId)
+    let value: T
+    try { value = await read() }
+    catch (error) {
+      // A read can fail after another Core has deleted its old view. Purge only on
+      // that committed fact; an unavailable observation keeps healthy cached data.
+      // Neither a failed observation nor cleanup may replace the original IO/cancel error.
+      try { await this.assertSessionRecordReadable(agentSessionId) } catch { /* Original error owns this response. */ }
+      throw error
+    }
+    await this.assertSessionRecordReadable(agentSessionId)
+    return value
   }
 
   /** Bounded logical captured-body usage at this semantic owner; no Run operation. */
   async readAgentSessionUsage(value: AgentSessionUsageInput, options: { signal?: AbortSignal } = {}): Promise<AgentSessionUsagePage> {
-    const input = parseAgentSessionUsageInput(value)
-    options.signal?.throwIfAborted()
-    const source = await this.historyDescriptor(input.agentSessionId, options.signal)
-    if (input.hostId !== 'local' && source.hostId !== input.hostId) throw new AgentMuxError('Usage target belongs to another semantic Host.', 'UNKNOWN_AGENT_SESSION')
-    const captured = await this.store.readCapturedUsage(input.agentSessionId, input, options.signal)
-    options.signal?.throwIfAborted()
-    return { hostId: input.hostId, agentSessionId: input.agentSessionId, observedAt: Date.now(),
-      lifecycle: { state: source.state, ...(source.retiredAt === undefined ? {} : { retiredAt: source.retiredAt }),
-        ...(source.pendingReopen ? { pendingReopen: true as const } : {}) }, captured, unmeasured: SESSION_USAGE_UNMEASURED }
+    return await this.withSessionRecordRead(value.agentSessionId, async () => {
+      const input = parseAgentSessionUsageInput(value)
+      options.signal?.throwIfAborted()
+      const source = await this.historyDescriptor(input.agentSessionId, options.signal)
+      if (input.hostId !== 'local' && source.hostId !== input.hostId) throw new AgentMuxError('Usage target belongs to another semantic Host.', 'UNKNOWN_AGENT_SESSION')
+      const captured = await this.store.readCapturedUsage(input.agentSessionId, input, options.signal)
+      options.signal?.throwIfAborted()
+      return { hostId: input.hostId, agentSessionId: input.agentSessionId, observedAt: Date.now(),
+        lifecycle: { state: source.state, ...(source.retiredAt === undefined ? {} : { retiredAt: source.retiredAt }),
+          ...(source.pendingReopen ? { pendingReopen: true as const } : {}) }, captured, unmeasured: SESSION_USAGE_UNMEASURED }
+    })
   }
 
   /** Read this owner's retained startup facts without probing or connecting Runtime. */
@@ -2924,33 +3030,39 @@ export class AgentMuxClient {
 
   /** One source-qualified timeline over the original native and captured owners. */
   async readAgentConversation(input: ConversationTimelineReadInput, options: ConversationReadOptions = {}): Promise<AgentConversationReadPage> {
-    return this.observeConversationRead(input, input.cursor || input.record || input.anchor || input.view ? undefined : 'latest', async () => {
-      const owner = await this.conversationReader(input, options)
-      if (input.anchor) { parseConversationCheckpoint(input.anchor.frontier, input); parseConversationFrontier(input.anchor.frontier.frontier, owner.reference) }
-      const anchor = input.anchor ? { ...input.anchor, frontier: { ...input.anchor.frontier, ...owner.reference } } : undefined
-      const page = await readUnifiedConversation({ ...input, ...owner.reference, ...(anchor ? { anchor } : {}) }, owner.port)
-      return page
+    return await this.withSessionRecordRead(input.agentSessionId, async () => {
+      return this.observeConversationRead(input, input.cursor || input.record || input.anchor || input.view ? undefined : 'latest', async () => {
+        const owner = await this.conversationReader(input, options)
+        if (input.anchor) { parseConversationCheckpoint(input.anchor.frontier, input); parseConversationFrontier(input.anchor.frontier.frontier, owner.reference) }
+        const anchor = input.anchor ? { ...input.anchor, frontier: { ...input.anchor.frontier, ...owner.reference } } : undefined
+        const page = await readUnifiedConversation({ ...input, ...owner.reference, ...(anchor ? { anchor } : {}) }, owner.port)
+        return page
+      })
     })
   }
 
   async conversationCheckpoint(input: ConversationCheckpointInput, options: ConversationReadOptions = {}): Promise<ConversationCheckpointPage> {
-    input = parseConversationCheckpointInput(input)
-    const owner = await this.conversationReader(input, options)
-    const page = await cutUnifiedConversation(owner.reference, owner.port, input.nativePosition, input.nativeSnapshot)
-    return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+    return await this.withSessionRecordRead(input.agentSessionId, async () => {
+      input = parseConversationCheckpointInput(input)
+      const owner = await this.conversationReader(input, options)
+      const page = await cutUnifiedConversation(owner.reference, owner.port, input.nativePosition, input.nativeSnapshot)
+      return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+    })
   }
 
   async readConversationChanges(input: ConversationChangesInput, options: ConversationReadOptions = {}): Promise<ConversationChangesPage> {
     // Reject invalid fields before source lookup, as on the public wire.
     parseConversationChangesInput(input)
-    return this.observeConversationRead(input, 'changes', async () => {
-      const owner = await this.conversationReader(input, options)
-      parseConversationCheckpoint(input.checkpoint, input)
-      parseConversationFrontier(input.checkpoint.frontier, owner.reference)
-      if(input.recover){parseConversationCheckpoint(input.recover,input);parseConversationFrontier(input.recover.frontier,owner.reference)}
-      if(input.through){parseConversationCheckpoint(input.through,input);parseConversationFrontier(input.through.frontier,owner.reference)}
-      const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference }, ...(input.through ? {through:{...input.through,...owner.reference}} : {}) }, owner.port)
-      return page
+    return await this.withSessionRecordRead(input.agentSessionId, async () => {
+      return this.observeConversationRead(input, 'changes', async () => {
+        const owner = await this.conversationReader(input, options)
+        parseConversationCheckpoint(input.checkpoint, input)
+        parseConversationFrontier(input.checkpoint.frontier, owner.reference)
+        if(input.recover){parseConversationCheckpoint(input.recover,input);parseConversationFrontier(input.recover.frontier,owner.reference)}
+        if(input.through){parseConversationCheckpoint(input.through,input);parseConversationFrontier(input.through.frontier,owner.reference)}
+        const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference }, ...(input.through ? {through:{...input.through,...owner.reference}} : {}) }, owner.port)
+        return page
+      })
     })
   }
 
@@ -2969,9 +3081,11 @@ export class AgentMuxClient {
   }
   /** Exact source custody metadata, including original receipts after a lost response. */
   async listConversationSnapshots(input: ConversationSnapshotInput): Promise<ConversationSnapshotPage> {
-    input = parseConversationSnapshotInput(input) as ConversationSnapshotInput
-    const store = await this.conversationSnapshots(input); await store.collectAbandoned()
-    return { hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source, ...await store.list(input.after, input.limit ?? 30) }
+    return await this.withSessionRecordRead(input.agentSessionId, async () => {
+      input = parseConversationSnapshotInput(input) as ConversationSnapshotInput
+      const store = await this.conversationSnapshots(input); await store.collectAbandoned()
+      return { hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source, ...await store.list(input.after, input.limit ?? 30) }
+    })
   }
   async releaseConversationSnapshot(input: ConversationSnapshotReleaseInput): Promise<ConversationSnapshotReleaseResult> {
     input = parseConversationSnapshotInput(input, true) as ConversationSnapshotReleaseInput
@@ -3035,7 +3149,7 @@ export class AgentMuxClient {
     invocation: Pick<AgentMuxSessionQuestionReplyInput, 'commandOverride' | 'args' | 'env'> & { turnId?: string; nativeSnapshotCursor?: string } = {}): Promise<AgentSessionHistoryItem> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('Conversation reading is busy; retry this exact original record.', 'AGENT_SESSION_HISTORY_BUSY')
-    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const lifetime = this.providerReadLifetime('history', agentSessionId), { controller, read } = lifetime
     const cancel = () => controller.abort(signal?.reason); signal?.addEventListener('abort', cancel, { once: true })
     try {
       signal?.throwIfAborted()
@@ -3372,15 +3486,16 @@ export class AgentMuxClient {
         if (!sameNativeHandle(candidate, session.nativeHandle)) append(candidate, binding)
       }
     }
-    for (const session of retired) if (session.hostId === 'local' && session.history) append(session.history.nativeHandle, { agentSessionId: session.agentSessionId,
+    for (const session of retired) if (session.hostId === 'local' && session.history && !session.recordDeletion) append(session.history.nativeHandle, { agentSessionId: session.agentSessionId,
       executorId: session.history.executorId, run: { ...session.run }, state: 'retired', retiredAt: session.observedAt })
     return index
   }
 
-  private async historyDescriptor(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor> {
+  private async historyDescriptor(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor & { state: 'active' | 'retired' }> {
     const descriptor = await this.store.readHistorySource(agentSessionId, signal)
     if (!descriptor) throw new AgentMuxError(`Unknown Agent Session: ${agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
-    return descriptor
+    if (descriptor.state === 'deleted') deletedAgentSessionRecord(agentSessionId)
+    return { ...descriptor, state: descriptor.state }
   }
 
   /** Resolve private launch/read configuration on its executing Host, never through a client projection. */
@@ -3780,7 +3895,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('History reading is busy; retry after the current page finishes.', 'AGENT_SESSION_HISTORY_BUSY')
     }
     options.signal?.throwIfAborted()
-    const lifetime = this.providerReadLifetime('history')
+    const lifetime = this.providerReadLifetime('history', agentSessionId)
     const { controller, read } = lifetime
     const cancelled = () => controller.abort(options.signal?.reason)
     options.signal?.addEventListener('abort', cancelled, { once: true })
@@ -3833,7 +3948,7 @@ export class AgentMuxClient {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Changes require a finite limit from 1 to 100.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('Conversation reading is busy; retry this original checkpoint.', 'AGENT_SESSION_HISTORY_BUSY')
     options.signal?.throwIfAborted()
-    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const lifetime = this.providerReadLifetime('history', agentSessionId), { controller, read } = lifetime
     const cancel = () => controller.abort(options.signal?.reason)
     options.signal?.addEventListener('abort', cancel, { once: true })
     try {
@@ -3868,7 +3983,7 @@ export class AgentMuxClient {
     if (this.providerReadsDisposed) throw new AgentMuxError('History reading client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('History reading is busy; retry this resource.', 'AGENT_SESSION_HISTORY_BUSY')
     input.signal?.throwIfAborted()
-    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const lifetime = this.providerReadLifetime('history', agentSessionId), { controller, read } = lifetime
     const cancel = (): void => controller.abort(input.signal?.reason)
     input.signal?.addEventListener('abort', cancel, { once: true })
     try {
@@ -4115,7 +4230,7 @@ export class AgentMuxClient {
     }
   }
 
-  private providerReadLifetime(purpose: 'history' | 'hooks') {
+  private providerReadLifetime(purpose: 'history' | 'hooks', agentSessionId?: string) {
     const prefix = purpose === 'history' ? 'AGENT_SESSION_HISTORY' : 'AGENT_HOOK_READ'
     if (this.providerReadsDisposed) throw new AgentMuxError('Provider reading client was disposed.', `${prefix}_CANCELLED`)
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) {
@@ -4123,6 +4238,7 @@ export class AgentMuxClient {
     }
     const controller = new AbortController()
     this.providerReads.add(controller)
+    if (agentSessionId !== undefined) this.providerReadSubjects.set(controller, agentSessionId)
     // Times out only after a stall: every completed physical read of this page restarts the wait.
     const stalled = () => controller.abort(new AgentMuxError(
       'Native Provider reading made no progress and timed out.', `${prefix}_TIMEOUT`))
@@ -5057,16 +5173,18 @@ export class AgentMuxClient {
 
   /** Original A2A metadata only; no connection, Run probe, input or acknowledgement. */
   async listMessages(input: import('./agent-message-query.js').AgentMuxMessageQuery & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-query.js').AgentMuxMessagePage> {
-    const caller = input.caller
-    if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
-      'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
-    this.messageReadUsed = true
-    void this.observeMessageReads()?.refresh()
-    const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
-    const page = await this.messageQueue.listMessages(input, async () => {
-      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-    }, runtimeId)
-    return { ...page, messages: page.messages.map(message => this.withAutomaticNotification(message)) }
+    return await this.withSessionRecordRead(input.participantSessionId, async () => {
+      const caller = input.caller
+      if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
+        'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
+      this.messageReadUsed = true
+      void this.observeMessageReads()?.refresh()
+      const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
+      const page = await this.messageQueue.listMessages(input, async () => {
+        if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      }, runtimeId)
+      return { ...page, messages: page.messages.map(message => this.withAutomaticNotification(message)) }
+    })
   }
 
   /** Batch coordination freezes once; every target consumes the existing single-message Inbox owner. */
@@ -5106,15 +5224,17 @@ export class AgentMuxClient {
 
   /** Original journal events from either side; no Runtime connection or consumer mutation. */
   async listMessageEvents(input: import('./agent-message-events.js').AgentMuxMessageEventsQuery & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-events.js').AgentMuxMessageEventsPage> {
-    const { caller, ...query } = input
-    if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
-      'An Agent can only browse its own original events.', 'MESSAGE_PARTICIPANT_MISMATCH')
-    this.messageReadUsed = true
-    void this.observeMessageReads()?.refresh()
-    const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
-    return this.messageQueue.listMessageEvents(query, async () => {
-      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-    }, runtimeId)
+    return await this.withSessionRecordRead(input.participantSessionId, async () => {
+      const { caller, ...query } = input
+      if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
+        'An Agent can only browse its own original events.', 'MESSAGE_PARTICIPANT_MISMATCH')
+      this.messageReadUsed = true
+      void this.observeMessageReads()?.refresh()
+      const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
+      return this.messageQueue.listMessageEvents(query, async () => {
+        if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      }, runtimeId)
+    })
   }
 
   /** SDK callers are trusted Host readers; managed authority is checked again under the journal lock. */
@@ -5130,13 +5250,15 @@ export class AgentMuxClient {
 
   async listDispatches(input: { participantSessionId: string; afterSourceMessageId?: string; limit?: number;
     caller?: { agentSessionId: string; capability: string } }): Promise<DispatchPage> {
-    const caller = input.caller
-    if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
-      'An Agent can only list its own Dispatch participation.', 'DISPATCH_PARTICIPANT_MISMATCH')
-    const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
-    return this.messageQueue.listDispatches(input, async () => {
-      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-    }, runtimeId)
+    return await this.withSessionRecordRead(input.participantSessionId, async () => {
+      const caller = input.caller
+      if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
+        'An Agent can only list its own Dispatch participation.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      const runtimeId = caller && this.creationAuthority ? (await this.agentMessageAuthority()).runtimeId : undefined
+      return this.messageQueue.listDispatches(input, async () => {
+        if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      }, runtimeId)
+    })
   }
 
   private async dispatchIdentityDiagnostics(messages: readonly AgentMuxMessageEnvelope[]): Promise<readonly DispatchIdentityDiagnostic[]> {
@@ -6473,38 +6595,40 @@ export class AgentMuxClient {
   }
 
   async readAgentInputResource(value: AgentInputResourceRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputResourceResult> {
-    const input = parseAgentInputResourceRead(value), key = input.key
-    const receipt = await this.inspectAgentInput({ key }, caller)
-    const claim = receipt?.admission ?? await this.inspectAgentPromptSubmission(key)
-    if (!receipt && caller) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
-    if (!receipt && caller && caller.agentSessionId !== key.agentSessionId && claim?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError(
-      'Only an original input participant can read its selected image.', 'CONTROL_PERMISSION_DENIED')
-    const saved = await this.messageQueue.inspectInput({ key })
-    const source = saved?.intent.source.kind === 'prompt' ? saved.intent.source : undefined
-    const message = claim?.admission?.intent?.message ?? claim?.launch?.message
-    const body = source?.prompt ?? message?.userContent
-    const image = (source?.inputImages ?? message?.inputImages)?.[input.index]
-    const unavailable = (code: string): AgentInputResourceResult => ({ ...(input.purpose ? { purpose: input.purpose } : {}), key, index: input.index, revision: input.revision, status: 'unavailable', code,
-      message: 'The original selected image is unavailable. The original message and Agent remain available.' })
-    if (input.purpose === 'author-avatar') {
-      const profile = source?.authorHuman === true ? source.authorProfile : message?.authorHuman === true ? message.authorProfile : undefined
-      const avatar = profile?.avatar
-      if (!avatar || input.index !== 0 || avatar.revision !== input.revision || avatar.byteLength > input.maxBytes) return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE')
+    return await this.withSessionRecordRead(parseAgentInputResourceRead(value).key.agentSessionId, async () => {
+      const input = parseAgentInputResourceRead(value), key = input.key
+      const receipt = await this.inspectAgentInput({ key }, caller)
+      const claim = receipt?.admission ?? await this.inspectAgentPromptSubmission(key)
+      if (!receipt && caller) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
+      if (!receipt && caller && caller.agentSessionId !== key.agentSessionId && claim?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError(
+        'Only an original input participant can read its selected image.', 'CONTROL_PERMISSION_DENIED')
+      const saved = await this.messageQueue.inspectInput({ key })
+      const source = saved?.intent.source.kind === 'prompt' ? saved.intent.source : undefined
+      const message = claim?.admission?.intent?.message ?? claim?.launch?.message
+      const body = source?.prompt ?? message?.userContent
+      const image = (source?.inputImages ?? message?.inputImages)?.[input.index]
+      const unavailable = (code: string): AgentInputResourceResult => ({ ...(input.purpose ? { purpose: input.purpose } : {}), key, index: input.index, revision: input.revision, status: 'unavailable', code,
+        message: 'The original selected image is unavailable. The original message and Agent remain available.' })
+      if (input.purpose === 'author-avatar') {
+        const profile = source?.authorHuman === true ? source.authorProfile : message?.authorHuman === true ? message.authorProfile : undefined
+        const avatar = profile?.avatar
+        if (!avatar || input.index !== 0 || avatar.revision !== input.revision || avatar.byteLength > input.maxBytes) return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE')
+        try {
+          const original = parsePreparedAuthorProfile(profile).avatar!
+          return { purpose: 'author-avatar', key, index: input.index, revision: input.revision, status: 'available', name: 'avatar',
+            mimeType: original.mimeType, byteLength: original.byteLength, width: original.width, height: original.height, dataBase64: original.dataBase64 }
+        } catch { return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE') }
+      }
+      if (!image || body === undefined || image.upload.revision !== input.revision || !inputImageMatches(image, key, body)) return unavailable('INPUT_IMAGE_MEMBERSHIP_UNCONFIRMED')
+      if (!this.inputResources || image.upload.byteLength > input.maxBytes) return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE')
       try {
-        const original = parsePreparedAuthorProfile(profile).avatar!
-        return { purpose: 'author-avatar', key, index: input.index, revision: input.revision, status: 'available', name: 'avatar',
-          mimeType: original.mimeType, byteLength: original.byteLength, width: original.width, height: original.height, dataBase64: original.dataBase64 }
-      } catch { return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE') }
-    }
-    if (!image || body === undefined || image.upload.revision !== input.revision || !inputImageMatches(image, key, body)) return unavailable('INPUT_IMAGE_MEMBERSHIP_UNCONFIRMED')
-    if (!this.inputResources || image.upload.byteLength > input.maxBytes) return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE')
-    try {
-      const bytes = await this.inputResources.read(image.upload, input.maxBytes)
-      if (!bytes || bytes.revision !== image.upload.revision || bytes.byteLength !== image.upload.byteLength || bytes.mimeType !== image.upload.mimeType) return unavailable('INPUT_IMAGE_RESOURCE_UNCONFIRMED')
-      const imageData = imageBytes(Buffer.from(bytes.dataBase64, 'base64'), input.maxBytes, image.upload.mimeType)
-      if (imageData.status !== 'read') return unavailable('INPUT_IMAGE_FORMAT_UNAVAILABLE')
-      return { key, index: input.index, status: 'available', name: image.upload.name, ...bytes, mimeType: imageData.mimeType, width: imageData.width, height: imageData.height }
-    } catch { return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE') }
+        const bytes = await this.inputResources.read(image.upload, input.maxBytes)
+        if (!bytes || bytes.revision !== image.upload.revision || bytes.byteLength !== image.upload.byteLength || bytes.mimeType !== image.upload.mimeType) return unavailable('INPUT_IMAGE_RESOURCE_UNCONFIRMED')
+        const imageData = imageBytes(Buffer.from(bytes.dataBase64, 'base64'), input.maxBytes, image.upload.mimeType)
+        if (imageData.status !== 'read') return unavailable('INPUT_IMAGE_FORMAT_UNAVAILABLE')
+        return { key, index: input.index, status: 'available', name: image.upload.name, ...bytes, mimeType: imageData.mimeType, width: imageData.width, height: imageData.height }
+      } catch { return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE') }
+    })
   }
 
   private async readCapturedPromptProducer(agentSessionId: string, expectedRun: AgentMuxRunRef, operationId: string): Promise<AgentPromptMessageContent | undefined> {
@@ -6521,10 +6645,12 @@ export class AgentMuxClient {
 
   /** Read the original Session owner's exact claim; this never prepares or dispatches input. */
   async inspectAgentPromptSubmission(key: AgentPromptInputKey): Promise<import('./types.js').AgentPromptSubmissionRecord | null> {
-    key = validateAgentPromptInputKey(key)
-    const original = await this.store.readPromptAdmission(key.agentSessionId, key.expectedRun, agentPromptInputId(key))
-    if (original?.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) throw new AgentMuxError('The input key names another original producer.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-    return original
+    return await this.withSessionRecordRead(validateAgentPromptInputKey(key).agentSessionId, async () => {
+      key = validateAgentPromptInputKey(key)
+      const original = await this.store.readPromptAdmission(key.agentSessionId, key.expectedRun, agentPromptInputId(key))
+      if (original?.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) throw new AgentMuxError('The input key names another original producer.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      return original
+    })
   }
 
   /** Read current native activity without preparing, admitting or dispatching input. */
@@ -6577,71 +6703,75 @@ export class AgentMuxClient {
 
   /** Discover coalesced original input keys; exact inspection owns their current facts. */
   async readAgentInputChanges(value: AgentInputChangesRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputChangesPage> {
-    const input = parseAgentInputChangesRead(value)
-    return this.messageQueue.readInputChanges(input, async () => {
-      if (caller) {
-        await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-        if (caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Input change reading belongs to its exact recipient.', 'CONTROL_PERMISSION_DENIED')
-      }
+    return await this.withSessionRecordRead(parseAgentInputChangesRead(value).agentSessionId, async () => {
+      const input = parseAgentInputChangesRead(value)
+      return this.messageQueue.readInputChanges(input, async () => {
+        if (caller) {
+          await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+          if (caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Input change reading belongs to its exact recipient.', 'CONTROL_PERMISSION_DENIED')
+        }
+      })
     })
   }
 
   /** Read original journal membership; this never creates waiting, prepares or dispatches input. */
   async readAgentInputMailbox(value: AgentInputMailboxRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputMailboxPage> {
-    const input = parseAgentInputMailboxRead(value)
-    if (caller) {
-      await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-      if (caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Input mailbox reading belongs to its exact recipient.', 'CONTROL_PERMISSION_DENIED')
-    }
-    const page = await this.messageQueue.readInputMailbox(input)
-    if (!page.cut.throughSequence && !await this.store.readHistorySource(input.agentSessionId)) throw new AgentMuxError('The exact input recipient is unknown. No Session was created or input changed.', 'UNKNOWN_AGENT_SESSION')
-    const result: AgentInputMailboxPage = { agentSessionId: input.agentSessionId, queueId: this.messageQueue.queueId,
-      cut: page.cut, budgetBytes: input.maxBytes ?? 64 * 1024, items: [], nextCursor: null,
-      coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } }
-    const entries: import('./json-read-fragments.js').JsonReadEntry<AgentInputMailboxItem>[] = []
-    const fits = (entry: typeof entries[number], nextCursor: string | null) =>
-      Buffer.byteLength(JSON.stringify({ ...result, items: [...entries, entry], nextCursor })) <= result.budgetBytes - 1024
-    let index = 0, offset = page.offset
-    for (const original of page.items) {
-      const { sequence, recordedAt } = original
-      let item: AgentInputMailboxItem
-      if (original.kind === 'submission') {
-        let record: import('./types.js').AgentPromptSubmissionRecord | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
-        try { record = await this.inspectAgentPromptSubmission(original.key); if (!record) throw new AgentMuxError('The original accepted admission is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
-        catch (error) { failure = deliveryFailure(error) }
-        const observation=await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:original.key})).catch(()=>null)
-        item = { kind: 'submission', sequence, recordedAt, key: original.key, record, ...(observation ? {moteObservationId:observation.id} : {}), ...(failure ? { failure } : {}) }
-      } else {
-        let receipt: AgentInputSubmissionReceipt | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
-        try { receipt = await this.inspectAgentInput({ key: original.intent.key }); if (!receipt) throw new AgentMuxError('The original input receipt is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
-        catch (error) { failure = deliveryFailure(error) }
-        const { environment: _environment, ...intent } = original.intent
-        item = { kind: 'controlled', sequence, recordedAt, intent, ...(original.message ? { message: original.message,
-          ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) } : {}),
-          receipt, ...(failure ? { failure } : {}) }
+    return await this.withSessionRecordRead(parseAgentInputMailboxRead(value).agentSessionId, async () => {
+      const input = parseAgentInputMailboxRead(value)
+      if (caller) {
+        await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+        if (caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Input mailbox reading belongs to its exact recipient.', 'CONTROL_PERMISSION_DENIED')
       }
-      const bytes = Buffer.from(JSON.stringify(item)), digest = createHash('sha256').update(bytes).digest('hex')
-      if (offset && (index !== 0 || page.digest !== digest || offset >= bytes.length)) throw new AgentMuxError('The original input observation changed during fragmentation. Retain its claim and retry this read.', 'AGENT_INPUT_READ_CHANGED')
-      const next = page.continuation(index + 1)
-      if (!offset && fits({ kind: 'item', item }, next)) { entries.push({ kind: 'item', item }); index++; continue }
-      const key = item.kind === 'controlled' ? item.intent.key : item.key
-      const fragment = (length: number) => ({ kind: 'fragment' as const, itemId: agentInputJournalKey(key), encoding: 'json-utf8-base64' as const,
-        sha256: digest, offsetBytes: offset, totalBytes: bytes.length, dataBase64: bytes.subarray(offset, offset + length).toString('base64') })
-      let low = 0, high = bytes.length - offset
-      while (low < high) {
-        const middle = Math.ceil((low + high) / 2), complete = offset + middle === bytes.length
-        if (fits(fragment(middle), complete ? next : page.continuation(index, offset + middle, digest))) low = middle
-        else high = middle - 1
+      const page = await this.messageQueue.readInputMailbox(input)
+      if (!page.cut.throughSequence && !await this.store.readHistorySource(input.agentSessionId)) throw new AgentMuxError('The exact input recipient is unknown. No Session was created or input changed.', 'UNKNOWN_AGENT_SESSION')
+      const result: AgentInputMailboxPage = { agentSessionId: input.agentSessionId, queueId: this.messageQueue.queueId,
+        cut: page.cut, budgetBytes: input.maxBytes ?? 64 * 1024, items: [], nextCursor: null,
+        coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } }
+      const entries: import('./json-read-fragments.js').JsonReadEntry<AgentInputMailboxItem>[] = []
+      const fits = (entry: typeof entries[number], nextCursor: string | null) =>
+        Buffer.byteLength(JSON.stringify({ ...result, items: [...entries, entry], nextCursor })) <= result.budgetBytes - 1024
+      let index = 0, offset = page.offset
+      for (const original of page.items) {
+        const { sequence, recordedAt } = original
+        let item: AgentInputMailboxItem
+        if (original.kind === 'submission') {
+          let record: import('./types.js').AgentPromptSubmissionRecord | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
+          try { record = await this.inspectAgentPromptSubmission(original.key); if (!record) throw new AgentMuxError('The original accepted admission is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
+          catch (error) { failure = deliveryFailure(error) }
+          const observation=await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:original.key})).catch(()=>null)
+          item = { kind: 'submission', sequence, recordedAt, key: original.key, record, ...(observation ? {moteObservationId:observation.id} : {}), ...(failure ? { failure } : {}) }
+        } else {
+          let receipt: AgentInputSubmissionReceipt | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
+          try { receipt = await this.inspectAgentInput({ key: original.intent.key }); if (!receipt) throw new AgentMuxError('The original input receipt is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
+          catch (error) { failure = deliveryFailure(error) }
+          const { environment: _environment, ...intent } = original.intent
+          item = { kind: 'controlled', sequence, recordedAt, intent, ...(original.message ? { message: original.message,
+            ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) } : {}),
+            receipt, ...(failure ? { failure } : {}) }
+        }
+        const bytes = Buffer.from(JSON.stringify(item)), digest = createHash('sha256').update(bytes).digest('hex')
+        if (offset && (index !== 0 || page.digest !== digest || offset >= bytes.length)) throw new AgentMuxError('The original input observation changed during fragmentation. Retain its claim and retry this read.', 'AGENT_INPUT_READ_CHANGED')
+        const next = page.continuation(index + 1)
+        if (!offset && fits({ kind: 'item', item }, next)) { entries.push({ kind: 'item', item }); index++; continue }
+        const key = item.kind === 'controlled' ? item.intent.key : item.key
+        const fragment = (length: number) => ({ kind: 'fragment' as const, itemId: agentInputJournalKey(key), encoding: 'json-utf8-base64' as const,
+          sha256: digest, offsetBytes: offset, totalBytes: bytes.length, dataBase64: bytes.subarray(offset, offset + length).toString('base64') })
+        let low = 0, high = bytes.length - offset
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2), complete = offset + middle === bytes.length
+          if (fits(fragment(middle), complete ? next : page.continuation(index, offset + middle, digest))) low = middle
+          else high = middle - 1
+        }
+        if (low) {
+          entries.push(fragment(low)); offset += low
+          if (offset === bytes.length) { index++; offset = 0 }
+        }
+        break
       }
-      if (low) {
-        entries.push(fragment(low)); offset += low
-        if (offset === bytes.length) { index++; offset = 0 }
-      }
-      break
-    }
-    result.items = entries; result.nextCursor = page.continuation(index, offset, offset ? page.digest ?? (entries.at(-1)?.kind === 'fragment' ? (entries.at(-1) as Extract<typeof entries[number], { kind: 'fragment' }>).sha256 : undefined) : undefined)
-    if (page.items.length && !entries.length || Buffer.byteLength(JSON.stringify(result)) > result.budgetBytes - 1024) throw new AgentMuxError('The mailbox continuation cannot fit this read budget. Increase maxBytes; the original input is retained.', 'AGENT_INPUT_READ_BUDGET')
-    return result
+      result.items = entries; result.nextCursor = page.continuation(index, offset, offset ? page.digest ?? (entries.at(-1)?.kind === 'fragment' ? (entries.at(-1) as Extract<typeof entries[number], { kind: 'fragment' }>).sha256 : undefined) : undefined)
+      if (page.items.length && !entries.length || Buffer.byteLength(JSON.stringify(result)) > result.budgetBytes - 1024) throw new AgentMuxError('The mailbox continuation cannot fit this read budget. Increase maxBytes; the original input is retained.', 'AGENT_INPUT_READ_BUDGET')
+      return result
+    })
   }
 
   /** Journal visibility cannot revoke an already accepted input or turn its side effect into failure. */
@@ -6660,20 +6790,22 @@ export class AgentMuxClient {
     const saved = await this.messageQueue.inspectInput('key' in selector
       ? { key: await this.messageQueue.resolveInputOwnerKey(selector.key) } : selector)
     if (!saved) return null
-    if (caller) {
-      if (caller.agentSessionId === saved.intent.key.agentSessionId) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
-      else await this.assertInputWaitingAuthor(saved.intent, caller)
-    }
-    const admission = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
-    const status = agentInputSubmissionStatus(saved.control, admission)
-    const receipt: AgentInputSubmissionReceipt = { key: saved.intent.key, ref: saved.control.ref, control: saved.control,
-      persistence: 'confirmed', status, admission, observation: saved.control.state !== 'enabled' || admission ? 'closed'
-        : this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key)) ? 'owned' : 'rejoin-needed',
-      ...(saved.intent.source.kind === 'message' ? { originalControlOperationId: saved.intent.source.originalControlOperationId } : {}) }
-    try {
-      const observation = await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:saved.intent.key}))
-      return observation ? {...receipt,moteObservationId:observation.id} : receipt
-    } catch { return receipt } // Original input receipt remains authoritative if supplementary observation is unavailable.
+    return await this.withSessionRecordRead(saved.intent.key.agentSessionId, async () => {
+      if (caller) {
+        if (caller.agentSessionId === saved.intent.key.agentSessionId) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
+        else await this.assertInputWaitingAuthor(saved.intent, caller)
+      }
+      const admission = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
+      const status = agentInputSubmissionStatus(saved.control, admission)
+      const receipt: AgentInputSubmissionReceipt = { key: saved.intent.key, ref: saved.control.ref, control: saved.control,
+        persistence: 'confirmed', status, admission, observation: saved.control.state !== 'enabled' || admission ? 'closed'
+          : this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key)) ? 'owned' : 'rejoin-needed',
+        ...(saved.intent.source.kind === 'message' ? { originalControlOperationId: saved.intent.source.originalControlOperationId } : {}) }
+      try {
+        const observation = await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:saved.intent.key}))
+        return observation ? {...receipt,moteObservationId:observation.id} : receipt
+      } catch { return receipt } // Original input receipt remains authoritative if supplementary observation is unavailable.
+    })
   }
 
   /** Materialize the original journal into the existing captured source, never another input owner. */

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
+import type { AgentSessionHistoryDescriptor, AgentSessionRecordDeletionReceipt } from '@agentmux/core'
 import { api } from './api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
@@ -14,8 +14,17 @@ export function useFocusHistorySources(enabled: boolean) {
   const wanted = useRef(0), observed = useRef(-1), generation = useRef(0)
   const active = useRef(false), reading = useRef(false)
   // Invalidation bookkeeping only; the catalogue remains the source of lifecycle facts.
-  const known = useRef(new Map<string, { active: boolean; revision: number }>())
+  const known = useRef(new Map<string, { active: boolean; revision: number; deleted?: AgentSessionHistoryDescriptor }>())
   const refresh = useCallback(() => { wanted.current++; retry(value => value + 1) }, [])
+  const acceptDeletion = useCallback((receipt: AgentSessionRecordDeletionReceipt): void => {
+    const key = JSON.stringify([receipt.hostId, receipt.agentSessionId]), current = known.current.get(key)?.deleted
+    if (current?.recordDeletion && (current.recordDeletion.operationId !== receipt.deletion.operationId ||
+      current.recordDeletion.phase === 'complete' && receipt.deletion.phase !== 'complete')) return
+    const deleted: AgentSessionHistoryDescriptor = { hostId: receipt.hostId, agentSessionId: receipt.agentSessionId,
+      state: 'deleted', retiredAt: receipt.retiredAt, recordDeletion: { ...receipt.deletion } }
+    known.current.set(key, { active: false, revision: ++wanted.current, deleted })
+    setSources(values => [...values.filter(value => value.hostId !== receipt.hostId || value.agentSessionId !== receipt.agentSessionId), deleted])
+  }, [])
   const read = useCallback(function readCatalogue() {
     if (!active.current || reading.current || observed.current >= wanted.current) return
     const episode = generation.current, requested = wanted.current
@@ -25,12 +34,18 @@ export function useFocusHistorySources(enabled: boolean) {
       if (!current()) return
       for (const source of values) {
         const key = JSON.stringify([source.hostId, source.agentSessionId])
-        if ((known.current.get(key)?.revision ?? -1) < requested)
+        if ((known.current.get(key)?.revision ?? -1) < requested && !known.current.get(key)?.deleted)
           known.current.set(key, { active: source.state === 'active', revision: requested })
       }
       loaded.current = true; observed.current = requested
       const failed = new Set(warnings.map(warning => warning.hostId))
-      setSources(previous => failed.size ? [...values, ...previous.filter(source => failed.has(source.hostId))] : values)
+      setSources(previous => {
+        const observed = failed.size ? [...values, ...previous.filter(source => failed.has(source.hostId))] : values
+        // An older in-flight catalogue cannot republish a body after Core's confirmed terminal fact.
+        const terminals = [...known.current.values()].flatMap(value => value.deleted ? [value.deleted] : [])
+        if (!terminals.length) return observed
+        return [...observed.filter(source => !terminals.some(value => value.hostId === source.hostId && value.agentSessionId === source.agentSessionId)), ...terminals]
+      })
       setError(warnings.length ? warnings.map(warning => `${warning.hostId}: ${warning.message}`).join(' · ') : null)
     }).catch(cause => {
       if (!current()) return
@@ -45,13 +60,18 @@ export function useFocusHistorySources(enabled: boolean) {
   useEffect(() => api.sessions.onEvent(event => {
     if (event.type !== 'core') return
     const core = event.event
+    if (core.type === 'agent-session-record-deleted') {
+      acceptDeletion({ hostId: event.hostId, agentSessionId: core.agentSessionId, retiredAt: core.retiredAt,
+        deletion: core.recordDeletion, persistence: 'confirmed' })
+      return
+    }
     if (core.type !== 'agent-session' && core.type !== 'run-removed') return
     const id = core.type === 'agent-session' ? core.session.agentSessionId : core.agentSessionId
     if (!id) return
     const key = JSON.stringify([event.hostId, id]), isActive = core.type === 'agent-session'
-    if (isActive && known.current.get(key)?.active) return
+    if (known.current.get(key)?.deleted || isActive && known.current.get(key)?.active) return
     refresh(); known.current.set(key, { active: isActive, revision: wanted.current })
-  }), [refresh])
+  }), [refresh, acceptDeletion])
   useEffect(() => {
     if (!enabled) return
     const update = () => setDocumentVisible(document.visibilityState !== 'hidden')
@@ -66,6 +86,6 @@ export function useFocusHistorySources(enabled: boolean) {
   }, [enabled, documentVisible, read])
   useEffect(() => { read() }, [revision, read])
   const available = loaded.current && !loading && error === null
-  return useMemo(() => ({ sources, loading, error, refresh, available }), [sources, loading, error, refresh, available])
+  return useMemo(() => ({ sources, loading, error, refresh, acceptDeletion, available }), [sources, loading, error, refresh, acceptDeletion, available])
 }
 export type FocusHistoryCatalogue = ReturnType<typeof useFocusHistorySources>

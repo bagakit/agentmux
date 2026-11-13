@@ -1,3 +1,4 @@
+import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
 import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
 import { verifyAgentMessageInboxReceipt } from './agent-creation-authority.js'
@@ -609,6 +610,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as import('./conversation-changes.js').ConversationTimelineReadInput)
       case 'agent.history.usage': return parseAgentSessionUsagePage(value, input as AgentSessionUsageInput)
+      case 'agent.history.record.inspect': return parseAgentSessionRecordInspection(value, input as AgentSessionRecordInput)
+      case 'agent.history.record.delete': return parseAgentSessionRecordReceipt(value, input as AgentSessionRecordDeleteInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.continuity.control': {
         const result = parseAgentContinuityControlResult(value, parseAgentContinuityControlInput(input))

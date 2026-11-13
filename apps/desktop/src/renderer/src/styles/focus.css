@@ -386,3 +386,13 @@
 .session-record-details__amount > span { font-size: 12px; }
 .session-record-details__warning { color: var(--text-warning, var(--text)); }
 @media (max-width: 700px) { .session-record-dialog { padding: 12px; } .session-record-details__facts > div { grid-template-columns: 80px minmax(0, 1fr); } }
+
+.session-record-delete { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.session-record-delete__confirmation { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; }
+.session-record-delete__identity { overflow-wrap: anywhere; user-select: text; }
+.session-record-delete__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.session-record-deleted { display: block; overflow: auto; padding: 16px; }
+.session-record-deleted .muted { color: var(--text-muted); }
+
+.session-record-delete .danger-button { background: var(--red-bg); color: var(--red-text); box-shadow: none; }
+.session-record-delete .danger-button:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 22%, var(--surface-0)); }

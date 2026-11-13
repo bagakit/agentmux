@@ -1,3 +1,4 @@
+import { deletedAgentSessionRecord } from '../agent-session-record.js'
 import type { AgentMuxCreationRuntime } from '../terminal-creation-retirement.js'
 import { assertPreparedResumeBinding, resumeResolutionRequest, resumeResolutionDigest } from '../agent-prepared-resume.js'
 import { decodePreparedRun } from '../prepared-run.js'
@@ -243,6 +244,7 @@ export class AgentSessionRunLifecycle {
       (input.commandOverride !== undefined && (typeof input.commandOverride !== 'string' || !input.commandOverride))) {
       throw new AgentMuxError('Explicit continue requires the exact retired Session and valid current launch configuration.', 'INVALID_AGENT_REOPEN', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
     }
+    if (await this.ports.sessions.store.readRecordDeletion(input.agentSessionId)) deletedAgentSessionRecord(input.agentSessionId)
     const operation = agentLifecycleOperationIdentity('reopen', input.agentSessionId, safeId(input.operationId, 'Agent reopen operation id'))
     if (this.executingReopens.has(operation)) throw this.reopenUnconfirmed('The original continue operation is still executing.')
     this.executingReopens.add(operation)
@@ -260,11 +262,12 @@ export class AgentSessionRunLifecycle {
 
   async reconcileAgentReopen(input: Pick<AgentMuxAgentReopenInput, 'agentSessionId' | 'expectedRetiredAt' | 'operationId'>): Promise<AgentMuxAgentSession> {
     if (this.signal.aborted) throw this.reopenUnconfirmed('This continue owner has been disposed. Confirm the original operation through the current Core client.')
-    this.ports.connection.requireConnected()
     if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['agentSessionId', 'expectedRetiredAt', 'operationId'].includes(key)) ||
       typeof input.agentSessionId !== 'string' || !input.agentSessionId || !Number.isSafeInteger(input.expectedRetiredAt) || input.expectedRetiredAt < 0) {
       throw new AgentMuxError('Original continue confirmation requires its exact identity.', 'INVALID_AGENT_REOPEN', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
     }
+    if (await this.ports.sessions.store.readRecordDeletion(input.agentSessionId)) deletedAgentSessionRecord(input.agentSessionId)
+    this.ports.connection.requireConnected()
     const operationId = agentLifecycleOperationIdentity('reopen', input.agentSessionId, safeId(input.operationId, 'Agent reopen operation id'))
     if (this.executingReopens.has(operationId)) throw this.reopenUnconfirmed('The original continue operation is still executing.')
     this.executingReopens.add(operationId)

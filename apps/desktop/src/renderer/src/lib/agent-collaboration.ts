@@ -161,6 +161,7 @@ export function createCollaborationProjector() {
     }
     const retainedIds = new Set<string>()
     for (const source of retained) {
+      if (source.state === 'deleted') continue
       const creation = source.history?.creation
       if (!creation?.createdBy) continue
       const subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }, id = collaborationSubjectKey(subject), key = `retained:${id}`

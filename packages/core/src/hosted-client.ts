@@ -1,3 +1,4 @@
+import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, parseAgentSessionRecordDeletionEvent, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
 import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
 import { parseMessageFieldPage } from './agent-message-field.js'
@@ -105,6 +106,16 @@ export async function connectHostedAgentMux(options: {
     await controlConnecting
   }
   const emit = (event: AgentMuxClientEvent): void => {
+    if (event.type === 'agent-session-record-deleted') {
+      try { parseAgentSessionRecordDeletionEvent(event) }
+      catch {
+        // A malformed terminal observation cannot revoke this Host or claim a Session/Run scope.
+        publisher.publish({ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR',
+          message: 'The Host supplied invalid record deletion metadata. Its existing connection and input remain available.',
+          evidence: { source: 'agentmux', observedAt: Date.now() } })
+        return
+      }
+    }
     if (event.type === 'agent-message-changed' || event.type === 'agent-message-observation') {
       try { parseHostedMessageEvent(event) }
       catch (error) {
@@ -238,7 +249,7 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
-    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'readAgentSessionUsage' || method === 'sessionHistoryCheckpoint' || method === 'readSessionHistoryChanges' || method === 'conversationCheckpoint' || method === 'readConversationChanges' || method === 'readAgentConversation') {
+    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'readAgentSessionUsage' || method === 'inspectAgentSessionRecord' || method === 'deleteAgentSessionRecord' || method === 'sessionHistoryCheckpoint' || method === 'readSessionHistoryChanges' || method === 'conversationCheckpoint' || method === 'readConversationChanges' || method === 'readAgentConversation') {
       const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
       if (input && isAbortSignal(input.signal)) {
         const { signal: cancellation, ...value } = input
@@ -303,6 +314,8 @@ export async function connectHostedAgentMux(options: {
     if (method === 'readAgentInputChanges') return parseAgentInputChangesPage(decoded, wireArgs[0] as import('./agent-input-changes.js').AgentInputChangesRead)
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
     if (method === 'readAgentSessionUsage') return parseAgentSessionUsagePage(decoded, wireArgs[0] as AgentSessionUsageInput)
+    if (method === 'inspectAgentSessionRecord') return parseAgentSessionRecordInspection(decoded, wireArgs[0] as AgentSessionRecordInput)
+    if (method === 'deleteAgentSessionRecord') return parseAgentSessionRecordReceipt(decoded, wireArgs[0] as AgentSessionRecordDeleteInput)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     if (method === 'readMessage') {
       const input = wireArgs[0] as import('./agent-message-query.js').AgentMuxMessageReadRequest & { caller?: { agentSessionId: string } }

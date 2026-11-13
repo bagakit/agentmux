@@ -1,3 +1,4 @@
+import { parseAgentSessionRecordInput, deletedAgentSessionRecord, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsageInput, parseAgentSessionUsagePage } from './agent-session-usage.js'
 import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
 import { parseMessageApplication } from './agent-message-envelope.js'
@@ -157,7 +158,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
@@ -386,6 +387,8 @@ const NATIVE_FIELDS = {
   'agent.conversation.landmark.ls': ['hostId', 'agentSessionId', 'operationId'],
   'agent.conversation.landmark.apply': ['hostId', 'agentSessionId', 'operationId', 'expectedRevision', 'change'],
   'agent.history.usage': ['hostId', 'agentSessionId', 'cursor', 'limit'],
+  'agent.history.record.inspect': ['hostId', 'agentSessionId', 'operationId'],
+  'agent.history.record.delete': ['hostId', 'agentSessionId', 'operationId', 'expectedRetiredAt', 'expectedRetirementRevision', 'continue'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -1486,10 +1489,11 @@ export class AgentMuxRpcService {
       if (agentSessionId === 'self') throw new AgentMuxError('Continue requires the exact retired Session ID.', 'INVALID_CONTROL_REQUEST')
       const clients = await this.clients()
       const owners = await Promise.all(clients.map(async entry => ({ ...entry,
-        sources: await entry.client.sessionHistorySources() })))
+        sources: await entry.client.sessionHistorySources({ agentSessionId, ...(context.signal ? { signal: context.signal } : {}) }) })))
       const matches = owners.filter(entry => entry.sources.some(source => source.agentSessionId === agentSessionId &&
         source.hostId === (entry.client.forwardRpc ? 'local' : entry.hostId) && (source.state === 'retired' || method === 'agent.reopen.check')))
       if (matches.length !== 1) throw new AgentMuxError('The exact retired Session does not have one confirmed Host owner.', matches.length ? 'AMBIGUOUS_AGENT_SESSION' : 'STALE_AGENT_SESSION')
+      if (matches[0]!.sources.some(source => source.agentSessionId === agentSessionId && source.hostId === (matches[0]!.client.forwardRpc ? 'local' : matches[0]!.hostId) && source.state === 'deleted')) deletedAgentSessionRecord(agentSessionId)
       const client = matches[0]!.client
       context.signal?.throwIfAborted()
       await client.connect()
@@ -1887,6 +1891,27 @@ export class AgentMuxRpcService {
         ? ['agent', context.caller.agentSessionId, context.caller.capability]
         : ['principal', context.principal?.kind ?? 'public', context.principal?.id ?? '', context.transport ?? 'sdk'])).digest('hex')
       return await this.search.read(input, { authority, rpc: context, ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.history.record.inspect' || method === 'agent.history.record.delete') {
+      const deleting = method === 'agent.history.record.delete'
+      if (deleting && (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) throw new AgentMuxError(
+        'Deleting AgentMux records requires the original transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseAgentSessionRecordInput(params, deleting)
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact record Host is unavailable or ambiguous. No alternate owner was selected.', 'RUNTIME_UNAVAILABLE')
+      const client = owners[0]!.client, local = { ...input, hostId: 'local' }
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      if (deleting) {
+        const request = local as AgentSessionRecordDeleteInput
+        const raw = client.forwardRpc ? await client.forwardRpc('agent.history.record.delete', request, context)
+          : await client.deleteAgentSessionRecord(request, context.signal ? { signal: context.signal } : {})
+        return { ...parseAgentSessionRecordReceipt(raw, request), hostId: input.hostId } as AgentMuxRpcResult<M>
+      }
+      const { caller: _caller, ...readContext } = context
+      const raw = client.forwardRpc ? await client.forwardRpc('agent.history.record.inspect', local, readContext)
+        : await client.inspectAgentSessionRecord(local, context.signal ? { signal: context.signal } : {})
+      const page = parseAgentSessionRecordInspection(raw, local)
+      return { ...page, hostId: input.hostId, ...(page.state === 'deleted' ? { receipt: { ...page.receipt, hostId: input.hostId } } : {}) } as AgentMuxRpcResult<M>
     }
     if (method === 'agent.history.usage') {
       const input = parseAgentSessionUsageInput(params)

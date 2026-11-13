@@ -952,7 +952,7 @@ export class RuntimeController {
       // original store also covers stale bindings and retirement without consulting a live Run.
       const sources = await loadSessionHistorySources(this.agentSessionStore)
       const sessionNameMetadata = sources.flatMap((source): AgentSessionNameMetadata[] => {
-        if (!localHostIds.has(source.hostId) || !source.history) return []
+        if (!localHostIds.has(source.hostId) || source.state === 'deleted' || !source.history) return []
         const { providerId, executorId, workspacePath } = source.history
         return [{
           agentSessionId: source.agentSessionId, hostId: source.hostId, providerId, executorId, workspacePath,
