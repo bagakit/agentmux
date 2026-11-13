@@ -1317,6 +1317,8 @@ export type AgentMuxAgentSession = {
   nativeSourceObservation?: AgentNativeSourceObservation
   /** Current Core-owned Hook restore failure, scoped to this exact Run; never a durable or semantic status. */
   hookIngressObservation?: AgentHookIngressObservation
+  /** Current Hook delivery loss for this exact Run, held by its Hook binding; never stored. */
+  hookDeliveryObservation?: AgentHookDeliveryObservation
   nativeConfirmation?: AgentNativeSessionConfirmationReceipt
   /** Original confirmed operation facts; the Provider still has only one current conversation. */
   nativeConfirmationHistory?: AgentNativeSessionConfirmationReceipt[]
@@ -1557,9 +1559,24 @@ export type AgentHookIngressObservation = {
   observedAt: number
 }
 
+/**
+ * Native Hook observations of this exact Run are being lost: their receipts reached the binding but
+ * were refused or did not finish. One fact per Run, not per receipt. `accepted: false` means owner
+ * work never started for them; `'unknown'` means it may have, so whether one was recorded is
+ * unconfirmed. Absent means no loss since this binding last delivered a newer observation.
+ */
+export type AgentHookDeliveryObservation = {
+  run: AgentMuxRunRef
+  /** Wall time of the first lost observation since the last delivered one. */
+  since: number
+  accepted: false | 'unknown'
+  /** Failure code of the observation that set or escalated `accepted`. */
+  code: string
+}
+
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'terminalFrontend'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'terminalFrontend'> & {
   /** Original creation input frozen before Start; only its key is public. */
   initialInput?: import('./agent-session-recovery/continuity-contract.js').AgentMuxContinuityLaunchInput
   /** Retained original-Run recovery evidence; never a live activity or input-authorization projection. */

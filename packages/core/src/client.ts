@@ -1028,13 +1028,20 @@ export class AgentMuxClient {
         if (event.turnEndCallback) return { turnEndCallbackAccepted: this.adoptTurnEndDecision(event) }
       },
       undefined,
-      failure => {
-        const session = this.registry.findByRun(runRef(failure.runId ?? ''))
-        if (!session || session.agentSessionId !== failure.agentSessionId) return
-        this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
-          code: failure.code,
-          message: `Native Hook ${failure.receiptId} failed during ${failure.stage}; ${failure.accepted === false ? 'owner work did not start' : 'durable delivery is unconfirmed'}. The original Session, Run and terminal capability are kept. ${failure.code === 'HOOK_BODY_TOO_LARGE' || failure.code === 'INVALID_HOOK_ENVELOPE' ? 'Refresh native Session observation to read its original source.' : 'Retry the same observation receipt after backoff; refresh native Session observation if its sender has exited.'}${failure.message === undefined ? '' : ` Cause: ${failure.message}`}`,
-          evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      {
+        // An unreadable body loses exactly one observation and names no receipt; repeats share one record.
+        requestRefused: refusal => {
+          const session = this.registry.findByRun(runRef(refusal.runId ?? ''))
+          if (!session || session.agentSessionId !== refusal.agentSessionId) return
+          this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: refusal.code,
+            message: `A Native Hook observation was refused because its request ${refusal.code === 'HOOK_BODY_TOO_LARGE' ? 'exceeded the ingress size budget' : 'was not a readable envelope'}. The original Session, Run and terminal capability are kept. Refresh native Session observation to read its original source.`,
+            evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+        },
+        // One Run's delivery losses are one fact on its binding; publish the Session only when it changes.
+        deliveryChanged: (agentSessionId, runId) => {
+          const session = this.registry.findByRun(runRef(runId))
+          if (session?.agentSessionId === agentSessionId) this.publishSession(session)
+        }
       },
       (providerId, eventName) => {
         if (eventName === undefined) return undefined
@@ -8182,6 +8189,8 @@ export class AgentMuxClient {
     }
     const observation = this.currentHookIngressObservation(session)
     if (observation) projected.hookIngressObservation = structuredClone(observation)
+    const delivery = this.hookServer.deliveryObservation(session.agentSessionId, session.run.runId)
+    if (delivery) projected.hookDeliveryObservation = delivery
     return projected
   }
 

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { performance } from 'node:perf_hooks'
 import { AgentMuxError } from './errors.js'
-import type { AgentProviderId, NativeHookEnvelope } from './types.js'
+import type { AgentHookDeliveryObservation, AgentProviderId, NativeHookEnvelope } from './types.js'
 import { defaultAgentMuxHookPort } from './runtime-paths.js'
 import { HOOK_OWNER_TIMEOUT_MS, HOOK_REQUEST_TIMEOUT_MS, HOOK_RETRY_DELAY_MS } from './agent-hook-delivery.js'
 
@@ -136,16 +136,18 @@ type PendingBinding = {
   accepting: boolean
   closed: boolean
   receipts: Map<string, HookReceipt>
+  /** Order in which receipts reached owner admission; it decides which success is newer than a loss. */
+  admitted: number
+  delivery?: { fact: AgentHookDeliveryObservation; lostThrough: number }
 }
 
-export type HookDeliveryFailure = {
-  agentSessionId: string
-  runId: string | null
-  receiptId: string
-  code: string
-  message?: string
-  stage: 'admission' | 'owner'
-  accepted: false | 'unknown'
+/** A request whose body was never readable: it carries no receipt the sender could retry. */
+export type HookRequestRefusal = { agentSessionId: string; runId: string | null; code: 'HOOK_BODY_TOO_LARGE' | 'INVALID_HOOK_ENVELOPE' }
+
+export type HookIngressObserver = {
+  requestRefused?(refusal: HookRequestRefusal): void
+  /** The exact Run's delivery fact was created, escalated or removed; read it with deliveryObservation. */
+  deliveryChanged?(agentSessionId: string, runId: string): void
 }
 
 export class AgentHookServer {
@@ -157,6 +159,8 @@ export class AgentHookServer {
   // process by every later resume attempt.
   private starting: Promise<HookServerEndpoint> | null = null
   private readonly bindings = new Map<string, PendingBinding>()
+  /** Bindings that currently hold a delivery loss, by exact [agentSessionId, runId]. */
+  private readonly failing = new Map<string, PendingBinding>()
   private readonly retiring = new Set<Promise<void>>()
 
   constructor(
@@ -167,7 +171,7 @@ export class AgentHookServer {
       signal: AbortSignal
     ) => void | HookDecisionAdoption | Promise<void | HookDecisionAdoption>,
     private readonly port = defaultAgentMuxHookPort(),
-    private readonly onFailure?: (failure: HookDeliveryFailure) => void,
+    private readonly observer: HookIngressObserver = {},
     /** Which synchronous decision, if any, the Provider declares for this event name. */
     private readonly decisionKind?: (providerId: AgentProviderId, eventName: string | undefined) => HookDecisionKind | undefined,
     private readonly onDecisionCallbackClosed?: (agentSessionId: string, runId: string, receiptId: string, decided: boolean, kind: HookDecisionKind) => void
@@ -261,7 +265,8 @@ export class AgentHookServer {
       pendingDeliveries: 0,
       accepting: true,
       closed: false,
-      receipts: new Map()
+      receipts: new Map(),
+      admitted: 0
     }
     this.bindings.set(token, binding)
     let closed = false
@@ -354,6 +359,50 @@ export class AgentHookServer {
       receipt.decision.state = 'closed'
       receipt.decision.resolve(null)
     }
+    // A closed binding can no longer deliver, so its loss is no longer a current fact of this Run.
+    this.clearDelivery(binding)
+  }
+
+  /** This exact Run's current delivery loss, if its live binding holds one. */
+  deliveryObservation(agentSessionId: string, runId: string): AgentHookDeliveryObservation | undefined {
+    const binding = this.failing.get(JSON.stringify([agentSessionId, runId]))
+    return binding?.delivery && !binding.closed ? structuredClone(binding.delivery.fact) : undefined
+  }
+
+  /**
+   * One lost observation of a live, Run-bound binding. Repeats only move the watermark; the public
+   * fact changes when it appears or when owner work may have started for the first time.
+   */
+  private recordDeliveryLoss(binding: PendingBinding, sequence: number, code: string, accepted: false | 'unknown'): void {
+    if (binding.closed || binding.runId === null) return
+    const current = binding.delivery
+    if (current) {
+      current.lostThrough = Math.max(current.lostThrough, sequence)
+      if (accepted === false || current.fact.accepted === 'unknown') return
+      current.fact = { ...current.fact, accepted, code }
+    } else {
+      binding.delivery = { fact: { run: { runId: binding.runId }, since: Date.now(), accepted, code }, lostThrough: sequence }
+      this.failing.set(JSON.stringify([binding.agentSessionId, binding.runId]), binding)
+    }
+    this.deliveryChanged(binding)
+  }
+
+  /** Only a receipt admitted after every lost one carries newer native state than they did. */
+  private recordDelivered(binding: PendingBinding, sequence: number): void {
+    if (binding.delivery && sequence > binding.delivery.lostThrough) this.clearDelivery(binding)
+  }
+
+  private clearDelivery(binding: PendingBinding): void {
+    if (!binding.delivery) return
+    delete binding.delivery
+    const key = JSON.stringify([binding.agentSessionId, binding.runId])
+    if (this.failing.get(key) === binding) this.failing.delete(key)
+    this.deliveryChanged(binding)
+  }
+
+  private deliveryChanged(binding: PendingBinding): void {
+    if (binding.runId === null) return
+    try { this.observer.deliveryChanged?.(binding.agentSessionId, binding.runId) } catch { /* Observation cannot break ingress. */ }
   }
 
   private openDecisionCallback(binding: PendingBinding, event: HookIngressEvent & { decision: HookDecisionKind }, response: ServerResponse): DecisionCallback {
@@ -397,8 +446,7 @@ export class AgentHookServer {
       const code = oversized ? 'HOOK_BODY_TOO_LARGE' : 'INVALID_HOOK_ENVELOPE'
       respond(response, oversized ? 413 : 400, JSON.stringify({ error: code, stage: 'admission', accepted: false,
         retryable: false, recovery: 'Refresh the native Session observation; the Agent and terminal remain available.' }))
-      try { this.onFailure?.({ agentSessionId: binding.agentSessionId, runId: binding.runId,
-        receiptId: 'unparsed-envelope', code, stage: 'admission', accepted: false }) } catch { /* Diagnostic isolation. */ }
+      try { this.observer.requestRefused?.({ agentSessionId: binding.agentSessionId, runId: binding.runId, code }) } catch { /* Diagnostic isolation. */ }
       return
     }
     if (!isIngressEvent(parsed)) {
@@ -434,7 +482,7 @@ export class AgentHookServer {
         return
       }
       try { await existing.response; respond(response, 204) }
-      catch (error) { this.deliveryFailed(response, binding, parsed.receiptId, error) }
+      catch (error) { this.deliveryFailed(response, binding, parsed.receiptId, error, null) }
       return
     }
     // Backpressure applies to new work. An existing receipt must retain its
@@ -467,8 +515,10 @@ export class AgentHookServer {
     }
     const decision = event.decision ? this.openDecisionCallback(binding, { ...event, decision: event.decision }, response) : undefined
     binding.receipts.set(parsed.receiptId, { fingerprint, bytes: receiptBytes, expiresAt: Infinity, ...(decision ? { decision } : {}) })
+    const sequence = ++binding.admitted
     try {
       await this.enqueue(binding, event)
+      this.recordDelivered(binding, sequence)
       if (decision) {
         // Mode is confirmed only after the original event owner adopted the exact callback.
         // Flush before awaiting a person so the worker can leave its bounded observation phase.
@@ -484,11 +534,12 @@ export class AgentHookServer {
       } else respond(response, 204)
     } catch (error) {
       if (decision) { decision.state = 'closed'; decision.resolve(null) }
-      this.deliveryFailed(response, binding, parsed.receiptId, error)
+      this.deliveryFailed(response, binding, parsed.receiptId, error, sequence)
     }
   }
 
-  private deliveryFailed(response: ServerResponse, binding: PendingBinding, receiptId: string, error: unknown): void {
+  /** `sequence` is null when the sender re-reads an outcome this binding already recorded. */
+  private deliveryFailed(response: ServerResponse, binding: PendingBinding, receiptId: string, error: unknown, sequence: number | null): void {
     const queued = error instanceof HookQueueTimeoutError
     const code = error instanceof AgentMuxError ? error.code : 'HOOK_DELIVERY_FAILED'
     // A custom Provider/Store can put content or credentials in any Error message.
@@ -497,19 +548,22 @@ export class AgentHookServer {
       /^hookReceipt\.toolInvocation(?:\.(?:nativeSessionId|nativeToolCallId|nativeTurnId|nativeTranscriptPath|toolName|toolInput))? is invalid\.$/u.test(error.message)
       ? error.message : undefined
     this.fail(response, binding, receiptId, code, queued ? 'admission' : 'owner', queued ? false : 'unknown',
-      message)
+      message, sequence)
   }
 
+  /**
+   * Answer the sender, then record the lost observation on this Run's one delivery fact. A refusal
+   * without its own admission sequence counts at the current high-water mark, so only a receipt
+   * admitted after it can clear the fact. A re-read outcome (`sequence` null) is not a new loss.
+   */
   private fail(response: ServerResponse, binding: PendingBinding, receiptId: string, code: string,
-    stage: 'admission' | 'owner', accepted: false | 'unknown', message?: string): void {
-    const failure = { agentSessionId: binding.agentSessionId, runId: binding.runId, receiptId, code, stage, accepted,
-      ...(message === undefined ? {} : { message }) }
+    stage: 'admission' | 'owner', accepted: false | 'unknown', message?: string, sequence: number | null = binding.admitted): void {
     respond(response, stage === 'admission' && binding.accepting ? 429 : 503,
       JSON.stringify({ error: code, receiptId, stage, accepted, ...(message === undefined ? {} : { message }), retryable: !binding.closed,
         recovery: accepted === 'unknown'
           ? 'Retain the original receipt and verify its result against the native Session source; retry observes the same outcome without repeating owner work. The Agent and terminal remain available.'
           : 'Retry the original receipt after backoff; the Agent and terminal remain available.' }))
-    try { this.onFailure?.(failure) } catch { /* Diagnostic consumers cannot break ingress. */ }
+    if (sequence !== null) this.recordDeliveryLoss(binding, sequence, code, accepted)
   }
 
   private enqueue(binding: PendingBinding, event: HookIngressEvent): Promise<void> {

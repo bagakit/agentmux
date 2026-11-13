@@ -162,6 +162,13 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
       member(source.nativeHandlePersistence, ['confirmed', 'unconfirmed'])
       session.nativeHandlePersistence = source.nativeHandlePersistence as 'confirmed' | 'unconfirmed'
     }
+    if (source.hookDeliveryObservation !== undefined) {
+      // One live delivery loss of this exact Run; a loss of another Run is not this Session's fact.
+      const loss = record(source.hookDeliveryObservation, ['run', 'since', 'accepted', 'code'])
+      if (runRef(loss.run).runId !== session.run.runId || (loss.accepted !== false && loss.accepted !== 'unknown')) fail()
+      count(loss.since); string(loss.code)
+      session.hookDeliveryObservation = structuredClone(loss) as NonNullable<typeof session.hookDeliveryObservation>
+    }
     if (source.currentActivity !== undefined) {
       const activity = record(source.currentActivity, ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
         'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption'])
