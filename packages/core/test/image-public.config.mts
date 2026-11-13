@@ -9,7 +9,8 @@ const mutations: Record<string, { file: string; before: string; after: string }>
   authority: { file: '/packages/core/src/public-rpc-service.ts', before: "throw new AgentMuxError('Image operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')", after: 'void 0' },
   host: { file: '/packages/core/src/public-rpc-image.ts', before: 'if (p.hostId !== input.hostId)', after: 'if (false)' },
   operation: { file: '/packages/core/src/public-rpc-image.ts', before: 'operation.operationId !== input.operationId', after: 'false' },
-  png: { file: '/packages/core/src/public-rpc-image.ts', before: 'if (image.scale !== 1)', after: 'if (false)' }
+  png: { file: '/packages/core/src/public-rpc-image.ts', before: 'if (image.scale !== 1)', after: 'if (false)' },
+  origin: { file: '/packages/core/src/public-rpc-image.ts', before: "!((o.width as number) > 0 && (o.height as number) > 0)", after: 'false' }
 }
 const selected = process.env.IMAGE_PUBLIC_MUTATION
 const mutation = selected ? mutations[selected] : undefined

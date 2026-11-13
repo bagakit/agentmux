@@ -62,6 +62,15 @@ it('typed image requests reject ambiguous selectors, external sources and non-pi
   expect(parseNativeDesktopParams('native.clipboard.write', { hostId: 'local', instanceId: 'native-original', operationId: 'clipboard', format: 'png', data: image.data })).toMatchObject({ data: image.data })
 })
 
+it('a pin origin is an exact finite on-screen rectangle with a positive size', () => {
+  const origin = { x: -1440, y: 25.5, width: 320, height: 200 }
+  expect(parseImageParams('image.pin', { ...pin, origin })).toEqual({ ...pin, origin })
+  expect(parseImageParams('image.pin', pin), 'origin stays optional').not.toHaveProperty('origin')
+  for (const invalid of [{ ...origin, width: 0 }, { ...origin, height: -1 }, { ...origin, x: Number.NaN }, { ...origin, y: Number.POSITIVE_INFINITY },
+    { ...origin, x: '1' }, { x: 1, y: 2, width: 3 }, { ...origin, display: 2 }, null])
+    expect(() => parseImageParams('image.pin', { ...pin, origin: invalid }), JSON.stringify(invalid)).toThrow()
+})
+
 it('image result codec rejects foreign Host, pin, actor and original operation effects', () => {
   expect(parseImageResult('image.inspect', { ...result(), state: 'closed' }, { hostId: 'local', operationId: pin.operationId }, actor))
     .toMatchObject({ state: 'closed', recordedOperation: { effect: 'opened' } })

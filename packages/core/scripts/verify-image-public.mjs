@@ -49,7 +49,7 @@ try {
   assert.ok(report.numPassedTests > 0 && report.numFailedTests === 0, 'Image public baseline must execute nonempty assertions')
   receipt.baseline = { tests: report.numPassedTests, logSha256: hash(baseline.stdout + baseline.stderr) }
   const cases = { owner: 'public service consumes', authority: 'only authenticated actors', host: 'image result codec rejects',
-    operation: 'image result codec rejects', png: 'typed image requests reject' }
+    operation: 'image result codec rejects', png: 'typed image requests reject', origin: 'a pin origin is an exact finite' }
   for (const [mutation, title] of Object.entries(cases)) {
     const path = join(proof, mutation + '.json'), prefix = join(proof, mutation)
     const changed = run([...args, '-t', title, '--reporter=json', '--outputFile', path],
