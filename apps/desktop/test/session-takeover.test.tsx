@@ -213,7 +213,8 @@ it('the Region opens a custom action from its menu in place and preselects its d
   const surface = document.querySelector<HTMLElement>('.session-takeover[data-derived-action="review"]')!
   expect(surface).not.toBeNull(); expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(surface.querySelector('h2')!.textContent).toBe('Review this work')
-  expect(surface.querySelector('.session-takeover__instruction')!.textContent).toBe('Review the changes.')
+  expect(surface.querySelector('.session-takeover__instruction > p')!.textContent).toBe('Review the changes.')
+  expect(surface.querySelector('.agent-pick[data-executor-id="fixture"] .agent-pick__default')?.getAttribute('aria-label')).toBe('Default Agent for this action')
   expect([...surface.querySelectorAll<HTMLButtonElement>('.agent-pick')].map(pick => pick.dataset.executorId)).toEqual(['fixture', 'first'])
   expect(launch).not.toHaveBeenCalled()
 })

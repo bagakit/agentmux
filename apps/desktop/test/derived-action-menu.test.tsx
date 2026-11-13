@@ -27,7 +27,7 @@ it('lists visible official actions, then the user actions in saved order, and ke
   useAppStore.setState({ config: { ...useAppStore.getState().config!, agentDerivedActions: { actions: [review, retry], hidden: ['pass-on-experience'] } } })
   const onDerived = vi.fn(), onCustomize = vi.fn()
   const root = await mount({ onDerived, onCustomize })
-  expect(labels(root.querySelector('[role="group"][aria-label="Derived actions"]')!)).toEqual(['Take over', 'Fork current conversation…', 'Review this work', 'Try another approach…', 'Customize…'])
+  expect(labels(root.querySelector('[role="group"][aria-label="Derived actions"]')!)).toEqual(['Take over', 'Fork current conversation…', 'Review this work…', 'Try another approach…', 'Customize…'])
   expect(labels(root.querySelector('[role="group"][aria-label="Session lifecycle"]')!)).toEqual(['Restart Session…', 'Stop Agent'])
   await act(async () => root.querySelector<HTMLElement>('[data-derived-action="review"]')!.click())
   expect(onDerived).toHaveBeenCalledExactlyOnceWith(review)

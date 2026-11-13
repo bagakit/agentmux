@@ -56,7 +56,9 @@ it('adds a custom action from an example, edits it and saves it as the user\'s o
   const editor = pane().querySelector<HTMLElement>('[data-derived-editor]')!
   expect(editor.dataset.derivedEditor).toBe('review-this-work')
   await fill(editor.querySelector<HTMLTextAreaElement>('textarea')!, 'Review the changes. Do not edit files.')
-  expect(pane().querySelector('.derived-actions__preview-item')!.textContent).toContain('Review this work')
+  // The placement preview is the real derived group in miniature, with this action marked current.
+  expect(pane().querySelector('.derived-actions__menu [data-current]')!.textContent).toBe('Review this work…')
+  expect([...pane().querySelectorAll('.derived-actions__menu li')].map(item => item.textContent)).toEqual(['Take over', 'Fork current conversation…', 'Pass on experience', 'Review this work…'])
   await save()
   expect((await f.disk()).agentDerivedActions).toEqual({ actions: [{ id: 'review-this-work', label: 'Review this work', base: 'new-agent', instruction: 'Review the changes. Do not edit files.' }] })
   await act(async () => button('Delete action').click()); await save()
