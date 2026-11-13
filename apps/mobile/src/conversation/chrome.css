@@ -19,8 +19,8 @@
 .mobile-app .mobile-mote-navigation > button[role='tab'] { min-height: 36px; padding: 0 14px; border-radius: 999px; color: var(--text-2); font-size: var(--fs-body); font-weight: 550;
   box-shadow: none; transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease; }
 .mobile-app .mobile-mote-navigation > button[role='tab'][aria-selected='true'] { color: var(--text); background: var(--mobile-group); box-shadow: none; font-weight: 650; }
-.mobile-app .mobile-mote-navigation > .mobile-mote-team-button { min-height: 36px; margin-left: auto; padding: 0 12px; border-radius: 999px; color: var(--text-2);
-  font-size: var(--fs-meta); font-weight: 550; }
+.mobile-app .mobile-mote-navigation > .mobile-mote-team-button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: auto; padding: 0 12px;
+  border-radius: 999px; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
 .mobile-app .mobile-mote-navigation > .mobile-mote-team-button:active { background: var(--mobile-group); }
 
 /* Composer dock: the measured composer geometry stays with conversation.css; the dock only adds a
@@ -55,3 +55,31 @@
 .mobile-sheet-handle { width: 36px; height: 4px; margin: 2px auto 10px; border-radius: 2px; background: color-mix(in srgb, var(--text) 22%, transparent); }
 .mobile-sheet .mobile-sheet-title h2 { font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; }
 .mobile-sheet .mobile-menu-row { min-height: var(--mobile-menu-row); }
+
+/* Reading column. Short conversations rest on the composer instead of floating at the top; every
+ * message shares one 16px gutter, and the Agent's speech starts on the same column as the person's. */
+.mobile-app .mobile-conversation__reading { display: flex; flex-direction: column; }
+.mobile-app .mobile-conversation__reading > :first-child { margin-top: auto; }
+.mobile-app .mobile-conversation__reading > .mobile-reading-action:first-child + * { margin-top: 0; }
+.mobile-app .mobile-conversation .conversation-native-thread { padding: var(--sp-3) var(--mobile-gutter) var(--sp-4); }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { margin-block: var(--sp-3); padding: 0; border-radius: 0; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] { grid-template-columns: 28px minmax(0, 1fr); column-gap: var(--sp-4); }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] > .log-turn__node { --conversation-message-avatar-size: 28px; width: 28px; height: 28px; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] > .log-turn__body { font-size: var(--fs-body); line-height: 1.6; }
+/* The person's message is the one bubble: right-aligned, no avatar column, soft group surface. */
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) {
+  grid-template-columns: minmax(0, 1fr); max-width: 86%; margin-inline-start: auto; padding: 8px 12px 10px;
+  border-radius: var(--mobile-radius-group) var(--mobile-radius-group) var(--mobile-radius-sm) var(--mobile-radius-group);
+  background: var(--mobile-group); box-shadow: none; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) > .log-turn__node { display: none; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) > .log-turn__body { line-height: 1.55; }
+/* Copy and details stay reachable but quiet on touch: one trailing group, secondary ink, no colour. */
+@media (hover: none) {
+  .mobile-app .mobile-conversation .log-turn__actions { opacity: .55; }
+  .mobile-app .mobile-conversation .log-turn:focus-within .log-turn__actions, .mobile-app .mobile-conversation .log-turn__actions[data-copy-state='failed'] { opacity: 1; }
+}
+.mobile-app .mobile-conversation .log-turn__actions { color: var(--text-3); }
+.mobile-app .mobile-conversation .log-turn__who { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
+/* Composer tools stay legible: secondary ink at rest, full ink when pressed. */
+.mobile-app .mobile-conversation .composer-tool { color: var(--text-2); }
+.mobile-app .mobile-conversation .composer-tool:active:not(:disabled) { color: var(--text); background: var(--mobile-group-press); }

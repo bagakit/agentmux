@@ -50,7 +50,7 @@ import { mobileInteractionLabels } from '../presentation/interaction'
 
 const mobileConversationToolLabels: NonNullable<ClientUiPlatform['conversationToolLabels']> = {
   copy: '复制', copying: '正在复制…', copied: '已复制', retryCopy: '重新复制',
-  formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文'
+  formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文', self: '我'
 }
 
 export type { MobileConnection } from './use-hosted-conversation'
@@ -292,9 +292,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     })
     const main = moteDialogue?.page?.main.current, owner = reading.pageOwner
     return (speaker, size) => {
-      const resolved = original(speaker, size)
-      // The phone speaks to its owner in Chinese; the shared Desktop resolver keeps its own wording.
-      const prior = speaker.role === 'human' && resolved.name === 'You' ? { ...resolved, name: '我' } : resolved
+      const prior = original(speaker, size)
       return moteTarget && main && owner?.client === client && owner.agentSessionId === agentSessionId && main.hostId === owner.hostId && main.sessionId === agentSessionId && speaker.role === 'agent' && speaker.id === agentSessionId
         ? { ...prior, name: moteName ?? prior.name, avatar: mainAvatar(size) } : prior
     }
