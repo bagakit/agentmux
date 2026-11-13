@@ -35,6 +35,12 @@ reasoning, tools and platform notices are not answers. message ls/read cover ori
 participation. Read leaf help for the exact Host, source, cursor and authorization contract.
 Discovery never grants access to another Agent's private messages or working surface.
 
+For a remote peer, `agent send --to-session SID --host HOST` selects its exact route;
+`agent send --reply-source MID` returns along an original verified message. The
+receiving user approves message-purpose source trust independently in each direction.
+A signed outbox save does not prove remote delivery. Read `amux message --skill` for
+original thread synchronization over a one-way connection and unknown receipt recovery.
+
 For ordinary continuous progress, `agent progress --help` exposes exact-target list,
 create, action and update. A person or device may update only the original loop's interval
 and prompt. The next check and an already claimed or unconfirmed input keep their original

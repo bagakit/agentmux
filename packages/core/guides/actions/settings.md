@@ -44,6 +44,15 @@ match the reviewed values when it accepts approval. Managed
 Agents and devices cannot approve source trust. Opening a remote Agent never silently
 trusts a key or copies the caller capability to the target Host.
 
+Message-source trust uses the same Runtime identity with a separate `agent-message`
+approval: `settings hosts message-trusted-sources --host <id>` reads its authority
+and message pins; `settings hosts trust-message-source --host <id> --input <file|->`
+accepts the same four exact identity fields. Creation approval never enables messages.
+Only the authenticated person can approve either purpose. Approve each message
+direction explicitly when replies are needed; a network return route is unnecessary
+because the original sender can synchronize the worker's signed outbox. These reads
+do not prove delivery, Agent adoption or completion.
+
 Executor command is one literal executable name or path on the target Host; paths may
 contain spaces and must not be shell-quoted. Put launch arguments in the separate args
 array, preserving each argument, including empty strings. Do not put a whole shell command

@@ -14,6 +14,14 @@ them. A saved route/template is not a connected Host, running Agent or human app
 Read amux settings --help to select the exact configuration domain, then the matching leaf
 help for its fields, authority, revision and save receipt. Discovering settings saves nothing.
 
+Remote managed messages use message-purpose source pins. Read `settings hosts
+message-trusted-sources --host HOST` for the exact Runtime authority and approved
+sources. Only the person may approve `settings hosts trust-message-source --host
+HOST --input FILE`, carrying sourceRuntimeId, publicKey, targetRuntimeId and
+targetKeyFingerprint. Creation-source approval is independent. Both message directions
+need explicit approval; this does not require a reverse network connection or forward
+an Agent invocation capability. Read `amux message --skill` for original reply sync.
+
 ## Host home directory
 
 settings hosts home --host HOST reads that exact configured Host's current homeDirectory.
