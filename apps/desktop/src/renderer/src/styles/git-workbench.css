@@ -58,7 +58,8 @@
 .git-workbench__files button { height: 100%; align-items: center; padding: 0 var(--sp-2); }
 .git-workbench__file-path { flex-wrap: nowrap; overflow: hidden; }
 .git-workbench__file-name, .git-workbench__file-path small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-workbench__files .git-workbench__file-origin { display: none; }
+/* A rename keeps its old path on the same line, so a filter matching only that path still reads. */
+.git-workbench__files .git-workbench__file-origin { flex-basis: auto; font-size: inherit; }
 /* Changed-file lists read every file but mount only rows near the viewport (ChangedFileList). */
 .changed-file-list { position: relative; margin: 0; padding: 0; list-style: none; }
 .changed-file-list__row { position: absolute; top: 0; left: 0; width: 100%; padding-block: 1px; }

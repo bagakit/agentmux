@@ -92,7 +92,7 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
           <span className="git-workbench__file-path">
             <span className="git-workbench__file-name">{file.path.slice(file.path.lastIndexOf('/') + 1)}</span>
             {file.path.includes('/') && <small>{file.path.slice(0, file.path.lastIndexOf('/') + 1)}</small>}
-            {file.origPath && <small className="git-workbench__file-origin">{file.origPath} → {file.path}</small>}
+            {file.origPath && <small className="git-workbench__file-origin">from {file.origPath}</small>}
           </span>
         </button>
       } />
