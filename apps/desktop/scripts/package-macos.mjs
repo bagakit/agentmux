@@ -532,6 +532,7 @@ async function createDmg(appPath, dmgPath, temporaryRoot) {
   ], { capture: true })
   await detachCreatedImage(dmgPath)
   await run('hdiutil', ['verify', dmgPath], { capture: true })
+  await rm(dmgRoot, { recursive: true, force: true })
 }
 
 async function detachCreatedImage(imagePath) {
