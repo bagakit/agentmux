@@ -78,6 +78,10 @@
 | 原自动输入的明确取消与普通持续跟进 | [取消合同](../../packages/core/src/agent-automation.ts)、[进度合同](../../packages/core/src/agent-progress.ts)、[Host 取消 owner](../../apps/host/src/goal-automation-pause.ts)及[原进度 manager](../../apps/host/src/continuous-progress-loop-manager.ts) | `agent automation pause/inspect` 与 `agent progress list/create/action/update` → 同一原 Host owner；Desktop 与 Mobile 沿原 Session／Run／操作消费。取消只撤自动推进，不发送输入；字段与授权唯一沿合同及[输入环境边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界) |
 | 原 Goal 的精确变更观察 | [公共事件合同](../../packages/core/src/goal-changes.ts)、[Host 组合](../../apps/host/src/goals.ts) | `goal.watch` → 原 DemandStore 的准确变更 ID → Desktop 原消费者重读同 Goal；订阅恢复保原记录与可见观察问题，不另建 Goal 缓存或全历史轮询 |
 
+### 工作面像素观察与录制
+
+公共类型、严格解析和预算归 [App capture](../../packages/core/src/app-capture.ts)，CLI 与本机新文件输出归 [capture CLI](../../packages/core/src/app-capture-cli.ts)。`app capture` 和 `app record start/inspect/stop/read` 经同一公共服务接入 [Desktop 采集端口](../../apps/desktop/src/main/app-capture-owner.ts)、[原像素源](../../apps/desktop/src/main/app-capture.ts)与[录制 owner](../../apps/desktop/src/main/app-recording.ts)；窗口及文档代次复用 `app.window.ls`，Region 复用 `space inspect` 的准确 occurrence。只采本次原来源，不导航或授权操作；PNG、实际采集区间、裁剪与图层身份、WebM 及原操作回执分别表达。录制元信息、产物与重启未完成结果沿同一应用状态目录保存，未知不重录。
+
 ### 文件资源的读取、修改与发现
 
 Note 使用同一 `file.read/write/create`，经共享的 [NoteFileWriter](../../apps/host/src/note-file-writer.ts)

@@ -34,6 +34,15 @@ Use app focus --surface focus --host HOST --session SID for one exact Agent in t
 Both identities are required; this cannot use map view or transfer input. Original filters
 remain, with one explained temporary reveal. Inspect focus.agent for actual card visibility,
 not merely surface selection or an accepted navigation.
+Read app inspect overlays.settingsPage.sectionIds for the original client's registered Settings
+pages, then use app focus --settings-section ID. Settings is an overlay; the retained main
+Surface, workface, preferences and drafts remain. Its sectionId is the Panel's actual selection,
+including manual page changes; visible states whether that section is currently presented.
+An unknown section preserves the original page. Navigation preserves eligible conversation
+input without synthetic blur/restore; a main input hidden by Settings is reported unavailable.
+app focus --close-settings closes only that overlay, retaining its mounted editors and drafts.
+This does not save configuration, submit text or grant permission-response authority.
+
 app inspect reports selection.focusView separately from actual presentation and input.
 Retained Tab/Region selection does not certify that content is visible behind the map.
 Selection, focus and native input receipts are separate. Preserve current drafts and caret
@@ -58,3 +67,33 @@ an older content namespace or prove that an older page loaded the current releas
 Active and previous namespaces are retained in this Host instance only; older namespaces
 explicitly become not-retained. Publication does not claim disk persistence,
 native App updates, Host restart or safe reload of drafts and selected images.
+
+## Capture an exact workface
+
+Read app window ls for the original windowId and documentGeneration. app capture --input
+FILE|- [--output FILE] takes {target:{windowId,documentGeneration}}. To crop one presented
+Region, add target.region:{kind:"region",displayWorkspaceId,groupId,tabId,regionId} from
+space inspect. Capturing never navigates, focuses or starts an Agent; explicitly navigate
+an unavailable original workface first. Pixels come from this Renderer and its actual native
+child views, with a capture interval and source identities, without a system screen picker.
+
+app record start takes {operationId,target,durationMs,fps}. The original Desktop owner
+records a bounded WebM, preserving the same actor and operation across inspect/stop/read.
+Use app record inspect --input FILE|- with {operationId}; stop ends only that recording.
+read accepts the same identity and optional --output FILE. After an unknown start response,
+inspect the original operation; do not create another recording to recover its result.
+Use leaf help for the current duration, sampling, pixel and encoded-byte budgets. Recording
+and encoding failures never stop healthy Agents, clear drafts or alter layouts. Saved files
+remain under the original Desktop state owner; an interrupted source is not called complete.
+
+--output publishes a new local file without overwriting. Its receipt includes checksum and
+metadata; the binary payload is omitted from CLI stdout once written. A write failure retains
+the original artifact and operation for another explicit read/export, without recording again.
+
+A same-document geometry or native-layer change rejects that one frame with
+APP_CAPTURE_FRAME_CHANGED. The original recording continues its remaining interval;
+recording.gaps retains each machine-identified gap. A partial WebM remains readable
+and exportable, with a nonzero CLI outcome. A document loss, capture failure or unknown
+native completion keeps the original recording and its diagnostics. No failed start is
+replayed, and no page or Agent is closed to unlock a recording. Stop/dispose observation
+is bounded; an unsettled source stays explicit rather than blocking healthy manual work.
