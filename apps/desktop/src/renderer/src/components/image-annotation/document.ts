@@ -1,4 +1,4 @@
-import { shapeBounds, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+import { BLUR_RADIUS_RANGE, shapeBounds, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
 import type { AnnotationImage } from './types'
 
 export type AnnotationHistoricalSource = {
@@ -49,6 +49,11 @@ function finite(value: unknown): number {
 function positive(value: unknown): number {
   const number = finite(value)
   if (number <= 0) invalid('Annotation dimensions and styles must be positive.')
+  return number
+}
+function inRange(value: unknown, range: { min: number; max: number }, message: string): number {
+  const number = finite(value)
+  if (number < range.min || number > range.max) invalid(message)
   return number
 }
 function text(value: unknown): string {
@@ -126,6 +131,10 @@ function shape(value: unknown): ScreenshotShape {
   if (kind === 'pixelate') {
     record(value, [...fields, 'from', 'to', 'blockSize'])
     return { ...common, kind, from: point(base.from), to: point(base.to), blockSize: positive(base.blockSize) }
+  }
+  if (kind === 'blur') {
+    record(value, [...fields, 'from', 'to', 'radius'])
+    return { ...common, kind, from: point(base.from), to: point(base.to), radius: inRange(base.radius, BLUR_RADIUS_RANGE, 'The blur strength is out of range.') }
   }
   if (kind === 'cover') {
     record(value, [...fields, 'from', 'to'])

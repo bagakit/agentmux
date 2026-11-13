@@ -18,6 +18,7 @@ import {
   type PixelateShape,
   type PixelateBrushShape,
   type CoverShape,
+  type BlurShape,
   type ScreenshotShape,
   type TextShape
 } from './drawing-model'
@@ -47,6 +48,7 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
         break
       }
       case 'cover': drawCover(context, shape); break
+      case 'blur': drawBlur(context, shape); break
     }
   } finally { context.restore() }
 }
@@ -212,4 +214,36 @@ function drawPixelate(context: CanvasRenderingContext2D, shape: PixelateShape): 
   context.imageSmoothingEnabled = false
   context.drawImage(sample, 0, 0, sample.width, sample.height,
     (x - transform.e) / transform.a, (y - transform.f) / transform.d, (right - x) / transform.a, (bottom - y) / transform.d)
+}
+
+/** Blur the already painted pixels inside the region, like pixelation. The
+ * sample is padded with real neighbours, and stretched pixels where the canvas
+ * ends, so the blurred edge stays opaque and never fades into the original. */
+function drawBlur(context: CanvasRenderingContext2D, shape: BlurShape): void {
+  const rect = normalizeRect(shape.from, shape.to)
+  if (rect.width <= 0 || rect.height <= 0) return
+  const transform = context.getTransform(), canvas = context.canvas
+  const left = Math.max(0, Math.floor(rect.x * transform.a + transform.e))
+  const top = Math.max(0, Math.floor(rect.y * transform.d + transform.f))
+  const right = Math.min(canvas.width, Math.ceil((rect.x + rect.width) * transform.a + transform.e))
+  const bottom = Math.min(canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
+  if (right <= left || bottom <= top) return
+  const radius = Math.max(1, shape.radius * transform.a), pad = Math.ceil(radius * 3)
+  const sampleLeft = Math.max(0, left - pad), sampleTop = Math.max(0, top - pad)
+  const sampleWidth = Math.min(canvas.width, right + pad) - sampleLeft, sampleHeight = Math.min(canvas.height, bottom + pad) - sampleTop
+  const sample = canvas.ownerDocument.createElement('canvas')
+  sample.width = right - left + pad * 2
+  sample.height = bottom - top + pad * 2
+  const padded = sample.getContext('2d')
+  if (!padded) throw new Error('Screenshot blur requires a 2D canvas')
+  padded.drawImage(canvas, sampleLeft, sampleTop, sampleWidth, sampleHeight, 0, 0, sample.width, sample.height)
+  padded.drawImage(canvas, sampleLeft, sampleTop, sampleWidth, sampleHeight, sampleLeft - left + pad, sampleTop - top + pad, sampleWidth, sampleHeight)
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.beginPath(); context.rect(left, top, right - left, bottom - top); context.clip()
+  // Replace, never overlay: a translucent source must not keep its sharp pixels.
+  context.clearRect(left, top, right - left, bottom - top)
+  context.globalAlpha = 1
+  context.globalCompositeOperation = 'source-over'
+  context.filter = `blur(${radius}px)`
+  context.drawImage(sample, left - pad, top - pad)
 }

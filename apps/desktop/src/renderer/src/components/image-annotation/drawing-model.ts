@@ -17,9 +17,11 @@ export type NoteShape = ShapeBase & { kind: 'note'; from: ScreenshotPoint; to: S
 export type PixelateShape = ShapeBase & { kind: 'pixelate'; from: ScreenshotPoint; to: ScreenshotPoint; blockSize: number }
 export type PixelateBrushShape = ShapeBase & { kind: 'pixelate-brush'; points: ScreenshotPoint[]; width: number; blockSize: number }
 export type CoverShape = ShapeBase & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
+/** `radius` is the Gaussian blur radius in original image pixels. */
+export type BlurShape = ShapeBase & { kind: 'blur'; from: ScreenshotPoint; to: ScreenshotPoint; radius: number }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape
-export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape
+export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape | BlurShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
 export const DEFAULT_SCREENSHOT_COLOR: string = SCREENSHOT_COLORS[0]
@@ -30,10 +32,17 @@ export const DEFAULT_SCREENSHOT_FONT_SIZE = 18
 export const HIGHLIGHT_ALPHA = 0.35
 export const SCREENSHOT_TEXT_LINE_HEIGHT = 1.2
 const HIGHLIGHT_WIDTH_MULTIPLIER = 4
+export const BLUR_RADIUS_RANGE = { min: 2, max: 64 } as const
+export const DEFAULT_BLUR_RADIUS = 12
+
+const clamp = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, value))
+export function createBlurShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, radius = DEFAULT_BLUR_RADIUS): BlurShape {
+  return { id, color, kind: 'blur', from, to, radius: clamp(radius, BLUR_RADIUS_RANGE) }
+}
 
 export function screenshotTextLines(text: string): string[] { return text.split(/\r\n|\r|\n/) }
 export function isScreenshotMask(shape: ScreenshotShape): shape is ScreenshotMask {
-  return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover'
+  return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover' || shape.kind === 'blur'
 }
 
 /** Constraints affect original-image geometry, never the fitted viewport. */
@@ -138,6 +147,8 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
       return { ...shape, blockSize: shape.blockSize * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'cover':
       return { ...shape, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
+    case 'blur':
+      return { ...shape, radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'text':
       return { ...shape, fontSize: shape.fontSize * scale, at: scalePoint(shape.at, scale) }
   }
@@ -263,7 +274,7 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
     if (shape.kind === 'note' && Math.hypot(point.x - shape.from.x, point.y - shape.from.y) <= shape.radius + tolerance) return shape
     const rect = shapeBounds(shape, textWidth)
     if (point.x < rect.x - tolerance || point.x > rect.x + rect.width + tolerance || point.y < rect.y - tolerance || point.y > rect.y + rect.height + tolerance) continue
-    if (shape.kind === 'text' || shape.kind === 'pixelate' || shape.kind === 'cover') return shape
+    if (shape.kind === 'text' || shape.kind === 'pixelate' || shape.kind === 'cover' || shape.kind === 'blur') return shape
     const ink = tolerance + shape.width / 2
     if (shape.kind === 'ellipse') {
       if (distanceToEllipse(point, rect) <= ink) return shape
