@@ -1,130 +1,70 @@
-import { useLayoutEffect, useRef, useState } from 'react'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { useEffect, useRef, useState } from 'react'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
-import type { LauncherExecutionSelection } from '../store'
-import { LauncherExecutionPicker } from './LauncherExecutionPicker'
+import { fileNavigationSelection, useAppStore, type LauncherExecutionSelection } from '../store'
+import { AgentDeviceSelect } from './AgentDeviceSelect'
 
-const LocalIcon = semanticIconComponent('object.host')
-const ProjectIcon = semanticIconComponent('object.folder')
-const RemoteIcon = semanticIconComponent('object.remote-execution')
-const SelectedIcon = semanticIconComponent('status.selected')
-const CloseIcon = semanticIconComponent('action.close')
-const BackIcon = semanticIconComponent('navigation.back')
-const DownIcon = semanticIconComponent('navigation.down')
-
-type Intent = 'local' | 'remote' | 'remote-agent' | 'custom'
-type Setup = { intent: Intent; resourceWorkspaceId: string | undefined; agentWorkspaceId: string | null; picking: 'resource' | 'runtime' | null }
-const modes = [
-  { id: 'local', title: 'Local development', detail: 'Project and Agent on this machine', Icon: LocalIcon },
-  { id: 'remote', title: 'Remote development', detail: 'Project and Agent on a server', Icon: ProjectIcon },
-  { id: 'remote-agent', title: 'Remote Agent', detail: 'Local project · remote Agent', Icon: RemoteIcon }
-] as const
-
-/** Common intentions project the original two addresses; only an exact choice commits. */
-export function LauncherExecutionModes({ hosts, workspaces, workspace, agentWorkspace, explicitAgentWorkspaceId, disabled, onSelect, onManageProjects, onGuide }: {
-  hosts: readonly HostConfig[]
-  workspaces: readonly WorkspaceRecord[]
-  workspace: WorkspaceRecord | undefined
-  agentWorkspace: WorkspaceRecord | undefined
-  explicitAgentWorkspaceId: string | undefined
-  disabled: boolean
+/** A compact editor for the original two execution addresses; no Agent is created here. */
+export function LauncherExecutionModes({ hosts, workspaces, workspace, agentWorkspace, explicitAgentWorkspaceId, disabled, active = true, onSelect, onManageProjects, onGuide, onPreparingChange }: {
+  hosts: readonly HostConfig[]; workspaces: readonly WorkspaceRecord[]; workspace: WorkspaceRecord | undefined;
+  agentWorkspace: WorkspaceRecord | undefined; explicitAgentWorkspaceId: string | undefined; disabled: boolean; active?: boolean;
   onSelect(selection: LauncherExecutionSelection, options: { navigateProject: boolean }): boolean
-  onManageProjects(): void
-  onGuide?: (() => void) | undefined
+  onManageProjects(): void; onGuide?: (() => void) | undefined; onPreparingChange?(pending: boolean): void
 }) {
-  const [setup, setSetup] = useState<Setup | null>(null)
-  const trigger = useRef<HTMLButtonElement | null>(null)
-  const setupRef = useRef<HTMLDivElement | null>(null)
-  const previousPicker = useRef<Setup['picking']>(null)
-  useLayoutEffect(() => {
-    const previous = previousPicker.current
-    previousPicker.current = setup?.picking ?? null
-    if (setup && setup.picking === null && previous) setupRef.current?.querySelector<HTMLButtonElement>(`[data-endpoint="${previous}"]`)?.focus()
-  }, [setup?.picking])
-  const projectHost = hosts.find(host => host.id === workspace?.hostId)
-  const runtimeHost = hosts.find(host => host.id === agentWorkspace?.hostId)
-  const selected: Intent = explicitAgentWorkspaceId !== undefined
-    ? projectHost?.kind === 'local' && runtimeHost?.kind === 'ssh' ? 'remote-agent' : 'custom'
-    : projectHost?.kind === 'local' ? 'local' : projectHost?.kind === 'ssh' ? 'remote' : 'custom'
-  const projects = workspaces.filter(item => !isScratchWorkspaceId(item.id))
-  const resource = projects.find(item => item.id === setup?.resourceWorkspaceId)
-  const runtime = projects.find(item => item.id === setup?.agentWorkspaceId)
-
-  function environmentLabel(target: WorkspaceRecord | undefined) {
-    if (!target) return 'No machine selected'
-    const host = hosts.find(item => item.id === target.hostId)
-    if (!host) return target.hostId
-    return host.kind === 'ssh' ? `${host.label} · ${host.user ? `${host.user}@` : ''}${host.hostname}${host.port ? `:${host.port}` : ''}`
-      : `${host.label} · This machine`
-  }
-
-  function commit(resourceWorkspaceId: string, agentWorkspaceId: string | null, intent: Intent) {
-    if (onSelect({ resourceWorkspaceId, agentWorkspaceId }, { navigateProject: intent !== 'custom' })) {
-      setSetup(null)
-      if (resourceWorkspaceId === workspace?.id) trigger.current?.focus({ preventScroll: true })
+  const [pendingHost, setPendingHost] = useState<string | null>(null), [error, setError] = useState<string | null>(null)
+  const request = useRef<AbortController | null>(null)
+  const original = useRef({ workspace, explicitAgentWorkspaceId }); original.current = { workspace, explicitAgentWorkspaceId }
+  function cancel() { request.current?.abort(); request.current = null; setPendingHost(null); onPreparingChange?.(false) }
+  useEffect(() => { cancel(); return () => { request.current?.abort(); request.current = null; onPreparingChange?.(false) } }, [workspace?.id, explicitAgentWorkspaceId, active])
+  const runtime = explicitAgentWorkspaceId === undefined ? workspace : agentWorkspace
+  const runtimeHost = hosts.find(host => host.id === runtime?.hostId)
+  const directories = workspaces.filter(item => !isScratchWorkspaceId(item.id))
+  const hostName = (id: string) => { const host = hosts.find(item => item.id === id); return host ? `${host.label}${hosts.some(other => other.id !== id && other.label === host.label) ? ` (${id})` : ''}` : id }
+  const label = (item: WorkspaceRecord) => `${hostName(item.hostId)} · ${item.name} · ${item.path}`
+  async function chooseDevice(hostId: string, forceHome = false) {
+    cancel(); setError(null)
+    if (!workspace || !hostId) return
+    if (hostId === workspace.hostId && !forceHome) {
+      onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: null }, { navigateProject: false }); return
     }
+    const controller = new AbortController(), source = original.current, selection = fileNavigationSelection(useAppStore.getState())
+    let navigationChanged = false
+    const stop = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== selection) { navigationChanged = true; controller.abort() } })
+    request.current = controller; setPendingHost(hostId); onPreparingChange?.(true)
+    try {
+      const directory = await useAppStore.getState().prepareAgentHostWorkspace(hostId, { signal: controller.signal })
+      if (controller.signal.aborted || request.current !== controller || navigationChanged || original.current.workspace?.id !== source.workspace?.id || original.current.workspace?.hostId !== source.workspace?.hostId || original.current.workspace?.path !== source.workspace?.path || original.current.explicitAgentWorkspaceId !== source.explicitAgentWorkspaceId) return
+      onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: directory.id }, { navigateProject: false })
+    } catch (cause) { if (!controller.signal.aborted && request.current === controller) setError(cause instanceof Error ? cause.message : 'The Agent device could not be prepared. Retry this selection.') }
+    finally { stop(); if (request.current === controller) { request.current = null; setPendingHost(null); onPreparingChange?.(false) } }
   }
-  function begin(intent: Intent, button: HTMLButtonElement) {
-    trigger.current = button
-    if (intent === 'local' && workspace && projectHost?.kind === 'local') return commit(workspace.id, null, intent)
-    if (intent === 'remote' && workspace && projectHost?.kind === 'ssh') return commit(workspace.id, null, intent)
-    if (intent === 'remote-agent' && workspace && projectHost?.kind === 'local' && agentWorkspace && runtimeHost?.kind === 'ssh') {
-      return commit(workspace.id, agentWorkspace.id, intent)
-    }
-    setSetup({ intent, resourceWorkspaceId: workspace?.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null,
-      picking: intent === 'custom' ? null : intent === 'remote-agent' && projectHost?.kind === 'local' ? 'runtime' : 'resource' })
+  function selectDirectory(id: string) {
+    cancel(); setError(null)
+    if (!workspace) return
+    if (id === '@home') { if (runtimeHost) void chooseDevice(runtimeHost.id, true); return }
+    onSelect({ resourceWorkspaceId: workspace.id, agentWorkspaceId: id || null }, { navigateProject: false })
   }
-  function cancel() { setSetup(null); trigger.current?.focus() }
-  function choose(id: string) {
-    if (!setup) return
-    if (setup.picking === 'runtime') {
-      if (setup.intent === 'custom') setSetup({ ...setup, agentWorkspaceId: id, picking: null })
-      else if (setup.resourceWorkspaceId) commit(setup.resourceWorkspaceId, id, setup.intent)
-    } else if (setup.intent === 'custom') setSetup({ ...setup, resourceWorkspaceId: id, picking: null })
-    else if (setup.intent === 'remote-agent') setSetup({ ...setup, resourceWorkspaceId: id, picking: 'runtime' })
-    else commit(id, null, setup.intent)
-  }
-  const pickingRuntime = setup?.picking === 'runtime'
-  const allowedKind = setup?.intent === 'custom' ? undefined : pickingRuntime || setup?.intent === 'remote' ? 'ssh' : 'local'
-  const availableHosts = allowedKind ? hosts.filter(host => host.kind === allowedKind) : hosts
-  const setupTitle = setup?.intent === 'custom' ? 'Custom arrangement' : pickingRuntime ? 'Choose the remote Agent environment' : setup?.intent === 'remote' ? 'Choose a remote project' : 'Choose a local project'
-  return <section className="launcher-execution" aria-label="Execution arrangement">
-    <div className="launcher-execution__modes" aria-label="Common execution modes">
-      {modes.map(({ id, title, detail, Icon }) => <button key={id} type="button" className="launcher-execution__mode"
-        aria-pressed={selected === id} data-pending={setup?.intent === id || undefined} disabled={disabled}
-        onClick={event => begin(id, event.currentTarget)} title={detail}>
-        <Icon size={17} aria-hidden="true" /><span><strong>{title}</strong><small>{detail}</small></span>
-        {selected === id ? <SelectedIcon size={13} aria-label="Selected arrangement" /> : null}
-      </button>)}
+  return <section className="launcher-execution" aria-label="Agent location">
+    <div className="launcher-agent-location">
+      <AgentDeviceSelect hosts={hosts} value={pendingHost ?? runtimeHost?.id ?? ''} busy={pendingHost !== null} disabled={disabled || !active}
+        onChange={hostId => void chooseDevice(hostId)} />
+      {explicitAgentWorkspaceId !== undefined ? <span className="launcher-agent-location__project">Files &amp; tools: {workspace ? hostName(workspace.hostId) : 'Unknown device'}</span> : null}
     </div>
-    <div className="launcher-execution__actions">
-      <button type="button" className="launcher-execution__custom" aria-pressed={selected === 'custom'} aria-expanded={setup?.intent === 'custom'}
-        disabled={disabled} onClick={event => begin('custom', event.currentTarget)}>
-        <RemoteIcon size={13} />{selected === 'custom' ? 'Custom arrangement' : 'Custom'}<DownIcon size={11} />
-      </button>
-      {onGuide ? <button type="button" className="launcher-execution__guide" onClick={onGuide}>How it works</button> : null}
-    </div>
-    {setup ? <div ref={setupRef} className="launcher-execution__setup" onKeyDown={event => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); event.stopPropagation(); cancel() } }}>
-      <header><div><strong>{setupTitle}</strong><p>{pickingRuntime ? 'Native configuration and Skills load here. No project copy is needed.'
-        : setup.intent === 'custom' ? 'Choose project tools and Agent runtime independently.' : `Opens this project’s own work. Your draft stays in ${workspace?.name ?? 'its original project'}.`}</p></div>
-        <button type="button" className="icon-button" aria-label="Cancel execution setup" onClick={cancel}><CloseIcon size={14} /></button></header>
-      {setup.intent === 'custom' && setup.picking ? <button type="button" className="launcher-execution__custom"
-        onClick={() => setSetup({ ...setup, picking: null })}><BackIcon size={12} />Back to arrangement</button> : null}
-      {setup.picking ? <LauncherExecutionPicker key={`${setup.intent}:${setup.picking}`} hosts={availableHosts}
-        workspaces={projects.filter(item => availableHosts.some(host => host.id === item.hostId))}
-        selected={pickingRuntime ? runtime : resource} disabled={disabled} purpose={pickingRuntime ? 'runtime' : 'project'}
-        autoFocus onSelect={choose} onManageProjects={onManageProjects} /> : <>
-        <div className="launcher-execution__endpoints">
-          <button type="button" data-endpoint="resource" onClick={() => setSetup({ ...setup, picking: 'resource' })}><ProjectIcon size={15} /><span><small>Project & tools</small><strong>{resource?.name ?? 'Choose a project'}</strong><span className="launcher-execution__machine">{environmentLabel(resource)}</span><code>{resource?.path ?? 'No directory selected'}</code></span><DownIcon size={12} /></button>
-          <button type="button" data-endpoint="runtime" onClick={() => setSetup({ ...setup, picking: 'runtime' })}><RemoteIcon size={15} /><span><small>Agent runtime</small><strong>{setup.agentWorkspaceId === null ? 'Follow project' : runtime?.name ?? 'Environment unavailable'}</strong><span className="launcher-execution__machine">{environmentLabel(setup.agentWorkspaceId === null ? resource : runtime)}</span><code>{setup.agentWorkspaceId === null ? resource?.path : runtime?.path}</code></span><DownIcon size={12} /></button>
-        </div>
-        <footer><button type="button" className="small-button" onClick={cancel}>Cancel</button>
-          <button type="button" className="small-button" onClick={() => setSetup({ ...setup, agentWorkspaceId: null })}>Agent follows project</button>
-          <button type="button" className="primary-button" disabled={disabled || !resource || setup.agentWorkspaceId !== null && !runtime}
-            onClick={() => resource && commit(resource.id, setup.agentWorkspaceId, setup.intent)}>Use arrangement</button></footer>
-      </>}
-    </div> : null}
+    {pendingHost ? <p className="launcher-execution-feedback" role="status">Preparing the Agent startup directory…</p> : error ? <p className="launcher-execution-feedback" role="status">{error}</p> : null}
+    <details className="launcher-execution-advanced"><summary>Advanced arrangement</summary>
+      <div className="launcher-execution-fields">
+        <label><span>Files &amp; tools</span><select aria-label="Files and tools" value={workspace?.id ?? ''} disabled={disabled || !active} onChange={event => { cancel(); setError(null); onSelect({ resourceWorkspaceId: event.target.value, agentWorkspaceId: explicitAgentWorkspaceId ?? null }, { navigateProject: true }) }}>
+          {!workspace ? <option value="">Choose a folder…</option> : null}
+          {directories.map(item => <option value={item.id} key={item.id}>{label(item)}</option>)}
+        </select></label>
+        <label><span>Agent startup directory</span><select aria-label="Agent startup directory" value={explicitAgentWorkspaceId ?? ''} disabled={disabled || !active || pendingHost !== null} onChange={event => selectDirectory(event.target.value)}>
+          <option value="">Follow project directory</option><option value="@home">Device home</option>
+          {explicitAgentWorkspaceId && !directories.some(item => item.id === explicitAgentWorkspaceId) ? <option value={explicitAgentWorkspaceId}>Selected directory · unavailable</option> : null}
+          {directories.filter(item => item.hostId === runtimeHost?.id).map(item => <option value={item.id} key={item.id}>{item.name} · {item.path}</option>)}
+        </select></label>
+      </div>
+      <p>Startup directory supplies the Agent’s native configuration and Skills. Files and commands use the selected project.</p>
+      <div className="launcher-execution__actions"><button type="button" onClick={onManageProjects}>Manage folders</button>{onGuide ? <button type="button" onClick={onGuide}>How it works</button> : null}</div>
+    </details>
   </section>
 }

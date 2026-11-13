@@ -128,6 +128,7 @@ export function NewTabSurface({
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
+  const [executionPreparing, setExecutionPreparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const config = useAppStore((state) => state.config)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
@@ -338,7 +339,7 @@ export function NewTabSurface({
   // 同一概念判得不一样，症状是按钮灰着而键盘照旧发车（或反过来）。
   const readiness = {
     hasWorkspace: Boolean(workspace && agentWorkspace && (!splitExecution || splitWorkspaceSupported)),
-    busy: busy !== null,
+    busy: busy !== null || executionPreparing,
     installedExecutorCount: splitExecution ? selectedExecutor ? 1 : 0 : primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
   }
   // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
@@ -414,10 +415,6 @@ export function NewTabSurface({
     chooseArrangement({ resourceWorkspaceId: workspaceId, agentWorkspaceId: agentTarget?.agentWorkspaceId ?? null }, { navigateProject: true })
   }
 
-  function chooseAgentWorkspace(workspaceId: string): void {
-    if (workspace) chooseArrangement({ resourceWorkspaceId: workspace.id, agentWorkspaceId: workspaceId }, { navigateProject: false })
-  }
-
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const attachments = useComposerAttachments({ scope: toolsScope, hostId: workspace?.hostId, workspacePath: workspace?.path,
     disabled: false, insertion: insertionRef, feedback, document: dialogDocument, shortcutActive: visible && presentationActive && sections.agents === 'expanded',
@@ -440,14 +437,10 @@ export function NewTabSurface({
         roleLabel={splitExecution ? 'Project & tools' : undefined} />
       {!workspace || !isScratchWorkspaceId(workspace.id) ? <LauncherExecutionModes key={launcherId}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
-        explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null}
-        onSelect={chooseArrangement} onManageProjects={() => settings?.open('hosts')}
+        explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null} active={motionActive}
+        onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing} onManageProjects={() => settings?.open('hosts')}
         onGuide={settings ? () => settings.open('remote-execution', undefined, 'guide') : undefined} /> : null}
-      {splitExecution ? <LauncherEnvironment workspace={agentWorkspace} host={agentHost} check={undefined}
-        displayPath={agentWorkspace ? formatPathForDisplay(agentWorkspace.path, { home: agentHost?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute }) : ''}
-        purpose="runtime" roleLabel="Agent runtime" selectionLabel="Agent runtime environment" chooseTitle="Choose where the Agent runs" active={motionActive}
-        hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseAgentWorkspace}
-        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} /> : null}
+
 
       {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Separate execution needs two registered projects', mode: 'Mote context is not configured for this mode. Your selection and draft are retained.',
@@ -513,7 +506,7 @@ export function NewTabSurface({
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
         <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} />
-          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
+          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : executionPreparing ? 'Preparing device…' : 'Launch'}</button>
         </div>
       </div> : null}
       {emptyHostInventoryUnconfirmed && sections.agents !== 'hidden' ? sections.agents === 'expanded' ? null : unconfirmedConfigurations : (splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {

@@ -187,6 +187,7 @@ import type {
   AgentSessionRecoveryCandidate,
   AgentTimelineSnapshot,
   AppConfig,
+  WorkspaceRecord,
   BrowserEvent,
   CreateWorkspacePathInput,
   FileDocument,
@@ -1562,6 +1563,8 @@ export type AppState = GitReadingActions & {
   /** Commit a complete future execution target; another project retains its own input owners. */
   selectLauncherExecution(source: LauncherExecutionSource, selection: LauncherExecutionSelection,
     options?: { navigateProject?: boolean; reveal?: boolean }): LauncherExecutionDestination
+  /** Resolve the exact device home through its original Host, retaining any accepted Folder registration; no navigation. */
+  prepareAgentHostWorkspace(hostId: string, context?: { signal?: AbortSignal }): Promise<WorkspaceRecord>
   setLauncherAgentWorkspace(launcher: { tabId: string; regionId: string }, workspaceId: string | null): void
   setLauncherAgentExecutor(launcher: { tabId: string; regionId: string }, executorId: string): void
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
@@ -10990,6 +10993,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const { [sessionId]: _navigation, ...navigation } = state.agentComposerHistoryNavigation
     set({ agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text },
       agentComposerHistoryNavigation: navigation })
+  },
+  async prepareAgentHostWorkspace(hostId, context) {
+    const signal = context?.signal, host = get().config?.hosts.find(item => item.id === hostId)
+    signal?.throwIfAborted()
+    if (!host) throw new Error('Choose a configured Agent device.')
+    const route = (value: HostConfig | undefined) => { if (!value) return null; const { label: _label, ...target } = value; return target }
+    const target = route(host)
+    const current = () => configValuesEqual(route(get().config?.hosts.find(item => item.id === hostId)), target)
+    let step: 'read' | 'register' = 'read'
+    try {
+      const home = await api.hosts.home(structuredClone(host), signal ? { signal } : undefined)
+      signal?.throwIfAborted()
+      if (home.routeHostId !== hostId || !current()) throw Object.assign(new Error('The Agent device changed.'), { code: 'AGENT_HOST_CHANGED' })
+      const known = get().config?.workspaces.find(item => item.hostId === hostId && item.path === home.homeDirectory)
+      if (known) return known
+      step = 'register'
+      const registered = await api.workspaces.add({ hostId, path: home.homeDirectory })
+      if (registered.hostId !== hostId) throw Object.assign(new Error('The directory registration belongs to another device.'), { code: 'AGENT_HOST_CHANGED' })
+      // Registration may already be durable when this reader is cancelled. Keep its exact receipt.
+      set(state => state.config && state.config.hosts.some(item => item.id === hostId) && !state.config.workspaces.some(item => item.id === registered.id)
+        ? { config: { ...state.config, workspaces: [...state.config.workspaces, registered] } } : state)
+      signal?.throwIfAborted()
+      if (!current()) throw Object.assign(new Error('The Agent device changed after registration.'), { code: 'AGENT_HOST_CHANGED' })
+      return registered
+    } catch (error) {
+      signal?.throwIfAborted()
+      const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+      throw new Error(code === 'REMOTE_CORE_UPGRADE_REQUIRED' ? 'Update AgentMux Core on this device before preparing the Agent.'
+        : code === 'AGENT_HOST_CHANGED' ? 'The Agent device changed. Choose its current entry and retry.'
+          : `The Agent startup directory could not be ${step === 'read' ? 'read' : 'registered'}. Retry this device.`, { cause: error })
+    }
   },
   setLauncherExecutionWorkspace(launcher, workspaceId, executorId) {
     const state = get()

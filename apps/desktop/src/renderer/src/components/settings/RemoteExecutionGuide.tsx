@@ -6,7 +6,7 @@ import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 export function RemoteExecutionGuide({ active }: { active: boolean }) {
   const [open, setOpen] = useState(false)
   return <details className="remote-execution-guide" data-settings-field="guide" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Step-by-step guide <span>Space · choose both environments · continue work</span></summary>
+    <summary>Step-by-step guide <span>Project · Agent device · continue work</span></summary>
     {open && active ? <div className="remote-execution-guide__body"><AgentMarkdown content={AGENT_EXECUTION_GUIDE} documentMode readOnly visible /></div> : null}
   </details>
 }

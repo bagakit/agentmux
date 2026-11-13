@@ -2,7 +2,9 @@ import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } fro
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveAgentName } from '@agentmux/client-ui/display-name'
 import { isScratchWorkspaceId, type SessionSnapshot } from '../../../../shared/contracts'
-import { useAppStore } from '../../store'
+import { fileNavigationSelection, useAppStore } from '../../store'
+import { configValuesEqual } from '../../../../shared/config-edit'
+import { AgentDeviceSelect } from '../AgentDeviceSelect'
 import { sessionStatusLabel } from '../../lib/session-presentation'
 import { AgentToolExecutionNotice } from '../AgentToolExecutionNotice'
 import { ResolvedAgentAvatar } from '../AgentAvatar'
@@ -10,7 +12,6 @@ import { SettingsNavigation } from '../SettingsNavigation'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { RemoteExecutionGuide } from './RemoteExecutionGuide'
 import type { SettingsPaneProps } from './settings-catalog'
-import executionIllustration from '../../assets/settings/remote-execution.png'
 import '../../styles/remote-execution-settings.css'
 
 const AgentIcon = semanticIconComponent('object.agent')
@@ -29,7 +30,13 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const navigation = useContext(SettingsNavigation)
   const projects = config.workspaces.filter(workspace => !isScratchWorkspaceId(workspace.id))
-  const [projectId, setProjectId] = useState(() => projects.find(workspace => workspace.id === activeWorkspaceId)?.id ?? '')
+  const localProjects = projects.filter(project => config.hosts.find(host => host.id === project.hostId)?.kind === 'local')
+  const [projectId, setProjectId] = useState(() => localProjects.find(workspace => workspace.id === activeWorkspaceId)?.id ?? '')
+  const [agentHostId, setAgentHostId] = useState(''), [startupId, setStartupId] = useState('')
+  const [preparing, setPreparing] = useState(false)
+  const preparation = useRef<AbortController | null>(null)
+  function invalidatePreparation() { preparation.current?.abort(); preparation.current = null; setPreparing(false); setActionError(null) }
+  useEffect(() => { if (!active) invalidatePreparation(); return () => { preparation.current?.abort(); preparation.current = null } }, [active])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'detail'>('library')
   useLayoutEffect(() => {
@@ -83,15 +90,29 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     if (navigation) navigation.openHost(id)
     else onNavigate('hosts')
   }
-  function prepare() {
-    setActionError(null)
-    const state = useAppStore.getState()
-    const project = state.config?.workspaces.find(workspace => workspace.id === projectId && !isScratchWorkspaceId(workspace.id))
-    if (!project) { setActionError('Choose a registered project for its files and tools.'); return }
-    const tabId = state.openLauncher({ workspaceId: project.id, reveal: true,
-      initialExecution: { resourceWorkspaceId: project.id, agentWorkspaceId: project.id } })
-    if (!tabId) { setActionError('The project workface could not be opened. Its existing work is retained; check the workspace notice and try again.'); return }
-    onClose()
+  async function prepare() {
+    invalidatePreparation()
+    const state = useAppStore.getState(), project = state.config?.workspaces.find(item => item.id === projectId && !isScratchWorkspaceId(item.id))
+    const host = state.config?.hosts.find(item => item.id === agentHostId)
+    if (!project || !host) { setActionError('Choose the project and the device where the Agent will run.'); return }
+    const { label: _label, ...route } = host
+    const controller = new AbortController(), selection = fileNavigationSelection(state)
+    preparation.current = controller; setPreparing(true)
+    let navigationChanged = false
+    const stop = useAppStore.subscribe(current => { if (fileNavigationSelection(current) !== selection) { navigationChanged = true; controller.abort() } })
+    try {
+      const startup = startupId ? state.config?.workspaces.find(item => item.id === startupId && item.hostId === host.id && !isScratchWorkspaceId(item.id))
+        : host.id === project.hostId ? null : await useAppStore.getState().prepareAgentHostWorkspace(host.id, { signal: controller.signal })
+      if (controller.signal.aborted || preparation.current !== controller || navigationChanged) return
+      const current = useAppStore.getState().config, currentProject = current?.workspaces.find(item => item.id === project.id)
+      const { label: _currentLabel, ...currentRoute } = current?.hosts.find(item => item.id === host.id) ?? {}
+      if (startupId && !startup || !currentProject || currentProject.hostId !== project.hostId || currentProject.path !== project.path || !configValuesEqual(currentRoute, route)) throw new Error('The selected folder or Agent device changed. Choose its current entry and retry.')
+      const tabId = useAppStore.getState().openLauncher({ workspaceId: project.id, reveal: true,
+        initialExecution: { resourceWorkspaceId: project.id, agentWorkspaceId: startup?.id ?? null } })
+      if (!tabId) throw new Error('The original Launcher could not be opened. Existing work and drafts are retained.')
+      onClose()
+    } catch (cause) { if (!controller.signal.aborted && preparation.current === controller) setActionError(cause instanceof Error ? cause.message : 'The Agent device could not be prepared. Retry this selection.') }
+    finally { stop(); if (preparation.current === controller) { preparation.current = null; setPreparing(false) } }
   }
   function openOriginal(session: BoundAgent) {
     setActionError(null)
@@ -99,43 +120,42 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     else setActionError('The original workface could not be selected. Its Session is retained; check its exact Tab and Region in the workspace notice.')
   }
   return <div ref={container} className="settings-pane-stack remote-execution-settings">
-    <section hidden={narrow && view === 'detail'} className="remote-execution-intro" aria-label="How remote execution works">
-      <div className="remote-execution-intro__copy">
-        <span className="remote-execution-eyebrow">YOUR WORK, ACROSS MACHINES</span>
-        <h3>Keep the project.<br /> Choose where your Agent runs.</h3>
-        <p>Let one machine run the Agent while another keeps your files and executes its tools. Either machine can take either role.</p>
-      </div>
-      <figure className="remote-execution-diagram">
-        <img src={executionIllustration} alt="An Agent works at a conversation console on one machine, linked to a separate project workstation with files and a command terminal." width="1536" height="1024" />
-        <figcaption><span><strong>Agent runtime</strong><small>Conversation · Model</small></span><span><strong>Project &amp; tools</strong><small>Files · Commands</small></span></figcaption>
-        <p>Role illustration · Choose machines in the Launcher.</p>
-      </figure>
-    </section>
-
     <section hidden={narrow && view === 'detail'} className="settings-group remote-execution-prepare" data-settings-field="prepare">
-      <header><span>Start with your project</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts<OpenIcon size={13} /></button></header>
-      <p className="settings-group-note">Start in Space → your project → New Tab, or prepare the same Launcher here. Select the Agent runtime there, then Launch.</p>
-      {projects.length ? <div className="remote-execution-prepare__controls">
-        <label><span>Project &amp; tools</span><select aria-label="Project for remote execution" value={projectId} onChange={event => { setProjectId(event.target.value); setActionError(null) }}>
-          <option value="">Choose a project…</option>
-          {projectId && !projects.some(project => project.id === projectId) ? <option value={projectId}>Previously selected project · unavailable</option> : null}
-          {projects.map(project => <option value={project.id} key={project.id}>{project.name} · {hostName(project.hostId)} · {project.path}</option>)}
+      <header><span>Work on your project with another device</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts<OpenIcon size={13} /></button></header>
+      <p className="settings-group-note">{preparedProject && config.hosts.find(host => host.id === preparedProject.hostId)?.kind !== 'local' ? `Files and commands stay on ${hostName(preparedProject.hostId)}. Choose where the Agent runs.` : 'Your task and files stay on this Mac. The Agent runs on the device you choose.'}</p>
+      <div className="remote-execution-prepare__controls">
+        <label><span>{preparedProject && !localProjects.some(item => item.id === preparedProject.id) ? 'Files & tools · Advanced' : 'Project on this Mac'}</span>
+          <select aria-label="Project for remote Agent" value={projectId} onChange={event => { invalidatePreparation(); setProjectId(event.target.value) }}>
+            <option value="">Choose a project…</option>
+            {projectId && !localProjects.some(item => item.id === projectId) ? <option value={projectId}>{preparedProject ? `${preparedProject.name} · ${hostName(preparedProject.hostId)}` : 'Selected project · unavailable'}</option> : null}
+            {localProjects.map(project => <option value={project.id} key={project.id}>{project.name}{localProjects.some(other => other.id !== project.id && other.name === project.name) ? ` · ${project.path}` : ''}</option>)}
+          </select>
+        </label>
+        <AgentDeviceSelect hosts={config.hosts} value={agentHostId} busy={preparing} onChange={hostId => { invalidatePreparation(); setAgentHostId(hostId); setStartupId('') }} />
+        <button type="button" className="primary-button" data-remote-prepare disabled={preparing || !projectId || !agentHostId} onClick={() => void prepare()}>{preparing ? 'Preparing…' : 'Open in Launcher'}<ArrowIcon size={14} /></button>
+      </div>
+      {preparedProject ? <div className="remote-execution-prepare__target" aria-label="Selected project identity"><code>{preparedProject.path}</code></div> : <p className="settings-group-note">Choose a local folder to continue. A Git repository is optional.</p>}
+      <details className="remote-execution-advanced"><summary>Advanced arrangement</summary><div className="remote-execution-prepare__controls">
+        <label><span>Files & tools</span><select aria-label="Files and tools" value={projectId} onChange={event => { invalidatePreparation(); setProjectId(event.target.value) }}>
+          <option value="">Choose a folder…</option>{projects.map(project => <option value={project.id} key={project.id}>{hostName(project.hostId)} · {project.name} · {project.path}</option>)}
         </select></label>
-        <button type="button" className="primary-button" data-remote-prepare onClick={prepare}>Prepare Agent<ArrowIcon size={14} /></button>
-      </div> : <p className="settings-group-note">Register a project in Hosts to choose its files and tools. Existing Agents remain available below.</p>}
-      {preparedProject ? <div className="remote-execution-prepare__target" aria-label="Selected project identity"><strong>{preparedProject.name}</strong><span>{hostName(preparedProject.hostId)} · <code>{preparedProject.hostId}</code></span><code>{preparedProject.path}</code></div> : null}
-      <p className="remote-execution-caption">No Agent starts here. Provider support is checked for your selected runtime.</p>
+        <label><span>Agent startup directory</span><select aria-label="Agent startup directory" value={startupId} disabled={!agentHostId} onChange={event => { invalidatePreparation(); setStartupId(event.target.value) }}>
+          <option value="">{agentHostId === preparedProject?.hostId ? 'Follow project directory' : 'Device home'}</option>
+          {projects.filter(project => project.hostId === agentHostId).map(project => <option value={project.id} key={project.id}>{project.name} · {project.path}</option>)}
+        </select></label>
+      </div>{preparedProject ? <div className="remote-execution-prepare__target" aria-label="Files and tools identity"><strong>{preparedProject.name}</strong><span>{hostName(preparedProject.hostId)} · <code>{preparedProject.hostId}</code></span><code>{preparedProject.path}</code></div> : null}<p className="settings-group-note">Startup directory supplies native configuration and Skills. Files and commands use the selected project.</p></details>
+      <p className="remote-execution-caption">Choose the Agent configuration and enter your task in the Launcher. No Agent starts here.</p>
       <RemoteExecutionGuide active={active} />
     </section>
 
     {actionError ? <p className="remote-execution-feedback" role="status">{actionError}</p> : null}
     <section className="settings-group remote-execution-bindings" data-settings-field="bindings">
-      <header><span>Your execution bindings</span><small>{bindings.length} retained in this client</small></header>
-      <p className="settings-group-note">Open the original work or inspect its two environments. This list reflects this client’s retained Sessions.</p>
+      <header><span>Cross-device Agents</span><small>{bindings.length} retained in this client</small></header>
+      {bindings.length ? <p className="settings-group-note">Open the original work or inspect its two environments. This list reflects this client’s retained Sessions.</p> : null}
       {narrow && view === 'detail' ? <button type="button" className="small-button remote-execution-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><BackIcon size={14} />Back to bindings</button> : null}
-      <div className="remote-execution-bindings__body">
+      {!bindings.length && !selectedId ? <p className="settings-group-note">No cross-device Agents yet.</p> : <div className="remote-execution-bindings__body">
         <div hidden={narrow && view === 'detail'} className="remote-execution-library">
-        <SettingsResourceLibrary label="Execution bindings" query={query} onQuery={setQuery} selectedId={selectedId} focusRequest={returnFocus}
+        <SettingsResourceLibrary label="Cross-device Agents" query={query} onQuery={setQuery} selectedId={selectedId} focusRequest={returnFocus}
           onSelect={id => { setSelectedId(id); setView('detail'); setActionError(null) }} items={rows.map(session => ({ id: session.id, name: agentName(session),
             detail: `Agent: ${hostName(session.control.hostId)}\nTools: ${hostName(session.toolExecution.resourceHostId)}\n${resourceProject(session) ? `${resourceProject(session)} · ` : ''}${session.toolExecution.workspacePath}`,
             mark: <ResolvedAgentAvatar label={agentName(session)} providerId={session.providerId} executorId={session.executorId} state={session.status.state} size={26} /> }))} />
@@ -149,8 +169,8 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
           </dl>
           <AgentToolExecutionNotice key={selected.toolExecution.bindingId} session={selected} visible={active && detailVisible} presentation="inline" />
           <details className="remote-execution-identities"><summary>Original identities</summary><dl><dt>Session</dt><dd>{selected.control.agentSessionId}</dd><dt>Binding</dt><dd>{selected.toolExecution.bindingId}</dd></dl></details>
-        </div> : <div className="remote-execution-empty"><AgentIcon size={28} aria-hidden="true" /><h3>{selectedId ? 'Binding not observed' : bindings.length ? 'Choose a binding' : 'Your next Agent can work across machines'}</h3><p>{selectedId ? 'This client no longer exposes that reference. No Session has been stopped or replaced.' : bindings.length ? 'See where it runs, where its tools work, and what the original service reports.' : 'Prepare an Agent above. Its execution binding will appear here when this client receives the original Session.'}</p></div>}
-      </div>
+        </div> : <div className="remote-execution-empty"><AgentIcon size={28} aria-hidden="true" /><h3>{selectedId ? 'Binding not observed' : bindings.length ? 'Choose a binding' : 'No cross-device Agents yet'}</h3><p>{selectedId ? 'This client no longer exposes that reference. No Session has been stopped or replaced.' : bindings.length ? 'See where it runs, where its tools work, and what the original service reports.' : 'Open a Launcher above. Its execution binding will appear here when this client receives the original Session.'}</p></div>}
+      </div>}
     </section>
   </div>
 }
