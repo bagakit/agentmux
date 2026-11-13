@@ -304,18 +304,18 @@ function FileTreeRow({
         aria-selected={selected}
         onClick={onClick}
       >
-        <button
+        {node.isDirectory ? <button
           type="button"
           className="tree-row__disclosure"
           tabIndex={-1}
           onClick={(event) => {
             event.stopPropagation()
-            if (node.isDirectory) onToggle()
+            onToggle()
           }}
-          aria-label={node.isDirectory ? `${expanded ? 'Collapse' : 'Expand'} ${node.name}` : undefined}
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.name}`}
         >
-          {node.isDirectory ? expanded ? <ThemeNavigationDownIcon size={12} /> : <ThemeNavigationDisclosureIcon size={12} /> : null}
-        </button>
+          {expanded ? <ThemeNavigationDownIcon size={12} /> : <ThemeNavigationDisclosureIcon size={12} />}
+        </button> : <span className="tree-row__disclosure" aria-hidden="true" />}
         <span
           className="tree-row__icon"
           // 读失败的目录此前与真的空目录逐像素相同（都是展开的空文件夹）。图标换成告警，并把原因
