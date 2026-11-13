@@ -45,10 +45,12 @@ async function fixture(checkpoint = false, fill = false) {
   Object.assign(manager, { entries: new Map([[browserId, entry]]), taskAssets: assets, taskExecutions: new Map() })
   const actions = vi.fn(async (_browserId: string, _script: string) => ({ browserId, result: { changed: true }, logs: [], outcome: { kind: 'completed' },
     runOperation: { id: `operation-${now++}`, browserId } }))
-  const returnControl = vi.spyOn(manager, 'returnControl').mockImplementation(() => { entry.humanControl = false; entry.activity.control = 'agent'; return {} as never })
+  const returnControl = vi.spyOn(manager as any, 'applyAgentControl').mockImplementation(() => { entry.humanControl = false; entry.activity.control = 'agent'; return {} as never })
   vi.spyOn(manager as any, 'yieldControl').mockImplementation(() => { entry.humanControl = true; entry.activity.control = 'human' })
   vi.spyOn(manager, 'runScript').mockImplementation(actions as never)
   const owner = { getTaskAssets: (id: string) => assets.state(id), getOperation: vi.fn(async () => null),
+    saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: unknown) => manager.saveTaskAssetDraft(id, assetId, revision, content),
+    publishTaskAsset: (id: string, assetId: string, revision: number) => manager.publishTaskAsset(id, assetId, revision),
     runControlledTaskBatch: (input: any) => manager.runControlledTaskBatch(input), stopTaskBatch: (id: string, batchId: string) => manager.stopTaskBatch(id, batchId),
     runControlledTaskAsset: (input: any) => manager.runControlledTaskAsset(input), stopTaskAsset: (id: string, runId: string) => manager.stopTaskAsset(id, runId) }
   return { assets, asset, store, entry, manager, actions, returnControl, owner }
@@ -272,7 +274,7 @@ it('actual Main dispatcher refuses a selected condition action after its documen
   const taskAuthority = vi.spyOn(f.assets, 'isExecutionCurrent').mockReturnValue(true)
   Object.assign(f.manager, { refLedgers: { read: vi.fn(async () => null), write: vi.fn() } })
   const sender = { sendCommand: vi.fn(), frames: new Map() }
-  const actual = (f.manager as any).pageCallHandler(f.entry, sender, [], operation, false, new AbortController().signal,
+  const actual = (f.manager as any).pageCallHandler(f.entry, f.entry.view, sender, [], operation, false, new AbortController().signal,
     { cursor: { runId: 'original-selected-run', assetId: f.asset.id, version: 1, browserId, stepId: 'navigation', expectedNavigationId: 'old-condition-navigation' } })
   await expect(actual('gotoUrl', ['https://generic.invalid/next'])).rejects.toThrow('condition document changed')
   expect((f.entry as any).feedback.begin).toHaveBeenCalledOnce(); expect(nativeNavigation).not.toHaveBeenCalled(); expect(sender.sendCommand).not.toHaveBeenCalled()
