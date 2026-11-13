@@ -16,7 +16,10 @@
 .focus-map-settings__boundaries path, .focus-map-preview__contour { fill: color-mix(in srgb, var(--green) 5%, transparent); stroke: var(--text-3); stroke-width: 2; }
 .focus-map-settings__boundaries rect { fill: var(--surface-2); stroke: var(--line); stroke-width: 3; }
 .focus-map-settings__boundaries label > span { font-size: var(--fs-meta); }
-.focus-map-settings__field { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr); align-items: center; gap: 8px; font-size: var(--fs-meta); }
+/* The label column holds its words; the control takes the rest, so the longest option
+ * ("Identity + status + summary") is read whole rather than clipped. */
+.focus-map-settings__field { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 12px; font-size: var(--fs-meta); }
+.focus-map-settings__field > span { min-width: 72px; }
 .focus-map-settings select, .focus-map-settings input[type=number] { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); background: var(--surface-1); color: var(--text); border-radius: var(--radius-sm); font: inherit; }
 .focus-map-settings__levels { display: grid; gap: 7px; }
 .focus-map-settings__levels details { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 10px; min-width: 0; }
@@ -43,7 +46,7 @@
 .focus-map-preview__identity > span { position: absolute; top: 50%; }
 .focus-map-preview__identity > strong { position: absolute; top: 50%; transform: translateY(-50%); right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .focus-map-preview__detail { box-sizing: border-box; position: absolute; inset: 0; padding: 10px; }
-@container (max-width: 380px) { .focus-map-settings__field { grid-template-columns: minmax(0,1fr); } .focus-map-settings__range { gap: 8px; } }
+@container (max-width: 460px) { .focus-map-settings__field { grid-template-columns: minmax(0,1fr); gap: 4px; } .focus-map-settings__range { gap: 8px; } }
 .focus-settings-description { margin: var(--sp-2) 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .focus-settings-window { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 5px; margin: var(--sp-4) 0 0; padding: 0; border: 0; min-width: 0; }
 .focus-settings-window legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
