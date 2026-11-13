@@ -123,8 +123,24 @@ export function createBrowserProfilePageEnvironment(ports: {
         (settings?.hardwareConcurrency !== undefined || page.touched.has('hardwareConcurrency'))
       ) {
         try {
+          const tree = (await send('Page.getFrameTree', {})) as { frameTree?: { frame?: { id?: string } } }
+          const frameId = tree.frameTree?.frame?.id
+          if (typeof frameId !== 'string' || !frameId)
+            throw new Error(
+              'The original native main frame is unconfirmed; its hardware override was not sent.'
+            )
+          const realm = (await send('Page.createIsolatedWorld', {
+            frameId,
+            worldName: 'agentmux-profile-environment-baseline',
+            grantUniveralAccess: false
+          })) as { executionContextId?: number }
+          if (!Number.isInteger(realm.executionContextId) || realm.executionContextId! <= 0)
+            throw new Error(
+              'The original isolated hardware baseline context is unconfirmed; its override was not sent.'
+            )
           const result = (await send('Runtime.evaluate', {
             expression: 'navigator.hardwareConcurrency',
+            contextId: realm.executionContextId,
             returnByValue: true
           })) as { result?: { value?: unknown } }
           const value = result.result?.value
@@ -348,7 +364,7 @@ export function createBrowserProfilePageEnvironment(ports: {
       return [...(profiles.get(profileId)?.values() ?? [])].map((page) => structuredClone(page.receipt))
     },
     hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean {
-      const page=profiles.get(profileId)?.get(contents)
+      const page = profiles.get(profileId)?.get(contents)
       return !!page && !page.disposed && page.lease?.isSoleConsumer === true
     }
   }
