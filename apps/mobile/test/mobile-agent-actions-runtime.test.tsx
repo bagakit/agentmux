@@ -39,7 +39,7 @@ it('the mounted mobile action resumes the same native Agent through the real pub
   expect(source.session.run).toEqual(original.run)
   const copy = vi.fn().mockResolvedValue(true)
   const view = await mount(<MobileAgentActions client={client} agentSessionId={original.agentSessionId} connected copyText={copy} />)
-  await click(button(view.element, '恢复原 Agent'))
+  await click(button(view.element, '恢复 Agent'))
   await act(async () => { await until(() => getDeviceWorkface().snapshot().record.agentResumes?.at(-1), value => value?.phase === 'confirmed', 'actual mobile continuity receipt') })
   const current = await client.forwardRpc('agent.inspect', { target: { kind: 'agent-session', agentSessionId: original.agentSessionId } })
   const intent = getDeviceWorkface().snapshot().record.agentResumes!.at(-1)!

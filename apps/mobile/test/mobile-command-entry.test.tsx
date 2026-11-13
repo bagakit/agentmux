@@ -42,7 +42,7 @@ it('keeps the direct entry when discovery has no declared commands, with a closa
   const view = await mount(<ClientUiProvider platform={createBrowserPlatform()}><MobileMessageTools commands={[]} onCommand={select} refresh={refresh} /></ClientUiProvider>)
   const trigger = button(view.element, 'Choose a command')
   await click(trigger)
-  expect(document.querySelector('.mobile-command-menu')?.textContent).toContain('当前会话尚未列出命令')
+  expect(document.querySelector('.mobile-command-menu')?.textContent).toContain('当前对话没有可用命令')
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(document.querySelector('.mobile-command-menu')).toBeNull()
   expect(select).not.toHaveBeenCalled()

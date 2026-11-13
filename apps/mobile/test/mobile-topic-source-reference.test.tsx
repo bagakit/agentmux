@@ -153,7 +153,7 @@ describe('source content references without saved bodies or substituted resource
     const view = await mount(<MobileTopicSource {...props} />)
     expect(props.onReferenceChange).not.toHaveBeenCalled()
     expect(view.element.querySelector('header h1')?.textContent).toBe('second.md')
-    expect(view.element.textContent).toContain('原引用、已确认范围')
+    expect(view.element.textContent).toContain('来源范围还没重新确认')
     offline = false; await click(view.element, '重试读取')
     await waitFor(() => expect(view.element.querySelector('article h1')?.textContent).toBe('准确第二文件'))
     expect(props.onReferenceChange).not.toHaveBeenCalled()
@@ -166,7 +166,7 @@ describe('source content references without saved bodies or substituted resource
       : Promise.reject(new Error(`Unexpected ${method}`)))
     const props = { ...callbacks(), source, rpc, initialReference: savedFile() }
     const view = await mount(<MobileTopicSource {...props} />)
-    expect(view.element.textContent).toContain('Zone 文件映射已改变')
+    expect(view.element.textContent).toContain('来源文件位置已变化')
     expect(view.element.textContent).not.toContain('不能冒充的另一正文')
     expect(props.onReferenceChange).not.toHaveBeenCalled()
     expect(call.mock.calls.filter(([method]) => method === 'file.read')).toHaveLength(1)
@@ -225,7 +225,7 @@ describe('source content references without saved bodies or substituted resource
       { noteId: 'second-note', title: '第二页', resource: { ...expectedResource, path: 'wrong/second.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }] }))
     const props = { ...callbacks(), source: original, rpc: call as unknown as TopicsRpc, initialReference: saved }
     const view = await mount(<MobileTopicSource {...props} />)
-    expect(view.element.querySelector('[aria-label="原笔记页待核实"]')?.textContent).toContain('映射尚未确认或已改变')
+    expect(view.element.querySelector('[aria-label="笔记页待核实"]')?.textContent).toContain('文件位置还没确认或已变化')
     expect(call).toHaveBeenCalledExactlyOnceWith('notebook.inspect', { notebookId: original.notebookId })
     expect(props.onReferenceChange).not.toHaveBeenCalled(); expect(view.element.querySelector('[data-note-id]')).toBeNull()
   })
@@ -247,7 +247,7 @@ describe('source content references without saved bodies or substituted resource
     expect(view.element.querySelector('article h1')?.textContent).toBe('后来的准确正文')
     expect(JSON.stringify(cb.onReferenceChange.mock.calls)).not.toContain('docs/second.md')
     const reads = cb.onReferenceChange.mock.calls.length
-    await click(view.element, '刷新原文件')
+    await click(view.element, '刷新文件')
     expect(resolveLater).toBeTypeOf('function')
     await unmount(view.element)
     await act(async () => resolveLater(originalRead('later.md', '# 卸载后的迟到正文')))

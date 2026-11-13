@@ -83,11 +83,11 @@ it('retains the exact durable unknown intent with a marked information entry and
   const original = JSON.stringify({ version: 1, intentId: 'original-intent', runId: 'original-run', kind: 'input', createdAt: _reshape_fixtureEpoch(0, 0, 12) })
   localStorage.setItem(key, original)
   const p = port(), view = await mount(p.client)
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('重启前的终端操作回执未确认')
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('重启前的终端操作还没确认送达')
   expect(view.node.querySelector('[aria-label="终端阅读与状态"]')?.getAttribute('data-notice')).toBe('true')
   const details = await openReading(view.node)
   expect(details.textContent).toContain('original-intent')
-  expect([...details.querySelectorAll('button')].some(button => button.textContent === '已在原会话核对，继续新输入')).toBe(true)
+  expect([...details.querySelectorAll('button')].some(button => button.textContent === '已核对，继续输入')).toBe(true)
   expect(localStorage.getItem(key)).toBe(original)
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
   expect(view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')?.disabled).toBe(true)
@@ -103,7 +103,7 @@ it('keeps one toolbar mode switch and exposes PTY size and keys only during expl
   const keys = [...view.node.querySelectorAll<HTMLButtonElement>('.mobile-terminal-keys > button')]
   expect(keys[0]?.getAttribute('aria-label')).toBe('终端 Esc')
   const size = keys.at(-1)!
-  expect(size.textContent).toBe('PTY 尺寸'); expect(size.disabled).toBe(false)
+  expect(size.textContent).toBe('终端大小'); expect(size.disabled).toBe(false)
   expect(view.node.querySelector('[aria-label="终端 Esc"]')).not.toBeNull()
   await act(async () => size.click())
   expect(view.node.querySelector('.mobile-terminal-size')).not.toBeNull()
@@ -130,7 +130,7 @@ it('uses explicit service facts rather than display wording and keeps full bound
   vi.spyOn(p.client, 'runtimeIdentity').mockImplementation(() => { throw new Error('原 owner 身份仍未知') })
   await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
   expect(view.node.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('原会话身份尚未核实')
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('还没确认这个对话')
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
@@ -187,9 +187,9 @@ it('keeps the retained terminal and explicit control available when Unicode conf
   unicodeRefusal.active = true
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   const p = port(), view = await mount(p.client), original = canvases[0]
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('终端字宽配置尚未生效')
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('终端字宽设置没有生效')
   const details = await openReading(view.node)
-  expect(details.textContent).toContain('原输出与输入继续可用')
+  expect(details.textContent).toContain('输出和输入仍可使用')
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭终端阅读"]')!.click())
   await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
   expect(view.node.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('control')

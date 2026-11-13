@@ -10,11 +10,11 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
     await tap('[data-fixture-goal-summary=current]', title)
     await read('delete document.querySelector("[data-fixture-goal-summary=current]").dataset.fixtureGoalSummary')
   }
-  await tap('[aria-label="关联 Session ID"]', '输入原 Session')
-  await read(`(()=>{const input=document.querySelector('[aria-label="关联 Session ID"]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'session-original');input.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  await tap('[aria-label="关联会话 ID"]', '输入原 Session')
+  await read(`(()=>{const input=document.querySelector('[aria-label="关联会话 ID"]');const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'session-original');input.dispatchEvent(new Event('input',{bubbles:true}))})()`)
   await read('mobileProductScene.holdGoalRecoveryWrite()')
   await button('关联会话')
-  await until('document.body.textContent.includes("关联回执未确认")')
+  await until('document.body.textContent.includes("Mac 还没确认关联")')
   await button('手机设置与连接')
   await button('提醒与诊断', '[role=dialog]')
   await until('document.querySelector("[aria-label=未确认的目标操作]")')
@@ -23,7 +23,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
     await resize(width, 760); await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)})`)
     await capture(`goal-exit-request-${width}-${appearance}`)
   }
-  await button('复制原请求')
+  await button('复制请求')
   await button('已另行保全，移除本页副本…')
   for (const width of [320, 390]) for (const appearance of ['dark', 'light']) {
     await resize(width, 760); await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)})`)

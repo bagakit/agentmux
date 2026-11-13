@@ -94,10 +94,10 @@ it.each(['digest', 'quota', 'listener'] as const)('releases the fresh Mobile sen
     const first = structuredClone(storedAttempt()), firstRecord = actualJournal!.get(first.logId!)!.record
     expect(firstRecord.error).toMatchObject({ message: 'resource-bound original mobile refusal', cause: { message: 'original image witness unavailable' } })
     expect(button(view.element, 'Send').disabled).toBe(false)
-    expect(button(view.element, '重试原请求')).toBeDefined()
+    expect(button(view.element, '重试发送')).toBeDefined()
     if (fault === 'quota') expect(view.element.textContent).toContain('EACCES')
     expect(f.submit).toHaveBeenCalledOnce()
-    await click(button(view.element, '重试原请求'))
+    await click(button(view.element, '重试发送'))
     await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
     expect(f.submit).toHaveBeenCalledTimes(2)
     expect(f.submit.mock.calls[1]).toEqual(f.submit.mock.calls[0])
@@ -131,9 +131,9 @@ it.each(['preparation', 'lost-ack'] as const)('continues the same %s request thr
   const summary = view.element.querySelector('.mobile-send-status__summary')!
   expect(summary.textContent).not.toContain(firstError.message)
   expect(summary.textContent).toContain('草稿已保留')
-  expect(button(view.element, '重试原请求').closest('details')).toBeNull()
+  expect(button(view.element, '重试发送').closest('details')).toBeNull()
   expect(button(view.element, 'Send').disabled).toBe(false)
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await settled(() => expect(storedAttempt().logId).not.toBe(firstId))
   const secondAttempt = structuredClone(storedAttempt()), secondId = secondAttempt.logId!, secondRecord = log(secondId).record
   expect(secondId).not.toBe(firstId)
@@ -189,14 +189,14 @@ it.each(['run', 'runtime'] as const)('keeps every retry visible but refuses a ch
   const original = structuredClone(storedAttempt())
   if (target === 'run') { const changed = session(); changed.run = { runId: 'other-current-run' }; f.sessions.set('session-original', changed) }
   else f.replaceRuntime('another-runtime')
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await settled(() => expect(storedAttempt().logId).not.toBe(original.logId))
   const later = structuredClone(storedAttempt()), laterRecord = log(later.logId!).record
   expect(later).toMatchObject({ operationId: original.operationId, runId: original.runId, request: original.request, draft: body })
   expect(laterRecord.stage).toBe('retry-validation')
   expect(laterRecord.error.code).toBe(target === 'run' ? 'AGENT_PROMPT_INPUT_UNCONFIRMED' : 'STALE_AGENT_SESSION')
   expect(f.submit).toHaveBeenCalledOnce()
-  expect(button(view.element, '重试原请求')).toBeDefined()
+  expect(button(view.element, '重试发送')).toBeDefined()
   expect([...editor(view.element).querySelectorAll('p')].map(node => node.textContent)).toEqual(body.split('\n'))
   expect(log(original.logId!).record.operationId).toBe(original.operationId)
 })
@@ -207,7 +207,7 @@ it('has one actual in-flight request, keeps a distinct edited draft, and never a
   const view = await mount(<MobileConversationSurface {...f.options} />)
   await paste(view.element, body); await plainEnter(view.element)
   await settled(() => expect(storedAttempt().logId).toBeDefined())
-  const original = structuredClone(storedAttempt()), retry = button(view.element, '重试原请求')
+  const original = structuredClone(storedAttempt()), retry = button(view.element, '重试发送')
   await act(async () => { retry.click(); retry.click() })
   expect(f.submit).toHaveBeenCalledTimes(2)
   expect(storedAttempt().phase).toBe('sending')
@@ -246,7 +246,7 @@ it.each(['known', 'unknown'] as const)('retains offline failure with %s diagnost
   await view.render(<MobileConversationSurface {...f.options} />)
   expect(f.submit).not.toHaveBeenCalled()
   expect(log(original.logId!).record).toEqual(record)
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0].operationId).toBe(original.operationId)
@@ -271,7 +271,7 @@ it('reopens the actual device record with the original request/runtime/inputRequ
   expect(f.submit).toHaveBeenCalledOnce()
   expect(storedAttempt()).toEqual(saved)
   expect(localStorage.getItem('agentmux-mobile-workface-v1')).toBe(originalBytes)
-  expect(button(restored.element, '重试原请求')).toBeDefined()
+  expect(button(restored.element, '重试发送')).toBeDefined()
   const malformed = structuredClone(reopened.record.conversation)
   Object.assign(malformed.attempts[0]![1], { inputRequested: 'true' })
   expect(() => parseDraftRecord(malformed)).toThrow()
@@ -284,8 +284,8 @@ it('keeps a legacy unknown retry reachable but never fabricates its missing orig
   getDeviceWorkface().updateConversation({ version: 1, drafts: [[draftKey, body]], responses: [],
     attempts: [[draftKey, { operationId: 'legacy-original-operation', runId: 'run-original', draft: body, phase: 'unknown' }]] })
   const f = consumer(), view = await mount(<MobileConversationSurface {...f.options} />)
-  expect(button(view.element, '重试原请求')).toBeDefined()
-  await click(button(view.element, '重试原请求'))
+  expect(button(view.element, '重试发送')).toBeDefined()
+  await click(button(view.element, '重试发送'))
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   expect(f.submit).not.toHaveBeenCalled()
   expect(storedAttempt()).toMatchObject({ operationId: 'legacy-original-operation', runId: 'run-original', draft: body, phase: 'unknown' })
@@ -293,7 +293,7 @@ it('keeps a legacy unknown retry reachable but never fabricates its missing orig
   expect(storedAttempt()).not.toHaveProperty('inputRequested')
   expect(log(storedAttempt().logId!).record).toMatchObject({ operationId: 'legacy-original-operation',
     conditionAvailable: false, error: { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' } })
-  expect(button(view.element, '重试原请求')).toBeDefined()
+  expect(button(view.element, '重试发送')).toBeDefined()
 })
 
 
@@ -325,9 +325,9 @@ it('sends a distinct explicit draft while retaining the original unknown input f
   await paste(restored.element, 'Keep this neighboring draft')
   const history = restored.element.querySelector<HTMLElement>('[data-retained="true"]')!
   expect(history.textContent).toContain(original.operationId)
-  await click(button(history, '复制原正文'))
+  await click(button(history, '复制正文'))
   expect(f.clipboard).toHaveBeenLastCalledWith(original.draft)
-  await click(button(history, '重试这条原请求'))
+  await click(button(history, '重试这条消息'))
   await settled(() => expect(saved().phase).toBe('confirmed'))
   expect(f.submit).toHaveBeenCalledTimes(3)
   expect(f.submit.mock.calls[2]).toEqual(f.submit.mock.calls[0])
@@ -345,7 +345,7 @@ it('retains a legacy unknown with no original condition without blocking a disti
   expect(f.submit.mock.calls[0]![0].prompt).toBe('A new explicit message')
   const key = JSON.stringify(['retained-prompt', 'session-original', original.operationId])
   expect(getDeviceWorkface().snapshot().record.conversation.attempts.find(([id]) => id === key)![1]).toEqual(original)
-  await click(button(view.element.querySelector<HTMLElement>('[data-retained="true"]')!, '重试这条原请求'))
+  await click(button(view.element.querySelector<HTMLElement>('[data-retained="true"]')!, '重试这条消息'))
   expect(f.submit).toHaveBeenCalledOnce()
   expect(getDeviceWorkface().snapshot().record.conversation.attempts.find(([id]) => id === key)![1]).not.toHaveProperty('request')
 })
@@ -398,7 +398,7 @@ it('reopens an offline plain Enter intent and binds its first condition without 
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.conversation.attempts.find(([key]) => key === draftKey)?.[1]).toEqual(original)
   const restored = await mount(<MobileConversationSurface {...f.options} />)
   expect(f.submit).not.toHaveBeenCalled()
-  await click(button(restored.element, '重试原请求'))
+  await click(button(restored.element, '重试发送'))
   await settled(() => expect(storedAttempt().phase).toBe('confirmed'))
   expect(f.submit).toHaveBeenCalledOnce()
   const request = f.submit.mock.calls[0]![0]
@@ -460,14 +460,14 @@ it('refuses a never-dispatched legacy intent whose original explicit choice is u
     attempts: [[draftKey, { operationId: 'legacy-unrequested-operation', runId: 'run-original', draft: body,
       phase: 'rejected', inputRequested: false, originalRuntimeId: 'original-runtime' }]] })
   const f = consumer(), view = await mount(<MobileConversationSurface {...f.options} />)
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await settled(() => expect(storedAttempt().logId).toBeDefined())
   expect(f.submit).not.toHaveBeenCalled()
   expect(storedAttempt()).not.toHaveProperty('request')
   expect(storedAttempt()).not.toHaveProperty('explicit')
   expect(log(storedAttempt().logId!).record).toMatchObject({ operationId: 'legacy-unrequested-operation',
     stage: 'retry-validation', error: { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' } })
-  expect(view.element.textContent).toContain('原消息最初的执行选择无法核实')
+  expect(view.element.textContent).toContain('无法确认这条消息最初选择的执行方式')
 })
 
 

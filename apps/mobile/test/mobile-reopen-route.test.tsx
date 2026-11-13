@@ -87,7 +87,7 @@ it('keeps ordinary startup chat-first even when the saved directory and terminal
 it('lets the user explicitly recheck an empty restored conversation without inventing a background chat-start intent', async () => {
   const f = await openSaved(presentation(true), 'conversation', null)
   expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
-  expect(f.element.querySelector('.mobile-chat-start')?.textContent).toContain('原工作面已接回')
+  expect(f.element.querySelector('.mobile-chat-start')?.textContent).toContain('已回到上次的位置')
   await click(button(f.element, '重新核对'))
   await vi.waitFor(() => expect(f.owner.snapshot().record.selectedSessionId).toBe('session-original'))
   expect(f.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)

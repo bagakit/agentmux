@@ -274,7 +274,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     f.sessions.set('session-original', { ...f.sessions.get('session-original')!, run: { runId: 'changed-run' } })
     await click(button(view.element, 'Interrupt the current turn'))
     expect(f.signalAgent).toHaveBeenCalledTimes(2)
-    expect(view.element.textContent).toContain('原 Session 或 Run 已改变')
+    expect(view.element.textContent).toContain('对话已变化，没有发送中断')
   })
 
   it.each(['exited', 'interrupted'] as const)('omits raw posture on an authoritatively %s Run while typed Send and draft remain usable', async process => {
@@ -295,7 +295,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     const status = vi.fn().mockRejectedValue(new Error('status observation unavailable'))
     f.client.statusAgent = status
     const view = await originalSurface(f, 'session-original')
-    expect(view.element.textContent).toContain('Run 状态未确认')
+    expect(view.element.textContent).toContain('运行状态未确认')
     const trigger = view.element.querySelector<HTMLButtonElement>('.mobile-posture-picker button')
     expect(trigger, 'Unknown observation retains the original posture capability').not.toBeNull()
     await click(trigger!)
@@ -303,7 +303,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     expect(f.setAgentPosture).toHaveBeenCalledOnce()
     status.mockResolvedValue(activityStatus(current))
     await act(async () => { f.emit({ type: 'agent-session', session: current }) })
-    expect(view.element.textContent).not.toContain('Run 状态未确认')
+    expect(view.element.textContent).not.toContain('运行状态未确认')
     expect(view.element.querySelector('.mobile-posture-picker')).not.toBeNull()
   })
 })

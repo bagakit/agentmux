@@ -81,10 +81,10 @@ it('scopes missing selected-session metadata to that conversation while retainin
   const originalEditor = editor(view.element), originalDraft = structuredClone(getDeviceWorkface().snapshot().record.conversation)
   missing = true
   await act(async () => f.emit({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as never))
-  expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('原会话元信息尚未核实')
+  expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('对话信息还没确认')
   for (const home of ['Focus', 'Mote', 'Space']) {
     await click(button(view.element.querySelector('.mobile-navigation')!, home))
-    expect(view.element.querySelector('.mobile-service-notice')?.textContent ?? '').not.toContain('原会话元信息尚未核实')
+    expect(view.element.querySelector('.mobile-service-notice')?.textContent ?? '').not.toContain('对话信息还没确认')
     expect(editor(view.element)).toBe(originalEditor)
     expect(originalEditor.textContent).toBe('保留这段对话里的未发送正文')
   }
@@ -92,11 +92,11 @@ it('scopes missing selected-session metadata to that conversation while retainin
   await click(button(document.body, '提醒与诊断'))
   const diagnostic = document.body.querySelector('.mobile-session-diagnostic')!
   expect(diagnostic).not.toBeNull()
-  expect(diagnostic.textContent).toContain('原会话元信息尚未核实')
+  expect(diagnostic.textContent).toContain('对话信息还没确认')
   expect(diagnostic.textContent).toContain('session-original')
   expect(button(diagnostic, '查看 Mac 连接')).toBeDefined()
   await click(button(diagnostic, '返回这段对话'))
-  expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('原会话元信息尚未核实')
+  expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('对话信息还没确认')
   expect(editor(view.element)).toBe(originalEditor)
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(originalDraft)
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')

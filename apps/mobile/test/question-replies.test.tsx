@@ -73,7 +73,7 @@ function questionFixture(historyPage = page) {
   return { ...f, rpc, write, reply, questionTarget, replyKey }
 }
 async function type(element: HTMLElement, value: string) { const field = element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!; expect(field.disabled).toBe(false); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }) }
-async function refresh(element: HTMLElement) { if (!element.querySelector('[aria-label="刷新原对话"]')) await click(button(element, 'Show the message tool row')); await click(button(element, '刷新原对话')) }
+async function refresh(element: HTMLElement) { if (!element.querySelector('[aria-label="刷新对话"]')) await click(button(element, 'Show the message tool row')); await click(button(element, '刷新对话')) }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } vi.restoreAllMocks() })
 it('the mounted mobile card persists exact answers before sending them through the public reply API', async () => {

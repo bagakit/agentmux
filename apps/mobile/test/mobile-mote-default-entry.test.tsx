@@ -124,8 +124,8 @@ it('opens a concrete Mote choice directly as Main and keeps explicit member inpu
   await click(button(f.view.element, '打开 Mote 主对话 · 原 Mote')); await wait(() => mainIsVisible(f))
   await paste(f.view.element, '主对话原稿')
   await click(button(f.view.element, 'Threads'))
-  await waitForElement(f.view.element, '[aria-label="打开原成员 · 原成员"]')
-  await click(button(f.view.element, '打开原成员 · 原成员'))
+  await waitForElement(f.view.element, '[aria-label="打开成员 · 原成员"]')
+  await click(button(f.view.element, '打开成员 · 原成员'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(workerSid))
   await paste(f.view.element, '成员原稿')
   const before = f.ensure.mock.calls.length

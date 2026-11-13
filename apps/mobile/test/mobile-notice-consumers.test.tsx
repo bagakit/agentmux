@@ -78,12 +78,12 @@ it('dismisses the actual unreadable device-storage warning while preserving orig
     connection={{ state: 'connected', message: '原 Host' }} platform={createBrowserPlatform()} /></MobileNoticeProvider>)
   await paste(view.element, '暂存于当前页的草稿')
   const originalEditor = editor(view.element)
-  const issue = [...view.element.querySelectorAll<HTMLElement>('.mobile-notice')].find(value => value.textContent?.includes('原记录尚未覆盖'))!
+  const issue = [...view.element.querySelectorAll<HTMLElement>('.mobile-notice')].find(value => value.textContent?.includes('已存的记录尚未覆盖'))!
   expect(issue).toBeDefined()
   await click(button(issue, '收起提醒'))
-  expect(view.element.textContent).not.toContain('原记录尚未覆盖')
+  expect(view.element.textContent).not.toContain('已存的记录尚未覆盖')
   await click(button(view.element, '恢复已收起提醒'))
-  expect(view.element.textContent).toContain('原记录尚未覆盖')
+  expect(view.element.textContent).toContain('已存的记录尚未覆盖')
   expect(editor(view.element)).toBe(originalEditor)
   expect(originalEditor.textContent).toBe('暂存于当前页的草稿')
   expect(localStorage.getItem('agentmux-mobile-workface-v1')).toBe('{unreadable-original')

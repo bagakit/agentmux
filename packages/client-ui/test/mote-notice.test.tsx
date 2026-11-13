@@ -150,7 +150,7 @@ it.each([{ ...originalOwner, routeHostId: 'another-host' }, { ...originalOwner, 
   'Mobile keeps an unconfirmed original owner local to this notice: %j', async other => {
     const inspectMoteInput = vi.fn(async () => inspection())
     const adapter = createMobileMoteInputReader({ inspectMoteInput } as unknown as AgentMuxHostedClient, scope.agentSessionId)
-    await expect(adapter(other, 'original-member', 'original-observation')).rejects.toThrow('原通知的 Host')
+    await expect(adapter(other, 'original-member', 'original-observation')).rejects.toThrow('这条通知的 Mac')
     expect(inspectMoteInput).not.toHaveBeenCalled()
   })
 

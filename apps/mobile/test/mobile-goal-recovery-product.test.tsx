@@ -26,16 +26,16 @@ it('keeps an unpersisted request through Goal unmount and retries it through the
   const goal = { id: 'goal-original' } as any
   const render = (show: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={async () => () => true}><CaptureUpdate /><MobileApp client={null} connection={{ state: 'disconnected', message: '离线' }} platform={createBrowserPlatform()} />{show && <MobileGoalLinks client={f.client} goal={goal} updated={() => {}} />}</MobileWebUpdateSafetyProvider>
   const view = await mount(render(true))
-  const input = view.element.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')!
+  const input = view.element.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'session-original'); input.dispatchEvent(new Event('input', { bubbles: true })) })
   await click(button(view.element, '关联会话'))
   expect(rpc).toHaveBeenCalledTimes(1)
   await act(async () => { waiting.reject(Error('receipt unavailable')); await Promise.resolve() })
   await view.render(render(false))
-  expect(await update()).toMatchObject({ status: 'blocked', message: expect.stringContaining('尚未保存在当前设备工作面') })
+  expect(await update()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作还没存到这台手机') })
   await openAppMenu(view.element); await click(button(document.body, '提醒与诊断'))
   expect(document.body.textContent).toContain('goal-original')
-  await click(button(document.body, '保存原设备工作面'))
+  await click(button(document.body, '保存设备记录'))
   expect(await update()).toEqual({ status: 'navigating' })
   expect(navigate).toHaveBeenCalledOnce(); expect(rpc).toHaveBeenCalledTimes(1)
   vi.unstubAllGlobals()
@@ -51,9 +51,9 @@ it('shows an original unknown Goal request in the actual offline App even if the
   await openAppMenu(view.element)
   await click(button(document.body, '提醒与诊断'))
   expect(document.body.textContent).toContain('deleted-original-goal')
-  expect(document.body.textContent).toContain('回执未确认')
-  await click(button(document.body, '复制原请求'))
-  expect(JSON.parse(copy.mock.calls[0]![0])).toEqual({ ...item, result: '原 RPC 回执未确认' })
+  expect(document.body.textContent).toContain('还没确认')
+  await click(button(document.body, '复制请求'))
+  expect(JSON.parse(copy.mock.calls[0]![0])).toEqual({ ...item, result: 'Mac 还没确认' })
   expect(owner.snapshot().record.goalOperationRecords).toEqual([item])
 })
 

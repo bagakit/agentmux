@@ -52,7 +52,7 @@ it.each(['browser', 'native'])('%s Back leaves visible Survey content without po
   expect(surveyEntry).not.toBeNull(); await click(surveyEntry!)
   await click(visibleButton(view.element, '准确原研究'))
   const second = [...view.element.querySelectorAll<HTMLElement>('.mobile-survey-tab')].find(tab => tab.querySelector('h2')?.textContent === 'second原标签')!
-  await click(visibleButton(second, '查看原网页'))
+  await click(visibleButton(second, '查看网页'))
   expect(view.element.querySelector<HTMLAnchorElement>('.mobile-survey a')?.href).toBe('http://original.example/read')
   expect(getDeviceWorkface().snapshot().record.presentation!.survey).toEqual({ zoneId: zone.zoneId, tabId: 'second-tab', regionId: 'second-browser-region' })
   const back = async () => mode === 'native' ? act(async () => native.back!()) : act(async () => { history.back(); await new Promise(resolve => setTimeout(resolve, 30)) })
@@ -61,7 +61,7 @@ it.each(['browser', 'native'])('%s Back leaves visible Survey content without po
   expect(getDeviceWorkface().snapshot().record.presentation!.topics).toEqual(topicFrames)
   await back()
   expect(getDeviceWorkface().snapshot().record.presentation!.survey).toBeUndefined()
-  expect(view.element.querySelector('nav[aria-label="原研究列表"]')).not.toBeNull()
+  expect(view.element.querySelector('nav[aria-label="研究列表"]')).not.toBeNull()
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(conversation)
   expect(view.element.querySelector('[contenteditable=true]')).toBe(originalEditor)
   const calls = vi.mocked(f.client.forwardRpc!).mock.calls.length

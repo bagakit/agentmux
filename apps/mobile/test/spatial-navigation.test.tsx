@@ -105,7 +105,7 @@ it('keeps the locally selected Topic across a Session round trip after an extern
   })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
   await openAppMenu(view.element); await click(button(overlay, 'Survey研究与笔记'))
-  await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '原研究原研究选择'))
+  await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '原研究当前选择'))
   await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '外部 Topic A'))
   const topics = view.element.querySelector('.mobile-topics') as HTMLElement
   expect(topics.querySelector('h1')?.textContent).toBe('Topic A')

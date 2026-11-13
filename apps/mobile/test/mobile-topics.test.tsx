@@ -223,7 +223,7 @@ describe('original Topic mobile consumers', () => {
     const back = vi.fn(), workface = vi.fn(() => null)
     const { element } = await mount(<MobileTopicsSurface rpc={rpc} onOpenTopic={vi.fn()} renderWorkface={workface} openSource={vi.fn()} onBackChange={back} />)
     await click(button(element, '原分类')); await click(button(element, '同名 Topic原一句说明')); await click(button(element, '知识')); await click(button(element, '原知识事实'))
-    expect(element.querySelector('.mobile-topic-reading')?.textContent).toContain('原条目正文待重新读取')
+    expect(element.querySelector('.mobile-topic-reading')?.textContent).toContain('正文还没读到')
     // The selected ID is already a detail reference while its body is pending:
     // first Back leaves that detail, then Back leaves the Knowledge list.
     await act(async () => back.mock.calls.at(-1)![0]())
@@ -305,8 +305,8 @@ describe('original Topic mobile consumers', () => {
     await click(button(element, '原知识事实 · view:original'))
     expect(rpc).toHaveBeenCalledWith('topic.knowledge.read', { topicId: topic.topicId, entryId: knowledge.entryId })
     expect(element.querySelector('article h1')?.textContent).toBe('原正文')
-    await click(button(element, '原研究')); expect(source).toHaveBeenCalledWith(knowledge.sources[0])
-    await click(button(element, '原笔记 / 块')); expect(source).toHaveBeenCalledWith(knowledge.sources[1])
+    await click(button(element, '研究')); expect(source).toHaveBeenCalledWith(knowledge.sources[0])
+    await click(button(element, '笔记 / 块')); expect(source).toHaveBeenCalledWith(knowledge.sources[1])
   })
   it('keeps original revision and sources on editing, never infers a newer target', async () => {
     const saved = vi.fn(), rpc = rpcMock(async (_method, params) => {
@@ -331,7 +331,7 @@ describe('original Topic mobile consumers', () => {
     const first = vi.mocked(rpc).mock.calls[0]![1] as { entryId: string; expectedRevision: unknown }
     expect(first.expectedRevision).toBeNull(); expect(first.entryId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(element.querySelector('textarea')?.value).toBe('保留的草稿'); expect(button(element, '保存知识').disabled).toBe(true)
-    await click(button(element, '检查原保存结果'))
+    await click(button(element, '检查保存结果'))
     expect(rpc).toHaveBeenLastCalledWith('topic.knowledge.read', { topicId: topic.topicId, entryId: first.entryId })
     await click(button(element, '以检查结果为基准继续编辑'))
     await waitFor(() => expect(button(element, '保存知识').disabled).toBe(false))
@@ -372,7 +372,7 @@ describe('original Topic mobile consumers', () => {
     await click(button(element, '新建 Topic')); await input(element.querySelector('input')!, '新 Topic'); await click(button(element, '确认保存'))
     const original = vi.mocked(rpc).mock.calls[0]![1] as { topicId: string }
     expect(original.topicId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
-    await click(button(element, '检查原操作结果'))
+    await click(button(element, '检查操作结果'))
     expect(rpc).toHaveBeenLastCalledWith('topic.inspect', { topicId: original.topicId })
     await click(button(element, '以检查结果为基准继续'))
     expect(button(element, '确认保存').disabled).toBe(false)

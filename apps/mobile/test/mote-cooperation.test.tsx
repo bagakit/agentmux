@@ -78,7 +78,7 @@ it('actual chat-first App exposes its original main recipient and scoped team wi
 it('actual member request navigation keeps original source and both drafts while returning to the saved main rather than first member', async () => {
   const f = await setup()
   await paste(f.view.element, '主对话的原草稿')
-  await click(button(f.view.element, '查看本 Mote 团队')); await click(button(panel(), '打开原成员 · 资料研究员'))
+  await click(button(f.view.element, '查看本 Mote 团队')); await click(button(panel(), '打开成员 · 资料研究员'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(memberId)
   expect(f.view.element.querySelector('.mobile-mote-recipient')?.textContent).toContain('成员资料研究员')
   expect(f.view.element.querySelector('.mobile-header .mobile-session-title')?.textContent).toBe('产品研究搭档')
@@ -90,14 +90,14 @@ it('actual member request navigation keeps original source and both drafts while
   expect(f.respond.mock.calls[0]![0]).toMatchObject({ agentSessionId: memberId, moteSource: { spaceId, zoneId: 'original-zone', tabId: 'original-tab', regionId: 'member-region' } })
   await click(button(f.view.element, '回主对话'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(sid); expect(editor(f.view.element).textContent).toBe('主对话的原草稿')
-  await click(button(f.view.element, '查看本 Mote 团队')); await click(button(panel(), '打开原成员 · 资料研究员'))
+  await click(button(f.view.element, '查看本 Mote 团队')); await click(button(panel(), '打开成员 · 资料研究员'))
   expect(editor(f.view.element).textContent).toBe('成员的原草稿'); expect(f.respond).toHaveBeenCalledOnce()
 })
 
 it('unknown main reference is not replaced with a first member and healthy original input stays available', async () => {
   const original = catalog(); original.motePresentation![0]!.quickMode = { status: 'unconfirmed', message: '原主引用尚未确认' }; original.motePresentation![0]!.conversation = null
   const f = await setup(original)
-  expect(f.view.element.querySelector('.mobile-mote-recipient')?.textContent).toContain('原对话')
+  expect(f.view.element.querySelector('.mobile-mote-recipient small')?.textContent).toBe('对话')
   expect(f.view.element.querySelector('.mobile-mote-main-return')).toBeNull()
   await click(button(f.view.element, '查看本 Mote 团队'))
   expect(button(panel(), '核对主 Agent')).toBeDefined(); expect(panel().querySelector('.mobile-mote-role')?.textContent).not.toBe('主 Agent')
@@ -218,13 +218,13 @@ it('unknown execution Hosts retain independent original Regions and never borrow
   expect(panel().querySelector('.mobile-mote-team-section h3')?.textContent).not.toContain('需要你')
   for (const row of rows) {
     expect(row.dataset.moteHost).toBe(''); expect(row.textContent).not.toContain('资料研究员')
-    expect(row.textContent).toContain('原位置与恢复'); expect(row.querySelector('button')!.disabled).toBe(false)
+    expect(row.textContent).toContain('位置与恢复'); expect(row.querySelector('button')!.disabled).toBe(false)
     await click(row.querySelector('.mobile-mote-member-open')!)
     expect(f.owner.snapshot().record.selectedSessionId).toBe(sid)
   }
   expect(panel().textContent).toContain('member-region'); expect(panel().textContent).toContain('second-unknown-region')
   expect(document.body.textContent).toContain('这个成员的执行端尚未确认')
-  await click(button(rows[0]!, '刷新原团队'))
+  await click(button(rows[0]!, '刷新团队'))
   expect(f.rpc).toHaveBeenCalledWith('space.ls', { target: { spaceId }, presentation: true })
   await click(button(document.body, '关闭面板'))
   expect(editor(f.view.element).textContent).toBe('Host 未知仍保留原主稿'); expect(button(f.view.element, 'Send').disabled).toBe(false)

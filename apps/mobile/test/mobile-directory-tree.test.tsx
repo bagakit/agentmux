@@ -44,7 +44,7 @@ describe('original mobile directory tree consumers', () => {
     expect(diagnostic.textContent).not.toContain('Unrelated diagnostic')
     await click(button(diagnostic as HTMLElement, '关闭目录信息')); expect(notice.getAttribute('aria-expanded')).toBe('false')
     await click(view.element.querySelector('.mobile-mote-choice')!)
-    expect(view.element.querySelector('.mobile-mote-contents')?.textContent).toContain('原 Agent 绑定尚未确认')
+    expect(view.element.querySelector('.mobile-mote-contents')?.textContent).toContain('Agent 绑定还没确认')
     expect(view.element.querySelector('.mobile-mote-contents')?.textContent).not.toContain('尚无已绑定 Agent')
     expect(view.element.querySelector('.mobile-spatial-tab')).toBeNull()
     await click(view.element.querySelector('.mobile-mote-quick-open')!)

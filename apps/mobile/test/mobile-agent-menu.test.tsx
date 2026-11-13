@@ -18,7 +18,7 @@ it('keeps usage and original Region diagnostics readable without a client', asyn
   const usage = await mount(<MobileAgentUsage client={null} agentSessionId="session-original" connected={false} />)
   expect(usage.element.textContent).toContain('连接暂不可用')
   const region = await mount(<MobileRegionContent client={null} connected tabId="tab-original" regionId="region-original" zoneId="zone-original" kind="file" />)
-  expect(region.element.textContent).toContain('原内容公共端口暂不可用')
+  expect(region.element.textContent).toContain('连接暂不可用，暂时读不到内容')
 })
 async function pointer(target: Element, type: string, overrides = {}) {
   const event = new Event(type, { bubbles: true, cancelable: true })
@@ -119,7 +119,7 @@ it.each(['close', 'Escape', 'Back'])('opens the actual App menu before delayed i
   expect([...dialog.querySelectorAll('button')].some(value => value.textContent?.trim() === '查看消耗')).toBe(false)
   expect(inspect).toHaveBeenCalledExactlyOnceWith('peer')
   expect(button(dialog, '复制 Agent 身份链接').disabled).toBe(false)
-  expect(button(dialog, '恢复原 Agent').disabled).toBe(false)
+  expect(button(dialog, '恢复 Agent').disabled).toBe(false)
   await click(button(dialog, '复制 Agent 身份链接')); expect(f.copy.mock.calls[0]![0]).toBe('amux://agent/peer')
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(f.original)
@@ -178,7 +178,7 @@ it.each(['sid', 'Host'])('rejects a reading for another %s and refreshes only th
   const f = fixture()
   f.client.forwardRpc = vi.fn().mockResolvedValueOnce({ session: { ...usageSession(wrong === 'sid' ? 'peer' : 'session-original'), run: session().run, hostId: wrong === 'Host' ? 'other-host' : 'host-original' } }).mockResolvedValueOnce({ session: usageSession() })
   const view = await mount(<MobileAgentUsage client={f.client} agentSessionId="session-original" connected />)
-  expect(view.element.textContent).toContain('另一 Agent'); expect(view.element.textContent).not.toContain('50 / 200 tokens')
+  expect(view.element.textContent).toContain('另一个 Agent 或另一台 Mac'); expect(view.element.textContent).not.toContain('50 / 200 tokens')
   await click(button(view.element, '刷新消耗')); expect(view.element.textContent).toContain('50 / 200 tokens')
   for (const [, params] of vi.mocked(f.client.forwardRpc).mock.calls) expect(params).toEqual({ target: { kind: 'agent-session', agentSessionId: 'session-original' } })
 })
@@ -228,7 +228,7 @@ it('preserves the original Goal Host check for More and long press as well as sh
   vi.useFakeTimers(); const main = view.element.querySelector('.mobile-agent-row__open')!
   await pointer(main, 'pointerdown'); await act(async () => vi.advanceTimersByTime(500)); await pointer(main, 'pointerup')
   expect(menu).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(f.client.forwardRpc).not.toHaveBeenCalled()
-  expect(view.element.textContent).toContain('原目标与当前 Host 尚未匹配')
+  expect(view.element.textContent).toContain('当前连接的 Mac 与这个目标不一致')
 })
 it('rechecks the open actual menu source when the same client changes Runtime while Copy remains usable', async () => {
   const f = await appMenu(async id => ({ session: session(id) }))
@@ -236,9 +236,9 @@ it('rechecks the open actual menu source when the same client changes Runtime wh
   f.client.runtimeOwnerIdentity = () => ({ runtimeId } as never)
   await click(button(f.element, '另一个原 Agent · 更多操作')); const reads = vi.mocked(f.client.forwardRpc).mock.calls.length
   runtimeId = 'replacement-runtime'
-  await click(button(document.body, '刷新消耗')); await click(button(document.body, '恢复原 Agent')); await click(button(document.body, '打开原对话'))
+  await click(button(document.body, '刷新消耗')); await click(button(document.body, '恢复 Agent')); await click(button(document.body, '打开对话'))
   expect(vi.mocked(f.client.forwardRpc).mock.calls).toHaveLength(reads); expect(f.ensure).not.toHaveBeenCalled(); expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('原菜单的 Host 或工作面来源已变化')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('菜单打开后连接或位置已变化')
   await click(button(document.body, '复制 Agent 身份链接')); expect(f.copy.mock.calls[0]![0]).toBe('amux://agent/peer')
 })
 it('ends an in-flight reading when its actual App menu source is invalidated while retaining Copy and close', async () => {
@@ -250,7 +250,7 @@ it('ends an in-flight reading when its actual App menu source is invalidated whi
   ownerInstanceId = 'replacement-owner'
   await f.render(f.app())
   const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
-  expect(dialog.textContent).toContain('原菜单的 Host 或工作面来源已变化')
+  expect(dialog.textContent).toContain('菜单打开后连接或位置已变化')
   expect(dialog.querySelector('[aria-label="Agent 消耗"]')?.textContent).not.toContain('正在读取…')
   expect(inspect).toHaveBeenCalledTimes(1)
   await click(button(dialog, '复制 Agent 身份链接')); expect(f.copy.mock.calls[0]![0]).toBe('amux://agent/peer')

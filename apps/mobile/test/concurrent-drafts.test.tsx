@@ -24,7 +24,7 @@ describe('device-owned concurrent draft edits', () => {
     await Promise.all([a.save(), b.save(), new DeviceWorkfaceStore(disk.b).updateNavigation({ selectedSessionId: 'other-session', hostUrl: '', panel: 'terminal' })])
     const reopened = createLocalDrafts(disk.b)
     expect(reopened.drafts.get(key)).toBe(unknown.draft); expect(reopened.drafts.get('other-session')).toBe('另一会话草稿')
-    expect(reopened.attempts.get(key)).toMatchObject({ ...unknown, message: expect.stringContaining('原输入回执未知') })
+    expect(reopened.attempts.get(key)).toMatchObject({ ...unknown, message: expect.stringContaining('重启前的消息还没确认送达') })
     expect(disk.record().panel).toBe('terminal')
   })
   it('treats another page writing during this pending save as normal concurrency, including snapshot and a second edit', async () => {
@@ -68,7 +68,7 @@ describe('device-owned concurrent draft edits', () => {
     expect(owner.goalIntentRunning(intent.operationId)).toBe(true)
     owner.releaseGoalIntent(intent)
     await owner.settleGoalIntent(intent, 'unknown', owner.recordIdentity(), intent)
-    expect(() => owner.settleGoalIntent(intent, 'confirmed', owner.recordIdentity(), intent)).toThrow('意图已变化')
+    expect(() => owner.settleGoalIntent(intent, 'confirmed', owner.recordIdentity(), intent)).toThrow('目标操作已更新')
     expect(owner.snapshot().record.goalIntents?.[0]?.phase).toBe('unknown')
   })
   it('keeps the canonical unknown request and the competing body rather than replacing it with another operation or stale deletion', async () => {

@@ -92,7 +92,7 @@ it('a delayed original A receipt cannot clear later B or steal the later Mobile 
   await paste(f.scene(), 'Later B Query')
   await wait(() => expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later B Query'))
   await act(async () => hold.resolve())
-  await wait(() => expect((f.scene()?.textContent ?? '')).toContain('原首条消息已确认投递'))
+  await wait(() => expect((f.scene()?.textContent ?? '')).toContain('首条消息已送达'))
   expect(new Map(f.owner.snapshot().record.conversation.drafts).get(f.key)).toBe('Later B Query')
   expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
@@ -139,7 +139,7 @@ it('an explicit Mobile new round hands over before its first Query and keeps the
   const liveRow = [...f.scene().querySelectorAll<HTMLElement>('[data-mote-period]')].find(row => row.dataset.motePeriod === liveId)!
   expect(liveRow.textContent).toContain('当前对话'); expect(liveRow.textContent).not.toContain('结束未记录')
   await click(liveRow.querySelector('button')!)
-  await wait(() => expect(f.view.element.querySelector('[aria-label="原主对话历史"]')).toBeNull())
+  await wait(() => expect(f.view.element.querySelector('[aria-label="主对话历史"]')).toBeNull())
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(secondSession))
   await openNewRound(f)
   await wait(() => expect(f.scene().querySelector('[data-mote-period]')).toBeTruthy())
@@ -148,13 +148,13 @@ it('an explicit Mobile new round hands over before its first Query and keeps the
   const periodId = source.period?.id ?? JSON.stringify(['legacy-main', source.roleRevision, source.operationId])
   const row = [...f.scene().querySelectorAll<HTMLElement>('[data-mote-period]')].find(row => row.dataset.motePeriod === periodId)?.querySelector('button')
   expect(row).toBeTruthy(); await click(row!)
-  await wait(() => expect(f.view.element.querySelector('[aria-label="原主对话历史"] .mote-conversation__earlier')).toBeTruthy())
+  await wait(() => expect(f.view.element.querySelector('[aria-label="主对话历史"] .mote-conversation__earlier')).toBeTruthy())
   if (source.period?.range.kind === 'bounded' && source.period.range.through) {
     await wait(() => expect(f.changes).toHaveBeenCalled())
     expect(f.changes.mock.calls.at(-1)![0]).toMatchObject({ hostId: source.reference.hostId, agentSessionId: firstSession, checkpoint: source.period.range.after, through: source.period.range.through })
   } else {
     expect(f.changes).not.toHaveBeenCalled()
-    expect(button(f.view.element.querySelector<HTMLElement>('[aria-label="原主对话历史"]')!, '打开原 Agent 对话')).toBeTruthy()
+    expect(button(f.view.element.querySelector<HTMLElement>('[aria-label="主对话历史"]')!, '打开原 Agent 对话')).toBeTruthy()
     expect(f.view.element.textContent).toContain(source.period?.range.kind === 'unconfirmed' ? source.period.range.issue : '这段历史没有完整的消息边界记录')
   }
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(2)
@@ -179,7 +179,7 @@ it('an unconfirmed Mote directory read keeps the already selected healthy Main r
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
   const original = f.owner.snapshot().record.selectedSessionId
   await click(button(f.view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
-  await wait(() => expect(f.view.element.textContent).toContain('原主对话配置尚未确认'))
+  await wait(() => expect(f.view.element.textContent).toContain('主对话配置还没确认'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(original)
   expect(f.view.element.querySelector('.mote-start')).toBeNull()
   expect(f.view.element.querySelector('.mobile-conversation-slot:not([hidden])')).toBeTruthy()
@@ -188,7 +188,7 @@ it('an unconfirmed Mote directory read keeps the already selected healthy Main r
   const summary = notice.querySelector('summary')!
   expect(summary.getAttribute('aria-label')).toMatch(/^主对话信息待核对 · \d+ 项$/)
   expect(summary.querySelector('.mobile-mote-source-status__dot')).not.toBeNull()
-  expect(notice.querySelector('dl')?.textContent).toContain('原主对话配置尚未确认')
+  expect(notice.querySelector('dl')?.textContent).toContain('主对话配置还没确认')
   expect(f.view.element.querySelector('.mobile-mote-main-handoff')).toBeNull()
   expect(f.view.element.querySelector('.mote-conversation__issue')).toBeNull()
   const advances = f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.advance').length
@@ -197,7 +197,7 @@ it('an unconfirmed Mote directory read keeps the already selected healthy Main r
   await click(notice.querySelector('summary')!); await click(button(notice, '重新核对'))
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.ls').length).toBeGreaterThan(reads))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(original)
-  expect(notice.textContent).toContain('原主对话配置尚未确认')
+  expect(notice.textContent).toContain('主对话配置还没确认')
   expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.dialogue.setup.advance')).toHaveLength(advances)
   expect(f.host.h.inner.kernel.input).toHaveBeenCalledTimes(inputs)
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
@@ -209,7 +209,7 @@ it('a confirmed Main binding without canonical first-Query delivery keeps the ex
   await paste(f.scene(), 'Keep this exact unknown first Query'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
   await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.advance')).toBe(true))
   const operation = f.rpc.mock.calls.find(([method]) => method === 'agent.open')![1]
-  await wait(() => expect((f.scene()?.textContent ?? '')).toContain('原开始意图已保留'))
+  await wait(() => expect((f.scene()?.textContent ?? '')).toContain('这次开始还在核对'))
   const observed = await f.host.setup(operation.operationId, false)
   expect(observed.binding).toBe('confirmed')
   expect(['admitted', 'terminal-confirmed']).not.toContain(agentPromptSubmissionOutcome(observed.deferredInput?.record ?? null))
@@ -298,7 +298,7 @@ it('a Core due response arriving after later B editing leaves the healthy origin
   await act(async () => { editor(slot()).replaceChildren(document.createElement('p')); editor(slot()).dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })) })
   await paste(slot(), 'Later B Query remains here')
   await act(async () => hold.resolve())
-  await wait(() => expect(slot().textContent).toContain('原策略已要求新一轮'))
+  await wait(() => expect(slot().textContent).toContain('设置要求开始新一轮'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(old)
   expect(f.view.element.querySelector('.mote-start')).toBeNull()
   expect(new Map(f.owner.snapshot().record.conversation.drafts).get(JSON.stringify(['draft', old]))).toBe('Later B Query remains here')

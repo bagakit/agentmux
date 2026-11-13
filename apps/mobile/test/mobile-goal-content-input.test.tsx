@@ -63,6 +63,6 @@ it('keeps the original Goal composition candidate through a parent render, then 
   expect(unknownDraft.scope).toEqual(originalDraft.scope)
   expect(owner.recordIdentity()).toBe(recordId)
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalDrafts).toEqual([unknownDraft])
-  expect(body.value).toBe('组字候选'); expect(view.element.textContent).toContain('保存回执未确认')
+  expect(body.value).toBe('组字候选'); expect(view.element.textContent).toContain('保存还没确认')
   expect(writes()).toHaveLength(1)
 })

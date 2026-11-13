@@ -165,7 +165,7 @@ it('keeps an accepted retry protected after its conversation unmounts, without r
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action />{surface}</MobileWebUpdateSafetyProvider>)
   await vi.waitFor(() => expect(f.inspectInput).toHaveBeenCalled())
   f.inspectInput.mockClear().mockImplementation(() => gate.promise)
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   expect(f.inspectInput).toHaveBeenCalledOnce()
   await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /></MobileWebUpdateSafetyProvider>)
   expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('重试操作') })
@@ -187,7 +187,7 @@ it('explicitly cancels a retry while the original observation is pending, withou
   </MobileWebUpdateSafetyProvider>)
   await vi.waitFor(() => expect(f.inspectInput).toHaveBeenCalled())
   f.inspectInput.mockClear().mockImplementation(() => gate.promise)
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await click(button(view.element, '取消未发起的重试'))
   expect(await apply()).toEqual({ status: 'navigating' })
   const save = vi.spyOn(getDeviceWorkface(), 'editConversation')
@@ -230,7 +230,7 @@ it('updates after the original manual retry is dispatched without replaying it',
     <MobileConversationSurface client={f.client} agentSessionId="session-original"
       connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} />
   </MobileWebUpdateSafetyProvider>)
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
   expect(f.submit.mock.calls[0]![0].operationId).toBe('original-prompt')
   expect(await apply()).toEqual({ status: 'navigating' })
@@ -258,7 +258,7 @@ it('cancels a manual retry during its request save without changing the prior re
     <MobileConversationSurface client={f.client} agentSessionId="session-original"
       connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} />
   </MobileWebUpdateSafetyProvider>)
-  await click(button(view.element, '重试原请求')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  await click(button(view.element, '重试发送')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
   await click(button(view.element, '取消未发起的重试'))
   expect(await apply()).toMatchObject({ status: 'blocked' })
   await act(async () => { gate.resolve(); await vi.waitFor(() => expect(restored).toHaveBeenCalledOnce()) })
@@ -295,7 +295,7 @@ it('retains a matching Core observation when cancelling a retry during its reque
     if (requestedWritten) rollback()
     return edit(edits, recordId)
   })
-  await click(button(view.element, '重试原请求')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  await click(button(view.element, '重试发送')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
   await act(async () => f.emit({ type: 'agent-input', receipt: waiting }))
   await click(button(view.element, '取消未发起的重试'))
   await act(async () => { gate.resolve(); await vi.waitFor(() => expect(owner.snapshot().record.conversation.attempts[0]![1].inputRequested).toBe(true)) })
@@ -328,7 +328,7 @@ it('does not replace a newly observed waiting input with the older rejected phas
     <MobileConversationSurface client={f.client} agentSessionId="session-original"
       connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} />
   </MobileWebUpdateSafetyProvider>)
-  await click(button(view.element, '重试原请求')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  await click(button(view.element, '重试发送')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
   await click(button(view.element, '取消未发起的重试'))
   await act(async () => { gate.resolve(); await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce()) })
   await vi.waitFor(() => expect(createLocalDrafts().attempts.get(key)?.phase).toBe('unknown'))
@@ -356,7 +356,7 @@ it('cancels a nonmanual retry during its phase save without dispatching or chang
     <MobileConversationSurface client={f.client} agentSessionId="session-original"
       connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} />
   </MobileWebUpdateSafetyProvider>)
-  await click(button(view.element, '重试原请求')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  await click(button(view.element, '重试发送')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
   await click(button(view.element, '取消未发起的重试'))
   expect(await apply()).toMatchObject({ status: 'blocked' })
   await act(async () => { gate.resolve(); await vi.waitFor(() => expect(restored).toHaveBeenCalledOnce()) })
@@ -383,7 +383,7 @@ it('restores the original unrequested input when condition retention is cancelle
     <MobileConversationSurface client={f.client} agentSessionId="session-original"
       connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} />
   </MobileWebUpdateSafetyProvider>)
-  await click(button(view.element, '重试原请求')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+  await click(button(view.element, '重试发送')); await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
   await click(button(view.element, '取消未发起的重试'))
   await act(async () => { gate.resolve(); await vi.waitFor(() => expect(restored).toHaveBeenCalledOnce()) })
   await vi.waitFor(() => expect(owner.snapshot().record.conversation.attempts[0]![1]).not.toHaveProperty('request'))
@@ -498,7 +498,7 @@ it('can explicitly cancel before a pending send-intent save finishes, without di
   expect(f.submit).not.toHaveBeenCalled()
   await click(button(view.element, '取消发送准备'))
   expect(editor(view.element).textContent).toBe('原正文')
-  expect(view.element.textContent).toContain('设备保存尚未确认')
+  expect(view.element.textContent).toContain('还没确认存到这台手机上')
   expect(f.submit).not.toHaveBeenCalled()
   await act(async () => { gate.resolve(); await vi.waitFor(() => expect(owner.snapshot().record.conversation.attempts[0]?.[1].phase).toBe('rejected')) })
   expect(f.submit).not.toHaveBeenCalled()
@@ -610,7 +610,7 @@ it('offers an explicit escape when Agent creation was never sent because its loc
   await click(button(document.body, '创建 Agent'))
   await vi.waitFor(() => expect(failed).toHaveBeenCalledOnce())
   expect(rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(0)
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('创建操作') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('新建 Agent 还没确认') })
   await click(button(document.body, '放弃未发起的创建'))
   expect(document.body.textContent).toContain('表单保留')
   expect(rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(0)

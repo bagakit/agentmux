@@ -41,7 +41,7 @@ it.each([true, false])('menu compose closes the original dialog and preserves dr
   expect(editor(view.element)).toBe(originalEditor); expect(originalEditor.textContent).toContain('原始未发送草稿')
   if (succeeds) expect(document.activeElement).toBe(originalEditor)
   expect(owner.snapshot().record.selectedSessionId).toBe(sid); expect(f.client.agentSession(sid).run.runId).toBe('run-original')
-  if (!succeeds) expect(view.element.textContent).toContain('输入区暂时未准备好。原草稿保留。')
+  if (!succeeds) expect(view.element.textContent).toContain('输入区暂时未准备好，请稍后再试。')
   expect(f.submit).not.toHaveBeenCalled()
 })
 
@@ -50,7 +50,7 @@ it('does not focus a different client when the original dialog closes during a b
   const action = document.querySelector<HTMLButtonElement>('[role="dialog"] [aria-label="撰写消息"]')!
   await act(async () => { action.click(); await view.render(surface(second.client)) })
   expect(focus).not.toHaveBeenCalled()
-  expect(view.element.textContent).toContain('已切换工作面，原聚焦操作未执行；草稿保留。')
+  expect(view.element.textContent).toContain('已切换到其他位置，未聚焦输入区。')
   expect(editor(view.element)).toBe(originalEditor); expect(originalEditor.textContent).toContain('原始未发送草稿')
   expect(f.submit).not.toHaveBeenCalled(); expect(second.submit).not.toHaveBeenCalled()
 })
@@ -61,7 +61,7 @@ it('does not focus a hidden conversation when its workface changes as the origin
   const nav = button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus')
   await act(async () => { action.click(); nav.click() })
   expect(focus).not.toHaveBeenCalled()
-  expect(view.element.textContent).toContain('已切换工作面，原聚焦操作未执行；草稿保留。')
+  expect(view.element.textContent).toContain('已切换到其他位置，未聚焦输入区。')
   expect(originalEditor.textContent).toContain('原始未发送草稿'); expect(f.submit).not.toHaveBeenCalled()
 })
 
@@ -78,7 +78,7 @@ it('does not focus a different Session when the original dialog closes in the sa
   expect(other).toBeDefined()
   await act(async () => { action.click(); other.click() })
   expect(focus).not.toHaveBeenCalled()
-  expect(view.element.textContent).toContain('已切换工作面，原聚焦操作未执行；草稿保留。')
+  expect(view.element.textContent).toContain('已切换到其他位置，未聚焦输入区。')
   expect(owner.snapshot().record.selectedSessionId).toBe('other')
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
   await click(originalRow)

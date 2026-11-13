@@ -55,7 +55,7 @@ app.whenReady().then(async () => {
   win.setContentSize(900, 820); await capture('offline-retains-wide')
   await read('attachmentScene.reconnect()'); await named('移除 本周研究资料与两个方案的比较.md 本地引用'); await capture('original-draft-retained-wide')
   win.setContentSize(390, 844); await read('attachmentScene.posture()')
-  await until('document.querySelector(".mobile-conversation__composer").textContent.includes("Run 状态未确认")')
+  await until('document.querySelector(".mobile-conversation__composer").textContent.includes("运行状态未确认")')
   await capture('posture-unknown-phone'); await named('执行模式'); await capture('posture-menu-unknown-phone')
   await assertHittable('.mobile-posture-menu [role="menuitem"]'); await click('.mobile-posture-menu [role="menuitem"]')
   await until('attachmentScene.facts().calls.some(call=>call.method==="setAgentPosture")')

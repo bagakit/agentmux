@@ -9,9 +9,9 @@ import { acceptedPrompt, button, click, deferred, editor, evidence, fixture, his
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 async function refreshOriginal(element: HTMLElement) {
-  const action = [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.getAttribute('aria-label') === '刷新原对话')
+  const action = [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.getAttribute('aria-label') === '刷新对话')
   if (!action) await click(button(element, 'Show the message tool row'))
-  await click(button(element, '刷新原对话'))
+  await click(button(element, '刷新对话'))
 }
 const STORAGE = 'agentmux-mobile-workface-v1'
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
@@ -306,7 +306,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     const unknown = async (candidate: ReturnType<typeof session>) => {
       f.sessions.set(candidate.agentSessionId, candidate)
       await act(async () => f.emit({ type: 'agent-session', session: candidate }))
-      expect(view.element.textContent).not.toContain('Core 已确认原输入未应用')
+      expect(view.element.textContent).not.toContain('这条消息没有送达')
       expect(attempts().get(draftKey)).toMatchObject({ operationId: input.operationId, phase: 'unknown', request: originalRequest })
       expect(editor(view.element).textContent).toBe('原意图的未应用事实')
       expect(button(view.element, 'Send').disabled).toBe(false)
@@ -324,7 +324,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       submit: { ...value.terminalPromptSubmission.submit, notApplied: true } } })
     f.sessions.set(value.agentSessionId, value)
     await act(async () => f.emit({ type: 'agent-session', session: value }))
-    expect(view.element.textContent).toContain('Core 已确认原输入未应用')
+    expect(view.element.textContent).toContain('这条消息没有送达')
     await vi.waitFor(() => expect(attempts().get(draftKey)).toMatchObject({ phase: 'rejected', request: originalRequest }))
     expect(editor(view.element).textContent).toBe('原意图的未应用事实')
     expect(button(view.element, 'Send').disabled).toBe(false)
@@ -360,10 +360,10 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(button(view.element, '原选项').disabled).toBe(false)
     // Returning to the still-current original tuple cannot accidentally reopen its unknown answer.
     await act(async () => f.emit({ type: 'agent-session', session: value }))
-    expect(view.element.textContent).toContain('答复回执未知')
+    expect(view.element.textContent).toContain('还没确认答复是否送达')
     expect(view.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
     expect([...view.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button:not(.mobile-notice__dismiss)')]
-      .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询原答复回执', disabled: false }])
+      .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询答复结果', disabled: false }])
     expect(f.respond).toHaveBeenCalledOnce()
   })
 
@@ -403,7 +403,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       connection={{ state: 'unavailable', message: '重启后尚未授权' }} />)
     expect(editor(restored.element).textContent).toContain('冷启草稿')
     expect(editor(restored.element).textContent).toContain('工具')
-    expect(restored.element.textContent).toContain('重启后的原输入回执未知')
+    expect(restored.element.textContent).toContain('重启前的消息还没确认送达')
     expect(f.submit).toHaveBeenCalledOnce()
     await restored.render(<MobileConversationSurface {...options} />)
     expect(button(restored.element, 'Send').disabled).toBe(false)
@@ -438,30 +438,30 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await act(async () => previous.root.unmount()); previous.element.remove()
     const restored = await mount(<MobileConversationSurface {...options} />)
     expect(restored.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
-    expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
+    expect(restored.element.textContent).toContain('重启前的答复还没确认送达')
     expect([...restored.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button:not(.mobile-notice__dismiss)')]
-      .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询原答复回执', disabled: false }])
+      .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询答复结果', disabled: false }])
     expect(f.respond).toHaveBeenCalledOnce()
     await refreshOriginal(restored.element)
     expect(f.respond).toHaveBeenCalledOnce()
     await act(async () => receipt.resolve())
-    expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
+    expect(restored.element.textContent).toContain('重启前的答复还没确认送达')
   })
 
   it('keeps unreadable original draft bytes intact while healthy SDK input and copying remain available', async () => {
     localStorage.setItem(STORAGE, '{unreadable-original-drafts')
     const f = fixture(), copy = vi.fn().mockResolvedValue(undefined)
     const view = await mount(<MobileConversationSurface {...props(f)} platform={createBrowserPlatform({ clipboard: { writeText: copy } })} />)
-    expect(view.element.textContent).toContain('原记录尚未覆盖')
+    expect(view.element.textContent).toContain('已存的记录尚未覆盖')
     await paste(view.element, '存储坏了仍可编辑')
     expect(localStorage.getItem(STORAGE)).toBe('{unreadable-original-drafts')
     await click(button(view.element, '复制当前草稿'))
     expect(copy).toHaveBeenCalledExactlyOnceWith('存储坏了仍可编辑')
-    expect(view.element.textContent).toContain('原记录尚未覆盖')
+    expect(view.element.textContent).toContain('已存的记录尚未覆盖')
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledOnce()
     expect(localStorage.getItem(STORAGE)).toBe('{unreadable-original-drafts')
-    expect(view.element.textContent).toContain('原记录尚未覆盖')
+    expect(view.element.textContent).toContain('已存的记录尚未覆盖')
   })
 
   it('preserves previously durable bytes on a failed write, reports the gap, and retries only saving', async () => {
@@ -481,7 +481,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(view.element.textContent).toContain('先前记录仍保留')
     vi.stubGlobal('localStorage', originalStorage)
     await click(button(view.element, '重试保存'))
-    expect(view.element.textContent).not.toContain('本机草稿暂时无法保存')
+    expect(view.element.textContent).not.toContain('草稿暂时存不到这台手机上')
     expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.drafts).toEqual([[JSON.stringify(['draft', 'session-original']), '']])
     expect(f.submit).toHaveBeenCalledOnce()
   })

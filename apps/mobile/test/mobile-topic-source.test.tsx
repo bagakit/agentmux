@@ -34,9 +34,9 @@ describe('original knowledge source read', () => {
     const { element } = await mount({ source, rpc, onBack: back, openScope, displayPath: path => path.replace(fixturePath("projects/original"), '项目根') })
     expect(call).toHaveBeenCalledWith('file.read', { zoneId: zone.zoneId, path: 'docs/a.md', expectedResource })
     expect(element.querySelector('article h1')?.textContent).toBe('原文件正文')
-    expect(element.textContent).toContain('当前保存版本与来源记录的版本不同')
+    expect(element.textContent).toContain('文件在记录之后已修改')
     expect(element.textContent).toContain('项目根'); expect(element.textContent).not.toContain(workspace.workspaceId)
-    await click(element, '打开原工作面'); expect(openScope).toHaveBeenCalledWith({ zoneId: zone.zoneId, path: 'docs/a.md', workspace, directoryPath: zone.directoryPath })
+    await click(element, '打开工作面'); expect(openScope).toHaveBeenCalledWith({ zoneId: zone.zoneId, path: 'docs/a.md', workspace, directoryPath: zone.directoryPath })
     await click(element, '返回知识'); expect(back).toHaveBeenCalledOnce()
   })
   it('does not pick the first of multiple exact scopes or read from a different Host or path sibling', async () => {
@@ -45,7 +45,7 @@ describe('original knowledge source read', () => {
       : method === 'space.ls' ? { catalog: { zones: [zone, nested, { ...zone, zoneId: 'wrong-host', hostId: 'other' }, { ...zone, zoneId: 'wrong-boundary', directoryPath: fixturePath("projects/orig") }] } } : originalRead)
     const { element } = await mount({ source, rpc, onBack: vi.fn(), openScope: vi.fn() })
     expect(call.mock.calls.filter(value => value[0] === 'file.read')).toHaveLength(0)
-    const choices = [...element.querySelectorAll<HTMLButtonElement>('li button')].filter(button => button.textContent !== '打开此原工作面')
+    const choices = [...element.querySelectorAll<HTMLButtonElement>('li button')].filter(button => button.textContent !== '打开此工作面')
     expect(choices).toHaveLength(2)
     await act(async () => choices[1]!.click())
     expect(call).toHaveBeenLastCalledWith('file.read', { zoneId: nested.zoneId, path: 'a.md', expectedResource })
@@ -57,7 +57,7 @@ describe('original knowledge source read', () => {
     const { element } = await mount({ source, rpc, onBack: vi.fn(), openScope: vi.fn() })
     unknown = true; await click(element, '重试读取')
     expect(element.querySelector('article h1')?.textContent).toBe('原文件正文'); expect(element.textContent).toContain('read unavailable')
-    unknown = false; await click(element, '重试原文件')
+    unknown = false; await click(element, '重试此文件')
     expect(element.textContent).not.toContain('read unavailable')
     expect(call.mock.calls.map(value => value[0])).toEqual(['app.snapshot', 'space.ls', 'file.read', 'app.snapshot', 'space.ls', 'file.read', 'file.read'])
   })
@@ -67,7 +67,7 @@ describe('original knowledge source read', () => {
     const openScope = vi.fn()
     const { element } = await mount({ source, rpc, onBack: vi.fn(), openScope })
     expect(element.textContent).toContain('reader unavailable')
-    await click(element, '打开原工作面')
+    await click(element, '打开工作面')
     expect(openScope).toHaveBeenCalledWith({ zoneId: zone.zoneId, path: 'docs/a.md', workspace, directoryPath: zone.directoryPath })
   })
   it('lists an original directory and joins owner-relative file names to its exact requested directory', async () => {
@@ -84,7 +84,7 @@ describe('original knowledge source read', () => {
     const { rpc, call } = fixture(() => ({ pages: [], notebook: null }))
     const { element } = await mount({ source: { kind: 'note', noteId: 'unregistered-note', blockId: 'original-block' }, rpc, onBack: vi.fn(), openScope: vi.fn() })
     expect(call.mock.calls.map(value => value[0])).toEqual(['notebook.inspect'])
-    expect(element.textContent).toContain('不能仅凭 Note ID 定位正文')
+    expect(element.textContent).toContain('没有在目录里找到这条笔记对应的文件')
   })
   it('asks the original owner for a registered Note logical mapping and shares NoteReader without duplicating Scratch rules', async () => {
     const physicalZone = { ...zone, directoryPath: fixturePath("outside/topic") }
@@ -109,7 +109,7 @@ describe('original knowledge source read', () => {
     const { rpc, call } = fixture(method => method === 'app.snapshot' ? { workspaces: [{ ...workspace, hostId: 'another-host' }], unavailable: [] } : { catalog: { zones: [zone] } })
     const { element } = await mount({ source, rpc, onBack: vi.fn(), openScope: vi.fn() })
     expect(call.mock.calls.map(value => value[0])).toEqual(['app.snapshot', 'space.ls'])
-    expect(element.textContent).toContain('尚未共同确认'); expect(element.textContent).toContain(source.path)
+    expect(element.textContent).toContain('还没确认来源所在的 Mac 和工作区'); expect(element.textContent).toContain(source.path)
   })
   it('ignores a late file body from a prior source instead of changing the later source reading', async () => {
     let resolve!: (value: unknown) => void

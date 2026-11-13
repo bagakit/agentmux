@@ -27,7 +27,7 @@ const ownerStart = control.indexOf('        if ((queue.length || unresolved) && 
 const ownerEnd = control.indexOf('        if (queue.length && queue[0]!', ownerStart)
 assert.ok(ownerStart >= 0 && ownerEnd > ownerStart)
 const owner = control.slice(ownerStart, ownerEnd)
-assert.ok(owner.includes('return false') && owner.includes('另一 Host'), 'Actual nonempty semantic owner admission block')
+assert.ok(owner.includes('return false') && owner.includes('另一台 Mac'), 'Actual nonempty semantic owner admission block')
 const mutations = [
   { id: 'same-page-intent-owner-recreated', target: 'src/terminal/MobileTerminalViewer.tsx',
     from: '    let binding = controls.current.get(agentSessionId)', to: '    let binding: ReturnType<typeof createMobileTerminalControl> | undefined = undefined' },

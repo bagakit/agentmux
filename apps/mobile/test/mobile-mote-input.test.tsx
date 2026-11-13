@@ -71,7 +71,7 @@ it('conditioned prompt retries retain the exact original operation and source ac
   expect(createLocalDrafts().attempts.get(JSON.stringify(['draft', sid]))).toMatchObject({ phase: 'unknown', moteSource: source })
   await view.render(null)
   await view.render(surface(f, otherSource))
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   expect(f.submit).toHaveBeenCalledTimes(2)
   expect(f.submit.mock.calls[1]![0]).toEqual(original)
 })
@@ -83,7 +83,7 @@ it('a legacy unknown prompt never acquires a new navigation source when explicit
     request: { condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null }, execution: 'default', explicit: false, runtimeId: 'original-runtime' } })
   await local.save()
   const view = await mount(surface(f, otherSource))
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ operationId: 'legacy-original-operation', prompt: 'Legacy original input' })
   expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('moteSource')
@@ -100,7 +100,7 @@ it('manual prompt retries keep their original source and operation after navigat
   expect(original.moteSource).toEqual(source)
   expect(original.agentMuxNote).toBe(MOTE_INPUT_GUIDANCE)
   await view.render(surface(f, otherSource))
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   expect(f.submit).toHaveBeenCalledTimes(2)
   expect(f.submit.mock.calls[1]![0]).toEqual(original)
 })
@@ -115,7 +115,7 @@ it.each([undefined, 'Earlier frozen platform note'] as const)('a legacy original
   await local.save()
   const view = await mount(surface(f, otherSource))
   expect(f.submit).not.toHaveBeenCalled()
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   expect(f.submit).toHaveBeenCalledOnce()
   const input = f.submit.mock.calls[0]![0]
   expect(input).toMatchObject({ operationId: 'legacy-mote-original-operation', prompt: 'Legacy exact human body', moteSource: source })
@@ -139,7 +139,7 @@ it.each([true, false])('an original admission only resumes when its frozen human
   await local.save()
   const view = await mount(surface(f, otherSource))
   expect(f.submit).not.toHaveBeenCalled()
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   if (!matches) {
     expect(f.submit).not.toHaveBeenCalled()
     expect(createLocalDrafts().attempts.get(JSON.stringify(['draft', sid]))).toMatchObject({ operationId, phase: 'unknown' })
@@ -217,7 +217,7 @@ it('permission responses persist the original Card operation and source before d
   await view.render(surface(f, otherSource))
   expect(f.respond).toHaveBeenCalledOnce()
   expect(createLocalDrafts().responses.values().next().value).toMatchObject({ phase: 'unknown', original: { input: { moteSource: source } } })
-  expect(view.element.textContent).toContain('答复回执未知')
+  expect(view.element.textContent).toContain('还没确认答复是否送达')
 })
 
 it.each([source, undefined])('a cold refused permission retry keeps its entire original operation and source %j', async originalSource => {

@@ -91,7 +91,7 @@ it('keeps an unavailable remote legacy Note readable with only its exact convers
     expect(host.querySelector('pre')?.textContent).toBe(raw)
     expect(host.textContent).toContain('Original remote Note conversion remains unconfirmed')
     expect(host.textContent).not.toContain('Unrelated local conversion')
-    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === '刷新原转换状态')!.click())
+    await act(async () => [...host.querySelectorAll('button')].find(button => button.textContent === '刷新转换状态')!.click())
     expect(rpc.mock.calls.map(call => call[0])).toEqual(['app.snapshot', 'file.read', 'notebook.inspect', 'notebook.inspect'])
   } finally { await act(async () => root.unmount()); host.remove() }
 })

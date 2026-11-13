@@ -27,7 +27,7 @@ function retainOriginal(draft = body, phase: 'unknown' | 'sending' = 'unknown') 
     attempts: [[key, { operationId: op, runId: 'run-original', draft: body, phase }]] })
 }
 function retry(element: HTMLElement) {
-  return [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent?.trim() === '重试原请求')
+  return [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent?.trim() === '重试发送')
 }
 function stored() { return JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')!).conversation }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })

@@ -5,10 +5,10 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await win.webContents.insertText('核对目录后，继续这段未发送的讨论。')
   await until('mobileProductScene.facts().record.conversation.drafts.some(([,text])=>text.includes("核对目录后"))')
   await read('mobileProductScene.prepareDirectoryNotices();mobileProductScene.unconfirmSelectedMetadata()')
-  await until('document.querySelector(".mobile-service-notice")?.textContent.includes("原会话元信息尚未核实")')
+  await until('document.querySelector(".mobile-service-notice")?.textContent.includes("对话信息还没确认")')
   await button('Focus', '.mobile-navigation')
   await until('!!document.querySelector(".mobile-spatial-panel .mobile-directory-notice")')
-  assert.equal(await read('document.querySelector(".mobile-service-notice")?.textContent.includes("原会话元信息尚未核实")||false'), false)
+  assert.equal(await read('document.querySelector(".mobile-service-notice")?.textContent.includes("对话信息还没确认")||false'), false)
   const original = await read('mobileProductScene.facts().record.conversation')
   result.directoryNotices = []
   for (const [width, height] of [[390, 844], [320, 760], [390, 480]]) for (const appearance of ['dark', 'light']) {

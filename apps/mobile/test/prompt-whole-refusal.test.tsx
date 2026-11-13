@@ -59,7 +59,7 @@ it('explicitly resends the original refused conditioned body as a new intent whi
   const f = consumer(), { view, original } = await firstRefusal(f)
   await paste(view.element, ' Different new draft')
   const edited = editor(view.element).textContent
-  await click(button(view.element, '重新发送原正文'))
+  await click(button(view.element, '重新发送'))
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('confirmed'))
   expect(f.submit.mock.calls[1]![0]).toMatchObject({ prompt: body, execution: 'default', expectedRun: original.request!.condition.expectedRun, afterSubmissionId: original.operationId })
   expect(f.submit.mock.calls[1]![0]).not.toHaveProperty('admissionIntent')
@@ -85,7 +85,7 @@ it('does not interpret a partially accepted payload refusal as whole input or re
   await vi.waitFor(() => expect(currentAttempt().logId).toBeDefined())
   expect(currentAttempt().phase).toBe('unknown')
   const original = f.submit.mock.calls[0]![0]
-  await click(button(view.element, '重试原请求'))
+  await click(button(view.element, '重试发送'))
   await vi.waitFor(() => expect(f.submit).toHaveBeenCalledTimes(2))
   expect(f.submit.mock.calls[1]![0]).toEqual(original)
 })
@@ -102,7 +102,7 @@ it.each(['runtime', 'host', 'run', 'operation'] as const)('does not settle a neg
     originalRefusal(f, target === 'operation' ? 'another-operation' : original.operationId)
   })
   expect(currentAttempt()).toEqual(original)
-  expect(button(view.element, '重试原请求')).toBeDefined()
+  expect(button(view.element, '重试发送')).toBeDefined()
   expect(f.submit).toHaveBeenCalledOnce()
 })
 
@@ -119,7 +119,7 @@ it('keeps the original archived request and diagnostic when an old retry failure
   const view = await mount(f.surface); await paste(view.element, body); await plainEnter(view.element)
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('unknown'))
   const original = structuredClone(currentAttempt())
-  await click(button(view.element, '重试原请求')); await entered.promise
+  await click(button(view.element, '重试发送')); await entered.promise
   await act(async () => originalRefusal(f, original.operationId))
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('rejected'))
   await click(button(view.element, 'Send'))

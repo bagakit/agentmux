@@ -10,7 +10,7 @@ const variants: Record<string, { file: string; edits: Array<{ before: string; af
     { before: 'if (flight.cancelled) return null\n          if (fileUploadIntentKey(upload)', after: 'if (false) return null\n          if (fileUploadIntentKey(upload)' }
   ] },
   'same-operation-collision': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
-    before: "if (bytes.current.has(file.id) || latestUploads.current.some(item => item.identity.operationId === file.id) || originalEntries.current.has(file.id)) {\n      throw new Error('附件操作标识与原记录冲突；原附件和这次正文保留，请重新选择文件。')\n    }", after: 'void file.id' }] },
+    before: "if (bytes.current.has(file.id) || latestUploads.current.some(item => item.identity.operationId === file.id) || originalEntries.current.has(file.id)) {\n      throw new Error('附件标识与已有记录冲突，请重新选择文件。')\n    }", after: 'void file.id' }] },
   'drop-confirmation': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
     before: "onClick={() => setCopyDecision(decideCopy(upload, file, 'discard'))}", after: "onClick={() => releaseCopy(decideCopy(upload, file, 'discard'))}" }] },
   'replace-original-bytes': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
@@ -35,11 +35,11 @@ const variants: Record<string, { file: string; edits: Array<{ before: string; af
     { before: "flight.dispatched = inspectOnly ? 'inspect' : 'upload'", after: "requested = true; flight.dispatched = inspectOnly ? 'inspect' : 'upload'" }
   ] },
   'preserve-confirmed-receipt': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
-    before: "if (previous && fileUploadIntentKey(previous) === intent && (previous.phase === 'uploaded' || previous.phase === 'inserted') &&\n            upload.phase !== 'uploaded' && upload.phase !== 'inserted') throw new Error('原上传已确认；不会用较早的未确认结果覆盖回执。')",
+    before: "if (previous && fileUploadIntentKey(previous) === intent && (previous.phase === 'uploaded' || previous.phase === 'inserted') &&\n            upload.phase !== 'uploaded' && upload.phase !== 'inserted') throw new Error('上传已确认，较早的未确认结果不会覆盖它。')",
     after: 'void previous' }] },
   'no-ui-overwrite-after-cas': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
-    before: "if (mounted.current) setNotice(`原附件回执尚未保全；可核对同一操作。${errorMessage(error)}`)\n        return false",
-    after: "if (mounted.current) setNotice(`原附件回执尚未保全；可核对同一操作。${errorMessage(error)}`)" }] }
+    before: "if (mounted.current) setNotice(`附件结果还没存到这台手机上，可以核对这次上传。${errorMessage(error)}`)\n        return false",
+    after: "if (mounted.current) setNotice(`附件结果还没存到这台手机上，可以核对这次上传。${errorMessage(error)}`)" }] }
 }
 if (mutant && !variants[mutant]) throw new Error('Unknown upload-exit mutation')
 export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), { name: 'upload-exit-mutation', enforce: 'pre', transform(code, id) {

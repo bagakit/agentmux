@@ -62,7 +62,7 @@ describe('original Survey mobile slice', () => {
   it('reads explicit original membership via public RPC and opens the exact Region Session and Topic', async () => {
     const view = await mount()
     expect(view.forwardRpc).toHaveBeenCalledWith('space.ls', { target: {}, presentation: true })
-    const list = view.element.querySelector('nav[aria-label="原研究列表"]')!
+    const list = view.element.querySelector('nav[aria-label="研究列表"]')!
     expect([...list.querySelectorAll('button strong')].map(button => button.textContent)).toEqual(['原命名研究', '图暂缺的原研究'])
     expect(list.textContent).not.toContain('uncollected')
     expect(view.forwardRpc.mock.calls.map(call => call[0])).toEqual(['space.ls'])
@@ -72,10 +72,10 @@ describe('original Survey mobile slice', () => {
     await view.click('原 Agent 名称')
     expect(view.openSession).toHaveBeenCalledWith('session-original', { name: '原 Agent 名称', project: '原项目' })
     await view.click('原关联课题'); expect(view.openTopic).toHaveBeenCalledWith('topic-original')
-    expect(view.element.textContent).not.toContain('刷新原 Browser 当前网址')
-    expect(view.element.textContent).not.toContain('刷新原文件')
+    expect(view.element.textContent).not.toContain('刷新网页当前网址')
+    expect(view.element.textContent).not.toContain('刷新文件')
     await view.click('original.note.md')
-    expect(view.element.textContent).toContain('刷新原文件')
+    expect(view.element.textContent).toContain('刷新文件')
   })
   it('retains original selection and healthy conversation on failed or missing presentation reads', async () => {
     const view = await mount()
@@ -87,10 +87,10 @@ describe('original Survey mobile slice', () => {
     const { survey: omitted, ...withoutSurvey } = catalog
     view.forwardRpc.mockResolvedValueOnce({ catalog: parsed(withoutSurvey) })
     await view.click('刷新研究')
-    expect(view.element.textContent).toContain('原 Survey 呈现尚未确认')
+    expect(view.element.textContent).toContain('研究列表还没确认')
     expect(view.element.textContent).toContain('原命名研究')
     await view.click('返回研究列表'); await view.click('图暂缺的原研究')
-    expect(view.element.textContent).toContain('原 Zone 暂未确认')
+    expect(view.element.textContent).toContain('这项研究的位置还没确认')
     expect(view.element.textContent).not.toContain('继续对话')
   })
   it('reads original Note content only on selection and retains it after observation failure', async () => {
@@ -100,23 +100,23 @@ describe('original Survey mobile slice', () => {
     expect(view.forwardRpc).toHaveBeenCalledWith('file.read', { zoneId: 'research', path: 'original.note.md', expectedResource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original") } })
     const content = serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'note-id', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'block-id' }, content: [{ type: 'text', text: '原笔记全文' }] }] } })
     view.forwardRpc.mockResolvedValueOnce({ workspaces: [{ workspaceId: 'resource', hostId: 'local', path: fixturePath("original") }] }).mockResolvedValueOnce({ resource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original"), zoneId: 'research', zonePath: fixturePath("original"), path: 'original.note.md' }, result: { status: 'read', document: { path: 'original.note.md', content, revision: 'rev-original' } } })
-    await view.click('刷新原文件')
+    await view.click('刷新文件')
     expect(view.forwardRpc.mock.calls.filter(call => call[0] === 'file.read').at(-1)).toEqual(['file.read', { zoneId: 'research', path: 'original.note.md', expectedResource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original") } }])
     expect(noteText(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body'))).toBe('原笔记全文')
     expect(view.element.querySelector('[data-block-id="block-id"]')).not.toBeNull()
     view.forwardRpc.mockRejectedValueOnce(new Error('file unavailable'))
-    await view.click('刷新原文件')
+    await view.click('刷新文件')
     expect(view.element.textContent).toContain('file unavailable')
     expect(noteText(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body'))).toBe('原笔记全文')
   })
   it('opens the exact browserId URL as an independent mobile page', async () => {
     const view = await mount()
-    await view.click('原命名研究'); await view.click('查看原网页')
+    await view.click('原命名研究'); await view.click('查看网页')
     view.forwardRpc.mockResolvedValueOnce({ targets: [{ id: 'wrong-browser', url: 'https://wrong.example', title: 'wrong', status: 'ready' }, { id: 'browser-id-original', url: 'https://original.example/page', title: 'Original page', status: 'ready' }] })
-    await view.click('刷新原 Browser 当前网址')
+    await view.click('刷新网页当前网址')
     expect(view.forwardRpc).toHaveBeenLastCalledWith('browser.targets', {})
     expect(view.element.querySelector('a')?.getAttribute('href')).toBe('https://original.example/page')
-    expect(view.element.textContent).toContain('不控制 Mac 原 Browser 画面')
+    expect(view.element.textContent).toContain('不会控制 Mac 上的浏览器')
   })
   it('carries original collected and file owner output through the codec into actual reading', async () => {
     const raw = serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'owner-note', content: { type: 'doc', content: [{ type: 'heading', attrs: { blockId: 'heading', level: 2 }, content: [{ type: 'text', text: '原标题' }] }, { type: 'paragraph', attrs: { blockId: 'body' }, content: [{ type: 'text', text: '加粗原正文', marks: [{ type: 'bold' }] }] }, { type: 'codeBlock', attrs: { blockId: 'code', language: null }, content: [{ type: 'text', text: 'const original = true' }] }, { type: 'bulletList', content: [{ type: 'listItem', attrs: { blockId: 'item' }, content: [{ type: 'paragraph', attrs: { blockId: 'item-text' }, content: [{ type: 'text', text: '原列表项' }] }] }] }, { type: 'blockReference', attrs: { blockId: 'reference', referenceId: 'ref-original', mode: 'embed', target: { noteId: 'owner-note', blockId: 'body' } } }] } })
@@ -161,7 +161,7 @@ describe('original Survey mobile slice', () => {
     const { survey: omitted, ...withoutSurvey } = catalog
     const view = await mount(vi.fn().mockResolvedValue({ catalog: parsed(withoutSurvey) }))
     expect(view.element.querySelector('nav')).toBeNull()
-    expect(view.element.textContent).toContain('原研究列表尚未确认')
+    expect(view.element.textContent).toContain('研究列表还没确认')
   })
 })
 
@@ -212,7 +212,7 @@ describe('original Region read lifecycle', () => {
       .mockReturnValueOnce(old.promise).mockResolvedValue({ result: { status: 'unknown', message: 'Current original observation is unknown' } })
     const view = await reader(read)
     await view.render()
-    await act(async () => [...view.element.querySelectorAll('button')].find(button => button.textContent === '刷新原文件')!.click())
+    await act(async () => [...view.element.querySelectorAll('button')].find(button => button.textContent === '刷新文件')!.click())
     expect(read).toHaveBeenCalledTimes(2)
     await view.render({ [trigger]: false }); await view.render()
     expect(read).toHaveBeenCalledTimes(3)
@@ -264,7 +264,7 @@ describe('original Region read lifecycle', () => {
       : original(method))
     await view.render({ visible: false }); await view.render()
     expect(read).toHaveBeenCalledTimes(1)
-    expect(view.element.textContent).toContain('原文件 Workspace 资源映射已改变')
+    expect(view.element.textContent).toContain('文件所在的工作区已改变')
     expect(view.element.textContent).toContain('original-mapped-revision')
     expect(view.element.querySelector('[contenteditable=true]')?.textContent).toContain('Retained device draft')
     expect(localStorage.getItem(draftKey)).toContain('Retained device draft')
@@ -393,7 +393,7 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     expect(view.fileRead).toHaveBeenCalledTimes(1)
     await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 20))); expect([...view.element.querySelectorAll('button')].some(button => button.textContent === 'original.note.md')).toBe(true) })
     await view.click('original.note.md')
-    expect(view.element.textContent).toContain('所选原文件不是此引用的 Note')
+    expect(view.element.textContent).toContain('所选文件不是这条引用对应的笔记')
     await view.click('target.note.md')
     await vi.waitFor(() => expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('跨文件引用正文😀'))
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['original.note.md', 'original.note.md', 'target.note.md'])
@@ -481,7 +481,7 @@ describe('Note save uncertainty and durable device intent', () => {
       const fault = deviceFault !== 'none' ? vi.spyOn(localStorage, deviceFault as 'getItem' | 'setItem').mockImplementation(() => { throw new Error('ACK durable storage failed') }) : null
       try { await act(async () => pending.finish()) } finally { fault?.mockRestore() }
       if (deviceFault !== 'none') {
-        expect(element.textContent).toContain('本机保存回执未持久保存')
+        expect(element.textContent).toContain('这台手机没能记下保存结果')
         const key = Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:'))!
         expect(JSON.parse(localStorage.getItem(key)!).attempt.phase).toBe('sending')
         await click('核对当前原文')
@@ -577,7 +577,7 @@ it('keeps an unknown save when a remapped Zone reads an identical Note in anothe
   await vi.waitFor(() => expect(view.element.textContent).toContain('保存回执未知'))
   await mkdir(join(view.directory, 'other')); await writeFile(join(view.directory, 'other/original.note.md'), await readFile(join(view.directory, 'original.note.md')))
   view.remap(join(view.directory, 'other')); await view.click('核对当前原文')
-  await vi.waitFor(() => expect(view.element.textContent).toContain('原文件映射已改变'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('文件位置已改变'))
   expect([...view.element.querySelectorAll('button')].find(value => value.textContent === '保存原笔记')!.disabled).toBe(true)
   expect(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:'))!)!).attempt.phase).toBe('unknown')
 })

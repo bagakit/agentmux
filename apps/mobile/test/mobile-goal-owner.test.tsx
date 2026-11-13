@@ -109,7 +109,7 @@ it('retains a lost delete receipt after the real public Goal service removes the
   }
   await view.render()
   await view.click('删除目标…'); await view.click('确认删除此目标')
-  await view.wait('删除回执未确认')
+  await view.wait('Mac 还没确认删除')
   expect(await owner.get('original-goal')).toBeNull()
   const call = original.mock.calls.find(([method]) => method === 'goal.delete')!
   const records = getDeviceWorkface().snapshot().record.goalOperationRecords ?? []
@@ -137,7 +137,7 @@ it('published Demand dispatch persistence and strict Core Goal codec feed the mo
   expect(publicGoal.goal.dispatches).toEqual(before!.dispatches)
   const progress = view.element.querySelector('[aria-label="目标协作与输入记录"]')!
   for (const value of before!.dispatches!) expect(progress.textContent).toContain(value.operationId)
-  expect(progress.textContent).toContain('4 条原输入记录 · 1 条已确认')
+  expect(progress.textContent).toContain('4 条输入记录 · 1 条已确认')
   expect(progress.textContent).toContain('不推断唯一当前执行')
   expect(view.forwardRpc.mock.calls.some(([method]) => ['goal.start', 'goal.update', 'goal.continuation-action'].includes(method))).toBe(false)
   expect(await owner.get('original-goal')).toEqual(before)
@@ -170,7 +170,7 @@ it('actual mounted Goal editor freezes the same top-level CAS request and keeps 
   expect(Object.isFrozen(request)).toBe(true); expect(Object.isFrozen(request.patch)).toBe(true)
   expect(getDeviceWorkface().snapshot().record.goalDrafts?.[0]?.operations[0]?.request).toEqual(request)
   await editBody(view, '原请求之后继续输入的正文')
-  await act(async () => settle()); await view.wait('原目标已确认保存')
+  await act(async () => settle()); await view.wait('目标已保存。')
   expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')?.value).toBe('原请求之后继续输入的正文')
   expect((await owner.get('original-goal'))!.description).toBe('明确本次保存正文')
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalDrafts?.[0]).toMatchObject({ description: '原请求之后继续输入的正文', operations: [] })
@@ -182,11 +182,11 @@ it('actual Demand CAS refuses the old draft version after a newer read, and only
   await owner.update('original-goal', { description: '别人的已保存正文' })
   const newerVersion = (await owner.get('original-goal'))!.updatedAt
   expect(newerVersion).toBeGreaterThan(originalVersion)
-  await view.click('读取当前目标'); await view.wait('原目标已有新版本')
-  await saveBody(view); await view.wait('保存回执未确认')
+  await view.click('读取当前目标'); await view.wait('Mac 上的目标有新版本')
+  await saveBody(view); await view.wait('保存还没确认')
   await vi.waitFor(() => {
     const statuses = [...view.element.querySelectorAll('[role="status"]')].map(value => value.textContent ?? '')
-    expect(statuses.filter(value => value.includes('保存回执未确认'))).toHaveLength(1)
+    expect(statuses.filter(value => value.includes('保存还没确认'))).toHaveLength(1)
     const originalIssue = getDeviceWorkface().snapshot().record.goalDrafts![0]!.operations[0]!.issue!
     expect(originalIssue).toBeTruthy()
     expect(statuses.some(value => value.includes(originalIssue))).toBe(false)
@@ -196,7 +196,7 @@ it('actual Demand CAS refuses the old draft version after a newer read, and only
   expect(first.expectedUpdatedAt).toBe(originalVersion); expect(first.patch).not.toHaveProperty('expectedUpdatedAt')
   expect((await owner.get('original-goal'))!.description).toBe('别人的已保存正文')
   await view.click('采用已读新版本；下次保存当前草稿将覆盖该版本')
-  await saveBody(view); await view.wait('原目标已确认保存')
+  await saveBody(view); await view.wait('目标已保存。')
   const requests = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')
   expect(requests).toHaveLength(2); expect(requests[1]![1].expectedUpdatedAt).toBe(newerVersion)
   expect(requests[1]![1].operationId).not.toBe(first.operationId)
@@ -208,11 +208,11 @@ it('a lost real writer ACK stays unknown on cold remount even when inspect retur
   const first = await existingGoal(); await first.click('编辑目标正文'); await editBody(first, '回应丢失的完整原正文')
   const normal = vi.mocked(hostGoals.demands.update).getMockImplementation()!
   vi.mocked(hostGoals.demands.update).mockImplementationOnce(async (...args) => { await normal(...args); throw new Error('Original save ACK lost') })
-  await saveBody(first); await first.wait('保存回执未确认')
+  await saveBody(first); await first.wait('保存还没确认')
   const request = first.forwardRpc.mock.calls.find(([method]) => method === 'goal.update')![1]
   expect((await owner.get('original-goal'))!.description).toBe('回应丢失的完整原正文')
   await unmount(first)
-  const restored = await mount({ goalId: 'original-goal', mode: 'edit', discussion: null }); await restored.wait('原保存回执未确认')
+  const restored = await mount({ goalId: 'original-goal', mode: 'edit', discussion: null }); await restored.wait('保存还没确认')
   expect(restored.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')?.value).toBe('回应丢失的完整原正文')
   await restored.click('读取当前目标核对'); await restored.wait('回应丢失的完整原正文')
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.update')).toBe(false)
@@ -246,7 +246,7 @@ it.each(['runtime', 'instance', 'both'])('same client %s rebind refuses a late A
   await act(async () => settle())
   await vi.waitFor(async () => { await act(async () => {}); expect(view.buttons('保存正文')[0]?.disabled).toBe(false) })
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
-  expect(view.element.textContent).not.toContain('原目标已确认保存')
+  expect(view.element.textContent).not.toContain('目标已保存。')
   expect(getDeviceWorkface().snapshot().record.goalDrafts?.[0]?.operations).toHaveLength(1)
   await saveBody(view)
   const writes = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')
@@ -256,8 +256,8 @@ it.each(['runtime', 'instance', 'both'])('same client %s rebind refuses a late A
     expect(writes).toHaveLength(2)
     expect(writes[1]![1].operationId).not.toBe(writes[0]![1].operationId)
     expect(getDeviceWorkface().snapshot().record.goalDrafts?.[0]?.operations[0]?.request).toEqual(writes[0]![1])
-    await view.wait('保存回执未确认')
-    expect(view.element.textContent).not.toContain('原目标已确认保存')
+    await view.wait('保存还没确认')
+    expect(view.element.textContent).not.toContain('目标已保存。')
     expect(getDeviceWorkface().snapshot().record.goalDrafts?.[0]?.operations).toHaveLength(2)
   } else {
     expect(writes).toHaveLength(1)
@@ -273,14 +273,14 @@ it('actual successful writer plus settlement quota failure preserves the full or
     if (key === DEVICE_WORKFACE_KEY && record.goalDrafts?.some((value: any) => value.description === 'Host确认但设备回执写入失败的正文' && value.operations.length === 0)) throw new Error('Settlement quota failure')
     write(key, bytes)
   })
-  await saveBody(view); await view.wait('设备回执保全尚未完成')
+  await saveBody(view); await view.wait('这台手机还没记下确认')
   const calls = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')
   expect(calls).toHaveLength(1)
   const request = calls[0]![1]
   expect((await owner.get('original-goal'))!.description).toBe(request.patch.description)
   const exported = getDeviceWorkface().parseBackup(getDeviceWorkface().exportBackup())
   const operations = [...(exported.goalDrafts ?? []), ...(exported.goalDraftConflicts ?? [])].flatMap(value => value.operations)
-  expect(operations).toContainEqual({ request, ownerInstanceId: 'original-goal-process', phase: 'unknown', issue: expect.stringContaining('设备记录尚未确认') })
+  expect(operations).toContainEqual({ request, ownerInstanceId: 'original-goal-process', phase: 'unknown', issue: expect.stringContaining('这台手机还没记下确认') })
   expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')?.value).toBe(request.patch.description)
   await view.render(false); await view.render(true)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')).toHaveLength(1)
@@ -294,10 +294,10 @@ it('same-key device conflict has an explicit recovery even when the Host version
   const peer = new DeviceWorkfaceStore(() => localStorage)
   const canonical = { ...original, description: '另一页原正文', operations: [{ request, ownerInstanceId: 'original-goal-process', phase: 'unknown' as const, issue: '另一页回应未知' }] }
   await peer.editGoalDraft(original, canonical, peer.recordIdentity())
-  await editBody(view, '本页冲突后完整正文'); await view.wait('另一页面已保存这份目标草稿')
+  await editBody(view, '本页冲突后完整正文'); await view.wait('另一个页面已保存这份草稿')
   expect(view.buttons('采用已读新版本；下次保存当前草稿将覆盖该版本')).toHaveLength(0)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.update')).toBe(false)
-  await view.click('明确保留本页正文与双方原请求')
+  await view.click('保留本页正文和两边的请求')
   await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.goalDrafts![0]!.description).toBe('本页冲突后完整正文'))
   expect(getDeviceWorkface().snapshot().record.goalDrafts![0]!.operations[0]!.request).toEqual(request)
   expect(getDeviceWorkface().snapshot().record.goalDraftConflicts).toEqual(expect.arrayContaining([expect.objectContaining({ description: '本页冲突后完整正文' })]))
@@ -316,7 +316,7 @@ it('record replacement during durable settlement leaves the complete request vis
   const request = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.update')![1]
   await device.replaceBackup({ ...emptyDeviceWorkface(), selectedSessionId: 'replacement-B' })
   const before = localStorage.getItem(DEVICE_WORKFACE_KEY)
-  await act(async () => release()); await view.wait('未将原回执写入新工作面')
+  await act(async () => release()); await view.wait('这次确认没有写入新记录')
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
   expect(device.snapshot().record.goalDrafts).toBeUndefined()
   expect(view.element.textContent).toContain(request.operationId)
@@ -332,7 +332,7 @@ it('unrelated same-record conversation/navigation edits preserve the normal orig
   await saveBody(view); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
   await device.editConversation([{ bucket: 'drafts', key: 'other-conversation', next: '同记录原未发会话正文' }], token)
   await device.updateNavigation({ selectedSessionId: 'another-session', hostUrl: '', panel: 'terminal' })
-  await act(async () => settle()); await view.wait('原目标已确认保存')
+  await act(async () => settle()); await view.wait('目标已保存。')
   const record = new DeviceWorkfaceStore(() => localStorage).snapshot().record
   expect(record.recordId).toBe(token); expect(record.conversation.drafts).toEqual([['other-conversation', '同记录原未发会话正文']])
   expect(record.selectedSessionId).toBe('another-session'); expect(record.goalDrafts?.[0]?.operations).toEqual([])
@@ -345,7 +345,7 @@ it('cold remount restores unknown creation from durable device bytes and reads i
   const bytes = localStorage.getItem(DEVICE_WORKFACE_KEY)!
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalIntents).toMatchObject([{ goalId: input.goalId, operationId: input.operationId, kind: 'create', phase: 'unknown' }])
   await unmount(first)
-  const restored = await mount(); await restored.wait('重启或重入后的原创建回执未知')
+  const restored = await mount(); await restored.wait('还不确定目标是否已创建')
   expect(restored.element.textContent).toContain(input.goalId); expect(restored.buttons('新建目标')[0]!.disabled).toBe(true)
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.create')).toBe(false)
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(bytes)
@@ -361,9 +361,9 @@ it('cold remount keeps human acknowledgement unknown as an owner guard until exp
   await unmount(first)
   const restored = await mount(); await restored.wait('Actual goal'); await restored.click('Actual goal未分配项目 · 待整理')
   expect(restored.buttons('确认当前目标')).toHaveLength(0)
-  expect(restored.element.textContent).toContain('原人认可回执未知')
+  expect(restored.element.textContent).toContain('还不确定你的确认是否已生效')
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.confirm')).toBe(false)
-  await restored.click('读取当前提案与报告'); await restored.wait('已读取原目标当前内容')
+  await restored.click('读取当前提案与报告'); await restored.wait('已读取当前目标')
   expect(restored.buttons('确认当前目标')).toHaveLength(1)
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.confirm')).toBe(false)
   await restored.click('确认当前目标'); await restored.wait('已确认读过的当前目标提案')
@@ -374,7 +374,7 @@ it('late original discussion receipt after leaving Goals preserves its Tab witho
   const view = await existingGoal(), forward = view.forwardRpc.getMockImplementation()!
   let settle!: () => void
   view.forwardRpc.mockImplementation((method, params) => method === 'goal.discuss' ? forward(method, params).then(result => new Promise(resolve => { settle = () => resolve(result) })) : forward(method, params))
-  await view.click('打开目标原讨论'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
+  await view.click('打开目标讨论'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
   await view.render(false); await view.render(true); await act(async () => settle())
   expect(view.openSession).not.toHaveBeenCalled(); expect(view.buttons('返回原目标')).toHaveLength(0)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'space.inspect')).toBe(false)
@@ -407,7 +407,7 @@ it('late old acknowledgement-recovery read never replaces a newer displayed prop
   await act(async () => settle()); await view.wait('迟到旧读取不能代签当前内容')
   expect(view.element.textContent).toContain('New current owner proposal'); expect(view.buttons('确认当前目标')).toHaveLength(0)
   expect(getDeviceWorkface().snapshot().record.goalIntents).toHaveLength(1)
-  await view.click('读取当前提案与报告'); await view.wait('已读取原目标当前内容')
+  await view.click('读取当前提案与报告'); await view.wait('已读取当前目标')
   expect(view.buttons('确认当前目标')).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.confirm')).toHaveLength(1)
 })
@@ -431,7 +431,7 @@ it('device intent I/O failure keeps human acknowledgement and its unknown recove
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.confirm')).toHaveLength(1)
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); expect(view.element.textContent).toContain('刷新保障不足')
   expect(getDeviceWorkface().exportBackup()).toContain('expectedRevision'); expect(view.buttons('确认当前目标')).toHaveLength(0)
-  await view.click('读取当前提案与报告'); await view.wait('已读取原目标当前内容')
+  await view.click('读取当前提案与报告'); await view.wait('已读取当前目标')
   await view.click('确认当前目标'); await view.wait('已确认读过的当前目标提案')
   expect((await owner.get('original-goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); set.mockRestore(); await getDeviceWorkface().replaceUnreadableWithCurrent()
@@ -450,7 +450,7 @@ it('one click uses the current Host domain and strict public service to save one
   expect([...discussions.values()].map(value => value.tabId)).toEqual([tabId]); expect(await owner.list()).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
   expect(view.openSession).toHaveBeenCalledExactlyOnceWith(discussions.get(input.goalId)!.sessionId, expect.objectContaining({ project: '未分配项目' }))
-  await view.click('返回原目标'); expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
+  await view.click('返回目标'); expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
 })
 
 it('unknown save reads the held ID against the real owner before discussion and never creates again across hide/show', async () => {
@@ -470,7 +470,7 @@ it('owner-confirmed absence only allows explicit saving of the same original ID'
   vi.mocked(hostGoals.demands.create).mockRejectedValueOnce(new Error('No save acknowledgement'))
   const view = await mount(); await view.click('新建目标'); await view.wait('No save acknowledgement')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  await view.click('读取同一目标核对'); await view.wait('准确 ID 尚未保存')
+  await view.click('读取同一目标核对'); await view.wait('Mac 上还没有这个目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   await view.click('明确保存同一目标'); await view.wait(discussionName)
   const creations = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')
@@ -482,9 +482,9 @@ it('an unavailable discussion owner retains the saved goal and explicit reopenin
   discussionUnavailable = true
   const view = await mount(); await view.click('新建目标'); await view.wait('Original discussion owner is unavailable')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  expect(await owner.get(input.goalId)).not.toBeNull(); expect(view.element.textContent).toContain('原目标已保存')
+  expect(await owner.get(input.goalId)).not.toBeNull(); expect(view.element.textContent).toContain('目标已保存，讨论还没确认')
   discussionUnavailable = false
-  await view.click('打开这个目标的原讨论'); await view.wait(discussionName)
+  await view.click('打开这个目标的讨论'); await view.wait(discussionName)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss').map(([, params]) => params.goalId)).toEqual([input.goalId, input.goalId])
 })
@@ -494,9 +494,9 @@ it('human confirmation unknown keeps normal acknowledgement unavailable until ex
   vi.mocked(hostGoals.demands.confirmAlignment).mockImplementationOnce(async (id, revision) => { await owner.confirmAlignment(id, revision); throw new Error('Human ACK lost') })
   await view.click('确认当前目标'); await view.wait('Human ACK lost')
   expect(view.buttons('确认当前目标')).toHaveLength(0)
-  expect(view.buttons('打开目标原讨论')[0]!.disabled).toBe(false)
+  expect(view.buttons('打开目标讨论')[0]!.disabled).toBe(false)
   await view.render(false); await view.render(true); expect(view.buttons('确认当前目标')).toHaveLength(0)
-  await view.click('读取当前提案与报告'); await view.wait('已读取原目标当前内容')
+  await view.click('读取当前提案与报告'); await view.wait('已读取当前目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.confirm')).toHaveLength(1)
   expect(view.element.textContent).toContain('Human ACK lost'); expect((await owner.get('original-goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
 })
@@ -511,7 +511,7 @@ it('late confirmation acknowledgement never replaces a newer owner proposal alre
   await view.click('确认当前目标'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
   await owner.update('original-goal', { alignment: { ...proposal, summary: 'Newer proposal actually read' } })
   await view.click('刷新目标'); await view.wait('Newer proposal actually read')
-  await act(async () => settle(undefined)); await view.wait('当前已有较新提案')
+  await act(async () => settle(undefined)); await view.wait('现在有更新的提案')
   expect(view.element.textContent).toContain('Newer proposal actually read'); expect(view.buttons('确认当前目标')).toHaveLength(1)
 })
 
@@ -521,7 +521,7 @@ it('actual gap acceptance keeps the exact submission and reported difference', a
   const submission = (await owner.get('original-goal'))!.grounding!.submissionId
   const view = await mount(); await view.wait('Actual goal'); await view.click('Actual goal未分配项目 · 待整理'); await view.wait('Checked result with gap')
   expect(view.buttons('接受当前结果')).toHaveLength(0)
-  await view.click('接受结果并保留差距'); await view.wait('已接受原结果，报告差距仍保留')
+  await view.click('接受结果并保留差距'); await view.wait('已验收并保留差距。')
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.accept', { goalId: 'original-goal', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps: true, operationId: expect.any(String) })
   expect((await owner.get('original-goal'))!.grounding).toMatchObject({ submissionId: submission, acceptedAt: expect.any(Number), checks: [{ outcome: 'gap', note: 'A real difference remains', criterionId: 'c', evidence: ['actual.log'] }] })
 })
@@ -532,7 +532,7 @@ it('mobile discussion actions retain grill and grounding modes on the same exact
   await view.click('讨论目标变更'); await view.wait(discussionName)
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: 'original-goal', mode: 'grill', operationId: expect.any(String) })
   const tabId = discussions.get('original-goal')!.tabId
-  await view.click('返回原目标'); await view.click('确认当前目标'); await view.wait('已确认读过的当前目标提案')
+  await view.click('返回目标'); await view.click('确认当前目标'); await view.wait('已确认读过的当前目标提案')
   await view.click('请求核对结果'); await view.wait(discussionName)
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: 'original-goal', mode: 'grounding', operationId: expect.any(String) })
   expect(discussions.get('original-goal')?.tabId).toBe(tabId)
@@ -543,11 +543,11 @@ it('mobile discussion actions retain grill and grounding modes on the same exact
 
 it('current human stage action follows evidence before secondary discussion and low-frequency properties', async () => {
   const view = await existingGoal()
-  const article = view.element.querySelector('article')!, section = article.querySelector('[aria-label="目标确认与原讨论"]')!
+  const article = view.element.querySelector('article')!, section = article.querySelector('[aria-label="目标确认与讨论"]')!
   const evidence = article.querySelector('[aria-label="结果与证据"]')!, properties = [...article.querySelectorAll('summary')].find(node => node.textContent === '工作状态与属性')!
   expect(evidence.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(section.compareDocumentPosition(properties) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  const confirm = view.buttons('确认当前目标')[0]!, discuss = view.buttons('打开目标原讨论')[0]!
+  const confirm = view.buttons('确认当前目标')[0]!, discuss = view.buttons('打开目标讨论')[0]!
   expect(confirm.compareDocumentPosition(discuss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
 
@@ -580,6 +580,6 @@ it.each([false, true])('mobile exact acceptance keeps the goal open or explicitl
   expect(saved.status).toBe(finish ? 'done' : 'in_review')
   expect(saved.grounding!.submissionId).toBe(before.grounding!.submissionId)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.accept')).toHaveLength(1)
-  await view.wait(finish ? '当前结果已接受，目标已结束。' : '当前结果已接受，目标仍开放。')
+  await view.wait(finish ? '已验收，目标已结束。' : '已验收，目标仍开放。')
   expect(useAppStore.getState().sessions).toEqual([])
 })

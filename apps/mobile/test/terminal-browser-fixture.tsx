@@ -253,9 +253,9 @@ export async function runControlBrowserProof() {
   await until(() => parsedWrites >= 2, 'active output query parse')
   assert(writes().length === 2 && sizes().length === 0 && copies.length === 0, 'Even control mode cannot forward parser replies or automatic clipboard')
   cases.push({ name: 'explicit-actual-xterm-user-input-only', facts: { input, writes: writes().length, sizeCalls: sizes().length } })
-  button('PTY 尺寸').click()
-  await until(() => document.querySelector('[aria-label="PTY 列数"]') !== null, 'explicit size form mounted')
-  const column = document.querySelector<HTMLInputElement>('[aria-label="PTY 列数"]')!, row = document.querySelector<HTMLInputElement>('[aria-label="PTY 行数"]')!
+  button('终端大小').click()
+  await until(() => document.querySelector('[aria-label="终端列数"]') !== null, 'explicit size form mounted')
+  const column = document.querySelector<HTMLInputElement>('[aria-label="终端列数"]')!, row = document.querySelector<HTMLInputElement>('[aria-label="终端行数"]')!
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
   setter.call(column, '52'); column.dispatchEvent(new Event('input', { bubbles: true }))
   setter.call(row, '18'); row.dispatchEvent(new Event('input', { bubbles: true }))
@@ -268,7 +268,7 @@ export async function runControlBrowserProof() {
   assert(sizes().length === 1, 'Window/rotation cannot resize remote PTY')
   cases.push({ name: 'manual-original-size-no-viewport-policy', facts: sizes()[0] })
   loseInputReceipt = true; terminal!.input('uncertain original', true)
-  await until(() => terminal!.options.disableStdin === true && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('回执未确认'), 'unknown receipt remains visible')
+  await until(() => terminal!.options.disableStdin === true && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('还没确认送达'), 'unknown receipt remains visible')
   const count = writes().length
   button('回到观看').click()
   render(false); await until(() => calls.some(value => value.method === 'releaseRunAttachment'), 'hidden viewer releases own observation')
@@ -279,7 +279,7 @@ export async function runControlBrowserProof() {
   root.unmount(); root = createRoot(document.getElementById('root')!); terminal = null
   render(); await until(() => terminal !== null && document.querySelector('[data-reading="reading"]') !== null, 'new actual component instance')
   assert(button('控制终端').disabled === true && terminal!.options.disableStdin === true && writes().length === count, 'Cold component admission is unknown and never writes')
-  await clickReadingDetail('已在原会话核对，继续新输入')
+  await clickReadingDetail('已核对，继续输入')
   await until(() => button('控制终端').disabled === false, 'explicit review releases old local guard')
   loseInputReceipt = false; button('控制终端').click()
   await until(() => document.querySelector('.mobile-terminal')!.getAttribute('data-control') === 'control', 'explicit new control mode committed')
@@ -324,12 +324,12 @@ export async function runRebindBrowserProof() {
   // A preceding failed controlled run can leave its real metadata guard. Admit the
   // new test intent through the product's explicit review gesture, never storage deletion.
   if (button('控制终端').disabled) {
-    await clickReadingDetail('已在原会话核对，继续新输入')
+    await clickReadingDetail('已核对，继续输入')
     await until(() => !button('控制终端').disabled, 'prior controlled fixture explicitly reviewed')
   }
   await clickControl()
   loseInputReceipt = true; terminal!.input('original unknown', true); terminal!.input('same-page suffix', true)
-  await until(() => terminal!.options.disableStdin === true && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('回执未确认'), 'unknown original dispatch')
+  await until(() => terminal!.options.disableStdin === true && document.querySelector('.mobile-terminal-notice')!.textContent!.includes('还没确认送达'), 'unknown original dispatch')
   const originalWrites = writes().map(value => (value.args[0] as AgentMuxAgentWriteInput).data), originalCanvas = terminal
   assert(originalWrites.length === 1 && originalWrites[0] === 'original unknown', 'Only the first original operation was invoked')
   const replacement = port()
@@ -339,7 +339,7 @@ export async function runRebindBrowserProof() {
   assert(writes().length === 1, 'Replacement cannot replay an uncertain operation or its suffix')
   const stored = localStorage.getItem(`agentmux-mobile-terminal-intent-v1:${session.agentSessionId}`)!
   assert(stored && !stored.includes('original unknown') && !stored.includes('suffix'), 'Rebinding never persists terminal payload')
-  await clickReadingDetail('已在原会话核对，继续新输入')
+  await clickReadingDetail('已核对，继续输入')
   await until(() => !button('控制终端').disabled, 'original unknown intent explicitly reviewed')
   loseInputReceipt = false; await clickControl()
   await until(() => writes().length === 2 && inputReceipts.some(value => value.input.data === 'same-page suffix' && value.receipt.runId === session.run.runId) && originalInputAcknowledged(), 'only retained suffix receives its original ACK')
@@ -350,7 +350,7 @@ export async function runRebindBrowserProof() {
   await until(() => terminal!.options.disableStdin === true, 'second unknown dispatch')
   const count = writes().length
   await rebind(port({ runtimeIdentity: () => ({ ...finite.runtimeIdentity(), instanceId: 'different-Mac-runtime' }) }))
-  await clickReadingDetail('已在原会话核对，继续新输入'); await until(() => !button('控制终端').disabled, 'explicit review on changed owner')
+  await clickReadingDetail('已核对，继续输入'); await until(() => !button('控制终端').disabled, 'explicit review on changed owner')
   document.querySelector<HTMLButtonElement>('[aria-label="终端阅读与状态"]')!.focus(); button('控制终端').click()
   await new Promise(resolve => setTimeout(resolve, 20))
   assert(terminal!.options.disableStdin && document.activeElement !== terminal!.textarea && writes().length === count, 'Same Session/Run IDs on another Mac cannot receive input or focus')
@@ -382,7 +382,7 @@ export async function runRebindBrowserProof() {
   await clickReadingDetail('复制未发送输入'); await until(() => copies.at(-1) === 'Session A suffix', 'selected Session A retained its own suffix')
   assert(writes().length === beforeLate && terminal!.options.disableStdin, 'Returning to Session A never repeats its unknown input')
   cases.push({ name: 'late-previous-selected-session-ACK-has-no-current-session-effects', facts: { previousSession: session.agentSessionId, selectedSession: otherSession.agentSessionId, beforeLate, writes: writes().length, copied: copies.at(-1) } })
-  await clickReadingDetail('已在原会话核对，继续新输入'); await clickReadingDetail('放弃未发送输入')
+  await clickReadingDetail('已核对，继续输入'); await clickReadingDetail('放弃未发送输入')
   root.unmount(); await until(() => listeners.size === 0, 'same-page own observers cleanup')
   assert(forbidden.length === 0, 'Rebind uses only the original finite SDK facts and methods')
   return { passed: true, cases, limitations: ['Actual mounted Chromium/xterm lifecycle with controlled semantic SDK ports; no actual phone, native trust, Host handoff or network performance claim.'] }
@@ -393,10 +393,10 @@ export async function renderControlVisualFixture(mode: 'watch' | 'control' | 'un
   await until(() => terminal !== null && document.querySelector('[data-reading="reading"]') !== null, 'actual visual terminal')
   const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(element => element.textContent?.trim() === label)!
   if (mode !== 'watch') { button('控制终端').click(); await until(() => terminal!.options.disableStdin === false, 'explicit visual control') }
-  if (mode === 'size') { button('PTY 尺寸').click(); await until(() => document.querySelector('.mobile-terminal-size') !== null, 'manual size form') }
+  if (mode === 'size') { button('终端大小').click(); await until(() => document.querySelector('.mobile-terminal-size') !== null, 'manual size form') }
   if (mode === 'unknown') {
     loseInputReceipt = true; terminal!.input('original uncertain fixture', true)
-    await until(() => document.querySelector('.mobile-terminal-notice')!.textContent!.includes('回执未确认'), 'persistent unknown notice')
+    await until(() => document.querySelector('.mobile-terminal-notice')!.textContent!.includes('还没确认送达'), 'persistent unknown notice')
   }
   return { mode, runId: session.run.runId, cols: terminal!.cols, rows: terminal!.rows, fixture: true }
 }

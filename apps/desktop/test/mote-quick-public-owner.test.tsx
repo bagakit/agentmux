@@ -359,7 +359,7 @@ describe('original Quick public owner vertical slice', () => {
     expect(parseMoteQuickMode(await readFile(f.path, 'utf8'))).toEqual({ status: 'valid', defaults: {} })
     const rejected = await other.editMoteQuickDraft(before, { ...before, values: { recovery: 'on-open' } }, owner.recordIdentity()).catch(error => error)
     expect(rejected.name).toBe('Error'); expect(rejected.cause).toBe(failure)
-    expect(rejected.message).toContain('另一页面已改原配置')
+    expect(rejected.message).toContain('另一个页面已改了这份配置')
   })
   it('creates a deleted MOTE.md with empty defaults through real writers, without fabricating an unchanged document', async () => {
     const f = await original(); await rm(f.path)

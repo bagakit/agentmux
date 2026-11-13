@@ -90,7 +90,7 @@ it('executes the original public codec and spatial creation owner only after exa
   expect(f.launch.mock.calls[0]![0]).toMatchObject({ createOperationId: intent.input.operationId, workspacePath: fixturePath('original'), executorId: 'original' })
   expect(intent.input.destination).toEqual({ spaceId: f.catalog.spaces[0]!.spaceId, zoneId: f.catalog.zones[0]!.zoneId, newTab: true })
   expect(f.props.openSession).not.toHaveBeenCalled()
-  await click(button(document.body, '打开原 Agent 对话'))
+  await click(button(document.body, '打开 Agent 对话'))
   expect(f.props.openSession).toHaveBeenCalledWith(intent.agentSessionId)
 })
 it('keeps a lost creation receipt across reload and inspects the original operation without a second launch', async () => {
@@ -104,7 +104,7 @@ it('keeps a lost creation receipt across reload and inspects the original operat
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.agentCreates!.at(-1)!.input).toEqual(intent.input)
   await view.render(<MobileAgentCreate {...f.props} visible={false} />); await view.render(<MobileAgentCreate {...f.props} />)
   expect(f.launch).toHaveBeenCalledTimes(1)
-  await click(button(document.body, '核对原创建操作'))
+  await click(button(document.body, '核对上次创建'))
   expect(f.launch).toHaveBeenCalledTimes(1)
   expect(f.rpc).toHaveBeenCalledWith('space.inspect', { target: { operationId: intent.input.operationId } })
   await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.agentSessionId).toBeTruthy()) })
@@ -155,7 +155,7 @@ it('keeps another healthy Host creation independent of a pending original reques
   await act(async () => { held.reject(new Error('Original A receipt lost')); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.find(item => item.input.operationId === first.input.operationId)?.phase).toBe('unknown')) })
   expect(document.body.textContent).not.toContain('Original A receipt lost')
   await view.render(<MobileAgentCreate {...f.props} />)
-  await click(button(document.body, '核对原创建操作'))
+  await click(button(document.body, '核对上次创建'))
   await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.find(item => item.input.operationId === first.input.operationId)?.agentSessionId).toBeTruthy()) })
   expect(getDeviceWorkface().snapshot().record.agentCreates?.find(item => item.input.operationId === first.input.operationId)?.phase).toBe('unknown')
   expect(document.body.textContent).toContain('工作面持久化尚未确认')
@@ -169,7 +169,7 @@ it('creates only at the selected original Launcher through the public codec and 
   await mount(<MobileAgentCreate {...f.props} target={f.target} />)
   expect(f.launch).not.toHaveBeenCalled()
   expect(document.body.textContent).toContain('Original empty workface')
-  expect(document.body.textContent).toContain('关闭表单不会创建')
+  expect(document.body.textContent).toContain('在选定的启动位中创建 Agent')
   expect(document.querySelector<HTMLSelectElement>('[aria-label="新 Agent 空间"]')?.disabled).toBe(true)
   expect(document.querySelector<HTMLSelectElement>('[aria-label="新 Agent Zone"]')?.disabled).toBe(true)
   expect(document.querySelector('[aria-label="新 Agent Zone"]')?.textContent).not.toContain(fixturePath('original'))
@@ -197,7 +197,7 @@ it.each(['occupy', 'remove', 'unbind'] as const)('does not reroute or launch whe
   const intent = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
   expect(intent.input.destination).toEqual(f.target)
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.agentCreates!.at(-1)!.input).toEqual(intent.input)
-  await click(button(document.body, '核对原创建操作'))
+  await click(button(document.body, '核对上次创建'))
   expect(f.rpc).toHaveBeenCalledWith('space.inspect', { target: { operationId: intent.input.operationId } })
   expect(f.launch).not.toHaveBeenCalled()
 })
@@ -240,7 +240,7 @@ it('decodes only complete new-Tab or exact-Launcher intents and preserves both o
     { ...f.target, zoneId: undefined }, { ...f.target, tabId: '' },
     { ...f.target, newTab: true }, { ...original.input.destination, tabId: undefined },
     { ...f.target, newTab: false }, { ...f.target, split: 'right' }
-  ]) expect(() => parseMobileAgentCreateIntent({ ...original, input: { ...original.input, destination } })).toThrow('原 Agent 创建意图无效')
+  ]) expect(() => parseMobileAgentCreateIntent({ ...original, input: { ...original.input, destination } })).toThrow('这条 Agent 创建记录无效')
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.agentCreates).toEqual(before)
 })
 
@@ -370,7 +370,7 @@ describe('Mobile recovery usability', () => {
     await click(button(document.body, '创建 Agent'))
     await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('unknown')) })
     if (laterEdit) { await instruction('Later editing'); await instruction('Original submitted instruction') }
-    await click(button(document.body, '核对原创建操作')); await settled()
+    await click(button(document.body, '核对上次创建')); await settled()
     expect(await applyUpdate!()).toMatchObject({ status: laterEdit ? 'blocked' : 'navigating' })
     expect(f.launch).toHaveBeenCalledTimes(1)
   })
@@ -409,7 +409,7 @@ describe('Mobile recovery usability', () => {
     await click(button(document.body, '另建 Agent（保留待核对项）')); await settled()
     const later = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
     expect(later.input.operationId).not.toBe(original.input.operationId)
-    const inspect = button(document.body, '核对原创建操作'), create = button(document.body, '另建 Agent（保留待核对项）')
+    const inspect = button(document.body, '核对上次创建'), create = button(document.body, '另建 Agent（保留待核对项）')
     expect(inspect.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(inspect.classList.contains('mobile-primary')).toBe(true)
     expect(create.classList.contains('mobile-primary')).toBe(false)

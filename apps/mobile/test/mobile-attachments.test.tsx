@@ -169,7 +169,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     expect(f.submit.mock.calls[0]![0].prompt).toBe('Body only intent')
     expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([original])
     expect(f.calls.filter(call => call.method.startsWith('file.upload')).map(call => call.method)).toEqual(['file.upload'])
-    await click(button(ui.element, '核对 screen.png 原上传')); await settled('inserted')
+    await click(button(ui.element, '核对 screen.png 上传')); await settled('inserted')
     expect(f.calls.filter(call => call.method.startsWith('file.upload')).map(call => call.method)).toEqual(['file.upload', 'file.upload.inspect'])
     expect(f.calls.find(call => call.method === 'file.upload.inspect')!.params).toEqual(original.identity)
   })
@@ -200,7 +200,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const original = structuredClone(getDeviceWorkface().snapshot().record.fileUploads![0]!.identity)
     await click(button(ui.element, '取消发送准备'))
     expect(f.submit).not.toHaveBeenCalled(); expect(editor(ui.element).textContent).toBe('Original body')
-    expect(ui.element.textContent).toContain('本次发送准备已取消')
+    expect(ui.element.textContent).toContain('发送准备已取消')
     await act(async () => { gate.resolve(); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('uploaded')) })
     expect(f.submit).not.toHaveBeenCalled()
     expect(f.calls.filter(call => call.method === 'file.upload')).toHaveLength(1)
@@ -275,7 +275,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     await click(button(ui.element, '本次仅发送正文')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
     await click(button(ui.element, '本次仅发送正文'))
     expect(f.submit).toHaveBeenCalledOnce(); expect(f.calls.filter(call => call.method.startsWith('file.upload'))).toEqual([])
-    expect(ui.element.textContent).toContain('同一正文已有未确认输入')
+    expect(ui.element.textContent).toContain('同一正文已有一次还没确认的发送')
   })
 
   it('cannot use body-only to take over a message that already entered the original input owner', async () => {
@@ -312,7 +312,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const prepared = preparation.prepare('Original body').then(value => ({ value, error: null }), error => ({ value: null, error: error as Error }))
     captured.identity.name = name
     await act(async () => gate.resolve())
-    expect((await prepared).error?.message).toContain(change === 'record' ? '工作面已改变' : '另一客户端、工作面或目标')
+    expect((await prepared).error?.message).toContain(change === 'record' ? '工作面已改变' : '属于另一个页面或对话')
     if (change !== 'record') expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([{ ...retained, phase: 'inserted' }])
     expect(f.calls.filter(call => call.method.startsWith('file.upload'))).toHaveLength(1)
     expect((await f.owner.inspect(retained.identity)).status).toBe('uploaded')
@@ -477,7 +477,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     if (change === 'record') await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
     await ui.render(render(change === 'session' ? 'other' : 'session-original', change === 'client' ? { ...f.client } : f.client))
     await act(async () => { gate.resolve(); await f.forward.mock.results[0]!.value })
-    if (change === 'record') await act(async () => { await vi.waitFor(() => expect(ui.element.textContent).toContain('原附件回执尚未保全')) })
+    if (change === 'record') await act(async () => { await vi.waitFor(() => expect(ui.element.textContent).toContain('附件结果还没存到这台手机上')) })
     else await settled('uploaded')
     expect(f.submit).not.toHaveBeenCalled()
     expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
@@ -497,13 +497,13 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     await ui.render(render(change === 'session' ? 'other' : 'session-original'))
     await act(async () => { gate.resolve(file); await pending })
     expect(f.calls).toEqual([]); expect(added).toEqual([])
-    expect(ui.element.textContent).toContain('原选择')
+    expect(ui.element.textContent).toContain('它属于开始选择时的对话')
     f.sessions.set('session-original', originalSession)
     Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original' }) })
     await ui.render(render())
     await click(button(ui.element, '上传并加入 notes.md'))
     if (change === 'record') {
-      expect(f.calls).toEqual([]); expect(ui.element.textContent).toContain('设备工作面已被替换')
+      expect(f.calls).toEqual([]); expect(ui.element.textContent).toContain('这台手机上的工作面已被替换')
       expect(getDeviceWorkface().snapshot().record.fileUploads ?? []).toEqual([])
       await click(button(ui.element, '移除 notes.md 本地引用'))
       expect(ui.element.querySelector('.mobile-attachment')).toBeNull()
@@ -530,7 +530,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     f.sessions.set('session-original', originalSession); await ui.render(render())
     expect(ui.element.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQIDBA==')
     await click(button(ui.element, '上传并加入 slow.png'))
-    if (change === 'record') { expect(f.calls).toEqual([]); expect(ui.element.textContent).toContain('设备工作面已被替换') }
+    if (change === 'record') { expect(f.calls).toEqual([]); expect(ui.element.textContent).toContain('这台手机上的工作面已被替换') }
     else { await settled('inserted'); expect(f.calls[0]!.params).toMatchObject({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, dataBase64: 'AQIDBA==' }) }
   })
 
@@ -638,7 +638,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const ui = await mount(<MobileAttachments {...props} />); await act(async () => controls.current!.choose()); await click(button(ui.element, '上传并加入 notes.md'))
     await settled('unknown'); expect(getDeviceWorkface().snapshot().record.fileUploads![0]!.phase).toBe('unknown'); expect(added).toEqual([])
     await ui.render(<div />); await ui.render(<MobileAttachments {...props} />)
-    await click(button(ui.element, '核对 notes.md 原上传')); await settled('inserted')
+    await click(button(ui.element, '核对 notes.md 上传')); await settled('inserted')
     expect(f.calls.map(call => call.method)).toEqual(['file.upload', 'file.upload.inspect'])
     expect(f.calls[1]!.params).toEqual(identity(file)); expect(f.calls[1]!.params).not.toHaveProperty('dataBase64')
     expect(added).toHaveLength(1)
@@ -647,7 +647,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const f = boundFixture(), file = local(), controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
     const render = (online: boolean) => <MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected={online} promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert} pickFile={async () => file} />
     const ui = await mount(render(false)); await act(async () => controls.current!.choose()); await click(button(ui.element, '上传并加入 notes.md'))
-    expect(f.calls).toHaveLength(0); expect(ui.element.textContent).toContain('未连接')
+    expect(f.calls).toHaveLength(0); expect(ui.element.textContent).toContain('没有连接')
     await ui.render(render(true)); await click(button(ui.element, '上传并加入 notes.md')); await settled('inserted')
     expect(f.calls.map(call => call.method)).toEqual(['file.upload']); expect(added).toHaveLength(1)
   })
@@ -658,7 +658,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     vi.spyOn(getDeviceWorkface(), 'retainFileUpload').mockImplementation(() => { throw new Error('private device storage full') })
     await click(button(ui.element, '上传并加入 notes.md'))
     expect(f.calls).toHaveLength(0); expect(added).toEqual([])
-    expect(ui.element.textContent).toContain('原上传操作尚未保全')
+    expect(ui.element.textContent).toContain('上传记录还没存到这台手机上')
     expect(button(ui.element, '移除 notes.md 本地引用')).toBeDefined()
   })
   it('bounds pending local selections without taking away the existing attachment or message path', async () => {
@@ -689,12 +689,12 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); await gate.promise; return result })
     await click(button(ui.element, '上传并加入 notes.md')); await ui.render(render('later-message')); await act(async () => gate.resolve()); await settled('uploaded')
-    expect(added).toEqual([]); expect(ui.element.textContent).toContain('已在原 Mac')
+    expect(added).toEqual([]); expect(ui.element.textContent).toContain('已在 Mac')
   })
   it('uses the same exact target/content guard and never lets device persistence replace the original upload identity', () => {
     const file = local(), original: MobileFileUpload = { runtimeId: 'runtime', identity: identity(file), phase: 'unknown' }
     getDeviceWorkface().retainFileUpload(original)
-    expect(() => getDeviceWorkface().retainFileUpload({ ...original, identity: { ...original.identity, agentSessionId: 'foreign' } })).toThrow('原附件')
+    expect(() => getDeviceWorkface().retainFileUpload({ ...original, identity: { ...original.identity, agentSessionId: 'foreign' } })).toThrow('附件的目标或内容不同')
     expect(() => getDeviceWorkface().removeFileUpload(file.id)).toThrow('尚未确认')
     expect(fileUploadScopeMatches(original, { runtimeId: 'runtime', hostId: 'local', sessionId: 'session-original', runId: 'foreign' })).toBe(false)
     expect(getDeviceWorkface().snapshot().record.fileUploads![0]).toEqual(original)

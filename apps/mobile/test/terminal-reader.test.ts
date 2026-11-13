@@ -74,7 +74,7 @@ describe('original Run passive mobile reader', () => {
     const h = harness(), admission = deferred<Awaited<ReturnType<AgentMuxHostedClient['reattachAgent']>>>()
     h.attach.mockReturnValueOnce(admission.promise); h.reader.setVisible(true)
     await vi.advanceTimersByTimeAsync(6_100)
-    expect(h.reports.at(-1)).toMatchObject({ phase: 'pending', notice: expect.stringContaining('握手仍未返回') })
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'pending', notice: expect.stringContaining('终端输出还没返回') })
     const notice = h.reports.at(-1)!.notice
     h.emit({ type: 'connection-state', state: 'restored', evidence: { source: 'user', observedAt: _newTailFixtureEpoch(0, 0, 1) } })
     expect(h.reports.at(-1)?.notice).toBe(notice)
@@ -106,7 +106,7 @@ describe('original Run passive mobile reader', () => {
     expect(h.sizes).toEqual([[80, 24], [61, 19]])
     expect(h.bytes).toEqual([...encode('synthetic screen seedabcd')])
     expect(h.reader.facts().resizeRevision).toBe(1)
-    expect(h.reports.at(-1)?.message).toBe('已核实原会话的终端输出。原 Run 仍由 Mac Host 持有。')
+    expect(h.reports.at(-1)?.message).toBe('已读取终端输出。')
     h.output(103, encode('de')); await settle(); expect(h.bytes).toEqual([...encode('synthetic screen seedabcde')])
     await h.reader.dispose()
   })
@@ -204,7 +204,7 @@ describe('original Run passive mobile reader', () => {
   it('consumes the SDK authoritative reconnect snapshot and reads unknown missing output from parser cursor, not observed afterByte', async () => {
     const h = harness(snapshot(new Uint8Array(), { checkpoint: 0 })); h.reader.setVisible(true); await settle(); h.output(0, encode('original')); await settle()
     h.emit({ type: 'connection-state', state: 'lost', evidence: { source: 'user', observedAt: 1 } })
-    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: expect.stringContaining('Host 输出连接尚未恢复') })
+    expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice: expect.stringContaining('Mac 输出连接还没恢复') })
     const recovered = snapshot(encode('missed output'), { start: 8 })
     recovered.terminal = { type: 'unknown', reason: 'origin_unknown' }
     h.replay.mockResolvedValueOnce(recovered)
@@ -239,9 +239,9 @@ describe('original Run passive mobile reader', () => {
     const nextSession = { ...session(), run: { runId: 'confirmed-new-run' } }; h.setSession(nextSession)
     h.emit({ type: 'agent-session', session: nextSession })
     const notice = h.reports.at(-1)!.notice
-    expect(notice).toContain('画面来自上一个 Run')
+    expect(notice).toContain('画面来自上一次运行')
     h.emit({ type: 'terminal-snapshot', ...snapshot(new Uint8Array(), { checkpoint: 3 }), afterByte: 3 }); await settle()
-    await vi.waitFor(() => expect(h.reports.at(-1)?.message).toContain('已核实原会话的终端输出'))
+    await vi.waitFor(() => expect(h.reports.at(-1)?.message).toContain('已读取终端输出'))
     expect(h.reports.at(-1)).toMatchObject({ phase: 'reading', notice })
     const nextSnapshot = snapshot(encode('NEW'), { checkpoint: 0 }); nextSnapshot.run.runId = 'confirmed-new-run'
     if (nextSnapshot.terminal.type === 'basic-vt') nextSnapshot.terminal.checkpoint.runId = 'confirmed-new-run'
@@ -257,7 +257,7 @@ describe('original Run passive mobile reader', () => {
     h.output(10, encode('old-tail')); await vi.advanceTimersByTimeAsync(6_100)
     const nextSession = { ...session(), run: { runId: 'confirmed-new-run' } }; h.setSession(nextSession)
     h.emit({ type: 'agent-session', session: nextSession })
-    expect(h.reports.at(-1)?.message).toContain('画面来自上一个 Run')
+    expect(h.reports.at(-1)?.message).toContain('画面来自上一次运行')
     expect(h.reader.facts().cursor).toBe(18)
     const nextSnapshot = snapshot(encode('NEW')); nextSnapshot.run.runId = 'confirmed-new-run'
     h.attach.mockResolvedValueOnce({ session: nextSession, attachment: nextSnapshot })

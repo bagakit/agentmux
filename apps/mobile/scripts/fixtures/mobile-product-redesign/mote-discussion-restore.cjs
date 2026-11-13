@@ -10,7 +10,7 @@ module.exports=async({win,read,until,tap,button,capture,result,phase})=>{
     await until('mobileProductScene.facts().record.conversation.drafts.some(([key,text])=>key.includes("session-waiting")&&text.includes("重启后"))&&mobileProductScene.facts().record.presentation?.moteView?.directAgent===true')
     await capture('13-mobile-thread-before-process-restart')
   }else{
-    await until('mobileProductScene.facts().record.selectedSessionId==="session-waiting"&&document.querySelector(".mobile-mote-thread-return")?.innerText.includes("原 Agent 对话")')
+    await until('mobileProductScene.facts().record.selectedSessionId==="session-waiting"&&document.querySelector(".mobile-mote-thread-return")?.innerText.includes("Agent 对话 · ")')
     await until('document.querySelector("[contenteditable=true]")?.textContent==="原 thread 草稿，重启后仍回到这里。"')
     const facts=await read('mobileProductScene.facts()')
     assert.deepEqual(facts.record.presentation.moteView,{spaceId:'mote-original',section:'threads',detail:true,directAgent:true})

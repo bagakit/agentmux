@@ -94,7 +94,7 @@ async function connect() {
   }
   release = client.onEvent(event => {
     if (event.type !== 'connection-state') return
-    connection = { state: event.state === 'restored' ? 'connected' : 'disconnected', message: event.state === 'restored' ? '已连接原 Host' : '连接中断；原会话和草稿保留。' }
+    connection = { state: event.state === 'restored' ? 'connected' : 'disconnected', message: event.state === 'restored' ? '已连接 Mac' : '连接中断，正在自动重连。' }
     operations.push({ type: 'connection', state: connection.state }); publish()
   })
   connection = { state: 'connected', message: '已连接原 Host' }; publish()
@@ -115,7 +115,7 @@ Object.assign(window, {
       connection, visible, operations, reads, conversationReads, copies, metrics:{firstFrame,frames,longTasks,bodyMounts:[...bodyMounts]}, device: getDeviceWorkface().snapshot().record,
       selection: document.getSelection()?.toString(), text: document.querySelector('.mobile-conversation')?.textContent } },
     async disconnect() {
-      release(); connection = { state: 'disconnected', message: '连接中断；原会话和草稿保留。' }; publish()
+      release(); connection = { state: 'disconnected', message: '连接中断，正在自动重连。' }; publish()
       await client?.dispose(); await bridge.dispose(); operations.push({ type: 'disconnect' })
     },
     async reconnect() { await connect(); operations.push({ type: 'reconnect' }) },

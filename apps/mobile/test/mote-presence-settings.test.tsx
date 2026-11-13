@@ -76,13 +76,13 @@ it('actual Mobile Profile settings save default30min presence through the origin
   const f = original(), view = await f.open(), input = view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!
   expect(input.value).toBe('30')
   expect(view.element.querySelector<HTMLInputElement>('[aria-label="启用 Mote 自动维持"]')!.checked).toBe(true)
-  expect(view.element.textContent).toContain('原心跳安排已暂停')
+  expect(view.element.textContent).toContain('心跳安排已暂停')
   await minutes(view.element, '7'); await submit(view.element)
-  await wait(() => expect(view.element.textContent).toContain('原 Quick 配置已保存'))
+  await wait(() => expect(view.element.textContent).toContain('快捷配置已保存'))
   const saves = f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.save')
   expect(saves).toHaveLength(1)
   expect(saves[0]![1]).toMatchObject({ kind: 'quick', target: f.target, baseline: { document: f.document, defaults: f.savedDefaults }, values: { presence: { enabled: true, intervalMs: 420000 } } })
-  expect(view.element.querySelector('[data-mote-maintenance-status]')?.textContent).toBe('原心跳安排已暂停')
+  expect(view.element.querySelector('[data-mote-maintenance-status]')?.textContent).toBe('心跳安排已暂停')
   expect(f.rpc.mock.calls.every(([method]) => ['space.ls', 'space.mote.preferences.read', 'space.mote.preferences.save', 'space.mote.dialogue.read', 'space.state'].includes(method))).toBe(true)
   expect(f.f.submit).not.toHaveBeenCalled()
 })
@@ -107,7 +107,7 @@ it('retains an unknown presence save and later interval under its original opera
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.save')).toHaveLength(1))
   const packet = structuredClone(f.rpc.mock.calls.find(([method]) => method === 'space.mote.preferences.save')![1])
   pending.reject(new Error('Original save receipt unavailable'))
-  await wait(() => expect(view.element.textContent).toContain('原保存未确认'))
+  await wait(() => expect(view.element.textContent).toContain('保存还没确认'))
   await minutes(view.element, '47')
   await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.values.presence?.intervalMs).toBe(2820000))
   const originalDraft = getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!
@@ -133,7 +133,7 @@ it('presents unconfirmed actual maintenance independently from readable settings
 it('resumes only the explicit original paused arrangement after retaining its exact operation and current owner fence', async () => {
   const f = original(), view = await f.open()
   expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume')).toHaveLength(0)
-  await click(button(view.element, '明确恢复原心跳安排'))
+  await click(button(view.element, '恢复心跳安排'))
   await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.maintenanceAttempts?.[0]?.phase).toBe('confirmed'))
   const call = f.rpc.mock.calls.find(([method]) => method === 'schedule.resume')!
   expect(call[1]).toEqual({ scheduleId: 'original-schedule', expectedRevision: 7, operationId: expect.any(String) })
@@ -146,14 +146,14 @@ it('resumes only the explicit original paused arrangement after retaining its ex
 
 it('inspects an unknown original resume without replay and keeps its read observation separate from a write durability receipt', async () => {
   const f = original(); f.loseResumeReceipt(); const view = await f.open()
-  await click(button(view.element, '明确恢复原心跳安排'))
-  await wait(() => expect(view.element.textContent).toContain('原恢复回执未确认'))
+  await click(button(view.element, '恢复心跳安排'))
+  await wait(() => expect(view.element.textContent).toContain('恢复还没确认'))
   const packet = structuredClone(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.maintenanceAttempts![0]!.input)
   await view.render(null); await view.render(f.render()); await click(button(view.element, '编辑快捷配置'))
-  await wait(() => expect(view.element.textContent).toContain('原恢复待核对'))
-  const summary = [...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('原心跳恢复请求'))!
-  await click(summary); await click(button(view.element, '核对原恢复请求'))
-  await wait(() => expect(view.element.textContent).toContain('已读到原恢复记录'))
+  await wait(() => expect(view.element.textContent).toContain('恢复待核对'))
+  const summary = [...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('心跳恢复请求'))!
+  await click(summary); await click(button(view.element, '核对这次恢复'))
+  await wait(() => expect(view.element.textContent).toContain('已读到恢复记录'))
   expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume')).toHaveLength(1)
   expect(f.rpc.mock.calls.find(([method]) => method === 'schedule.inspect')![1]).toEqual({ operationId: packet.operationId })
   const originalResume = getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.maintenanceAttempts![0]!
@@ -164,8 +164,8 @@ it('inspects an unknown original resume without replay and keeps its read observ
 
 it('presents the actual stopped arrangement before the compatibility paused status without offering resume or creating a replacement', async () => {
   const f = original(); f.stopArrangement(); const view = await f.open()
-  expect(view.element.querySelector('[data-mote-maintenance-status]')?.textContent).toBe('原安排已停止')
-  expect([...view.element.querySelectorAll('button')].some(node => node.textContent === '明确恢复原心跳安排')).toBe(false)
+  expect(view.element.querySelector('[data-mote-maintenance-status]')?.textContent).toBe('心跳安排已停止')
+  expect([...view.element.querySelectorAll('button')].some(node => node.textContent === '恢复心跳安排')).toBe(false)
   expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume' || method === 'schedule.create')).toHaveLength(0)
   await minutes(view.element, '20'); await submit(view.element)
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.save')).toHaveLength(1))
@@ -175,15 +175,15 @@ it('presents the actual stopped arrangement before the compatibility paused stat
 
 it('inspects the same durable original resume across same runtime process restart without replay or rewriting its original source', async () => {
   const f = original(); f.loseResumeReceipt(); const view = await f.open()
-  await click(button(view.element, '明确恢复原心跳安排'))
+  await click(button(view.element, '恢复心跳安排'))
   await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.maintenanceAttempts?.[0]?.phase).toBe('unknown'))
   const retained = structuredClone(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.maintenanceAttempts![0]!)
   f.f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-settings-runtime', ownerInstanceId: 'replacement-settings-process', availability: 'connected' }) as ReturnType<AgentMuxHostedClient['runtimeOwnerIdentity']>
   await view.render(null); await view.render(f.render()); await click(button(view.element, '编辑快捷配置'))
-  await wait(() => expect(view.element.textContent).toContain('原恢复待核对'))
-  await click([...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('原心跳恢复请求'))!)
-  await click(button(view.element, '核对原恢复请求'))
-  await wait(() => expect(view.element.textContent).toContain('已读到原恢复记录'))
+  await wait(() => expect(view.element.textContent).toContain('恢复待核对'))
+  await click([...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('心跳恢复请求'))!)
+  await click(button(view.element, '核对这次恢复'))
+  await wait(() => expect(view.element.textContent).toContain('已读到恢复记录'))
   expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume')).toHaveLength(1)
   const inspection = f.rpc.mock.calls.find(([method]) => method === 'schedule.inspect')!
   expect(inspection[1]).toEqual({ operationId: retained.input.operationId })
@@ -196,13 +196,13 @@ it('inspects the same durable original resume across same runtime process restar
 
 it('does not send an unknown original resume to a different runtime even through the same client object', async () => {
   const f = original(); f.loseResumeReceipt(); const view = await f.open()
-  await click(button(view.element, '明确恢复原心跳安排'))
+  await click(button(view.element, '恢复心跳安排'))
   await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.maintenanceAttempts?.[0]?.phase).toBe('unknown'))
   const retained = structuredClone(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.maintenanceAttempts![0]!)
   f.f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'different-settings-runtime', ownerInstanceId: 'different-settings-process', availability: 'connected' }) as ReturnType<AgentMuxHostedClient['runtimeOwnerIdentity']>
-  await click([...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('原心跳恢复请求'))!)
-  await click(button(view.element, '核对原恢复请求'))
-  await wait(() => expect(view.element.textContent).toContain('原安排的连接或设备归属尚未确认'))
+  await click([...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('心跳恢复请求'))!)
+  await click(button(view.element, '核对这次恢复'))
+  await wait(() => expect(view.element.textContent).toContain('心跳安排对应的连接或设备还没确认'))
   expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume')).toHaveLength(1)
   expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.inspect')).toHaveLength(0)
   expect(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.maintenanceAttempts![0]).toEqual(retained)

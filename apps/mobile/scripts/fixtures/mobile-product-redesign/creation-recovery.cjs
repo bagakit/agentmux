@@ -18,9 +18,9 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
     result.operations.push({ action: 'original-creation-hierarchy', width, height, observed })
     await capture(name)
   }
-  await button('核对原创建操作', '.mobile-agent-create')
+  await button('核对上次创建', '.mobile-agent-create')
   await until('mobileProductScene.facts().calls.some(call=>call.method === "space.inspect" && call.params.target?.operationId === "original-unconfirmed-creation")')
-  await until(`document.querySelector('.mobile-create-receipt [role="status"]')?.textContent.includes('原创建回执尚未确认')`)
+  await until(`document.querySelector('.mobile-create-receipt [role="status"]')?.textContent.includes('创建还没确认')`)
   await read('document.querySelector(".mobile-agent-create").scrollTop=0')
   const feedback = await read(`(()=>{const card=document.querySelector('.mobile-create-receipt'),notice=card.querySelector('[role="status"]'),rect=notice.getBoundingClientRect();return {operationId:mobileProductScene.facts().record.agentCreates[0].input.operationId,text:notice.textContent,rect:rect.toJSON(),viewport:{width:innerWidth,height:innerHeight},visible:rect.top>=0&&rect.bottom<=innerHeight,unique:document.querySelectorAll('.mobile-agent-create [role="status"]').length===1}})()`)
   assert.equal(feedback.visible, true, 'Original inspection feedback is readable beside its action in the narrow current viewport')

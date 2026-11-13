@@ -96,10 +96,10 @@ it('theme changes keep the exact durable unknown terminal intent and original re
   const pending = JSON.stringify({ version: 1, intentId: 'original-intent', runId: 'original-run', kind: 'input', createdAt: fixtureEpoch(0, 0, 12) })
   localStorage.setItem(key, pending)
   const view = await mount(), original = canvases[0]!
-  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('重启前的终端操作回执未确认')
+  expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('重启前的终端操作还没确认送达')
   await changeDrawings(); await click(button('终端阅读与状态'))
   expect(document.querySelector('.mobile-terminal-details')?.textContent).toContain('original-intent')
-  expect([...document.querySelectorAll('button')].some(button => button.textContent === '已在原会话核对，继续新输入')).toBe(true)
+  expect([...document.querySelectorAll('button')].some(button => button.textContent === '已核对，继续输入')).toBe(true)
   expect(localStorage.getItem(key)).toBe(pending); expect(canvases[0]).toBe(original)
   expect(view.write).not.toHaveBeenCalled(); expect(view.resize).not.toHaveBeenCalled()
 })

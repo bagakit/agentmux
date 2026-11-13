@@ -98,7 +98,7 @@ it('retains the actual SDK-only fallback row and original DOM across menu suspen
   await click(button(f.element, '刷新空间目录'))
   expect(list.contains(row)).toBe(true); expect(row.querySelector('.mobile-agent-row__open')).toBe(open)
   await click(f.element.querySelector('.mobile-directory-notice')!)
-  expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('原会话元信息目录暂不可读')
+  expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('对话信息暂时读不到')
   expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('original catalog unavailable')
   await click(button(document.body, '关闭目录信息'))
   await click(open)

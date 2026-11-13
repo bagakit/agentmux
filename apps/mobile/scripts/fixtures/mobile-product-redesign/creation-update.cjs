@@ -39,7 +39,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await read('document.querySelector(".mobile-web-update-settings").scrollIntoView({block:"center"})')
   await capture('creation-confirmed-update-preflight')
   await read('mobileProductScene.failCreationUpdatePreflight()')
-  await until('document.querySelector(".mobile-web-update-settings").textContent.includes("原连接或新版入口暂时无法确认")')
+  await until('document.querySelector(".mobile-web-update-settings").textContent.includes("连接或新版入口暂时无法确认")')
   const final = await read('({href:location.href,saved:mobileProductScene.readSavedWorkface(),facts:mobileProductScene.facts()})')
   assert.equal(final.href, original.href, 'The original page remains after the explicit preflight rejection')
   assert.equal(final.saved.issue, null)

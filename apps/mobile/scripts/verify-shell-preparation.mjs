@@ -56,7 +56,7 @@ const mutations = [
     from: "if (!value || Array.isArray(value) || value.version !== 1\n      || !(value.selectedSessionId === null || typeof value.selectedSessionId === 'string' && value.selectedSessionId.length > 0)\n      || typeof value.hostUrl !== 'string' || !(value.panel === 'conversation' || value.panel === 'sessions' || value.panel === 'terminal')) {",
     to: 'if (!value || value.version !== 1) {' },
   { id: 'storage-failure-claims-saved', file: 'src/MobileApp.tsx', test: 'test/shell-navigation.test.tsx',
-    from: "setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。')",
+    from: "setNotice('这台设备暂时无法保存导航位置，当前阅读不受影响。')",
     to: "setNotice('Mac 地址已保存在这台设备。连接与设备授权尚未确认，请在 Mac 上完成授权。')" },
   { id: 'unconfirmed-hero-claims-running', file: 'src/MobileApp.tsx', test: 'test/shell-navigation.test.tsx',
     from: 'Agent 与会话由 Mac 管理。</p>', to: '草稿在手边，Agent 仍在原处工作。</p>' }

@@ -12,7 +12,7 @@ function Update() { apply = useMobileWebUpdateSafety().apply; return null }
 const connection = async () => () => true
 const goal = { id: 'goal-original', updatedAt: 1, assigneeSessionIds: [], supervisorSessionId: null } as any
 async function input(view: HTMLElement) {
-  const element = view.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')!
+  const element = view.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, 'session-original'); element.dispatchEvent(new Event('input', { bubbles: true })) })
 }
 afterEach(async () => {
@@ -34,15 +34,15 @@ it('retains the exact request when another page replaces the workface, and refus
   await act(async () => { await owner.replaceBackup(emptyDeviceWorkface()) })
   expect(owner.recordIdentity()).not.toBe(priorRecordId)
   await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('尚未保存在当前设备工作面') })
-  await click(button(view.element, '保存原设备工作面'))
-  expect(view.element.textContent).toContain('设备工作面身份已变化')
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作还没存到这台手机') })
+  await click(button(view.element, '保存设备记录'))
+  expect(view.element.textContent).toContain('这台手机的工作面已更换')
   expect(owner.snapshot().record.goalOperationRecords ?? []).toEqual([])
   const replacement = localStorage.getItem('agentmux-mobile-workface-v1')
-  await click(button(view.element, '复制原请求'))
+  await click(button(view.element, '复制请求'))
   await click(button(view.element, '已另行保全，移除本页副本…'))
   await click(button(view.element, '确认已保全并移除本页副本'))
-  await vi.waitFor(() => expect(view.element.textContent).toContain('设备原记录状态未知'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('设备记录状态未知'))
   expect(localStorage.getItem('agentmux-mobile-workface-v1')).toBe(replacement)
   expect(rpc).toHaveBeenCalledTimes(1)
 })
@@ -58,7 +58,7 @@ it('sends the original Goal request without waiting for bookkeeping and removes 
   await input(view.element); await click(button(view.element, '关联会话'))
   expect(rpc).toHaveBeenCalledTimes(1)
   expect(updated).toHaveBeenCalledOnce()
-  expect(view.element.textContent).toContain('会话已关联到原目标')
+  expect(view.element.textContent).toContain('会话已关联到这个目标')
   expect(button(view.element, '关联会话').disabled).toBe(false)
   expect(await apply()).toMatchObject({ status: 'blocked' })
   await act(async () => { release.resolve(); await release.promise })
@@ -73,8 +73,8 @@ it('does not misclassify a confirmed Goal receipt when the local presentation ca
   const rpc = vi.fn(async () => ({ goal })); f.client.forwardRpc = rpc as any
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={connection}><Update /><MobileGoalOperationSafety /><MobileGoalLinks client={f.client} goal={goal} updated={() => { throw Error('local presentation failed') }} /></MobileWebUpdateSafetyProvider>)
   await input(view.element); await click(button(view.element, '关联会话'))
-  expect(view.element.textContent).toContain('原关联已收到回执')
-  expect(view.element.textContent).not.toContain('关联回执未确认')
+  expect(view.element.textContent).toContain('Mac 已确认关联')
+  expect(view.element.textContent).not.toContain('Mac 还没确认关联')
   await vi.waitFor(() => expect(owner.snapshot().record.goalOperationRecords ?? []).toEqual([]))
   expect(rpc).toHaveBeenCalledOnce()
 })
@@ -89,7 +89,7 @@ it('immediately reports the unknown receipt and restores the action when bookkee
   const rpc = vi.fn(async () => { throw Error('original receipt unavailable') }); f.client.forwardRpc = rpc as any
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={connection}><Update /><MobileGoalOperationSafety /><MobileGoalLinks client={f.client} goal={goal} updated={() => {}} /></MobileWebUpdateSafetyProvider>)
   await input(view.element); await click(button(view.element, '关联会话'))
-  expect(view.element.textContent).toContain('关联回执未确认')
+  expect(view.element.textContent).toContain('Mac 还没确认关联')
   expect(button(view.element, '关联会话').disabled).toBe(false)
   expect(await apply()).toMatchObject({ status: 'blocked' })
   await act(async () => { release.resolve(); await release.promise })
@@ -108,7 +108,7 @@ it.each(['success', 'unknown', 'presentation-error'] as const)('shows assignment
   const updated = vi.fn(() => { if (outcome === 'presentation-error') throw Error('local presentation failed') })
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={connection}><Update /><MobileGoalOperationSafety /><MobileGoalActions client={f.client} goal={goal} visible updated={updated} deleted={() => {}} /></MobileWebUpdateSafetyProvider>)
   await click(button(view.element, '保存负责人分配'))
-  expect(view.element.textContent).toContain(outcome === 'success' ? '负责人分配已保存' : outcome === 'unknown' ? '分配回执未确认' : '原操作已收到回执')
+  expect(view.element.textContent).toContain(outcome === 'success' ? '负责人分配已保存' : outcome === 'unknown' ? 'Mac 还没确认分配' : 'Mac 已确认操作')
   expect(button(view.element, '保存负责人分配').disabled).toBe(false)
   if (outcome === 'presentation-error') expect(view.element.textContent).not.toContain('分配回执未确认')
   expect(rpc.mock.calls.filter(([method]) => method === 'goal.assign')).toHaveLength(1)

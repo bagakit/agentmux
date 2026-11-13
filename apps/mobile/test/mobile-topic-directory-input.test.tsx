@@ -42,5 +42,5 @@ it('keeps the exact organization draft and native attrs after an unknown origina
   expect(rpc).toHaveBeenCalledWith('topic.category.create', { categoryId: expect.any(String), title: '新的工作记录' })
   expect(field.value).toBe('  新的工作记录  '); expect(element.textContent).toContain('操作未确认')
   await click(element, '保留草稿并返回'); await click(element, '继续管理草稿'); expect(field.value).toBe('  新的工作记录  ')
-  await click(element, '检查原操作结果'); expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'topic.category.create')).toHaveLength(1)
+  await click(element, '检查操作结果'); expect(vi.mocked(rpc).mock.calls.filter(call => call[0] === 'topic.category.create')).toHaveLength(1)
 })

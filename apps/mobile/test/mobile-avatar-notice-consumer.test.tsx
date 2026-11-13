@@ -114,11 +114,11 @@ it.each(['mote', 'space'] as const)('%s missing original appearance stays unknow
   await open(kind, f)
   await waitForElement(document, '.mobile-avatar-notice')
   const item = await reveal()
-  expect(item.textContent).toContain('尚未确认')
+  expect(item.textContent).toContain('还没确认')
   const before = (f.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === f.method && params?.target?.spaceId === spaceId).length
   await click(button(item, '重新读取头像'))
   await vi.waitFor(() => expect((f.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === f.method && params?.target?.spaceId === spaceId).length).toBeGreaterThan(before))
-  expect(notice().textContent).toContain('尚未确认')
+  expect(notice().textContent).toContain('还没确认')
   expect(f.submit).not.toHaveBeenCalled()
 })
 

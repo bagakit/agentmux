@@ -12,7 +12,7 @@ const variants: Record<string, { file: string; before: string; after: string }> 
   "setup-owner-host": { file: "/src/navigation/MobileMoteMainActions.tsx", before: "const input = { target, creation: { hostId: 'local', operationId: id } }", after: "const input = { target, creation: { hostId: target.expectedResource.hostId, operationId: id } }" },
   "setup-configured-executor": { file: "/src/navigation/MobileMoteMainActions.tsx", before: "item.id === reading.preferences.defaults?.executorId", after: "true" },
   'presence-interval': { file: '/src/navigation/MobileMoteQuickEditor.tsx', before: 'intervalMs: Number(value) * 60000', after: 'intervalMs: DEFAULT_MOTE_PRESENCE.intervalMs' },
-  'paused-presentation': { file: '/src/navigation/MobileMoteQuickEditor.tsx', before: "paused: '原心跳安排已暂停'", after: "paused: '已安排自动心跳'" },
+  'paused-presentation': { file: '/src/navigation/MobileMoteQuickEditor.tsx', before: "paused: '心跳安排已暂停'", after: "paused: '已安排自动心跳'" },
   'work-host-route': { file: '/src/navigation/MobileMoteThreads.tsx', before: 'hostId: source.origin.hostId, sourceMessageId: source.origin.messageId', after: "hostId: 'local', sourceMessageId: source.origin.messageId" },
   'work-host-receipt': { file: '/src/navigation/MobileMoteThreads.tsx', before: 'if (value.hostId !== source.origin.hostId)', after: 'if (false)' },
   'accepted-page-target': { file: '/src/conversation/MobileConversationSurface.tsx', before: 'target={!moteDirectAgent && pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined}', after: 'target={moteTarget}' },

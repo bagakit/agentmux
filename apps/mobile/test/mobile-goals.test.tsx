@@ -66,7 +66,7 @@ describe('Mobile Goals original owner slice', () => {
     expect(element.querySelector('textarea')).not.toBeNull()
     await act(async () => back!())
     expect(element.querySelector('textarea')).toBeNull()
-    expect(element.querySelector('[aria-label="目标详情"]')?.textContent).toContain('当前目标尚未读回')
+    expect(element.querySelector('[aria-label="目标详情"]')?.textContent).toContain('还没读到这个目标')
   })
   it('does not apply a late same-SID B presentation to the original A Goal after the same client rebinds Runtime and owner instance', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
@@ -81,7 +81,7 @@ describe('Mobile Goals original owner slice', () => {
     expect(progress.textContent).not.toContain('B项目')
     await view.click('打开关联会话')
     expect(view.openSession).not.toHaveBeenCalled()
-    expect(progress.textContent).toContain('未将同名 Session 当作原会话')
+    expect(progress.textContent).toContain('当前连接的 Mac 与这个目标不一致')
   })
   it('uses original public roles/names and all typed dispatch stages without inferring current execution from activity or the last record', async () => {
     const dispatch = { agentSessionId: 'session-exact', hostId: 'original-execution-host', runId: 'original-run', execution: 'finite' as const, prompt: '原请求正文', preparedAt: 10 }
@@ -95,7 +95,7 @@ describe('Mobile Goals original owner slice', () => {
     const progress = view.element.querySelector('[aria-label="目标协作与输入记录"]')!
     expect(progress.textContent).toContain('负责人：原 Agent 名称')
     expect(progress.textContent).toContain('Supervisor：原 Agent 名称')
-    for (const text of ['4 条原输入记录 · 1 条已确认', '已准备，尚未提交', '已提交，确认未到', '原输入已确认', '原输入回执未知', '不推断唯一当前执行', '输入确认不代表工作完成或结果接受']) expect(progress.textContent).toContain(text)
+    for (const text of ['4 条输入记录 · 1 条已确认', '已准备，尚未提交', '已提交，确认未到', '输入已确认', '输入未确认', '不推断唯一当前执行', '输入确认不代表工作完成或结果接受']) expect(progress.textContent).toContain(text)
     for (const value of goal.dispatches) expect(progress.textContent).toContain(value.operationId)
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'space.ls')).toHaveLength(1)
     expect(view.forwardRpc.mock.calls.some(([method]) => ['goal.start', 'goal.update'].includes(method))).toBe(false)
@@ -147,7 +147,7 @@ describe('Mobile Goals original owner slice', () => {
     await view.click('原目标原项目 · 已完成原用户意图')
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { goalId: 'goal-original' })
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.decisions', { goalId: 'goal-original' })
-    for (const text of ['原用户意图', '真实成功标准', '重要未决问题', '目标尚未确认', '结果未知', 'src/result.ts:42', '旧报告标准 criterion-original', '尚不能对应当前目标标准', '结果尚未接受', '原决策', '原活动']) expect(view.element.textContent).toContain(text)
+    for (const text of ['原用户意图', '真实成功标准', '重要未决问题', '目标尚未确认', '结果未知', 'src/result.ts:42', '旧报告标准 criterion-original', '尚不能对应当前目标标准', '尚未验收', '原决策', '原活动']) expect(view.element.textContent).toContain(text)
     await view.click('打开关联会话'); expect(view.openSession).toHaveBeenCalledWith('session-exact', { name: '原 Agent 名称', project: '原 Agent 项目' })
     expect(view.forwardRpc.mock.calls.every(([method]) => !['goal.start', 'goal.create', 'agent.send'].includes(method))).toBe(true)
   })
@@ -155,7 +155,7 @@ describe('Mobile Goals original owner slice', () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
     await view.change('工作状态', 'blocked')
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: 'goal-original', patch: { status: 'blocked' }, expectedUpdatedAt: 2, operationId: expect.any(String) })
-    expect(view.element.textContent).toContain('目标尚未确认'); expect(view.element.textContent).toContain('结果尚未接受')
+    expect(view.element.textContent).toContain('目标尚未确认'); expect(view.element.textContent).toContain('尚未验收')
     await view.change('优先级', 'urgent')
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.update', { goalId: 'goal-original', patch: { priority: 'urgent' }, expectedUpdatedAt: 3, operationId: expect.any(String) })
     await view.click('返回目标列表'); expect(view.element.textContent).toContain('原项目 · 受阻')
@@ -177,7 +177,7 @@ describe('Mobile Goals original owner slice', () => {
     view.forwardRpc.mockRejectedValueOnce(new Error('receipt lost'))
     await act(async () => { const textarea = view.element.querySelector('article textarea')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '待保存正文'); textarea.dispatchEvent(new Event('input', { bubbles: true })) })
     await act(async () => view.element.querySelector('article form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-    expect(view.element.textContent).toContain('保存回执未确认'); expect(view.element.querySelector('article textarea')?.value).toBe('待保存正文')
+    expect(view.element.textContent).toContain('保存还没确认'); expect(view.element.querySelector('article textarea')?.value).toBe('待保存正文')
     await view.click('读取当前目标核对')
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.update')).toHaveLength(1)
     expect(view.element.querySelector('article textarea')).not.toBeNull()
@@ -260,11 +260,11 @@ describe('Mobile Goals original owner slice', () => {
   })
   it('writes real original Project and Session links with exact identities', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
-    const input = view.element.querySelector('[aria-label="关联 Session ID"]') as HTMLInputElement
+    const input = view.element.querySelector('[aria-label="关联会话 ID"]') as HTMLInputElement
     await view.text(input, 'new-session-exact')
     await act(async () => input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.link-session', { goalId: original.id, sessionId: 'new-session-exact', operationId: expect.any(String) }, undefined, goalOwner)
-    const project = view.element.querySelector('[aria-label="关联 Project ID"]') as HTMLInputElement
+    const project = view.element.querySelector('[aria-label="关联项目 ID"]') as HTMLInputElement
     await view.text(project, 'new-project-exact')
     await act(async () => project.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.link-project', { goalId: original.id, projectId: 'new-project-exact', operationId: expect.any(String) }, undefined, goalOwner)
@@ -274,8 +274,8 @@ describe('Mobile Goals original owner slice', () => {
     const view = await mount([{ ...original, grounding: { ...original.grounding!, acceptedAt: 5 } }])
     await view.click('原目标原项目 · 已完成原用户意图')
     const result = view.element.querySelector('[aria-label="结果与证据"]')!
-    expect(result.textContent).toContain('旧报告曾被接受，不代表当前结果接受')
-    expect(result.textContent).not.toContain('真实成功标准'); expect(result.textContent).not.toContain('当前结果已接受')
+    expect(result.textContent).toContain('旧报告曾通过验收，当前结果尚未验收')
+    expect(result.textContent).not.toContain('真实成功标准'); expect(result.textContent).not.toContain('已验收')
   })
   it('saves only edited body fields and keeps unrelated remote title changes', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图'); await view.click('编辑目标正文')
@@ -292,7 +292,7 @@ describe('Mobile Goals original owner slice', () => {
     const all = Array.from({ length: 1001 }, (_, index) => ({ ...original, id: `original-${index}`, title: `原目标 ${index}`, sessionIds: [] }))
     const view = await mount(all)
     expect(view.element.querySelectorAll('.mobile-goals-list li')).toHaveLength(1000)
-    expect(view.element.textContent).toContain('目录已达到原服务单次返回范围')
+    expect(view.element.textContent).toContain('目录只读到前 1000 个目标')
     await view.text(view.element.querySelector('[aria-label="打开 Goal ID"]') as HTMLInputElement, 'original-1000')
     await act(async () => view.element.querySelector('[aria-label="打开 Goal ID"]')!.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(view.element.querySelector('h2')?.textContent).toBe('原目标 1000')
@@ -312,20 +312,20 @@ describe('Mobile Goals original owner slice', () => {
   })
   it('preserves unknown link operation and exact input through another goal and hide/show', async () => {
     const view = await mount([original, { ...original, id: 'second', title: '第二目标' }]); await view.click('原目标原项目 · 已完成原用户意图')
-    const input = view.element.querySelector('[aria-label="关联 Session ID"]') as HTMLInputElement
+    const input = view.element.querySelector('[aria-label="关联会话 ID"]') as HTMLInputElement
     await view.text(input, 'pending-exact-session')
     view.forwardRpc.mockRejectedValueOnce(new Error('unknown link receipt'))
     await act(async () => input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     const call = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.link-session')!
     await view.click('返回目标列表'); await view.click('第二目标原项目 · 已完成原用户意图'); await view.click('返回目标列表'); await view.click('原目标原项目 · 已完成原用户意图')
     await view.render(false); await view.render(true)
-    expect(view.element.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')?.value).toBe('pending-exact-session')
+    expect(view.element.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')?.value).toBe('pending-exact-session')
     expect(view.element.textContent).toContain('unknown link receipt'); expect(view.element.textContent).toContain(call[1].operationId)
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.link-session')).toHaveLength(1)
   })
   it('does not roll back newer attributes when an older link receipt arrives later', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
-    const input = view.element.querySelector('[aria-label="关联 Session ID"]') as HTMLInputElement
+    const input = view.element.querySelector('[aria-label="关联会话 ID"]') as HTMLInputElement
     await view.text(input, 'new-session-exact')
     let resolve!: (value: any) => void
     const actual = view.forwardRpc.getMockImplementation()!
@@ -341,11 +341,11 @@ describe('Mobile Goals original owner slice', () => {
   })
   it('assigns exact public responsible Sessions without starting, starts only explicitly and records actual handoff links', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
-    const assignees = view.element.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement
+    const assignees = view.element.querySelector('[aria-label="负责人会话 ID"]') as HTMLInputElement
     await view.text(assignees, 'session-exact, session-explicit'); await view.click('保存负责人分配')
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.assign', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 2, start: false, operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
-    await view.text(view.element.querySelector('[aria-label="执行 Session ID"]') as HTMLInputElement, 'session-explicit')
+    await view.text(view.element.querySelector('[aria-label="执行或交接的会话 ID"]') as HTMLInputElement, 'session-explicit')
     await view.click('开始执行此目标')
     expect(view.forwardRpc).toHaveBeenCalledWith('goal.start', { goalId: original.id, sessionId: 'session-explicit', operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.element.querySelector<HTMLSelectElement>('[aria-label="工作状态"]')?.value).toBe('in_progress')
@@ -369,7 +369,7 @@ describe('Mobile Goals original owner slice', () => {
   })
   it('does not resurrect a confirmed deleted Goal from older reads or link receipts', async () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
-    const link = view.element.querySelector('[aria-label="关联 Session ID"]') as HTMLInputElement
+    const link = view.element.querySelector('[aria-label="关联会话 ID"]') as HTMLInputElement
     await view.text(link, 'late-session')
     let resolve!: (value: any) => void
     view.forwardRpc.mockImplementationOnce(() => new Promise(done => { resolve = done }))
@@ -391,17 +391,17 @@ describe('Mobile Goals original owner slice', () => {
   })
   it('retains the exact original action target and operation ID after editing inputs, switching goals and hide/show', async () => {
     const view = await mount([original, { ...original, id: 'second', title: '第二目标' }]); await view.click('原目标原项目 · 已完成原用户意图')
-    const input = view.element.querySelector('[aria-label="执行 Session ID"]') as HTMLInputElement
+    const input = view.element.querySelector('[aria-label="执行或交接的会话 ID"]') as HTMLInputElement
     await view.text(input, 'original-request-session')
-    await view.text(view.element.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement, 'original-request-session')
-    await view.text(view.element.querySelector('[aria-label="Supervisor Session ID"]') as HTMLInputElement, 'original-request-session')
+    await view.text(view.element.querySelector('[aria-label="负责人会话 ID"]') as HTMLInputElement, 'original-request-session')
+    await view.text(view.element.querySelector('[aria-label="Supervisor 会话 ID"]') as HTMLInputElement, 'original-request-session')
     view.forwardRpc.mockRejectedValueOnce(new Error('handoff receipt lost')); await view.click('保存交接关系')
     const operationId = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.handoff')![1].operationId
     await view.text(input, 'later-input-session')
     await view.click('返回目标列表'); await view.click('第二目标原项目 · 已完成原用户意图'); await view.click('返回目标列表'); await view.click('原目标原项目 · 已完成原用户意图')
     await view.render(false); await view.render(true)
     expect(view.element.textContent).toContain('original-request-session'); expect(view.element.textContent).toContain(operationId)
-    expect(view.element.querySelector<HTMLInputElement>('[aria-label="执行 Session ID"]')?.value).toBe('later-input-session')
+    expect(view.element.querySelector<HTMLInputElement>('[aria-label="执行或交接的会话 ID"]')?.value).toBe('later-input-session')
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.handoff')).toHaveLength(1)
   })
   it('retains the original list on failed list reads and does not gate opening its healthy Session', async () => {
@@ -463,5 +463,5 @@ it('keeps an unknown creation and its exact operation across hide/show without s
   await view.click('读取同一目标核对')
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { goalId: input.goalId })
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
-  expect(view.element.textContent).toContain('准确 ID 尚未保存')
+  expect(view.element.textContent).toContain('Mac 上还没有这个目标')
 })

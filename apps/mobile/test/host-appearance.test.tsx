@@ -95,7 +95,7 @@ it('keeps the last theme on unsupported documents, stale events and disconnect, 
   await act(async () => handlers.onInitial({ observation: snapshot }))
   expect(document.documentElement.dataset.theme).toBe('custom.first')
   await act(async () => handlers.onEvent({ type: 'snapshot', data: { ...snapshot, revision: 1, values: { ...snapshot.values, theme: { version: 999 } } } }))
-  expect(document.documentElement.dataset.theme).toBe('custom.first'); expect(container.textContent).toContain('保留最后确认')
+  expect(document.documentElement.dataset.theme).toBe('custom.first'); expect(container.textContent).toContain('暂用上次的主题')
   await act(async () => handlers.onEvent({ type: 'snapshot', data: { ...snapshot, revision: 0 } }))
   expect(container.textContent).toContain('not newer')
   await act(async () => handlers.onEnd(new Error('Disconnected transport')))
@@ -264,7 +264,7 @@ it('actual MobileApp keeps its workface usable while reporting an unavailable ap
   await act(async () => root.render(<MobileApp client={client} connection={{ state: 'connected', message: 'Retained transport' }}
     platform={createBrowserPlatform({ overlayContainer: () => container })} />))
   await until(() => Boolean(container.querySelector('.mobile-service-notice')?.textContent?.includes('这个 Mac 尚未提供主题同步')))
-  expect(container.querySelector('.mobile-service-notice')?.textContent).toContain('保留最后确认的主题、App 图标和原工作面')
+  expect(container.querySelector('.mobile-service-notice')?.textContent).toContain('暂用上次的主题和 App 图标')
   expect(container.querySelector('[aria-label="手机设置与连接"]')).not.toBeNull()
   expect(window.matchMedia).toHaveBeenCalledTimes(1)
 })

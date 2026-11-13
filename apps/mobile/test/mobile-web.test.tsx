@@ -197,7 +197,7 @@ it('never adopts a pending copy acknowledgement under a different original query
   const value = uiValue(), pending = deferred<boolean>(), copyText = vi.fn(() => pending.promise)
   const render = (next: MobileWebPageObservation) => <MobileWebDiagnostics observation={next} copyText={copyText} />
   const view = await mount(render(value)); await click(button(view.element, '网页版本与诊断'))
-  await click(button(view.element, '复制原查询信息'))
+  await click(button(view.element, '复制查询信息'))
   await view.render(render({ ...value, page: { ...page, documentId: 'another-document' } }))
   await act(async () => { pending.resolve(true); await settle() })
   expect(view.element.textContent).not.toContain('已复制原页面')

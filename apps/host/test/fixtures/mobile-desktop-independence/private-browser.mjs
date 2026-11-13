@@ -186,7 +186,7 @@ export async function editOriginalNote(page, input) {
 export async function recoverOriginalSession(page, input) {
   await page.locator('.mobile-conversation[data-agent-session-id="' + input.sessionId + '"]').waitFor()
   await page.getByRole('button', { name: '当前对话操作', exact: true }).click()
-  await page.getByRole('button', { name: '恢复原 Agent', exact: true }).click()
+  await page.getByRole('button', { name: '恢复 Agent', exact: true }).click()
   await page.waitForFunction(sessionId => {
     const record = JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1'))
     return record.agentResumes?.some(intent => intent.input.agentSessionId === sessionId)

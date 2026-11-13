@@ -91,7 +91,7 @@ describe('actual phone primary workfaces', () => {
     const view = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原Host离线' }} platform={createBrowserPlatform()} />)
     const input = view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')!
     expect(input.value).toBe('离线仍可编辑的完整草稿')
-    expect(view.element.textContent).toContain('原保存回执未确认')
+    expect(view.element.textContent).toContain('保存还没确认')
     await view.render(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     for (const label of order) { await click(button(nav(view.element), label)); expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(input) }
     await click(button(nav(view.element), 'Goals'))
@@ -121,7 +121,7 @@ describe('actual phone primary workfaces', () => {
     }) as any
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await click(button(nav(view.element), 'Goals')); await click(view.element.querySelector('.mobile-goals-list button')!)
-    await click(button(view.element, '打开目标原讨论'))
+    await click(button(view.element, '打开目标讨论'))
     expect(view.element.querySelector('.mobile-session-toolbar')).not.toBeNull()
     expect(getDeviceWorkface().snapshot().record.presentation!.goals!.discussion).toEqual({ goalId: goal.id, tabId: 'original-tab', regionId: 'original-region', hostId: 'local', agentSessionId: 'session-original' })
     await click(button(view.element, '返回 Goals'))
@@ -261,7 +261,7 @@ describe('actual phone primary workfaces', () => {
       : method === 'space.ls' ? Promise.resolve({ catalog }) : ordinary(method, params))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await openAppMenu(view.element); await click(button(overlay, 'Survey研究与笔记'))
-    await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Research原研究选择'))
+    await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Research当前选择'))
     await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Topic'))
     expect(f.client.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { spaceId: 'topic-space' } })
     await click(button(nav(view.element), 'Goals'))

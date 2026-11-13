@@ -35,14 +35,14 @@ it('protects the hidden Topic organization draft and original unconfirmed creati
   await fill(input, '原 Topic 名称')
   await click(button(view.element, '保留草稿并返回'))
   expect(input.closest('[hidden]')).not.toBeNull()
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('Topic 管理草稿') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('Topic 管理有未保存的草稿') })
   await click(button(view.element, '继续管理草稿')); await click(button(view.element, '确认保存'))
   expect(rpc).toHaveBeenCalledTimes(1)
   const identity = rpc.mock.calls[0]![1] as { topicId: string }
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('Topic 管理操作') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('Topic 操作还在进行或还没确认') })
   await act(async () => { waiting.reject(Error('原回执未确认')); await Promise.resolve() })
   await click(button(view.element, '保留草稿并返回'))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('Topic 管理操作') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('Topic 操作还在进行或还没确认') })
   await click(button(view.element, '继续管理草稿'))
   expect(input.value).toBe('原 Topic 名称')
   expect(rpc).toHaveBeenCalledTimes(1)
@@ -56,17 +56,17 @@ it('protects hidden Goal action input, in-flight requests and the original unkno
   f.client.forwardRpc = rpc as any
   const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   const render = (visible: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Update /><MobileGoalOperationSafety /><div hidden={!visible}><MobileGoalActions client={f.client} goal={goal} visible={visible} updated={() => {}} deleted={() => {}} /></div></MobileWebUpdateSafetyProvider>
-  const view = await mount(render(true)), input = view.element.querySelector<HTMLInputElement>('[aria-label="分配 Session IDs"]')!
+  const view = await mount(render(true)), input = view.element.querySelector<HTMLInputElement>('[aria-label="负责人会话 ID"]')!
   await fill(input, 'original-session')
   await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作输入') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作有未保存的输入') })
   await view.render(render(true)); await click(button(view.element, '保存负责人分配'))
   await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.goalOperationRecords?.some(item => JSON.stringify(item.request) === JSON.stringify(rpc.mock.calls.find(([method]) => method === 'goal.assign')![1]))).toBe(true))
   expect(await apply()).toEqual({ status: 'navigating' })
   await act(async () => { waiting.reject(Error('原回执未确认')); await Promise.resolve() })
   await fill(input, '')
   await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作输入') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作有未保存的输入') })
   await fill(input, 'original-session')
   expect(await apply()).toEqual({ status: 'navigating' })
   expect(navigate).toHaveBeenCalledTimes(2)
@@ -81,15 +81,15 @@ it('protects hidden Goal link input and the exact original unconfirmed request',
   f.client.forwardRpc = rpc as any
   const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   const render = (visible: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Update /><MobileGoalOperationSafety /><div hidden={!visible}><MobileGoalLinks client={f.client} goal={goal} updated={() => {}} /></div></MobileWebUpdateSafetyProvider>
-  const view = await mount(render(true)), input = view.element.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')!
+  const view = await mount(render(true)), input = view.element.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')!
   await fill(input, 'original-session'); await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标关联输入') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标关联有未保存的输入') })
   await view.render(render(true)); await click(button(view.element, '关联会话'))
   await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.goalOperationRecords?.some(item => JSON.stringify(item.request) === JSON.stringify(rpc.mock.calls[0]![1]))).toBe(true))
   expect(await apply()).toEqual({ status: 'navigating' })
   await act(async () => { waiting.reject(Error('原回执未确认')); await Promise.resolve() })
   await fill(input, ''); await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标关联输入') })
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标关联有未保存的输入') })
   await fill(input, 'original-session')
   expect(await apply()).toEqual({ status: 'navigating' })
   expect(navigate).toHaveBeenCalledTimes(2)
@@ -103,7 +103,7 @@ it('allows an update after Goal assignment is actually confirmed and no input re
   const f = fixture(), navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   f.client.forwardRpc = vi.fn(async () => ({ goal })) as any
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Update /><MobileGoalActions client={f.client} goal={goal} visible updated={() => {}} deleted={() => {}} /></MobileWebUpdateSafetyProvider>)
-  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="分配 Session IDs"]')!, 'original-session')
+  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="负责人会话 ID"]')!, 'original-session')
   await click(button(view.element, '保存负责人分配'))
   expect(await apply()).toEqual({ status: 'navigating' })
   expect(navigate).toHaveBeenCalledExactlyOnceWith('/#amux-update')
@@ -113,7 +113,7 @@ it('allows an update after a Goal link is confirmed and the original input is un
   const f = fixture(), navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   f.client.forwardRpc = vi.fn(async () => ({ goal })) as any
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Update /><MobileGoalLinks client={f.client} goal={goal} updated={() => {}} /></MobileWebUpdateSafetyProvider>)
-  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')!, 'original-session')
+  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')!, 'original-session')
   await click(button(view.element, '关联会话'))
   expect(await apply()).toEqual({ status: 'navigating' })
   expect(navigate).toHaveBeenCalledExactlyOnceWith('/#amux-update')
@@ -127,14 +127,14 @@ it('keeps an unsaved unknown request after its Goal view unmounts and retries bo
   const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   const render = (show: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Update /><MobileGoalOperationSafety /><MobileGoalOperationRecovery copyText={vi.fn()} />{show && <MobileGoalLinks client={f.client} goal={goal} updated={() => {}} />}</MobileWebUpdateSafetyProvider>
   const view = await mount(render(true))
-  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')!, 'session-after-failure')
+  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')!, 'session-after-failure')
   await click(button(view.element, '关联会话'))
   expect(rpc).toHaveBeenCalledTimes(1)
   expect(rpc.mock.calls[0]![3]).toEqual({ runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' })
   await act(async () => { waiting.reject(Error('lost receipt')); await Promise.resolve() })
   await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('尚未保存在当前设备工作面') })
-  await click(button(view.element, '保存原设备工作面'))
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标操作还没存到这台手机') })
+  await click(button(view.element, '保存设备记录'))
   expect(getDeviceWorkface().snapshot().record.goalOperationRecords?.some(item => JSON.stringify(item.request) === JSON.stringify(rpc.mock.calls[0]![1]))).toBe(true)
   expect(await apply()).toEqual({ status: 'navigating' }); expect(navigate).toHaveBeenCalledOnce()
   expect(rpc).toHaveBeenCalledTimes(1)
@@ -158,7 +158,7 @@ it('records unconfirmed runtime identity honestly while preserving the normal or
   f.client.runtimeOwnerIdentity = () => null; f.client.forwardRpc = rpc as any
   const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Update /><MobileGoalOperationSafety /><MobileGoalLinks client={f.client} goal={goal} updated={() => {}} /></MobileWebUpdateSafetyProvider>)
-  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="关联 Session ID"]')!, 'unverified-session')
+  await fill(view.element.querySelector<HTMLInputElement>('[aria-label="关联会话 ID"]')!, 'unverified-session')
   await click(button(view.element, '关联会话'))
   expect(rpc.mock.calls[0]![3]).toBeUndefined()
   await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.goalOperationRecords?.some(item => JSON.stringify(item.request) === JSON.stringify(rpc.mock.calls[0]![1]))).toBe(true))

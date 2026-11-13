@@ -31,7 +31,7 @@ describe('original conversation observation recovery', () => {
     expect(text.indexOf('大白话')).toBeLessThan(text.indexOf('Agent 自己'))
     expect(text.indexOf('Agent 自己')).toBeLessThan(text.indexOf('继续'))
     expect(view.element.textContent).toContain('source not confirmed yet')
-    await click(button(view.element, '刷新原记录'))
+    await click(button(view.element, '刷新记录'))
     expect(reads.mock.calls.length).toBeGreaterThan(1)
     expect(view.element.querySelector('[data-native-record-id="native-answer"]')).not.toBeNull()
     expect(f.submit).not.toHaveBeenCalled()
@@ -105,7 +105,7 @@ describe('original conversation observation recovery', () => {
       agentSessionId: value.agentSessionId, title: 'Current request is not the lost original operation',
       evidence: { source: 'native-hook', observedAt: _historyTailFixtureEpoch(0, 0, 1), run: value.run }, options: [{ id: 'allow', kind: 'allow-once', label: 'Allow' }] } } })
     const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={value.agentSessionId} connection={connected} platform={createBrowserPlatform()} />)
-    expect(view.element.textContent).toContain('重启后的原请求答复回执未知')
+    expect(view.element.textContent).toContain('重启前的答复还没确认送达')
     expect(view.element.querySelector('[data-original-response]')).toBeNull()
     expect(createLocalDrafts().responses.get(key)).toMatchObject({ phase: 'unknown' })
     expect(createLocalDrafts().responses.get(key)?.original).toBeUndefined()

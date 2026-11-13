@@ -122,10 +122,10 @@ describe('actual App Knowledge Chat source consumes original Files and Markdown'
     expect(before.scope).toEqual({ origin: location.origin, runtimeId: 'original-chat-source-runtime', deviceHostId: hostId })
     expect(before.attempts).toHaveLength(1); expect(attempt.phase).toBe('unknown'); expect(attempt.input).toEqual(input)
     expect(rpc.mock.calls.filter(([method]) => method === 'topic.knowledge.write').map(([, params]) => params)).toEqual([input])
-    await click(button(knowledge, '返回阅读')); await click(button(knowledge, '原讨论'))
+    await click(button(knowledge, '返回阅读')); await click(button(knowledge, '讨论'))
     const workface = () => element.querySelector<HTMLElement>(`[aria-label="${sourceTopic.title} 的讨论与内容"]`)
     try {
-      await waitFor(() => expect(workface()?.querySelector('[aria-label="原文件阅读"] h1')?.textContent).toBe(secondHeading))
+      await waitFor(() => expect(workface()?.querySelector('[aria-label="文件阅读"] h1')?.textContent).toBe(secondHeading))
     } catch (error) {
       console.error('Original Chat source failure diagnostics', JSON.stringify({
         workfaceHtml: workface()?.outerHTML ?? null,
@@ -138,7 +138,7 @@ describe('actual App Knowledge Chat source consumes original Files and Markdown'
       throw error
     }
     expect(workface()!.closest('[hidden]')).toBeNull()
-    expect(workface()!.querySelectorAll('[aria-label="原文件阅读"]')).toHaveLength(1)
+    expect(workface()!.querySelectorAll('[aria-label="文件阅读"]')).toHaveLength(1)
     expect(workface()!.querySelector('h2')?.textContent).toBe('准确第二来源 Chat')
     expect(workface()!.textContent).toContain('第二 Region 的原 Files 非空正文。')
     expect(workface()!.textContent).not.toContain('第一来源 Chat'); expect(workface()!.textContent).not.toContain('第一 Chat 磁盘标题')

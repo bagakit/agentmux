@@ -21,7 +21,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await capture('mote-start-history-list-390-dark')
   assert.equal(await read('document.querySelectorAll(".mote-start-history [data-mote-period]").length'),2,'Two tenures of one Session retain separate period rows')
   await tap('.mote-start-history li:first-child button', 'Open one exact original period')
-  await until('!!document.querySelector("[aria-label=原主对话历史] [data-mote-period]")')
+  await until('!!document.querySelector("[aria-label=主对话历史] [data-mote-period]")')
   await resize(320,760); await capture('mote-start-history-detail-320-dark')
   await read('mobileProductScene.prepareMoteStart("unknown")')
   await until('!document.querySelector(".mote-start")&&document.querySelector(".mobile-conversation-slot:not([hidden])")')

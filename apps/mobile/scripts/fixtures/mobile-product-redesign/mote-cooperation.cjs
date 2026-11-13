@@ -14,7 +14,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await capture('mote-cooperation-team-390')
   const scoped = await read('[...document.querySelectorAll(".mobile-mote-team-section:last-child [data-mote-member]")].map(node=>node.dataset.moteMember)')
   assert.deepEqual(scoped, ['session-mote', 'session-waiting'])
-  await button('打开原成员 · 资料整理', '[role=dialog]')
+  await button('打开成员 · 资料整理', '[role=dialog]')
   await until('mobileProductScene.facts().record.selectedSessionId==="session-waiting"')
   await until('document.querySelector(".mobile-mote-recipient")?.innerText.includes("成员")')
   await capture('mote-cooperation-member-request-390')

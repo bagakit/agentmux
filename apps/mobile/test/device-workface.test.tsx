@@ -197,7 +197,7 @@ describe('one durable mobile workface owner', () => {
     expect(restored.issue).toBeNull()
     expect(restored.record).toEqual({ ...original(), panel: 'terminal' })
     expect(createLocalDrafts(() => disk).attempts.get(key)).toEqual({ operationId: 'intent-original', runId: 'run-original',
-      draft: '原草稿', phase: 'unknown', message: '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。' })
+      draft: '原草稿', phase: 'unknown', message: '重启前的消息还没确认送达，不会自动重发。可以刷新对话查看。' })
     expect(disk.setItem.mock.calls.map(call => call[0])).toEqual([DEVICE_WORKFACE_KEY, DEVICE_WORKFACE_KEY, DEVICE_WORKFACE_KEY])
   })
   it('retains durable bytes on a failed write and exports the current temporary workface for preservation', async () => {
@@ -211,7 +211,7 @@ describe('one durable mobile workface owner', () => {
   })
   it('preserves unreadable original bytes and stages temporary drafts until the explicit full-record recovery', async () => {
     const disk = storage('{original-unreadable'), owner = getDeviceWorkface(() => disk), drafts = createLocalDrafts(() => disk)
-    expect(owner.snapshot().issue).toContain('原记录尚未覆盖')
+    expect(owner.snapshot().issue).toContain('已存的记录尚未覆盖')
     drafts.drafts.set(key, '坏记录旁继续编辑的草稿'); await drafts.save()
     expect(disk.raw()).toBe('{original-unreadable'); expect(disk.setItem).not.toHaveBeenCalled()
     await owner.replaceUnreadableWithCurrent({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })
@@ -241,7 +241,7 @@ describe('one durable mobile workface owner', () => {
   })
   it('rejects another Host and accepts the original Host at a changed address without erasing input', async () => {
     const disk = storage(JSON.stringify(original())), owner = new DeviceWorkfaceStore(() => disk), before = disk.raw()
-    expect(() => owner.confirmHost({ origin: original().hostUrl, hostId: 'replacement-host' })).toThrow('原 Host 身份不同')
+    expect(() => owner.confirmHost({ origin: original().hostUrl, hostId: 'replacement-host' })).toThrow('当前连接的 Mac 和保存工作面的 Mac 不同')
     expect(owner.snapshot().record).toEqual(original()); expect(disk.raw()).toBe(before); expect(disk.setItem).not.toHaveBeenCalled()
     await owner.confirmHost({ origin: 'https://192.168.1.21:4321', hostId: 'host-original' })
     expect(owner.snapshot().record).toEqual({ ...original(), host: { origin: 'https://192.168.1.21:4321', hostId: 'host-original' } })
@@ -252,7 +252,7 @@ describe('one durable mobile workface owner', () => {
     const f = fixture(), view = await mount(<MobileApp client={f.client} connection={{ state: 'disconnected', message: '原 Mac 尚未核实' }} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(editor(view.element).textContent).toBe('原草稿')
-    expect(view.element.textContent).toContain('重启后的原输入回执未知')
+    expect(view.element.textContent).toContain('重启前的消息还没确认送达')
     expect(button(view.element, 'Send').disabled).toBe(false); expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
     expect(domain(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!))).toEqual({ ...original(), presentation: expect.objectContaining({ showSession: true, showGoalWork: false }) })
   })
@@ -292,7 +292,7 @@ describe('one durable mobile workface owner', () => {
     expect(button(overlay, '导出工作面文件').disabled).toBe(false)
     expect(button(overlay, '选择工作面文件').disabled).toBe(false)
     expect(overlay.querySelector('input[type="file"]')).not.toBeNull()
-    expect(overlay.textContent).toContain('恢复后仍需核对原 Mac 和设备授权')
+    expect(overlay.textContent).toContain('恢复后仍需核对 Mac 和设备授权')
   })
   it('exports the actual temporary app Session selection beside an unreadable original record without writing it', async () => {
     localStorage.setItem(DEVICE_WORKFACE_KEY, '{keep-original-bytes')
@@ -316,7 +316,7 @@ describe('one durable mobile workface owner', () => {
     disk.getItem.mockImplementation(() => null)
     expect(owner.snapshot().record.conversation.drafts).toEqual([[key, '读取失败旁编辑']])
     expect(owner.parseBackup(owner.exportBackup()).conversation.drafts).toEqual([[key, '读取失败旁编辑']])
-    expect(owner.snapshot().issue).toContain('当前临时工作面仍保留')
+    expect(owner.snapshot().issue).toContain('当前仍是临时工作面')
     expect(disk.setItem).not.toHaveBeenCalled()
   })
   it('reuses the same owner while the storage accessor itself is unavailable and after it becomes readable', async () => {
@@ -339,10 +339,10 @@ describe('one durable mobile workface owner', () => {
     first.attempts.set(key, { operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown', message: 'unknown' })
     await first.save()
     const next = createLocalDrafts(access)
-    expect(next.canSave).toBe(false); expect(next.notice).toContain('未确认输入仍保留')
+    expect(next.canSave).toBe(false); expect(next.notice).toContain('未确认输入都还在')
     expect(next.drafts.get(key)).toBe('临时原草稿')
     expect(next.attempts.get(key)).toEqual({ operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown',
-      message: '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。' })
+      message: '重启前的消息还没确认送达，不会自动重发。可以刷新对话查看。' })
     next.drafts.set(key, '继续编辑的草稿'); await next.save()
     expect(getDeviceWorkface(access).snapshot().record.conversation.attempts).toEqual([[key, {
       operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown' }]])

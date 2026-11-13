@@ -97,7 +97,7 @@ it('restores the local history policy on a failed parser write and leaves the or
     await vi.waitFor(() => expect(reports.at(-1)?.message).toContain('Actual local parser write failure'))
     expect(terminal.options.scrollback).toBe(500)
     expect(reader.facts().cursor).toBe(0)
-    expect(reports.at(-1)?.message).toContain('原画面和会话引用仍保留')
+    expect(reports.at(-1)?.message).toContain('当前画面保留。这不代表终端已退出')
   } finally { await reader.dispose(); terminal.dispose() }
 })
 

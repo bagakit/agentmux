@@ -94,13 +94,13 @@ describe('connected Goal original identity and business operations', () => {
     await sendGoalOperation(f.client, owner, op, () => true)
     expect(f.calls.find(call => call.method === 'goal.start')?.params.operationId).toBe(op.operationId)
     f.identity('another-runtime'); f.calls.length = 0
-    await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '另一个')
+    await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '另一台 Mac')
     expect(f.calls).toEqual([])
     f.identity('original-runtime'); await owner.confirmHost({ origin: location.origin, hostId: 'relay-server' })
     await sendGoalOperation(f.client, owner, op, () => true)
     const known = { ...op, deviceHostId: 'relay-server' }; await owner.retainGoalOperation(known)
     await owner.replaceBackup({ ...owner.snapshot().record, host: { origin: location.origin, hostId: 'different-relay' } })
-    await rejectsOriginal(sendGoalOperation(f.client, owner, known, () => true), '另一个')
+    await rejectsOriginal(sendGoalOperation(f.client, owner, known, () => true), '另一台 Mac')
   })
   it('keeps later intent and other pending operations when an old receipt confirms', async () => {
     const f = goalFixture(), owner = getDeviceWorkface(), old = operation(f), later = { ...old, operationId: 'later-original-operation', goalId: 'later-goal' }
@@ -113,7 +113,7 @@ describe('connected Goal original identity and business operations', () => {
     const f = goalFixture(), owner = getDeviceWorkface(), old = operation(f)
     await owner.retainGoalOperation(old)
     const otherWindow = new DeviceWorkfaceStore(() => localStorage)
-    expect(() => otherWindow.retainGoalOperation({ ...old, operationId: 'second-window-new-operation' })).toThrow('已有待确认操作')
+    expect(() => otherWindow.retainGoalOperation({ ...old, operationId: 'second-window-new-operation' })).toThrow('有一次操作还没确认')
     expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalWork?.pending).toEqual([old])
   })
   it('does not forward after a delayed fresh read belongs to an old A-B-A scope', async () => {
@@ -144,7 +144,7 @@ describe('connected Goal original identity and business operations', () => {
     const f = goalFixture(), op = operation(f), owner = getDeviceWorkface(); await owner.retainGoalOperation(op)
     const original = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await original(method, params); if (method === 'goal.start') result.continuation.agentSessionId = 'other'; return result })
-    await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '其他执行会话')
+    await rejectsOriginal(sendGoalOperation(f.client, owner, op, () => true), '属于另一个对话')
     expect(owner.snapshot().record.goalWork?.pending).toEqual([op])
   })
   it('reconciles a lost mutation ACK with the original OP/revision after re-open, never replacing it with resume', async () => {
@@ -170,7 +170,7 @@ describe('connected Goal original identity and business operations', () => {
     const current = { ...loop(), status: 'paused' as const, initialDelivery: { ...loop().initialDelivery!, state: 'unknown' as const } }
     const f = goalFixture([current]), owner = getDeviceWorkface(), base = operation(f, 'action')
     if (base.kind !== 'action') throw new Error('Controlled original action required')
-    await rejectsOriginal(sendGoalOperation(f.client, owner, { ...base, action: 'resume' }, () => true), '尚未确认')
+    await rejectsOriginal(sendGoalOperation(f.client, owner, { ...base, action: 'resume' }, () => true), '还没确认')
     f.state.goal.alignment!.revision = 2
     await rejectsOriginal(sendGoalOperation(f.client, owner, operation(f), () => true))
     await sendGoalOperation(f.client, owner, { ...base, action: 'stop' }, () => true)
@@ -243,8 +243,8 @@ describe('actual mobile Goal panel consumer', () => {
     expect(button(view.element, '开始并持续推进').disabled).toBe(false)
     await click(button(view.element, '开始并持续推进'))
     expect(f.calls.find(call => call.method === 'goal.start')?.params.sessionId).toBe('session-original')
-    expect(view.element.textContent).toContain('原开始操作待确认')
-    expect(button(view.element, '检查并重试原开始').disabled).toBe(false)
+    expect(view.element.textContent).toContain('开始操作待确认')
+    expect(button(view.element, '检查并重试开始').disabled).toBe(false)
     expect(owner.snapshot().record.goalWork?.selection?.deviceHostId).toBeNull()
     expect(owner.snapshot().record.goalWork?.pending[0]?.deviceHostId).toBe('confirmed-original-relay')
   })
@@ -256,7 +256,7 @@ describe('actual mobile Goal panel consumer', () => {
     f.identity('foreign-runtime')
     await act(async () => { wait.resolve({ goal, goalContinuations: [] }); await Promise.resolve() })
     expect(f.calls.some(call => call.method === 'goal.focus')).toBe(false)
-    expect(view.element.textContent).toContain('不能把原目标导航发送到当前 Host')
+    expect(view.element.textContent).toContain('不能在当前 Mac 上打开这个目标')
   })
   it('requires scope confirmation, shows original acceptance separately, and starts only the exact selected Core Session', async () => {
     const f = goalFixture(); f.state.goal.grounding = { alignmentRevision: 1, summary: '原成果', checks: [{ criterionId: 'criterion', outcome: 'met', evidence: ['relative/result.md'], note: '原证据' }], submissionId: 'original-submission', acceptedAt: null }
@@ -279,7 +279,7 @@ describe('actual mobile Goal panel consumer', () => {
     const pending = { ...loop(), status: 'paused' as const, initialDelivery: { ...loop().initialDelivery!, state: 'unknown' as const } }
     const f = goalFixture([pending]), view = await mount(renderPanel(f)); await click(button(view.element, `查看目标 ${goal.title}`))
     expect(view.element.textContent).not.toContain('恢复')
-    await click(button(view.element, '检查并重试原开始'))
+    await click(button(view.element, '检查并重试开始'))
     expect(f.calls.find(call => call.method === 'goal.start')?.params.operationId).toBe('original-start')
   })
   it('restores exact pending mutation after panel unmount and does no write until explicit same OP retry', async () => {
@@ -293,7 +293,7 @@ describe('actual mobile Goal panel consumer', () => {
     await view.render(renderPanel(f))
     expect(view.element.querySelector('h1')?.textContent).toBe(goal.title)
     expect(f.calls.some(call => call.method === 'goal.continuation-action')).toBe(false)
-    await click(button(view.element, '检查并重试原暂停'))
+    await click(button(view.element, '检查并重试暂停'))
     expect(f.calls.find(call => call.method === 'goal.continuation-action')?.params.operationId).toBe(saved.operationId)
     expect(getDeviceWorkface().snapshot().record.goalWork?.pending).toEqual([])
   })
@@ -304,7 +304,7 @@ describe('actual mobile Goal panel consumer', () => {
     const wait = deferred<AgentMuxRpcResult<'goal.inspect'>>(), original = f.forward.getMockImplementation()!
     f.forward.mockImplementation((method, params) => method === 'goal.inspect' ? wait.promise : original(method, params))
     await click(button(view.element, `查看目标 ${goal.title}`))
-    expect(view.element.querySelector('h1')?.textContent).toBe('原目标')
+    expect(view.element.querySelector('h1')?.textContent).toBe('目标')
     expect(view.element.textContent).not.toContain('准确完成原工作')
     const nextGoal = { ...goal, title: '新Host原目标', description: '新Host正文' }; delete nextGoal.alignment
     await act(async () => { wait.resolve({ goal: nextGoal, goalContinuations: [] }) })
