@@ -55,7 +55,7 @@ amux agent inspect --session '<session-id>'
 
 ## Mote 首问与原输入观察
 
-Mote 的首次 Query 和主动接替使用原 `agent open --input` 中的 `moteMain` 意图，固定原 Mote、MOTE baseline、角色及操作号。创建仍不带用户任务；确认原绑定后，由 `space mote dialogue setup advance` 沿原 Core Main 输入 owner 递交保留的 Query／接替上下文。`setup inspect` 只读，路由存在不代表已发送；未知时保留原输入 key 查询。准确 JSON 与历史 `period.range.after`／`through` 的读法见 [Core Mote guide](../../packages/core/guides/modules/mote.md)，不从标题、时间或 SID 去重猜任期。
+Mote 的首次 Query 和主动接替使用原 `agent open --mote-main` 中的 `moteMain` 意图，固定原 Mote、MOTE baseline、角色及操作号。创建仍不带用户任务；确认原绑定后，由 `space mote dialogue setup advance` 沿原 Core Main 输入 owner 递交保留的 Query／接替上下文。`setup inspect` 只读，路由存在不代表已发送；未知时保留原输入 key 查询。准确 JSON 与历史 `period.range.after`／`through` 的读法见 [Core Mote guide](../../packages/core/guides/modules/mote.md)，不从标题、时间或 SID 去重猜任期。
 
 `agent input inspect --input` 的 `{key,activity:true}` 可在原输入观察中附加当前原生活动读取，SDK 对应 `readAgentInputActivity(key)`；不带此字段时不新增 Provider 活动读取。它只读原 Session／Run，不能授予输入资格、重发、停止或单独判定对话过期。来源未知时保留原身份、请求和健康能力；自动流转仍由原 Mote 策略与 Main 输入 owner 判定。
 
@@ -184,14 +184,14 @@ amux space rename --tab '<tab-id>' --name-revision M --name '评审'
 | 打开 Terminal／Browser，操作已开的 Browser | `terminal open`、`browser open`、`browser` |
 | 按 Zone 目录后台打开或复用文件 | `file open` |
 | 读取准确 Zone 原文件的已保存正文与完整版本 | `file read` |
-| 检查、创建或暂停准确 Session 的日历提醒 | `schedule list\|inspect\|create\|pause\|resume\|cancel` |
+| 检查、创建、调整或暂停准确 Session 的提醒 | `schedule list\|inspect\|create\|update\|pause\|resume\|cancel` |
 | 读取或切换 Agent／File Region 正文模式 | `agent view`、`file view` |
 | 交换同一 Tab 的两个 Region 位置 | `space swap` |
 | 提升 Region 为 Tab、调整布局 | `space promote/arrange` |
 | 跨对象观察、Goal 和显式 Session 关系 | `app snapshot`、`goal`；方法手册 `mote playbook pmo` |
 | 已支持的偏好、诊断与资源观察 | `settings`、`system crash-log/metrics/doctor` |
 | 人工待发消息与准备退避 | `message pending ls/edit/send/stop/archive/restore` |
-| Session 消息、输出、生命周期 | `agent send/output/interrupt/resume/stop`、`message inbox/dispatch` |
+| Session 消息、输出、生命周期 | `agent send/output/interrupt/resume/stop/restart/reopen`、`message inbox/dispatch` |
 
 原 `agent resume` 的 operation 用于核对同一次恢复；重查不重投未知的启动或输入。新的 prepared resume 在 Core 私有 reservation 中冻结完整请求与原 Runtime，丢回执后只接回原 key 对应的准确 retained Run。旧准备没有派发来源时，当前 Runtime 查不到 key 仍是 unknown，不能据此退休、重发或补造来源；准确 retained 正见证须通过原 prepared Session 秘密绑定等核验后才能接回。完整环境不会进入公开 Session、inspect 或 CLI 回执。缺来源时保留原身份与能力，服务窗说明需要原派发来源或匹配的 retained Run。
 
@@ -260,7 +260,7 @@ amux agent interaction inspect --session '<session-id>' --operation-id '<operati
 
 Read original records with `agent history --host <host-id> --session <session-id> --source native`. Question IDs are opaque Provider values; never construct them. A missing answer means unknown, not proof that the Agent is waiting. `agent question reply --input FILE|-` answers through the same public business owner; its `--help` and [public types](../../packages/core/src/public-rpc.ts) define the input and original Run condition. A trusted user or device is required; managed Agents cannot impersonate human confirmation.
 
-A `submitted` receipt confirms ordinary input submission. Read native history by the exact question ID to observe the answer. A changed source, Run or operation rejects only that input; the original Agent and ordinary manual input remain available. When a receipt is lost or the outcome is unknown, keep the original operation ID and inspect original session records before deciding; do not blindly resend. Synchronous permissions and Hook waiting retain their existing interaction response entry.
+A `submitted` receipt confirms queue admission for the original native conversation, not adoption. Read native history by the exact question ID to observe the answer. A changed source, Run or operation rejects only that input; the original Agent and ordinary manual input remain available. When a receipt is lost or the outcome is unknown, keep the original operation ID and inspect original session records before deciding; do not blindly resend. Synchronous permissions and Hook waiting retain their existing interaction response entry.
 
 ## 创建 Goal、打开原讨论与人认可
 
