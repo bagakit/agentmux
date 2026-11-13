@@ -18,7 +18,7 @@ const aliases = ['core', 'demand', 'layout', 'client-ui'].flatMap(name => {
   return entries.map(([subpath, target]) => {
     if (name === 'client-ui') {
       const source = typeof target === 'string' ? target : target.browser
-      if (!source?.startsWith('./src/')) throw new Error(`Unmapped ${name} Source export: ${subpath}`)
+      if (!source || source.startsWith('./dist/')) throw new Error(`Unmapped ${name} Source export: ${subpath}`)
       const parts = subpath === '.' ? ['@agentmux/client-ui'] : ('@agentmux/client-ui' + subpath.slice(1)).split('*')
       const expression = parts.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
       const replacement = resolve(directory, source.replace('*', '$1'))

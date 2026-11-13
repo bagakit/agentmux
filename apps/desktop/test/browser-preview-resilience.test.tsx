@@ -216,18 +216,20 @@ it('T045 confirmed real frame preserves the original trusted first-press route',
   expect(bridge.activatePresentation.mock.calls[1]).toEqual(['original-lease', { kind: 'prepare-first-press', navigationId: 'original-navigation',
     captureId: 'capture-1', down: { x: 20 / 640, y: 30 / 320 }, button: 'left', clickCount: 1, modifiers: [] }])
 })
-it('a stage passes its occurrence unchanged, contains the frame and claims no page layout of its own', async () => {
+it('a default stage keeps its notice in its own row, contains the frame and claims no page layout', async () => {
   await render()
   const occurrence = bridge.registerPresentation.mock.calls[0]![0].occurrence
   expect(occurrence).toEqual(presentation.occurrence)
   expect(occurrence.layoutHost).toBeUndefined()
+  expect(container.querySelector('.browser-presentation')?.getAttribute('data-notice')).toBe('row')
   expect(container.querySelector<HTMLVideoElement>('video')!.style.objectFit).toBe('contain')
 })
-it('a page laid out to its stage maps a press through the contained frame at its own CSS point', async () => {
+it('an overlay notice leaves the whole stage to the page and still maps a press through the contained frame', async () => {
   // Stage 640x320 at (10,40). A layout-host page lays out to the stage, so its 1280x640 frame contains at 0.5:
   // a press 20px right of and 30px below the stage origin lands at the same CSS point on the page.
-  await render({ presentation: { ...presentation, occurrence: { ...presentation.occurrence, layoutHost: true } } })
-  expect(bridge.registerPresentation.mock.calls[0]![0].occurrence.layoutHost).toBe(true)
+  await render({ notice: 'overlay' })
+  expect(container.querySelector('.browser-presentation')?.getAttribute('data-notice')).toBe('overlay')
+  expect(container.querySelector('.browser-presentation-notice')?.textContent).toContain('preview')
   const video = container.querySelector<HTMLVideoElement>('video')!
   Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', { configurable: true, value: 2 })
   Object.defineProperties(video, { readyState: { configurable: true, value: 2 }, videoWidth: { configurable: true, value: 1280 }, videoHeight: { configurable: true, value: 640 } })
