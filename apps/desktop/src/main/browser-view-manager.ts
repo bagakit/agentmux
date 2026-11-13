@@ -759,9 +759,11 @@ export class BrowserViewManager {
       }
     }
     const id = mintObjectId()
-    this.presentationLeases.set(id, { id, entry, document, window: nativeWindow, windowDocument: input.window,
-      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location } }, geometry })
+    const lease: PresentationLease = { id, entry, document, window: nativeWindow, windowDocument: input.window,
+      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.layoutHost === true ? { layoutHost: true } : {}) }, geometry }
+    this.presentationLeases.set(id, lease)
     entry.presentationLeaseIds.add(id)
+    this.followLayoutHost(lease)
     if (geometry.visible) void entry.controlFeedback?.synchronize()
     return { leaseId: id }
   }
@@ -778,7 +780,7 @@ export class BrowserViewManager {
     if (lease.entry.inputLeaseId === leaseId) {
       if (lease.geometry.visible && lease.geometry.inputVisible !== false) this.setBounds(lease.entry.id, lease.geometry.bounds)
       else this.clearPresentationInput(lease.entry)
-    }
+    } else this.followLayoutHost(lease)
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
     if (wasVisible !== lease.geometry.visible) void lease.entry.controlFeedback?.synchronize()
   }
@@ -1098,6 +1100,33 @@ export class BrowserViewManager {
   private hasVisiblePresentation(entry: BrowserEntry): boolean {
     for (const id of entry.presentationLeaseIds) if (this.presentationLeases.get(id)?.geometry.visible) return true
     return false
+  }
+
+  /**
+   * A layout host's page area is the page's own size while no presentation shows it natively.
+   * A shown page keeps setBounds as its only size owner. A hidden child of a native window keeps
+   * its drawable size, so the same view briefly leaves its host, takes the size and returns hidden:
+   * no navigation, focus, visibility or input transfer. A source being prepared for capture is
+   * already unattached and visible in its hidden shell, so it takes the size in place. The
+   * recorded bounds move with the page, so a press on its preview maps through the size it has.
+   */
+  private followLayoutHost(lease: PresentationLease): void {
+    const entry = lease.entry, geometry = lease.geometry
+    if (!lease.occurrence.layoutHost || !geometry.visible || entry.visible || entry.inputLeaseId) return
+    const { width, height } = geometry.bounds, view = entry.view
+    if (entry.bounds?.width === width && entry.bounds.height === height) return
+    const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
+    if (capture?.preparationWindow && capture.source === view) {
+      entry.bounds = { ...geometry.bounds }
+      view.setBounds({ x: 0, y: 0, width, height })
+      return
+    }
+    const host = this.windowForView(view)
+    if (host.isDestroyed()) return
+    entry.bounds = { ...geometry.bounds }
+    host.contentView.removeChildView(view)
+    view.setBounds(entry.bounds)
+    this.placeView(view, host)
   }
 
   private isPresentationCaptureCurrent(capture: PresentationCapture): boolean {
