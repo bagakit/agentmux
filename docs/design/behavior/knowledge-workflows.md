@@ -126,7 +126,7 @@ Note 为人和 Agent 共同维护同一份原知识提供基础能力，以连�
 
 ## 笔记目录、设置与搬迁
 
-默认托管笔记库为当前宿主用户的 `~/.agentmux/notes`。托管 Markdown 正文与目录、归因和历史等知识元数据的原始文件共同位于该目录，持久范围沿本节文件自足原则；Notebook 页面树是逻辑收纳，不要求同名物理子目录。目录及备份仍由 Core Notebook owner 持有，正文仍由文件 owner 持有；Session／Run 与 durable spatial state 不迁入笔记目录，UI 偏好与未保存稿仍分别归原 client 和草稿 owner，不冒充已保存正文。
+默认托管笔记库为当前宿主用户的 `~/.agentmux/notes`。托管 Markdown 正文与目录、归因和历史等知识元数据的原始文件共同位于该目录，持久范围沿上文的文件自足原则；Notebook 页面树是逻辑收纳，不要求同名物理子目录。目录及备份仍由 Core Notebook owner 持有，正文仍由文件 owner 持有；Session／Run 与 durable spatial state 不迁入笔记目录，UI 偏好与未保存稿仍分别归原 client 和草稿 owner，不冒充已保存正文。
 
 Settings 的笔记设置可查询并更改实际笔记目录，委托同一 Core 笔记目录 owner 保存，正文仍由文件 owner 持有；默认与当前实际目录、待提交目录各自可辨。更改目录是迁移这一个托管库的动作，不是只切指针到空目录或创建另一份库。默认位置调整、旧存量纳入与以后人工更改目录复用同一迁移机制，不另留一次性脚本、旧目录回退或双写 owner。
 
