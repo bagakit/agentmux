@@ -34,6 +34,11 @@ export function cropGestureRect({ mode, start, at, original }: CropGesture, boun
   return rect.width > 0 && rect.height > 0 ? rect : null
 }
 
+/** The selection to show now: the moving gesture's while it has area, else the kept one. */
+export function shownSelection(gesture: CropGesture | null, kept: NormalizedRect | null, bounds: NormalizedRect): NormalizedRect | null {
+  return gesture ? cropGestureRect(gesture, bounds) ?? gesture.original : kept
+}
+
 // The floating toolbar's height, its gap to the selection and its inset from the frame edge, in frame CSS pixels.
 const CAPTURE_BAR_HEIGHT = 36, CAPTURE_BAR_GAP = 8, CAPTURE_BAR_INSET = 12
 /** Right-aligned to the selection: below it, else above it, else inside its bottom-right corner; always 12 px inside the frame. */
@@ -52,11 +57,11 @@ export const LOUPE_WIDTH = 136, LOUPE_HEIGHT = 150
 const LOUPE_OFFSET = 16, LOUPE_CLEARANCE = 8
 /** Beside the pointer, on the first diagonal that stays in the frame and off the selection. */
 export function captureLoupePlacement(at: ScreenshotPoint, avoid: NormalizedRect | null, frame: CaptureFrame): { left: number; top: number } {
-  const lefts = [at.x + LOUPE_OFFSET, at.x - LOUPE_OFFSET - LOUPE_WIDTH], tops = [at.y + LOUPE_OFFSET, at.y - LOUPE_OFFSET - LOUPE_HEIGHT]
-  const candidates = [{ left: lefts[0], top: tops[0] }, { left: lefts[1], top: tops[0] }, { left: lefts[0], top: tops[1] }, { left: lefts[1], top: tops[1] }]
+  const right = at.x + LOUPE_OFFSET, left = at.x - LOUPE_OFFSET - LOUPE_WIDTH, below = at.y + LOUPE_OFFSET, above = at.y - LOUPE_OFFSET - LOUPE_HEIGHT
+  const candidates = [{ left: right, top: below }, { left, top: below }, { left: right, top: above }, { left, top: above }]
   const fits = (box: { left: number; top: number }) => box.left >= 0 && box.top >= 0 && box.left + LOUPE_WIDTH <= frame.width && box.top + LOUPE_HEIGHT <= frame.height
   const clear = (box: { left: number; top: number }) => !avoid || box.left >= avoid.x + avoid.width + LOUPE_CLEARANCE || box.left + LOUPE_WIDTH <= avoid.x - LOUPE_CLEARANCE ||
     box.top >= avoid.y + avoid.height + LOUPE_CLEARANCE || box.top + LOUPE_HEIGHT <= avoid.y - LOUPE_CLEARANCE
-  const inFrame = candidates.filter(fits), chosen = inFrame.find(clear) ?? inFrame[0] ?? candidates[0]!
+  const inFrame = candidates.filter(fits), chosen = inFrame.find(clear) ?? inFrame[0] ?? { left: right, top: below }
   return { left: clamp(chosen.left, 0, frame.width - LOUPE_WIDTH), top: clamp(chosen.top, 0, frame.height - LOUPE_HEIGHT) }
 }
