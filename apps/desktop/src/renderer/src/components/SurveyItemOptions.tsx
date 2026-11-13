@@ -14,6 +14,7 @@ const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const CollectSourcesIcon = semanticIconComponent('action.collect-sources')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -113,8 +114,8 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       </M.CheckboxItem> : null}
 
       {collected && onSaveToTopic ? <>
-        <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('research'))}><ThemeActionOpenExternalIcon size={14} /><span>Save research to Topic…</span></M.Item>
-        {currentPanelAvailable ? <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('panel'))}><ThemeActionOpenExternalIcon size={14} /><span>Save current panel to Topic…</span></M.Item> : null}
+        <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('research'))}><CollectSourcesIcon size={14} /><span>Save research to Topic…</span></M.Item>
+        {currentPanelAvailable ? <M.Item className="tab-context-menu__item" onSelect={() => run(() => onSaveToTopic('panel'))}><CollectSourcesIcon size={14} /><span>Save current panel to Topic…</span></M.Item> : null}
       </> : null}
       {onDeleteNotebook ? <M.Item className="tab-context-menu__item" onSelect={() => run(onDeleteNotebook)}><ThemeActionRemoveIcon size={14} /><span>Delete notebook…</span></M.Item> : null}
       <M.Separator className="tab-context-menu__separator" />

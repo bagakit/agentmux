@@ -34,6 +34,7 @@ import { directoryIdentity } from '../../../shared/space-addresses'
 
 
 const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
+const CollectSourcesIcon = semanticIconComponent('action.collect-sources')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
@@ -208,7 +209,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ visible =
     finally { setOpening(false) }
   }
   const actions = activeNotebook ? <div className="recall-notebook-actions">
-    <button className="survey-icon-button" aria-label="Save notebook to Topic" title="Save notebook to Topic" onClick={() => setCapture({ title: activeNotebook.name, sources: [{ kind: 'notebook', notebookId: activeNotebook.notebookId }], noteIds: pages.filter(page => page.notebookId === activeNotebook.notebookId).map(page => page.noteId) })}><ThemeActionCreateNoteIcon size={14} /></button>
+    <button className="survey-icon-button" aria-label="Save notebook to Topic" title="Save notebook to Topic" onClick={() => setCapture({ title: activeNotebook.name, sources: [{ kind: 'notebook', notebookId: activeNotebook.notebookId }], noteIds: pages.filter(page => page.notebookId === activeNotebook.notebookId).map(page => page.noteId) })}><CollectSourcesIcon size={14} /></button>
     {activeNotebook.notebookId !== DEFAULT_NOTEBOOK_ID ? <button className="survey-icon-button" aria-label="Delete notebook" title="Delete notebook" onClick={() => { if (!deletion.pending) setDeleteTarget({ ...activeNotebook, pageCount: pages.filter(page => page.notebookId === activeNotebook.notebookId).length }); setDeleteOpen(true) }}><ThemeActionRemoveIcon size={14} /></button> : null}
   </div> : null
   return <section ref={surfaceRef} className="global-recall-surface" aria-label="Recall" hidden={!visible} inert={!visible} aria-hidden={!visible} data-sidebar-collapsed={sidebarCollapsed} data-navigation-stacked={navigationStacked} data-native-window-controls={isMacPlatform()} style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveWidth}px` } as CSSProperties}>
