@@ -108,6 +108,21 @@ describe('object editing in the mounted editor', () => {
     expect([by(undone, 'a').from, by(undone, 'b').from], 'one Undo restores the whole group move').toEqual([{ x: 20, y: 40 }, { x: 120, y: 80 }])
   })
 
+  it('a group drag keeps the committed layer of the other marks and draws only its members each frame', async () => {
+    const mask: ScreenshotShape = { id: 'm', kind: 'pixelate', color: '#000000', blockSize: 8, from: { x: 300, y: 200 }, to: { x: 380, y: 280 } }
+    const { press, key, canvas } = await mount([...row(), mask])
+    await press(20, 40); await press(120, 80, true)
+    const pointer = (type: string, x: number, y: number) => canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y }))
+    await act(async () => { pointer('pointerdown', 20, 40); pointer('pointermove', 25, 45) }); await frame()
+    const committedAtStart = raster.committed.mock.calls.length
+    for (const step of [30, 35, 40, 45]) { await act(async () => { pointer('pointermove', step, step + 20) }); await frame() }
+    expect(raster.committed.mock.calls.length, 'moving the group re-renders no committed layer per frame').toBe(committedAtStart)
+    const drawn = raster.scene.mock.lastCall![2] as ScreenshotShape[]
+    expect(drawn.map(shape => shape.id).sort(), 'each frame draws only the moving members above the cached layer').toEqual(['a', 'b'])
+    await act(async () => { pointer('pointerup', 45, 65) }); await frame()
+    await key('Escape')
+  })
+
   it('Delete removes every selected mark and arrows nudge them all', async () => {
     const { press, key, output, ids, by } = await mount()
     await press(20, 40); await press(260, 60, true)
