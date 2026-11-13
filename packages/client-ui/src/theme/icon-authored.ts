@@ -274,6 +274,34 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "存活、空闲、排队、终止、未知或需要输入均不等价于正在工作。永久循环会误导，原正文/动作仍准确。", trigger: "沿原已确认状态或控件值显示；存活、排队、未知等事实不自动启用动画。" }
     }
   },
+  "media-play": {
+    shapes: [["path",{"d":"M7 4.6v14.8a1 1 0 0 0 1.52.85l12-7.4a1 1 0 0 0 0-1.7l-12-7.4A1 1 0 0 0 7 4.6Z","fill":"currentColor","stroke":"none"}]],
+    design: {
+      rest: "实心三角压在视频画面上仍有足够分量；圆角顶点避免缩小后发尖",
+      motion: { kind: "still", animation: "none", description: "播放与暂停是两个静止图形，切换由媒体元素已确认的 playing / pause 事件决定。", trigger: "沿原媒体元素状态显示，不随点击预先切换。" }
+    }
+  },
+  "media-pause": {
+    shapes: [["rect",{"x":"6","y":"4","width":"4.5","height":"16","rx":"1.4","fill":"currentColor","stroke":"none"}],["rect",{"x":"13.5","y":"4","width":"4.5","height":"16","rx":"1.4","fill":"currentColor","stroke":"none"}]],
+    design: {
+      rest: "两根实心竖条与实心播放三角同重，切换时外轮廓宽度一致",
+      motion: { kind: "still", animation: "none", description: "暂停图形本身不表达正在缓冲或正在解码。", trigger: "沿原媒体元素状态显示。" }
+    }
+  },
+  "media-seek-back": {
+    shapes: [["path",{"d":"M4 12a8 8 0 1 0 2.35-5.66"}],["path",{"d":"M4 4v4.5h4.5"}],["path",{"d":"M10.5 9.5v6"}],["path",{"d":"M13.5 10a1.5 1.5 0 0 1 3 0v4a1.5 1.5 0 0 1-3 0Z"}]],
+    design: {
+      rest: "逆时针弧加数字 10，表示回退十秒",
+      motion: { kind: "still", animation: "none", description: "跳转是一次性动作，跳转结果由 seeked 事件确认。", trigger: "用户显式点击或快捷键。" }
+    }
+  },
+  "media-seek-forward": {
+    shapes: [["path",{"d":"M20 12a8 8 0 1 1-2.35-5.66"}],["path",{"d":"M20 4v4.5h-4.5"}],["path",{"d":"M7.5 9.5v6"}],["path",{"d":"M10.5 10a1.5 1.5 0 0 1 3 0v4a1.5 1.5 0 0 1-3 0Z"}]],
+    design: {
+      rest: "顺时针弧加数字 10，表示前进十秒",
+      motion: { kind: "still", animation: "none", description: "跳转是一次性动作，跳转结果由 seeked 事件确认。", trigger: "用户显式点击或快捷键。" }
+    }
+  },
   "redaction-block": {
     shapes: [["rect",{"x":"3","y":"6","width":"18","height":"12","rx":"2","fill":"currentColor","stroke":"none"}]],
     design: {
