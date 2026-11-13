@@ -9,11 +9,12 @@ import { get } from 'node:http'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { CapsuleInspection, CapsulePreparedReply } from '@agentmux/core/capsule'
+import { formatCapsuleAnswer } from '@agentmux/core/capsule'
 import type { AgentMuxRpcServiceOptions } from '../../../packages/core/src/public-rpc-service'
 
 const bridge = vi.hoisted(() => ({ root: '', handlers: new Map<string, (...args: any[]) => any>(), options: [] as any[],
   nativeDocument: null as null | { sender: any; frame: any; record: any; browserId: string; navigationId: string; instanceId?: string }, failDispatchSave: false }))
-vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false, once: vi.fn() },
+vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false, once: vi.fn(), on: vi.fn(), off: vi.fn() },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: true }), clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}, safeStorage: {},
@@ -32,7 +33,7 @@ vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class {
     setPresentationWindowOwner() {} resourceProcessIds() { return [] } resourceOwnerCounts() { return { browserViews: 0, releasedBrowserViews: 0 } }
     release() {} dispose() {}
   } }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } } }))
 vi.mock('../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { resourceProcessIds() { return [] } dispose() {} } }))
 vi.mock('../../../packages/capsule/src/storage', async original => {
   const actual = await original<typeof import('../../../packages/capsule/src/storage')>()
@@ -140,7 +141,7 @@ async function terminalReceipt(h: Fixture, id: string) {
 function prepared(h: Fixture, inputOperationId = 'forged-input'): CapsulePreparedReply {
   return { version: 1, operationId: h.params.operationId, capsuleId: h.params.capsuleId, interactionId: h.params.interactionId,
     inputOperationId, target: h.question.target!, expectedRun: { runId: 'run-recipient' }, principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` },
-    prompt: JSON.stringify({ source: 'capsule-response', capsuleId: h.params.capsuleId, interactionId: h.params.interactionId, question: h.question.question, answer: h.params.answer }) }
+    prompt: formatCapsuleAnswer({ capsuleId: h.params.capsuleId, interactionId: h.params.interactionId, question: h.question.question, answer: h.params.answer }) }
 }
 
 it('does not turn a page sender, App subframe, local RPC user or forged envelope into Human confirmation', async () => {
@@ -184,6 +185,25 @@ it('does not resubmit an unknown original reply after actual Core firstsave or o
   expect(phases.mock.calls.filter(([input]) => input.phase === 'submit')).toHaveLength(1)
   expect(phases.mock.calls.some(([input]) => input.phase === 'inspect')).toBe(true)
   expect(h.submit).toHaveBeenCalledOnce(); expect(h.inner.kernel.input).toHaveBeenCalledTimes(2)
+  expect((await h.queue.readJournal()).filter(value => value.kind === 'input-intent')).toHaveLength(1)
+})
+
+it('settles an answer that crossed dispatch with the earlier JSON prompt through inspect, never resubmitting it', async () => {
+  const h = await fixture(), original = RuntimeController.prototype.submitPrompt.bind(h.runtime)
+  h.submit.mockImplementation(async (...args) => { await original(...args); throw new AgentMuxError('Core reply observation lost', 'CONTROL_UNAVAILABLE') })
+  const first = await h.invoke('capsules:reply', [h.params]) as import('@agentmux/core/capsule').CapsuleReplyResult
+  expect(first.delivery.status).toBe('unknown'); await terminalReceipt(h, first.delivery.inputOperationId)
+  // A reply saved by an earlier build froze the former JSON prompt before crossing dispatch.
+  const file = join(h.stateDirectory, 'interactions', h.params.capsuleId, `${h.params.interactionId}.json`)
+  const saved = JSON.parse(await readFile(file, 'utf8'))
+  expect(saved.interaction.reply.phase).toBe('dispatch-started')
+  saved.preparedReply.prompt = JSON.stringify({ source: 'capsule-response', capsuleId: h.params.capsuleId,
+    interactionId: h.params.interactionId, question: h.question.question, answer: h.params.answer })
+  await writeFile(file, JSON.stringify(saved))
+  h.submit.mockClear()
+  await h.restartCapsuleService()
+  await expect(h.invoke('capsules:reply', [h.params])).resolves.toMatchObject({ delivery: { inputStatus: 'terminal-confirmed', inputOperationId: first.delivery.inputOperationId } })
+  expect(h.submit).not.toHaveBeenCalled()
   expect((await h.queue.readJournal()).filter(value => value.kind === 'input-intent')).toHaveLength(1)
 })
 
