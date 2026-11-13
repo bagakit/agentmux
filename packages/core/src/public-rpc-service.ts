@@ -368,7 +368,7 @@ const NATIVE_FIELDS = {
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
   'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition'],
-  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view', 'rewrite'],
+  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'through', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent'],
