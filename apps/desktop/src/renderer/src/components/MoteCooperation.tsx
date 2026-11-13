@@ -2,7 +2,7 @@ import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -13,11 +13,9 @@ import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { agentSessionPresentationIndex, sessionStatusLabel } from '../lib/session-presentation'
 import { useObservedAppStore } from '../lib/use-observed-app-store'
 import { moteMembers, moteMemberSnapshot, type MoteMember } from '../lib/mote-team'
-import { MoteWorkfaceContext, type MoteWorkfaceScope } from '../lib/mote-workface'
+import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { moteCurrentGoals, goalsForMote } from '../lib/mote-goals'
-import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
@@ -30,15 +28,10 @@ const Down = semanticIconComponent('navigation.down')
 const Close = semanticIconComponent('action.close')
 const Settings = semanticIconComponent('action.quick-mode')
 
-export function MoteWorkfaceCooperation(props: Omit<Parameters<typeof MoteCooperation>[0], 'scope'>) {
-  const scope = useContext(MoteWorkfaceContext)
-  return scope ? <MoteCooperation {...props} scope={scope} /> : null
-}
-
 /** One compact reading surface over original members. All actions navigate existing owners. */
-export function MoteCooperation({ scope, active, reference, onSelect, actions, presentation = 'bar' }: {
+export function MoteCooperation({ scope, active, reference, onSelect, actions, presentation }: {
   scope: MoteWorkfaceScope; active: boolean; reference?: WorkbenchProjectionSelection | null | undefined
-  onSelect(reference: WorkbenchProjectionSelection): boolean; actions?: ReactNode; presentation?: 'bar' | 'navigation' | 'threads'
+  onSelect(reference: WorkbenchProjectionSelection): boolean; actions?: ReactNode; presentation: 'navigation' | 'threads'
 }) {
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
     spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
@@ -71,7 +64,6 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   const primaryLocation = primaryResolution.conversation
   const primaryIssue = primaryResolution.issue
   const current = reference ? members.find(member => member.locations.some(location => sameWorkbenchProjectionSelection(location, reference))) : undefined
-  const session = current ? sessions[current.key] : undefined
   const isPrimary = (member: MoteMember) => {
     const observed = sessions[member.key]
     return Boolean(primary && (observed ? observed.control.hostId === primary.hostId && observed.control.agentSessionId === primary.sessionId
@@ -107,7 +99,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     return { current, human: current.filter(goal => goal.responsibility?.executions.some(row =>
       row.nextOwner.kind === 'human' && (contentOwned(goal) || memberRow(row)))) }
   }, [demands, goalMembers, graph, spaceId, scope.workspace.hostId, scope.workspace.id])
-  const goals = work.current, humanGoals = work.human
+  const humanGoals = work.human
   const needed = attention.length + humanGoals.length
   const [expanded, setExpanded] = useState(false), [editing, setEditing] = useState(false)
   const [issue, setIssue] = useState('')
@@ -134,8 +126,6 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     return () => { current = false; release() }
   }, [presentation, expanded, active, panel])
   const id = useId()
-  const iconTarget = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic, facts.spaceZoneBindings), [scope, facts.spaceZoneBindings])
-  const icon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const title = (member: MoteMember) => member.regions.find(region => region.title)?.title || sessions[member.key]?.label || member.agentSessionId
   function open(location: WorkbenchProjectionSelection) {
     const expected = members.find(member => member.locations.some(item => sameWorkbenchProjectionSelection(item, location)))
@@ -144,11 +134,11 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     const before = expected && sessions[expected.key], after = actual && moteMemberSnapshot(actual, useAppStore.getState().tabs, useAppStore.getState().sessions)
     if (!actual?.locations.some(item => sameWorkbenchProjectionSelection(item, location)) || before && after &&
       (before.control.hostId !== after.control.hostId || before.control.agentSessionId !== after.control.agentSessionId)) {
-      setIssue('The original member location is not confirmed. Your conversation and drafts are kept; reopen its original location.')
+      setIssue('原成员位置尚未确认，你的对话和草稿都保留；请重新打开它的原位置。')
       return
     }
     if (onSelect(location)) { setIssue(''); setExpanded(false) }
-    else setIssue('The original location is not confirmed. Your current conversation and drafts are kept; choose its original location again.')
+    else setIssue('原位置尚未确认，当前对话和草稿都保留；请重新选择它的原位置。')
   }
   async function openGoal(goalId: string) {
     // This existing action opens the Goal owner. It does not continue, approve or answer it.
@@ -170,51 +160,51 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   }
   const ordered = [...attention, ...members.filter(member => !attention.includes(member)).sort((a, b) => Number(isPrimary(b)) - Number(isPrimary(a)))].filter(member => presentation !== 'threads' || !isPrimary(member))
   const membersPanel = <div className="mote-cooperation__team-body" id={id} data-mote-team>
-      <div className="mote-cooperation__team-heading"><strong>{presentation === 'threads' ? '其他 Agent' : 'Team work'}</strong><span>{ordered.length} Agent{members.length === 1 ? '' : 's'}</span></div>
-      {scope.issue || !spaceId ? <p className="mote-cooperation__issue" role="status">{spaceId ? 'Showing the last confirmed members and their original conversations.' : 'Original team bindings are not confirmed. Existing members and conversations are kept.'}</p> : null}
+      <div className="mote-cooperation__team-heading"><strong>{presentation === 'threads' ? '其他 Agent' : '团队协作'}</strong><span>{ordered.length} 个 Agent</span></div>
+      {scope.issue || !spaceId ? <p className="mote-cooperation__issue" role="status">{spaceId ? '显示最后确认的成员及其原对话。' : '原团队绑定尚未确认，已有成员和对话都保留。'}</p> : null}
       {humanGoals.map(goal => <button key={goal.id} type="button" className="mote-cooperation__goal" onClick={() => openGoal(goal.id)}>
-        <span>Needs your review</span><strong>{goal.title}</strong><Forward size={14} /></button>)}
+        <span>待你审阅</span><strong>{goal.title}</strong><Forward size={14} /></button>)}
       {ordered.map(member => {
         const observed = sessions[member.key], request = requestFor(member), name = title(member)
-        const detail = request ? request.kind === 'permission' ? request.title || 'Permission requested' : 'Answer requested'
-          : observed ? sessionStatusLabel(observed) : 'Status not confirmed'
+        const detail = request ? request.kind === 'permission' ? request.title || '请求权限' : '等你回答'
+          : observed ? sessionStatusLabel(observed) : '状态未确认'
         return <div className="mote-cooperation__member" key={member.key} data-mote-member={member.agentSessionId}
           data-member-host={member.hostId ?? ''} data-attention={request ? 'true' : undefined}>
           <div className="mote-cooperation__member-info">
             {observed ? <ResolvedAgentAvatar label={observed.label} providerId={observed.providerId} state={observed.status.state} size={22} /> : <Team size={20} />}
-            <div><strong title={name}>{name}</strong><span>{isPrimary(member) ? roleConfirmed ? 'Main Agent' : 'Last confirmed main Agent' : roleConfirmed ? 'Member' : 'Agent'}<span aria-hidden="true"> · </span>{detail}</span></div>
+            <div><strong title={name}>{name}</strong><span>{isPrimary(member) ? roleConfirmed ? '主 Agent' : '最后确认的主 Agent' : roleConfirmed ? '成员' : 'Agent'}<span aria-hidden="true"> · </span>{detail}</span></div>
           </div>
           <div className="mote-cooperation__locations">
-            {member.locations.map((location, index) => <button type="button" key={JSON.stringify(location)} aria-label={`Open ${name}${member.locations.length > 1 ? ` · location ${index + 1}` : ''}`}
+            {member.locations.map((location, index) => <button type="button" key={JSON.stringify(location)} aria-label={`打开 ${name}${member.locations.length > 1 ? ` · 位置 ${index + 1}` : ''}`}
               aria-current={reference && sameWorkbenchProjectionSelection(reference, location) ? 'page' : undefined} onClick={() => open(location)}>
-              {member.locations.length > 1 ? `Location ${index + 1}` : request ? 'Review request' : 'Open'}<Forward size={13} /></button>)}
-            {!member.locations.length ? <span>Original location unconfirmed</span> : null}
+              {member.locations.length > 1 ? `位置 ${index + 1}` : request ? '查看请求' : '打开'}<Forward size={13} /></button>)}
+            {!member.locations.length ? <span>原位置未确认</span> : null}
           </div>
         </div>
       })}
-      {!members.length && spaceId ? <p className="mote-cooperation__empty">No Agents in this Mote yet. Begin with its original discussion.</p> : null}
-      {!needed && members.length ? <p className="mote-cooperation__empty">No confirmed requests need you right now.</p> : null}
+      {!members.length && spaceId ? <p className="mote-cooperation__empty">这个 Mote 还没有 Agent，从原讨论开始。</p> : null}
+      {!needed && members.length ? <p className="mote-cooperation__empty">目前没有需要你处理的已确认请求。</p> : null}
     </div>
   const editDialog = editing ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)}
       onClose={() => setEditing(false)} returnFocus={() => trigger.current} /> : null
   if (presentation === 'threads') return <section className="mote-cooperation mote-cooperation--threads" aria-label="其他 Agent 对话">{issue ? <p role="status">{issue}</p> : null}{membersPanel}</section>
-  if (presentation === 'navigation') return <Dialog.Root modal={false} open={expanded && active} onOpenChange={setExpanded}>
-    <section className="mote-cooperation mote-cooperation--navigation" data-mote-cooperation={scope.topic.id} aria-label="Mote cooperation">
-      <Dialog.Trigger asChild><button type="button" ref={trigger} className="mote-cooperation__team" aria-label="Team work" title="Team and cooperation settings"
+  return <Dialog.Root modal={false} open={expanded && active} onOpenChange={setExpanded}>
+    <section className="mote-cooperation mote-cooperation--navigation" data-mote-cooperation={scope.topic.id} aria-label="Mote 协作">
+      <Dialog.Trigger asChild><button type="button" ref={trigger} className="mote-cooperation__team" aria-label="团队协作" title="团队与协作设置"
         aria-expanded={expanded} aria-controls={id} data-needs-you={needed > 0 ? 'true' : undefined}>
-        <Team size={15} /><span>{needed ? `${needed} needs you` : 'Team'}</span><Down size={12} />
+        <Team size={15} /><span>{needed ? `${needed} 项待你处理` : '团队'}</span><Down size={12} />
       </button></Dialog.Trigger>
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Content ref={setPanel} className="mote-cooperation mote-cooperation__popover" style={{ visibility: 'hidden' }} aria-describedby={undefined}
           onOpenAutoFocus={event => { event.preventDefault(); panel?.focus({ preventScroll: true }) }}>
-          <header className="mote-cooperation__popover-heading"><Dialog.Title>Team &amp; cooperation</Dialog.Title>
-            <Dialog.Close type="button" className="icon-button" aria-label="Close team work"><Close size={14} /></Dialog.Close></header>
+          <header className="mote-cooperation__popover-heading"><Dialog.Title>团队与协作</Dialog.Title>
+            <Dialog.Close type="button" className="icon-button" aria-label="关闭团队协作"><Close size={14} /></Dialog.Close></header>
           {issue || primaryIssue ? <p className="mote-cooperation__issue" role="status">{issue || primaryIssue}</p> : null}
-          {primary && primaryLocation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="Return to main Agent"
-            onClick={() => open(primaryLocation!)}>Main conversation<Forward size={13} /></button> : null}
+          {primary && primaryLocation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="返回主 Agent"
+            onClick={() => open(primaryLocation!)}>主对话<Forward size={13} /></button> : null}
           {membersPanel}
           <footer className="mote-cooperation__popover-actions">
-            <button type="button" className="mote-cooperation__return" onClick={() => { setExpanded(false); setEditing(true) }}><Settings size={14} />Cooperation settings</button>
+            <button type="button" className="mote-cooperation__return" onClick={() => { setExpanded(false); setEditing(true) }}><Settings size={14} />协作设置</button>
             {actions}
           </footer>
         </Dialog.Content>
@@ -222,30 +212,4 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
       {editDialog}
     </section>
   </Dialog.Root>
-  return <section className="mote-cooperation" data-mote-cooperation={scope.topic.id} aria-label="Mote cooperation">
-    <div className="mote-cooperation__bar">
-      <div className="mote-cooperation__identity">
-        <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
-          avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={active} />
-        <div className="mote-cooperation__copy"><strong title={scope.topic.title}>{scope.topic.title}</strong>
-          <span>{current ? <>{isPrimary(current) ? roleConfirmed ? 'Main Agent' : 'Last confirmed main Agent' : 'Team member'}<span aria-hidden="true"> · </span><b title={title(current)}>{title(current)}</b></> : primary ? 'Original conversation retained' : 'Choose your main Agent'}
-            {session ? <><span aria-hidden="true"> · </span>{sessionStatusLabel(session)}</> : null}</span>
-        </div>
-      </div>
-      <div className="mote-cooperation__actions">
-        {primary && primaryLocation && (!current || !isPrimary(current)) ? <button type="button" className="mote-cooperation__return" aria-label="Return to main Agent"
-          onClick={() => open(primaryLocation!)}>Main Agent<Forward size={13} /></button> : null}
-        {!primaryLocation ? <button type="button" className="mote-cooperation__return" onClick={() => setEditing(true)}>{primary || primaryIssue ? 'Review main Agent' : 'Choose main Agent'}</button> : null}
-        <button type="button" ref={trigger} className="mote-cooperation__team" aria-label="Team work" aria-expanded={expanded} aria-controls={id}
-          data-needs-you={needed > 0 ? 'true' : undefined} onClick={() => setExpanded(value => !value)}>
-          <Team size={15} /><span>{needed ? `${needed} needs you` : 'Team'}</span><small>{members.length}</small><Down size={12} /></button>
-        {actions}
-      </div>
-    </div>
-    {goals[0] && !expanded ? <button type="button" className="mote-cooperation__work" onClick={() => openGoal(goals[0]!.id)}>
-      <span>Current work</span><strong>{goals[0].title}</strong><Forward size={12} /></button> : null}
-    {issue || primaryIssue ? <p className="mote-cooperation__issue mote-space-frame__issue" role="status">{issue || primaryIssue}</p> : null}
-    {expanded ? membersPanel : null}
-    {editDialog}
-  </section>
 }

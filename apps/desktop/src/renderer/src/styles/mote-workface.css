@@ -362,22 +362,11 @@
 /* A retained service notice uses real space without pushing the original Composer below its workface. */
 .workbench-context-frame { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
 .workbench-context-frame > .workspace-workbench { flex: 1; height: auto; }
-.mote-workface__presentation-action { margin-inline-start: auto; margin-inline-end: 8px; align-self: center; padding: 3px 7px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; -webkit-app-region: no-drag; }
-.mote-workface__presentation-action:hover, .mote-workface__presentation-action:focus-visible { color: var(--text); background: var(--surface-2); }
 /* A portal may retain its original React owner. Scope chrome to this actual
    displayed Mote surface, so opening the floating workface never changes its
    background neighbour. Original controls and native content stay mounted. */
 [data-mote-workface-presentation="conversation"] .agent-surface[data-agent-surface-mode="activity"] > .agent-region-header-home { display: none; }
 [data-mote-workface-presentation="conversation"] .agent-surface[data-agent-surface-mode="activity"]:has(> .agent-region-header-home) { --agent-region-reading-inset: 0px; }
-
-@container mote-space (max-width: 760px) {
-  .mote-space-frame__header { align-items: flex-start; gap: 4px 8px; }
-  .mote-space-frame__navigation { flex-wrap: wrap; gap: 4px 12px; }
-  .mote-space-frame__navigation > .mote-space-frame__name { flex: 1 1 120px; max-width: none; }
-  .mote-space-frame__navigation > .surface-mode-switch { flex: 1 0 100%; }
-  .mote-space-frame__navigation > .surface-mode-switch button { padding-inline: 10px; }
-  .mote-cooperation--navigation { padding-top: 4px; }
-}
 
 .mote-ideas__browser[data-empty="true"] { grid-template-columns: minmax(0, 1fr); }
 .mote-ideas__browser[data-empty="true"] > .mote-ideas__library { max-width: 640px; border: 0; }
@@ -401,6 +390,7 @@
 .mote-threads-panel__locations { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .mote-cooperation--threads { border: 0; padding: 0; }
 .mote-cooperation--threads .mote-cooperation__team-body { max-height: none; }
+.mote-entry-loading { display: flex; flex: 1; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 180px; color: var(--text-3); font-size: var(--fs-body); }
 @container mote-space (max-width: 760px) {
   .mote-space-frame__header { align-items: center; gap: 8px; }
   .mote-space-frame__navigation { flex-wrap: nowrap; gap: 8px; }
@@ -412,12 +402,13 @@
 .mote-space-frame, .mote-workface { position: relative; }
 .mote-main-slot { display: inline-flex; align-items: center; flex: 0 0 auto; margin-inline-start: auto; }
 .mote-main-actions[data-presentation="menu"] { font-size: var(--fs-meta); }
-.mote-main-actions[data-presentation="menu"] > details > summary { cursor: pointer; color: var(--text-3); padding: 3px 8px; min-height: 24px; box-sizing: border-box; list-style: none; border-radius: var(--radius-sm); }
-.mote-main-actions[data-presentation="menu"] > details > summary:hover { color: var(--text); background: var(--surface-2); }
-.mote-main-actions[data-presentation="menu"] > details[open] { position: absolute; right: 12px; top: 2px; z-index: var(--layer-popover); width: min(360px, calc(100% - 24px)); box-sizing: border-box; padding: 0 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--shadow-soft); }
-.mote-main-actions[data-presentation="menu"] > details[open] > summary { text-align: end; }
-.mote-main-actions[data-presentation="menu"] > details[open] button { margin: 4px; }
-.mote-main-actions[data-presentation="menu"] > p, .mote-main-actions[data-presentation="menu"] > details + details { position: absolute; top: 30px; right: 12px; max-width: min(440px, calc(100% - 24px)); background: var(--surface-1); padding: 8px; z-index: 3; }
+.mote-main-actions__trigger { appearance: none; border: 0; background: transparent; font: inherit; cursor: pointer; color: var(--text-3); padding: 3px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--radius-sm); -webkit-app-region: no-drag; }
+.mote-main-actions__trigger:hover, .mote-main-actions__trigger[data-state="open"] { color: var(--text); background: var(--surface-2); }
+.mote-main-actions__trigger:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+/* Shared non-modal popover: the native overlay projection sees its open dialog role and state. */
+.mote-main-actions__menu { position: fixed; z-index: var(--layer-popover); width: 360px; box-sizing: border-box; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--shadow-soft); color: var(--text); font-size: var(--fs-meta); }
+.mote-main-actions__title { margin: 0 4px 4px; font-size: var(--fs-meta); font-weight: 600; color: var(--text-2); }
+.mote-main-actions__menu button { margin: 4px; }
 .mote-main-actions[data-presentation="setup"] { position: absolute; top: 32px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--text-2); font-size: var(--fs-body); }
 .mote-main-actions[data-presentation="setup"] > div { max-width: 460px; text-align: center; }
 .mote-main-actions[data-presentation="setup"] button { margin: 4px; }

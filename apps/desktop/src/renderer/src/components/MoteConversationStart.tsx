@@ -18,7 +18,7 @@ import { sessionPresentationById } from '../lib/session-presentation'
 
 /** The welcome uses the existing durable Launcher draft and original Main setup admission. */
 export function MoteConversationStart({ scope, active, mode, onConfigure, onOpenMain, onOpenPeriod, automatic }: {
-  scope: MoteWorkfaceScope; active: boolean; mode: 'start' | 'new'; onConfigure(): void
+  scope: MoteWorkfaceScope; active: boolean; mode: 'start' | 'new'; onConfigure(invoker?: HTMLElement | null): void
   onOpenMain(reference: MoteDefaultConversation): void; onOpenPeriod(source: Source): void
   automatic?: MoteRolloverStart | undefined
 }) {
@@ -77,18 +77,19 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
       portrait={<SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
         avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={active} />}
       brand={<BrandIcon size={128} />}
-      actions={<button type="button" className="mote-start__settings" onClick={onConfigure} aria-label="Mote 快捷配置">设置</button>}
+      actions={<button type="button" className="mote-start__settings" onClick={event => onConfigure(event.currentTarget)} aria-label="Mote 快捷配置">设置</button>}
       composer={<AgentComposer value={draft} disabled={false} active={active} placeholder="写下你想聊的事…"
         onChange={value => { edits.current++; useLauncherState.getState().setDraft(key, 'prompt', value) }}
-        {...(state.ready && !state.busy && active && !persistenceIssue && !automatic ? { onSubmit: () => {
+        {...(state.ready && !state.busy && active && !persistenceIssue && !automatic && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => {
           const query = { operationId: mintObjectId(), prompt: draft, revision: edits.current, lifetime: lifetime.current }
           submission.current = query; void state.submit({ operationId: query.operationId, prompt: query.prompt })
         } } : {})} />}
       notice={<>{state.issue && <p role="status">{state.issue}</p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}
         {automatic && <div role="status">正在按此 Mote 的空闲策略承接原输入。<details><summary>本次输入</summary><p>{automatic.query.prompt}</p></details></div>}
+        {mode !== 'new' && state.reading?.dialogue.main.current && <p role="status">已有当前主对话，这里不会另建主 Agent；草稿保留，可从「对话选项」返回当前主对话。</p>}
         {state.busy && <p role="status">正在接通这次对话…</p>}
         <details><summary>{state.pending.length ? '原开始请求待核对' : '对话选项'}</summary>
-          <button type="button" onClick={onConfigure}>快捷配置</button><button type="button" disabled={state.busy} onClick={state.refresh}>重新核对</button>
+          <button type="button" onClick={event => onConfigure(event.currentTarget)}>快捷配置</button><button type="button" disabled={state.busy} onClick={state.refresh}>重新核对</button>
           {state.reading?.dialogue.main.current && <button type="button" onClick={() => onOpenMain(state.reading!.dialogue.main.current!)}>返回当前主对话</button>}
           {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对原开始请求</button><button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续原开始请求</button><code>{id}</code></div>)}
           {state.result && <p>{state.result.issue ?? '原请求已保留，绑定和消息投递分别核对。'} <code>{state.result.operationId}</code></p>}

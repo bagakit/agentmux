@@ -22,9 +22,11 @@ import { MoteConversationStart } from './MoteConversationStart'
 import { MotePeriodConversation, MoteOriginalConversation } from '@agentmux/client-ui/components/MoteConversationThreads'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { api } from '../lib/api'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { motePresentationContextKey, usePublishMotePresentation } from '../lib/mote-presentation-context'
 
 const ThreadsIcon = semanticIconComponent('object.conversations')
+const LoadingIcon = semanticIconComponent('status.loading')
 
 type Props = {
   workspaceId: string; topicId?: string | undefined; floating?: boolean; visible?: boolean; recoverOnOpen?: boolean
@@ -46,6 +48,13 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   const [local, setLocal] = useState<{ owner: string; section: 'discussion' | 'threads'; member: boolean; original: boolean; token?: string; start?: boolean; period?: Extract<MoteDialogueLink, {kind:'main'}>; periodOriginal?: boolean; rollover?: MoteRolloverStart }>({ owner, section: 'discussion', member: false, original: false })
   const [floatingActionsHost, setFloatingActionsHost] = useState<HTMLSpanElement | null>(null)
   const [settings, setSettings] = useState(false)
+  const settingsInvoker = useRef<HTMLElement | null>(null), ownerDocument = useWorkbenchDocument()
+  // The dialog returns focus to the control that opened it, or to the Main menu trigger for menu actions.
+  function openSettings(invoker?: HTMLElement | null) {
+    const active = invoker ?? ownerDocument.activeElement
+    settingsInvoker.current = active instanceof HTMLElement && active !== active.ownerDocument.body ? active : null
+    setSettings(true)
+  }
   const currentLocal = local.owner === owner ? local : { owner, section: 'discussion' as const, member: false, original: false }
   const sharedFrame = !floating && frame?.topicId === scope?.topic.id ? frame : null
   const section = sharedFrame?.section === 'threads' ? 'threads' : sharedFrame?.section === 'discussion' ? 'discussion' : currentLocal.section
@@ -142,6 +151,10 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     main?.identity?.hostId === scope?.workspace.hostId && main?.identity?.moteId === scope?.topic.id ? main?.current : null
   const selectedMain = matchesSelection(readingMain)
   const showOriginal = !scope || presentation === 'workface' || section === 'threads' && memberIntent || section === 'discussion' && selectedMain && !currentLocal.start && !currentLocal.period
+  // Only the original role owner can say there is no current Main. Reading, unknown or an unselected current Main is never the start welcome.
+  const roleOwned = main?.status === 'ready' && !dialogue?.unavailable && main.identity?.hostId === scope?.workspace.hostId && main.identity?.moteId === scope?.topic.id
+  const entry = !scope || section !== 'discussion' || showOriginal || currentLocal.period ? null : currentLocal.start ? 'welcome' as const
+    : roleOwned && !main?.current ? 'welcome' as const : currentMain ? 'current' as const : !dialogue?.page && !dialogue?.issue ? 'reading' as const : 'unconfirmed' as const
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal,
     showOriginalWorkface: () => setLocal(previous => ({ ...previous, owner, original: true })),
     showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference,
@@ -157,9 +170,12 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       {notice}
       {selectedMain && currentMain && readingMain?.sessionId !== currentMain.sessionId ? <div className="mote-workface__handoff" role="status">主 Agent 已更换，原对话和草稿保留。<button type="button" onClick={showDiscussion}>返回当前主对话</button></div> : null}
       {entryRecovery.issue ? <p role="status" className="mote-conversation__issue">{entryRecovery.issue}<button type="button" className="small-button" onClick={entryRecovery.inspect}>核对原恢复</button></p> : null}
-      {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal} entryToken={entryToken} presentation="menu" onConfigure={() => setSettings(true)} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
-      {scope && section === 'discussion' && !showOriginal && !currentLocal.period ? <MoteConversationStart scope={scope} active={visible} mode={currentLocal.start ? 'new' : 'start'} automatic={currentLocal.rollover}
-        onConfigure={() => setSettings(true)} onOpenMain={openMain} onOpenPeriod={period => setLocal(previous => ({ ...previous, owner, period, periodOriginal: false }))} /> : null}
+      {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
+      {scope && entry === 'reading' ? <div className="mote-entry-loading" role="status" aria-live="polite"><LoadingIcon size={14} animation="spin" aria-hidden="true" /><span>正在接回 {scope.topic.title} 的主对话…</span></div> : null}
+      {scope && entry === 'current' && currentMain ? <p role="status" className="mote-conversation__issue">{scope.topic.title} 已有当前主对话，原对话和草稿都在。<button type="button" className="small-button" onClick={() => openMain(currentMain)}>打开当前主对话</button></p> : null}
+      {scope && entry === 'unconfirmed' && !main?.current ? <p role="status" className="mote-conversation__issue">主对话的来源尚未确认，不会当作没有主对话而新建。原对话和草稿仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
+      {scope && entry === 'welcome' ? <MoteConversationStart scope={scope} active={visible} mode={currentLocal.start ? 'new' : 'start'} automatic={currentLocal.rollover}
+        onConfigure={openSettings} onOpenMain={openMain} onOpenPeriod={period => setLocal(previous => ({ ...previous, owner, period, periodOriginal: false }))} /> : null}
       {scope && section === 'discussion' && currentLocal.period && !showOriginal ? <div className="mote-workface__period"><button type="button" className="small-button" onClick={() => setLocal(previous => {
         if (previous.periodOriginal) return { ...previous, periodOriginal: false }
         const { period, periodOriginal, ...rest } = previous; return rest
@@ -173,7 +189,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       </div> : null}
       {scope && section === 'discussion' && !showOriginal && !currentMain && main?.current ? <p role="status" className="mote-conversation__issue">原主对话的角色或位置尚未确认，原身份、工作和输入仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={showThreads}>查看 Threads</button></p> : null}
       <div className="mote-workface__original" hidden={!showOriginal} inert={!showOriginal}>{children}</div>
-      {settings && scope ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setSettings(false)} returnFocus={() => null} /> : null}
+      {settings && scope ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setSettings(false)} returnFocus={() => settingsInvoker.current?.isConnected ? settingsInvoker.current : null} /> : null}
     </div>
   </MoteWorkfaceContext.Provider>
 }
