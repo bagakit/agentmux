@@ -25,7 +25,7 @@ const sourceFiles = ['apps/desktop/src/main/workspace-media-streams.ts', 'apps/d
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/index.html',
   'packages/editor-extensions/src/ui/MediaPlayer.tsx', 'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',
   'apps/desktop/src/renderer/src/components/file-preview/PlaylistFilePreview.tsx', 'packages/editor-extensions/src/engines/media-player.ts',
-  'apps/desktop/src/renderer/src/lib/use-workspace-media-stream.ts', 'apps/desktop/src/renderer/src/styles/media-player.css',
+  'apps/desktop/src/renderer/src/lib/use-workspace-media-stream.ts', 'packages/editor-extensions/src/styles/media-player.css', 'packages/editor-extensions/src/styles/preview-common.css', 'packages/editor-extensions/src/format-file-bytes.ts',
   'apps/desktop/src/renderer/src/styles/tokens.css', 'apps/desktop/src/shared/workspace-file-preview.ts', 'packages/editor-extensions/src/catalog.ts',
   'packages/client-ui/src/theme/icon-authored.ts', 'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts',
   'apps/desktop/scripts/verify-workspace-media-playback.mjs', 'apps/desktop/scripts/package-smoke-context.mjs',

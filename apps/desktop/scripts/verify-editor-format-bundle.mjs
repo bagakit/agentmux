@@ -20,6 +20,7 @@ const heavyPackage = /\/node_modules\/(?:\.pnpm\/)?(?:mermaid|@viz-js(?:\/|\+)vi
 const report = { passed: false, sources, targets }
 try {
   for (const file of ['apps/desktop/scripts/verify-editor-format-bundle.mjs', 'apps/desktop/electron.vite.config.ts',
+    'packages/editor-extensions/src/build/extension-notices.ts', 'packages/editor-extensions/src/build/pdfjs-viewer-assets.ts',
     'packages/editor-extensions/src/build/file-diagram-assets.ts', 'packages/editor-extensions/src/build/excalidraw-local-fonts.ts',
     'apps/desktop/package.json', 'packages/editor-extensions/package.json', 'packages/client-ui/package.json', 'pnpm-lock.yaml']) {
     sources[file] = sha(await readFile(join(repository, file)))
@@ -93,6 +94,13 @@ try {
     assert.ok(modules.includes(file), `Existing shared YAML consumer: ${file}`)
   }
   assert.deepEqual(modules.filter(id => /\/engines\/(?:data-config|data-parse|vega-spec|mermaid-engine|dot-engine|drawio-engine|plantuml-engine|format-engine)\.ts$/.test(id)), [], 'File parser/compiler implementations stay outside startup.')
+  assert.deepEqual(modules.filter(id => /packages\/editor-extensions\/src\/(?:books|book-reader)\//.test(id)), [], 'Book parser and reader entry stay outside App startup.')
+  const bookEntry = chunks.find(chunk => chunk.entry && chunk.facade === 'apps/desktop/src/renderer/book-reader/index.html')
+  assert.ok(bookEntry, 'The actual isolated book HTML entry was compiled.')
+  const bookClosure = new Set(), visitBook = file => { if (bookClosure.has(file)) return; bookClosure.add(file); for (const dependency of byFile.get(file)?.imports ?? []) visitBook(dependency) }
+  visitBook(bookEntry.file)
+  assert.ok([...bookClosure].flatMap(file => byFile.get(file)?.modules ?? []).includes('packages/editor-extensions/src/book-reader/runtime.ts'), 'The private runtime registration was not tree-shaken.')
+  assert.ok(targets.preload.chunks.some(chunk => chunk.entry && chunk.facade === 'apps/desktop/src/preload/book-reader.ts'), 'The real sandboxed book preload was compiled.')
   const artifacts = Object.keys(targets.renderer.artifacts)
   for (const pattern of [/markdown-render\.worker-.*\.js$/, /data-structured\.worker-.*\.js$/, /data-notebook\.worker-.*\.js$/, /dot-worker-.*\.js$/, /format-worker-.*\.js$/, /vega-chart\.worker-.*\.js$/]) {
     assert.ok(artifacts.some(file => pattern.test(file)), `Actual emitted lazy Worker: ${pattern}`)
@@ -104,7 +112,7 @@ try {
   for (const [file, digest] of Object.entries(sources)) assert.equal(sha(await readFile(join(repository, file))), digest, `Final source identity: ${file}`)
   report.startup = { entry: entry.file, chunks: [...closure], moduleCount: modules.length, eagerFormatEngines: isolated,
     sharedDependencies: sharedYaml.length ? [{ package: 'yaml', reason: 'Existing startup Mote preference consumers', modules: sharedYaml }] : [] }
-  for (const file of ['licenses/editor-extensions/djvu-rs/LICENSE', 'licenses/editor-extensions/djvu-rs/THIRD_PARTY_NOTICES', 'licenses/editor-extensions/pdfjs/LICENSE', 'licenses/editor-extensions/foliate-js/LICENSE']) {
+  for (const file of ['licenses/editor-extensions/djvu-rs/LICENSE', 'licenses/editor-extensions/djvu-rs/THIRD_PARTY_NOTICES', 'licenses/editor-extensions/pdfjs/LICENSE', 'licenses/editor-extensions/zip.js/LICENSE', 'licenses/editor-extensions/fflate/LICENSE', 'licenses/editor-extensions/foliate-js/LICENSE']) {
     assert.ok(targets.renderer.artifacts[file], `Actual packaged upstream notice: ${file}`)
   }
   assert.ok(artifacts.some(file => /djvu_rs_bg-.*\.wasm$/.test(file)), 'Actual lazily fetched DjVu decoder WASM was emitted')
