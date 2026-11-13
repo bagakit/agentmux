@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, open as openFile, readFile, rename, rm, truncate, 
 import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { NativeJsonlHistoryReader, readNativeHistoryBytes, type NativeHistoryReadBudget } from '../src/native-jsonl-history-reader.js'
 import { NativeText } from '../src/native-history-value.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
@@ -681,4 +681,28 @@ it('keeps exact physical end boundaries across forward, backward and addressed r
   expect(await reader.readBefore(three!.start)).toEqual(two)
   expect(await reader.readPrevious()).toEqual(two)
   expect(await reader.readNext()).toBeNull()
+})
+
+it('keeps reading a page that makes progress past the page deadline and stops one that stalls', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agentmux-native-progress-'))
+  roots.push(root)
+  const filePath = join(root, 'target.bin')
+  await writeFile(filePath, Buffer.from('1234567890'))
+  const file = await openFile(filePath, constants.O_RDONLY)
+  const signal = new AbortController().signal
+  let clock = 1_000_000
+  const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+  try {
+    // Six reads two seconds apart: twelve seconds in all, each gap well inside the deadline.
+    const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: clock }
+    for (let offset = 0; offset < 6; offset++) {
+      clock += 2_000
+      expect((await readNativeHistoryBytes(file, offset, 1, signal, budget)).toString()).toBe(String(offset + 1))
+    }
+    expect(budget.bytesRead).toBe(6)
+    // A page whose last progress was longer ago than the deadline still stops.
+    const stalled: NativeHistoryReadBudget = { bytesRead: 0, startedAt: clock }
+    clock += 10_001
+    await expect(readNativeHistoryBytes(file, 0, 1, signal, stalled)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TIMEOUT' })
+  } finally { now.mockRestore(); await file.close() }
 })

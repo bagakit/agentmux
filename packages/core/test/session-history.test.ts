@@ -295,3 +295,33 @@ describe('public native Session history pages', () => {
     }
   })
 })
+
+describe('history page reads that keep making progress', () => {
+  it('completes a Provider page whose physical reads keep arriving past the page deadline, and still stops one that stalls', async () => {
+    vi.useFakeTimers()
+    const { readNativeHistoryBytes } = await import('../src/native-jsonl-history-reader.js')
+    // A FileHandle whose read takes two seconds: the real read owner, accounting and checks run unchanged.
+    const slowFile = { read: async (buffer: Buffer, offset: number, length: number) => {
+      await new Promise(resolve => setTimeout(resolve, 2_000)); buffer.fill(65, offset, offset + length)
+      return { bytesRead: length, buffer }
+    } } as unknown as import('node:fs/promises').FileHandle
+    let signal!: AbortSignal
+    const reader = vi.fn(async (context: AgentProviderSessionHistoryContext) => {
+      signal = context.signal
+      const budget = { bytesRead: 0, startedAt: Date.now() }
+      for (let offset = 0; offset < 6; offset++) await readNativeHistoryBytes(slowFile, offset, 1, context.signal, budget)
+      return page()
+    })
+    const { client } = await harness(reader)
+    const request = client.sessionHistoryPage('main-session')
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect((await request).items).toEqual([item])
+    expect(signal.aborted).toBe(false)
+
+    const silent = vi.fn(async () => await new Promise<AgentProviderSessionHistoryPage>(() => {}))
+    const stalled = await harness(silent)
+    const rejection = expect(stalled.client.sessionHistoryPage('main-session')).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TIMEOUT' })
+    await vi.advanceTimersByTimeAsync(10_000)
+    await rejection
+  })
+})
