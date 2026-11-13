@@ -346,43 +346,11 @@ describe('semantic session registry concurrency', () => {
     let releaseTransition!: () => void
     const transitionEntered = new Promise<void>((resolve) => { enteredTransition = resolve })
     const transitionRelease = new Promise<void>((resolve) => { releaseTransition = resolve })
-    const store: AgentMuxAgentSessionStore = {
-      withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
-      confirmDurability: (id, run, expected) => memory.confirmDurability(id, run, expected),
-      async load() { return await memory.load() },
-      loadMetadata: memory.loadMetadata.bind(memory),
-      readMetadata: memory.readMetadata.bind(memory),
-      readRetiredAgentSession: memory.readRetiredAgentSession.bind(memory),
-      readHistorySource: memory.readHistorySource.bind(memory),
-      readFuturePromptIntent: memory.readFuturePromptIntent.bind(memory),
-      listFuturePromptIntents: memory.listFuturePromptIntents.bind(memory),
-      loadCreationSessionId: memory.loadCreationSessionId.bind(memory),
-      loadCreationCorrelation: memory.loadCreationCorrelation.bind(memory),
-      prepareCreate: memory.prepareCreate.bind(memory),
-      claimCreate: memory.claimCreate.bind(memory),
-      prepareReopen: memory.prepareReopen.bind(memory),
-      releaseReopenOwner: memory.releaseReopenOwner.bind(memory),
-      claimReopen: memory.claimReopen.bind(memory),
-      async loadRetiredRuns() { return await memory.loadRetiredRuns() },
-      async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
-      async loadReopenCorrelations() { return await memory.loadReopenCorrelations() },
-      compareAndSwap: memory.compareAndSwap.bind(memory),
-      async compareAndSwapMetadata(expected, next) {
-        if (next?.run.runId === 'run-2') {
-          enteredTransition()
-          await transitionRelease
-        }
-        await memory.compareAndSwapMetadata(expected, next)
-      },
-      async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
-      recordRestartAdmission: memory.recordRestartAdmission.bind(memory),
-      async claimStaleLifecycles(value, target) { return await memory.claimStaleLifecycles(value, target) },
-      async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
-      async retireRuns(value) { await memory.retireRuns(value) },
-      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) },
-      async loadTimeline(agentSessionId) { return await memory.loadTimeline(agentSessionId) },
-      async applyTimelineMutation(value, signal) { return await memory.applyTimelineMutation(value, signal) }
-    }
+    const store: AgentMuxAgentSessionStore = memory, compare = memory.compareAndSwapMetadata.bind(memory)
+    vi.spyOn(memory, 'compareAndSwapMetadata').mockImplementation(async (expected, next, signal, future, author) => {
+      if (next?.run.runId === 'run-2') { enteredTransition(); await transitionRelease }
+      await compare(expected, next, signal, future, author)
+    })
     const registry = new AgentMuxAgentSessionRegistry(store)
     const original = session()
     const resumed = { ...original, run: session('run-2').run, updatedAt: reshapeFixtureEpoch(0, 0, 200) }
@@ -407,51 +375,21 @@ describe('semantic session registry concurrency', () => {
     let releaseActive!: () => void
     const released = new Promise<void>((resolve) => { releaseActive = resolve })
     let compareCalls = 0
-    const store: AgentMuxAgentSessionStore = {
-      withPromptSubmission: (id, operation) => memory.withPromptSubmission(id, operation),
-      confirmDurability: (id, run, expected) => memory.confirmDurability(id, run, expected),
-      async load() { return await memory.load() },
-      loadMetadata: memory.loadMetadata.bind(memory),
-      readMetadata: memory.readMetadata.bind(memory),
-      readRetiredAgentSession: memory.readRetiredAgentSession.bind(memory),
-      readHistorySource: memory.readHistorySource.bind(memory),
-      readFuturePromptIntent: memory.readFuturePromptIntent.bind(memory),
-      listFuturePromptIntents: memory.listFuturePromptIntents.bind(memory),
-      loadCreationSessionId: memory.loadCreationSessionId.bind(memory),
-      loadCreationCorrelation: memory.loadCreationCorrelation.bind(memory),
-      prepareCreate: memory.prepareCreate.bind(memory),
-      claimCreate: memory.claimCreate.bind(memory),
-      prepareReopen: memory.prepareReopen.bind(memory),
-      releaseReopenOwner: memory.releaseReopenOwner.bind(memory),
-      claimReopen: memory.claimReopen.bind(memory),
-      async loadRetiredRuns() { return await memory.loadRetiredRuns() },
-      async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
-      async loadReopenCorrelations() { return await memory.loadReopenCorrelations() },
-      async compareAndSwap(expected, next, signal) { compareCalls += 1; await memory.compareAndSwap(expected, next, signal) },
-      async compareAndSwapMetadata(expected, next, signal) {
-        compareCalls += 1
-        if (block) {
-          blocked()
-          await new Promise<void>((resolve, reject) => {
-            const abort = (): void => reject(signal?.reason)
-            signal?.addEventListener('abort', abort, { once: true })
-            void released.then(() => {
-              signal?.removeEventListener('abort', abort)
-              resolve()
-            })
-          })
-        }
-        await memory.compareAndSwapMetadata(expected, next, signal)
-      },
-      async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
-      recordRestartAdmission: memory.recordRestartAdmission.bind(memory),
-      async claimStaleLifecycles(value, target) { return await memory.claimStaleLifecycles(value, target) },
-      async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
-      async retireRuns(value) { await memory.retireRuns(value) },
-      async commitLifecycle(value, next) { await memory.commitLifecycle(value, next) },
-      async loadTimeline(agentSessionId) { return await memory.loadTimeline(agentSessionId) },
-      async applyTimelineMutation(value, signal) { return await memory.applyTimelineMutation(value, signal) }
-    }
+    const store: AgentMuxAgentSessionStore = memory
+    const compare = memory.compareAndSwap.bind(memory), compareMetadata = memory.compareAndSwapMetadata.bind(memory)
+    vi.spyOn(memory, 'compareAndSwap').mockImplementation(async (...args) => { compareCalls++; await compare(...args) })
+    vi.spyOn(memory, 'compareAndSwapMetadata').mockImplementation(async (expected, next, signal, future, author) => {
+      compareCalls++
+      if (block) {
+        blocked()
+        await new Promise<void>((resolve, reject) => {
+          const abort = (): void => reject(signal?.reason)
+          signal?.addEventListener('abort', abort, { once: true })
+          void released.then(() => { signal?.removeEventListener('abort', abort); resolve() })
+        })
+      }
+      await compareMetadata(expected, next, signal, future, author)
+    })
     const registry = new AgentMuxAgentSessionRegistry(store)
     await registry.put(session())
     block = true
