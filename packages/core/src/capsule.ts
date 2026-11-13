@@ -1,5 +1,6 @@
 /** Capsule's portable owner contract is shared with Hosts; Core owns only composition. */
 export * from '@agentmux/capsule'
+export { formatCapsuleAnswer, parseCapsuleAnswer, type CapsuleAnswer } from './capsule-answer.js'
 import { CapsuleValidationError, parseCapsuleParams, parseCapsuleResult,
   type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from '@agentmux/capsule'
 import { AgentMuxError } from './errors.js'

@@ -9,6 +9,7 @@ import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
 import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 import { formatAmuxSharing, formatAmuxObjectLink } from './sharing.js'
+import { formatCapsuleAnswer, parseCapsuleAnswer } from './capsule-answer.js'
 
 export { AMUX_PROTOCOL_DEFINITIONS, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 
@@ -373,6 +374,9 @@ function parseStandaloneProtocol(text: string): AmuxProtocolDeclaration | null {
       return { id: 'reaction', tag: AMUX_PROTOCOL_DEFINITIONS.reaction.tag, attributes: [], body: null, raw: text, code }
     }
   }
+  const capsuleAnswer = parseCapsuleAnswer(text)
+  if (capsuleAnswer) return { id: 'capsule-answer', tag: AMUX_PROTOCOL_DEFINITIONS['capsule-answer'].tag,
+    attributes: [{ name: 'version', value: '1' }], body: null, raw: text, capsuleAnswer }
   const header = /^<amux:([a-z][a-z0-9-]*)((?: +[a-z][a-z0-9-]*="[^<>"\r\n]*")*) *(\/?)>/u.exec(text)
   if (!header) return null
   const tag = `amux:${header[1]}`
@@ -424,6 +428,7 @@ const protocolExamples = {
     { label: 'Single reference', wire: renderAgentMuxMessageReferences([sampleReference]) },
     { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }
   ],
+  'capsule-answer': () => [{ label: 'Confirmed page answer', wire: formatCapsuleAnswer({ capsuleId: 'PAGE', interactionId: 'QUESTION', question: 'Which icon?', answer: 'B, with a lighter shadow' }) }],
   continue: () => [{ label: 'Continuation declaration', wire: AMUX_CONTINUE_MARKER }],
   reaction: () => [
     { label: 'Standalone keyword declaration', wire: formatAmuxReactionMarker('ok') },

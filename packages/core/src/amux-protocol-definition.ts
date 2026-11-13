@@ -24,6 +24,10 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     tag: 'amux:a2a', form: 'envelope', title: 'A2A Inbox references',
     description: 'References to originals, individually or in an amux container. Reading this card does not fetch or acknowledge them.',
   },
+  'capsule-answer': {
+    tag: 'amux:capsule-answer', form: 'envelope', title: 'Page answer',
+    description: 'A confirmed answer to one Capsule page question, with its original page and question IDs. The trusted confirmation and input receipt, not this text, establish the human source.',
+  },
   continue: {
     tag: 'amux:continue', form: 'marker', title: 'Continue',
     description: 'A continuation declaration. Viewing it does not resume a Session or establish that work was completed.',
@@ -58,12 +62,17 @@ export function formatAmuxReactionMarker(code: string): string {
   return `<${AMUX_PROTOCOL_DEFINITIONS.reaction.tag} ${code} />`
 }
 
+/** A person's confirmed answer to one Capsule page question, as delivered to the page's recipient Agent. */
+export type CapsuleAnswer = { capsuleId: string; interactionId: string; question: string; answer: string }
+
 export type AmuxProtocolDeclaration = {
   /** Absent for an unknown type: a generic reading card, not a supported business action. */
-  id?: 'continue' | 'reaction'
+  id?: 'continue' | 'reaction' | 'capsule-answer'
   tag: string
   attributes: readonly { name: string; value: string }[]
   body: string | null
   raw: string
   code?: string
+  /** Read from the exact registered wire; still a declaration, not a human-source proof. */
+  capsuleAnswer?: CapsuleAnswer
 }
