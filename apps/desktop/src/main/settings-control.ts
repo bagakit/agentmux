@@ -1,8 +1,7 @@
-import { defaultNotesDirectory } from '@agentmux/core/notebook-store'
 import type { NotesStorageOwner } from './notes-storage-owner.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { ConfigOwner } from './config-owner.js'
-import { scalarSettings } from './settings/setting-catalog.js'
+import { scalarSettings, ownedSettings } from './settings/setting-catalog.js'
 
 function unsupported(key: string): Error {
   return Object.assign(new Error(`Unsupported setting: ${key}. Run amux settings inspect to see the currently supported settings.`), { code: 'UNSUPPORTED_SETTING' })
@@ -13,25 +12,28 @@ export async function executeSettingsControl(
   owner: ConfigOwner,
   notes?: Pick<NotesStorageOwner, 'inspect' | 'change'>
 ): Promise<Extract<AgentMuxControlResult, { operation: 'settings.get' | 'settings.set' }>> {
+  const owned = ownedSettings(notes)
   if (request.operation === 'settings.get') {
-    const notesDirectory = async () => ({ key: 'notes.directory', kind: 'string' as const, value: (await notes!.inspect()).directory, default: defaultNotesDirectory() })
-    // Asked by name, the directory's own read failure is the answer.
-    if (request.target === 'notes.directory' && notes) return { operation: request.operation, entries: [await notesDirectory()], partial: true }
     const snapshot = owner.current, settings = scalarSettings(snapshot)
-    const selected = request.target === undefined || request.target === '' ? settings
-      : settings.filter(setting => setting.key === request.target || setting.key.startsWith(`${request.target}.`))
-    if (!selected.length) throw unsupported(request.target ?? '')
+    const matches = (setting: { key: string }) => !request.target || setting.key === request.target || setting.key.startsWith(`${request.target}.`)
+    const selected = settings.filter(matches), selectedOwned = owned.filter(matches)
+    if (!selected.length && !selectedOwned.length) throw unsupported(request.target ?? '')
     const entries = selected.map((setting) => setting.entry(snapshot))
-    if (!notes || !(request.target === undefined || request.target === '' || request.target === 'notes')) return { operation: request.operation, entries, partial: true as const }
-    // In a broad read, an unreadable Notes location is one unknown key, never every other setting.
-    try { return { operation: request.operation, entries: [...entries, await notesDirectory()], partial: true as const } }
-    catch (cause) {
-      const code = typeof (cause as { code?: unknown })?.code === 'string' ? (cause as { code: string }).code : 'NOTES_DIRECTORY_UNAVAILABLE'
-      const message = `${cause instanceof Error ? cause.message : String(cause)} The other settings were read; run amux settings inspect notes.directory to read it again.`
-      return { operation: request.operation, entries, partial: true as const, issues: [{ key: 'notes.directory', code, message }] }
+    const issues: { key: string; code: string; message: string }[] = []
+    for (const setting of selectedOwned) {
+      try { entries.push(await setting.inspect()) }
+      catch (cause) {
+        // Asked by exact key, preserve that owner's original failure.
+        if (request.target === setting.key) throw cause
+        const code = typeof (cause as { code?: unknown })?.code === 'string' ? (cause as { code: string }).code : setting.unavailableCode
+        const message = `${cause instanceof Error ? cause.message : String(cause)} The other settings were read; run amux settings inspect ${setting.key} to read it again.`
+        issues.push({ key: setting.key, code, message })
+      }
     }
+    return { operation: request.operation, entries, partial: true, ...(issues.length ? { issues } : {}) }
   }
-  if (request.key === 'notes.directory' && notes) { const current = await notes.inspect(request.requestId); const saved = await notes.change({ operationId: request.requestId, expectedDirectory: current.operation?.expectedDirectory ?? current.directory, directory: request.value }); return { operation: request.operation, requestId: request.requestId, entry: { key: request.key, kind: 'string', value: saved.directory, default: defaultNotesDirectory() } } }
+  const ownedSetting = owned.find(candidate => candidate.key === request.key)
+  if (ownedSetting) return { operation: request.operation, requestId: request.requestId, entry: await ownedSetting.apply(request.value, request.requestId) }
   const saved = await owner.update(current => {
     const settings = scalarSettings(current), setting = settings.find(candidate => candidate.key === request.key)
     if (!setting) throw unsupported(request.key)

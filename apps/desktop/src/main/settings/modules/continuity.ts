@@ -1,7 +1,7 @@
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core'
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import type { AppConfig } from '../../../shared/contracts.js'
-import { booleanSetting, enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
+import { booleanSetting, enumSetting, invalid, parseIntegerSettingValue, type ScalarSetting } from '../scalar-setting.js'
 
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
 function numberSetting(key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 'recheckIntervalMs' | 'recheckMaxAttempts' | 'retryInitialDelayMs' | 'retryMaxDelayMs' | 'retryMaxAttempts'): ScalarSetting {
@@ -9,8 +9,9 @@ function numberSetting(key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 
     key: `continuity.${key}`,
     entry(config) { return { key: this.key, kind: 'number', value: normalizeAgentContinuityPolicy(config.continuity)[key], default: defaults[key] } },
     apply(config, text) {
-      const value = Number(text)
-      if (!/^\d+$/.test(text) || !Number.isSafeInteger(value) || value < 0) {
+      let value: number
+      try { value = parseIntegerSettingValue(this.key, text) }
+      catch {
         const error = invalid(this.key, text)
         error.message += ` Use a whole number from 0 to ${Number.MAX_SAFE_INTEGER}${key.endsWith('Ms') ? ' milliseconds' : ''}.`
         throw error

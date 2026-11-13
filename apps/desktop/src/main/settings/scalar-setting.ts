@@ -36,6 +36,26 @@ export function booleanSetting(
   }
 }
 
+/** A whole number within a closed range; the legal values are listed so callers can discover them. */
+export function integerSetting(key: string, range: { min: number; max: number }, defaultValue: number, read: (config: AppConfig) => number,
+  write: (config: AppConfig, value: number) => AppConfig): ScalarSetting {
+  return {
+    key,
+    entry(config) { return { key, kind: 'number', value: read(config), default: defaultValue, enum: Array.from({ length: range.max - range.min + 1 }, (_, index) => range.min + index) } },
+    apply(config, value) {
+      const next = parseIntegerSettingValue(key, value, range.min, range.max)
+      return read(config) === next ? config : write(config, next)
+    }
+  }
+}
+
+/** Shared lexical validation for integer fields with domain-specific entries or cross-field rules. */
+export function parseIntegerSettingValue(key: string, text: string, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+  const value = Number(text)
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(value) || value < min || value > max) throw invalid(key, text)
+  return value
+}
+
 export function invalid(key: string, value: string): Error {
   return Object.assign(new Error(`Invalid value for ${key}: ${value}. Run amux settings inspect ${key} for valid values.`), { code: 'INVALID_SETTING_VALUE' })
 }

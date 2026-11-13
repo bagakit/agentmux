@@ -1,6 +1,6 @@
 import type { AppConfig } from '../../../shared/contracts.js'
 import { DEFAULT_AUTOMATION_PREFERENCES, resolveAutomationPreferences, validateAutomationPreferences, type AutomationDefaults } from '../../../shared/automation-preferences.js'
-import { invalid, type ScalarSetting } from '../scalar-setting.js'
+import { invalid, parseIntegerSettingValue, type ScalarSetting } from '../scalar-setting.js'
 
 /** Exact scalar declarations; ConfigOwner remains the only persistence/publication owner. */
 export const automationSettings = (Object.keys(DEFAULT_AUTOMATION_PREFERENCES) as (keyof AutomationDefaults)[]).map((key): ScalarSetting => ({
@@ -12,8 +12,7 @@ export const automationSettings = (Object.keys(DEFAULT_AUTOMATION_PREFERENCES) a
       : { key: this.key, kind: 'string', value: value as string, default: fallback as string }
   },
   apply(config: AppConfig, text: string): AppConfig {
-    const value = typeof DEFAULT_AUTOMATION_PREFERENCES[key] === 'number' ? Number(text) : text
-    if (typeof value === 'number' && (!/^\d+$/.test(text) || !Number.isSafeInteger(value))) throw invalid(this.key, text)
+    const value = typeof DEFAULT_AUTOMATION_PREFERENCES[key] === 'number' ? parseIntegerSettingValue(this.key, text) : text
     if (this.entry(config).value === value) return config
     const next = { ...config, automation: { ...config.automation, [key]: value } }
     try { validateAutomationPreferences(next.automation) }
