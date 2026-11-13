@@ -2,13 +2,20 @@ import { projectMonogram } from '@agentmux/client-ui/project-monogram'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { CSSProperties } from 'react'
 import type { BrowserProfileSummary } from '../../../shared/contracts'
-import { speakerColorHue } from '../lib/conversation-avatar-color'
+import { clearsSemanticHues, speakerColorHue } from '../lib/conversation-avatar-color'
 
 const ThemeObjectProfileIcon = semanticIconComponent('object.browser')
 
-/** The hue a Profile shows everywhere: the person's choice, or one derived from its id. */
+/**
+ * Identity hues a Profile can show: teal through rose. The speaker rule keeps only ±22° around each
+ * status color, which still lets yellow-green and lime through; on a mark beside green status text
+ * those read as success. Automatic and chosen Profiles draw from this one palette, so both stay clear.
+ */
+export const PROFILE_HUES = [180, 248, 266, 284, 302, 320, 338].filter(clearsSemanticHues)
+
+/** The hue a Profile shows everywhere: the person's choice, or one picked from its id within the palette. */
 export function profileHue(profile: Pick<BrowserProfileSummary, 'id' | 'hue'>): number {
-  return profile.hue ?? speakerColorHue(profile.id)
+  return profile.hue ?? PROFILE_HUES[speakerColorHue(profile.id) % PROFILE_HUES.length]!
 }
 
 /**

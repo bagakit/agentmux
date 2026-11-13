@@ -7,11 +7,10 @@ import type { BrowserProfileSite, BrowserProfileSummary } from '../../../../shar
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
-import { clearsSemanticHues } from '../../lib/conversation-avatar-color'
 import { useAppStore } from '../../store'
 import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
 import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
-import { ProfileMark, profileHue } from '../ProfileMark'
+import { PROFILE_HUES, ProfileMark, profileHue } from '../ProfileMark'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import * as Menu from '../HoverDropdownMenu'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
@@ -25,9 +24,8 @@ const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 
-/** Identity hues a person can pick: teal through rose, well clear of the hues that mean
- *  success, attention, failure or a person. Lime and yellow-green read as success, so none here. */
-export const PROFILE_HUES = [180, 248, 266, 284, 302, 320, 338].filter(clearsSemanticHues)
+/** The palette lives with the mark, so a chosen and an automatic Profile color can never drift apart. */
+export { PROFILE_HUES }
 const HUE_NAMES: Readonly<Record<number, string>> = { 180: 'Teal', 248: 'Indigo', 266: 'Violet', 284: 'Purple', 302: 'Orchid', 320: 'Magenta', 338: 'Rose' }
 
 /** What each skip reason means to the person who imported, said once here rather than per caller. */
