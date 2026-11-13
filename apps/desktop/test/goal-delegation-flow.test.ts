@@ -483,4 +483,48 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     expect((await f.demands.get('goal'))!.status).toBe('in_progress')
     await record('exit-report-collection-and-unknown', await f.proof())
   }, 30_000)
+
+  it('drives a Goal plan through the public CLI: revise, delegate a node, report, independent review, and a dependent node opens', async () => {
+    const f = await fixture()
+    const revise = async (who: string, revision: unknown) => {
+      const path = join(f.root, `plan-${who}-${Math.random().toString(36).slice(2)}.json`); await fs.writeFile(path, JSON.stringify({ goalId: 'goal', revision }))
+      return await f.cli(who, ['goal', 'plan', 'revise', '--input', path])
+    }
+    const review = async (who: string, input: unknown) => {
+      const path = join(f.root, `review-${who}-${Math.random().toString(36).slice(2)}.json`); await fs.writeFile(path, JSON.stringify({ goalId: 'goal', review: input }))
+      return await f.cli(who, ['goal', 'plan', 'review', '--input', path])
+    }
+    const nodes = [
+      { id: 'api', title: 'Plan API', outcome: 'The plan is readable', dependsOn: [], criterionIds: ['AC-01'], check: 'pnpm test api', executor: { hostId: 'local', agentSessionId: 'worker-a' } },
+      { id: 'ui', title: 'Plan graph', outcome: 'The graph shows nodes', dependsOn: ['api'], criterionIds: ['AC-02'], check: 'pnpm test ui', executor: null }
+    ]
+    // A worker is not the Supervisor and cannot rewrite the plan; the Supervisor can.
+    await expect(revise('worker-a', { operationId: 'plan-by-worker', expectedRevision: 0, alignmentRevision: 1, nodes })).rejects.toThrow()
+    const first = (await revise('owner', { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes })).result
+    expect(first.plan.revision).toBe(1)
+    expect(first.plan.history[0]).toMatchObject({ operationId: 'plan-1', author: { kind: 'agent', id: 'owner' } })
+    // A dependent node cannot be delegated before its dependency passes review.
+    await expect(f.goal('owner', 'delegate', { goalId: 'goal', intent: { ...task('worker-b', ['AC-02']), planNodeId: 'ui' } })).rejects.toThrow()
+    expect(f.inputs).toEqual([])
+    const apiTask = { ...task('worker-a', ['AC-01']), planNodeId: 'api' }
+    const delegated = (await f.goal('owner', 'delegate', { goalId: 'goal', intent: apiTask })).result
+    expect(delegated.delegations[0].planNodeId).toBe('api')
+    expect(JSON.parse(f.inputs[0]!.body.split('\n[AgentMux delegation]\n')[1]!.split('\n')[0]!)).toMatchObject({ planNodeId: 'api', goalId: 'goal' })
+    await f.goal('worker-a', 'report', { goalId: 'goal', operationId: apiTask.operationId, report: result(apiTask) })
+    const verdict = { operationId: 'review-api', nodeId: 'api', delegationOperationId: apiTask.operationId, verdict: 'pass',
+      check: { command: 'pnpm test api', result: '12 passed', evidence: ['ci/api.log:1'] }, note: '' }
+    // The executor cannot sign off its own node.
+    await expect(review('worker-a', verdict)).rejects.toThrow()
+    const reviewed = (await review('worker-b', verdict)).result
+    expect(reviewed.plan.reviews).toHaveLength(1)
+    expect(reviewed.plan.reviews[0]).toMatchObject({ verdict: 'pass', reviewer: { kind: 'agent', id: 'worker-b' } })
+    // The dependent node is now open for delegation, and the plan read is the same owner fact.
+    await f.goal('owner', 'delegate', { goalId: 'goal', intent: { ...task('worker-b', ['AC-02']), planNodeId: 'ui' } })
+    const read = (await f.cli('owner', ['goal', 'plan', '--goal', 'goal'])).result
+    expect(read.plan).toEqual((await f.demands.get('goal'))!.plan)
+    expect(read.delegations.map((delegation: { planNodeId?: string }) => delegation.planNodeId)).toEqual(['api', 'ui'])
+    // A node review never accepts the Goal.
+    expect((await f.demands.get('goal'))!.grounding?.acceptedAt ?? null).toBeNull()
+    expect(f.stop).not.toHaveBeenCalled()
+  }, 30_000)
 })
