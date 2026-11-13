@@ -18,6 +18,7 @@ import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPre
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { handoffSavedGoalDiscussions } from './lib/goal-discussion-handoff'
 import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
+import { goalDiscussionRequestKey, originalGoalDiscussionRequest, type GoalDiscussionRequest, type GoalDiscussionTaskMode } from './lib/goal-discussion-request'
 import { observeNotifications } from './lib/notification-observation'
 import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
 import { noteShareRange, noteShareSiblingRange } from '@agentmux/client-ui/note/note-share-range'
@@ -998,6 +999,7 @@ export type AppState = GitReadingActions & {
   /** UI intent only; original Core/spatial creation still owns the reserved Session. */
   goalAgentSelectionDrafts: Record<string, GoalAgentSelectionDraft>
   goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
+  goalDiscussionRequests: Record<string, GoalDiscussionRequest>
   goalAgentCreationDrafts: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -1195,7 +1197,7 @@ export type AppState = GitReadingActions & {
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
   openDemandPmo(demandId: string, onReceipt?: (receipt: GoalPmoReceipt) => void): Promise<string>
-  requestDemandPmoTask(demandId: string, mode: 'grill' | 'grounding', options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string>
+  requestDemandPmoTask(demandId: string, mode: GoalDiscussionTaskMode, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string>
   refreshDemand(demandId: string): Promise<void>
   confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
   acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<void>
@@ -3926,6 +3928,7 @@ type PersistedAppState = {
   agentOperations: AgentOperationReferences
   goalAgentSelectionDrafts?: Record<string, GoalAgentSelectionDraft>
   goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
+  goalDiscussionRequests?: Record<string, GoalDiscussionRequest>
   goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -4207,6 +4210,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     agentOperations: persistedAgentOperations(state.agentOperations),
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
     goalFiniteStartIntents: state.goalFiniteStartIntents,
+    goalDiscussionRequests: state.goalDiscussionRequests,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
@@ -5263,14 +5267,40 @@ function gitNavigationTarget(state: AppState) {
     surface.file ? [surface.file.path, surface.file.origPath] : null]) : null
 }
 
-async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding', options?: { onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
+async function openGoalPmo(demandId: string, mode: 'open' | GoalDiscussionTaskMode, options?: { onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
   const state = useAppStore.getState()
   await handoffOriginalGoalDiscussions(demandId)
   const choice = primaryMoteExecutorChoice(state)
-  const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: mintObjectId(), demandId, mode, ...(choice.executorId ? { executorId: choice.executorId } : {}) })
+  const key = mode === 'open' ? null : goalDiscussionRequestKey(demandId, mode)
+  const held = key === null ? undefined : useAppStore.getState().goalDiscussionRequests[key]
+  const request = held === undefined
+    ? { goalId: demandId, mode, requestId: mintObjectId(), ...(choice.executorId ? { executorId: choice.executorId } : {}) }
+    : originalGoalDiscussionRequest(held, demandId, mode as GoalDiscussionTaskMode)
+  if (key !== null) {
+    useAppStore.setState(current => ({ goalDiscussionRequests: { ...current.goalDiscussionRequests, [key]: request as GoalDiscussionRequest } }))
+    // The original local persistence owner confirms this action reference before any input.
+    // This does not require a spatial save or certify the eventual recipient delivery.
+    await requestWorkbenchStorageFlush(false)
+  }
+  const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: request.requestId, demandId, mode, ...(request.executorId ? { executorId: request.executorId } : {}) })
   if (result.operation !== 'demand.discuss') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original discussion returned another operation.')
   const goal = hostGoalRecord(result.demand)
   useAppStore.setState(current => ({ demands: { ...current.demands, [goal.id]: demandRecordFromFilesystem(goal, current.demands[goal.id]) } }))
+  if (key !== null) {
+    useAppStore.setState(current => {
+      if (current.goalDiscussionRequests[key]?.requestId !== request.requestId) return current
+      const goalDiscussionRequests = { ...current.goalDiscussionRequests }; delete goalDiscussionRequests[key]
+      return { goalDiscussionRequests }
+    })
+    try { await requestWorkbenchStorageFlush(false) }
+    catch {
+      // The Host has already confirmed the request. A local cleanup failure must not
+      // turn that receipt into an unknown send or authorize a different operation.
+      useAppStore.setState(current => current.goalDiscussionRequests[key] ? current : {
+        goalDiscussionRequests: { ...current.goalDiscussionRequests, [key]: request as GoalDiscussionRequest }
+      })
+    }
+  }
   const receipt = { tabId: result.receipt.tabId, agentSessionId: result.receipt.agentSessionId }
   options?.onReceipt?.(receipt)
   // The Goals caller presents this original discussion Tab without replacing its background workface.
@@ -5328,6 +5358,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentOperations: {},
   goalAgentSelectionDrafts: {},
   goalFiniteStartIntents: {},
+  goalDiscussionRequests: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
   connectorRoomDrafts: {},
