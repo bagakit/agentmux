@@ -281,6 +281,20 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "特殊填充几何或身份不应套循环、禁止遮罩或斜杠。", trigger: "原工具/resize/身份槽职责，不存在可泛化的busy事实" }
     }
   },
+  "pixel-mosaic": {
+    shapes: [["rect",{"x":"3","y":"3","width":"18","height":"18","rx":"2"}],["path",{"d":"M3 5a2 2 0 0 1 2-2h4v6H3Z M15 3h4a2 2 0 0 1 2 2v4h-6Z M9 9h6v6H9Z M3 15h6v6H5a2 2 0 0 1-2-2Z M15 15h6v4a2 2 0 0 1-2 2h-4Z","fill":"currentColor","stroke":"none"}]],
+    design: {
+      rest: "圆角方框分成3×3格、相间实心表示马赛克，区别表格、网格布局与实心遮盖",
+      motion: { kind: "still", animation: "none", description: "特殊填充几何或身份不应套循环、禁止遮罩或斜杠。", trigger: "原工具/resize/身份槽职责，不存在可泛化的busy事实" }
+    }
+  },
+  "numbered-badge": {
+    shapes: [["circle",{"cx":"12","cy":"12","r":"9"}],["path",{"d":"M9.5 9.5 12 7.5v9 M9.5 16.5h5"}]],
+    design: {
+      rest: "圆形徽标内的描边数字1表示顺序编号标注，区别话题井号与画圆工具",
+      motion: { kind: "still", animation: "none", description: "编号由原标注数据给出；入口图形静止，不预播新增或重排。", trigger: "原工具选择职责，不存在可泛化的busy事实" }
+    }
+  },
   "resize-corner": {
     shapes: [["path",{"d":"M5 19 19 5M11 19l8-8M17 19l2-2"}]],
     design: {

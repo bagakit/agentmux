@@ -4,7 +4,7 @@ import { RovingToolbar, RovingToolbarButton } from '../RovingToolbar'
 import { ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 
 const icon = semanticIconComponent
-const PinIcon = icon('action.pin'), SaveIcon = icon('action.save'), ExpandIcon = icon('action.open-external'), CloseIcon = icon('action.close')
+const PinIcon = icon('action.pin'), SaveIcon = icon('action.save'), ExpandIcon = icon('layout.expand'), CloseIcon = icon('action.close')
 /** The marks a capture selection offers, in toolbar order; labels, icons and keys are the shared editor's. */
 export const CAPTURE_TOOLS = (['rect', 'ellipse', 'arrow', 'pen', 'pixelate', 'blur', 'text', 'note', 'callout'] as const).map(id => ANNOTATION_TOOLS.find(item => item.id === id)!)
 
