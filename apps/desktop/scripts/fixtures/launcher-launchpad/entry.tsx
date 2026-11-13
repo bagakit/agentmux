@@ -11,7 +11,7 @@ import { PmoTeamsTopicFloatingPanel } from '../../../src/renderer/src/components
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
 import { useAppStore, executorDetectionKey, warmTerminalKey, prepareRendererUpdate } from '../../../src/renderer/src/store'
-import { api } from '../../../src/renderer/src/lib/api'
+import { api, PREVIEW_WORKSPACE_PATH } from '../../../src/renderer/src/lib/api'
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
 import { workbenchProjectionSlotId, type WorkbenchProjection } from '../../../src/renderer/src/lib/workbench-projection'
@@ -41,9 +41,9 @@ for (const name of ['listTopics'] as const) {
 }
 if (!restarting) {
   const initial=await api.config.get()
-  await api.config.save({...initial,workspaces:[...initial.workspaces.map(item=>item.path==='home//agentmux'?{...item,path:_hygiene_fixturePath("Users/preview/projects/agentmux")}:item),{id:SCRATCH_WORKSPACE_ID,name:'No Project',path:_hygiene_fixturePath("Users/preview/.agentmux/scratch"),hostId:'local',kind:'folder'}]},initial)
+  await api.config.save({...initial,workspaces:[...initial.workspaces.map(item=>item.path===PREVIEW_WORKSPACE_PATH?{...item,path:_hygiene_fixturePath("Users/preview/projects/agentmux")}:item),{id:SCRATCH_WORKSPACE_ID,name:'No Project',path:_hygiene_fixturePath("Users/preview/.agentmux/scratch"),hostId:'local',kind:'folder'}]},initial)
   const snapshot=api.sessions.snapshot
-  api.sessions.snapshot=async()=>{const value=await snapshot();return {...value,localHome:_hygiene_fixturePath("Users/preview"),sessions:value.sessions.map(session=>session.workspacePath==='home//agentmux'?{...session,workspacePath:_hygiene_fixturePath("Users/preview/projects/agentmux")}:session)}}
+  api.sessions.snapshot=async()=>{const value=await snapshot();return {...value,localHome:_hygiene_fixturePath("Users/preview"),sessions:value.sessions.map(session=>session.workspacePath===PREVIEW_WORKSPACE_PATH?{...session,workspacePath:_hygiene_fixturePath("Users/preview/projects/agentmux")}:session)}}
 }
 if (restarting) {
   if (!restartFacts) throw new Error('Restart must have the exact captured preview API facts, not seeded views')
