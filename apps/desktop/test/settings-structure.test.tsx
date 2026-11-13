@@ -39,7 +39,7 @@ it('renders preference, resource and connection entries, with Overview before th
   const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!
   expect(pane.isConnected).toBe(true)
   expect([...pane.querySelectorAll('.settings-group > header > span')].map(node => node.textContent))
-    .toEqual(['Workspace theme', 'Application appearance', 'Editor font size', 'Terminal font size', 'Terminal palette'])
+    .toEqual(['App icon', 'Workspace theme', 'Application appearance', 'Editor font size', 'Terminal font size', 'Terminal palette'])
   expect(dom.container.querySelector('[data-settings-pane="copy-paths"]')).toBeNull()
 })
 
