@@ -33,7 +33,45 @@ printf '%s:done\\n' "$token"
 `
 
 type TerminalPort = Pick<AgentMuxHostedClient, 'prepareTerminal' | 'createPreparedTerminal' | 'attachTerminal' |
-  'writeTerminal' | 'readRunReplay' | 'releaseRunAttachment' | 'removeTerminal' | 'stopTerminal' | 'runtimeIdentity' | 'onStatusEvent' | 'onRunEvent' | 'dispose'>
+  'writeTerminal' | 'readRunReplay' | 'releaseRunAttachment' | 'removeTerminal' | 'stopTerminal' | 'listRuns' | 'runtimeIdentity' | 'onStatusEvent' | 'onRunEvent' | 'dispose'>
+
+/** Lifecycle calls take the exact Run reference; the full projection is not a valid request. */
+const runRef = (run: AgentMuxRun): { runId: string } => ({ runId: run.runId })
+
+/** Settle `work` by the call's deadline or abort. A late reply is ignored here; its owner keeps its identity. */
+function bounded<T>(work: Promise<T>, deadline: number | undefined, signal: AbortSignal | undefined, step: string): Promise<T> {
+  if (signal?.aborted) return Promise.reject(new AgentMuxError(`The original command was cancelled before ${step}.`, 'COMMAND_ABORTED'))
+  if (deadline === undefined && !signal) return work
+  return new Promise<T>((resolve, reject) => {
+    const timer = deadline === undefined ? undefined
+      : setTimeout(() => finish(() => reject(new AgentMuxError(`The original command timed out while ${step}; no command was started.`, 'COMMAND_TIMEOUT'))), Math.max(0, deadline - Date.now()))
+    const onAbort = () => finish(() => reject(new AgentMuxError(`The original command was cancelled while ${step}; no command was started.`, 'COMMAND_ABORTED')))
+    const finish = (settle: () => void) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); settle() }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    work.then(value => finish(() => resolve(value)), error => finish(() => reject(error)))
+  })
+}
+
+/** Nothing was created before this point: the command was not applied. */
+function notApplied(error: unknown): AgentMuxError {
+  const cause = error instanceof Error ? error : new Error(String(error))
+  const wrapped = new AgentMuxError(cause.message, cause instanceof AgentMuxError ? cause.code : 'COMMAND_UNCONFIRMED', undefined,
+    { disposition: 'not_applied', confirmedInputBytes: null })
+  Object.defineProperty(wrapped, 'cause', { value: cause })
+  return wrapped
+}
+
+/** Wait briefly for the Runtime's own answer that this Run is no longer running; anything else is not proof. */
+async function runEnded(client: TerminalPort, run: AgentMuxRun): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let state: AgentMuxRun['state'] | undefined
+    try { state = (await client.listRuns()).find(value => value.runId === run.runId)?.state } catch { return false }
+    if (state !== undefined && state !== 'running') return true
+    if (state === undefined) return false
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  return false
+}
 
 /** Transient commands consume existing Core Terminal APIs and the selected Host's RPC transport. */
 export class HostedExecutionHost implements ExecutionHost {
@@ -41,6 +79,9 @@ export class HostedExecutionHost implements ExecutionHost {
   readonly id: string
   readonly label: string
   private client: Promise<TerminalPort> | undefined
+  /** Commands using each connection. A connection dropped after a failed or timed-out connect closes after its last one. */
+  private readonly users = new Map<Promise<TerminalPort>, number>()
+  private readonly dropped = new Set<Promise<TerminalPort>>()
   private disposed = false
   constructor(private readonly options: { id: string; label: string; connect(): Promise<TerminalPort> }) {
     this.id = options.id; this.label = options.label
@@ -58,14 +99,35 @@ export class HostedExecutionHost implements ExecutionHost {
     if (!command || tokens.some(token => token.includes('\0'))) throw new AgentMuxError('Remote command or argument is invalid.', 'INVALID_COMMAND')
     if (this.disposed) throw new AgentMuxError('This Host command consumer is disposed.', 'CONTROL_CANCELLED')
     options.signal?.throwIfAborted()
-    const client = await (this.client ??= this.options.connect().catch(error => { this.client = undefined; throw error }))
-    options.signal?.throwIfAborted()
+    // One deadline from the call: connecting, preparing and creating are inside it, not before it.
+    const deadline = options.timeoutMs === undefined ? undefined : Date.now() + options.timeoutMs
+    const connecting = this.client ??= this.options.connect()
+    this.users.set(connecting, (this.users.get(connecting) ?? 0) + 1)
+    let held = true
+    const release = () => {
+      if (!held) return
+      held = false
+      const left = (this.users.get(connecting) ?? 1) - 1
+      if (left > 0) { this.users.set(connecting, left); return }
+      this.users.delete(connecting)
+      if (this.dropped.delete(connecting)) void connecting.then(client => client.dispose(), () => {})
+    }
+    const client = await bounded(connecting, deadline, options.signal, 'connecting to the Host').catch(error => {
+      // A connect that failed or outlived this call's deadline is not reused: the next command connects again.
+      // Cancelling one command is not evidence against the connection, so it stays for the others.
+      if (!(error instanceof AgentMuxError && error.code === 'COMMAND_ABORTED')) {
+        if (this.client === connecting) this.client = undefined
+        this.dropped.add(connecting)
+      }
+      release()
+      throw notApplied(error)
+    })
     const createOperationId = mintObjectId(), token = `amux-${mintObjectId()}`, limit = options.maxOutputBytes ?? 8 * 1024 * 1024
-    const prepared = await client.prepareTerminal({ createOperationId, workspacePath: options.cwd ?? '/', command: '/bin/sh',
-      args: ['-c', commandScript, 'agentmux-command', token, options.cwd === undefined ? 'yes' : 'no', String(limit + 1), ...tokens] })
-    options.signal?.throwIfAborted()
+    const prepared = await bounded(client.prepareTerminal({ createOperationId, workspacePath: options.cwd ?? '/', command: '/bin/sh',
+      args: ['-c', commandScript, 'agentmux-command', token, options.cwd === undefined ? 'yes' : 'no', String(limit + 1), ...tokens] }),
+      deadline, options.signal, 'preparing the command').catch(error => { release(); throw notApplied(error) })
     let run: AgentMuxRun | undefined, cursor = 0, inputOperationId: string | undefined
-    let opening = true, ended = false, finished = false, attached = false, bytes = 0, confirmed = false, creationSent = false
+    let opening = true, ended = false, finished = false, attached = false, bytes = 0, confirmed = false, creationSent = false, stopped = false
     let prefix = '', tail = '', finalRead: Promise<void> | undefined
     const pending: Array<{ start: number; data: Uint8Array }> = [], output: Buffer[] = []
     // The helper emits two base64 strings plus a bounded private envelope.
@@ -74,7 +136,7 @@ export class HostedExecutionHost implements ExecutionHost {
     const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
     const done = new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject })
     void ready.catch(() => {}); void done.catch(() => {})
-    let timeout: ReturnType<typeof setTimeout> | undefined
+    let timeout: ReturnType<typeof setTimeout> | undefined, stopping: Promise<void> | undefined
     let failedError: AgentMuxError | undefined
     const identityError = (error: unknown) => {
       const cause = error instanceof Error ? error : new Error(String(error))
@@ -99,7 +161,7 @@ export class HostedExecutionHost implements ExecutionHost {
       if (finished || start + data.byteLength <= cursor) return
       if (start > cursor) { failure(new AgentMuxError('The original command output has a byte Gap. Its Run was retained.', 'COMMAND_OUTPUT_GAP')); return }
       const next = Buffer.from(data.subarray(cursor - start)); cursor = start + data.byteLength; bytes += next.byteLength
-      if (bytes > encodedLimit) { failure(new AgentMuxError('Command output exceeded its byte limit.', 'COMMAND_OUTPUT_LIMIT')); void client.stopTerminal(run!).catch(() => {}); return }
+      if (bytes > encodedLimit) { cancel('COMMAND_OUTPUT_LIMIT', 'Command output exceeded its byte limit.'); return }
       output.push(next)
       if (prefix.length < 256) prefix = (prefix + next.toString('ascii')).slice(0, 256)
       tail = (tail + next.subarray(-256).toString('ascii')).slice(-256)
@@ -134,19 +196,38 @@ export class HostedExecutionHost implements ExecutionHost {
     }
     const cancel = (code: string, message: string) => {
       failure(new AgentMuxError(message, code))
-      if (run) void client.stopTerminal(run).catch(() => {})
+      if (run) stopping ??= client.stopTerminal(runRef(run)).then(() => { stopped = true }, () => {})
+    }
+    let cleaned: Promise<void> | undefined, createSettled = false
+    const cleanup = (): Promise<void> => {
+      const own = run
+      // Without a Run yet, a create still in flight finishes this cleanup when it settles.
+      if (!own) { if (createSettled) release(); return Promise.resolve() }
+      return cleaned ??= (async () => {
+        if (attached) await client.releaseRunAttachment(runRef(own)).catch(() => {})
+        if (!confirmed) { await stopping; if (stopped) ended ||= await runEnded(client, own) }
+        if (ended && (confirmed || stopped)) await client.removeTerminal(runRef(own)).catch(() => {})
+      })().finally(release)
     }
     const abort = () => cancel('COMMAND_ABORTED', 'The original command was cancelled; its operation and Run identity were retained.')
     options.signal?.addEventListener('abort', abort, { once: true })
+    if (deadline !== undefined) timeout = setTimeout(() => cancel('COMMAND_TIMEOUT', 'The original command timed out; no command was replayed.'), Math.max(0, deadline - Date.now()))
     try {
       creationSent = true
-      run = await client.createPreparedTerminal(prepared)
+      // A create that has not replied when the call ends is unknown. If it replies later, that Run is this
+      // command's own: it is stopped like any cancelled one and removed once it has ended.
+      const creating = client.createPreparedTerminal(prepared)
+      void creating.then(late => {
+        createSettled = true
+        if (run || !finished) return
+        run = late; stopping ??= client.stopTerminal(runRef(late)).then(() => { stopped = true }, () => {}); void cleanup()
+      }, () => { createSettled = true; if (!run) release() })
+      run = await Promise.race([creating, done.then(() => { throw failedError })])
       if (options.signal?.aborted) abort()
-      if (failedError) throw failedError
+      if (failedError) { stopping ??= client.stopTerminal(runRef(run)).then(() => { stopped = true }, () => {}); throw failedError }
       // The original zero-byte attachment replays anything produced before the create reply.
       // Index this Run before opening its attachment so in-flight events retain their order.
       unsubscribeRun = client.onRunEvent(run.runId, receiveRun)
-      if (options.timeoutMs !== undefined) timeout = setTimeout(() => cancel('COMMAND_TIMEOUT', 'The original command timed out; no command was replayed.'), options.timeoutMs)
       const initial = await client.attachTerminal(run.runId, 0, 'raw'); attached = true
       snapshot(initial); opening = false
       for (const event of pending) accept(event.start, event.data)
@@ -183,9 +264,10 @@ export class HostedExecutionHost implements ExecutionHost {
       throw failedError ?? identityError(error)
     } finally {
       clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); unsubscribeRun(); unsubscribeStatus()
-      if (run && attached) await client.releaseRunAttachment(run).catch(() => {})
-      // Unknown or live Runs retain their original evidence and recovery path.
-      if (run && ended && confirmed) await client.removeTerminal(run).catch(() => {})
+      // A completed command is cleaned up before it returns. A failed one returns within its deadline and is
+      // cleaned up after: a Run this side stopped is removed once the Runtime confirms it ended, and a Run
+      // whose stop or end is not confirmed keeps its original identity for recovery.
+      if (confirmed) await cleanup(); else void cleanup()
     }
   }
 
