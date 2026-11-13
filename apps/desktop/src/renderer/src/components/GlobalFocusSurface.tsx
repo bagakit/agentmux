@@ -288,13 +288,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const filteredIds = new Set(filtered.map(row => row.id))
   const focusProjectLanes = orderedLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
     .map(lane => ({ ...lane, contextIds: lane.contextIds.filter(id => filteredIds.has(id)), activeAgentIds: lane.activeAgentIds.filter(id => filteredIds.has(id)) }))
-  const boardLanes = useFocusCollectionLanes(focusProjectLanes, navigationCatalog, originContent, boardRowsRef, scanInteraction)
-  const scanByOriginalLane = new Map(boardLanes.flatMap(lane => (lane.collection?.topics ?? [lane]).map(original => [original.id, lane.id] as const)))
+  const boardLanes = useFocusCollectionLanes(focusProjectLanes, navigationCatalog, originContent, boardRowsRef, scanInteraction, visible)
+  const scanByContext = new Map(boardLanes.flatMap(lane => (lane.collection?.topics ?? [lane]).flatMap(original =>
+    original.contextIds.map(id => [focusTopicContextKey(original.hostId, id), { scanId: lane.id, originalId: original.id }] as const))))
+  const displayedCurrentLaneId = currentContext ? scanByContext.get(focusTopicContextKey(currentContext.hostId, currentContext.id))?.originalId ?? currentLaneId : currentLaneId
   const rowsByLane = new Map<string, typeof filtered>()
   for (const row of filtered) {
-    const lane = laneByContext.get(focusTopicContextKey(row.hostId, row.id))
-    if (!lane) continue
-    const scanId = scanByOriginalLane.get(lane.id)!
+    const scanId = scanByContext.get(focusTopicContextKey(row.hostId, row.id))?.scanId
+    if (!scanId) continue
     const rows = rowsByLane.get(scanId) ?? []
     rows.push(row)
     rowsByLane.set(scanId, rows)
@@ -474,7 +475,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
-            {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={currentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>
               {query || filters.projects.length || filters.states.length || filters.types.length ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}

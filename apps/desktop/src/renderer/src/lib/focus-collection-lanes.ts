@@ -10,9 +10,9 @@ export type FocusScanLane = FocusProjectLane & {
 }
 export const focusTopicContextKey = (hostId: string, contextId: string) => JSON.stringify([hostId, contextId])
 
-/** Join only original Topic home Zones. Display Tabs, Survey and title strings do not grant membership. */
-export function deriveFocusCollectionLanes(lanes: readonly FocusProjectLane[], catalog: AgentMuxSpaceCatalog,
-  content: { bindings: SpaceZoneBindings; categories: readonly TopicCategory[] }): FocusScanLane[] {
+/** Disposable lookup built from the same immutable spatial facts as the catalog. */
+export function createFocusCollectionIndex(catalog: AgentMuxSpaceCatalog,
+  content: { bindings: SpaceZoneBindings; categories: readonly TopicCategory[] }) {
   const zones = new Map(catalog.zones.map(zone => [zone.zoneId, zone]))
   const spaces = new Map(catalog.spaces.map(space => [space.spaceId, space]))
   const categories = new Map(content.categories.map(category => [JSON.stringify([category.hostId, category.spaceId]), category]))
@@ -31,6 +31,17 @@ export function deriveFocusCollectionLanes(lanes: readonly FocusProjectLane[], c
     if (spaces.get(binding.spaceId)?.kind !== 'container') continue
     const values = categoryBindings.get(binding.zoneId) ?? []; values.push(binding.spaceId); categoryBindings.set(binding.zoneId, values)
   }
+  return { spaces, categories, originalZones, categoryBindings }
+}
+
+/** Join only original Topic home Zones. Display Tabs, Survey and title strings do not grant membership. */
+export function deriveFocusCollectionLanes(lanes: readonly FocusProjectLane[], catalog: AgentMuxSpaceCatalog,
+  content: { bindings: SpaceZoneBindings; categories: readonly TopicCategory[] }): FocusScanLane[] {
+  return projectFocusCollectionLanes(lanes, createFocusCollectionIndex(catalog, content))
+}
+
+export function projectFocusCollectionLanes(lanes: readonly FocusProjectLane[], index: ReturnType<typeof createFocusCollectionIndex>): FocusScanLane[] {
+  const { spaces, categories, originalZones, categoryBindings } = index
   const result: FocusScanLane[] = []
   const collections = new Map<string, { lane: FocusScanLane; topics: FocusProjectLane[]; active: Set<string>; contexts: Set<string>; issues: Set<string> }>()
   for (const lane of lanes) {
