@@ -473,3 +473,21 @@ it('strict public check codec rejects mixed or admission-bearing unavailable can
     { ...ready, candidateUnavailable: unavailable.candidateUnavailable }
   ]) expect(() => parseRemoteCoreUpgradeCheck(invalid)).toThrow()
 })
+
+it('public CLI checks an SSH Host that keeps an unused empty Tailcat target, and still rejects an empty one in use', async () => {
+  const f = await fixture()
+  const residual: RemoteCoreUpgradeHost = { ...host, transport: 'ssh', tailcat: { address: '', keyFile: '' } }
+  expect(parseRemoteCoreUpgradeCheck(await f.manager.check(residual)).input).toEqual(residual)
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'tailcat-check.sock'), coreClients: () => [], execute: async request => {
+    if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await f.manager.check(residual) }
+    throw new Error('Unexpected residual Tailcat operation')
+  } })
+  await server.start()
+  try {
+    const result = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-check', host.id], objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }))
+    expect(result.code, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout).result.check).toMatchObject({ input: { tailcat: { address: '', keyFile: '' } }, eligible: true, reason: 'ready', current: { state: 'available' } })
+  } finally { await server.stop() }
+  const used = await f.manager.check({ ...residual, transport: 'ssh-tailcat' })
+  expect(() => parseRemoteCoreUpgradeCheck(used)).toThrow('Tailcat target is invalid')
+})
