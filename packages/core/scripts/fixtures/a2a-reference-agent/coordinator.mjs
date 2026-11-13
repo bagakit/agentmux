@@ -8,11 +8,47 @@ import { pathToFileURL } from 'node:url'
 import { bounded, registerChild, terminate } from '../a2a-agent-behavior/process.mjs'
 import { readPrivateNativeRecords } from '../a2a-agent-behavior/native-evidence.mjs'
 
+const exec = promisify(execFile)
+
+// Keep the exact transient CLI handle and receipt alongside the other private helpers.
+function startPrivateCli(cli, args, { env, cwd }, receiptPath, nativeProcessBirth) {
+  const request = exec(cli, args, { env, cwd })
+  void request.catch(() => {})
+  const child = request.child, identity = registerChild(child, nativeProcessBirth)
+  const recorded = (async () => {
+    await writeFile(receiptPath, JSON.stringify({ processId: child.pid, processIdentity: { pid: child.pid } }), { mode: 0o600 })
+    const original = await identity
+    await writeFile(receiptPath, JSON.stringify({ processId: child.pid, processIdentity: original }), { mode: 0o600 })
+    return original
+  })()
+  const completed = (async () => {
+    const [result, record] = await Promise.allSettled([request, recorded])
+    let recordError = record.status === 'rejected' ? record.reason : null
+    const exited = child.exitCode !== null || child.signalCode !== null
+    if (!recordError && exited) {
+      try { await writeFile(receiptPath, JSON.stringify({ processId: child.pid, processIdentity: { ...record.value, exited: true } }), { mode: 0o600 }) }
+      catch (error) { recordError = error }
+    }
+    if (recordError) throw result.status === 'rejected'
+      ? new AggregateError([recordError, result.reason], 'Private CLI receipt and execution both failed') : recordError
+    if (result.status === 'rejected') throw result.reason
+    return result.value
+  })()
+  void completed.catch(() => {})
+  return { child, completed }
+}
+
+function privateFailure(error, redact) {
+  return { message: redact(error.message), code: error.code, signal: error.signal ?? null, killed: error.killed ?? null,
+    stdout: redact(error.stdout ?? ''), stderr: redact(error.stderr ?? ''), stack: redact(error.stack ?? ''),
+    errors: error.errors?.map(item => privateFailure(item, redact)) }
+}
+
 const config = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const { repository, privateRoot, evidence, executable, model } = config
 const workspace = join(privateRoot, 'workspace'), authHome = join(privateRoot, 'auth'), environment = { ...process.env }
 assert.equal(environment.HOME, join(privateRoot, 'home')); assert.equal(environment.CODEX_HOME, authHome); assert.equal(process.cwd(), workspace)
-const hash = bytes => createHash('sha256').update(bytes).digest('hex'), exec = promisify(execFile)
+const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const ownership = { daemonProcess: null, modelReceipts: ['model-embedded-process.json'],
   peerReceipts: ['peer-process.json'], credentialReceipts: ['peer-private-auth.json', 'model-private-auth.json'] }
 const recordOwnership = () => writeFile(join(privateRoot, 'owned-processes.json'), JSON.stringify(ownership), { mode: 0o600 })
@@ -20,7 +56,7 @@ const secrets = new Set([config.httpToken]), sessions = [], receipt = { schema: 
   modelRequested: model, finiteSample: true, completeFeatureCoverage: false, userRuntimeTouched: false, scenarios: [] }
 const redact = value => [...secrets].reduce((text, secret) => text.replaceAll(secret, '[redacted-private-credential]'), value)
 const save = (name, value) => writeFile(join(evidence, name), redact(typeof value === 'string' ? value : JSON.stringify(value, null, 2) + '\n'), { mode: 0o600 })
-let client, server, daemon, interrupted = false
+let client, server, daemon, core, cliProcess, interrupted = false
 const observedErrors = []
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { interrupted = true })
 async function until(read, accept, label, milliseconds = 120_000) {
@@ -61,7 +97,8 @@ function assertDiscovery({ records, nativeId, wire, messageId, originalBody, mes
 }
 try {
   await mkdir(evidence, { recursive: true, mode: 0o700 }); await recordOwnership()
-  const coreRoot = config.coreRoot, core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
+  const coreRoot = config.coreRoot
+  core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
   const { nativeProcessBirth } = await import(pathToFileURL(join(coreRoot, 'dist/agent-native-process.js')).href)
   const { agentMuxModuleSkill } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-module-skills.js')).href)
   const messageModule = agentMuxModuleSkill('message'); assert.ok(messageModule)
@@ -129,10 +166,19 @@ catch(error){failed(error);receipt.identityError=error.message;try{save()}catch(
   assert.ok(!receipt.nativeProcess.args.some(argument => ['app-server', '--remote'].includes(argument)))
   receipt.original = { session: initialIdle.session, process: initialIdle.run, startupTaskSha256: hash(task), messageModuleSha256: hash(messageModule), model }
   const originalBody = `Accepted arithmetic delegation: compute 17 + 25 and send me one combined result. Include audit marker ${marker}. Explain the calculation briefly.`
-  const cli = await exec(config.cli, ['agent', 'send', '--to-session', modelSession.agentSessionId, '--text', originalBody], { env: { ...environment, AGENTMUX_AGENT_SESSION_ID: peer.agentSessionId, AGENTMUX_AGENT_CAPABILITY: peerAuth.capability }, cwd: workspace, timeout: 15_000 })
+  receipt.originalSend = { operationId: 'reference-send-' + suffix, messageId: 'reference-request-' + suffix }
+  await save('original-send-intent.json', { ...receipt.originalSend, recipientSessionId: modelSession.agentSessionId, body: originalBody })
+  ownership.peerReceipts.push('message-send-process.json'); await recordOwnership()
+  const request = startPrivateCli(config.cli, ['agent', 'send', '--to-session', modelSession.agentSessionId, '--text', originalBody,
+    '--operation-id', receipt.originalSend.operationId, '--message-id', receipt.originalSend.messageId],
+    { env: { ...environment, AGENTMUX_AGENT_SESSION_ID: peer.agentSessionId, AGENTMUX_AGENT_CAPABILITY: peerAuth.capability }, cwd: workspace },
+    join(privateRoot, 'message-send-process.json'), nativeProcessBirth)
+  cliProcess = request.child
+  const cli = await request.completed
   const sent = JSON.parse(cli.stdout); await save('original-send.json', sent)
   assert.equal(sent.ok, true); assert.equal(sent.result.deliveryMode, 'reference'); assert.equal(sent.result.delivery.state, 'queued')
   const messageId = sent.result.messageId
+  assert.equal(messageId, receipt.originalSend.messageId)
   const outgoing = await until(() => client.listMessages({ participantSessionId: modelSession.agentSessionId, direction: 'outgoing', limit: 10 }), page => page.messages.length > 0, 'Actual model delegation result')
   assert.equal(outgoing.messages.length, 1, 'Accepted delegation generated more than one response')
   const reply = await client.readMessage({ messageId: outgoing.messages[0].envelope.messageId })
@@ -166,10 +212,18 @@ catch(error){failed(error);receipt.identityError=error.message;try{save()}catch(
     nativeModelInputDistinctFromInboxBody: true, cursorAcknowledgementAbsent: true, oracleSensitivity: 'foreign original body and native model rejected; not implementation mutation' })
   receipt.boundary = 'One private actual Codex TUI/native actor sample through candidate public CLI, Core journal and Provider idle queue. Input acceptance, native adoption and explicit body read are separately checked; universal Agent adoption is not claimed.'
   receipt.passed = true
-} catch (error) { receipt.failure = { message: redact(error.message), code: error.code, stack: redact(error.stack ?? '') }; receipt.agentErrors = observedErrors; await save('native-records.json', await readPrivateNativeRecords(authHome).catch(error => ({ unavailable: error.message }))) }
+} catch (error) {
+  receipt.failure = privateFailure(error, redact)
+  receipt.agentErrors = observedErrors
+  if (client && receipt.originalSend) {
+    const original = await client.readMessage({ messageId: receipt.originalSend.messageId }).then(message => ({ message }), error => ({ unavailable: error.message }))
+    await save('original-send-observation.json', { ...receipt.originalSend, ...original })
+  }
+}
 finally {
   const errors = [], attempt = async action => { try { return await action() } catch (error) { errors.push(error.message) } }
   for (const name of ownership.credentialReceipts) { const credential = await readFile(join(privateRoot, name), 'utf8').then(JSON.parse, () => null); if (credential?.capability) secrets.add(credential.capability) }
+  if (cliProcess) await attempt(() => terminate(cliProcess))
   const ownedSessions = client ? client.agentSessions() : sessions
   for (const session of ownedSessions.toReversed()) {
     if (client) await attempt(async () => { await save(session.agentSessionId.startsWith('model-') ? 'model-replay.json' : 'peer-replay.json', await client.readRunReplay(session.run)) })
@@ -178,6 +232,8 @@ finally {
   if (server) await attempt(() => bounded(server.stop(), 10_000, 'Private RPC stop'))
   if (client) await attempt(() => bounded(client.dispose(), 10_000, 'Private Core disposal'))
   if (daemon) await attempt(() => terminate(daemon))
+  if (core) await attempt(async () => save('message-journal.json', await new core.DurableAgentMuxMessageQueue(environment.AGENTMUX_MESSAGE_QUEUE_PATH).readJournal()))
+  await attempt(async () => save('native-records.json', await readPrivateNativeRecords(authHome)))
   receipt.cleanup = { errors, exactDaemonPid: daemon?.pid, privateRootOwnedByLauncher: true, noHostProcessScan: true }
   if (errors.length) receipt.passed = false
   await mkdir(evidence, { recursive: true, mode: 0o700 }); await save('receipt.json', receipt)
