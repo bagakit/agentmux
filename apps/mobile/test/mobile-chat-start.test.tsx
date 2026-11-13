@@ -113,16 +113,21 @@ describe('phone chat-first navigation through the actual App', () => {
     catalog.appearance = [{ spaceId: 'primary', preset: 'primary-mote' }]
     expect(mobileChatStart(catalog, null).sessionId).toBeNull()
   })
-  it('shows Motes as direct horizontal choices with a sibling Profile action and remembers only explicit selection', async () => {
+  it('shows Motes as direct horizontal choices that open their Main, with a header Profile action, and remembers only explicit selection', async () => {
     const f = original()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
+    // The Mote entry opens the primary Main first; the choice row is one explicit step back.
+    await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original'))
+    expect(getDeviceWorkface().snapshot().record.presentation?.recentMoteSpaceId).not.toBe('recent')
+    await click(button(view.element, '返回 Mote'))
     await waitForElement(view.element, '.mobile-mote-choice')
     expect(view.element.querySelectorAll('.mobile-mote-choice')).toHaveLength(2)
-    await click(view.element.querySelector('[aria-label="选择 Mote · 研究"]')!)
-    expect(view.element.querySelector('.mobile-mote-selected')?.getAttribute('data-space-id')).toBe('recent')
-    const profile = view.element.querySelector('[aria-label="查看 Mote 资料 · 研究"]')!
+    const profile = view.element.querySelector('.mobile-mote-selected [aria-label^="查看 Mote 资料 · "]')!
     expect(profile.closest('header')).not.toBeNull(); expect(profile.closest('.mobile-space-children')).toBeNull()
+    await click(button(view.element, '打开 Mote 主对话 · 研究'))
+    await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('other'))
+    expect(getDeviceWorkface().snapshot().record.presentation?.identity?.mote?.spaceId).toBe('recent')
     expect(getDeviceWorkface().snapshot().record.presentation?.recentMoteSpaceId).toBe('recent')
     expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
   })

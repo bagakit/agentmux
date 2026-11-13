@@ -140,15 +140,15 @@ it('opens a concrete Mote choice directly as Main and keeps explicit member inpu
   expect(f.submit).not.toHaveBeenCalled()
 })
 
-it('uses original Profile Setup for the exact unbound Mote without borrowing the primary Mote or its first member', async () => {
+it('opens the welcome input for the exact unbound Mote without borrowing the primary Mote or its first member', async () => {
   const facts = catalog(); facts.motePresentation![1]!.quickMode = { status: 'missing' }; facts.motePresentation![1]!.conversation = null
   const f = await original(facts)
   await click(button(f.nav(), 'Mote'))
-  await waitForElement(document.body, '.mobile-mote-profile')
-  expect(f.owner.snapshot().record.selectedSessionId).toBe('session-original')
-  expect(f.owner.snapshot().record.presentation?.profile?.identity.mote?.spaceId).toBe(spaceId)
-  expect(document.body.querySelector('.mobile-mote-profile')?.getAttribute('data-mote-space-id')).toBe(spaceId)
-  expect(document.body.querySelector('.mobile-mote-setup')).not.toBeNull()
+  await waitForElement(document.body, '.mote-start')
+  expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
+  expect(f.owner.snapshot().record.presentation?.moteView).toEqual({ spaceId, section: 'discussion', detail: false, directAgent: false })
+  expect(f.owner.snapshot().record.presentation?.identity?.mote?.spaceId).toBe(spaceId)
+  expect(document.body.querySelector('.mote-start')?.getAttribute('aria-label')).toBe('原 Mote · 开始对话')
   expect(f.rpc).toHaveBeenCalledWith('space.mote.preferences.read', { kind: 'quick', target })
   expect(f.ensure).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
   expect(f.rpc.mock.calls.some(([method]) => method.includes('setup.advance') || method === 'agent.open')).toBe(false)

@@ -179,7 +179,7 @@ it('only exact original whole-operation notApplied can release unknown; Host/Run
 it('keeps editing/terminal/clipboard failure available after device save failure and ignores clipboard callbacks after another SID/Host/Run/source', async () => {
   const f = questionFixture(), platform = createBrowserPlatform(), copy = vi.spyOn(platform, 'copyText').mockResolvedValue(false), showTerminal = vi.fn()
   const surface = (id = sid) => <MobileConversationSurface client={f.client} agentSessionId={id} connection={{ state: 'connected' as const, message: 'connected' }} platform={platform} onShowTerminal={showTerminal}/>
-  const view = await mount(surface()); await click(button(view.element, 'Keep original')); await type(view.element, 'Original answer'); await click(button(view.element, 'Copy answer: 补充说明')); expect(view.element.textContent).toContain('Retry copy')
+  const view = await mount(surface()); await click(button(view.element, 'Keep original')); await type(view.element, 'Original answer'); await click(button(view.element, 'Copy answer: 补充说明')); expect(view.element.textContent).toContain('重新复制')
   const set = localStorage.setItem.bind(localStorage); vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => { if (key === DEVICE_WORKFACE_KEY) throw new Error('Device save unavailable'); return set(key, value) })
   await type(view.element, 'Unsaved answer retained'); await vi.waitFor(() => expect(view.element.textContent).toContain('尚未持久保存'))
   expect(button(view.element, '发送答案').disabled).toBe(false)
