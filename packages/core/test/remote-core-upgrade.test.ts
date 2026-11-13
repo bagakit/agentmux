@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 import { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from '../src/remote-core-upgrade.js'
-import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY } from '../src/remote-core-upgrade-programs.js'
+import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY, SELECT_CORE_RELEASE } from '../src/remote-core-upgrade-programs.js'
 import { parseRemoteCoreUpgradeCheck } from '../src/remote-core-upgrade-codec.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -32,7 +32,7 @@ async function fixture() {
   const sessions = [{ agentSessionId: 'original-session', run: { runId: 'original-run' } }] as AgentMuxAgentSession[]
   let receiptStatus = 'matching', physicalDrift = false
   const physical = () => { const { nativeInstanceId, nativeRuntimeId, nativeBuildId, ...value } = launch; return value }
-  let shutdownUnknown = false, startUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false, savedRunMissing = false
+  let shutdownUnknown = false, startUnknown = false, selectUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false, savedRunMissing = false
   let stageCommand = fixturePath("scope/state/core-releases/") + digest + '/launcher/amux'
   let stagePause: Promise<void> | undefined, resumeStage: (() => void) | undefined
   const compatibility = { daemonInstanceId: native.instanceId, runtimeId: launch.nativeRuntimeId, protocolGeneration: PROTOCOL_VERSION,
@@ -80,6 +80,10 @@ async function fixture() {
       launch = { ...launch, cli: fixturePath("scope/state/core-releases/") + digest + '/dist/headless-runtime-cli.js', processId: owner.processId, startTicks: '5555', deploymentDigest: digest }
       if (startUnknown) throw new Error('start response lost')
       output = { processId: owner.processId }
+    } else if (args[1] === SELECT_CORE_RELEASE) {
+      effects.push('select-current-release'); expect(_command).toBe(fixturePath("original/bin/node")); expect(p.stateDirectory).toBe(fixturePath("scope/state")); expect(p.digest).toBe(digest)
+      if (selectUnknown) throw new Error('select response lost')
+      output = { current: digest }
     } else throw new Error('Unexpected program')
     return { stdout: JSON.stringify(output), stderr: '', exitCode: 0 }
   })
@@ -92,7 +96,7 @@ async function fixture() {
     setOwnerProtocol: (version: number) => { owner = { ...owner, protocolVersion: version as 2 } },
     setCurrentDigest: (value: string) => { launch = { ...launch, deploymentDigest: value } },
     setStageCommand: (command: string) => { stageCommand = command },
-    setShutdownUnknown: () => { shutdownUnknown = true }, setStartUnknown: () => { startUnknown = true }, setChangedWhileStaging: () => { changedWhileStaging = true },
+    setShutdownUnknown: () => { shutdownUnknown = true }, setStartUnknown: () => { startUnknown = true }, setSelectUnknown: (value = true) => { selectUnknown = value }, setChangedWhileStaging: () => { changedWhileStaging = true },
     setChangedTerminal: () => { changedTerminal = true }, setNaturalExit: () => { naturalExit = true },
     setSavedRunMissing: () => { savedRunMissing = true },
     pauseStage: () => { stagePause = new Promise(resolve => { resumeStage = resolve }) }, resumeStage: () => resumeStage?.() }
@@ -105,9 +109,9 @@ it('performs one fenced Core update and preserves the original namespace, Sessio
   expect(receipt.status).toBe('completed'); expect(receipt.operationId).toBe('once')
   expect(receipt.remoteCommand).toBe(fixturePath("scope/state/core-releases/") + digest + '/launcher/amux')
   expect(receipt.input).toEqual(host)
-  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
   const again = await f.manager.upgrade(host, check.expected!, 'once')
-  expect(again).toEqual(receipt); expect(f.effects).toHaveLength(3)
+  expect(again).toEqual(receipt); expect(f.effects).toHaveLength(4)
   expect((await f.manager.inspect({ ...host, remoteCommand: receipt.remoteCommand! }, 'once'))?.status).toBe('completed')
 })
 
@@ -151,7 +155,8 @@ it('inspects an old retained launcher path without migrating its receipt or repe
   expect(observed).toMatchObject({ status: 'completed', remoteCommand: legacyCommand, input: host })
   expect(f.maintenance.mock.calls.length).toBeGreaterThan(0)
   expect(f.maintenance.mock.calls.every(([params]) => params.socket === host.remoteSocketPath)).toBe(true)
-  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  // The original completion and its reconciliation each name the same confirmed release; nothing restarts.
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release', 'select-current-release'])
   expect(JSON.parse(await readFile(path, 'utf8')).receipt.remoteCommand).toBe(legacyCommand)
 })
 
@@ -206,7 +211,7 @@ it('preserves the original saved Session binding when its exact Native Run is ph
   expect(retained.observed.bootstrap.sessions).toEqual([{ agentSessionId: 'original-session', run: { runId: 'original-run' } }])
   expect(retained.observed.missingRunIds).toEqual(['original-run'])
   expect(retained.nativeRuns).toMatchObject([{ runId: 'ordinary-terminal', pid: 505, state: 'running' }])
-  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
 })
 
 it('retains an unknown shutdown, reads it after owner restart and rejects any automatic replay', async () => {
@@ -245,7 +250,7 @@ it('two manager instances share one original admission and do not overwrite a ru
   await expect(other.upgrade(host, check.expected!, 'second-operation')).rejects.toThrow('unconfirmed')
   expect((await f.manager.inspect(host, 'shared-admission'))?.status).toBe('running')
   f.resumeStage(); expect((await first).status).toBe('completed')
-  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
 })
 
 it('an unconfirmed operation remains discoverable even beside a newer closed observation', async () => {
@@ -299,7 +304,7 @@ it.each(['missing', 'mismatch', 'unreadable'])('keeps qualified remote maintenan
   expect(check.eligible).toBe(true); expect(check.detail).toContain('产品来源回执'); expect(f.effects).toEqual([])
   const receipt = await f.manager.upgrade(host, check.expected!, 'provenance-' + status)
   expect(receipt.status).toBe('completed')
-  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
 })
 it('refuses the exact remote maintenance when current process changes after public identity without touching Runs', async () => {
   const f = await fixture(); f.setPhysicalDrift()
@@ -402,7 +407,7 @@ it.each(['same', 'different', 'unavailable', 'historical-without-summary'] as co
     expect(JSON.parse(cli.stdout).result.receipt).toEqual(inspected.receipt)
     expect(assemble).toHaveBeenCalledOnce()
     expect(f.run.mock.calls.filter(([, args]) => args[1] === NATIVE_RUN_INVENTORY).every(([, , options]) => JSON.parse(options.input).releaseDirectory === fixturePath('scope/state/core-releases/') + digest)).toBe(true)
-    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+    expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
   } finally { await rpc.dispose(); await server.stop() }
 }, 15_000)
 
@@ -486,7 +491,7 @@ it('an empty or unattributable operation record is refused by its own ID without
   expect(() => parseRemoteCoreUpgradeCheck({ ...checked, unreadableOperations: ['../outside'] })).toThrow('unreadable operation IDs')
   await expect(f.manager.inspect(host, 'interrupted')).rejects.toMatchObject({ code: 'CORE_UPGRADE_OPERATION_UNREADABLE' })
   expect((await f.manager.upgrade(host, checked.expected!, 'after-damage')).status).toBe('completed')
-  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
 })
 
 it('reserves an operation ID atomically, never leaving an empty record or a staging file', async () => {
@@ -519,4 +524,25 @@ it('public CLI checks an SSH Host that keeps an unused empty Tailcat target, and
   } finally { await server.stop() }
   const used = await f.manager.check({ ...residual, transport: 'ssh-tailcat' })
   expect(() => parseRemoteCoreUpgradeCheck(used)).toThrow('Tailcat target is invalid')
+})
+
+it('a lost restart-release receipt leaves the confirmed upgrade unknown, and its reconciliation names the release once more', async () => {
+  const f = await fixture(), check = await f.manager.check(host)
+  f.setSelectUnknown()
+  const receipt = await f.manager.upgrade(host, check.expected!, 'select-lost')
+  expect(receipt).toMatchObject({ status: 'unknown' })
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release'])
+  f.setSelectUnknown(false)
+  const inspected = await new RemoteCoreUpgradeManager(f.options).inspect(host, 'select-lost')
+  expect(inspected).toMatchObject({ status: 'completed' })
+  // Reconciliation only reads, then names the already-confirmed release; it never stops or starts a Core.
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core', 'select-current-release', 'select-current-release'])
+})
+
+it('a failed upgrade never names its release for the next restart', async () => {
+  const f = await fixture(), check = await f.manager.check(host)
+  f.setStartUnknown()
+  const receipt = await f.manager.upgrade(host, check.expected!, 'start-lost')
+  expect(receipt.status).toBe('unknown')
+  expect(f.effects).not.toContain('select-current-release')
 })
