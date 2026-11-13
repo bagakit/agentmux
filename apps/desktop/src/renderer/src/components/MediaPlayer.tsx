@@ -76,6 +76,9 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
   const waiting = useRef<ReturnType<typeof setTimeout> | null>(null)
   const released = useRef(false)
+  // The lease this player is currently showing; an answer about any other lease is stale.
+  const currentLease = useRef(lease.id)
+  currentLease.current = lease.id
   // The engine's own decoded fact, kept once seen: a later error never makes it unknown again.
   const decodedOnce = useRef(false)
   const audioOnly = lease.kind === 'audio' || decode === 'no-picture'
@@ -159,10 +162,9 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
   const fail = useCallback(async () => {
     const element = media.current
     if (released.current || !element?.error) return
-    const code = element.error.code
-    // The lease owner records why it refused bytes before answering, so this read cannot race it.
-    const fact = await api.files.mediaStreamStatus(lease.id).then(value => value.state, () => 'unknown' as const)
-    if (released.current) return
+    const code = element.error.code, asked = lease.id
+    const fact = await api.files.mediaStreamStatus(asked).then(value => value.state, () => 'unknown' as const)
+    if (released.current || currentLease.current !== asked) return
     const view = describeMediaFailure(fact, code, decodedOnce.current)
     if (!view) return
     setDecode('error'); setFailure(view); setBuffering(false)
