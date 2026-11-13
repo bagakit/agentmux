@@ -42,7 +42,7 @@ function heldProjection(lanes: readonly FocusProjectLane[], previous: readonly F
   }
   const result = new Map<string, { lane: FocusScanLane; topics: FocusProjectLane[]; issues: Set<string> }>()
   for (const { lane, index } of segments.values()) {
-    for (const projected of index ? projectFocusCollectionLanes([lane], index) : [lane]) {
+    for (const projected of index ? projectFocusCollectionLanes([lane], index) : [lane as FocusScanLane]) {
       let entry = result.get(projected.id)
       if (!entry) {
         entry = { lane: projected, topics: [], issues: new Set() }
@@ -72,7 +72,7 @@ export function useFocusCollectionLanes(lanes: readonly FocusProjectLane[], cata
   const currentIndex = index ?? lastIndex.current
   const held = useRef({ index: currentIndex, lanes })
   const [, update] = useReducer(value => value + 1, 0)
-  const desired = currentIndex ? projectFocusCollectionLanes(lanes, currentIndex) : [...lanes]
+  const desired: FocusScanLane[] = currentIndex ? projectFocusCollectionLanes(lanes, currentIndex) : [...lanes]
   const prior = held.current
   const originalByContext = new Map(prior.lanes.flatMap(lane => lane.contextIds.map(id => [focusTopicContextKey(lane.hostId, id), lane] as const)))
   const sourcesChanged = prior.index !== currentIndex || lanes.some(lane => lane.contextIds.some(id => {

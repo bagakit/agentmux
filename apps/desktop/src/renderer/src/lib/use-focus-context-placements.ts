@@ -24,7 +24,7 @@ export function useFocusContextPlacements(contexts: readonly FocusContext[], roo
   const key = (context: FocusContext) => focusTopicContextKey(context.hostId, context.id)
   const changed = contexts.some(context => committed.current.has(key(context)) && committed.current.get(key(context)) !== context.bucket)
   const interacting = changed ? interactingContexts(root.current) : new Set<string>()
-  const groups = Object.fromEntries(FOCUS_BUCKETS.map(bucket => [bucket, []])) as Record<FocusContext['bucket'], FocusContext[]>
+  const groups = Object.fromEntries(FOCUS_BUCKETS.map(bucket => [bucket, [] as FocusContext[]])) as Record<FocusContext['bucket'], FocusContext[]>
   const pending = new Set<string>()
   for (const context of contexts) {
     const id = key(context), previous = committed.current.get(id)
