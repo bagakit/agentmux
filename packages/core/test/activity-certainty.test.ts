@@ -79,3 +79,20 @@ it('actual public four-state snapshots provide exact scene inputs without a Runt
       observerNow: SCENE_NOW, boundary: 'Actual public Client/private FileStore and accepted Hooks; isolated fixed Run transport, not Native Writer or physical Run proof.' }, null, 2) + '\n')
   }
 })
+it('a Hook that reports its activity unknown reads unconfirmed through agent.input.inspect, never active', async () => {
+  const { AgentMuxRpcService } = await import('../src/public-rpc-service.js')
+  const h = await activityCertaintyClient('hook-unknown', 'claude'); opened.push(h)
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: h.client }] })
+  const key = { kind: 'prompt' as const, agentSessionId: 'hook-unknown', expectedRun: { runId: h.run.runId }, submissionId: 'never-admitted' }
+  const activity = async () => (await service.call('agent.input.inspect', { key, activity: true }, { principal: { kind: 'user', id: 'reader' } })).activity
+  const native = (sequence: number, extra = {}) => ({ session_id: 'native-main', sourceId: 'native-source', sequence, turnId: 'native-turn-1', ...extra })
+  await h.hook('turn.start', 'start-1', native(1))
+  expect(await activity()).toMatchObject({ state: 'active', source: 'native-hook' })
+  await h.hook('AgentMuxActivityUnavailable', 'source-gap', native(2, { reason: 'source-changed' }))
+  expect(h.client.agentSession('hook-unknown').currentActivity?.state).toBe('unknown')
+  // Claude declares no Provider evidence reader, so nothing else can confirm the state.
+  expect(await activity()).toMatchObject({ state: 'unconfirmed', source: 'unconfirmed', sourceId: null, issue: expect.any(String) })
+  await h.hook('turn.start', 'start-3', native(3, { turnId: 'native-turn-2' }))
+  await h.hook('turn.complete', 'end-4', native(4, { turnId: 'native-turn-2', reason: 'answer', isAborted: false }))
+  expect(await activity()).toMatchObject({ state: 'idle', source: 'native-hook' })
+})
