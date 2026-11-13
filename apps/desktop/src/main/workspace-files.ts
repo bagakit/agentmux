@@ -1142,7 +1142,8 @@ export class WorkspaceFiles {
     if (this.hostFor(workspace.hostId).kind !== 'local') return null
     const { root, requested } = await localFileScope(workspace, requestedPath)
     try {
-      const info = await lstat(localPathWithin(root, requested), { bigint: true })
+      // The object a read would return: a link to a playlist changes when its target does.
+      const info = await stat(localPathWithin(root, requested), { bigint: true })
       return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
