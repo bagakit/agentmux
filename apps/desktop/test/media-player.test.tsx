@@ -61,6 +61,12 @@ describe('player keys stay inside the player', () => {
     expect(resolveMediaKey(key(' ', {}, button), onDemand)).toBeNull()
     expect(resolveMediaKey(key('k', {}, button), onDemand)).toEqual({ kind: 'toggle-play' })
   })
+  it('a focused timeline seeks by the player step, not by a thousandth of the duration', () => {
+    const timeline = Object.assign(document.createElement('input'), { type: 'range' }); timeline.dataset.mediaTimeline = ''
+    expect(resolveMediaKey(key('ArrowRight', {}, timeline), onDemand)).toEqual({ kind: 'seek-by', seconds: 5 })
+    expect(resolveMediaKey(key('ArrowLeft', {}, timeline), onDemand)).toEqual({ kind: 'seek-by', seconds: -5 })
+    expect(resolveMediaKey(key('Home', {}, timeline), onDemand)).toEqual({ kind: 'seek-start' })
+  })
   it('live without a window keeps play, mute, volume and go-live; seeking and speed are absent', () => {
     const live = { stream: 'live' as const, video: true }
     expect(resolveMediaKey(key(' '), live)).toEqual({ kind: 'toggle-play' })
@@ -126,6 +132,16 @@ describe('mounted player', () => {
     const group = container.querySelector('[role="group"]')!
     expect(group.getAttribute('aria-label')).toBe('Video player: clips/promo.mp4'); expect(group.getAttribute('tabindex')).toBe('0')
     expect(container.querySelector('button[aria-label="Play"]')).not.toBeNull()
+  })
+
+  it('the rendered timeline is the one the player step drives', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    define(media(), { duration: 600 })
+    await act(async () => { media().dispatchEvent(new Event('durationchange')) })
+    const timeline = container.querySelector<HTMLInputElement>('.media-player__slider')!, volume = container.querySelector<HTMLInputElement>('.media-player__volume')!
+    const onDemand = { stream: 'on-demand' as const, video: true }
+    expect(resolveMediaKey(key('ArrowRight', {}, timeline), onDemand)).toEqual({ kind: 'seek-by', seconds: 5 })
+    expect(resolveMediaKey(key('ArrowRight', {}, volume), onDemand)).toBeNull()
   })
 
   it('keys pressed inside the player act on it; the same key elsewhere does not', async () => {
