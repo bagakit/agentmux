@@ -62,7 +62,10 @@ const specifications = {
       consumer: 'renumbers a gapped original to 1..n with one action and restores it with one Undo', failure: /explicit renumbering makes the numbers continuous/ },
     { label: 'capture-callout-missing', source: component + 'CaptureToolbar.tsx',
       find: "'pixelate', 'blur', 'text', 'note', 'callout'] as const", replace: "'pixelate', 'blur', 'text', 'note'] as const", test: pointingTools,
-      consumer: 'offers blur and the magnifier on the light capture toolbar and keeps spotlight in the window editor', failure: /carries blur and the magnifier/ }]
+      consumer: 'offers blur and the magnifier on the light capture toolbar and keeps spotlight in the window editor', failure: /carries blur and the magnifier/ },
+    { label: 'new-note-max-plus-one', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'number: nextNoteNumber(documentState.shapes)', replace: 'number: Math.max(0, ...notes.map(note => note.number)) + 1', test: pointingTools,
+      consumer: 'numbers a new note after every existing note when a saved original repeats a number', failure: /a new note takes the number after all existing notes/ }]
   },
   capture: {
     tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
