@@ -80,6 +80,19 @@ export function surveySelectedBrowser(tabs: Readonly<Record<string, WorkbenchTab
   return surface?.kind === 'browser' ? surface : null
 }
 
+export type SurveyBrowserControl = 'unknown' | 'parked' | 'agent' | 'human' | 'idle'
+
+/**
+ * A confirmed release or a cold description that has not created its page is parked, not unknown.
+ * An unavailable owner or an unconfirmed Region stays unknown even when it was parked.
+ */
+export function surveyBrowserControl(browser: BrowserWorkbenchSurface, regionUnconfirmed: boolean): SurveyBrowserControl {
+  if (regionUnconfirmed || browser.nativeOwnerUnavailable) return 'unknown'
+  if (browser.nativeOwnerReleased || browser.nativeOwnerDeferred) return 'parked'
+  if (!browser.navigationId) return 'unknown'
+  return browser.driving ? 'agent' : browser.activity?.control === 'human' ? 'human' : browser.activity ? 'idle' : 'unknown'
+}
+
 /** Only a known original topology result can retire a Region reference; the Zone remains selected. */
 export function surveySelectionAfterClose(before: Readonly<Record<string, WorkbenchTab>>, after: Readonly<Record<string, WorkbenchTab>>,
   selected: SurveyZoneSelection | null): SurveyZoneSelection | null {

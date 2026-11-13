@@ -13,7 +13,7 @@ import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
+import { surveyBrowserControl, surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { workbenchSurfaces } from '../lib/workbench-tabs'
 import { currentDisplayNameRevision, useAppStore } from '../store'
@@ -202,8 +202,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const operators = new Map<string, SelectorPresenceAgent>()
     const sessionIndex = sessionPresentationById(sessions)
     const labels = browsers.map(browser => {
-      const control = browser.nativeOwnerReleased || unconfirmedBrowserRegionIds?.has(browser.regionId) || browser.nativeOwnerUnavailable || !browser.navigationId
-        ? 'unknown' : browser.driving ? 'agent' : browser.activity?.control === 'human' ? 'human' : browser.activity ? 'idle' : 'unknown'
+      const control = surveyBrowserControl(browser, Boolean(unconfirmedBrowserRegionIds?.has(browser.regionId)))
       const operation = browser.activity?.operation
       const operator = control === 'agent' && operation?.browserId === browser.browserId && operation.finishedAt === undefined && ['preparing', 'running', 'waiting'].includes(operation.phase) ? operation.operator : undefined
       if (operator && operator.id !== 'agent:unknown') {
@@ -214,7 +213,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           appearance: session ? config?.executors[session.executorId]?.avatar : undefined,
           state: session?.status.state })
       }
-      return control === 'agent' ? `Agent operating${operator?.name ? ` · ${operator.name}` : ''}` : control === 'human' ? 'Human control' : control === 'idle' ? 'No active Agent operation' : 'Control unknown · restoring'
+      return control === 'agent' ? `Agent operating${operator?.name ? ` · ${operator.name}` : ''}` : control === 'human' ? 'Human control' : control === 'idle' ? 'No active Agent operation'
+        : control === 'parked' ? 'Page parked · loads when shown' : 'Control unknown · restoring'
     })
     const kinds = new Set(labels)
     const agents = surfaces.filter(surface => surface.kind === 'agent').length
