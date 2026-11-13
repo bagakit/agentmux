@@ -20,6 +20,7 @@ export function compileBrowserSteps(input: { url: string; steps: BrowserReplaySt
     if (!REPLAYABLE_METHODS.has(step.method)) return `throw new Error(${JSON.stringify(
       `Recorded step "${step.method}" is not a replayable Browser page function; inspect the operation history before retrying.`
     )})`
+    if (step.method === 'drag' && (!step.target || !step.destination)) return `throw new Error('A replay drag requires both original semantic targets; locate them before retrying.')`
     if (step.target) {
       const target = JSON.stringify(step.target)
       const args = JSON.stringify(step.args)
@@ -34,7 +35,11 @@ export function compileBrowserSteps(input: { url: string; steps: BrowserReplaySt
         const matches = page.nodes.filter((node) => node.role === expected.role && node.name === expected.name);
         const targetNode = matches[expected.ordinal - 1];
         if (!targetNode || matches.length !== expected.count) throw new Error('Replay target changed; inspect the page before retrying.');
-        await ${step.method}(targetNode.ref${step.method === 'hover' || step.method === 'scroll' ? '' : `, ...${args}`});
+        ${step.method === 'drag' ? `const destination = ${JSON.stringify(step.destination)};
+        const destinations = page.nodes.filter(node => node.role === destination.role && node.name === destination.name);
+        const destinationNode = destinations[destination.ordinal - 1];
+        if (!destinationNode || destinations.length !== destination.count) throw new Error('Replay drop target changed; inspect the page before retrying.');
+        await drag(targetNode.ref, destinationNode.ref);` : `await ${step.method}(targetNode.ref${step.method === 'hover' || step.method === 'scroll' ? '' : `, ...${args}`});`}
       }`
     }
     return `await ${step.method}(...${JSON.stringify(step.args)})`

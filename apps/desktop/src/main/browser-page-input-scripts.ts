@@ -82,13 +82,22 @@ export const OWNS_HIT_DECLARATION = `function (hit) {
 }`
 
 /**
- * Did Main's own pointer move land on this element? `:hover` is Chromium's hit-test result after the
- * acknowledged move. It is false when the move was routed somewhere else, which is how an inaccurate
- * conversion into top-level coordinates is caught before anything is pressed.
+ * A one-move witness in the original isolated world. CSS :hover is presentation state and
+ * can stay empty after navigation even when trusted mousemove reached the exact target.
+ * The remote handle owns its listener; Main reads and disposes it after its native move.
  */
-export const POINTER_ON_DECLARATION = `function () {
-  const self = this instanceof Element ? this : this.parentElement;
-  return self instanceof Element && self.matches(':hover');
+export const PREPARE_POINTER_WITNESS_DECLARATION = `function () {
+  const target = this, root = target.getRootNode();
+  let landed = false;
+  const owns = (${OWNS_HIT_DECLARATION});
+  const moved = event => {
+    if (!event.isTrusted || event.buttons !== 0) return;
+    root.removeEventListener('mousemove', moved, true);
+    const path = event.composedPath();
+    landed = owns.call(target, path[0] || event.target);
+  };
+  root.addEventListener('mousemove', moved, true);
+  return { read: () => landed, dispose: () => root.removeEventListener('mousemove', moved, true) };
 }`
 
 /**

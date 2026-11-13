@@ -23,7 +23,7 @@ import { validateBrowserTaskBatchValues, BROWSER_TASK_BATCH_MAX_OPERATIONS, BROW
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
-const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll']
+const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag']
 const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
 const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
@@ -660,7 +660,7 @@ function afterStepFailure(step: BrowserTaskStep, attempts: number, report: Brows
 }
 
 /** Page steps that send exactly one existing Browser page function; the replay compiler checks it against the real page API. */
-const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll' } as const satisfies
+const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll', drag: 'drag' } as const satisfies
   Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert'>, string>
 
 function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>, downloadPath?: string): string {
@@ -671,7 +671,9 @@ function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, stri
   if (step.kind !== 'navigate' && (!step.target || step.target.count !== 1 || step.target.ordinal !== 1)) {
     throw new Error('The task target is unknown or ambiguous. Locate the actual page target before executing it.')
   }
+  if (step.kind === 'drag' && (!step.destination || step.destination.count !== 1 || step.destination.ordinal !== 1)) throw new Error('The drag destination is unknown or ambiguous. Locate the actual drop target before executing it.')
   const replay: BrowserReplayStep = {
+    ...(step.kind === 'drag' ? { destination: step.destination } : {}),
     method: downloadPath ? 'download' : PAGE_STEP_METHOD[step.kind],
     url: step.url, ...(step.target ? { target: step.target } : {}),
     args: downloadPath ? [{ path: downloadPath }] : step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'navigate' ? [step.url]
@@ -747,11 +749,13 @@ function content(value: unknown): BrowserTaskContent {
   })
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
-    draftFields(step, ['id', 'kind', 'url', 'target', 'parameterKey', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
+    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'parameterKey', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
     if (!step || !STEP_KINDS.includes(step.kind)) throw new Error('Invalid task step')
     if (typeof step.url !== 'string' || typeof step.reviewed !== 'boolean' || (step.label !== undefined && typeof step.label !== 'string') || (step.warning !== undefined && typeof step.warning !== 'string')) throw new Error('Invalid task step field')
     const url = safeUrl(step.url)
+    if (step.destination && step.kind !== 'drag') throw new Error('Only drag steps have a destination.')
     return { id: identity(step.id), kind: step.kind, url, ...(step.target ? { target: target(step.target) } : {}),
+      ...(step.destination ? { destination: target(step.destination) } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
       ...(step.branch !== undefined ? { branch: branch(step.branch) } : {}),
       ...(step.wait !== undefined ? { wait: waitCondition(step.wait) } : {}),

@@ -19,6 +19,7 @@ export function browserTaskStepSummary(step: BrowserTaskStep): string {
     return `Assert ${ASSERT_LABEL[fact.kind]} · ${subject}`
   }
   const target = step.target?.name ?? 'Target needs location'
+  if (step.kind === 'drag') return `Drag · ${target} → ${step.destination?.name ?? 'Drop target needs location'}`
   if (step.kind === 'press') return `Press ${step.key ?? 'key'} · ${target}`
   if (step.kind === 'hover') return `Hover · ${target}`
   if (step.kind === 'scroll') return `Scroll to · ${target}`

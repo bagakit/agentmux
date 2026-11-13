@@ -1,4 +1,4 @@
-import type { BrowserOperation, BrowserOperationStep, BrowserReplayStep } from '../shared/browser-operation.js'
+import type { BrowserOperation, BrowserOperationStep, BrowserReplayStep, BrowserReplayTarget } from '../shared/browser-operation.js'
 
 export function summarizeBrowserValue(value: unknown): string {
   if (value === null) return 'null'
@@ -34,7 +34,7 @@ export function startBrowserOperationStep(operation: BrowserOperation, method: s
   const replay: BrowserReplayStep = {
     method,
     url: safeBrowserUrl(operation.url),
-    args: sensitive
+    args: method === 'drag' ? [] : sensitive
       ? []
       : (typeof args[0] === 'string' && args[0].startsWith('@') ? args.slice(1) : args)
           .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),
@@ -53,4 +53,14 @@ export function startBrowserOperationStep(operation: BrowserOperation, method: s
   operation.steps.push(step)
   operation.summary = `Running ${method}`
   return step
+}
+
+/** A page call records onto its original step even while another observation is in flight. */
+export function recordBrowserOperationTarget(step: BrowserOperationStep, target: BrowserReplayTarget, endpoint?: 'destination'): void {
+  if (endpoint === 'destination') {
+    if (step.replay) step.replay.destination = target
+  } else {
+    step.target = target
+    if (step.replay) step.replay.target = target
+  }
 }

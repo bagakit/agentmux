@@ -19,7 +19,7 @@ import { BrowserLocalRecoveryFailure } from './browser-local-recovery.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import type { BrowserOwnDispatch } from './browser-own-dispatch.js'
 import {
-  SCROLL_INTO_VIEW, BROWSER_NATIVE_INPUT_WORLD, OWNS_HIT_DECLARATION, POINTER_ON_DECLARATION, PREPARE_TEXT_DECLARATION, SET_PICKER_VALUE_DECLARATION, READ_TEXT_DECLARATION, RESTORE_TEXT_FOCUS_DECLARATION, nativeKeyFor, parseKeyChord, editingCommandFor, FOCUS_FOR_KEY_DECLARATION
+  SCROLL_INTO_VIEW, BROWSER_NATIVE_INPUT_WORLD, OWNS_HIT_DECLARATION, PREPARE_POINTER_WITNESS_DECLARATION, PREPARE_TEXT_DECLARATION, SET_PICKER_VALUE_DECLARATION, READ_TEXT_DECLARATION, RESTORE_TEXT_FOCUS_DECLARATION, nativeKeyFor, parseKeyChord, editingCommandFor, FOCUS_FOR_KEY_DECLARATION
 } from './browser-page-input-scripts.js'
 import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-scope.js'
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
@@ -62,7 +62,7 @@ export type BrowserPageContext = {
    */
   note(text: string): void
   /** Receives the semantic identity of the ref that is about to be acted on. */
-  recordTarget?(target: BrowserReplayTarget): void
+  recordTarget?(target: BrowserReplayTarget, endpoint?: 'destination'): void
   /** Main rechecks original stop/control/view after resolving a handle, before an action is sent. */
   beforeAction?(): void
   /** Passive feedback uses the actually resolved node/sender, never old-ref lookup or input values. */
@@ -362,7 +362,7 @@ export function createBrowserPageDispatch(
   }
 
   /** Resolves the ref, records its semantic target and passes the first dispatch guard. Every action starts here. */
-  async function actionTarget(scope: BrowserPageActionScope | undefined, ref: string) {
+  async function actionTarget(scope: BrowserPageActionScope | undefined, ref: string, endpoint?: 'destination') {
     const { objectId, send, node, navigationId } = await handleFor(ref)
     const actionFeedback = scope?.feedback ?? context.actionFeedback
     const beforeAction = scope?.beforeAction ?? context.beforeAction
@@ -376,7 +376,7 @@ export function createBrowserPageDispatch(
     if (node) {
       const same = current?.nodes.filter((candidate) => candidate.role === node.role && candidate.name === node.name) ?? []
       const recordTarget = scope?.recordTarget ?? context.recordTarget
-      recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === node.ref) + 1, count: same.length })
+      recordTarget?.({ role: node.role, name: node.name, ordinal: same.findIndex((candidate) => candidate.ref === node.ref) + 1, count: same.length }, endpoint)
     }
     guard()
     return { objectId, send, node, guard, actionFeedback }
@@ -454,6 +454,21 @@ export function createBrowserPageDispatch(
     return response && !response.exceptionDetails ? response.result?.value : undefined
   }
 
+  /** Confirm this original native move by its trusted event target, independently of page CSS. */
+  async function witnessedPointerMove(send: BrowserCdpSender, objectId: string, move: () => Promise<unknown>): Promise<boolean> {
+    const prepared = await send('Runtime.callFunctionOn', { objectId, functionDeclaration: PREPARE_POINTER_WITNESS_DECLARATION,
+      returnByValue: false }) as { result?: { objectId?: string }; exceptionDetails?: unknown }
+    const witness = prepared.result?.objectId
+    if (!witness || prepared.exceptionDetails) throw notDispatched('The original pointer target could not be observed. No press was sent; inspect the page before acting again.')
+    try {
+      await move()
+      return await inWorld(send, witness, 'function () { return this.read() }') === true
+    } finally {
+      await inWorld(send, witness, 'function () { this.dispose() }').catch(() => {})
+      await send('Runtime.releaseObject', { objectId: witness }).catch(() => {})
+    }
+  }
+
   /**
    * A trusted native left click at the target's box: mouseMoved, mousePressed, mouseReleased with
    * clickCount 1, sent on the top-level page. No trajectory, no delays.
@@ -493,9 +508,8 @@ export function createBrowserPageDispatch(
       try {
         // Beginning can yield (it first retires a person's pending element picker).
         guard()
-        await mouse({ type: 'mouseMoved', x, y, button: 'none', buttons: 0 })
-        if (await inWorld(send, target, POINTER_ON_DECLARATION) !== true) {
-          if (!press) throw new Error(`The pointer was moved but did not land on ${ref}. Inspect the page before relying on its hover state.`)
+        if (!await witnessedPointerMove(send, target, () => mouse({ type: 'mouseMoved', x, y, button: 'none', buttons: 0 }))) {
+          if (!press) throw new BrowserLocalRecoveryFailure(`The pointer move was acknowledged but its original target could not be confirmed for ${ref}. Inspect the page before relying on it.`, 'locator-changed', 'unknown')
           throw notDispatched(`The pointer did not land on ${ref}, so it was not pressed. Inspect the page or take a new snapshot().`)
         }
         // Hover is the confirmed move itself; it leaves the pointer there, as a person's hover does.
@@ -519,6 +533,118 @@ export function createBrowserPageDispatch(
     // download trigger. Its animation cannot delay or replace the action result.
     if (press) try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
     return undefined
+  }
+
+  // One page program may issue concurrent calls. The intercepted native payload belongs to
+  // exactly one drag; a second drag must not consume it or disable its interception.
+  let dragging = false
+  async function nativeDrag(scope: BrowserPageActionScope | undefined, sourceRef: string, destinationRef: string): Promise<undefined> {
+    if (dragging) throw notDispatched('A native drag is already in progress in this page program. Await it before starting another drag.')
+    dragging = true
+    let pressed = false, intercepted = false
+    let phase = 'press acknowledgement'
+    let data: unknown, cancelPoint: { x: number; y: number } | undefined
+    let unobserve = () => {}
+    const released: { send: BrowserCdpSender; objectId: string }[] = []
+    let native: BrowserOwnDispatch | undefined
+    try {
+      const source = await actionTarget(scope, sourceRef)
+      const destination = await actionTarget(scope, destinationRef, 'destination')
+      const guard = () => { source.guard(); destination.guard() }
+      // Scroll both before locating either point. If they cannot both be hit at once, do
+      // not press; scrolling after a press would silently change the gesture's endpoint.
+      for (const target of [source, destination]) {
+        await target.send('Runtime.callFunctionOn', { objectId: target.objectId, functionDeclaration: SCROLL_INTO_VIEW, awaitPromise: true, returnByValue: true })
+        guard()
+        await target.actionFeedback?.(target.node, target.send)
+        guard()
+      }
+      async function prepare(ref: string, target: typeof source) {
+        if (!target.node.frameId) throw notDispatched(`The document holding ${ref} has no frame identity. Take a new snapshot().`)
+        const world = await target.send('Page.createIsolatedWorld', { frameId: target.node.frameId, worldName: BROWSER_NATIVE_INPUT_WORLD }) as { executionContextId: number }
+        const resolved = await target.send('DOM.resolveNode', { backendNodeId: target.node.backendNodeId, executionContextId: world.executionContextId }) as { object?: { objectId?: string } }
+        const objectId = resolved.object?.objectId
+        if (!objectId) throw notDispatched(`${ref} is no longer inspectable. Take a new snapshot().`)
+        released.push({ send: target.send, objectId })
+        const point = await nativePoint(ref, target.send, objectId, target.node, world.executionContextId)
+        return { ...target, objectId, world: world.executionContextId, point }
+      }
+      const from = await prepare(sourceRef, source), to = await prepare(destinationRef, destination)
+      guard()
+      const scale = context.inputScale?.() ?? 1
+      const start = { x: from.point.x * scale, y: from.point.y * scale }, end = { x: to.point.x * scale, y: to.point.y * scale }
+      const distance = Math.hypot(end.x - start.x, end.y - start.y)
+      if (!distance) throw notDispatched('The drag endpoints have the same native point. Inspect the source and destination before dragging.')
+      native = await context.beginNativeInput?.() ?? { input: <T>(command: () => Promise<T>) => command(), end: () => {} }
+      const input = (method: string, params: Record<string, unknown>) => native!.input(() => session.sendCommand(method, params))
+      const mouse = (params: Record<string, unknown>) => input('Input.dispatchMouseEvent', params)
+      unobserve = session.observe((method, params, sessionId) => {
+        if (method === 'Input.dragIntercepted' && !sessionId) data = (params as { data?: unknown }).data
+      })
+      intercepted = true
+      await session.sendCommand('Input.setInterceptDrags', { enabled: true })
+      guard()
+      if (!await witnessedPointerMove(from.send, from.objectId, () => mouse({ type: 'mouseMoved', ...start, button: 'none', buttons: 0 }))) throw notDispatched('The pointer did not land on the original drag source. Take a new snapshot().')
+      guard()
+      // A rejected press can still have reached Chromium. From this boundary onward a
+      // failure is unknown, never a safe local retry or a release on a replacement page.
+      pressed = true; cancelPoint = start
+      await mouse({ type: 'mousePressed', ...start, button: 'left', buttons: 1, clickCount: 1 })
+      guard()
+      phase = 'native drag movement'
+      const fraction = Math.min(10 / distance, 0.5)
+      await mouse({ type: 'mouseMoved', x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction, button: 'left', buttons: 1 })
+      guard()
+      cancelPoint = end
+      await mouse({ type: 'mouseMoved', ...end, button: 'left', buttons: 1 })
+      const checkDestination = async () => {
+        phase = 'original drop-target validation'
+        guard()
+        const currentPoint = await nativePoint(destinationRef, to.send, to.objectId, to.node, to.world)
+        if (currentPoint.x !== to.point.x || currentPoint.y !== to.point.y) throw new Error('The original drop target moved during the drag.')
+        guard()
+      }
+      await checkDestination()
+      if (data) {
+        // The payload is Chromium's original dragIntercepted event, including MIME types
+        // and allowed operations. No page DOM event or invented DataTransfer is used.
+        for (const type of ['dragEnter', 'dragOver', 'drop']) {
+          await checkDestination()
+          phase = `native ${type} acknowledgement`
+          await input('Input.dispatchDragEvent', { type, ...end, data })
+        }
+      } else {
+        // HTML5 drop already ends Chromium's drag. Only pointer/mouse dragging
+        // needs a release; another mouseup after drop could act on a new document.
+        await checkDestination()
+        phase = 'native pointer release acknowledgement'
+        await mouse({ type: 'mouseReleased', ...end, button: 'left', buttons: 0, clickCount: 1 })
+      }
+      try { void Promise.resolve(scope?.dispatched?.()).catch(() => {}) } catch { /* Decoration only. */ }
+      return undefined
+    } catch (cause) {
+      if (pressed) {
+        // Cancel Chromium's original HTML drag, if any. Do not send a mouse release to a
+        // changed document/target or after human takeover just to make cleanup look good.
+        await native?.input(() => session.sendCommand('Input.dispatchDragEvent', { type: 'dragCancel', ...cancelPoint,
+          data: data ?? { items: [], dragOperationsMask: 0 } })).catch(() => {
+          context.note('Native drag cancellation could not be confirmed. The original Browser remains available; inspect its pointer state before acting again.')
+        })
+        const failure = new BrowserLocalRecoveryFailure(`The native drag may have affected the original page. Its ${phase} failed; completion is unknown. Inspect the original page before acting again.`, 'locator-changed', 'unknown')
+        failure.cause = cause
+        throw failure
+      }
+      throw cause
+    } finally {
+      unobserve()
+      if (intercepted) {
+        try { await session.sendCommand('Input.setInterceptDrags', { enabled: false }) }
+        catch { context.note('The drag ended, but native drag interception cleanup could not be confirmed. The original Browser remains available. Inspect its input; cdp("Input.setInterceptDrags", {enabled: false}) in this Browser retries only that cleanup.') }
+      }
+      native?.end()
+      for (const target of released) await target.send('Runtime.releaseObject', { objectId: target.objectId }).catch(() => {})
+      dragging = false
+    }
   }
 
   /**
@@ -949,6 +1075,9 @@ export function createBrowserPageDispatch(
         // The key goes to the element's page focus, not the window: the window focus a person is using
         // is never taken (T-012). Page focus returns afterwards unless the key moved it.
         return await nativeKey(scope, requireString(args[0], 'ref'), requireString(args[1], 'key'))
+      case 'drag':
+        if (args.length !== 2 || args.some(ref => typeof ref !== 'string' || !ref.startsWith('@'))) throw new Error('drag requires sourceRef and destinationRef from snapshot().')
+        return await nativeDrag(scope, args[0] as string, args[1] as string)
       case 'hover':
         // A native pointer move to the proven box, confirmed by Chromium's own :hover; no press.
         return await nativeClick(scope, requireString(args[0], 'ref'), false)

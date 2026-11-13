@@ -734,6 +734,7 @@ function sanitizeReplay(replay: BrowserReplayStep): BrowserReplayStep {
     method: clamp(replay.method),
     url: stripUrl(replay.url),
     ...(replay.target ? { target: sanitizeTarget(replay.target) } : {}),
+    ...(replay.destination ? { destination: sanitizeTarget(replay.destination) } : {}),
     args: sensitive || navigationWithQuery ? [] : navigationArgs.slice(0, MAX_REPLAY_ARGS).map(sanitizeScalar),
     ...(replay.inputKey ? { inputKey: clamp(replay.inputKey) } : {}),
     ...(sensitive || navigationWithQuery || replay.blockedReason

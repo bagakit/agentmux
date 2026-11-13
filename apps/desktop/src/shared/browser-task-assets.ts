@@ -28,10 +28,12 @@ export type BrowserTaskAssertion =
 export type BrowserTaskStepFailure = 'stop' | 'continue' | { goto: string }
 export type BrowserTaskStep = {
   id: string
-  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll'
+  kind: 'click' | 'fill' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag'
   /** Redacted page identity, never a stored input value. */
   url: string
   target?: BrowserReplayTarget
+  /** Drag only: the independently resolved semantic drop target. */
+  destination?: BrowserReplayTarget
   parameterKey?: string
   label?: string
   branch?: BrowserTaskBranch

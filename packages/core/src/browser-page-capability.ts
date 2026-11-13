@@ -89,6 +89,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'fillInput', effect: 'act', summary: 'replace an input value' },
   { name: 'typeText', effect: 'act', summary: 'type into the focused element' },
   { name: 'pressKey', effect: 'act', summary: 'press one key or a chord such as Control+a, Shift+Tab or Meta+z on a ref' },
+  { name: 'drag', effect: 'act', summary: 'drag(sourceRef, destinationRef): native left-button drag between two current refs; supports HTML5 drop and pointer/mouse drag, without selectors or coordinates' },
   { name: 'hover', effect: 'act', summary: 'move the pointer over an element' },
   { name: 'scroll', effect: 'act', summary: 'scroll the page or an element' },
   { name: 'waitForElement', effect: 'wait', summary: 'wait until an element is there; {exact: true, role} matches one name exactly' },

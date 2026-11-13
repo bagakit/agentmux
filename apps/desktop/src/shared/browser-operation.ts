@@ -10,6 +10,8 @@ export type BrowserReplayStep = {
   /** URL without credentials, query or fragment. */
   url: string
   target?: BrowserReplayTarget
+  /** Drag only: the independently resolved semantic drop target. */
+  destination?: BrowserReplayTarget
   /** Only non-secret scalar arguments; text/code is never recorded. */
   args: unknown[]
   inputKey?: string

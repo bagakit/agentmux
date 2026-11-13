@@ -11,7 +11,7 @@ import { attachExternalBrowserTarget, type ExternalBrowserTargetSession } from '
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
-import { startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
+import { recordBrowserOperationTarget, startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
 import { showBrowserOperationFeedback, BROWSER_OPERATION_FEEDBACK_WORLD_NAME, buildBrowserOperationFeedbackRevisionScript } from './browser-operation-feedback.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import type { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
@@ -189,7 +189,7 @@ export class ExternalBrowserOwner {
             if (actions.has(method)) { requireCurrent(); cue = await ownedFeedback.begin(method, method === 'pressKey' ? args[1] : undefined); requireCurrent() }
             else if (waits.has(method)) await ownedFeedback.clear()
             else await ownedFeedback.observe()
-            const value = await dispatch(method, args, { beforeAction: requireCurrent, recordTarget: target => { currentStep.target = target },
+            const value = await dispatch(method, args, { beforeAction: requireCurrent, recordTarget: (target, endpoint) => recordBrowserOperationTarget(currentStep, target, endpoint),
               ...(cue === undefined ? {} : { feedback: async (node, sender) => { requireCurrent(); await ownedFeedback.showTarget(node, sender, cue); requireCurrent() } }) })
             if (cue !== undefined) await ownedFeedback.completeAction(cue)
             currentStep.status = 'completed'; currentStep.summary = summarizeBrowserValue(value); currentStep.finishedAt = Date.now()

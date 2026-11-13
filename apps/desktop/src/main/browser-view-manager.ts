@@ -67,7 +67,7 @@ import { capturePageImage } from '@agentmux/native-desktop/image'
 import { browserPagePixels } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
-import { safeBrowserUrl, startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
+import { safeBrowserUrl, startBrowserOperationStep, recordBrowserOperationTarget, summarizeBrowserValue } from './browser-operation-step.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import {
   appLinkOutcome,
@@ -3500,21 +3500,7 @@ export class BrowserViewManager {
         void this.operationJournal?.setPhase(operation.id, operation.phase, { summary: operation.summary, warning: operation.warning })
         this.emit(entry)
       },
-      recordTarget: (target) => {
-        if (!activeStep) return
-        activeStep.target = target
-        if (activeStep.replay) {
-          activeStep.replay.target = target
-          if (activeStep.method === 'fillInput' || activeStep.method === 'typeText') {
-            activeStep.replay.args = []
-            activeStep.replay.inputKey = 'value'
-            activeStep.replay.blockedReason = 'Sensitive input is requested again at replay time.'
-          } else if (activeStep.method === 'js' || activeStep.method === 'cdp') {
-            activeStep.replay.args = []
-            activeStep.replay.blockedReason = 'Opaque page code or protocol input requires explicit review.'
-          }
-        }
-      }
+      recordTarget: (target, endpoint) => { if (activeStep) recordBrowserOperationTarget(activeStep, target, endpoint) }
     })
     return async (name, args) => {
       requireLive()
@@ -3586,6 +3572,7 @@ export class BrowserViewManager {
           // only a read-only call can say nothing reached the page.
           const changesPage = BROWSER_ACTION_PAGE_CALLS.has(name)
           const call = () => dispatch(name, args, { beforeAction: () => beforeAction(step),
+            recordTarget: (target, endpoint) => recordBrowserOperationTarget(step, target, endpoint),
             ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {
               dispatched: () => feedback.clickConfirmed(action)
             } : {}),
@@ -3614,7 +3601,7 @@ export class BrowserViewManager {
             },
             dispatch: async (method, callArgs, mayDispatch) => {
               activeRecoveryMayDispatch = mayDispatch
-              try { return await dispatch(method, callArgs) } finally { activeRecoveryMayDispatch = undefined }
+              try { return await dispatch(method, callArgs, { recordTarget: (target, endpoint) => recordBrowserOperationTarget(step, target, endpoint) }) } finally { activeRecoveryMayDispatch = undefined }
             },
             verify: () => this.verifyOutcome(entry.id, operation.id),
             record: report => saveEvidence({ kind: 'diagnostic', code: 'page-call-failed',
