@@ -41,4 +41,14 @@ describe('Goal plan guidance reaches its readers', () => {
       expect(help, method).toContain(fact)
     }
   })
+
+  it('discovers an explicit planning request without treating discussion or confirmation as plan authority', () => {
+    const skill = agentMuxModuleSkill('goal')!, manager = goalRoleGuidance({ role: 'manager', goalId: 'goal' })
+    for (const fact of ['--mode plan', 'human confirmation is not a prerequisite', 'discussion Agent is not automatically the Supervisor', 'acknowledgement or a textual breakdown'])
+      expect(skill, fact).toContain(fact)
+    expect(manager).toContain('When explicitly asked to plan')
+    expect(manager).toContain('manager guidance is not a Supervisor grant')
+    const help = agentMuxCommandHelp('goal.discuss')!
+    for (const fact of ['open|grill|grounding|plan', '--operation-id', 'input, not a saved plan', 'never starts work']) expect(help, fact).toContain(fact)
+  })
 })

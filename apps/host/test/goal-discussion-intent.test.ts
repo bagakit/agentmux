@@ -71,3 +71,23 @@ it('the exact frozen platform source refuses another valid placement before nati
   await expect(f.owner.contextForSpatialOpen({ ...canonical, destination: { ...canonical.destination, newTab: undefined, tabId: 'another-tab', regionId: 'another-launcher' } })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
   await expect(f.owner.contextForSpatialOpen({ ...canonical, focus: true })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
 })
+it('freezes a first planning request with its actual Goal and read/save instructions, without creating a plan or granting a role', async () => {
+  const f = await fixture(), request = { ...f.request, mode: 'plan' as const, executorId: 'claude' }
+  await expect(f.owner.execute(request, {})).rejects.toThrow('native-boundary')
+  const goal = (await f.demands.get(request.demandId))!
+  expect(goal.discussionIntent).toMatchObject({ mode: 'plan', requestOperationId: request.requestId,
+    prompt: `Make a plan for this existing Goal: ${goal.id}.` })
+  const note = goal.discussionIntent!.agentMuxNote
+  expect(note).toContain(`Make and save a dependency plan inside the existing Goal ${goal.id}.`)
+  expect(note).toContain('goal plan revise --input FILE')
+  expect(note).toContain('A current proposal allows planning before human confirmation.')
+  expect(note).toContain('Do not invent intent, standards, human approval or a placeholder plan')
+  expect(note).toContain('does not grant Supervisor authority')
+  expect(goal.plan).toBeUndefined(); expect(goal.alignment).toBeUndefined(); expect(goal.supervisorSessionId).toBeNull()
+  const original = f.call.mock.calls[0]![1] as any
+  expect(original.content.prompt).toBe(goal.discussionIntent!.prompt)
+  const context = await f.owner.contextForSpatialOpen({ ...original, schemaVersion: 1, operation: 'agent.open', requestId: original.operationId })
+  expect(context).toBe(note)
+  await expect(f.owner.execute({ ...request, mode: 'grill' }, {})).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+  expect(f.call).toHaveBeenCalledTimes(1)
+})

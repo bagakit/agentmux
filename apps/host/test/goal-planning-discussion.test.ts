@@ -1,0 +1,68 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { appendFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { AgentMuxSpatialStateStore } from '@agentmux/core'
+import { deriveObjectId } from '@agentmux/core/object-id'
+import { createWorkspaceLayout, createWorkbenchViewLayout } from '@agentmux/core/spatial-layout'
+import { contributeGoalDiscussionBinding } from '../src/goal-discussion-bindings.js'
+import { workspaceProjectId } from '../src/workspace-projects.js'
+import { crossHostOwner, type CrossHostCleanup } from './helpers/goal-cross-host-fixture.js'
+const cleanup: CrossHostCleanup = []
+afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+
+it('the public CLI submits and reconciles an original managed planning input, then only the legal author can save the unconfirmed Goal plan', async () => {
+  vi.stubEnv('NODE_OPTIONS', [process.env.NODE_OPTIONS, '--import ' + resolve('apps/host/test/goal-planning-discussion-node-loader.mjs')].filter(Boolean).join(' '))
+  const f = await crossHostOwner(cleanup, 'planning', ['supervisor', 'discussion'])
+  const goalId = 'original-planning-goal', operationId = 'original-planning-request'
+  await f.call(null, ['goal', 'create', '--goal', goalId, '--title', 'Keep the real Goal', '--description', 'Preserve the original human intent.',
+    '--assignees', '["supervisor","discussion"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+  const alignment = { summary: 'Deliver a checked outcome.', criteria: [{ id: 'result', text: 'The original result has an independent check.' }], openQuestions: [] }
+  await f.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(alignment)])
+  const spatial = new AgentMuxSpatialStateStore(), directory = f.original.root
+  await spatial.commit({ expectedRevision: 0, graph: {
+    spaces: [{ spaceId: 'space', kind: 'mote', topicId: '__pmo_teams__', name: 'Original', hostId: 'local', directoryPath: directory, projectId: null }],
+    zones: [{ zoneId: 'zone', workspaceId: 'original-project', kind: 'home', hostId: 'local', directoryPath: directory, branch: null }],
+    bindings: [{ spaceId: 'space', zoneId: 'zone' }], tabs: [{ tabId: 'discussion-tab', zoneId: 'zone', workspaceId: 'original-project', name: 'Original discussion', regionIds: ['discussion-region'] }],
+    regions: [{ tabId: 'discussion-tab', regionId: 'discussion-region', kind: 'agent', agentSessionId: 'discussion', runId: 'run-discussion', execution: { hostId: 'local', cwd: directory } }],
+    layouts: { 'original-project': createWorkspaceLayout('group', ['discussion-tab']) }, tabLayouts: { 'discussion-tab': createWorkbenchViewLayout('discussion-region') }, resources: {}
+  } })
+  await contributeGoalDiscussionBinding({ spatial, goalId, binding: { schema: 'agentmux.goal-discussion-binding.v1', tabId: 'discussion-tab', regionId: 'discussion-region',
+    recipient: { kind: 'agent', hostId: 'local', agentSessionId: 'discussion' } } })
+  const args = ['goal', 'discuss', '--goal', goalId, '--mode', 'plan', '--operation-id', operationId]
+  const first = await f.call('supervisor', args)
+  expect(first.receipt).toMatchObject({ mode: 'plan', operationId, agentSessionId: 'discussion', tabId: 'discussion-tab' })
+  const messageId = deriveObjectId('goal-discussion-message', operationId)
+  const message = (await f.call('supervisor', ['message', 'read', '--host', 'local', '--message-id', messageId])).message
+  expect(message, 'A planning request must reach the original Core message journal; navigation is not input.').not.toBeNull()
+  expect(message.envelope).toMatchObject({ operationId, recipientSessionId: 'discussion', senderSessionId: 'supervisor' })
+  expect(message.envelope.body).toContain(`Make and save a dependency plan inside the existing Goal ${goalId}.`)
+  expect(message.envelope.body).toContain('goal plan revise --input FILE')
+  const input = await f.client().inspectAgentPromptSubmission({ kind: 'message', agentSessionId: 'discussion', expectedRun: { runId: 'run-discussion' }, messageId })
+  expect(input?.admission).toMatchObject({ acknowledged: true, inputKey: { kind: 'message', agentSessionId: 'discussion', expectedRun: { runId: 'run-discussion' }, messageId } })
+  expect((await f.call(null, ['goal', 'plan', '--goal', goalId])).plan).toBeUndefined()
+  const nativeWrites = () => f.original.rawInput.mock.calls.length + (f.native.input as { mock: { calls: unknown[] } }).mock.calls.length
+  const beforeRetry = nativeWrites()
+  expect(beforeRetry).toBeGreaterThan(0)
+  // Changing real project context makes resubmission a different frozen body. A repeat
+  // request must read the original admission, not re-run the producer against new context.
+  await f.call(null, ['goal', 'update', '--goal', goalId, '--project', workspaceProjectId({ id: 'original-project', name: 'Original project', hostId: 'local', path: directory })])
+  const retry = await f.call('supervisor', args)
+  expect(retry.receipt).toEqual(first.receipt)
+  expect(nativeWrites()).toBe(beforeRetry)
+  const revision = { goalId, revision: { operationId: 'original-plan-revision', expectedRevision: 0, alignmentRevision: 1, nodes: [
+    { id: 'prepare', title: 'Prepare', outcome: 'A checked input', dependsOn: [], criterionIds: ['result'], check: 'check prepare', executor: null },
+    { id: 'deliver', title: 'Deliver', outcome: 'The checked result', dependsOn: ['prepare'], criterionIds: ['result'], check: 'check deliver', executor: null }
+  ] } }
+  const denied = await f.cli('discussion', ['goal', 'plan', 'revise', '--input', '-'], revision)
+  expect(denied.code).toBe(1); expect(denied.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  expect((await f.call(null, ['goal', 'plan', '--goal', goalId])).plan).toBeUndefined()
+  const saved = await f.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], revision)
+  expect(saved.plan.history[0].author).toMatchObject({ kind: 'agent', id: 'supervisor' })
+  expect(saved.plan.nodes[1].dependsOn).toEqual(['prepare'])
+  const read = await f.call(null, ['goal', 'inspect', '--goal', goalId])
+  expect(read.goal).toMatchObject({ supervisorSessionId: 'supervisor', alignment: { confirmedAt: null }, plan: { revision: 1 } })
+  expect(read.goal.delegations ?? []).toEqual([])
+  expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
+  if (process.env.GOAL_PLANNING_FACTS) appendFileSync(process.env.GOAL_PLANNING_FACTS, JSON.stringify({ cli: f.cliReceipts, originalInput: input, originalMessage: message,
+    originalReceipt: first.receipt, retryReceipt: retry.receipt, nativeWritesBeforeRetry: beforeRetry, nativeWritesAfterRetry: nativeWrites(), plan: saved.plan, finalGoal: read.goal }) + '\n')
+})
