@@ -17,12 +17,27 @@ app.whenReady().then(async () => {
     await read('window.__connectionsTrustedEvents=window.moteStartCapture.facts().trustedEvents')
     app.focus({ steal: true }); win.show(); win.focus(); win.webContents.focus(); await settle()
     const before = await read('window.moteStartCapture.facts()')
+    result.visualMutation = await read('window.__moteRolloverVisualMutation ?? null')
     async function capture(name, surface = panel) {
       await settle()
       const facts = await read('window.moteStartCapture.facts()'); assert.deepEqual(facts.writes, [], 'Opening, reading and typing never creates or sends')
       const dom = await read(`(()=>{const n=${surface};return{body:n?.innerText,rect:n?.getBoundingClientRect().toJSON(),viewport:{width:innerWidth,height:innerHeight},scroll:document.querySelector('.mote-start')?.scrollTop,motion:[...document.querySelectorAll('.mote-start .mote-identity-motion')].map(n=>({visible:n.dataset.moteVisible,motion:n.dataset.moteMotion})),draft:document.querySelector('.mote-start .tiptap')?.innerText}})()`)
       assert.ok(dom.rect?.width > 0); const file = name + '.png'
       await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.images.push(file); result.operations.push({ name, dom, facts })
+    }
+    if (process.argv.includes('--rollover-later-only')) {
+      await read('void(window.moteRolloverVisual=window.moteStartCapture.rolloverMember())')
+      await until(`${panel}.querySelector('[data-mote-section="threads"] .mote-workface__original:not([hidden])')`, 'Later explicit member selection is displayed first')
+      await read('window.moteRolloverVisual.arrive()')
+      await until(`${panel}.querySelector('[data-mote-section="threads"] .mote-workface__original:not([hidden]) details[open] button')`, 'Single original Query remains reachable in the selected member')
+      await capture('16-member-original-query-continuation')
+      const retained = await read('({queue:window.moteRolloverVisual.operationId,draft:document.querySelector(".mote-workface__original:not([hidden]) .tiptap")?.innerText})')
+      await click(`js:${panel}.querySelector('[data-mote-rollover="private-new-query"] button')`)
+      await until(`${panel}.querySelector('.mote-start') && window.moteRolloverVisual.requests.length===1`, 'Explicit continuation enters the original pending Main action')
+      await capture('17-explicit-original-query-pending')
+      result.rollover = { retained, pending: await read('window.moteRolloverVisual.requests'), boundary: 'Controlled original pending request only; real Host creation/input confirmation is covered by the consumer test, not this visual fixture.' }
+      result.initial = before; result.final = await read('window.moteStartCapture.facts()')
+      assert.deepEqual(result.final.identities, before.identities); result.passed = true; return
     }
     if (process.argv.includes('--supplement-only')) {
       await click(`js:${panel}.querySelector(${JSON.stringify('[aria-label="Open Mote in Space"]')})`)

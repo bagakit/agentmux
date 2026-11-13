@@ -65,4 +65,19 @@ seed()
 Object.assign(window, { moteStartCapture: { ready: true, facts: original.facts, theme: original.theme,
   history(value: boolean) { history = value; unknown = false; bound = false; seed() },
   unknown() { unknown = true; seed() }, bound() { bound = true; unknown = false; seed() },
-  longName() { original.longNames() } } })
+  longName() { original.longNames() },
+  rolloverMember() {
+    bound = true; unknown = false; history = false; seed()
+    requestPmoTeamsTopicFloatingOpen({ targetTopicId: topic.id, reference })
+    const prompt = '把原来的问题接到新对话，当前这段工作先保留。'
+    const requests: unknown[] = []
+    // The visual fixture observes only a private pending creation, never a user Run.
+    api.spatial.openAgent = async input => { requests.push(input); return await new Promise(() => {}) }
+    const arrive = () => useAppStore.setState(current => ({ agentComposerDrafts: { ...current.agentComposerDrafts, [reference.sessionId]: '这里保留给这位 Agent 的下一步草稿。' },
+      agentSteerQueues: { ...current.agentSteerQueues, [reference.sessionId]: [{ operationId: decision.queryOperationId, text: prompt,
+        enqueuedAt: captureAt, status: 'deferred', origin: 'manual', awaitingExplicitSend: true,
+        mainRollover: { ...decision, expectedRoleRevision: 'original-main-role' },
+        moteMain: { target, expectedRoleRevision: 'original-main-role' } }] } }))
+    return { prompt, operationId: decision.queryOperationId, creationOperationId: decision.creationOperationId,
+      sessionId: reference.sessionId, requests, arrive }
+  } } })

@@ -28,11 +28,22 @@ const mutations: Record<string, { owner: string; from: string; to: string }> = {
     from: 'result.record?.requestId !== automatic.decision.creationOperationId || JSON.stringify(result.record.moteMain?.rollover) !== JSON.stringify(automatic.decision) ||',
     to: 'false ||' },
   'rollover-not-discovered': { owner: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
-    from: 'visible && rollovers.length === 1 &&', to: 'false && visible && rollovers.length === 1 &&' },
+    from: 'visible && !memberInput && rollovers.length === 1 &&', to: 'false && visible && !memberInput && rollovers.length === 1 &&' },
+  'rollover-member-selection-stolen': { owner: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
+    from: 'visible && !memberInput && rollovers.length === 1 &&', to: 'visible && rollovers.length === 1 &&' },
+  'rollover-rejected-entry-consumed': { owner: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
+    from: 'if (accepted) { rolloverHandled.current = entry.operationId; feedback.dismiss() }',
+    to: 'rolloverHandled.current = entry.operationId; if (accepted) { feedback.dismiss() }' },
+  'rollover-rejected-entry-silent': { owner: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
+    from: "else feedback.report('这条输入属于原 Mote，当前页面未接纳。原问题和操作已保留；返回所属 Mote 后继续。')", to: '' },
+  'rollover-single-continuation-hidden': { owner: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
+    from: 'rollovers.length > 0 && moteWorkface?.startRollover', to: 'rollovers.length > 1 && moteWorkface?.startRollover' },
   'rollover-multiple-auto-selects': { owner: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
-    from: 'rollovers.length === 1', to: 'rollovers.length >= 1' },
+    from: '!memberInput && rollovers.length === 1 &&', to: '!memberInput && rollovers.length >= 1 &&' },
+  'rollover-same-agent-member-intent-dropped': { owner: 'apps/desktop/src/renderer/src/lib/pmo-teams-topic-floating.ts',
+    from: "Boolean((tabId || suppliedReference) && previous.conversationIntent !== 'member') || ", to: '' },
   'rollover-target-unchecked': { owner: 'apps/desktop/src/renderer/src/components/MoteWorkface.tsx',
-    from: 'if (JSON.stringify(rollover.decision.target) !== JSON.stringify(dialogue?.target)) return', to: 'void 0' },
+    from: 'if (JSON.stringify(rollover.decision.target) !== JSON.stringify(dialogue?.target)) return false', to: 'void 0' },
   'closed-history-needs-live-occurrence': { owner: 'apps/desktop/src/renderer/src/components/MoteWorkface.tsx',
     from: 'onOpenOriginal={() => setLocal(previous => ({ ...previous, periodOriginal: true }))}',
     to: 'onOpenOriginal={() => { showThread(currentLocal.period!.reference) }}' },
@@ -74,5 +85,6 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.cache/mote-conv
     return { code: loaded + '\nimport { appendFileSync as __amxRootUiAppend } from "node:fs";\n' +
       '__amxRootUiAppend(' + JSON.stringify(log) + ', ' + JSON.stringify(JSON.stringify({ ...fact, stage: 'evaluated' }) + '\n') + ');\n', map: null }
   } }],
-  test: { ...base.test, environment: 'happy-dom', include: ['apps/desktop/test/mote-conversation-start-public-consumer.test.tsx'],
+  test: { ...base.test, environment: 'happy-dom', include: [process.env.AGENTMUX_TEST_MOTE_ROLLOVER_LATER
+    ? 'apps/desktop/test/mote-rollover-later-intent.test.tsx' : 'apps/desktop/test/mote-conversation-start-public-consumer.test.tsx'],
     fileParallelism: false, maxWorkers: 1, testTimeout: 45_000, passWithNoTests: false } })

@@ -15,6 +15,18 @@ const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-perfor
   boundary: 'Original App/PmoTeamsTopicFloatingPanel/MoteSpaceFrame/WorkspaceWorkbench/SessionPane/Composer/Store and CSS in private Electron. Original Core conversation projector/codec consumes controlled typed source pages. Exact private Sessions/Run/Space bindings and finite API/native ports only; no real user App/Run, Provider, model, package, install or native recovery claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
+  const visualMutation = process.env.AGENTMUX_MOTE_ROLLOVER_VISUAL_MUTATION
+  assert.ok(!visualMutation || visualMutation === 'pending-covers-continuation', 'Unknown visual mutation')
+  const mutations = { name: 'rollover-loaded-visual-mutation', setup(plugin) {
+    if (!visualMutation) return
+    plugin.onLoad({ filter: /\/AgentSessionComposer\.tsx$/ }, async args => {
+      const source = await fs.readFile(args.path, 'utf8'), from = 'pendingLayout={deliveryLayout}'
+      assert.equal(source.split(from).length, 2, 'One original production geometry seam')
+      const loaded = source.replace(from, 'pendingLayout={pendingLayout}')
+      receipt.visualMutation = { name: visualMutation, owner: path.relative(root, args.path), originalSHA256: sha(source), loadedSHA256: sha(loaded) }
+      return { loader: 'tsx', contents: loaded + '\nwindow.__moteRolloverVisualMutation=' + JSON.stringify(receipt.visualMutation) + ';' }
+    })
+  } }
   const alias = { ...radixOverlayAliases }
   const clientFolder = path.join(root, 'packages/client-ui')
   const clientExports = Object.entries(JSON.parse(await fs.readFile(path.join(clientFolder, 'package.json'), 'utf8')).exports)
@@ -60,7 +72,7 @@ try {
     alias['@agentmux/host' + (subpath === '.' ? '' : subpath.slice(1))] = path.join(root, 'apps/host', target.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'))
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
+    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [mutations, clientSources, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
@@ -78,12 +90,12 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script>' + boundedScript + 'window.closedTabSetup={phase:"module-loading",errors:[]};window.addEventListener("error",e=>window.closedTabSetup.errors.push(String(e.error?.stack||e.message)));window.addEventListener("unhandledrejection",e=>window.closedTabSetup.errors.push(String(e.reason?.stack||e.reason)));</script><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--supplement-only') ? ['--supplement-only'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...process.argv.slice(2).filter(value => ['--supplement-only', '--rollover-later-only'].includes(value))],
     { cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.deepEqual(receipt.renderer.images, process.argv.includes('--supplement-only') ? ['10-space-welcome-pointer.png', '11-space-reduced-motion-light.png', '12-period-history-list.png', '13-bounded-period-body.png', '14-policy-edit-save-visible.png', '15-original-session-scope.png'] : ['01-welcome-history-dark.png', '02-welcome-draft-dark.png', '03-welcome-history-light.png', '04-welcome-narrow-light.png', '05-welcome-short-dark.png', '06-welcome-empty-dark.png', '07-welcome-source-unconfirmed.png', '08-period-reader-dark.png', '09-policy-editor-dark.png'], 'Every named real product scene must be captured')
+  assert.deepEqual(receipt.renderer.images, process.argv.includes('--rollover-later-only') ? ['16-member-original-query-continuation.png', '17-explicit-original-query-pending.png'] : process.argv.includes('--supplement-only') ? ['10-space-welcome-pointer.png', '11-space-reduced-motion-light.png', '12-period-history-list.png', '13-bounded-period-body.png', '14-policy-edit-save-visible.png', '15-original-session-scope.png'] : ['01-welcome-history-dark.png', '02-welcome-draft-dark.png', '03-welcome-history-light.png', '04-welcome-narrow-light.png', '05-welcome-short-dark.png', '06-welcome-empty-dark.png', '07-welcome-source-unconfirmed.png', '08-period-reader-dark.png', '09-policy-editor-dark.png'], 'Every named real product scene must be captured')
   for (const file of receipt.renderer.images) receipt.images[path.relative(root, path.join(directory, file))] = sha(await fs.readFile(path.join(directory, file)))
   receipt.sourceDrift = []
   for (const [file, expected] of Object.entries(receipt.source)) if (sha(await fs.readFile(path.resolve(root, file))) !== expected) receipt.sourceDrift.push(file)
