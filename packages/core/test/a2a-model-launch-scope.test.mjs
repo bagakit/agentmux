@@ -52,10 +52,10 @@ const hook = registerHooks({ resolve(specifier, context, next) {
   if (url !== coordinator) return loaded
   const source = String(loaded.source), marker = 'const config = JSON.parse'
   assert.equal(source.split(marker).length, 2)
-  return { ...loaded, source: source.slice(0, source.indexOf(marker)) + '\nexport {startPrivateCli,privateFailure}\n' }
+  return { ...loaded, source: source.slice(0, source.indexOf(marker)) + '\nexport {startPrivateCli,privateFailure,assertDiscovery}\n' }
 } })
-let startPrivateCli, privateFailure
-try { ({ startPrivateCli, privateFailure } = await import(coordinator)) } finally { hook.deregister() }
+let startPrivateCli, privateFailure, assertDiscovery
+try { ({ startPrivateCli, privateFailure, assertDiscovery } = await import(coordinator)) } finally { hook.deregister() }
 
 test('a normal owned CLI can complete beyond the old fifteen-second observation window', { skip: process.platform !== 'darwin' }, async () => {
   const scope = await mkdtemp(join(temporary, 'a2a-slow-cli-')), receipt = join(scope, 'process.json')
@@ -97,4 +97,36 @@ test('an exit-receipt write failure preserves and redacts the original CLI error
     assert.match(cli.stack, /Command failed/u)
     assert.ok(!JSON.stringify(saved).includes('credential-marker'))
   } finally { delete globalThis[key]; await terminate(command.child); await rm(scope, { recursive: true, force: true }) }
+})
+
+
+test('original native command completions retain reads across asynchronous tool yields', () => {
+  const messageModule = 'Exact candidate message contract', originalBody = 'Accepted arithmetic 17 + 25 marker', wire = 'original reference only', messageId = 'original-mid'
+  const user = (text, at = 0) => ({ timestamp: new Date(at).toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } })
+  const completed = (id, command, output, start, end) => ({ type: 'event_msg', payload: { type: 'item_completed', started_at_ms: start, completed_at_ms: end,
+    item: { type: 'CommandExecution', id, command: ['/bin/zsh', '-lc', command], aggregated_output: output, status: 'completed', exit_code: 0 } } })
+  const context = { type: 'turn_context', payload: { model: 'selected-model', approval_policy: 'never', sandbox_policy: { type: 'workspace-write' } } }
+  const records = [{ path: 'original.jsonl', records: [
+    { type: 'session_meta', payload: { id: 'original-native' } }, context, user('Wait for the request'),
+    completed('skill', 'amux message --skill', messageModule, 10, 20), user(wire, 25), context,
+    { type: 'response_item', payload: { type: 'function_call', call_id: 'read-call', arguments: 'amux message read --message-id original-mid' } },
+    { type: 'response_item', payload: { type: 'function_call_output', call_id: 'read-call', output: 'Process running with session ID 91' } },
+    completed('read', 'amux message read --message-id original-mid', originalBody, 30, 40),
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '17 + 25 = 42 marker' }] } }
+  ] }]
+  const facts = { records, nativeId: 'original-native', wire, messageId, originalBody, messageModule, marker: 'marker', model: 'selected-model' }
+  assert.equal(assertDiscovery(facts).originalReadCommandId, 'read')
+  assert.throws(() => assertDiscovery({ ...facts, originalBody: 'unread different body' }), /No original MID/u)
+  const event = records[0].records[8].payload
+  event.item.exit_code = 1
+  assert.throws(() => assertDiscovery(facts), /No original MID/u)
+  event.item.exit_code = 0; event.started_at_ms = 19
+  assert.throws(() => assertDiscovery(facts), /No original MID/u)
+  event.started_at_ms = 24
+  assert.throws(() => assertDiscovery(facts), /No original MID/u)
+  event.started_at_ms = 30
+  delete records[0].records[4].timestamp
+  assert.throws(() => assertDiscovery(facts), /No original MID/u)
+  records[0].records[4].timestamp = new Date(25).toISOString()
+  assert.equal(assertDiscovery(facts).skillCommandId, 'skill')
 })

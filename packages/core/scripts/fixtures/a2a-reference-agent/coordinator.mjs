@@ -44,6 +44,42 @@ function privateFailure(error, redact) {
     errors: error.errors?.map(item => privateFailure(item, redact)) }
 }
 
+function assertDiscovery({ records, nativeId, wire, messageId, originalBody, messageModule, marker, model }) {
+  const matches = records.filter(file => file.records[0]?.type === 'session_meta' && (file.records[0].payload.id ?? file.records[0].payload.session_id) === nativeId)
+  assert.equal(matches.length, 1, 'The actual original native conversation is not unique')
+  const main = matches[0], contexts = main.records.filter(record => record.type === 'turn_context').map(record => record.payload)
+  assert.ok(contexts.length >= 2, 'Native startup and notification turn settings are missing')
+  for (const context of contexts) { assert.equal(context.model, model, 'Actual native model differs from the qualified sample'); assert.equal(context.approval_policy, 'never'); assert.equal(context.sandbox_policy?.type, 'workspace-write') }
+  const inputs = main.records.flatMap((record, index) => record.type === 'response_item' && record.payload?.type === 'message' && record.payload.role === 'user'
+    ? [{ index, recordedAt: Date.parse(record.timestamp), text: record.payload.content.filter(part => part.type === 'input_text').map(part => part.text).join('') }] : [])
+  const notices = inputs.filter(input => input.text === wire)
+  assert.equal(notices.length, 1, 'The original reference input was not adopted exactly once by this model')
+  assert.ok(inputs.length >= 2, 'Startup and notification must remain distinct original native inputs')
+  assert.ok(inputs.every(input => !input.text.includes(originalBody)), 'The model received the body before explicitly reading the original Inbox')
+  const calls = main.records.flatMap((record, index) => record.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(record.payload?.type) ? [{ index, ...record.payload, arguments: record.payload.arguments ?? record.payload.input }] : [])
+  // Native command completion carries the full result even when the tool first yielded a sessionId.
+  const executions = main.records.flatMap((record, index) => {
+    const event = record.payload, item = event?.item
+    return record.type === 'event_msg' && event?.type === 'item_completed' && item?.type === 'CommandExecution'
+      && item.status === 'completed' && item.exit_code === 0
+      ? [{ index, id: item.id, command: item.command.join(' '), output: item.aggregated_output,
+        startedAt: event.started_at_ms, completedAt: event.completed_at_ms }] : []
+  })
+  const skill = executions.find(item => /\bmessage\s+--skill\b/u.test(item.command) && item.output.includes(messageModule.trim()))
+  assert.ok(skill, 'No actual consumption of this candidate message skill in the original Session')
+  const read = executions.find(item => item.index > notices[0].index && item.index > skill.index
+    && Number.isFinite(item.startedAt) && Number.isFinite(notices[0].recordedAt) && item.startedAt >= notices[0].recordedAt
+    && Number.isFinite(skill.completedAt) && item.startedAt >= skill.completedAt
+    && /\bmessage\s+read\b/u.test(item.command) && item.command.includes(messageId) && item.output.includes(originalBody))
+  assert.ok(read, 'No original MID/body read after consuming the message skill')
+  assert.ok(!calls.some(call => /\b(?:agent\s+(?:open|submit|input|stop|resume)|terminal\s+(?:input|submit))\b/u.test(call.arguments)), 'Peer input expanded the authorized operations')
+  const final = main.records.filter(record => record.type === 'response_item' && record.payload?.type === 'message' && record.payload.role === 'assistant')
+    .flatMap(record => record.payload.content.filter(part => part.type === 'output_text').map(part => part.text)).join('\n')
+  assert.ok(/\b42\b/u.test(final.replaceAll(marker, '')), 'The user did not receive the authorized arithmetic result')
+  return { nativeId, nativeFile: main.path, inputCount: inputs.length, noticeInputIndex: notices[0].index, noticeInputAt: notices[0].recordedAt,
+    skillCommandId: skill.id, originalReadCommandId: read.id, final, originalWireSha256: createHash('sha256').update(wire).digest('hex') }
+}
+
 const config = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const { repository, privateRoot, evidence, executable, model } = config
 const workspace = join(privateRoot, 'workspace'), authHome = join(privateRoot, 'auth'), environment = { ...process.env }
@@ -64,37 +100,7 @@ async function until(read, accept, label, milliseconds = 120_000) {
   do { if (interrupted) throw Error('Private reference proof was interrupted'); const value = await read(); if (accept(value)) return value; await new Promise(done => setTimeout(done, 100)) } while (Date.now() < deadline)
   throw Error(label + ' remains unconfirmed; no delivery or adoption is inferred')
 }
-function decodedText(value) {
-  if (typeof value === 'string') { try { return decodedText(JSON.parse(value)) } catch { return value } }
-  if (Array.isArray(value)) return value.map(decodedText).join('\n')
-  return value && typeof value === 'object' ? Object.values(value).map(decodedText).join('\n') : String(value ?? '')
-}
-function assertDiscovery({ records, nativeId, wire, messageId, originalBody, messageModule, marker, model }) {
-  const matches = records.filter(file => file.records[0]?.type === 'session_meta' && (file.records[0].payload.id ?? file.records[0].payload.session_id) === nativeId)
-  assert.equal(matches.length, 1, 'The actual original native conversation is not unique')
-  const main = matches[0], contexts = main.records.filter(record => record.type === 'turn_context').map(record => record.payload)
-  assert.ok(contexts.length >= 2, 'Native startup and notification turn settings are missing')
-  for (const context of contexts) { assert.equal(context.model, model, 'Actual native model differs from the qualified sample'); assert.equal(context.approval_policy, 'never'); assert.equal(context.sandbox_policy?.type, 'workspace-write') }
-  const inputs = main.records.flatMap((record, index) => record.type === 'response_item' && record.payload?.type === 'message' && record.payload.role === 'user'
-    ? [{ index, text: record.payload.content.filter(part => part.type === 'input_text').map(part => part.text).join('') }] : [])
-  const notices = inputs.filter(input => input.text === wire)
-  assert.equal(notices.length, 1, 'The original reference input was not adopted exactly once by this model')
-  assert.ok(inputs.length >= 2, 'Startup and notification must remain distinct original native inputs')
-  assert.ok(inputs.every(input => !input.text.includes(originalBody)), 'The model received the body before explicitly reading the original Inbox')
-  const calls = main.records.flatMap((record, index) => record.type === 'response_item' && ['function_call', 'custom_tool_call'].includes(record.payload?.type) ? [{ index, ...record.payload, arguments: record.payload.arguments ?? record.payload.input }] : [])
-  const outputs = main.records.flatMap((record, index) => record.type === 'response_item' && ['function_call_output', 'custom_tool_call_output'].includes(record.payload?.type) ? [{ index, ...record.payload }] : [])
-  const completed = calls.map(call => ({ ...call, output: outputs.find(output => output.call_id === call.call_id) })).filter(call => call.output)
-  const skill = completed.find(call => /\bmessage\s+--skill\b/u.test(call.arguments) && decodedText(call.output.output).includes(messageModule.trim()))
-  assert.ok(skill, 'No actual consumption of this candidate message skill in the original Session')
-  const read = completed.find(call => call.index > notices[0].index && call.index > skill.output.index && /\bmessage\s+read\b/u.test(call.arguments) && call.arguments.includes(messageId) && decodedText(call.output.output).includes(originalBody))
-  assert.ok(read, 'No original MID/body read after consuming the message skill')
-  assert.ok(!calls.some(call => /\b(?:agent\s+(?:open|submit|input|stop|resume)|terminal\s+(?:input|submit))\b/u.test(call.arguments)), 'Peer input expanded the authorized operations')
-  const final = main.records.filter(record => record.type === 'response_item' && record.payload?.type === 'message' && record.payload.role === 'assistant')
-    .flatMap(record => record.payload.content.filter(part => part.type === 'output_text').map(part => part.text)).join('\n')
-  assert.ok(/\b42\b/u.test(final.replaceAll(marker, '')), 'The user did not receive the authorized arithmetic result')
-  return { nativeId, nativeFile: main.path, inputCount: inputs.length, noticeInputIndex: notices[0].index,
-    skillCallId: skill.call_id, originalReadCallId: read.call_id, final, originalWireSha256: hash(wire) }
-}
+
 try {
   await mkdir(evidence, { recursive: true, mode: 0o700 }); await recordOwnership()
   const coreRoot = config.coreRoot
@@ -109,7 +115,7 @@ try {
     selectedMode: 'embedded-tui-durable-queue', qualification: 'pending-original-native-records' }
   assert.equal(version.stderr, '')
   // This is the explicitly selected finite sample, not a new Provider version claim.
-  assert.equal(receipt.nativeExecutable.version, 'codex-cli 0.167.0', 'The actual native executable differs from the selected qualification sample')
+  assert.equal(receipt.nativeExecutable.version, 'codex-cli 0.166.0', 'The actual native executable differs from the selected qualification sample')
   const runtime = environment.AGENTMUX_RUNTIME_DIRECTORY, state = environment.AGENTMUX_STATE_DIRECTORY
   daemon = spawn(join(coreRoot, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { env: environment, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
