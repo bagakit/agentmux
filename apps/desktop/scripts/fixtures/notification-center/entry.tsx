@@ -92,6 +92,11 @@ const scene = {
     state.reportError('The same original platform limit was observed by the second notification consumer.', delivery)
   },
   newEvent() { useAppStore.getState().reportError('A later operation has its own retained receipt.', { summary: 'A new operation needs review', kind: 'indeterminate' }) },
+  overflowActivity() {
+    for (let index = 0; index < 270; index++) useAppStore.getState().reportError(`Independent operation ${index} did not complete. Its original receipt remains available.`,
+      { kind: 'indeterminate', summary: `Operation ${index} needs review`, event: { source: 'operation', key: `overflow-${index}` } })
+    return useAppStore.getState().notificationEventsNotRetained
+  },
   resolveAndRecur() {
     const original = useAppStore.getState().environmentWarning
     // Empty string is a confirmed healthy owner observation; undefined means unavailable.
