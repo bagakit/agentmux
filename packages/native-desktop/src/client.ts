@@ -311,6 +311,17 @@ export class NativeDesktop {
         throw invalid('Native display frame lost its exact display identity or geometry')
       }
       ids.add(display.displayId)
+      if (!Array.isArray(display.windows)) throw invalid('Native display frame lost its window list')
+      const windowIds = new Set<number>()
+      for (const window of display.windows) {
+        const bounds = window?.frame
+        if (!window || typeof window !== 'object' || !Number.isSafeInteger(window.windowId) || window.windowId <= 0 || windowIds.has(window.windowId)
+          || !bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0
+          || (window.owner !== undefined && typeof window.owner !== 'string')) {
+          throw invalid('Native display window lost its exact identity or geometry')
+        }
+        windowIds.add(window.windowId)
+      }
       if ((display.png === undefined) === (display.issue === undefined)) throw invalid('Native display frame must carry either pixels or an issue')
       if (display.issue !== undefined) {
         if (typeof display.issue !== 'string' || !display.issue || display.width !== undefined || display.height !== undefined || display.engine !== undefined) {

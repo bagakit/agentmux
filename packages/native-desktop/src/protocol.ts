@@ -47,11 +47,21 @@ export interface CaptureResult {
   error?: NativeErrorData
 }
 /** One active display: its exact pixels from one grab, or the reason they are missing. */
+/** An on-screen normal-layer window over a display, read beside its grab. */
+export interface NativeDisplayWindow {
+  windowId: number
+  /** Global Quartz points, the same space as the display frame; may extend past the display. */
+  frame: { x: number; y: number; width: number; height: number }
+  /** The owning application's name, when the window server reports one. Presentation only. */
+  owner?: string
+}
 export type NativeDisplayFrame = {
   displayId: number
   /** Global Quartz points. */
   frame: { x: number; y: number; width: number; height: number }
   scale: number
+  /** Windows intersecting this display, front to back, excluding AgentMux's own. */
+  windows: NativeDisplayWindow[]
 } & (
   | { png: string; width: number; height: number; engine: string; issue?: never }
   | { issue: string; png?: never; width?: never; height?: never; engine?: never }
