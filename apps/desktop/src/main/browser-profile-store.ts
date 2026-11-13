@@ -67,7 +67,9 @@ const metadataSchema = z
     revision: nonNegativeSafeIntegerSchema.optional(),
     defaultProfileId: profileIdSchema,
     profiles: z.array(profileRecordSchema).min(1),
-    pendingImports: z.array(pendingImportSchema)
+    pendingImports: z.array(pendingImportSchema),
+    /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
+    pendingDeletes: z.array(profileIdSchema).optional()
   })
   .strict()
   .superRefine((metadata, context) => {
@@ -107,6 +109,12 @@ const metadataSchema = z
         })
       }
       pendingIds.add(pending.profileId)
+    }
+    for (const [index, id] of (metadata.pendingDeletes ?? []).entries()) {
+      if (profileIds.has(id) || pendingIds.has(id)) {
+        context.addIssue({ code: 'custom', path: ['pendingDeletes', index], message: `Deleted Browser Profile is still listed: ${id}` })
+      }
+      pendingIds.add(id)
     }
   })
 
@@ -236,6 +244,11 @@ export class BrowserProfileStore {
     })
   }
 
+  /**
+   * Removes a Profile from the list and records it as deleted in the same write, before any of its
+   * site data is touched. A failed write leaves the Profile and its data as they were; a failed clear
+   * leaves only this record, which the next start clears again.
+   */
   deleteProfile(profileId: string): Promise<BrowserProfileSnapshot> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
@@ -248,9 +261,30 @@ export class BrowserProfileStore {
       }
       const next = metadataSchema.parse({
         ...metadata,
-        profiles: metadata.profiles.filter((profile) => profile.id !== validatedProfileId)
+        profiles: metadata.profiles.filter((profile) => profile.id !== validatedProfileId),
+        pendingDeletes: [...(metadata.pendingDeletes ?? []), validatedProfileId]
       })
       return await this.commit(next)
+    })
+  }
+
+  listPendingDeletes(): Promise<string[]> {
+    return this.enqueue(async () => [...((await this.readOrInitialize()).pendingDeletes ?? [])])
+  }
+
+  /**
+   * The deleted Profile's site data is confirmed cleared; forget the record. The list is unchanged,
+   * so the revision stays: an edit made against the list after the delete is not refused for this.
+   */
+  finishDelete(profileId: string): Promise<void> {
+    return this.enqueue(async () => {
+      const validatedProfileId = profileIdSchema.parse(profileId)
+      const metadata = await this.readOrInitialize()
+      const pending = metadata.pendingDeletes ?? []
+      if (!pending.includes(validatedProfileId)) throw new Error(`Unknown deleted Browser Profile: ${validatedProfileId}`)
+      const rest = pending.filter((id) => id !== validatedProfileId)
+      const { pendingDeletes: _done, ...kept } = metadata
+      await this.writeMetadata(metadataSchema.parse(rest.length ? { ...kept, pendingDeletes: rest } : kept))
     })
   }
 
@@ -351,7 +385,8 @@ export class BrowserProfileStore {
     let id: string
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
-      metadata.pendingImports.some((pending) => pending.profileId === id)
+      metadata.pendingImports.some((pending) => pending.profileId === id) ||
+      (metadata.pendingDeletes ?? []).includes(id)
     )
     return id
   }

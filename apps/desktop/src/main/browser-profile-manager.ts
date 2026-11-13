@@ -73,6 +73,11 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         await this.clearPartition(pending.profileId)
         snapshot = await this.store.abortPendingImport(pending.profileId)
       }
+      // A deleted Profile is already out of the list, so a clear that fails again blocks nothing.
+      for (const profileId of await this.store.listPendingDeletes()) {
+        try { await this.clearPartition(profileId); await this.store.finishDelete(profileId) }
+        catch (error) { console.warn('A deleted Browser Profile still has site data; clearing is retried at the next start.', error) }
+      }
 
       // Loading is a read, not a change; only later commits are published.
       this.replace(snapshot)
@@ -159,17 +164,17 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     await this.trackMutation((async () => {
       this.profiles.delete(profileId)
       this.deleting.add(profileId)
+      // The list is written first. Clearing first could leave a listed Profile with its sign-ins gone.
       let snapshot: BrowserProfileSnapshot
-      try {
-        await this.clearPartition(profileId)
-        snapshot = await this.store.deleteProfile(profileId)
-      } catch (error) {
+      try { snapshot = await this.store.deleteProfile(profileId) }
+      catch (error) {
         this.deleting.delete(profileId)
         this.profiles.set(profileId, profile)
         throw error
       }
       this.deleting.delete(profileId)
       this.adopt(snapshot)
+      await this.clearDeleted(profileId, profile.label)
     })())
   }
 
@@ -348,6 +353,17 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     if (!entry) throw new Error('Unknown or already consumed Browser Profile import source')
     if (entry.expiresAt < Date.now()) throw new Error('Browser Profile import source expired')
     return entry.source
+  }
+
+  /** A deleted Profile's data is cleared after the list commits; failure keeps its record for the next start. */
+  private async clearDeleted(profileId: string, label: string): Promise<void> {
+    try {
+      await this.clearPartition(profileId)
+      await this.store.finishDelete(profileId)
+    } catch (cause) {
+      throw Object.assign(new Error(`${label} was deleted, but clearing its sign-ins and site data did not finish. AgentMux clears it again when it next starts.`, { cause }),
+        { code: 'BROWSER_PROFILE_DATA_CLEAR_PENDING', profileId })
+    }
   }
 
   private async clearPartition(profileId: string): Promise<void> {

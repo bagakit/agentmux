@@ -84,9 +84,17 @@ export function createBrowserProfileUsage(ports: BrowserProfileUsagePorts) {
         throw profileError(`Browser Profile is still used by the saved Browser "${name}"${savedList.length > 1 ? ` and ${savedList.length - 1} more` : ''}. Open it and switch it to another Profile, or close it, then delete again.`,
           'BROWSER_PROFILE_IN_USE', { details: { browsers } })
       }
-      await ports.deleteProfile(profileId, approval)
-      const cleared = await ports.clearPreviews(profileId)
-      if (cleared.status === 'unavailable') console.warn('Browser Profile was deleted; its historical preview cleanup is unconfirmed:', cleared.warning)
+      const clearPreviews = async () => {
+        const cleared = await ports.clearPreviews(profileId)
+        if (cleared.status === 'unavailable') console.warn('Browser Profile was deleted; its historical preview cleanup is unconfirmed:', cleared.warning)
+      }
+      try { await ports.deleteProfile(profileId, approval) }
+      catch (error) {
+        // Deleted, with its site data still to clear: the deleted Profile's previews go now as well.
+        if ((error as { code?: unknown } | null)?.code === 'BROWSER_PROFILE_DATA_CLEAR_PENDING') await clearPreviews()
+        throw error
+      }
+      await clearPreviews()
     }
   }
 }

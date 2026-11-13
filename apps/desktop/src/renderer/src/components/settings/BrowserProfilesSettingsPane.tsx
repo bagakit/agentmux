@@ -29,6 +29,13 @@ const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 export const PROFILE_HUES = [180, 248, 266, 284, 302, 320, 338].filter(clearsSemanticHues)
 const HUE_NAMES: Readonly<Record<number, string>> = { 180: 'Teal', 248: 'Indigo', 266: 'Violet', 284: 'Purple', 302: 'Orchid', 320: 'Magenta', 338: 'Rose' }
 
+type Failure = { code: string | null; message: string }
+/** Runs one edit. A caller that decides by the refusal's code asks for the failure itself. */
+type Run = {
+  (key: string, action: () => Promise<unknown>): Promise<boolean>
+  (key: string, action: () => Promise<unknown>, report: true): Promise<true | Failure>
+}
+
 type Use = { browserId: string; tabId: string; title: string; url: string; state: 'open' | 'saved' }
 
 function usesOf(profileId: string, surfaces: readonly (BrowserWorkbenchSurface & { tabId: string })[]): Use[] {
@@ -81,6 +88,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const [error, setError] = useState<string | null>(null)
   // The refusal's machine code decides recovery; the shown sentence never does.
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  // A delete that committed while its site data still clears: the Profile is gone, so the notice outlives its editor.
+  const [notice, setNotice] = useState<string | null>(null)
   const selected = profiles.find(profile => profile.id === selectedId) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
   useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
 
@@ -88,13 +97,17 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const needle = query.trim().toLowerCase()
   const visible = profiles.filter(profile => !needle || [profile.label, profile.notes ?? '', profile.source?.browserLabel ?? '', profile.source?.profileLabel ?? '']
     .some(text => text.toLowerCase().includes(needle)))
-  const run = async (key: string, action: () => Promise<unknown>): Promise<boolean> => {
-    if (busy) return false
+  const run = (async (key: string, action: () => Promise<unknown>, report = false) => {
+    if (busy) return report ? { code: null, message: '' } : false
     setBusy(key); setError(null); setErrorCode(null)
     try { await action(); return true }
-    catch (cause) { setError(presentError(cause)); setErrorCode(describeError(cause).code ?? null); return false }
+    catch (cause) {
+      const failure = { code: describeError(cause).code ?? null, message: presentError(cause) }
+      setError(failure.message); setErrorCode(failure.code)
+      return report ? failure : false
+    }
     finally { setBusy(null) }
-  }
+  }) as Run
   const [renameRequest, setRenameRequest] = useState<string | null>(null)
   const create = async () => {
     const taken = new Set(profiles.map(profile => profile.label))
@@ -116,6 +129,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
         </button>
         <ImportMenu disabled={busy !== null || !list.profiles} onImported={id => { setSelectedId(id); setView('editor') }} />
       </div>
+      {notice ? <p className="browser-profiles-settings__service" role="status">{notice}{' '}
+        <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>Dismiss</button></p> : null}
       {list.error ? <p className="browser-profiles-settings__service" role="status">
         Couldn’t refresh Profiles{list.profiles ? '; showing the last list' : ''}. {list.error}{' '}
         <button type="button" disabled={list.reading} onClick={() => void browserProfiles.refresh()}>{list.reading ? 'Retrying…' : 'Retry'}</button>
@@ -136,7 +151,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
-            onDeleted={() => { setSelectedId(null); setView('library') }} />
+            onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setNotice(pending) }} />
             : <p className="settings-resource-empty" role="status">{list.reading ? 'Loading Profiles…' : 'No Profile selected.'}</p>}
         </div>
       </div>
@@ -149,12 +164,13 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
   revision: number
   uses: Use[]
   busy: string | null
-  run(key: string, action: () => Promise<unknown>): Promise<boolean>
+  run: Run
   error: string | null
   errorCode: string | null
   editName: boolean
   onNameEdited(): void
-  onDeleted(): void
+  /** `pending` names site data that is still being cleared after the Profile was deleted. */
+  onDeleted(pending: string | null): void
   onShow(use: Use): void
   onOpen(): void
 }) {
@@ -283,7 +299,11 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, e
         <div>
           <button ref={cancelDelete} type="button" className="small-button" onClick={closeConfirm}>Cancel</button>
           <button type="button" className="danger-button" disabled={busy !== null} onClick={() => void run('delete', () => api.browser.deleteProfile(profile.id,
-            { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id })).then(ok => { if (ok) onDeleted(); else setConfirm(null) })}>
+            { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id }), true).then(result => {
+              if (result === true) onDeleted(null)
+              else if (result.code === 'BROWSER_PROFILE_DATA_CLEAR_PENDING') onDeleted(result.message)
+              else setConfirm(null)
+            })}>
             {busy === 'delete' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}Delete {profile.label}
           </button>
         </div>
