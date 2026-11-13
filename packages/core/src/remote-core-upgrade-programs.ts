@@ -198,18 +198,19 @@ void(async()=>{
   }
   const bootstrap=await call('runtime.bootstrap',{consumerId:'core-upgrade-inspect-'+mintObjectId(),fence});
   if(bootstrap.owner.runtimeId!==owner.runtimeId||bootstrap.owner.ownerInstanceId!==owner.ownerInstanceId||bootstrap.hostProcessId!==owner.processId||bootstrap.storePath!==launch.storePath)throw Error('Original bootstrap belongs to another owner or Store');
-  const sessions=[],runs=[],missing=new Set();
-  for(const session of bootstrap.sessions){
-   sessions.push({agentSessionId:session.agentSessionId,run:{runId:session.run.runId}});
-   try{const run=await native.status(session.run.runId);
-    if(run.id!==session.run.runId)throw Error('Native status belongs to another Run');
-    runs.push({agentSessionId:session.agentSessionId,runId:run.id,pid:run.pid,state:run.state.type,outputBytes:run.latest_output_bytes,inputBytes:run.applied_input_bytes});
-   }catch(error){if(!(error instanceof CtxmuxProtocolError)||error.code!=='run_not_found')throw error;missing.add(session.run.runId);}
+  const sessions=bootstrap.sessions.map(session=>({agentSessionId:session.agentSessionId,run:{runId:session.run.runId}})),nativeRuns=[];
+  // Every Run of this exact Native, read through its own SDK: the Session bindings, a
+  // Core-only update and a Native replacement all use this one inventory.
+  for(const summary of await native.list()){
+   try{const run=await native.status(summary.id);
+    if(run.id!==summary.id)throw Error('Native status belongs to another Run');
+    nativeRuns.push({runId:run.id,pid:run.pid,state:run.state.type,outputBytes:run.latest_output_bytes,durableOutputBytes:run.durable_output_bytes,inputBytes:run.applied_input_bytes});
+   }catch(error){if(!(error instanceof CtxmuxProtocolError)||error.code!=='run_not_found')throw error;}
   }
   if(JSON.stringify(ownerFacts((await call('runtime.owner.identity',{expectedRuntimeId:p.runtimeId})).owner))!==JSON.stringify(owner))throw Error('The original owner changed during observation');
   const after=await sdk.runtimeInfo();
   if(after.daemonInstanceId!==hello.daemonInstanceId||after.runtimeId!==hello.runtimeId||after.buildId!==hello.buildId)throw Error('Native identity changed during observation');
-  source();nativeScope();console.log(JSON.stringify({owner,bootstrap:{storePath:bootstrap.storePath,hostProcessId:bootstrap.hostProcessId,sessions},runs,missingRunIds:[...missing],nativeRuntime}));
+  source();nativeScope();console.log(JSON.stringify({owner,bootstrap:{storePath:bootstrap.storePath,hostProcessId:bootstrap.hostProcessId,sessions},nativeRuns,nativeRuntime}));
  }finally{await rpc?.dispose();fs.rmSync(scratch,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.message);process.exitCode=1});
 `
@@ -267,9 +268,4 @@ try:
  parts=stat.rsplit(')',1)[1].split(); gone=parts[19]!=p['startTicks'] or parts[0]=='Z'
 except FileNotFoundError: gone=True
 print(json.dumps({'gone':gone}))
-`
-export const NATIVE_RUN_INVENTORY = String.raw`
-const fs=require('node:fs'),path=require('node:path'),url=require('node:url');const p=JSON.parse(fs.readFileSync(0,'utf8'));
-void(async()=>{const m=await import(url.pathToFileURL(path.join(p.releaseDirectory,'dist','ctxmux-run-adapter.js')).href);
-const result=await m.observeExistingCtxmuxRuns(p.socketPath,p.instanceId);console.log(JSON.stringify(result));})().catch(e=>{console.error(e.message);process.exitCode=1});
 `

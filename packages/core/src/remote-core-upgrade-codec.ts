@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import type { RemoteCoreCurrentObservation, RemoteCoreUpgradeCandidate, RemoteCoreUpgradeCheck, RemoteCoreUpgradeExpected, RemoteCoreUpgradeHost, RemoteCoreUpgradeReceipt,
-  RemoteCoreMaintenanceOwner, RemoteCoreMaintenanceObservation } from './remote-core-upgrade.js'
+  RemoteCoreMaintenanceOwner, RemoteCoreMaintenanceObservation, RemoteCoreUpgradeNativeRun } from './remote-core-upgrade.js'
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new AgentMuxError('Upgrade DTO has invalid fields.', 'CONTROL_PROTOCOL_ERROR')
   return value as Record<string, unknown>
@@ -42,11 +42,18 @@ export function parseRemoteCoreMaintenanceShutdown(value: unknown): { accepted: 
   if (p.accepted !== true) throw new AgentMuxError('Maintenance shutdown acknowledgement is unknown.', 'CONTROL_PROTOCOL_ERROR')
   return { accepted: true, owner: maintenanceOwner(p.owner) }
 }
+export function parseRemoteCoreNativeRun(value: unknown): RemoteCoreUpgradeNativeRun {
+  const run = record(value, ['runId', 'pid', 'state', 'outputBytes', 'durableOutputBytes', 'inputBytes'])
+  if (!['running', 'exited', 'interrupted'].includes(text(run.state))) throw new AgentMuxError('Maintenance Run state is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return { runId: text(run.runId), pid: run.pid === null ? null : positive(run.pid), state: run.state as RemoteCoreUpgradeNativeRun['state'],
+    outputBytes: count(run.outputBytes), durableOutputBytes: run.durableOutputBytes === null ? null : count(run.durableOutputBytes),
+    inputBytes: run.inputBytes === null ? null : count(run.inputBytes) }
+}
 export function parseRemoteCoreMaintenanceObservation(value: unknown): RemoteCoreMaintenanceObservation {
-  const p = record(value, ['owner', 'bootstrap', 'runs', 'missingRunIds', 'nativeRuntime']), owner = maintenanceOwner(p.owner)
+  const p = record(value, ['owner', 'bootstrap', 'nativeRuns', 'nativeRuntime']), owner = maintenanceOwner(p.owner)
   const bootstrap = record(p.bootstrap, ['storePath', 'hostProcessId', 'sessions'])
   const runtime = record(p.nativeRuntime, ['daemonInstanceId', 'runtimeId', 'buildId', 'protocolGeneration', 'runtimeIdPersistence', 'platform', 'arch', 'capabilities'])
-  if (!Array.isArray(bootstrap.sessions) || !Array.isArray(p.runs) || !Array.isArray(p.missingRunIds) || !runtime.capabilities || typeof runtime.capabilities !== 'object' || Array.isArray(runtime.capabilities)) {
+  if (!Array.isArray(bootstrap.sessions) || !Array.isArray(p.nativeRuns) || !runtime.capabilities || typeof runtime.capabilities !== 'object' || Array.isArray(runtime.capabilities)) {
     throw new AgentMuxError('Maintenance inventory is invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
   const capabilities = Object.fromEntries(Object.entries(runtime.capabilities).map(([key, version]) => [text(key), count(version)]))
@@ -54,24 +61,13 @@ export function parseRemoteCoreMaintenanceObservation(value: unknown): RemoteCor
     const session = record(value, ['agentSessionId', 'run']), run = record(session.run, ['runId'])
     return { agentSessionId: text(session.agentSessionId), run: { runId: text(run.runId) } }
   })
-  const runs = p.runs.map(value => {
-    const run = record(value, ['agentSessionId', 'runId', 'pid', 'state', 'outputBytes', 'inputBytes'])
-    if (!['running', 'exited', 'interrupted'].includes(text(run.state))) throw new AgentMuxError('Maintenance Run state is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    return { agentSessionId: text(run.agentSessionId), runId: text(run.runId), pid: run.pid === null ? null : positive(run.pid),
-      state: run.state as RemoteCoreMaintenanceObservation['runs'][number]['state'], outputBytes: count(run.outputBytes), inputBytes: run.inputBytes === null ? null : count(run.inputBytes) }
-  })
-  const bySession = new Map(runs.map(run => [run.agentSessionId, run])), bindings = new Map(sessions.map(session => [session.agentSessionId, session.run.runId]))
-  const boundRunIds = new Set(bindings.values())
-  const missingRunIds = p.missingRunIds.map(text), missing = new Set(missingRunIds)
+  const nativeRuns = p.nativeRuns.map(parseRemoteCoreNativeRun)
   if (positive(bootstrap.hostProcessId) !== owner.processId || text(runtime.daemonInstanceId) !== owner.ctxmux.instanceId ||
     count(runtime.protocolGeneration) !== owner.ctxmux.protocolVersion || text(runtime.buildId) !== owner.ctxmux.buildIdentity ||
-    bindings.size !== sessions.length || bySession.size !== runs.length ||
-    missing.size !== missingRunIds.length || missingRunIds.some(id => !boundRunIds.has(id)) || runs.some(run => missing.has(run.runId)) ||
-    sessions.some(session => bySession.get(session.agentSessionId)?.runId !== session.run.runId && !missing.has(session.run.runId)) ||
-    runs.some(run => bindings.get(run.agentSessionId) !== run.runId)) {
+    new Set(sessions.map(session => session.agentSessionId)).size !== sessions.length || new Set(nativeRuns.map(run => run.runId)).size !== nativeRuns.length) {
     throw new AgentMuxError('Maintenance facts belong to different owners or Run bindings.', 'CONTROL_PROTOCOL_ERROR')
   }
-  return { owner, bootstrap: { storePath: text(bootstrap.storePath), hostProcessId: owner.processId, sessions }, runs, missingRunIds,
+  return { owner, bootstrap: { storePath: text(bootstrap.storePath), hostProcessId: owner.processId, sessions }, nativeRuns,
     nativeRuntime: { daemonInstanceId: text(runtime.daemonInstanceId), runtimeId: text(runtime.runtimeId), buildId: text(runtime.buildId),
       protocolGeneration: count(runtime.protocolGeneration), runtimeIdPersistence: text(runtime.runtimeIdPersistence), platform: text(runtime.platform), arch: text(runtime.arch), capabilities } }
 }

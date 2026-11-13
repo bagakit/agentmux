@@ -11,7 +11,7 @@ import { SshExecutionHost, type ExecutionHost } from './execution-host.js'
 import { assertAgentMuxRuntimeCompatibility } from './ctxmux-run-adapter.js'
 import type { AgentMuxRunState, AgentMuxRuntimeCompatibilityInput } from './types.js'
 import { createPortableCoreArtifact, type PortableCoreArtifact } from './portable-core-artifact.js'
-import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY, SELECT_CORE_RELEASE } from './remote-core-upgrade-programs.js'
+import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, SELECT_CORE_RELEASE } from './remote-core-upgrade-programs.js'
 import { parseRemoteCoreUpgradeExpected, parseRemoteCoreMaintenanceObservation, parseRemoteCoreMaintenanceShutdown } from './remote-core-upgrade-codec.js'
 
 export type RemoteCoreUpgradeHost = { id: string; kind: 'local'; label: string; tailcat?: { enabled: boolean; keyFile: string; allowedClients: string[] } } | {
@@ -53,21 +53,24 @@ type Launch = { node: string; cli: string; cwd: string; processId: number; start
   stateDirectory: string; runtimeDirectory: string; storePath: string; nativeSha256: string; nativeProcessId: number; nativeStartTicks: string
   nativeArtifactDirectory: string; nativeManifestSha256: string; nativeInstanceId: string; nativeRuntimeId: string; nativeBuildId: string
   platform: string; deploymentDigest: string; version: string | null; sourceCommit: string | null }
-export type RemoteCoreUpgradeNativeRun = { runId: string; pid: number | null; state: AgentMuxRunState; outputBytes: number; inputBytes: number | null }
-type RunObservation = RemoteCoreUpgradeNativeRun & { agentSessionId: string }
+/** One Native Run as its own serving Native reports it. */
+export type RemoteCoreUpgradeNativeRun = { runId: string; pid: number | null; state: AgentMuxRunState; outputBytes: number
+  /** Bytes the Native has made durable, or null without a state directory. */
+  durableOutputBytes: number | null; inputBytes: number | null }
 export type RemoteCoreMaintenanceOwner = { runtimeId: string; ownerInstanceId: string; processId: number; protocolVersion: number
   ctxmux: { instanceId: string; processId: number | null; buildIdentity: string; protocolVersion: number } }
 export type RemoteCoreMaintenanceObservation = { owner: RemoteCoreMaintenanceOwner
+  /** Session bindings of the semantic owner. A bound Run absent from nativeRuns is physically
+   * absent from this Native; that is never a Session terminal fact. */
   bootstrap: { storePath: string; hostProcessId: number; sessions: { agentSessionId: string; run: { runId: string } }[] }
-  runs: RunObservation[]
-  /** Exact typed Native run_not_found observations; never Session terminal facts. */
-  missingRunIds: string[]
+  /** Every Run of this exact Native instance, read through its own SDK. */
+  nativeRuns: RemoteCoreUpgradeNativeRun[]
   nativeRuntime: AgentMuxRuntimeCompatibilityInput & { daemonInstanceId: string; runtimeId: string } }
 type OwnerReceiptObservation = { status: 'matching' | 'missing' | 'mismatch' | 'unreadable'; path: string; detail?: string }
 type LaunchInspection = Omit<Launch, 'nativeInstanceId' | 'nativeRuntimeId' | 'nativeBuildId'>
 type Observed = RemoteCoreMaintenanceObservation & { launch: Launch; ownerReceipt: OwnerReceiptObservation }
 type OperationRecords = { values: RetainedOperation[]; unreadable: string[] }
-type RetainedOperation = { receipt: RemoteCoreUpgradeReceipt; observed?: Observed; releaseDirectory?: string; nativeRuns?: RemoteCoreUpgradeNativeRun[] }
+type RetainedOperation = { receipt: RemoteCoreUpgradeReceipt; observed?: Observed; releaseDirectory?: string }
 export type RemoteCoreUpgradeOptions = {
   stateDirectory: string; packageRoot?: string
   /** The execution port supports a headless client without Desktop ownership. */
@@ -310,8 +313,6 @@ export class RemoteCoreUpgradeManager {
         // not the current App's SDK or a newly assembled local candidate.
         const next = await this.observe({ ...retained.receipt.input, remoteCommand: retained.receipt.remoteCommand }, false)
         this.verify(retained.observed, next, retained.receipt.expected.candidateDigest)
-        if (!retained.nativeRuns) throw new AgentMuxError('The original Native inventory is unknown.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
-        this.verifyRuns(retained.nativeRuns, await this.nativeRuns(retained.receipt.input, retained.observed.launch, retained.releaseDirectory, retained.receipt.expected.nativeInstanceId, retained.observed.nativeRuntime.protocolGeneration))
         // A confirmed original upgrade also names its release for the next restart.
         await this.select(retained.receipt.input, retained.observed.launch, retained.receipt.expected.candidateDigest, operationId)
         retained.receipt.status = 'completed'; retained.receipt.stage = 'completed'; retained.receipt.detail = '已复查原操作：新 Core 已运行，原 Runtime 和 Session/Run 绑定保留。'
@@ -381,7 +382,8 @@ export class RemoteCoreUpgradeManager {
       value.receipt.stage = 'staged'; value.receipt.detail = '候选已核验，正在重新核对原服务。'; await this.save(value)
       const current = await this.observe(input)
       if (JSON.stringify(this.expected(input, artifact, current)) !== JSON.stringify(expected) || current.launch.nativeSha256 !== observed.launch.nativeSha256 || current.launch.deploymentDigest !== observed.launch.deploymentDigest) throw new AgentMuxError('The original owner or software changed while staging; no owner was stopped.', 'CONFIG_CONFLICT')
-      value.nativeRuns = await this.nativeRuns(input, observed.launch, stage.releaseDirectory, expected.nativeInstanceId, artifact.requiredNativeProtocolVersion)
+      // The stop is admitted against the latest exact inventory of the same Native instance.
+      value.observed = current
       value.receipt.stage = 'stopping'; value.receipt.detail = '正在停止原 Core 服务；Agent Run 保留。'; await this.save(value)
       mutation = true
       const response = parseRemoteCoreMaintenanceShutdown(await this.program(input, current.launch.node, ['-e', READ_CORE_MAINTENANCE], {
@@ -403,8 +405,7 @@ export class RemoteCoreUpgradeManager {
         try { next = await this.observe(target); break } catch (error) { last = error; await wait() }
       }
       if (!next) throw new AgentMuxError(`新 Core 的启动结果尚未确认：${errorText(last)}`, 'CORE_UPGRADE_RESPONSE_UNKNOWN')
-      this.verify(observed, next, artifact.digest)
-      this.verifyRuns(value.nativeRuns, await this.nativeRuns(target, next.launch, stage.releaseDirectory, expected.nativeInstanceId, artifact.requiredNativeProtocolVersion))
+      this.verify(current, next, artifact.digest)
       await this.select(input, observed.launch, artifact.digest, operationId)
       value.receipt.status = 'completed'; value.receipt.stage = 'completed'; value.receipt.detail = 'Core 已升级，原 Runtime、Session 和运行进程已保留。'
     } catch (error) {
@@ -429,22 +430,14 @@ export class RemoteCoreUpgradeManager {
         !isDeepStrictEqual(next.nativeRuntime, previous.nativeRuntime)) {
       throw new AgentMuxError('The new Core did not retain the original Runtime or candidate identity.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     }
+    this.verifySessions(previous, next)
+    this.verifyRuns(previous.nativeRuns, next.nativeRuns)
+  }
+  private verifySessions(previous: Observed, next: Observed): void {
     for (const session of previous.bootstrap.sessions) {
       const retained = next.bootstrap.sessions.find(candidate => candidate.agentSessionId === session.agentSessionId)
       if (!retained || JSON.stringify(retained.run) !== JSON.stringify(session.run)) throw new AgentMuxError('An original Session/Run binding is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
     }
-    this.verifyRuns(previous.runs, next.runs)
-  }
-  private async nativeRuns(input: RemoteCoreUpgradeHost, launch: Launch, releaseDirectory: string, instanceId: string, protocolVersion: number): Promise<RemoteCoreUpgradeNativeRun[]> {
-    const result = await this.program<{ instanceId: string; protocolVersion: number; runs: RemoteCoreUpgradeNativeRun[] }>(input, launch.node, ['-e', NATIVE_RUN_INVENTORY], {
-      releaseDirectory, socketPath: join(launch.runtimeDirectory, 'ctxmux.sock'), instanceId })
-    if (result.instanceId !== instanceId || result.protocolVersion !== protocolVersion || !Array.isArray(result.runs)) throw new AgentMuxError('The original Native inventory is unconfirmed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
-    for (const run of result.runs) if (typeof run.runId !== 'string' || !run.runId ||
-      !['running', 'exited', 'interrupted'].includes(run.state) || run.pid !== null && (!Number.isSafeInteger(run.pid) || run.pid < 1) ||
-      !Number.isSafeInteger(run.outputBytes) || run.outputBytes < 0 || run.inputBytes !== null && (!Number.isSafeInteger(run.inputBytes) || run.inputBytes < 0)) {
-      throw new AgentMuxError('A Native Run observation is malformed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
-    }
-    return result.runs
   }
   private verifyRuns(previous: RemoteCoreUpgradeNativeRun[], next: RemoteCoreUpgradeNativeRun[]): void {
     for (const before of previous) {
