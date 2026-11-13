@@ -13,6 +13,7 @@ import type {
   BrowserTaskAssertion, BrowserTaskSemanticTarget, BrowserTaskStepFailure, BrowserTaskWait
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
+import { compileBrowserTaskCheck } from './browser-task-check.js'
 import { parseBrowserOutcomeCriteriaRequest } from '../shared/browser-outcome-criteria.js'
 import { browserTaskNextIndex, browserTaskSegment, browserTaskReachedCheckpoints, validateBrowserTaskPath, BROWSER_TASK_MAX_EXECUTED_MILLIS, BROWSER_TASK_MAX_OPERATIONS, BROWSER_TASK_MAX_RETRIES, BROWSER_TASK_WAIT_MAX_MILLIS } from '../shared/browser-task-path.js'
 import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from './browser-task-branch.js'
@@ -608,15 +609,23 @@ export async function runBrowserTaskAsset(assets: BrowserTaskAssets, input: Brow
   return await assets.run(input, host, budget)
 }
 
+/** Page steps that send exactly one existing Browser page function; the replay compiler checks it against the real page API. */
+const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll' } as const satisfies
+  Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert'>, string>
+
 function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>, downloadPath?: string): string {
   if (!step.reviewed) throw new Error('Review the demonstrated step before executing it.')
+  // Wait and assert only read the page; they need no element handle of their own.
+  if (step.kind === 'wait' || step.kind === 'assert') return compileBrowserTaskCheck(step)
+  if (step.kind === 'checkpoint' || step.kind === 'branch') throw new Error('Checkpoints and conditions keep their own continuation; they are not page calls.')
   if (step.kind !== 'navigate' && (!step.target || step.target.count !== 1 || step.target.ordinal !== 1)) {
     throw new Error('The task target is unknown or ambiguous. Locate the actual page target before executing it.')
   }
   const replay: BrowserReplayStep = {
-    method: downloadPath ? 'download' : step.kind === 'fill' ? 'fillInput' : step.kind === 'navigate' ? 'gotoUrl' : 'click',
+    method: downloadPath ? 'download' : PAGE_STEP_METHOD[step.kind],
     url: step.url, ...(step.target ? { target: step.target } : {}),
-    args: downloadPath ? [{ path: downloadPath }] : step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'navigate' ? [step.url] : []
+    args: downloadPath ? [{ path: downloadPath }] : step.kind === 'fill' ? [parameters[step.parameterKey!]] : step.kind === 'navigate' ? [step.url]
+      : step.kind === 'press' ? [step.key] : []
   }
   if (!step.url) throw new Error('The reviewed page identity is unavailable. Locate the intended page before executing this step.')
   return `${compileBrowserSteps({ url: step.kind === 'navigate' ? 'about:blank' : step.url, steps: [replay] })}\nreturn { taskStepId: ${JSON.stringify(step.id)} }`
