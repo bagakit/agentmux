@@ -402,6 +402,8 @@ const activeRequests = new Set<string>()
 export async function executeSpatialControl(ports: SpatialControlPorts,
   request: Extract<AgentMuxSpaceControlRequest, { operation: 'space.ls' | 'space.inspect' | 'agent.open' | 'space.mv' | 'space.bind' | 'space.unbind' }>,
   signal?: AbortSignal, options?: SpatialControlOptions): Promise<AgentMuxSpaceControlResult> {
+  // Only the Core service expands a saved derived action; this owner admits the resulting content and touches nothing first.
+  if (request.operation === 'agent.open' && request.content.kind === 'derived-action') failure('INVALID_CONTROL_REQUEST', 'A derived action must be expanded by the Core service before admission. Nothing was opened.')
   let topics: readonly ScratchTopicSnapshot[] = []
   try { topics = await ports.topics() } catch { /* durable bindings remain discoverable with an explicit issue */ }
   let catalog = spatialCatalog(ports.get(), topics)
@@ -658,7 +660,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     report.save = await ports.save(true)
     if (!report.save.clientStateWritten && binding.createAgent) return await fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
     if (request.focus) ports.focus(target.address)
-    if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session') {
+    if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session' && request.content.kind !== 'derived-action') {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
       const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
       const topicId = !executionWorkspace && zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
