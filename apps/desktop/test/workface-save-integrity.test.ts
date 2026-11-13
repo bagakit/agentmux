@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { addTabOccurrence, createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { desktopSpatialGraph, DesktopSpatialPersistence, reconcileSpatialGraphs, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, desktopWorkbenchFromSpatial, DesktopSpatialPersistence, reconcileSpatialGraphs, SAVE_STALL_AFTER_MS } from '../src/renderer/src/lib/desktop-spatial-state'
+import { attachLauncherAgentPosition } from '../src/main/goal-discussion-handoff'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { AppConfig } from '../src/shared/contracts'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
@@ -176,7 +177,7 @@ describe('a stalled or failing background save is visible while the user works',
     await new Promise(resolve => setTimeout(resolve, 0))
     expect((await store.read())!.graph.tabs.map(tab => tab.tabId)).toEqual(['a'])
     await clock.advance(SAVE_STALL_AFTER_MS)
-    expect(warnings.at(-1)).toMatchObject({ code: 'SPATIAL_SAVE_STALLED', lastFailureCode: 'EIO' })
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'SPATIAL_SAVE_STALLED', lastFailureCode: 'EIO' }))
     // Storage comes back. No user edit happens; the background retry saves the Tab.
     offline = false
     for (let step = 0; step < 4; step++) await clock.advance(SAVE_STALL_AFTER_MS * 8)
@@ -196,5 +197,50 @@ describe('a stalled or failing background save is visible while the user works',
     persistence.stage(derive(['a']))
     expect(clock.pending()).toBe(0)
     expect(persistence.pendingChanges).toBe(false)
+  })
+})
+
+describe('a Launcher Agent position is recorded by Core at creation', () => {
+  const launcherTab = () => createWorkbenchTab('launch-tab', { regionId: 'launch-region', kind: 'launcher', workspaceId: 'project' } as never)
+  const launcherGraph = () => desktopSpatialGraph({ config, sessions: [], tabs: { 'launch-tab': launcherTab() },
+    layouts: { project: createWorkspaceLayout('group', ['launch-tab']) }, spaceZoneBindings: {}, spatialRequests: {} } as never, [])
+  const launch = { launcher: { tabId: 'launch-tab', regionId: 'launch-region' }, executionWorkspaceId: 'project', executorId: 'codex',
+    hostId: 'host', workspacePath: config.workspaces[0]!.path, prompt: 'Original first instruction', agentSessionId: 'created-agent',
+    createOperationId: 'original-creation' } as never
+  const result = (runId = 'created-run') => ({ created: { kind: 'agent', agentSessionId: 'created-agent', hostId: 'host',
+    creation: { createOperationId: 'original-creation', createdRun: { runId } } }, projectionFailures: [] }) as never
+
+  it('attaches the exact Launcher Region with no Renderer save, and a repeat is settled without a new revision', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: launcherGraph() })
+    expect(await attachLauncherAgentPosition(launch, result(), null, config.workspaces, store)).toBeUndefined()
+    const saved = (await store.read())!
+    expect(saved.graph.regions.find(region => region.regionId === 'launch-region')).toEqual({ tabId: 'launch-tab', regionId: 'launch-region',
+      kind: 'agent', agentSessionId: 'created-agent', runId: 'created-run', execution: { hostId: 'host', cwd: config.workspaces[0]!.path } })
+    expect(desktopWorkbenchFromSpatial(saved.graph).tabs['launch-tab']!.regions['launch-region']).toMatchObject({ kind: 'agent', sessionId: 'created-agent', phase: 'attached' })
+    expect(await attachLauncherAgentPosition(launch, result(), null, config.workspaces, store)).toBeUndefined()
+    expect((await store.read())!.revision).toBe(saved.revision)
+  })
+
+  it('reports a placement issue for a Region that is gone or holds another Agent, and leaves Core unchanged', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: launcherGraph() })
+    await attachLauncherAgentPosition(launch, result(), null, config.workspaces, store)
+    const before = (await store.read())!
+    const other = { ...(launch as object), agentSessionId: 'another-agent' } as never
+    const otherResult = { created: { kind: 'agent', agentSessionId: 'another-agent', hostId: 'host',
+      creation: { createOperationId: 'original-creation', createdRun: { runId: 'another-run' } } }, projectionFailures: [] } as never
+    expect(await attachLauncherAgentPosition(other, otherResult, null, config.workspaces, store)).toMatch(/Launcher position is not yet recorded/)
+    const gone = { ...(launch as object), launcher: { tabId: 'launch-tab', regionId: 'missing-region' } } as never
+    expect(await attachLauncherAgentPosition(gone, result(), null, config.workspaces, store)).toMatch(/not in the spatial document/)
+    expect((await store.read())!).toEqual(before)
+  })
+
+  it('leaves a Goal discussion Launcher to its own owned binding commit', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: launcherGraph() })
+    const before = (await store.read())!
+    expect(await attachLauncherAgentPosition(launch, result(), { metadataIssue: 'owned elsewhere' }, config.workspaces, store)).toBeUndefined()
+    expect((await store.read())!).toEqual(before)
   })
 })

@@ -10,6 +10,6 @@ export default defineConfig({
   test: { ...base.test, include: ['apps/desktop/test/workface-save-integrity.test.ts', 'apps/desktop/test/desktop-spatial-state.test.ts',
     'apps/desktop/test/desktop-spatial-store.test.ts', 'apps/desktop/test/spatial-workbench-checkpoint.test.ts',
     'apps/desktop/test/desktop-spatial-latest-intent.test.ts', 'apps/desktop/test/cross-device-project-groups.test.ts',
-    'apps/desktop/test/name-authority.test.ts'],
+    'apps/desktop/test/name-authority.test.ts', 'apps/desktop/test/launcher-position-ipc.test.ts'],
   globalSetup: [], passWithNoTests: false, fileParallelism: false }
 })
