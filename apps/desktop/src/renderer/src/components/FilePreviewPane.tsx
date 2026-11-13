@@ -148,7 +148,7 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
     </header>
     {binary ? <div className="file-preview-state"><strong>Binary file</strong><span>This file has no editable text content. Open it in a system application to inspect it.</span>{binary.kind === 'binary' ? <span className="file-preview__metadata">{formatFileBytes(binary.byteLength)}</span> : null}</div>
       : failure ? <div className="file-preview-state" role="alert"><strong>{failure.status === 'too-large' ? 'File exceeds the preview budget' : failure.status === 'deleted' ? 'File was deleted' : failure.status === 'changed' ? 'File changed while reading' : failure.status === 'directory' ? 'This path is a directory' : 'Preview unavailable'}</strong><span>{failure.message}</span><button className="small-button" onClick={() => reload()}>Retry</button></div>
-      : isMedia ? stream.lease ? <Suspense fallback={<FilePreviewState title="Preparing player" />}><MediaPlayer key={stream.lease.id} lease={stream.lease} name={surface.path} onRetry={reload} /></Suspense>
+      : isMedia ? stream.lease ? <Suspense fallback={<FilePreviewState title="Preparing player" />}><MediaPlayer key={stream.lease.id} lease={stream.lease} name={surface.path} onRetry={reload} resume={stream.resume} /></Suspense>
         : <div className="file-preview-state" role="status">{visible ? 'Opening media…' : 'Playback paused while hidden'}</div>
       : !preview ? <div className="file-preview-state" role="status">{visible ? 'Reading file…' : 'Preview paused while hidden'}</div>
       : preview.kind === 'pdf' ? <Suspense fallback={<FilePreviewState title="Loading PDF reader" />}><PdfContent data={preview.bytes} name={surface.path} visible={visible} /></Suspense>

@@ -24,10 +24,12 @@ const IDLE_HIDE_MS = 2_000
 const BUFFERING_DELAY_MS = 500
 /** How long a spoken status stays in the live region before it clears for the next one. */
 const ANNOUNCEMENT_MS = 1_000
-/** HTMLMediaElement.HAVE_CURRENT_DATA, spelled out: the first frame is decoded. */
-const HAVE_CURRENT_DATA = 2
+/** HTMLMediaElement.HAVE_METADATA and HAVE_CURRENT_DATA, spelled out: duration is known; the first frame is decoded. */
+const HAVE_METADATA = 1, HAVE_CURRENT_DATA = 2
 
 export type MediaLease = { id: string; url: string; kind: WorkspaceMediaStreamKind; byteLength: number }
+/** Where a person left one File view's playback. Presentation state, so the Renderer keeps it across that view's leases. */
+export type MediaResume = { current: { time: number; volume: number; muted: boolean; rate: number } | null }
 
 type Facts = {
   paused: boolean; ended: boolean; muted: boolean; volume: number; rate: number
@@ -55,7 +57,7 @@ function readFacts(element: HTMLMediaElement, previous: Facts): Facts {
  * The File Region's media player. The native element plays; this owns the chrome around it.
  * Facts come only from the element's own events and the lease owner's status, never from text.
  */
-export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name: string; onRetry: () => void }) {
+export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLease; name: string; onRetry: () => void; resume?: MediaResume }) {
   const root = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ width: number; height: number } | null>(null)
@@ -89,27 +91,39 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   const flash = useCallback((next: Omit<Indicator, 'key'>) => setIndicator({ ...next, key: performance.now() }), [])
   const announce = useCallback((text: string) => setAnnouncement({ key: performance.now(), text }), [])
 
-  // Leaving: pause and drop the source so the engine stops reading. The lease owner ends the lease.
-  // The element is captured now: React clears the ref before this cleanup runs.
+  // Leaving: remember where playback was, then pause and drop the source so the engine stops reading.
+  // The lease owner ends the lease. The element is captured now: React clears the ref before this cleanup runs.
   useEffect(() => {
     released.current = false
     const element = media.current
     return () => {
       released.current = true
+      if (element && resume) resume.current = { time: element.ended ? 0 : element.currentTime, volume: element.volume, muted: element.muted, rate: element.playbackRate }
       element?.pause(); element?.removeAttribute('src'); element?.load()
     }
-  }, [lease.id])
+  }, [lease.id, resume])
+
+  // A new lease of the same File view picks up where the person left it, paused. Only a position inside
+  // a bounded duration is restored: a live stream rejoins at its own live position.
+  const restore = useCallback(() => {
+    const element = media.current, saved = resume?.current
+    if (!element || !saved || !resume) return
+    resume.current = null
+    element.volume = saved.volume; element.muted = saved.muted; element.playbackRate = saved.rate
+    if (Number.isFinite(element.duration) && saved.time > 0 && saved.time < element.duration) element.currentTime = saved.time
+  }, [resume])
 
   // A cached or fast source can deliver its first frame before React attaches listeners. The element
   // keeps that fact in readyState, so read it once on mount instead of waiting for an event already gone.
   useEffect(() => {
     const element = media.current
+    if (element && element.readyState >= HAVE_METADATA) restore()
     if (!element || !(element.readyState >= HAVE_CURRENT_DATA)) return
     decodedOnce.current = true
     setFacts(previous => readFacts(element, previous))
     setDecode(current => current !== 'loading' ? current
       : element instanceof HTMLVideoElement && (element.videoWidth === 0 || element.videoHeight === 0) ? 'no-picture' : 'ready')
-  }, [lease.id])
+  }, [lease.id, restore])
 
   useEffect(() => () => { if (idle.current) clearTimeout(idle.current); if (waiting.current) clearTimeout(waiting.current) }, [])
   // The indicator leaves when its own --dur-indicator animation ends, in both the moving and the still variant.
@@ -224,7 +238,7 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   const VolumeGlyph = facts.muted || facts.volume === 0 ? MutedIcon : facts.volume < 0.5 ? VolumeLowIcon : VolumeIcon
   const controlsVisible = !playing || active || scrub !== null || failure !== null
   const events = {
-    onLoadedMetadata: update, onDurationChange: update, onTimeUpdate: update, onProgress: update, onVolumeChange: update, onRateChange: update,
+    onLoadedMetadata: () => { restore(); update() }, onDurationChange: update, onTimeUpdate: update, onProgress: update, onVolumeChange: update, onRateChange: update,
     onSeeked: update,
     onLoadedData: () => {
       update()

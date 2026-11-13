@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import { useAppStore } from '../store'
-import type { MediaLease } from '../components/MediaPlayer'
+import type { MediaLease, MediaResume } from '../components/MediaPlayer'
 
 type Failure = { status: string; message: string }
 
@@ -28,6 +28,8 @@ export function useWorkspaceMediaStream(workspaceId: string, path: string, enabl
   }, [workspaceId])
   const resource = useAppStore(selectResource)
   const [attempt, setAttempt] = useState(0)
+  // One per File target: hiding, retrying or a new lease of the same File resume here; another File starts fresh.
+  const resume = useMemo<MediaResume>(() => ({ current: null }), [workspaceId, path])
   const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt])
   const [lease, setLease] = useState<{ owner: typeof owner; value: MediaLease } | null>(null)
   const [failed, setFailed] = useState<{ owner: typeof owner; failure: Failure } | null>(null)
@@ -52,6 +54,7 @@ export function useWorkspaceMediaStream(workspaceId: string, path: string, enabl
   return {
     lease: enabled && lease?.owner === owner ? lease.value : null,
     failure: enabled && failed?.owner === owner ? failed.failure : null,
+    resume,
     reload: () => setAttempt(value => value + 1)
   }
 }

@@ -11,6 +11,6 @@ export function PlaylistFilePreview({ workspaceId, path, visible }: { workspaceI
     <span>{stream.failure.message}</span><button className="small-button" onClick={stream.reload}>Retry</button></div>
   if (!stream.lease) return <FilePreviewState title="Opening playlist" />
   return <Suspense fallback={<FilePreviewState title="Preparing player" />}>
-    <MediaPlayer key={stream.lease.id} lease={stream.lease} name={path} onRetry={stream.reload} />
+    <MediaPlayer key={stream.lease.id} lease={stream.lease} name={path} onRetry={stream.reload} resume={stream.resume} />
   </Suspense>
 }
