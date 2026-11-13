@@ -33,4 +33,15 @@ describe('Profile IPC results carry the refusal code as data', () => {
     await expect(api.browser.setDefaultProfile('missing-profile')).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: 'Unknown Browser Profile: missing-profile' })
     expect(BROWSER_PROFILE_RESULT_METHODS).toContain('updateProfile')
   })
+
+  it('makes the web preview store a pasted proxy line as its parsed server, as Main does', async () => {
+    const list = await api.browser.readProfiles()
+    const profile = await api.browser.updateProfile(list.profiles[0]!.id,
+      { network: { mode: 'proxy', server: 'socks5://proxy.example:1080', bypass: ['intranet.example'] } }, list.revision)
+    expect(profile.network).toEqual({ mode: 'proxy', server: { scheme: 'socks5', host: 'proxy.example', port: 1080 }, bypass: ['intranet.example'] })
+    // A line with credentials is refused here too, so a preview never shows a password back in the field.
+    const next = await api.browser.readProfiles()
+    await expect(api.browser.updateProfile(list.profiles[0]!.id, { network: { mode: 'proxy', server: 'user:secret@proxy.example:8080' } }, next.revision))
+      .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_INVALID' })
+  })
 })
