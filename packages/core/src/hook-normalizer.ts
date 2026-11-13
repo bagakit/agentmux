@@ -527,7 +527,7 @@ function buildTimeline(
   payload: Record<string, unknown>,
   observedAt: number,
   subject: NativeToolSubject | undefined,
-  childSubject: boolean
+  childSpeaker: boolean
 ): AgentTimelineMutation[] {
   const assistant = stringField(
     payload,
@@ -620,10 +620,11 @@ function buildTimeline(
       })
     }
   }
-  // A reply snapshot speaks for the main Agent. A declared child's last message
-  // (SubagentStop) is that child's report, not a reply in the parent conversation.
-  // An unconfirmed subject keeps its snapshot: an observation gap is not a child.
-  if (assistant && !childSubject) {
+  // A reply snapshot speaks for the main Agent. A child's last message (SubagentStop)
+  // is that child's report, not a reply in the parent conversation, whether or not its
+  // roster membership is confirmed yet. Without a child identity the snapshot stays:
+  // an observation gap is not a child.
+  if (assistant && !childSpeaker) {
     append('assistant_message', 'Assistant response', { content: assistant })
   }
   if (timeline.length === 0) {
@@ -681,6 +682,8 @@ export function normalizeNativeHook(
   const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent, specification.lifecycle)
   const declaredSubject = specification.resolveSubject?.(payload, context)
   const childSubject = declaredSubject ? declaredSubject.kind === 'child' : nativeHookHasSubagentSubject(specification, eventName, payload)
+  // The payload's own child identity says who spoke, even before roster membership confirms the child.
+  const childSpeaker = childSubject || nativeHookHasSubagentSubject(specification, eventName, payload)
   const incomingId = sessionIdField(payload, specification.nativeHandle?.sessionIdKeys ?? [])
   const incomingPath = transcriptPathField(payload, specification.nativeHandle?.transcriptPathKeys ?? [])
   const currentHandle = context.nativeHandle
@@ -805,7 +808,7 @@ export function normalizeNativeHook(
     })(),
     semanticState,
     status,
-    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject, childSubject),
+    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject, childSpeaker),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }
