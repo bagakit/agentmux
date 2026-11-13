@@ -243,6 +243,22 @@ describe('mounted player', () => {
     }
   })
 
+  it('a double click on the picture enters full screen and leaves play state as it was', async () => {
+    await render(<MediaPlayer lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    const video = media()
+    let paused = true
+    define(video, { ended: false })
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => paused })
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(() => { paused = false; return Promise.resolve() })
+    vi.mocked(HTMLMediaElement.prototype.pause).mockImplementation(() => { paused = true })
+    const fullscreen = vi.fn(() => Promise.resolve())
+    Object.defineProperty(container.querySelector('[role="group"]')!, 'requestFullscreen', { configurable: true, value: fullscreen })
+    // A browser delivers a double click as click, click, dblclick.
+    for (const type of ['click', 'click', 'dblclick']) await act(async () => { video.dispatchEvent(new MouseEvent(type, { bubbles: true })) })
+    expect(paused).toBe(true)
+    expect(fullscreen).toHaveBeenCalledTimes(1)
+  })
+
   it('an audio file uses the always-visible card with a primary play disc', async () => {
     await render(<MediaPlayer lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
     expect(media().tagName).toBe('AUDIO')
