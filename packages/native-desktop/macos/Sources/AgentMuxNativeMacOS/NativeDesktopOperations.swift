@@ -19,7 +19,9 @@ enum NativeDesktopOperations {
             if mode == "selection" {
                 return try NativeSelectionCaptureLease.shared.withCapture { ownership in
                     let allowEditing = params["allowEditing"]?.bool == true
-                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing) { loading in
+                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing, copyColor: { hex in
+                        _ = try clipboardWrite(["format": .string("text"), "data": .string(hex)])
+                    }) { loading in
                         try frozenSelectionPixels(loading: loading, ownership: ownership)
                     }
                     guard let selection else { return ["state": "cancelled"] }

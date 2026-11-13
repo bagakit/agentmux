@@ -17,12 +17,13 @@ private final class NativeSelectionResult: @unchecked Sendable {
 /// its calling worker waits; AppKit remains on the ordinary main event loop.
 enum NativeSelectionRequest {
     static func run(allowEditing: Bool = false,
+                    copyColor: @escaping @Sendable (String) throws -> Void,
                     load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         let result = NativeSelectionResult()
         let semaphore = DispatchSemaphore(value: 0)
         DispatchQueue.main.async {
             do {
-                try NativeScreenSelection.begin(allowEditing: allowEditing, load: load) { value in
+                try NativeScreenSelection.begin(allowEditing: allowEditing, copyColor: copyColor, load: load) { value in
                     result.result = value
                     semaphore.signal()
                 }
