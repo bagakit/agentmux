@@ -62,6 +62,6 @@ export function useMobileAttentionCatalog(client: AgentMuxHostedClient | null, a
     return () => { disposed = true; clearInterval(interval); document.removeEventListener('visibilitychange', foreground) }
   }, [client, active, paused, publish, revision])
   const current = state.client === client
-  return { items: current ? state.items : EMPTY_ITEMS, unconfirmed: !active || current && !state.confirmed,
+  return { items: current ? state.items : EMPTY_ITEMS, unconfirmed: !active || !current || !state.confirmed,
     issue: current ? state.issue : null, publish, refresh }
 }
