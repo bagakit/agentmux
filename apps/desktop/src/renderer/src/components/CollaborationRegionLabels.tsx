@@ -1,5 +1,5 @@
-import { type CSSProperties, type RefObject, useContext, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useStore } from '@xyflow/react'
+import { type CSSProperties, type RefObject, useContext, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useStore, useStoreApi } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { CollaborationArea } from '../lib/agent-collaboration'
@@ -35,8 +35,10 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   readingProxies: readonly HTMLElement[]
 }) {
   const preferences = useContext(CollaborationMapPreferences)
-  const camera = useStore(state => [...state.transform, state.width, state.height], same)
-  const root = useRef<HTMLDivElement>(null)
+  // Placement consumes a settled camera: zoom and size changes place at once, a pure pan
+  // places once it rests. Between those, the layer travels with the world as one transform.
+  const camera = usePlacementCamera()
+  const store = useStoreApi(), root = useRef<HTMLDivElement>(null)
   const [sizes, setSizes] = useState<ReadonlyMap<string, { budget: number; width: number; height: number; summaryHeight: number; inset: number }>>(new Map())
   const [occlusion, setOcclusion] = useState<readonly CollaborationBounds[]>([])
   const topology = useRef<readonly CollaborationArea[]>([]), original = areas.map(({ data }) => data.area)
@@ -184,10 +186,52 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current); for (const proxy of readingProxies) observer.observe(proxy) })
     return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
   }, [active, hud, contextControl, readingProxies, readingCamera])
+  // Labels were placed for \`camera\`. Until the next placement, each keeps its slot and
+  // travels with its own heading's world point, so a pan or pinch moves names with their
+  // territory through direct style writes, never a React render or a placement pass.
+  useLayoutEffect(() => {
+    const element = root.current
+    if (!element) return
+    const [placedX = 0, placedY = 0, placedZoom = 1] = camera
+    const anchors = [...element.children as HTMLCollectionOf<HTMLElement>].flatMap(label => {
+      const box = geometry.get(label.dataset.areaId!)
+      return box?.kind === 'area' ? [{ label, x: box.x + box.heading.x, y: box.y + box.heading.y + box.heading.height }] : []
+    })
+    const follow = ({ transform: [x, y, zoom] }: { transform: [number, number, number] }) => {
+      for (const anchor of anchors) {
+        const dx = anchor.x * (zoom - placedZoom) + x - placedX, dy = anchor.y * (zoom - placedZoom) + y - placedY
+        anchor.label.style.translate = dx || dy ? `${dx}px ${dy}px` : ''
+      }
+    }
+    follow(store.getState())
+    return store.subscribe(follow)
+  }, [store, camera, labels, geometry])
   return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
     <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + summaryBottom })} />
   </div>)}</div>
 })
+
+const PAN_SETTLE_MS = 120
+/** The camera that label placement reads. A viewport resize is taken at once; any camera
+ * movement is taken once it rests. In between, world-anchored labels keep their placed slot
+ * and travel with their territory (see the follow effect), so nothing is re-placed per frame. */
+function usePlacementCamera() {
+  const store = useStoreApi()
+  const read = () => { const { transform, width, height } = store.getState(); return [...transform, width, height] as const }
+  const [camera, setCamera] = useState(read)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const take = () => { timer = undefined; setCamera(previous => { const next = read(); return same(previous, next) ? previous : next }) }
+    const unsubscribe = store.subscribe(state => {
+      clearTimeout(timer)
+      setCamera(previous => previous[3] !== state.width || previous[4] !== state.height ? read() : previous)
+      timer = setTimeout(take, PAN_SETTLE_MS)
+    })
+    take()
+    return () => { clearTimeout(timer); unsubscribe() }
+  }, [store])
+  return camera
+}
 
 function RegionIdentity({ data, hasChildren, onToggle }: { data: Region; hasChildren: boolean; onToggle(): void }) {
   const { area } = data, target = area.iconTarget
