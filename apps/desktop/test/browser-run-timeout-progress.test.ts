@@ -99,3 +99,25 @@ describe('js() ends before the program does', () => {
     expect(await jsDispatch(async () => ({ result: { value: 4 } }), () => 60_000)['dispatch']('js', ['2+2'])).toBe(4)
   })
 })
+
+describe('waitForLoad answers for one document', () => {
+  it('ignores a complete readyState read while the page navigated, and returns the page that loaded', async () => {
+    let navigationId = 'nav-old', reads = 0
+    const session = {
+      sendCommand: vi.fn(async (method: string) => {
+        if (method !== 'Runtime.evaluate') return {}
+        reads += 1
+        // The first read lands on the old page as it is replaced; only the new page's read counts.
+        if (reads === 1) { navigationId = 'nav-new'; return { result: { value: 'complete' } } }
+        return { result: { value: reads === 2 ? 'loading' : 'complete' } }
+      }),
+      frames: new Map(), endedReason: null, frameDiscoveryFailure: null, observe: () => () => {}, detach: () => {}
+    } as unknown as BrowserPageTransport
+    const dispatch = createBrowserPageDispatch({
+      session, pageInfo: () => ({ url: navigationId === 'nav-new' ? 'https://example.invalid/next' : 'https://example.invalid/', title: 'Example', navigationId }),
+      gotoUrl: async () => {}, captureScreenshot: async () => ({}), readLedger: async () => null, writeLedger: async () => {}, note: () => {}
+    })
+    expect(await dispatch('waitForLoad', [2_000])).toEqual({ url: 'https://example.invalid/next', navigationId: 'nav-new' })
+    expect(reads, 'the read that straddled the navigation was taken as loaded').toBe(3)
+  })
+})
