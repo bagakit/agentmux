@@ -517,8 +517,11 @@ it.each(['missing', 'scale'] as const)('rejects a %s display in the current froz
     const captured = frames(); captured.displays.pop()
     ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => captured) })
   } else electron.displays[0]!.scaleFactor = 1
-  await expect(surface.present(session())).rejects.toMatchObject({ code: 'display_configuration_changed' })
+  const outcome = surface.present(session())
+  void outcome.catch(() => {})
+  await vi.advanceTimersByTimeAsync(0)
   expect(electron.windows, 'mismatched frames never become overlays').toHaveLength(0)
+  await expect(outcome).rejects.toMatchObject({ code: 'display_configuration_changed' })
 })
 
 it('a locked issue display cannot replace the selected display background', async () => {
