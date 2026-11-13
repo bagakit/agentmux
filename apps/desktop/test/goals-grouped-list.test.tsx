@@ -139,3 +139,19 @@ describe('One solid primary per surface', () => {
     expect(dom.container.querySelector('.goals-detail .goals-button--primary')).not.toBeNull()
   })
 })
+
+describe('Goals brand start', () => {
+  it('shows the Goals companions beside the title when Goals exist, decorative and size-bounded', async () => {
+    seed(); await dom.render(<GlobalBoardSurface />)
+    const art = dom.container.querySelector<HTMLImageElement>('.goals-page-header__art')!
+    expect(art.getAttribute('alt')).toBe('')
+    expect(art.getAttribute('aria-hidden')).toBe('true')
+    expect(art.src).toContain('goals-companions-header')
+    expect(Number(art.getAttribute('width'))).toBeLessThanOrEqual(278)
+  })
+
+  it('keeps the header compact without art while a Goal is open', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'review' }); await dom.render(<GlobalBoardSurface />)
+    expect(dom.container.querySelector('.goals-page-header__art')).toBeNull()
+  })
+})
