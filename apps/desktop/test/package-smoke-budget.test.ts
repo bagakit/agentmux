@@ -16,7 +16,7 @@ const functions = names.map(name => {
   const declarations = ast.statements.filter(ts.isFunctionDeclaration).filter(node => node.name?.text === name)
   if (declarations.length !== 1) throw new Error(`Expected exactly one original ${name}`)
   // Dynamic imports are dependency ports, supplied by the controlled boundaries below.
-  return declarations[0]!.getText(ast).replace(/^  const \{ (?:createPrivateRuntimeScope|macosHostService, macosHostServiceRegistration|defaultAgentMuxControlSocketPath) \} = await import\([^\n]+\)\n/gmu, '')
+  return declarations[0]!.getText(ast).replace(/^export /u, '').replace(/^  const \{ (?:createPrivateRuntimeScope|macosHostService, macosHostServiceRegistration|defaultAgentMuxControlSocketPath) \} = await import\([^\n]+\)\n/gmu, '')
 }).join('\n')
 
 type Scenario = {
@@ -58,8 +58,13 @@ function launch(scenario: Scenario = {}) {
     mkdir: async () => {}, writeFile: async () => {},
     process: { env: { ELECTRON_RUN_AS_NODE: '1' }, getuid: () => 501,
       stdout: { write: (value: string) => { output += value } },
-      kill: (_pid: number, signal: string) => {
-        signals.push(signal)
+      kill: (_pid: number, signal: string | number) => {
+        // Signal 0 is the existence probe, not a delivered signal.
+        if (signal === 0) {
+          if (killed || now >= exitAt) throw Object.assign(new Error('no such process'), { code: 'ESRCH' })
+          return true
+        }
+        signals.push(signal as string)
         if (signal === 'SIGKILL' || !scenario.ignoreTerm) killed = true
       } },
     PRODUCT_NAME: 'AgentMux', manifest: { version: '0.1.0' },
@@ -114,24 +119,30 @@ it('qualifies the exact ready, Runtime owner and normal exit after a 35-second c
   const attempt = launch()
   await expect(attempt.result).resolves.toBeUndefined()
   expect(attempt.facts()).toMatchObject({ now: _historyFixtureEpoch(0, 35, 0), ownerObserved: true,
-    output: 'packaged_desktop_launch=passed\n', signals: [], launchTimeouts: [60_000] })
+    output: 'packaged_desktop_launch=passed\n', signals: [], launchTimeouts: [300_000] })
   expect(attempt.facts().removed).toEqual([attempt.facts().runtime])
 })
 
-it('accepts confirmed normal exit at the shared absolute deadline', async () => {
-  const attempt = launch({ readyAt: _historyFixtureEpoch(0, 59, 960), ownerAt: _historyFixtureEpoch(0, 59, 980), exitAt: _historyFixtureEpoch(0, 60, 0) })
+it('accepts a slow first launch whose ready receipt arrives after the former one-minute window', async () => {
+  const attempt = launch({ readyAt: _historyFixtureEpoch(0, 75, 0), ownerAt: _historyFixtureEpoch(0, 80, 0), exitAt: _historyFixtureEpoch(0, 85, 0) })
   await expect(attempt.result).resolves.toBeUndefined()
-  expect(attempt.facts().now).toBe(60_000)
+  expect(attempt.facts().output).toBe('packaged_desktop_launch=passed\n')
+})
+
+it('accepts confirmed normal exit at the shared absolute deadline', async () => {
+  const attempt = launch({ readyAt: _historyFixtureEpoch(0, 299, 960), ownerAt: _historyFixtureEpoch(0, 299, 980), exitAt: _historyFixtureEpoch(0, 300, 0) })
+  await expect(attempt.result).resolves.toBeUndefined()
+  expect(attempt.facts().now).toBe(300_000)
 })
 
 it.each([
-  { name: 'pre-ready connect', readyAt: _historyFixtureEpoch(0, 60, 20), ownerAt: _historyFixtureEpoch(0, 60, 20), exitAt: _historyFixtureEpoch(0, 70, 0), stage: 'ready-receipt' },
-  { name: 'cumulative ready and owner', readyAt: _historyFixtureEpoch(0, 35, 0), ownerAt: _historyFixtureEpoch(0, 65, 0), exitAt: _historyFixtureEpoch(0, 70, 0), stage: 'runtime-owner-receipt' },
-  { name: 'cumulative ready, owner and exit', readyAt: _historyFixtureEpoch(0, 35, 0), ownerAt: _historyFixtureEpoch(0, 40, 0), exitAt: _historyFixtureEpoch(0, 65, 0), stage: 'application-exit' },
-  { name: 'launch consumes the same window', launchMs: 61_000, readyAt: _historyFixtureEpoch(0, 0, 0), ownerAt: _historyFixtureEpoch(0, 0, 0), exitAt: _historyFixtureEpoch(0, 61, 0), stage: 'ready-receipt' }
+  { name: 'pre-ready connect', readyAt: _historyFixtureEpoch(0, 300, 20), ownerAt: _historyFixtureEpoch(0, 300, 20), exitAt: _historyFixtureEpoch(0, 310, 0), stage: 'ready-receipt' },
+  { name: 'cumulative ready and owner', readyAt: _historyFixtureEpoch(0, 275, 0), ownerAt: _historyFixtureEpoch(0, 305, 0), exitAt: _historyFixtureEpoch(0, 310, 0), stage: 'runtime-owner-receipt' },
+  { name: 'cumulative ready, owner and exit', readyAt: _historyFixtureEpoch(0, 275, 0), ownerAt: _historyFixtureEpoch(0, 280, 0), exitAt: _historyFixtureEpoch(0, 305, 0), stage: 'application-exit' },
+  { name: 'launch consumes the same window', launchMs: 301_000, readyAt: _historyFixtureEpoch(0, 0, 0), ownerAt: _historyFixtureEpoch(0, 0, 0), exitAt: _historyFixtureEpoch(0, 301, 0), stage: 'ready-receipt' }
 ])('rejects $name after the total budget without restarting a stage clock', async ({ stage, ...scenario }) => {
   const facts = await failure(scenario, `Packaged Desktop ${stage} failed:`)
-  expect(facts.now).toBeGreaterThanOrEqual(60_000)
+  expect(facts.now).toBeGreaterThanOrEqual(300_000)
 })
 
 it.each([
