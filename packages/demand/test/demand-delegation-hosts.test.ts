@@ -83,5 +83,6 @@ it('retains verified Runtime references and rejects the worker under a second Ho
   const saved = (await openDemandStore({ root }).get('goal'))!
   expect(saved.delegations![0]!.runtimeIdentity).toEqual(runtimeIdentity)
   expect(saved.plan!.reviews[0]!.reviewer.runtimeId).toBe('independent-runtime')
+  expect((await store.reviewPlanNode('goal', review, { kind: 'agent', id: 'worker', hostId: 'second-independent-alias', runtimeId: 'independent-runtime' })).replayed).toBe(true)
   expect(projectGoalPlan(saved.plan!, saved.delegations!, criteria).nodes.map(item => item.state)).toEqual(['done', 'ready'])
 })
