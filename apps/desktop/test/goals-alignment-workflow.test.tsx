@@ -317,7 +317,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
 
   it.each(['confirm', 'accept'] as const)('reads a durable successful %s after a lost receipt without sending a second acknowledgement', async (kind) => {
     await save(proposal, kind === 'accept', kind === 'accept' ? report() : undefined)
-    const healthyRun = { id: 'healthy-run', label: 'Original Agent', hostId: 'local', providerId: 'codex', workspacePath: config.workspaces[0]!.path, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 1) } } as SessionSnapshot
+    const healthyRun = { id: 'healthy-run', label: 'Original Agent', hostId: 'local', providerId: 'codex', workspacePath: config.workspaces[0]!.path, kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' } } as SessionSnapshot
     useAppStore.setState({ sessions: [healthyRun] }); await mount()
     const reviewed = useAppStore.getState().demands.goal!
     // The original Host owner commits; only the receipt back to the renderer is lost.
@@ -414,7 +414,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   })
 
   it('does no default render work for unrelated Session output while a current report is visible', async () => {
-    await save(proposal, true, report()); const related = { id: 'healthy-run', kind: 'agent', hostId: 'local', providerId: 'codex', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, label: 'Original Agent', status: { state: 'waiting' }, workspacePath: _hygiene_fixturePath("repo") } as SessionSnapshot
+    await save(proposal, true, report()); const related = { id: 'healthy-run', kind: 'agent', hostId: 'local', providerId: 'codex', control: { kind: 'agent', hostId: 'local', agentSessionId: 'healthy-run', run: { runId: 'original-healthy-run' } }, label: 'Original Agent', status: { state: 'waiting' }, workspacePath: _hygiene_fixturePath("repo"), capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' } } as SessionSnapshot
     const unrelated = { ...related, id: 'unrelated', control: { kind: 'agent', hostId: 'local', agentSessionId: 'unrelated', run: { runId: 'unrelated-run' } } } as SessionSnapshot; useAppStore.setState({ sessions: [related, unrelated] })
     const commits = vi.fn(); await act(async () => root.render(createElement(Profiler, { id: 'goals', onRender: commits }, createElement(GlobalBoardSurface))))
     expect(container.querySelectorAll('[data-goal-criterion-id]')).toHaveLength(2); expect(container.querySelector('[data-demand-id]')?.textContent).toContain('1 linked · waiting')
