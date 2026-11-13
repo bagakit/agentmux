@@ -1,23 +1,47 @@
 /* Focus home: the needs-you strip and the grouped list with its 64px row anatomy. Loaded with the
  * directory chunk; the count badge it reuses is first-screen shell styling. */
 
-/* Needs-you strip: tickets that jump straight to the waiting request. */
+/* Needs-you strip: one card per waiting Agent. The header opens the conversation; a request that fits
+ * one tap answers in place underneath it. A single card spans the row; several scroll sideways. */
 .mobile-needs-you { margin: var(--sp-2) calc(-1 * var(--mobile-gutter)) var(--sp-4); }
 .mobile-needs-you > header { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--mobile-gutter) var(--sp-3);
   color: var(--mobile-attention); font-size: var(--fs-meta); font-weight: 700; }
 .mobile-needs-you > ul { display: flex; gap: var(--sp-4); margin: 0; padding: 0 var(--mobile-gutter) var(--sp-1); list-style: none;
-  overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x proximity; scrollbar-width: none; }
+  overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--mobile-gutter); scrollbar-width: none; }
 .mobile-needs-you > ul::-webkit-scrollbar { display: none; }
-.mobile-needs-you li { flex: none; scroll-snap-align: start; }
-.mobile-needs-you-ticket { display: flex; align-items: center; gap: var(--sp-4); max-width: 260px; min-height: 52px; padding: 6px 14px 6px 8px;
-  border: 1px solid var(--mobile-attention-line); border-radius: var(--mobile-radius-group); background: var(--mobile-attention-wash); color: var(--text); text-align: left;
-  transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
-.mobile-needs-you-ticket[data-reason='error'] { border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 8%, var(--mobile-group)); }
-.mobile-needs-you-ticket:active { transform: scale(.97); }
+.mobile-needs-you-card { flex: 0 0 min(300px, 84%); display: grid; align-content: start; scroll-snap-align: start; overflow: hidden;
+  border: 1px solid var(--mobile-attention-line); border-radius: var(--mobile-radius-group); background: var(--mobile-attention-wash); }
+.mobile-needs-you-card:only-child { flex-basis: 100%; }
+.mobile-needs-you-card[data-reason='error'] { border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 8%, var(--mobile-group)); }
+.mobile-needs-you-ticket { display: flex; align-items: center; gap: var(--sp-4); width: 100%; min-width: 0; min-height: 52px; padding: 6px 14px 6px 8px;
+  border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; transition: background-color var(--dur-fast) ease; }
+.mobile-needs-you-ticket:active { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .mobile-needs-you-ticket > span:last-child { display: grid; min-width: 0; }
 .mobile-needs-you-ticket strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 650; }
 .mobile-needs-you-ticket small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
 .mobile-needs-you-ticket[data-reason='error'] small { color: var(--red); }
+
+/* One-tap answer: the request in one line, then its choices as equal-weight pills; the safe
+ * single-use grant is the one filled action. */
+.mobile-ticket-answer { display: grid; gap: var(--sp-3); padding: 0 12px 12px 42px; animation: mobile-ticket-answer-in var(--dur-enter) var(--ease-enter) both; }
+.mobile-ticket-answer__title { margin: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
+.mobile-ticket-answer__choices { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.mobile-ticket-answer__choices > button { flex: 1 1 0; min-width: 72px; min-height: 40px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid var(--mobile-hairline); border-radius: 999px; background: var(--mobile-group); color: var(--text); font-size: var(--fs-meta); font-weight: 600;
+  transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease, opacity var(--dur-fast) ease; }
+.mobile-ticket-answer__choices > button.is-primary { border-color: transparent; background: var(--mobile-accent); color: var(--bg); }
+.mobile-ticket-answer__choices > button:active:not(:disabled) { transform: scale(.96); }
+.mobile-ticket-answer__choices > button:disabled { opacity: .5; }
+.mobile-ticket-answer__choices > button[aria-pressed='true']:disabled { opacity: 1; }
+.mobile-ticket-answer[data-phase='sending'] .mobile-ticket-answer__choices > button[aria-pressed='true'] { animation: mobile-ticket-sending 1.1s ease-in-out infinite; }
+.mobile-ticket-answer > p[role='status'] { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.mobile-ticket-answer[data-phase='confirmed'] > p[role='status'] { color: var(--green); }
+.mobile-ticket-answer__issue { margin: 0; color: var(--red); font-size: var(--fs-micro); }
+.mobile-ticket-answer__open { justify-self: start; min-height: 36px; padding: 0 12px; border: 1px solid var(--mobile-hairline); border-radius: 999px;
+  background: transparent; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
+@keyframes mobile-ticket-answer-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes mobile-ticket-sending { 50% { opacity: .62; } }
 
 /* Grouped list: one surface per group, hairlines from the avatar's right edge. */
 .mobile-focus-project { margin-top: var(--sp-5); }
@@ -84,6 +108,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mobile-row-dot[data-mark='attention'] { animation: none; }
-  .mobile-needs-you-ticket { transition: background-color var(--dur-fast) ease; }
-  .mobile-needs-you-ticket:active { transform: none; }
+  .mobile-ticket-answer { animation: none; }
+  .mobile-ticket-answer__choices > button:active:not(:disabled) { transform: none; }
+  .mobile-ticket-answer[data-phase='sending'] .mobile-ticket-answer__choices > button[aria-pressed='true'] { animation: none; }
 }

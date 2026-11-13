@@ -21,6 +21,7 @@ import { MobileAgentRow } from './MobileAgentRow'
 import { MobileHeaderMenu } from './MobileHeaderMenu'
 import { ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
 import { mobileNeedsYouReason, type MobileNeedsYouItem } from './needs-you'
+import { MobileNeedsYouAnswer } from './MobileNeedsYouAnswer'
 import { formatMobileClock } from '../presentation/time'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import './focus-home.css'
@@ -91,6 +92,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     document.addEventListener('visibilitychange', foreground)
     return () => { disposed = true; setPending(false); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, visible, revision, observeCatalog, onPresentation])
+  const answered = useCallback(() => refresh(value => value + 1), [])
   const previousHome = useRef(home), incoming = JSON.stringify(initialContext ?? null), previousIncoming = useRef(incoming)
   useEffect(() => {
     if (previousHome.current === home) return
@@ -371,11 +373,13 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         <header><span>需要你</span><span className="mobile-tab-badge" aria-hidden="true">{needsYou.length}</span></header>
         <ul>{needsYou.map(item => {
           const session = reference(item.agentSessionId), object = identity(session), row = directory.rows.get(item.agentSessionId)
-          return <li key={item.agentSessionId}><button type="button" className="mobile-needs-you-ticket" data-reason={item.reason}
+          return <li key={item.agentSessionId} className="mobile-needs-you-card" data-reason={item.reason}><button type="button" className="mobile-needs-you-ticket" data-reason={item.reason}
             aria-label={`${object.name} · ${item.reason === 'error' ? '出错' : '需要你'} · 打开对话`} onClick={() => openSession(item.agentSessionId, object)}>
             <span className="mobile-row-avatar"><AgentAvatarFace providerId={row?.providerId || session.providerId} appearance={row?.avatar} size={20} /><span className="mobile-row-dot" data-mark={item.reason === 'error' ? 'error' : 'attention'} aria-hidden="true" /></span>
             <span><strong>{object.name}</strong><small>{item.reason === 'error' ? '出错 · 需要处理' : row?.projectGroup?.name ?? object.project}</small></span>
-          </button></li>
+          </button>
+          {item.reason === 'waiting' && <MobileNeedsYouAnswer client={client} connected={connected} agentSessionId={item.agentSessionId}
+            onOpen={() => openSession(item.agentSessionId, object)} onAnswered={answered} />}</li>
         })}</ul>
       </section>}
       {[...projectRows].map(([key, { project, values }]) => {
