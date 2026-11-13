@@ -145,6 +145,10 @@ describe('phone Toolkit consumes the independent display program', () => {
     const admission = unknown(), f = fixture({ state: 'unknown', reason: admission.reason, admission })
     await render(generic)
     if (!generic) { await click('Copy link'); expect(f.clipboard).toHaveBeenCalledWith(currentURL) }
+    if (generic) {
+      await act(async () => { const more = button('More'); more.focus(); more.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+      expect(dom.container.querySelector('[role="menu"]')).not.toBeNull()
+    }
     await click('Continue original request')
     expect(f.action).toHaveBeenCalledExactlyOnceWith(definition.id, 'link', { invocationId: admission.invocationId, expectedRevision: definition.revision,
       sourceExecutionId: admission.action!.sourceExecutionId, expectedAdmissionExecutionId: null })
