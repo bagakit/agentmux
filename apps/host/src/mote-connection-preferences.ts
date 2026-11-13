@@ -1,5 +1,5 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import { parseFileReadResult, parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
+import { parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ConnectionEnrollmentCallContext, ConnectionPort } from '@agentmux/core/connections'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
   sameMoteConnectionValues, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesReadResult,
@@ -7,6 +7,7 @@ import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePrefer
 import { homeZoneId } from './mote-model.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteConnectionMode, serializeMoteConnectionMode } from './mote-quick-mode.js'
+import { readMoteQuickModeSource } from './mote-quick-mode-source.js'
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const resourceFields = ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'] as const
@@ -36,9 +37,11 @@ export class MoteConnectionPreferences {
     let source: MoteConnectionPreferencesReadResult['source'] = null
     try {
       await this.original(input)
-      source = parseFileReadResult(await this.ports.files.read({ ...input.target, path: MOTE_QUICK_MODE_PATH }), { ...input.target, path: MOTE_QUICK_MODE_PATH })
-      if (!source.resource || source.result.status !== 'read' && source.result.status !== 'deleted') throw new Error('The original MOTE.md could not be read. Keep its reference and inspect the file.')
-      const parsed = source.result.status === 'deleted' ? { status: 'valid' as const, values: { connection: null } } : parseMoteConnectionMode(source.result.document.content)
+      const file = await readMoteQuickModeSource(this.ports.files, input.target)
+      source = file.source
+      // Connection values parse on their own; without a text document only a confirmed absence holds the default.
+      if (!file.document && file.mode.status === 'unconfirmed') throw new Error(file.mode.message)
+      const parsed = file.document ? parseMoteConnectionMode(file.document.content) : { status: 'valid' as const, values: { connection: null } }
       if (parsed.status !== 'valid') throw new Error(parsed.message)
       return parseMotePreferencesReadResult({ ...base, status: 'ready', source, values: parsed.values, issue: null }, base)
     } catch (error) {

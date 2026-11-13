@@ -8,8 +8,9 @@ import type { MoteMainTransitionMarker } from '@agentmux/core/mote-preferences'
 import { AgentMuxError, spatialCatalog, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { moteMainRoleRevision, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { parseFileReadResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
-import { parseMoteQuickMode, MOTE_QUICK_MODE_PATH, sameMoteDefaultConversation } from './mote-quick-mode.js'
+import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
+import { sameMoteDefaultConversation } from './mote-quick-mode.js'
+import { readMoteQuickModeSource, moteQuickModeDefaults } from './mote-quick-mode-source.js'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { homeZoneId } from './mote-model.js'
@@ -42,18 +43,15 @@ export function createHostMoteMainReader(options: {
         workspace.id === SCRATCH_WORKSPACE_ID && workspace.id === target.expectedResource.workspaceId &&
         workspace.hostId === target.expectedResource.hostId && workspace.path === target.expectedResource.workspacePath)
       if (matches.length !== 1) throw new Error('The original Mote Files resource is unconfirmed. Keep the original target and retry discovery.')
-      const input = { ...target, path: MOTE_QUICK_MODE_PATH }
-      const file = parseFileReadResult(await options.files.read(input), input)
+      const file = await readMoteQuickModeSource(options.files, target)
       signal?.throwIfAborted()
-      snapshot.resource = file.resource
-      if (!file.resource) throw new Error('The original MOTE.md Files mapping is unconfirmed. Its role is not replaced.')
-      if (file.result.status !== 'read') throw new Error('The original MOTE.md could not be read. Its current role is not replaced.')
-      snapshot.documentRevision = file.result.document.revision
-      const parsed = parseMoteQuickMode(file.result.document.content)
-      if (parsed.status !== 'valid') throw new Error(parsed.message)
-      snapshot.current = parsed.defaults.conversation ?? null
-      snapshot.roleRevision = moteMainRoleRevision(parsed.defaults, snapshot.documentRevision)
-      if(parsed.defaults.conversationTransition)snapshot.transition=parsed.defaults.conversationTransition
+      snapshot.resource = file.source.resource
+      snapshot.documentRevision = file.document?.revision ?? null
+      // A confirmed absent MOTE.md is a ready Mote without a Main, in the role generation its first save keeps.
+      const defaults = moteQuickModeDefaults(file.mode)
+      snapshot.current = defaults.conversation ?? null
+      snapshot.roleRevision = moteMainRoleRevision(defaults, snapshot.documentRevision)
+      if(defaults.conversationTransition)snapshot.transition=defaults.conversationTransition
       snapshot.status = 'ready'
       return snapshot
     } catch (error) {

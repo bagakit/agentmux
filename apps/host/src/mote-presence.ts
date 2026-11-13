@@ -8,7 +8,7 @@ import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { GoalExecutionClient } from './goal-runtime.js'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
-import { parseMoteQuickMode } from './mote-quick-mode.js'
+import { readMoteQuickModeSource, moteQuickModeDefaults } from './mote-quick-mode-source.js'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { homeZoneId } from './mote-model.js'
@@ -49,9 +49,8 @@ export function createHostMotePresence(options: {
     if (!target) throw new Error('The original Mote maintenance source is not registered.')
     const main = await options.main.readCurrentMoteMain(target)
     if (main.status !== 'ready' || !main.identity || !main.current || main.roleRevision !== loop.managedSource.revision || motePresenceSourceId(main.identity) !== loop.managedSource.sourceId || main.current.hostId !== loop.hostId || main.current.sessionId !== loop.agentSessionId) throw new Error('The original main role changed or is unconfirmed.')
-    const file = await options.files.read({ ...target, path: 'MOTE.md' })
-    const parsed = file.result.status === 'read' ? parseMoteQuickMode(file.result.document.content) : null
-    if (parsed?.status !== 'valid' || !(parsed.defaults.presence ?? DEFAULT_MOTE_PRESENCE).enabled) throw new Error('The original standing maintenance was disabled or is unconfirmed.')
+    const { mode } = await readMoteQuickModeSource(options.files, target)
+    if (mode.status === 'unconfirmed' || !(moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE).enabled) throw new Error('The original standing maintenance was disabled or is unconfirmed.')
     await options.main.assertCurrent(main)
   }
   async function reconcile(target: MotePreferencesTarget) {
@@ -67,9 +66,8 @@ export function createHostMotePresence(options: {
           watchers.set(id, { path: main.resource.zonePath, watcher })
         } catch (error) { readings.set(id, { status: 'unconfirmed', schedule: null, issue: 'Original Mote settings watcher is unavailable: ' + String(error) }) }
       }
-      const file = await options.files.read({ ...target, path: 'MOTE.md' }), parsed = file.result.status === 'read' ? parseMoteQuickMode(file.result.document.content) : null
-      if (parsed?.status !== 'valid') throw new Error('The original maintenance configuration is unconfirmed.')
-      const preference = parsed.defaults.presence ?? DEFAULT_MOTE_PRESENCE, sourceId = motePresenceSourceId(main.identity)
+      const { mode } = await readMoteQuickModeSource(options.files, target)
+      const preference = moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE, sourceId = motePresenceSourceId(main.identity)
       sourceTargets.set(sourceId,id)
       const previous = targetExecutions.get(id), next = main.current ? executionKey(main.current.hostId,main.current.sessionId) : undefined
       if (previous !== next) {

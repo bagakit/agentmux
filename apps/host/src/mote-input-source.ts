@@ -5,7 +5,7 @@ import {
   type AgentMuxSpatialStateStore
 } from '@agentmux/core'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
-import { parseMoteQuickMode, MOTE_QUICK_MODE_PATH } from './mote-quick-mode.js'
+import { readMoteQuickModeSource } from './mote-quick-mode-source.js'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { homeZoneId } from './mote-model.js'
@@ -66,17 +66,15 @@ export function createHostMoteInputSource(options: {
         typeof value.path === 'string'
     )
     if (matches.length !== 1) return fail()
-    const file = await options.files.read({
+    const { mode, document } = await readMoteQuickModeSource(options.files, {
       spaceId: space.spaceId,
       zoneId,
-      path: MOTE_QUICK_MODE_PATH,
       expectedResource: { hostId: 'local', workspaceId: SCRATCH_WORKSPACE_ID, workspacePath: matches[0].path }
     })
     signal?.throwIfAborted()
-    if (file.result.status !== 'read') return fail()
-    const parsed = parseMoteQuickMode(file.result.document.content),
-      primary = parsed.status === 'valid' ? parsed.defaults.conversation : undefined
-    if (!primary) return fail()
+    // A confirmed absent MOTE.md has no primary, like a saved file without one.
+    if (mode.status !== 'saved' || !document || !mode.defaults.conversation) return fail()
+    const primary = mode.defaults.conversation
     const primaryRegion = catalog.regions.find(
       (value) => value.tabId === primary.tabId && value.regionId === primary.regionId
     )
@@ -98,7 +96,7 @@ export function createHostMoteInputSource(options: {
     return {
       source,
       primary: { hostId: primary.hostId, agentSessionId: primary.sessionId },
-      moteRevision: file.result.document.revision,
+      moteRevision: document.revision,
       spatialRevision: state.revision
     }
   }

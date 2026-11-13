@@ -1,4 +1,4 @@
-import { parseFileReadResult, parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
+import { parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import { DEFAULT_MOTE_PRESENCE, effectiveMoteQuickSave, sameMoteQuickDefaults, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult, type MoteQuickPreferencesPort, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult, type MotePresenceReading } from '@agentmux/core/mote-preferences'
 import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
@@ -6,6 +6,7 @@ import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections
 import { PMO_TEAMS_TOPIC_ID } from './mote-topic-model.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseMoteQuickMode, serializeMoteQuickMode, sameMoteDefaultConversation } from './mote-quick-mode.js'
+import { readMoteQuickModeSource, moteQuickModeDefaults } from './mote-quick-mode-source.js'
 
 /** The original MOTE.md semantic writer. Navigation remains a client action after its receipt. */
 export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
@@ -25,16 +26,16 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
     try {
       const main = await this.ports.main.readCurrentMoteMain(input.target)
       if (!main.identity) throw new Error(main.issue ?? 'The original Mote identity is unconfirmed.')
-      source = parseFileReadResult(await this.ports.files.read({ ...input.target, path: 'MOTE.md' }), { ...input.target, path: 'MOTE.md' })
-      const parsed = source.result.status === 'deleted' ? { status: 'valid' as const, defaults: {} } : source.result.status === 'read' ? parseMoteQuickMode(source.result.document.content) : null
-      if (!source.resource || parsed?.status !== 'valid') throw new Error(parsed?.status === 'unconfirmed' ? parsed.message : 'The original MOTE.md is unavailable.')
+      const file = await readMoteQuickModeSource(this.ports.files, input.target)
+      source = file.source
+      const defaults = moteQuickModeDefaults(file.mode)
       const catalog = await this.ports.catalog(), locations = catalog?.locations.filter(value => value.spaceId === input.target.spaceId) ?? []
       const conversations = locations.flatMap(location => {
         const region = catalog!.regions.find(value => value.tabId === location.tabId && value.regionId === location.regionId)
         return region?.kind === 'agent' && region.agentSessionId && region.execution ? [{ reference: { hostId: region.execution.hostId, sessionId: region.agentSessionId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }, label: `${region.execution.hostId} · ${region.agentSessionId}` }] : []
       })
       const executors = await this.ports.executors().catch(() => [])
-      return parseMotePreferencesReadResult({ ...input, status: 'ready', source, defaults: parsed.defaults,
+      return parseMotePreferencesReadResult({ ...input, status: 'ready', source, defaults,
         choices: { executors, conversations, destinations: locations.map(value => ({ reference: { kind: 'occurrence', displayWorkspaceId: value.displayWorkspaceId, groupId: value.groupId, tabId: value.tabId, regionId: value.regionId }, label: `${value.tabId} · ${value.regionId}` })) },
         main: main.identity.moteId === PMO_TEAMS_TOPIC_ID, issue: null, ...(this.ports.maintenance ? { maintenance: this.ports.maintenance(input.target) } : {}) }, input)
     } catch (error) { return parseMotePreferencesReadResult({ ...input, status: 'unconfirmed', source, defaults: null, choices: empty, main: null, issue: String(error) }, input) }
