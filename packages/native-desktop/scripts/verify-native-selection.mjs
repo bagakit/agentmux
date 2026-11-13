@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, statfsSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, statfsSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -11,15 +11,17 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const macos = join(repository, 'packages/native-desktop/macos')
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
-  console.log('verify-native-selection.mjs --source | --preview [--output DIRECTORY]\nCompiles only the real selection/Core sources and bare AppKit host; no App assembly/signing/install. --source requires two distinct active displays, drives real AppKit events and buttons, exports explicitly scoped AppKit view-layout frames and kills nonempty behavioral mutants. --preview opens the same production picker for manual interaction. No screen capture or permission request is used by the view-layout export; WindowServer layering and system focus remain unverified.')
+  console.log('verify-native-selection.mjs --source [--models-only] | --preview [--output DIRECTORY]\nCompiles only the real selection/Core sources and bare AppKit host; no App assembly/signing/install. --source requires two distinct active displays, drives real AppKit events and buttons, exports explicitly scoped AppKit view-layout frames and kills nonempty behavioral mutants. --preview opens the same production picker for manual interaction. --models-only runs production model/pixel/consumer assertions and their mutations without launching an AppKit host; it cannot sign off UI. No screen capture or permission request is used by the view-layout export; WindowServer layering and system focus remain unverified.')
   process.exit(0)
 }
 const preview = args.includes('--preview')
+const modelsOnly = args.includes('--models-only')
+assert(!modelsOnly || args.includes('--source'), '--models-only requires --source')
 assert(preview !== args.includes('--source'), 'Choose --source or --preview')
 const outputIndex = args.indexOf('--output')
 if (outputIndex >= 0) assert(args[outputIndex + 1] && !args[outputIndex + 1].startsWith('--'), '--output requires a directory')
 for (let i = 0; i < args.length; i++) {
-  if (['--source', '--preview'].includes(args[i])) continue
+  if (['--source', '--preview', '--models-only'].includes(args[i])) continue
   if (args[i] === '--output') { i++; continue }
   throw new Error(`Unknown argument: ${args[i]}`)
 }
@@ -28,28 +30,30 @@ const outputRoot = join(repository, '.local/state/screenshot-experience/native-s
 mkdirSync(outputRoot, { recursive: true })
 const output = outputIndex >= 0 ? resolve(args[outputIndex + 1]) : mkdtempSync(join(outputRoot, 'run-'))
 mkdirSync(output, { recursive: true })
-const cache = join(output, 'module-cache')
+const cache = join(repository, '.local/state/screenshot-experience/native-module-cache')
 mkdirSync(cache, { recursive: true })
-const core = ['NativeCaptureGeometry.swift', 'NativeSelectionState.swift', 'UnixSocketPathSafety.swift', 'NativeSelectionCaptureLease.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOSCore', name))
-const picker = ['NativeScreenSelection.swift', 'NativeSelectionRequest.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOS', name))
+const core = ['NativeCaptureGeometry.swift', 'NativeSelectionState.swift', 'UnixSocketPathSafety.swift', 'NativeSelectionCaptureLease.swift', 'NativeImageLimits.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOSCore', name))
+const picker = ['NativeScreenSelection.swift', 'NativeSelectionRequest.swift', 'NativeSelectionPixels.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOS', name))
 const hostSource = join(macos, 'Verification/SelectionPreview.swift')
 const checksSource = join(macos, 'Verification/SelectionStateChecks.swift')
 const leaseChecksSource = join(macos, 'Verification/SelectionLeaseChecks.swift')
 const consumerChecksSource = join(macos, 'Verification/SelectionCaptureConsumerChecks.swift')
+const pixelsChecksSource = join(macos, 'Verification/SelectionPixelsChecks.swift')
 const operationsSource = join(macos, 'Sources/AgentMuxNativeMacOS/NativeDesktopOperations.swift')
-const sources = [...core, ...picker, operationsSource, hostSource, checksSource, leaseChecksSource, consumerChecksSource, fileURLToPath(import.meta.url)]
+const sources = [...core, ...picker, operationsSource, hostSource, checksSource, leaseChecksSource, consumerChecksSource, pixelsChecksSource, fileURLToPath(import.meta.url)]
 const hashes = Object.fromEntries(sources.map(path => [path.slice(repository.length + 1), createHash('sha256').update(readFileSync(path)).digest('hex')]))
 const report = { schema: 'agentmux.native-selection-verification.v1', sourceHashes: hashes, featureAccepted: false,
   boundary: 'Real production NativeSelectionRequest/picker in a bare AppKit host; direct AppKit responder dispatch after exact own-view hit testing and real NSButton actions. WindowServer key/foreground and physical dispatch remain unknown. Not global shortcut, production signing, TCC continuity or installed-app proof.' }
 
 function command(command, parameters, log) {
   const space = statfsSync(output)
-  process.stderr.write(`Native selection compile: ${(Number(space.bavail) * Number(space.bsize) / 1024 / 1024).toFixed(0)} MiB available; reusing this invocation cache.\n`)
+  process.stderr.write(`Native selection compile: ${(Number(space.bavail) * Number(space.bsize) / 1024 / 1024).toFixed(0)} MiB available; shared native compiler cache.\n`)
   const result = spawnSync(command, parameters, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
   writeFileSync(log, (result.stdout ?? '') + (result.stderr ?? ''))
   if (result.error) throw result.error
   assert.equal(result.status, 0, `Compiler failed: ${log}\n${result.stderr ?? ''}`)
 }
+let compiledBaseline
 function build(directory, change) {
   mkdirSync(directory, { recursive: true })
   const substitute = path => {
@@ -61,12 +65,21 @@ function build(directory, change) {
     return copy
   }
   const options = ['-swift-version', '6', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos12.0`, '-module-cache-path', cache]
-  command('swiftc', [...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', ...core.map(substitute),
+  const changedCore = !change || core.includes(change.path)
+  const reuse = binary => copyFileSync(join(compiledBaseline, binary), join(directory, binary))
+  if (compiledBaseline && !changedCore) {
+    for (const name of ['AgentMuxNativeMacOSCore.swiftmodule', 'libAgentMuxNativeMacOSCore.dylib'])
+      symlinkSync(join(compiledBaseline, name), join(directory, name))
+  } else command('swiftc', [...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', ...core.map(substitute),
     '-emit-module-path', join(directory, 'AgentMuxNativeMacOSCore.swiftmodule'), '-o', join(directory, 'libAgentMuxNativeMacOSCore.dylib')], join(directory, 'core-build.log'))
   const link = [...options, '-parse-as-library', '-I', directory, '-L', directory, '-lAgentMuxNativeMacOSCore', '-Xlinker', '-rpath', '-Xlinker', '@executable_path']
-  command('swiftc', [...link, ...picker.map(substitute), hostSource, '-o', join(directory, 'selection-preview')], join(directory, 'picker-build.log'))
-  command('swiftc', [...link, checksSource, '-o', join(directory, 'selection-state-checks')], join(directory, 'checks-build.log'))
-  command('swiftc', [...link, leaseChecksSource, '-o', join(directory, 'selection-lease-checks')], join(directory, 'lease-checks-build.log'))
+  if (compiledBaseline && !changedCore && !picker.includes(change?.path)) reuse('selection-preview')
+  else command('swiftc', [...link, ...picker.map(substitute), hostSource, '-o', join(directory, 'selection-preview')], join(directory, 'picker-build.log'))
+  if (compiledBaseline && !changedCore) { reuse('selection-state-checks'); reuse('selection-lease-checks') }
+  else {
+    command('swiftc', [...link, checksSource, '-o', join(directory, 'selection-state-checks')], join(directory, 'checks-build.log'))
+    command('swiftc', [...link, leaseChecksSource, '-o', join(directory, 'selection-lease-checks')], join(directory, 'lease-checks-build.log'))
+  }
   let operations = readFileSync(operationsSource, 'utf8')
   if (change?.path === operationsSource) {
     assert.equal(operations.split(change.before).length, 2, 'Production consumer mutation must change one actual branch')
@@ -79,11 +92,15 @@ function build(directory, change) {
   assert.equal(template.split('/* PRODUCTION_CAPTURE_METHODS */').length, 2)
   const consumer = join(directory, 'CompiledSelectionCaptureConsumer.swift')
   writeFileSync(consumer, template.replace('/* PRODUCTION_CAPTURE_METHODS */', operations.slice(start, end)))
-  command('swiftc', [...link, consumer, '-o', join(directory, 'selection-consumer-checks')], join(directory, 'consumer-checks-build.log'))
+  if (compiledBaseline && !changedCore && change?.path !== operationsSource) reuse('selection-consumer-checks')
+  else command('swiftc', [...link, consumer, '-o', join(directory, 'selection-consumer-checks')], join(directory, 'consumer-checks-build.log'))
+  if (compiledBaseline && !changedCore && change?.path !== picker[2]) reuse('selection-pixels-checks')
+  else command('swiftc', [...link, substitute(picker[2]), pixelsChecksSource, '-o', join(directory, 'selection-pixels-checks')], join(directory, 'pixels-checks-build.log'))
+  if (!change) compiledBaseline = directory
   return directory
 }
 function checks(directory) {
-  const reports = ['selection-state-checks', 'selection-lease-checks', 'selection-consumer-checks'].map(name => {
+  const reports = ['selection-state-checks', 'selection-lease-checks', 'selection-consumer-checks', 'selection-pixels-checks'].map(name => {
     const result = spawnSync(join(directory, name), [], { encoding: 'utf8' })
     assert.equal(result.signal, null, 'State tests terminated outside an assertion')
     let value
@@ -195,6 +212,10 @@ async function exercise(directory, capture) {
     const firstReleased = await drag(point(rectangle.x, rectangle.y), point(rectangle.x + rectangle.width, rectangle.y + rectangle.height))
     const firstGlobal = { ...rectangle, x: rectangle.x + begin.window.x, y: rectangle.y + begin.window.y }
     verify(firstReleased.surfaces.length > 0 && firstReleased.surfaces.every(surface => sameRect(surface.selection, firstGlobal)), 'Every display reads the same original selection immediately after a gesture')
+    verify(firstReleased.surfaces.every(surface => surface.frozenPixels), 'Every selectable display uses the original frozen pixel source')
+    const hoverPoint = point(offset.x + screen.width * 0.75, offset.y + screen.height * 0.70)
+    const hovered = await host.request('hover', { point: hoverPoint, displayId: ready.displayId })
+    verify(hovered.sample && hovered.sample.x === Math.floor(hoverPoint.x) && hovered.sample.y === Math.floor(screen.height - hoverPoint.y), 'The real chooser reports the original pixel under its actual pointer')
     await delay(40)
     verify(host.completions.length === 0, 'Mouse release must wait for explicit confirmation')
     await image('selected')
@@ -321,6 +342,17 @@ async function exercise(directory, capture) {
     await host.request('displayChange')
     const configurationChange = await host.completion(++count)
     verify(configurationChange.state === 'failed' && configurationChange.code === 'display_configuration_changed', 'A display-change notification fails the original request explicitly')
+    const loading = await host.request('begin', { allowEditing: true, holdPixels: true })
+    verify(loading.surfaces.every(surface => !surface.frozenPixels), 'Pending pixel capture is explicit on every original display')
+    const pending = await host.request('inspect')
+    verify(pending.loadingPixels && pending.controls.some(button => button.identifier === 'native-selection-cancel' && button.enabled)
+      && pending.controls.some(button => button.identifier === 'native-selection-confirm' && !button.enabled), 'Cancellation stays available while frozen pixels are loading')
+    await image('loading-cancellable')
+    await host.request('key', { keyCode: 53 })
+    verify((await host.completion(++count)).state === 'cancelled', 'Escape cancels without waiting for the native pixel producer')
+    await host.request('releasePixels')
+    await delay(40)
+    verify((await host.request('inspect')).surfaces.length === 0 && host.completions.length === count, 'Late frozen pixels never reopen or complete the cancelled chooser again')
     verify(host.completions.length > 0 && host.completions.every(value => value.visiblePickerWindows === 0), 'Capture, edit and cancellation each retire every original overlay')
     receipt = { tests: cases.length, cases, displays: ready.screens, separateSpaces: ready.separateSpaces, multidisplayExercised: ready.screens.length > 1,
       completions: host.completions, images, events: host.events }
@@ -334,12 +366,52 @@ async function exercise(directory, capture) {
   }
 }
 
+const state = core[1], view = picker[0]
+const mutations = [
+  { name: 'display-enumeration', path: view, before: 'for screen in screens {', after: 'for screen in screens.prefix(1) {' },
+  { name: 'global-event-coordinates', path: view, before: 'event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow', after: 'event.locationInWindow' },
+  { name: 'shared-selection-owner', path: view, before: 'var selection: NativeSelectionState { coordinator.selection }',
+    after: 'var selection: NativeSelectionState { NativeSelectionState(bounds: coordinator.selection.bounds) }' },
+  { name: 'close-all-displays', path: view, before: 'for window in presentation.windows {', after: 'for window in presentation.windows.prefix(1) {' },
+  { name: 'first-display-click', path: view, before: 'override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }', after: 'override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }' },
+  { name: 'move', path: state, before: 'rectangle = translated(original, dx: location.x - anchor.x, dy: location.y - anchor.y)', after: 'rectangle = original' },
+  { name: 'nudge', path: state, before: 'self.rectangle = translated(rectangle, dx: dx, dy: dy)', after: 'self.rectangle = rectangle' },
+  { name: 'resize', path: state, before: 'right = min(bounds.maxX, max(location.x, left + minimumWidth))', after: 'right = original.maxX' },
+  { name: 'panel-bounds', path: state, before: 'x: min(max(preferredOrigin.x, available.minX), available.maxX - width)', after: 'x: preferredOrigin.x' },
+  { name: 'capture-lease', path: core[3], before: '        guard !occupied else { lock.unlock(); throw Failure.busy }', after: '        // Test mutant: concurrent ownership is admitted.' },
+  { name: 'consumer-lease', path: operationsSource, before: 'return try NativeSelectionCaptureLease.shared.withCapture {', after: 'return try unleasedCapture {' },
+  { name: 'release', path: view, before: 'func pointerUp(_ point: NSPoint) { pointerLocation = point; selection.pointerUp(point); refresh() }', after: 'func pointerUp(_ point: NSPoint) { pointerLocation = point; selection.pointerUp(point); refresh(); complete(action: .capture) }' },
+  { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
+  { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
+  { name: 'edit-action', path: view, before: 'editButton.action = #selector(edit)', after: 'editButton.action = #selector(confirm)' },
+  { name: 'edit-opt-in', path: view, before: 'guard allowEditing else { return }', after: '// Mutant: ignores the original host opt-in.' },
+  { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
+  { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbar.frame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
+  { name: 'frozen-completion-source', path: operationsSource, before: 'let frozen = try selection.pixels.compose(selection.rectangle)', after: 'let frozen = try captureRect(selection.rectangle, ownership: ownership)' },
+  { name: 'sample-vertical-source', path: picker[2], before: '(display.appKitFrame.maxY - point.y)', after: '(point.y - display.appKitFrame.minY)' },
+  { name: 'composite-crop-origin', path: picker[2], before: '(frame.minX - rectangle.minX) * geometry.scale', after: 'frame.minX * geometry.scale' },
+  { name: 'loading-cancel', path: view, before: '@objc fileprivate func cancel() { finish(.success(nil)) }', after: '@objc fileprivate func cancel() { if pixels != nil { finish(.success(nil)) } }' },
+]
+
 try {
   const baseline = build(output)
   report.stateChecks = checks(baseline)
   assert.equal(report.stateChecks.exitCode, 0)
   assert.equal(report.stateChecks.failures.length, 0)
-  if (preview) {
+  if (modelsOnly) {
+    report.modelMutations = []
+    const selected = mutations.filter(mutation => core.includes(mutation.path) || mutation.path === operationsSource || mutation.path === picker[2])
+    assert(selected.length > 0, 'The production model mutation selection is nonempty')
+    for (const mutation of selected) {
+      const directory = build(join(output, 'model-mutant-' + mutation.name), mutation)
+      const result = checks(directory)
+      assert(result.tests > 0 && result.failures.length > 0 && result.exitCode !== 0, 'Surviving production model mutation: ' + mutation.name)
+      report.modelMutations.push({ name: mutation.name, state: 'killed-by-source-assertion', tests: result.tests, failures: result.failures })
+    }
+    report.unverifiedMutations = mutations.filter(mutation => !selected.includes(mutation)).map(mutation => mutation.name)
+    report.state = 'model-source-passed-ui-unverified'
+    report.unverified = ['AppKit host launch and interactions', 'current candidate images and independent review', 'physical WindowServer/input, TCC and installed application']
+  } else if (preview) {
     const child = spawn(join(baseline, 'selection-preview'), ['--interactive'], { stdio: 'inherit' })
     const result = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => resolve(code)) })
     assert.equal(result, 0)
@@ -349,28 +421,6 @@ try {
     report.nativeFrames = 'not-verified'
     report.viewLayoutFrames = report.appKit.images.length > 0 && report.appKit.images.every(image => image.source === 'AppKit-view-layout-only') ? 'exported-awaiting-independent-review' : 'incomplete'
     report.unverified = ['WindowServer fullscreen/layering', 'system foreground/focus and physical event delivery', 'screen capture permissions and installed application', 'physical mixed-scale displays and final system PNG']
-    const state = core[1], view = picker[0]
-    const mutations = [
-      { name: 'display-enumeration', path: view, before: 'for screen in screens {', after: 'for screen in screens.prefix(1) {' },
-      { name: 'global-event-coordinates', path: view, before: 'event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow', after: 'event.locationInWindow' },
-      { name: 'shared-selection-owner', path: view, before: 'window.contentView = NativeScreenSelection(viewport: screen.frame, coordinator: coordinator)',
-        after: 'window.contentView = NativeScreenSelection(viewport: screen.frame, coordinator: NativeSelectionCoordinator(screenFrames: screens.map(\\.frame), primaryTop: primary.frame.maxY, initialPoint: coordinator.initialPoint, allowEditing: allowEditing))' },
-      { name: 'close-all-displays', path: view, before: 'for window in presentation.windows {', after: 'for window in presentation.windows.prefix(1) {' },
-      { name: 'first-display-click', path: view, before: 'override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }', after: 'override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }' },
-      { name: 'move', path: state, before: 'rectangle = translated(original, dx: location.x - anchor.x, dy: location.y - anchor.y)', after: 'rectangle = original' },
-      { name: 'nudge', path: state, before: 'self.rectangle = translated(rectangle, dx: dx, dy: dy)', after: 'self.rectangle = rectangle' },
-      { name: 'resize', path: state, before: 'right = min(bounds.maxX, max(location.x, left + minimumWidth))', after: 'right = original.maxX' },
-      { name: 'panel-bounds', path: state, before: 'x: min(max(preferredOrigin.x, available.minX), available.maxX - width)', after: 'x: preferredOrigin.x' },
-      { name: 'capture-lease', path: core[3], before: '        guard !occupied else { lock.unlock(); throw Failure.busy }', after: '        // Test mutant: concurrent ownership is admitted.' },
-      { name: 'consumer-lease', path: operationsSource, before: 'return try NativeSelectionCaptureLease.shared.withCapture {', after: 'return try unleasedCapture {' },
-      { name: 'release', path: view, before: 'func pointerUp(_ point: NSPoint) { selection.pointerUp(point); refresh() }', after: 'func pointerUp(_ point: NSPoint) { selection.pointerUp(point); refresh(); complete(action: .capture) }' },
-      { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
-      { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
-      { name: 'edit-action', path: view, before: 'editButton.action = #selector(edit)', after: 'editButton.action = #selector(confirm)' },
-      { name: 'edit-opt-in', path: view, before: 'guard allowEditing else { return }', after: '// Mutant: ignores the original host opt-in.' },
-      { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
-      { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbar.frame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
-    ]
     assert(mutations.length > 0)
     report.mutations = []
     for (const mutation of mutations) {
@@ -396,5 +446,7 @@ try {
     ...(error instanceof AggregateError ? { errors: error.errors.map(error => ({ message: error.message, diagnostics: error.diagnostics })) } : {}) }
   process.exitCode = 1
 }
+if (!process.exitCode) assert.deepEqual(Object.fromEntries(sources.map(path => [path.slice(repository.length + 1), createHash('sha256').update(readFileSync(path)).digest('hex')])), hashes, 'The candidate source changed during verification')
 writeFileSync(join(output, 'receipt.json'), JSON.stringify(report, null, 2) + '\n')
-console.log(JSON.stringify(report, null, 2))
+console.log(JSON.stringify({ state: report.state, receipt: join(output, 'receipt.json'),
+  tests: report.stateChecks?.tests, mutations: report.mutations?.length ?? report.modelMutations?.length, images: report.appKit?.images?.map(image => image.path), error: report.error?.message }))

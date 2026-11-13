@@ -7,6 +7,10 @@ import AgentMuxNativeMacOSCore
 // scope, cancellation and error handling remain the production source.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
+    static func frozenSelectionPixels(loading: NativeSelectionLoading, ownership: NativeSelectionCaptureLease.Ownership) throws -> NativeSelectionPixels {
+        _ = try captureRect(CGRect(x: 0, y: 0, width: 400, height: 300), ownership: ownership)
+        return NativeSelectionPixels()
+    }
     static func captureRect(_ rectangle: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> (image: String, scale: Double, engine: String) {
         let number = ControlledIO.shared.pixelCall()
         if number == 1 {
@@ -38,22 +42,35 @@ private func unleasedCapture<T>(_ operation: (NativeSelectionCaptureLease.Owners
     try NativeSelectionCaptureLease().withCapture(operation)
 }
 private enum NativeSelectionRequest {
-    static func run(allowEditing: Bool = false) throws -> NativeSelectionChoice? {
+    static func run(allowEditing: Bool = false,
+        load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledIO.shared.selectorCall()
-        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: allowEditing ? .edit : .capture)
+        let pixels = try load(NativeSelectionLoading())
+        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: allowEditing ? .edit : .capture, pixels: pixels)
     }
 }
 private enum NativeSelectionCompletionAction: String { case capture, edit }
-private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let pixels: NativeSelectionPixels }
+private final class NativeSelectionLoading: @unchecked Sendable {}
+private final class NativeSelectionPixels: @unchecked Sendable {
+    func compose(_ rect: CGRect) throws -> (image: String, scale: Double, engine: String) {
+        ControlledIO.shared.composed()
+        return ("original-frozen-pixels", 1, "controlled-pixel-IO")
+    }
+}
 private final class ControlledIO: @unchecked Sendable {
     static let shared = ControlledIO()
     let pixelsStarted = DispatchSemaphore(value: 0), releasePixels = DispatchSemaphore(value: 0), finished = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var selectors = 0, pixels = 0
+    private var compositions = 0
     private var firstCaptured = false
     func selectorCall() { lock.lock(); selectors += 1; lock.unlock() }
     func selectorCount() -> Int { lock.lock(); defer { lock.unlock() }; return selectors }
     func pixelCall() -> Int { lock.lock(); defer { lock.unlock() }; pixels += 1; return pixels }
+    func pixelCount() -> Int { lock.lock(); defer { lock.unlock() }; return pixels }
+    func composed() { lock.lock(); compositions += 1; lock.unlock() }
+    func compositionCount() -> Int { lock.lock(); defer { lock.unlock() }; return compositions }
     func finish(_ captured: Bool) { lock.lock(); firstCaptured = captured; lock.unlock(); finished.signal() }
     func wasCaptured() -> Bool { lock.lock(); defer { lock.unlock() }; return firstCaptured }
 }
@@ -76,6 +93,7 @@ private struct SelectionCaptureConsumerChecks {
         check("production original pixels finish normally", io.finished.wait(timeout: .now() + 5) == .success && io.wasCaptured())
         let next = NativeDesktopOperations.capture(["mode": .string("selection")])
         check("production next capture succeeds after image receipt", next["state"] as? String == "captured")
+        check("production completion composes original frozen pixels without another live capture", io.pixelCount() == 2 && io.compositionCount() == 2 && (next["screenshot"] as? [String: Any])?["data"] as? String == "original-frozen-pixels")
         check("production pure capture omits host editing intent", next["completionAction"] == nil)
         let editable = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true)])
         check("production editable capture retains exact selector editing intent", editable["state"] as? String == "captured" && editable["completionAction"] as? String == "edit")

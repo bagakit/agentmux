@@ -29,23 +29,24 @@ mkdirSync(output, { recursive: true })
 const macos = join(repository, 'packages/native-desktop/macos')
 const core = ['NativeCaptureGeometry.swift', 'NativeImageLimits.swift', 'NativeSelectionCaptureLease.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOSCore', name))
 const operationsPath = join(macos, 'Sources/AgentMuxNativeMacOS/NativeDesktopOperations.swift')
+const pixelsPath = join(macos, 'Sources/AgentMuxNativeMacOS/NativeSelectionPixels.swift')
 const mainPath = join(macos, 'Sources/AgentMuxNativeMacOS/main.swift')
 const fixturePath = join(macos, 'Verification/SelectionPixelLifetimeChecks.swift')
 const leaseChecksPath = join(macos, 'Verification/SelectionLeaseChecks.swift')
 const consumerChecksPath = join(macos, 'Verification/SelectionCaptureConsumerChecks.swift')
-const sources = [...core, operationsPath, mainPath, fixturePath, leaseChecksPath, consumerChecksPath, fileURLToPath(import.meta.url)]
+const sources = [...core, operationsPath, pixelsPath, mainPath, fixturePath, leaseChecksPath, consumerChecksPath, fileURLToPath(import.meta.url)]
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const inputs = new Map(sources.map(path => [path, readFileSync(path)]))
 const hashes = () => Object.fromEntries(sources.map(path => [path.slice(repository.length + 1), hash(readFileSync(path))]))
 const report = { schema: 'agentmux.selection-pixel-lifetime-verification.v1', passed: false, sourceHashes: hashes(),
   boundary: 'Exact source-loaded production capture, rectangle/SCK and BlockingAsync methods with real Core ownership; controlled selector/SCK service and PNG/permission IO. No AppKit, WindowServer, actual screenshot, physical shortcut/focus, TCC or signed/installed-app proof.',
   originalProductionTimeoutSeconds: 10, mutations: [] }
-const cache = join(output, 'module-cache')
+const cache = join(repository, '.local/state/screenshot-experience/native-module-cache')
 mkdirSync(cache, { recursive: true })
 const options = ['-swift-version', '6', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos12.0`, '-module-cache-path', cache]
 function command(parameters, log) {
   const space = statfsSync(output)
-  process.stderr.write(`Pixel lifetime narrow compile: ${(Number(space.bavail) * Number(space.bsize) / 1024 / 1024).toFixed(0)} MiB available; same-run module cache.\n`)
+  process.stderr.write(`Pixel lifetime narrow compile: ${(Number(space.bavail) * Number(space.bsize) / 1024 / 1024).toFixed(0)} MiB available; shared native compiler cache.\n`)
   const result = spawnSync('swiftc', parameters, { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
   writeFileSync(log, (result.stdout ?? '') + (result.stderr ?? ''))
   if (result.error) throw result.error
@@ -64,6 +65,7 @@ function replace(source, from, to) {
 const operations = inputs.get(operationsPath).toString(), main = inputs.get(mainPath).toString()
 const extracted = {
   capture: slice(operations, '    static func capture(_ params:', '    static func listDisplays()'),
+  frozen: slice(operations, '    private static func frozenSelectionPixels(', '    private static func captureRect(_ rect:'),
   rectangle: slice(operations, '    private static func captureRect(_ rect:', '    private static func displayScale(for rect:'),
   permission: slice(operations, '    static func permissionStatus()', '    static func clipboardRead('),
   blocking: slice(main, 'private final class AsyncBox<T>:', 'private struct BoundedPNG {'),
@@ -75,7 +77,7 @@ function build(name, mutation) {
   const loaded = { ...extracted }
   if (mutation) loaded[mutation.part] = replace(loaded[mutation.part], mutation.before, mutation.after)
   let fixture = inputs.get(fixturePath).toString()
-  for (const [part, marker] of Object.entries({ capture: 'CAPTURE_METHODS', rectangle: 'RECTANGLE_METHODS', permission: 'PERMISSION_QUERY', blocking: 'BLOCKING_ASYNC' })) {
+  for (const [part, marker] of Object.entries({ capture: 'CAPTURE_METHODS', frozen: 'FROZEN_METHODS', rectangle: 'RECTANGLE_METHODS', permission: 'PERMISSION_QUERY', blocking: 'BLOCKING_ASYNC' })) {
     fixture = replace(fixture, `/* PRODUCTION_${marker} */`, loaded[part])
     writeFileSync(join(directory, 'production-' + part + '.swift.txt'), loaded[part])
   }
@@ -88,7 +90,7 @@ function build(name, mutation) {
   command([...options, '-emit-module', '-emit-library', '-module-name', 'AgentMuxNativeMacOSCore', ...core,
     '-emit-module-path', join(directory, 'AgentMuxNativeMacOSCore.swiftmodule'), '-o', join(directory, 'libAgentMuxNativeMacOSCore.dylib')], join(directory, 'core-build.log'))
   const link = [...options, '-parse-as-library', '-I', directory, '-L', directory, '-lAgentMuxNativeMacOSCore', '-Xlinker', '-rpath', '-Xlinker', '@executable_path']
-  command([...link, generated, '-o', join(directory, 'selection-pixel-lifetime-checks')], join(directory, 'checks-build.log'))
+  command([...link, pixelsPath, generated, '-o', join(directory, 'selection-pixel-lifetime-checks')], join(directory, 'checks-build.log'))
   return { directory, link, loading }
 }
 function run(directory, binary) {
@@ -120,8 +122,8 @@ try {
     report.compatibility.push({ name, generatedSha256: hash(source), ...result })
   }
   const mutations = [
-    { name: 'consumer-ownership', part: 'capture', before: 'return try capturedRectangle(selection, ownership: ownership)', after: 'return try capturedRectangle(selection)' },
-    { name: 'async-ownership', part: 'rectangle', before: '            defer { withExtendedLifetime(ownership) {} }', after: '            // Test mutant: asynchronous producer does not retain physical ownership.' },
+    { name: 'consumer-ownership', part: 'capture', before: 'try frozenSelectionPixels(loading: loading, ownership: ownership)', after: 'try NativeSelectionCaptureLease().withCapture { separate in try frozenSelectionPixels(loading: loading, ownership: separate) }' },
+    { name: 'async-ownership', part: 'frozen', before: '                        defer { withExtendedLifetime(ownership) {} }', after: '                        // Test mutant: asynchronous producer does not retain physical ownership.' },
   ]
   assert(mutations.length > 0)
   for (const mutation of mutations) {

@@ -2,10 +2,11 @@ import Foundation
 import CoreGraphics
 import AgentMuxNativeMacOSCore
 
-// Exact production capture dispatch, rectangle/SCK methods and the unrelated
-// permission query are inserted here. Only their external IO is controlled.
+// Exact production dispatch, frozen display/SCK, rectangle and permission
+// methods are inserted. Only the external OS producer and chooser are controlled.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
+    /* PRODUCTION_FROZEN_METHODS */
     /* PRODUCTION_RECTANGLE_METHODS */
     /* PRODUCTION_PERMISSION_QUERY */
     static func png(_ image: CGImage, scale: Double) throws -> [String: Any] {
@@ -21,33 +22,54 @@ private enum NativeDesktopOperations {
 /* PRODUCTION_BLOCKING_ASYNC */
 
 private enum JSONValue {
-    case string(String), number(Double), object([String: JSONValue])
+    case string(String), number(Double), bool(Bool), object([String: JSONValue])
     var string: String? { if case let .string(value) = self { return value }; return nil }
     var number: Double? { if case let .number(value) = self { return value }; return nil }
+    var bool: Bool? { if case let .bool(value) = self { return value }; return nil }
 }
 private enum ProviderError: Error { case coded(String, String) }
-private struct NativeScreenSelectionError: Error { let code: String; let message: String }
+struct NativeScreenSelectionError: Error { let code: String; let message: String }
 private func nativeErrorPayload(_ error: Error) -> [String: String] {
     if case let ProviderError.coded(code, message) = error { return ["code": code, "message": message] }
+    if let error = error as? NativeScreenSelectionError { return ["code": error.code, "message": error.message] }
     return ["code": "fixture_unexpected", "message": String(describing: error)]
 }
+private enum NativeSelectionCompletionAction: String { case capture, edit }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction; let pixels: NativeSelectionPixels }
 private enum NativeSelectionRequest {
-    static func run() throws -> CGRect? {
+    static func run(allowEditing: Bool = false,
+        load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         ControlledPixels.shared.selected()
-        return CGRect(x: 10, y: 20, width: 100, height: 80)
+        let pixels = try load(NativeSelectionLoading())
+        guard pixels.displays.contains(where: { $0.image != nil }) else {
+            throw NativeScreenSelectionError(code: "display_capture_unavailable", message: pixels.displays.compactMap(\.issue).joined(separator: "\n"))
+        }
+        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: .capture, pixels: pixels)
     }
 }
+private func onMain<T>(_ body: () throws -> T) rethrows -> T { try body() }
+private func CGDisplayBounds(_ display: CGDirectDisplayID) -> CGRect { CGRect(x: 0, y: 0, width: 400, height: 300) }
+private struct NSDeviceDescriptionKey: Hashable { let rawValue: String; init(_ value: String) { rawValue = value } }
+private struct NSScreen {
+    let frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+    let backingScaleFactor: CGFloat = 1
+    let deviceDescription: [NSDeviceDescriptionKey: Any] = [NSDeviceDescriptionKey("NSScreenNumber"): NSNumber(value: 1)]
+    static var screens: [NSScreen] { [NSScreen()] }
+}
 
-// These names replace ScreenCaptureKit's external service, not its production
+// These names replace ScreenCaptureKit's external service, not the production
 // caller or asynchronous lifetime. The first request deliberately ignores Task
 // cancellation until this fixture resumes its checked continuation.
-private struct SCDisplay: Sendable { let frame: CGRect }
+private struct SCDisplay: Sendable { let displayID: CGDirectDisplayID = 1; let frame = CGRect(x: 0, y: 0, width: 400, height: 300) }
+private struct SCApplication: Sendable { let processID: pid_t }
+private struct SCWindow: Sendable { let owningApplication: SCApplication? }
 private struct SCShareableContent: Sendable {
-    let displays = [SCDisplay(frame: CGRect(x: 0, y: 0, width: 400, height: 300))]
+    let displays = [SCDisplay()]
+    let windows: [SCWindow] = []
     static var current: SCShareableContent { get async throws { SCShareableContent() } }
 }
 private final class SCContentFilter: @unchecked Sendable {
-    init(display: SCDisplay, excludingWindows: [Int]) {}
+    init(display: SCDisplay, excludingWindows: [SCWindow]) {}
 }
 private final class SCStreamConfiguration: @unchecked Sendable {
     var sourceRect = CGRect.zero
@@ -58,16 +80,14 @@ private enum SCScreenshotManager {
     static func captureImage(contentFilter: SCContentFilter, configuration: SCStreamConfiguration) async throws -> CGImage {
         let number = ControlledPixels.shared.started()
         defer { ControlledPixels.shared.returned(number) }
-        if number == 1 {
-            return try await withCheckedThrowingContinuation { ControlledPixels.shared.suspend($0) }
-        }
+        if number == 1 { return try await withCheckedThrowingContinuation { ControlledPixels.shared.suspend($0) } }
         return try pixel()
     }
 }
 private func pixel() throws -> CGImage {
-    guard let context = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-          let image = context.makeImage() else { throw ProviderError.coded("fixture_allocation", "could not create controlled pixel") }
+    guard let context = CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+        let image = context.makeImage() else { throw ProviderError.coded("fixture_allocation", "could not create controlled pixels") }
     return image
 }
 private func AXIsProcessTrusted() -> Bool { ControlledPixels.shared.queried(); return false }
@@ -99,7 +119,7 @@ private final class ControlledPixels: @unchecked Sendable {
     func observation() -> [String: Int] {
         lock.lock(); defer { lock.unlock() }
         return ["selectors": selectors, "producers": producers, "encodes": encodes, "queries": queries,
-                "resumeRequested": resumed ? 1 : 0, "firstManagerReturned": firstReturned ? 1 : 0]
+            "resumeRequested": resumed ? 1 : 0, "firstManagerReturned": firstReturned ? 1 : 0]
     }
 }
 
@@ -117,7 +137,7 @@ private struct SelectionPixelLifetimeChecks {
         let startedAt = ProcessInfo.processInfo.systemUptime
         let first = NativeDesktopOperations.capture(["mode": .string("selection")])
         let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
-        check("A retains the exact production timeout failure receipt", first["state"] as? String == "failed" && errorCode(first) == "action_timeout")
+        check("A retains the original failed display and native timeout detail", first["state"] as? String == "failed" && errorCode(first) == "display_capture_unavailable" && ((first["error"] as? [String: String])?["message"]?.contains("action_timeout") == true))
         check("A uses the unchanged ten-second production observer deadline", elapsed >= 9)
         check("A pixel producer is suspended after its observer timed out", io.suspended.wait(timeout: .now() + 1) == .success && io.observation()["firstManagerReturned"] == 0 && io.observation()["resumeRequested"] == 0)
         let afterTimeout = io.observation()
@@ -126,18 +146,12 @@ private struct SelectionPixelLifetimeChecks {
         check("B cannot open a second selector after A observer timeout", io.observation()["selectors"] == 1)
         check("B cannot start another pixel producer after A observer timeout", io.observation()["producers"] == 1)
         let queryFinished = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
-            _ = NativeDesktopOperations.permissionStatus()
-            queryFinished.signal()
-        }
+        DispatchQueue.global().async { _ = NativeDesktopOperations.permissionStatus(); queryFinished.signal() }
         check("unrelated actual permission query remains available during held pixels", queryFinished.wait(timeout: .now() + 1) == .success && io.observation()["queries"] == 1)
         let beforeRelease = io.observation()
         check("no screenshot success is encoded for timed-out A or rejected B", beforeRelease["encodes"] == 0)
         io.releaseProducer()
         check("the non-cooperative pixel service actually returns after explicit release", io.managerReturned.wait(timeout: .now() + 5) == .success)
-        // A service-return signal alone does not prove the production closure
-        // exited. Probe the real lease with no selector/pixel action until its
-        // retained ARC ownership is actually released, with a bounded deadline.
         let releaseDeadline = ProcessInfo.processInfo.systemUptime + 5
         var released = false
         repeat {
@@ -154,7 +168,7 @@ private struct SelectionPixelLifetimeChecks {
             "secondState": second["state"] as? String ?? "missing", "secondCode": errorCode(second) ?? "missing",
             "thirdState": third["state"] as? String ?? "missing", "observerSeconds": elapsed,
             "afterTimeout": afterTimeout, "beforeRelease": beforeRelease, "afterRelease": io.observation(),
-            "boundary": "Exact production capture/SCK/BlockingAsync source and Core ownership; controlled selector, non-cooperative SCK service, permission OS queries and PNG IO. No AppKit, screen capture, UI, focus, permission prompt or installed-app proof."]
+            "boundary": "Exact production capture/frozen SCK/BlockingAsync source and Core ownership; controlled chooser, display descriptors, non-cooperative SCK service, permission OS queries and PNG IO. No AppKit, screen capture, UI, focus, permission prompt or installed-app proof."]
         let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print(String(data: data, encoding: .utf8)!)
         if cases.isEmpty || !failures.isEmpty { exit(1) }

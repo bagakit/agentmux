@@ -11,6 +11,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
     private var completions = 0
     private var current: NativeScreenSelection?
     private var savedApplication: NSRunningApplication?
+    private var heldPixels: DispatchSemaphore?
 
     static func main() {
         UnixSocketPathSafety.initializePrivateCreationMask()
@@ -49,9 +50,17 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--interactive") { begin(id: 0) }
     }
 
-    private func begin(id: Int, allowEditing: Bool = false) {
+    private func begin(id: Int, allowEditing: Bool = false, holdPixels: Bool = false) {
+        let pixels: NativeSelectionPixels
+        do { pixels = try previewPixels() }
+        catch { emit(["id": id, "ok": false, "message": String(describing: error)]); return }
+        let release = holdPixels ? DispatchSemaphore(value: 0) : nil
+        heldPixels = release
         DispatchQueue.global().async { [weak self] in
-            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing) }
+            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing) { _ in
+                release?.wait()
+                return pixels
+            } }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.completions += 1
@@ -79,7 +88,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [self] in
             let views = pickerViews()
             let primaryFrame = NSScreen.screens.first?.frame
-            guard let view = views.first(where: { $0.window?.frame == primaryFrame }) ?? views.first else {
+            guard let view = views.first(where: { $0.window?.frame == primaryFrame }) ?? views.first,
+                  heldPixels != nil || !view.loadingPixels else {
                 if attempts > 0 { discoverPicker(id: id, attempts: attempts - 1) }
                 else { emit(["id": id, "ok": false, "message": "Production picker window is unavailable"]) }
                 return
@@ -94,7 +104,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         let id = value["id"] as? Int ?? -1
         do {
             let method = value["method"] as? String ?? ""
-            if method == "begin" { begin(id: id, allowEditing: value["allowEditing"] as? Bool == true); return }
+            if method == "begin" { begin(id: id, allowEditing: value["allowEditing"] as? Bool == true, holdPixels: value["holdPixels"] as? Bool == true); return }
+            if method == "releasePixels" { heldPixels?.signal(); heldPixels = nil; emit(observation(id: id)); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
             if method == "inspect" { emit(observation(id: id)); return }
             if method == "displayChange" {
@@ -124,6 +135,11 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                     default: recipient.mouseUp(with: event)
                     }
                 }
+            } else if method == "hover" {
+                let location = try point(value["point"])
+                guard let event = NSEvent.mouseEvent(with: .mouseMoved, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 0, pressure: 0) else { throw PreviewFailure("Could not create hover event") }
+                view.mouseMoved(with: event)
             } else if method == "key" {
                 let code = value["keyCode"] as? UInt16 ?? 0
                 let flags: NSEvent.ModifierFlags = value["shift"] as? Bool == true ? .shift : []
@@ -134,7 +150,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 recipient.keyDown(with: event)
             } else if method == "button" {
                 let identifier = value["identifier"] as? String ?? ""
-                guard let button = descendants(view).compactMap({ $0 as? NSButton }).first(where: { $0.identifier?.rawValue == identifier }) else { throw PreviewFailure("Exact button is unavailable") }
+                guard let button = pickerViews().flatMap(descendants).compactMap({ $0 as? NSButton }).first(where: { $0.identifier?.rawValue == identifier }) else { throw PreviewFailure("Exact button is unavailable") }
                 // AppKit's button action/enablement is real. This deliberately
                 // does not claim a physical WindowServer mouse click.
                 button.performClick(nil)
@@ -166,6 +182,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         let panels = descendants(view).filter { $0.identifier?.rawValue == "native-selection-toolbar" && !$0.isHidden }
         return ["displayId": screenID(window.screen), "windowId": window.windowNumber, "frame": rect(window.frame),
                 "selection": view.selection.rectangle.map(rect) as Any? ?? NSNull(), "toolbarVisible": !panels.isEmpty, "acceptsFirstMouse": view.acceptsFirstMouse(for: nil),
+                "frozenPixels": !view.loadingPixels,
                 "viewGlobalOrigin": rect(window.convertToScreen(view.convert(view.bounds, to: nil))),
                 "windowServer": windowServerObservation(window)]
     }
@@ -181,10 +198,11 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 "scope": "metadata-only-no-pixel-or-physical-input-proof"]
     }
     private func controls() -> [[String: Any]] {
-        guard let view = current else { return [] }
-        return descendants(view).compactMap { child in
-            guard let button = child as? NSButton, let identifier = button.identifier?.rawValue else { return nil }
-            return ["identifier": identifier, "enabled": button.isEnabled, "frame": rect(button.convert(button.bounds, to: view))]
+        pickerViews().flatMap { view in
+            descendants(view).compactMap { child in
+                guard let button = child as? NSButton, let identifier = button.identifier?.rawValue else { return nil }
+                return ["identifier": identifier, "enabled": button.isEnabled, "frame": rect(button.convert(button.bounds, to: view))]
+            }
         }
     }
     private func observation(id: Int) -> [String: Any] {
@@ -195,6 +213,10 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             value["rectangle"] = view.selection.rectangle.map(rect) as Any? ?? NSNull()
             value["isInteracting"] = view.selection.isInteracting
             value["canConfirm"] = view.selection.canConfirm
+            value["loadingPixels"] = view.loadingPixels
+            if let pixels = view.frozenPixels, let display = pixels.display(in: view.viewport), let sample = pixels.sample(at: view.pointerLocation, in: display) {
+                value["sample"] = ["x": sample.x, "y": sample.y, "hex": sample.hex, "rgb": [sample.red, sample.green, sample.blue]]
+            }
             value["window"] = view.window.map { rect($0.frame) } as Any? ?? NSNull()
             value["isKeyWindow"] = view.window?.isKeyWindow ?? false
             value["eventDelivery"] = "direct-AppKit-responder-dispatch"
@@ -220,7 +242,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             if let size = constrainedSize {
                 let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
                 window.isReleasedWhenClosed = false
-                let view = NativeScreenSelection(frame: NSRect(origin: .zero, size: size), allowEditing: true)
+                let frame = NSRect(origin: .zero, size: size)
+                let view = NativeScreenSelection(frame: frame, allowEditing: true, pixels: try previewPixels(frames: [frame]))
                 window.contentView = view
                 for (type, point) in [(NSEvent.EventType.leftMouseDown, NSPoint(x: 24, y: size.height * 0.52)), (.leftMouseUp, NSPoint(x: size.width - 24, y: size.height - 44))] {
                     guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { throw PreviewFailure("Could not create constrained layout event") }
@@ -287,6 +310,22 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         draw()
         context.flushGraphics()
         return bitmap
+    }
+
+    /// Synthetic pixels use the production image/selection path. This fixture
+    /// never asks macOS for the person's desktop or screen-capture permission.
+    private func previewPixels(frames: [CGRect]? = nil) throws -> NativeSelectionPixels {
+        let screens = NSScreen.screens
+        let primaryTop = frames?.first?.maxY ?? screens.first?.frame.maxY ?? 0
+        let frames = frames ?? screens.map(\.frame)
+        return NativeSelectionPixels(displays: try frames.enumerated().map { index, frame in
+            let background = PreviewBackground(frame: CGRect(origin: .zero, size: frame.size))
+            let bitmap = try raster(size: frame.size) { background.draw(background.bounds) }
+            guard let image = bitmap.cgImage else { throw PreviewFailure("Could not create the synthetic frozen display") }
+            return NativeSelectionDisplay(displayID: index < screens.count ? screenID(screens[index]) : CGDirectDisplayID(index + 1), appKitFrame: frame,
+                quartzFrame: NativeCaptureGeometry.quartzRect(appKitRect: frame, primaryDisplayTop: primaryTop), image: image,
+                engine: "synthetic-preview", issue: nil)
+        })
     }
 
     func applicationWillTerminate(_ notification: Notification) {
