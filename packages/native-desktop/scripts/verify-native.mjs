@@ -260,7 +260,7 @@ async function verifyOSFixture(desktop, instanceId, evidence, swiftArgs, pngFrom
 let evidence
 const report = { schema: 'agentmux.native-verification.v1', mode: sourceOnly ? 'source-only' : 'source',
   featureAccepted: false, unverified: ['release signer peer positive/negative cases', 'LaunchServices/TCC/permission continuity',
-    'selection success/cancel and multi-display/HiDPI', 'clipboard text/PNG and partial-input OS branches', 'macOS 12/13 runtime'] }
+    'real multi-display/HiDPI pixels', 'clipboard text/PNG and partial-input OS branches', 'macOS 12/13 runtime'] }
 try {
   parseSources()
   report.syntax = 'passed'
