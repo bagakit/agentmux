@@ -2,6 +2,7 @@ import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImag
 import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
 import { moteMainHandoverInputId, moteMainBindingDefaults, spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
 import { agentTakeoverPrompt } from './agent-takeover-context.js'
+import { agentDerivedActionPrompt, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
 import { reconcileMoteMainSetup } from './mote-main-setup.js'
 import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote-dialogue.js'
@@ -472,6 +473,42 @@ export class AgentMuxRpcService {
     return { owner, params: { ...p, consumerId } }
   }
 
+  /**
+   * `derived-action` content is a public shorthand. Expand it here, once, into the ordinary
+   * new-agent or fork-agent content the spatial owner already admits: the same Core prompt the
+   * Desktop menu sends, from the exact source Session and the saved definition.
+   */
+  private async expandDerivedAction(params: AgentMuxRpcParams<'agent.open'>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcParams<'agent.open'>> {
+    const content = (params as { content?: { kind?: unknown } }).content
+    if (!content || content.kind !== 'derived-action') return params
+    const request = rpcControlRequest('agent.open', params)
+    if (request.operation !== 'agent.open' || request.content.kind !== 'derived-action') return params
+    const { actionId, source, executorId } = request.content
+    if (isAgentBuiltInDerivedActionId(actionId)) throw new AgentMuxError(`“${actionId}” is an official action with its own command: Take over uses agent open --executor with agent context, Fork uses agent open --fork-from, and Pass on experience uses agent learning prepare.`, 'INVALID_CONTROL_REQUEST')
+    const caller = await this.authenticated(context)
+    // A managed Agent may derive work only from its own Session; a person or device names any exact Session.
+    if (caller && caller.agentSessionId !== source.agentSessionId) throw new AgentMuxError('A managed Agent can start a derived action only from its own Session.', 'CONTROL_PERMISSION_DENIED')
+    // The same original settings owner that answers `settings derived-actions inspect`.
+    const found = this.ports.callOriginalCore
+      ? await this.ports.callOriginalCore('local', 'settings.derived-actions.inspect', { id: actionId }, context) as { item?: { value?: unknown } }
+      : (await this.execute(rpcControlRequest('settings.derived-actions.inspect', { id: actionId }), undefined, context) as { item?: { value?: unknown } })
+    if (!found?.item) throw new AgentMuxError('The saved derived action is unavailable on this endpoint. Nothing was started.', 'CONTROL_UNAVAILABLE')
+    const action = parseAgentDerivedActionFields(found.item.value)
+    const owner = await this.owner(source.agentSessionId, true)
+    const session = owner.session
+    const { content: _shorthand, ...rest } = params as Record<string, unknown>
+    if (action.base === 'fork') {
+      if (executorId !== undefined) throw new AgentMuxError('A fork continues the source Provider; remove --executor.', 'INVALID_CONTROL_REQUEST')
+      const native = session.nativeHandle
+      if (native?.kind !== 'provider') throw new AgentMuxError('The source native conversation is not confirmed; it cannot be forked. Inspect the Session first.', 'AGENT_FORK_UNSUPPORTED')
+      return { ...rest, content: { kind: 'fork-agent', source: { agentSessionId: session.agentSessionId, expectedRun: { runId: session.run.runId }, expectedNativeHandle: native }, prompt: action.instruction } } as AgentMuxRpcParams<'agent.open'>
+    }
+    const chosen = executorId ?? action.executorId
+    if (!chosen) throw new AgentMuxError('Choose the Agent with --executor; this action has no default Agent.', 'INVALID_CONTROL_REQUEST')
+    const prompt = agentDerivedActionPrompt(action, { hostId: owner.hostId, agentSessionId: session.agentSessionId, cwd: session.workspacePath,
+      executorId: session.executorId, label: session.agentSessionId, diagnostic: 'Started from the public derived action command; read the complete context for the current state.' })
+    return { ...rest, content: { kind: 'new-agent', executorId: chosen, prompt } } as AgentMuxRpcParams<'agent.open'>
+  }
   private async assertRuntimeFence(context: AgentMuxRpcCallContext): Promise<void> {
     if (!context.runtimeFence) return
     if (!this.ports.hostedRuntime) throw new AgentMuxError('The original semantic Runtime owner is unavailable. No operation was rerouted.', 'CONTROL_UNAVAILABLE')
@@ -1296,6 +1333,7 @@ export class AgentMuxRpcService {
       return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.open') {
+      params = await this.expandDerivedAction(params as AgentMuxRpcParams<'agent.open'>, context) as typeof params
       const request = rpcControlRequest('agent.open', params)
       if (request.operation === 'agent.open' && request.moteMain) {
         // This correlation reserves a person's initial Main setup; ordinary Agent creation stays independent.

@@ -210,7 +210,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller', 'moteMain'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
@@ -228,6 +228,12 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       if (target.newZone) fail('Fork preserves its source execution directory; select an existing destination.', code)
       content = { kind: 'fork-agent', source: parseAgentForkSource(input.source),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
+    } else if (input.kind === 'derived-action') {
+      fields(input, ['kind', 'actionId', 'source', 'executorId'], code)
+      if (target.newZone) fail('A derived action keeps its source execution directory; select an existing destination.', code)
+      const origin = fields(input.source, ['agentSessionId'], code)
+      content = { kind: 'derived-action', actionId: spaceControlId(input.actionId, 'Derived action', code), source: { agentSessionId: spaceControlId(origin.agentSessionId, 'Source Session', code) },
+        ...(Object.hasOwn(input, 'executorId') ? { executorId: spaceControlId(input.executorId, 'Executor', code) } : {}) }
     } else if (input.kind === 'agent-session') {
       fields(input, ['kind', 'agentSessionId'], code)
       if (target.newZone) fail('Existing Session display cannot create a Zone.', code)

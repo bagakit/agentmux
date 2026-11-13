@@ -318,6 +318,8 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'agent.open'; content:
       | { kind: 'new-agent'; executorId: string; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
+      /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
+      | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }
       | { kind: 'agent-session'; agentSessionId: string };
       destination: AgentMuxSpaceDestination; focus: boolean;
       moteMain?: import('./spatial-agent-open-contract.js').MoteMainCreationIntent;
