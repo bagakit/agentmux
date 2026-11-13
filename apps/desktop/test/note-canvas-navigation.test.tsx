@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { emptyNotebookState, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { newNoteDocument } from '../src/shared/note-document'
-import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { GlobalRecallSurface } from '../src/renderer/src/components/GlobalRecallSurface'
 import { NoteCanvas } from '../src/renderer/src/components/NoteCanvas'
 import { api } from '../src/renderer/src/lib/api'
@@ -23,7 +23,7 @@ import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 const dom = composerDOM(), noteId = 'original-note'
 const workspace = { id: 'canvas-original', hostId: 'local', path: join(tmpdir(), 'agentmux-canvas-navigation'), name: 'Original notes', kind: 'folder' as const }
 const path = 'original.note.md', docKey = documentKey(workspace.id, path)
-const spaceId = directoryIdentity(workspace.hostId, workspace.path), zoneId = homeZoneId(spaceId)
+const spaceId = directoryIdentity(workspace.hostId, workspace.path), zoneId = workspaceZoneId(spaceId, workspace.id)
 const savedNote = newNoteDocument('Saved original body', noteId, 'exact-original-block')
 savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId, blockId: 'exact-original-block' } }, content: [{ type: 'text', text: '[[Original Note #Exact original]]' }] })
 const saved = { path, revision: 'saved-original', content: serializeNoteDocument(savedNote) }

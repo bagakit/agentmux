@@ -15,7 +15,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { composerConfig } from './helpers/composer-dom-fixture'
-import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { LocalExecutionHost } from '@agentmux/core'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
@@ -386,7 +386,7 @@ it('opens the accurate unregistered shared Markdown after its body changes on di
   await sharedGraphFixture()
   const workspace = { id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' as const }
   const spaceId = directoryIdentity('local', directory)
-  const tab = { ...createWorkbenchTab('shared-file-tab', { kind: 'file', regionId: 'shared-file-region', workspaceId: 'notes', path: 'block-shared.note.md' }), space: { spaceId, zoneId: homeZoneId(spaceId) } }
+  const tab = { ...createWorkbenchTab('shared-file-tab', { kind: 'file', regionId: 'shared-file-region', workspaceId: 'notes', path: 'block-shared.note.md' }), space: { spaceId, zoneId: workspaceZoneId(spaceId, workspace.id) } }
   useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, loading: false, mainSurface: 'recall', activeWorkspaceId: 'notes', tabs: { [tab.id]: tab }, layouts: { notes: createWorkspaceLayout('shared-file-group', [tab.id]) } })
   vi.spyOn(api.files, 'read').mockImplementation(async (_workspaceId, path) => files.read(workspace, path))
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
