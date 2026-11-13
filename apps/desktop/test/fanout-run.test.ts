@@ -8,6 +8,7 @@ import {
   type FanOutPorts
 } from '../src/main/fanout-run.js'
 import { WorktreeRetainedError } from '../src/main/worktree-service.js'
+import { AgentMuxError } from '@agentmux/core'
 
 const config: AppConfig = {
   version: 9,
@@ -17,6 +18,10 @@ const config: AppConfig = {
   appearance: { terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
 }
+
+/** A launch that Core refused before creating anything: the only failure that may hand a checkout back. */
+const notApplied = (message: string) => new AgentMuxError(message, 'AGENT_CREATION_NOT_APPLIED', undefined, undefined, undefined,
+  { operationId: 'original-create', disposition: 'not_applied' })
 
 function lane(branch: string, executorId = 'codex') {
   return { branch, path: (_hygiene_fixturePath("repo/.worktrees/") + (branch) + ""), executorId }
@@ -154,7 +159,7 @@ describe('fan-out run', () => {
     // A worktree with no agent in it is the state a person has to decide about. Reporting it as merely
     // "failed" would leave a real directory nobody knows to claim.
     const io = ports({
-      launchAgent: vi.fn(async () => { throw new Error('launch exploded') }),
+      launchAgent: vi.fn(async () => { throw notApplied('launch exploded') }),
       removeWorktree: undefined
     })
 
@@ -180,7 +185,7 @@ describe('fan-out run', () => {
       config: { ...current, workspaces: [] }
     }))
     const io = ports({
-      launchAgent: vi.fn(async () => { throw new Error('nope') }),
+      launchAgent: vi.fn(async () => { throw notApplied('nope') }),
       removeWorktree
     })
 
@@ -200,7 +205,7 @@ describe('fan-out run', () => {
     const cell = configCell()
     // The user needs the original reason AND the truth that the directory is still there.
     const io = ports({
-      launchAgent: vi.fn(async () => { throw new Error('the real problem') }),
+      launchAgent: vi.fn(async () => { throw notApplied('the real problem') }),
       removeWorktree: vi.fn(async () => { throw new Error('cleanup also failed') })
     })
 
@@ -228,7 +233,7 @@ describe('fan-out run', () => {
     // 判据分两条，因为它们各自能漂移：分类要如实带出（下游据它选措辞），且这条 lane 不许进搁浅清单
     // （那份清单的语义是「还有个签出等你决定」，而这里没有签出可决定，指过去就是指向一个不存在的路径）。
     const io = ports({
-      launchAgent: vi.fn(async () => { throw new Error('launch exploded') }),
+      launchAgent: vi.fn(async () => { throw notApplied('launch exploded') }),
       removeWorktree: vi.fn(async () => {
         throw new WorktreeRetainedError('record-not-withdrawn', 'removed it, could not update the list')
       })
@@ -248,12 +253,59 @@ describe('fan-out run', () => {
     ).toEqual([])
   })
 
+  it('keeps the worktree when Core cannot confirm whether the Agent was created', async () => {
+    const cell = configCell()
+    // The reply was lost after Core may have started the Agent in this checkout. Removing the directory
+    // here could pull it out from under a live Agent, so an unknown creation keeps it for a person.
+    const removeWorktree = vi.fn(async (_input: { workspaceId: string }, current: AppConfig) => ({ config: { ...current, workspaces: [] } }))
+    const io = ports({
+      launchAgent: vi.fn(async () => {
+        throw new AgentMuxError('Agent start is unconfirmed.', 'AGENT_CREATION_UNCONFIRMED', undefined, undefined, undefined,
+          { operationId: 'original-create', disposition: 'unknown' })
+      }),
+      removeWorktree
+    })
+
+    const result = await runFanOut({
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
+    })
+
+    expect(removeWorktree).not.toHaveBeenCalled()
+    const [first] = result.lanes
+    expect(first).toMatchObject({ status: 'launch-failed', error: 'Agent start is unconfirmed.' })
+    expect(first?.status === 'launch-failed' ? first.cleanup : null).toEqual({
+      retention: 'creation-unconfirmed',
+      reason: expect.stringContaining('original-create')
+    })
+    expect(strandedLanes(result).map((entry) => entry.branch)).toEqual(['a'])
+    expect(cell.value.workspaces.map((workspace) => workspace.id)).toEqual(['ws-a'])
+  })
+
+  it('still hands the worktree back when Core confirms the Agent was never created', async () => {
+    const cell = configCell()
+    const removeWorktree = vi.fn(async (_input: { workspaceId: string }, current: AppConfig) => ({ config: { ...current, workspaces: [] } }))
+    const io = ports({
+      launchAgent: vi.fn(async () => {
+        throw new AgentMuxError('Agent start was not applied.', 'AGENT_CREATION_NOT_APPLIED', undefined, undefined, undefined,
+          { operationId: 'original-create', disposition: 'not_applied' })
+      }),
+      removeWorktree
+    })
+
+    const result = await runFanOut({
+      workspaceId: 'repo', prompt: 'p', lanes: [lane('a')], readConfig: cell.read, ports: registeredPorts(io, cell)
+    })
+
+    expect(removeWorktree).toHaveBeenCalledOnce()
+    expect(result.lanes[0]).toMatchObject({ status: 'launch-failed', cleanup: null })
+  })
+
   it('脏树的清理拒绝仍然算搁浅：那个签出真的还在，等人决定', async () => {
     const cell = configCell()
     // 与上一条成对。同样是「清理没成功」，但这一档目录还在，所以它**必须**进搁浅清单——只钉上面
     // 那条时，把整个 strandedLanes 改成恒空也照旧全绿。
     const io = ports({
-      launchAgent: vi.fn(async () => { throw new Error('launch exploded') }),
+      launchAgent: vi.fn(async () => { throw notApplied('launch exploded') }),
       removeWorktree: vi.fn(async () => {
         throw new WorktreeRetainedError('uncommitted-changes', 'Worktree has uncommitted changes: a')
       })

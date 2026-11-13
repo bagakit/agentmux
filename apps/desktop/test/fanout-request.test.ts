@@ -20,7 +20,8 @@ import type {
 const RETENTIONS: readonly WorktreeRetention[] = [
   'uncommitted-changes',
   'git-failed',
-  'record-not-withdrawn'
+  'record-not-withdrawn',
+  'creation-unconfirmed'
 ]
 
 // ---------------------------------------------------------------------------
@@ -291,12 +292,12 @@ describe('一次扇出请求真的跑到底', () => {
     if (result.kind !== 'fanout') return
     for (const lane of result.lanes) {
       expect(lane.status).toBe('launch-failed')
-      // 不说清就会变成没人认领的孤儿目录。`cleanup` 是三档保留之一或 `null`（交回去了），而不是一个
+      // 不说清就会变成没人认领的孤儿目录。`cleanup` 是四档保留之一或 `null`（交回去了），而不是一个
       // 布尔——布尔答不出「git 删掉了目录、只是记录没撤下」那一档。
       if (lane.status === 'launch-failed') {
         expect(
           lane.cleanup === null || RETENTIONS.includes(lane.cleanup.retention),
-          `cleanup 不是三档保留之一也不是 null：${JSON.stringify(lane.cleanup)}`
+          `cleanup 不是四档保留之一也不是 null：${JSON.stringify(lane.cleanup)}`
         ).toBe(true)
       }
     }
