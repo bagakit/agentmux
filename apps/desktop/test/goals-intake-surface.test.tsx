@@ -162,6 +162,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(directGoalRequest()?.notSaved).toBe(true)
     expect(container.querySelector('.goals-creation')?.textContent).toContain('已确认目标尚未保存')
     expect(container.querySelector('button[data-new-goal]')?.hasAttribute('disabled')).toBe(true)
+    expect(button('保存这个目标').querySelector('[data-semantic-icon]')).toBeNull()
     await act(async () => root.render(null)); await mount(); await click('保存这个目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(creates().map(request => request.demandId)).toEqual([id, id])
