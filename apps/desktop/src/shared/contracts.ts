@@ -1913,7 +1913,7 @@ export type AgentMuxDesktopApi = {
     exportScreenshot(input: import('./screenshot-output').ScreenshotPngSave): Promise<import('./screenshot-output').ScreenshotFileResult>
     pinScreenshot(input: import('./screenshot-output').ScreenshotPngExport): Promise<import('@agentmux/core').ImageResult>
     inspectScreenshotPin(operationId: string): Promise<import('@agentmux/core').ImageResult>
-    screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatus>
+    screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatuses>
     onScreenshotIssue(listener: (message: string) => void): () => void
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
     listWorkspaceSkills(workspaceId: string, providerId: string): Promise<import('@agentmux/core').AgentSkill[]>

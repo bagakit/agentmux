@@ -1,22 +1,26 @@
-import { SCREENSHOT_SHORTCUT_ACCELERATOR, type ScreenshotShortcutStatus } from '../shared/screenshot-shortcut.js'
+import { SCREENSHOT_SHORTCUTS, screenshotShortcutAccelerator, type ScreenshotShortcutStatus, type ScreenshotShortcutStatuses } from '../shared/screenshot-shortcut.js'
 
-/** App-ready Main owner. A failed OS registration affects only this shortcut. */
+/** App-ready Main owner. A failed OS registration affects only that shortcut. */
 export function registerScreenshotShortcut({ platform, shortcuts, request }: {
   platform: string
   shortcuts: { register(accelerator: string, callback: () => void): boolean; unregister(accelerator: string): void }
-  request(): void
-}): { status: ScreenshotShortcutStatus; dispose(): void } {
-  const accelerator = SCREENSHOT_SHORTCUT_ACCELERATOR
-  let owned = false
-  let status: ScreenshotShortcutStatus = { state: 'unsupported', accelerator, message: 'System screen capture is available on macOS.' }
-  if (platform === 'darwin') {
+  request(background: (typeof SCREENSHOT_SHORTCUTS)[number]['background']): void
+}): { status: ScreenshotShortcutStatuses; dispose(): void } {
+  const owned = new Set<string>()
+  const statuses = SCREENSHOT_SHORTCUTS.map(binding => {
+    const accelerator = screenshotShortcutAccelerator(binding.chord)
+    if (platform !== 'darwin') return { state: 'unsupported', accelerator, message: 'System screen capture is available on macOS.' } satisfies ScreenshotShortcutStatus
     try {
-      owned = shortcuts.register(accelerator, request)
-      status = owned ? { state: 'registered', accelerator }
-        : { state: 'unavailable', accelerator, message: 'The system did not register this shortcut. Check other apps using the same keys, then reopen AgentMux. The Capture button remains available.' }
+      if (shortcuts.register(accelerator, () => request(binding.background))) {
+        owned.add(accelerator)
+        return { state: 'registered', accelerator } satisfies ScreenshotShortcutStatus
+      }
+      return { state: 'unavailable', accelerator, message: 'The system did not register this shortcut. Check other apps using the same keys, then reopen AgentMux. The Capture button remains available.' } satisfies ScreenshotShortcutStatus
     } catch (error) {
-      status = { state: 'unavailable', accelerator, message: `System shortcut registration failed: ${String(error)}. The Capture button remains available.` }
+      return { state: 'unavailable', accelerator, message: `System shortcut registration failed: ${String(error)}. The Capture button remains available.` } satisfies ScreenshotShortcutStatus
     }
-  }
-  return { status, dispose() { if (owned) { owned = false; shortcuts.unregister(accelerator) } } }
+  })
+  return { status: { ...statuses[0]!, alternate: statuses[1]! }, dispose() {
+    for (const accelerator of owned) { owned.delete(accelerator); shortcuts.unregister(accelerator) }
+  } }
 }

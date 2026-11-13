@@ -2,11 +2,11 @@ import { app, BrowserWindow, ipcMain, nativeTheme, screen, type IpcMainInvokeEve
 import { join } from 'node:path'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { ImageOrigin, ImageResult, NativeDesktopPayloadMap } from '@agentmux/core'
-import type { NativeDesktop, NativeDisplayFrame } from '@agentmux/native-desktop'
+import type { NativeDesktop, NativeDisplayFrame, NativeDisplayFrames } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
 import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT, type CaptureSurfaceEvent, type CaptureSurfaceHandoff, type CaptureSurfaceInput,
-  type CaptureSurfaceRect } from '../shared/capture-surface'
+  type CaptureSurfaceRect, type CaptureBackground, type CaptureSurfaceFrame } from '../shared/capture-surface'
 import type { ScreenshotCaptureSource, SystemScreenshotEditorFinish } from '../shared/system-screenshot-editor'
 import { themeBootstrap } from './theme-bootstrap'
 import { saveScreenshotPng } from './screenshot-files'
@@ -17,6 +17,8 @@ const PRESENT_FALLBACK_MS = 1500
 /** One capture's consumer: its primary delivery, and whether ⌘E may move the marks to the window editor. */
 export type CaptureSurfaceSession = {
   attachToDraft: boolean
+  /** Initial Desktop background; public native selection passes excluded explicitly. */
+  background?: CaptureBackground
   expandable: boolean
   /** Another app was in front at capture start; closing the surface gives it focus back. */
   returnFocus: boolean
@@ -40,11 +42,11 @@ type Ports = {
   returnFocus(): void
 }
 /** `presentedMs`: since present(), when its renderer painted the frozen frame. */
-type Overlay = { window: BrowserWindow; input: CaptureSurfaceInput; engine: string | undefined; presented: boolean; presentedMs: number | null }
+type Overlay = { window: BrowserWindow; input: CaptureSurfaceInput; presented: boolean; presentedMs: number | null }
 type Active = {
   session: CaptureSurfaceSession
   overlays: Overlay[]
-  capturedAt: number
+  background: CaptureBackground
   /** performance.now() at present(); the timing line counts from here. */
   startedAt: number
   settleMs: number
@@ -96,7 +98,7 @@ export class CaptureSurface {
         else resolve(outcome)
       }
     })
-    const active: Active = { session, overlays: [], capturedAt: 0, startedAt: performance.now(), settleMs: 0, framesMs: null, owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
+    const active: Active = { session, overlays: [], background: session.background ?? 'included', startedAt: performance.now(), settleMs: 0, framesMs: null, owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
     const changed = () => active.end(Object.assign(new Error('The display layout changed during this capture, so its selection no longer matches the screen. Take the screenshot again.'),
       { code: 'display_configuration_changed' }))
     // A work area change (Dock or menu bar) leaves every frozen frame where it was; bounds, scale or rotation do not.
@@ -115,26 +117,54 @@ export class CaptureSurface {
     // A window already at opacity 0 is out of the grab and keeps its own value.
     active.faded = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
       .map(window => ({ window, opacity: window.getOpacity() })).filter(({ opacity }) => opacity > 0)
+    const native = this.ports.native()
+    // Each result belongs to its actual exposure, including its window geometry and timestamp.
+    // A failure of one exposure cannot take away the other usable background.
+    const freeze = async (includeHostWindows: boolean): Promise<NativeDisplayFrames | Error> => {
+      try { return await native.captureDisplays({ includeHostWindows }) }
+      catch (error) { return error instanceof Error ? error : new Error(message(error)) }
+    }
+    const included = await freeze(true)
+    if (this.active !== active) return
     for (const { window } of active.faded) window.setOpacity(0)
-    // Only a window that was on screen can be in the grab; with none faded the grab starts at once.
     if (active.faded.length && process.platform === 'darwin') {
       await new Promise(resolve => setTimeout(resolve, stepOutSettleMs()))
       active.settleMs = since(active.startedAt)
     }
     if (this.active !== active) return
-    const frames = await this.ports.native().captureDisplays()
+    const excluded = active.faded.length ? await freeze(false) : included
     if (this.active !== active) return
+    if (included instanceof Error && excluded instanceof Error) throw active.background === 'included' ? included : excluded
     active.framesMs = since(active.startedAt)
-    active.capturedAt = frames.capturedAt
     const displays = screen.getAllDisplays()
     let theme: CaptureSurfaceInput['theme']
     try { theme = themeBootstrap(this.ports.appearance(), nativeTheme.shouldUseDarkColors) }
     catch (error) { theme = { status: 'unavailable', message: 'Saved appearance could not be loaded. ' + message(error) } }
-    const placed = frames.displays.map(frame => {
-      const bounds = displays.find(display => display.id === frame.displayId)?.bounds
-      if (!bounds || bounds.x !== frame.frame.x || bounds.y !== frame.frame.y || bounds.width !== frame.frame.width || bounds.height !== frame.frame.height)
+    const results = { included, excluded }
+    const usable = (mode: CaptureBackground) => !(results[mode] instanceof Error) && (results[mode] as NativeDisplayFrames).displays.some(frame => frame.issue === undefined)
+    if (!usable('included') && !usable('excluded')) throw new Error('No display returned usable screenshot pixels. Take the screenshot again.')
+    const successful = included instanceof Error ? excluded as NativeDisplayFrames : included
+    if (successful.displays.length !== displays.length || (!(excluded instanceof Error) && excluded.displays.length !== displays.length))
+      throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
+    const placed = successful.displays.map(frame => {
+      const display = displays.find(display => display.id === frame.displayId)
+      const bounds = display?.bounds
+      if (!bounds || !sameRect(bounds, frame.frame) || display.scaleFactor !== frame.scale)
         throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
-      return { frame, input: overlayInput(frame, active.session, theme, this.recalled(frame)) }
+      const background = (result: NativeDisplayFrames | Error): CaptureSurfaceFrame => {
+        if (result instanceof Error) return { capturedAt: 0, issue: result.message }
+        const variant = result.displays.find(row => row.displayId === frame.displayId)
+        if (!variant || !sameRect(variant.frame, frame.frame) || variant.scale !== frame.scale)
+          throw Object.assign(new Error('The display layout changed between screenshot backgrounds. Take the screenshot again.'), { code: 'display_configuration_changed' })
+        return overlayFrame(variant, result.capturedAt)
+      }
+      const initialCrop = this.recalled(frame)
+      const includedFrame = background(included)
+      const input: CaptureSurfaceInput = { requestId: mintObjectId(), displayId: frame.displayId, frame: frame.frame, scale: frame.scale, safeTop: frame.safeTop,
+        attachToDraft: active.session.attachToDraft, expandable: active.session.expandable, theme, background: active.background,
+        backgrounds: { included: includedFrame, excluded: included === excluded ? includedFrame : background(excluded) },
+        ...(initialCrop ? { initialCrop } : {}) }
+      return { frame, input }
     })
     for (const { frame, input } of placed) {
       const window = new BrowserWindow({
@@ -143,7 +173,7 @@ export class CaptureSurface {
         alwaysOnTop: true, enableLargerThanScreen: true, title: 'Screenshot', ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
         webPreferences: { preload: join(import.meta.dirname, '../preload/capture-surface.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false }
       })
-      const overlay: Overlay = { window, input, engine: frame.engine, presented: false, presentedMs: null }
+      const overlay: Overlay = { window, input, presented: false, presentedMs: null }
       active.overlays.push(overlay)
       raise(window, frame.frame)
       window.once('ready-to-show', () => raise(window, frame.frame))
@@ -181,17 +211,29 @@ export class CaptureSurface {
     if (!active || !overlay || overlay.window.isDestroyed() || event.senderFrame !== overlay.window.webContents.mainFrame)
       throw new Error('This screenshot overlay does not belong to the current capture.')
     if (action === 'load') return overlay.input
-    const params = input as { requestId?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
+    const params = input as { background?: unknown; requestId?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
     if (params?.requestId !== overlay.input.requestId) throw new Error('The original screenshot request is no longer current.')
     if (action === 'presented') {
+      if (params.background !== active.background) return
       overlay.presented = true
       overlay.presentedMs ??= since(active.startedAt)
       if (active.overlays.every(row => row.presented)) this.show(active)
       return
     }
     if (action === 'cancel') { active.end({ state: 'cancelled' }); return }
+    if (action === 'switch-background') {
+      if (active.owner !== null || active.finishing) { send(overlay, { kind: 'notice', message: 'Keep the selection on its current display. Finish or cancel this capture before choosing another background.' }); return }
+      const next = active.background === 'included' ? 'excluded' : 'included'
+      // T-001's issue view offers an explicit choice; a failed hidden background is never silently replaced.
+      if (overlay.input.backgrounds[active.background].image) return
+      if (!overlay.input.backgrounds[next].image) { send(overlay, { kind: 'notice', message: overlay.input.backgrounds[next].issue! }); return }
+      active.background = next
+      for (const other of active.overlays) send(other, { kind: 'background', background: next })
+      return
+    }
+
     if (action === 'select') {
-      if (overlay.input.image === undefined || (active.owner !== null && active.owner !== overlay.input.displayId)) return false
+      if (overlay.input.backgrounds[active.background].image === undefined || (active.owner !== null && active.owner !== overlay.input.displayId)) return false
       if (active.owner === null) {
         active.owner = overlay.input.displayId
         for (const other of active.overlays) if (other !== overlay) send(other, { kind: 'locked' })
@@ -204,16 +246,20 @@ export class CaptureSurface {
       return await this.ports.copyText(params.text).then((): SystemScreenshotEditorFinish => ({ status: 'completed' }), error => ({ status: 'failed', message: message(error) }))
     }
     if (active.owner !== overlay.input.displayId) throw new Error('Only the display that holds the selection can output it.')
+    if (params.background !== active.background) throw new Error('The screenshot background changed before this output. Keep the selection and try the output again.')
+    const captured = overlay.input.backgrounds[active.background]
+    if (!captured.image) throw new Error(captured.issue)
+
     if (action === 'expand') {
       if (!active.session.expandable) throw new Error('This capture returns its selection directly. Finish it with Done or cancel it.')
       const handoff = params.handoff
       if (!handoff || !Array.isArray(handoff.shapes) || typeof handoff.tool !== 'string' || !handoff.crop) throw new Error('Keep the original marks and selection to expand.')
       const source = this.source(active, overlay, handoff.crop), remembered = this.remember(overlay, source.rect)
-      active.end({ state: 'expanded', image: overlay.input.image!, source, handoff, delivered: () => { this.recall = remembered } })
+      active.end({ state: 'expanded', image: captured.image, source, handoff, delivered: () => { this.recall = remembered } })
       return
     }
     pngBytes(params.image!)
-    if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: active.capturedAt })
+    if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
     const source = this.source(active, overlay, params.selection)
     if (action === 'pin') {
       if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pin operation.')
@@ -226,10 +272,10 @@ export class CaptureSurface {
     if (action !== 'finish') throw new Error('The screenshot overlay request is invalid.')
     if (active.finishing) return { status: 'failed', message: 'The previous copy is still in progress. Cancel remains available.' } satisfies SystemScreenshotEditorFinish
     active.finishing = true
-    try { await active.session.complete(params.image!, source, overlay.engine!) }
+    try { await active.session.complete(params.image!, source, captured.engine) }
     catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorFinish }
     finally { active.finishing = false }
-    this.recall = this.remember(overlay, source.rect)
+    if (this.active === active) this.recall = this.remember(overlay, source.rect)
     active.end({ state: 'completed' })
     return { status: 'completed' } satisfies SystemScreenshotEditorFinish
   }
@@ -248,18 +294,19 @@ export class CaptureSurface {
 
   /** The selection in global points: this display's origin plus its frozen-frame pixels over the display scale. */
   private source(active: Active, overlay: Overlay, selection: CaptureSurfaceRect | undefined): ScreenshotCaptureSource {
-    const { frame, scale, image } = overlay.input
+    const { frame, scale } = overlay.input
+    const { image, capturedAt } = overlay.input.backgrounds[active.background]
     if (!selection || ![selection.x, selection.y, selection.width, selection.height].every(Number.isFinite) || selection.width <= 0 || selection.height <= 0
       || selection.x < 0 || selection.y < 0 || selection.x + selection.width > image!.width || selection.y + selection.height > image!.height)
       throw new Error('The selection must stay inside its display.')
-    return { rect: { x: frame.x + selection.x / scale, y: frame.y + selection.y / scale, width: selection.width / scale, height: selection.height / scale }, scale, capturedAt: active.capturedAt }
+    return { rect: { x: frame.x + selection.x / scale, y: frame.y + selection.y / scale, width: selection.width / scale, height: selection.height / scale }, scale, capturedAt }
   }
 
   /** The public selection capture: the same surface without ⌘E, returning the processed selection as Core's public capture result. */
   async captureSelection(returnFocus: boolean): Promise<NativeDesktopPayloadMap['native.capture']> {
     let result: NativeDesktopPayloadMap['native.capture'] | null = null
     try {
-      const outcome = await this.present({ attachToDraft: false, expandable: false, returnFocus, complete: async (image, source, engine) => {
+      const outcome = await this.present({ attachToDraft: false, background: 'excluded', expandable: false, returnFocus, complete: async (image, source, engine) => {
         result = { state: 'captured', engine, selectionRect: source.rect,
           screenshot: { format: 'png', data: image.dataUrl.slice('data:image/png;base64,'.length), width: image.width, height: image.height, scale: source.scale } }
       } })
@@ -287,12 +334,11 @@ export class CaptureSurface {
   }
 }
 
-function overlayInput(frame: NativeDisplayFrame, session: CaptureSurfaceSession, theme: CaptureSurfaceInput['theme'], initialCrop: CaptureSurfaceHandoff['crop'] | undefined): CaptureSurfaceInput {
-  const base = { requestId: mintObjectId(), displayId: frame.displayId, frame: frame.frame, scale: frame.scale, safeTop: frame.safeTop, attachToDraft: session.attachToDraft, expandable: session.expandable, theme }
-  if (frame.issue !== undefined) return { ...base, issue: frame.issue }
+function overlayFrame(frame: NativeDisplayFrame, capturedAt: number): CaptureSurfaceFrame {
+  if (frame.issue !== undefined) return { capturedAt, issue: frame.issue }
   const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + frame.png, width: frame.width, height: frame.height, byteLength: Buffer.byteLength(frame.png, 'base64') }
-  pngBytes(image)
-  return { ...base, image, windows: displayWindows(frame, image), ...(initialCrop ? { initialCrop } : {}) }
+  // NativeDesktop validated this PNG at the private protocol boundary.
+  return { image, windows: displayWindows(frame, image), engine: frame.engine, capturedAt }
 }
 
 /** Native's global window bounds as this frame's pixels, clipped to the frame; windows off it are dropped and the order is kept. */

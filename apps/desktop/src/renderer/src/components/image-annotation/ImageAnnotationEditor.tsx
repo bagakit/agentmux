@@ -140,6 +140,8 @@ type EditorBase = {
   onCancel(): void
   onComplete: AnnotationOutput
   onEdited?(): void
+  /** The current source image has been loaded and drawn into the editor canvas. */
+  onPresented?(): void
   onError?(error: unknown): void
 }
 /** A fitted, zoomable editor with its header, property row, notes panel and footer. The default presentation. */
@@ -190,7 +192,7 @@ export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | Capt
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialStateKept = true, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS, safeTop = 0,
-  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onError }: ImageAnnotationEditorProps) {
+  locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onPresented, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
   const document = ownerDocument ?? workbenchDocument
   const ownerWindow = document.defaultView!
@@ -211,8 +213,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const sourcePixelsRef = useRef<ImageData | null>(null), antsPhase = useRef(0)
   const barRef = useRef<HTMLDivElement>(null), chipRef = useRef<HTMLSpanElement>(null), loupeRef = useRef<HTMLCanvasElement>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') committedLayerRef.current = document.createElement('canvas')
-  const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 })
-  const [imageError, setImageError] = useState(false)
+  const [loadedSource, setLoadedSource] = useState<string | null>(null), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 })
+  const [failedSource, setFailedSource] = useState<string | null>(null)
+  const loaded = loadedSource === image.dataUrl, imageError = failedSource === image.dataUrl
   const [documentState, setDocumentState] = useState<ScreenshotDocument>(() => ({ ...createScreenshotDocument(), ...initialState }))
   const [pendingText, setPendingText] = useState<TextDraft | null>(null)
   const capture = presentation === 'capture', label = completeLabel ?? (capture ? 'Done' : 'Copy PNG')
@@ -261,10 +264,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // The region an open adjustment edits shows as still dashes once no wand selection marches around it.
   const currentAdjustment = adjusting ? documentState.shapes.find(shape => shape.id === adjusting.id) : null
   const outlined = wand?.outline ?? (currentAdjustment && 'outline' in currentAdjustment ? currentAdjustment.outline : adjusting?.outline) ?? null
-  const live = useRef({ size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe, outlined })
-  live.current = { size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe, outlined }
-  const cache = useRef<{ document: ScreenshotDocument; shapes: ScreenshotShape[]; view: AnnotationView; size: Size; loaded: boolean;
+  const live = useRef({ size, documentState, loaded, source: image.dataUrl, selected, selectedShapes, tool, active, pendingText, loupe, outlined })
+  live.current = { size, documentState, loaded, source: image.dataUrl, selected, selectedShapes, tool, active, pendingText, loupe, outlined }
+  const cache = useRef<{ document: ScreenshotDocument; shapes: ScreenshotShape[]; view: AnnotationView; size: Size; loaded: boolean; source: string;
     excluded: string | undefined; hidden: ReadonlySet<string> | undefined; erased: number; masks: ScreenshotShape[] } | null>(null)
+  const presentedSource = useRef<string | null>(null), presentedCallback = useRef(onPresented)
+  presentedCallback.current = onPresented
   const scale = view.scale
 
   /** Copies the frozen pixels around the frame point into the sampler and reads the centre one. */
@@ -323,10 +328,10 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       const erased = eraseRef.current?.size ?? 0, previous = cache.current, shapes = state.documentState.shapes
       try {
         if (!previous || previous.document !== state.documentState || previous.view !== currentView || previous.size !== state.size ||
-          previous.loaded !== state.loaded || previous.excluded !== excluded || previous.erased !== erased || previous.shapes !== shapes || previous.hidden !== hidden) {
+          previous.loaded !== state.loaded || previous.source !== state.source || previous.excluded !== excluded || previous.erased !== erased || previous.shapes !== shapes || previous.hidden !== hidden) {
           const output = screenshotOutputShapes(shapes.filter(shape => shape.id !== excluded && !hidden?.has(shape.id) && !eraseRef.current?.has(shape.id)), state.documentState.crop)
           renderCommittedLayer(committed, output, viewport, state.loaded ? imageRef.current! : undefined)
-          cache.current = { document: state.documentState, shapes, hidden, view: currentView, size: state.size, loaded: state.loaded, excluded, erased,
+          cache.current = { document: state.documentState, shapes, hidden, view: currentView, size: state.size, loaded: state.loaded, source: state.source, excluded, erased,
             masks: output.filter(isScreenshotMask) }
         }
         const moving = group ? screenshotOutputShapes(group.moved.filter(shape => group.ids.has(shape.id)), state.documentState.crop) : currentGestureRef.current
@@ -368,12 +373,16 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           for (const y of guides.y) context.fillRect(0, y - .5 / fit, image.width, 1 / fit)
         }
         context.restore()
+        if (state.loaded && presentedSource.current !== image.dataUrl) {
+          presentedSource.current = image.dataUrl
+          presentedCallback.current?.()
+        }
         // The window highlight's fade paints only its own few frames.
         if (fading) schedulePaint()
         setView(current => current === currentView ? current : currentView)
       } catch (error) { onError?.(error) }
     })
-  }, [image.width, image.height, onError, ownerWindow, capture])
+  }, [image.width, image.height, image.dataUrl, onError, ownerWindow, capture])
   /** Each member's dashed bounds, and the group's bounds as one thin solid outline around them. */
   function paintGroup(context: CanvasRenderingContext2D, members: readonly ScreenshotShape[], fit: number) {
     context.strokeStyle = '#3b82f6'; context.lineWidth = 1 / fit; context.setLineDash([4 / fit, 3 / fit])
@@ -1104,8 +1113,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     onUndo={undo} onRedo={redo} onDelete={removeSelected} onClear={() => { resetGesture(); textDraftRef.current = null; setPendingText(null); selectOnly(null); edit(clearShapes); schedulePaint() }} />
   const canvasViewport = <>
         <div className="image-annotation-editor__viewport" style={{ width: size.width, height: size.height }}>
-          <img ref={imageRef} src={image.dataUrl} alt="Captured image" draggable={false} onLoad={() => { setLoaded(true); setImageError(false) }}
-            onError={() => { setLoaded(false); setImageError(true); onError?.(new Error('The image could not be decoded. Current annotations are kept.')) }} />
+          <img ref={imageRef} src={image.dataUrl} alt="Captured image" draggable={false} onLoad={event => { if ((event.currentTarget.currentSrc || event.currentTarget.src) === image.dataUrl) { setLoadedSource(image.dataUrl); setFailedSource(null) } }}
+            onError={() => { setLoadedSource(null); setFailedSource(image.dataUrl); onError?.(new Error('The image could not be decoded. Current annotations are kept.')) }} />
           <canvas ref={canvasRef} tabIndex={0} aria-label="Screenshot canvas" style={{ cursor: capture ? locked ? 'default' : cursor : tool === 'pan' || panHeld ? 'grab' : tool === 'select' ? groupIds.size ? 'move' : 'default' : 'crosshair' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelGesture}
             onPointerLeave={event => { if (capture) { setHover(null); lightWindow(null) } if (event.relatedTarget !== lockBadgeRef.current) setLockHover(null) }} onContextMenu={onContextMenu}

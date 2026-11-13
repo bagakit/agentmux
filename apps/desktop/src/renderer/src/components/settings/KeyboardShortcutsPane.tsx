@@ -5,7 +5,7 @@ import { buildCheatSheet, type CheatSheetRow, type CheatSheetGroupId } from '../
 import { bindingById, type ShortcutBinding } from '../../lib/shortcut-registry'
 import { isMacPlatform } from '../../lib/host-platform'
 import { api } from '../../lib/api'
-import { SCREENSHOT_SHORTCUT, type ScreenshotShortcutStatus } from '../../../../shared/screenshot-shortcut'
+import { SCREENSHOT_SHORTCUTS, type ScreenshotShortcutStatuses } from '../../../../shared/screenshot-shortcut'
 import '../../styles/settings-keyboard-shortcuts.css'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -32,11 +32,12 @@ export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGr
   const [selectedGroup, setSelectedGroup] = useState<CheatSheetGroupId | null>(null)
   const search = useRef<HTMLInputElement>(null)
   const isMac = isMacPlatform()
-  const [captureStatus, setCaptureStatus] = useState<ScreenshotShortcutStatus | null>(null)
+  const [captureStatus, setCaptureStatus] = useState<ScreenshotShortcutStatuses | null>(null)
+  const [captureIssue, setCaptureIssue] = useState<string | null>(null)
   useEffect(() => {
     let current = true
-    if (isMac) void api.ui.screenshotShortcutStatus().then(status => { if (current) setCaptureStatus(status) }, error => {
-      if (current) setCaptureStatus({ state: 'unavailable', accelerator: '', message: `Shortcut registration could not be observed: ${String(error)}. The Capture button remains available.` })
+    if (isMac) void api.ui.screenshotShortcutStatus().then(status => { if (current) { setCaptureStatus(status); setCaptureIssue(null) } }, error => {
+      if (current) setCaptureIssue(`Shortcut registration could not be observed: ${String(error)}. The Capture button remains available.`)
     })
     return () => { current = false }
   }, [isMac])
@@ -48,6 +49,12 @@ export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGr
   }) })).filter(group => group.rows.length > 0)
   const count = visible.reduce((total, group) => total + group.rows.length, 0)
   function clearSearch(): void { setQuery(''); search.current?.focus() }
+  function captureRegistration(id: string): string | null {
+    const binding = SCREENSHOT_SHORTCUTS.find(binding => binding.id === id)
+    if (!binding) return null
+    const status = binding.background === 'included' ? captureStatus : captureStatus?.alternate
+    return captureIssue ?? (status?.state === 'registered' ? 'Registered with macOS' : status?.message ?? 'Checking system shortcut registration…')
+  }
 
   return <div className="keyboard-shortcuts" data-keyboard-shortcuts>
     <div className="keyboard-shortcuts__intro"><p>Shortcuts for {isMac ? 'macOS' : 'this platform'}. These bindings are read-only.</p></div>
@@ -63,7 +70,7 @@ export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGr
     {visible.map(group => <section key={group.id} className="keyboard-shortcuts__group" data-shortcut-group={group.id}>
       {!groupId ? <header><h3>{group.title}</h3><p>{scopeDescription(bindingById(group.rows[0]!.id)!)}</p></header> : null}
       <ul>{group.rows.map(row => <li key={row.id} data-binding-id={row.id} data-tab-selection={row.id.startsWith('workbench.select-tab.') || undefined}>
-        <span className="keyboard-shortcuts__label">{row.label}{row.description ? <small>{row.description}</small> : null}{row.id === SCREENSHOT_SHORTCUT.id ? <small role="status">{captureStatus?.state === 'registered' ? 'Registered with macOS' : captureStatus?.message ?? 'Checking system shortcut registration…'}</small> : null}</span><span className="keyboard-shortcuts__chord">{row.keys.map((token, index) => <kbd key={index}>{token}</kbd>)}</span>
+        <span className="keyboard-shortcuts__label">{row.label}{row.description ? <small>{row.description}</small> : null}{captureRegistration(row.id) ? <small role="status">{captureRegistration(row.id)}</small> : null}</span><span className="keyboard-shortcuts__chord">{row.keys.map((token, index) => <kbd key={index}>{token}</kbd>)}</span>
       </li>)}</ul>
     </section>)}
   </div>

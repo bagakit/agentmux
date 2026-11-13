@@ -1497,7 +1497,7 @@ export async function registerIpc(args: {
     chooseSource: mode => screenshotSources.choose(mode), countdown: seconds => screenshotCountdown.wait(seconds) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
-    capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue,
+    capture: (attachToDraft, background) => screenCapture.capture(attachToDraft, 'selection', {}, background), reportIssue: reportScreenshotIssue,
     remindPending: () => { if (!captureSurface.notice('Finish or cancel this screenshot first')) screenshotEditor.notice('Finish or cancel this screenshot first') } })
   registerNativeDesktopIpc({ capture: (mode, options) => screenCapture.capture(true, mode, options), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
@@ -2443,7 +2443,7 @@ export async function registerIpc(args: {
   const disposeThemeBootstrap = registerThemeBootstrap(ipcMain, args.window, () => config.appearance, () => nativeTheme.shouldUseDarkColors)
   const disposeTerminalBrightness = observeTerminalBrightness(nativeTheme, updateTerminalBrightness)
   const screenshotShortcut = registerScreenshotShortcut({ platform: process.platform, shortcuts: globalShortcut,
-    request: () => { void globalScreenshot.run().catch(reportScreenshotIssue) } })
+    request: background => { void globalScreenshot.run(background).catch(reportScreenshotIssue) } })
   handleWithEvent('ui:screenshotShortcutStatus', event => {
     return screenshotShortcut.status
   })

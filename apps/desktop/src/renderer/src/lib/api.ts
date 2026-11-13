@@ -1,5 +1,5 @@
 import { createRendererSessionRecovery } from './session-recovery-api'
-import { SCREENSHOT_SHORTCUT_ACCELERATOR } from '../../../shared/screenshot-shortcut'
+import { SCREENSHOT_SHORTCUT, SCREENSHOT_SHORTCUT_ALTERNATE, screenshotShortcutAccelerator } from '../../../shared/screenshot-shortcut'
 import { createConversationReadApi } from './conversation-read-api'
 import { unwrapSessionObservationResult } from '../../../shared/session-observation-result'
 import { unwrapSessionStopReply } from '../../../shared/session-stop-result'
@@ -923,7 +923,8 @@ const mockApi: AgentMuxDesktopApi = {
     exportScreenshot: async () => { throw new Error('PNG export requires the desktop app. Copy PNG remains available.') },
     pinScreenshot: async () => { throw new Error('Pinned images require the desktop app. Copy PNG remains available.') },
     inspectScreenshotPin: async () => { throw new Error('Pinned image inspection requires the desktop app. Your image and other outputs remain available.') },
-    screenshotShortcutStatus: async () => ({ state: 'unavailable', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR, message: 'System shortcuts require the desktop app.' }),
+    screenshotShortcutStatus: async () => ({ state: 'unavailable', accelerator: screenshotShortcutAccelerator(SCREENSHOT_SHORTCUT.chord), message: 'System shortcuts require the desktop app.',
+      alternate: { state: 'unavailable', accelerator: screenshotShortcutAccelerator(SCREENSHOT_SHORTCUT_ALTERNATE.chord), message: 'System shortcuts require the desktop app.' } }),
     onScreenshotIssue: () => () => {},
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     listWorkspaceSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },

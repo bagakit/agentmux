@@ -12,7 +12,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
 import { useAppStore } from '../store'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../shared/contracts'
-import { SCREENSHOT_SHORTCUT } from '../../../shared/screenshot-shortcut'
+import { SCREENSHOT_SHORTCUTS } from '../../../shared/screenshot-shortcut'
 import { formatChord } from '../lib/shortcut-cheat-sheet'
 import { isMacPlatform } from '../lib/host-platform'
 
@@ -157,7 +157,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     {referenceTools}
     </span>
     {onCapture ? <span className="composer-tool-group" role="group" aria-label="Screen capture"><button type="button" className="composer-tool" disabled={disabled || capturing}
-      aria-label="Capture a screen region" title={isMacPlatform() ? `Capture a screen region (${formatChord(SCREENSHOT_SHORTCUT.chord, true).join('')} · system-wide)` : 'Capture a screen region'} onClick={() => { void runAction(() => capture()) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button>
+      aria-label="Capture a screen region" title={isMacPlatform() ? `Capture a screen region (${SCREENSHOT_SHORTCUTS.map(binding => `${formatChord(binding.chord, true).join('')} ${binding.background === 'included' ? 'includes' : 'hides'} AgentMux`).join(' · ')} · system-wide)` : 'Capture a screen region'} onClick={() => { void runAction(() => capture()) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button>
       <DropdownMenu.Root><DropdownMenu.Trigger className="composer-tool" disabled={disabled || capturing} aria-label="Choose screenshot source" title="Choose screenshot source"><SemanticIcon name="control.select-open" size={11} /></DropdownMenu.Trigger>
         <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="end" sideOffset={4} collisionPadding={8}>
           <DropdownMenu.Item onSelect={() => { void runAction(() => capture()) }}>Screen region</DropdownMenu.Item>

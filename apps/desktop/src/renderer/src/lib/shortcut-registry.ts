@@ -1,6 +1,6 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { COMPOSER_KEYBOARD_BINDINGS } from '@agentmux/client-ui/composer-keyboard'
-import { SCREENSHOT_SHORTCUT } from '../../../shared/screenshot-shortcut'
+import { SCREENSHOT_SHORTCUTS } from '../../../shared/screenshot-shortcut'
 // Desktop's complete shortcut inventory: local bindings plus declarations owned by shared surfaces.
 // Chord, stable id, scope, and the platform bottom line are each expressed exactly once at their owner.
 // Before this, the same "which key is which action" decision was scattered
@@ -199,8 +199,8 @@ const SELECT_TAB_BINDINGS: ShortcutBinding[] = Array.from({ length: 9 }, (_, ind
  * guard keeps it that way.
  */
 export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
-  { id: SCREENSHOT_SHORTCUT.id, scope: 'system', keyClass: 'digit', label: SCREENSHOT_SHORTCUT.label,
-    description: SCREENSHOT_SHORTCUT.description, macOnly: true, mac: SCREENSHOT_SHORTCUT.chord, other: SCREENSHOT_SHORTCUT.chord },
+  ...SCREENSHOT_SHORTCUTS.map(binding => ({ id: binding.id, scope: 'system', keyClass: 'digit', label: binding.label,
+    description: binding.description, macOnly: true, mac: binding.chord, other: binding.chord } satisfies ShortcutBinding)),
   // The shared Composer is the dispatch owner; Desktop only projects its declaration for discovery.
   ...COMPOSER_KEYBOARD_BINDINGS.map(({ chord, id, keyClass, label, description }): ShortcutBinding => ({
     id, keyClass, label, description, scope: 'message-tool', mac: chord, other: chord
