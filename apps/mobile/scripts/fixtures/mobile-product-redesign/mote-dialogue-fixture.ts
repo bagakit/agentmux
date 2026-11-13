@@ -1,5 +1,6 @@
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
-import type { MoteDialoguePage } from '@agentmux/core/mote-dialogue'
+import type { MoteDialoguePage, MoteMainSetupResult } from '@agentmux/core/mote-dialogue'
+import { moteMainBindingDefaults } from '@agentmux/core/spatial-graph'
 import { effectiveMoteQuickSave, type MotePresenceReading, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 /** Private observations only. No live Mote, schedule, model or Run is operated. */
 export function createMoteDialogueCapture() {
@@ -21,12 +22,18 @@ export function createMoteDialogueCapture() {
     everyMs: 1800000, intervalMs: 1000, prompt: 'Original frozen internal check of goals, threads, decisions and unfinished commitments.', nextCheckAt: originalAt + 1800000, status: 'paused', revision: 7,
     creationOperationId: 'original-heartbeat-create', futureIntentId: 'original-heartbeat-intent' } }
   let unknown = false
+  let retentionSnapshot: MoteMainSetupResult | null = null, setup: MoteMainSetupResult | null = null, releaseSetup: (() => void) | null = null
   const dispatch = { hostId, dispatch: { sourceMessageId: work.origin.messageId, ownerAgentSessionId: main.sessionId, workerAgentSessionId: b.sessionId, threadId: work.origin.threadId,
       openedAt: originalAt, originAwaits: true, events: [{ kind: 'worker_done', senderSessionId: b.sessionId, recipientSessionId: main.sessionId, messageId: 'original-research-report', createdAt: originalAt + 60000 }] },
     source: { envelope: { messageId: work.origin.messageId, threadId: work.origin.threadId, senderSessionId: main.sessionId, recipientSessionId: b.sessionId,
       body: '比较两个实验方向，保留原资料与需要你决定的问题。', createdAt: originalAt } }, replies: [{ envelope: { messageId: 'original-research-report', threadId: work.origin.threadId,
       senderSessionId: b.sessionId, recipientSessionId: main.sessionId, body: '三份样本已读。方案 A 更容易在一天内得到反馈；方案 B 的原依据也已保留。下一步仍由你决定。', createdAt: originalAt + 60000 } }], identityDiagnostics: [] }
   return {
+    // Replay only the typed success/retention facts from the real consumer test.
+    // Identities are rebound to this private capture's original target and request; no live owner is called.
+    configureRetention(snapshot: MoteMainSetupResult) { retentionSnapshot = snapshot; setup = null },
+    releaseSetup() { releaseSetup?.(); releaseSetup = null },
+    retentionIssue: () => setup?.issue,
     setStartScene(mode: 'empty' | 'new' | 'history' | 'unknown' | 'policy', checkpoint: import('@agentmux/core/conversation').ConversationCheckpoint) {
       unknown = mode === 'unknown'
       const periods = [0, 1].map(index => ({ ...prior, sequence: index + 1, operationId: 'capture-history-' + index, roleRevision: 'capture-role-' + index,
@@ -43,9 +50,34 @@ export function createMoteDialogueCapture() {
     },
     replaceMain() { page = { ...page, links: [work, prior], main: { ...page.main, current: b, roleRevision: 'original-role-B' } } },
     unconfirm() { unknown = true },
-    facts: () => ({ target, page, maintenance }),
+    facts: () => ({ target, page, maintenance, defaults }),
     rpc(method: string, input: any) {
-      if (method === 'space.state') return { state: { graph: { resources: {} } } }
+      if (method === 'space.state') return { state: { graph: { resources: setup?.record ? { 'core:agent-open': { schema: 'agentmux.spatial-agent-open.v1', requests: { [setup.operationId]: setup.record } } } : {} } } }
+      if (method === 'agent.open' && retentionSnapshot?.record) {
+        const original = retentionSnapshot, record = original.record!, query = input.moteMain.deferredInput
+        const replacement = new Map<string, string>([
+          [original.operationId, input.operationId], [record.moteMain!.sourceOperationId, input.moteMain.sourceOperationId], [record.moteMain!.bindOperationId, input.moteMain.bindOperationId],
+          [record.agentSessionId, main.sessionId], [record.execution.hostId, hostId], [record.executorId, input.content.executorId],
+          ...(query ? [[record.moteMain!.deferredInput!.operationId, query.operationId], [record.moteMain!.deferredInput!.prompt, query.prompt], [original.deferredInput!.route!.key.expectedRun.runId, 'run-session-mote']] as [string, string][] : [])
+        ])
+        const rewrite = (value: any): any => typeof value === 'string' ? replacement.get(value) ?? value : Array.isArray(value) ? value.map(rewrite) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, value]) => [key, rewrite(value)])) : value
+        setup = rewrite(original)
+        setup!.operationId = input.operationId; setup!.ownerHostId = 'local'; setup!.reference = main
+        setup!.record = { ...setup!.record!, requestId: input.operationId, moteMain: input.moteMain,
+          address: { spaceId, zoneId, workspaceId: resource.workspaceId, displayWorkspaceId: main.displayWorkspaceId, groupId: main.groupId, tabId: main.tabId, regionId: main.regionId },
+          execution: { hostId, workspaceId: resource.workspaceId, workspacePath: fixturePath('execution-original') } }
+        defaults = moteMainBindingDefaults(setup!.record!)
+        setup!.bindingObserved = { kind: 'preferences', source: { resource: file, documentRevision: document.revision, defaults } }
+        if (setup!.deferredInput?.route) { setup!.deferredInput.route.identity = identity; setup!.deferredInput.route.reference = main; setup!.deferredInput.route.roleRevision = defaults.conversationRevision! }
+        page = { ...page, main: { ...page.main, current: main, roleRevision: defaults.conversationRevision! } }
+        return {}
+      }
+      if (setup && (method === 'space.mote.dialogue.setup.inspect' || method === 'space.mote.dialogue.setup.advance')) {
+        if (input.creation.operationId !== setup.operationId) throw Error('Capture must inspect the same original setup operation')
+        const reply = structuredClone(setup)
+        if (method === 'space.mote.dialogue.setup.advance' && setup.record?.moteMain?.deferredInput && !releaseSetup) return new Promise(resolve => { releaseSetup = () => resolve(reply) })
+        return reply
+      }
       if (method === 'space.mote.dialogue.read') { if (unknown) throw Error('原主对话读取暂不可用；保留上次确认的角色、原工作与草稿。'); return structuredClone({ ...page, links: page.links.filter(link => !input.kind || link.kind === input.kind) }) }
       if (method === 'message.dispatch.read') { if (input.hostId !== hostId || input.sourceMessageId !== work.origin.messageId) throw Error('Wrong original work source'); return structuredClone(dispatch) }
       if (method === 'space.mote.preferences.read') return { kind: 'quick', target, status: 'ready', source: { resource: file, result: { status: 'read', document } }, defaults,

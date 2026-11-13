@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
+  await win.loadFile(html, ['mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -70,6 +70,9 @@ app.whenReady().then(async () => {
     await button('日常协作', '.mobile-mote-agents')
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
+  }
+  if (mode === 'mote-main-retention') {
+    await require('./mote-main-retention.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
   }
   if (mode === 'mote-start') {
     await require('./mote-start.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return

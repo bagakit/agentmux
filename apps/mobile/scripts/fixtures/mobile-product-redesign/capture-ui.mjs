@@ -158,15 +158,32 @@ try {
   const iconOwner = path.join(compiled, 'project-appearance-owner.mjs')
   const iconBuild = await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/main/project-appearance.ts'], outfile: iconOwner, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', metafile: true, plugins: [workspaceSources] })
   const projectAppearance = await (await import(pathToFileURL(iconOwner).href)).projectAppearance(iconProject)
-  const providerOwner = path.join(compiled, 'provider-catalog-owner.cjs')
-  const providerBuild = await build({ absWorkingDir: root, entryPoints: ['packages/core/src/agent-provider.ts'], outfile: providerOwner, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error', metafile: true, plugins: [workspaceSources] })
-  const providerCatalog = new (require(providerOwner)).AgentProviderRegistry().catalog()
+  let retentionFixtures = null
+  if (process.argv.includes('--mote-main-retention')) {
+    const evidenceRoot = process.env.AGENTMUX_MOTE_RETENTION_EVIDENCE
+    assert.ok(evidenceRoot, 'Use the fresh actual-consumer fixture output, not a hand-authored setup DTO')
+    retentionFixtures = {}
+    receipt.retentionFixtures = {}
+    for (const surface of ['welcome', 'profile']) {
+      const file = path.resolve(evidenceRoot, surface + '-fixture.json'), bytes = await fs.readFile(file)
+      retentionFixtures[surface] = JSON.parse(bytes)
+      receipt.retentionFixtures[surface] = { file: path.relative(root, file), sha256: sha(bytes) }
+      assert.equal(retentionFixtures[surface].result.binding, 'confirmed')
+      assert.ok(retentionFixtures[surface].result.issue)
+    }
+  }
+  const providerOwner = path.join(compiled, 'provider-catalog-owner.mjs')
+  const providerBuild = await build({ absWorkingDir: root, entryPoints: ['packages/core/src/agent-provider.ts'], outfile: providerOwner, bundle: true, platform: 'node', format: 'esm',
+    banner: { js: "import { createRequire as __providerRequire } from 'node:module'; const require = __providerRequire(import.meta.url);" }, logLevel: 'error', metafile: true, plugins: [workspaceSources] })
+  await fs.symlink(path.join(root, 'packages/core/node_modules'), path.join(compiled, 'node_modules'), 'dir')
+  const providerCatalog = new (await import(pathToFileURL(providerOwner).href)).AgentProviderRegistry().catalog()
+  await fs.unlink(path.join(compiled, 'node_modules'))
   assert.ok(providerCatalog.find(value => value.id === 'codex')?.composer?.commands?.length, 'Original Provider owner declares the captured Commands')
   assert.ok(projectAppearance.icon?.startsWith('data:image/'), 'The original App filesystem owner returns the real bounded project image')
   receipt.projectAppearance = { owner: 'apps/desktop/src/main/project-appearance.ts', kind: projectAppearance.kind, source: 'packages/client-ui/src/assets/app-icons/qingzhuan.png', imageSha256: sha(projectAppearance.icon) }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workspaceSources, workers, sourceProof],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_SETUP_RETENTION__: JSON.stringify(retentionFixtures), __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   const inputs = { ...iconBuild.metafile.inputs, ...providerBuild.metafile.inputs, ...built.metafile.inputs, ...workerInputs }
   for (const file of Object.keys(inputs).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-identity-source:') && !file.startsWith('(disabled):') && !file.startsWith('<define:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const file of ['packages/core/test/helpers/workspace-source-export.mjs', 'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts']) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
@@ -189,7 +206,8 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['mature-shell', 'mote-start', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  if (subset === 'mote-main-retention') receipt.source[path.relative(root, path.join(fixture, 'mote-main-retention.cjs'))] = sha(await fs.readFile(path.join(fixture, 'mote-main-retention.cjs')))
   if (subset) receipt.captureSubset = subset
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })

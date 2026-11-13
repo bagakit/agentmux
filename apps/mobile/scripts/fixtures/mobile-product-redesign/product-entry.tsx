@@ -1,6 +1,7 @@
 import { retainObjectReference } from '../../../src/recovery/presentation-route'
 declare const __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: { kind: string; icon: string | null }
 declare const __AGENTMUX_MOBILE_PROVIDER_CATALOG__: ReturnType<AgentMuxHostedClient['catalog']>
+declare const __AGENTMUX_MOBILE_SETUP_RETENTION__: Record<'welcome' | 'profile', { result: import('@agentmux/core/mote-dialogue').MoteMainSetupResult }> | null
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
@@ -234,6 +235,10 @@ const client = {
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     record(method, params)
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
+    if (method === 'space.ls' && moteDialogueCapture && __AGENTMUX_MOBILE_SETUP_RETENTION__) {
+      const source = moteDialogueCapture.facts(), fact = catalog.motePresentation!.find(value => value.spaceId === source.target.spaceId)!
+      Object.assign(fact, { quickMode: { status: 'saved', version: source.page.main.documentRevision, defaults: source.defaults }, conversation: source.page.main.current })
+    }
     if (moteDialogueCapture) { const reply = moteDialogueCapture.rpc(method, params); if (reply !== undefined) return reply }
     if (method === 'file.upload' && holdFileUpload) return await new Promise(resolve => {
       releaseFileUpload = () => { const { dataBase64: _data, ...identity } = params; resolve({ ...identity, status: 'uploaded', path: '/opaque/原资料截图.png' }) }
@@ -337,6 +342,12 @@ function Scene() {
   const [unconfirmedClient, setUnconfirmedClient] = useState(false)
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   Object.assign(window, { mobileProductScene: {
+    configureSetupRetention: (surface: 'welcome' | 'profile') => {
+      if (!moteDialogueCapture || !__AGENTMUX_MOBILE_SETUP_RETENTION__) throw Error('The exact real-consumer retention fixtures are required')
+      moteDialogueCapture.configureRetention(__AGENTMUX_MOBILE_SETUP_RETENTION__[surface].result)
+    },
+    releaseSetupRetention: () => moteDialogueCapture!.releaseSetup(),
+    setupRetentionIssue: () => moteDialogueCapture!.retentionIssue(),
     prepareMoteStart: async (mode: 'empty' | 'new' | 'history' | 'unknown' | 'policy') => {
       if (!moteDialogueCapture) throw Error('The controlled dialogue scene must be selected explicitly')
       const checkpoint = (await client.readAgentConversation({ hostId: 'host-original', agentSessionId: main.agentSessionId })).window.checkpoint
