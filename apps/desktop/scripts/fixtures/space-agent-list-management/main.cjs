@@ -168,7 +168,7 @@ app.whenReady().then(async () => {
       result.operations.push({ kind: 'retained-reply-exited-run', ...retainedReply })
       await read('spaceListScene.retainedReply(false)'); await settle()
       const final = await facts(); await writeFile(join(privateRoot, 'expected.json'), JSON.stringify({ order: final.order, preference: final.preference, sessionIds: final.sessions.map(session => session.id), tabs: final.tabs, layouts: final.layouts, drafts: final.drafts }))
-      await clickLabel('去 Focus 中查看'); await until('!!document.querySelector(".global-focus-main .focus-context")')
+      await clickLabel('View in Focus'); await until('!!document.querySelector(".global-focus-main .focus-context")')
       for (const width of [1200, 360]) {
         win.setContentSize(width, 880); await settle()
         const image = `shared-focus-${width}.png`
