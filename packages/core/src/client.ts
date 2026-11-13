@@ -572,12 +572,18 @@ function digestInteractionResponse(response: AgentMuxInteractionResponse): strin
  * 一处取值」而不是让 11 个调用点各带一个 `exitReason` 实参：那样每处都要手抄一次「从台账取值」，漏抄
  * 一处，那条路上的退出原因就静默退化成缺席，而 tsc 对可选字段缺席一言不发——正是本条缺陷的形状。
  */
+/** One ended Run in the ledger: why it exited (undefined for an interruption) and when Core first saw it end. */
+type EndedRun = { exitReason: AgentMuxRunExitReason | undefined; endedAt: number }
+
 function projectRunWith(
-  exitReason: AgentMuxRunExitReason | undefined,
+  ended: EndedRun | undefined,
   run: CtxmuxAdapterRun,
   agentSession?: AgentMuxAgentSession
 ): AgentMuxRun {
-  const observedAt = Date.now()
+  // An ended Run carries the time it ended: that is the fact's own time, and projecting it again must
+  // not move it to now. A running Run has no transition time; its observedAt is this observation.
+  const exitReason = ended?.exitReason
+  const observedAt = run.state.type !== 'running' && ended ? ended.endedAt : Date.now()
   return {
     runId: run.runId,
     kind: agentSession ? 'agent' : 'terminal',
@@ -921,7 +927,10 @@ export class AgentMuxClient {
   //
   // 一个 runId 只终结一次且此后永不复活，所以这里不逐条删——删了就等于把「已终结」这个事实忘掉，
   // 迟到的 hook 又能复活它。整份随断连清空（连接重建后会重新 list 出真相），与 stopRequestedRuns 同处。
-  private readonly endedRuns = new Map<string, AgentMuxRunExitReason | undefined>()
+  //
+  // `endedAt` 是 Core 第一次观察到这次终结的时刻：实时退出事件带来的 observedAt，或冷启动 list 时第一次
+  // 看到它。ctxmux 的 RunInfo 不带转移时间，所以这是这条事实唯一稳定的时间；同一次终结投影多少次都是它。
+  private readonly endedRuns = new Map<string, EndedRun>()
 
   // 每个 run 的 turn 收尾台账：turn 已收尾之后到达的工具事件不许再改语义状态（判据与理由见
   // hook-turn-phase.ts，那里记着「为什么不是比 observedAt」）。
@@ -1997,16 +2006,17 @@ export class AgentMuxClient {
       if (run.state.type === 'running') continue
       if (this.endedRuns.has(run.runId)) continue
       const stopRequested = this.stopRequestedRuns.delete(run.runId)
-      this.endedRuns.set(
-        run.runId,
-        run.state.type === 'exited'
+      this.endedRuns.set(run.runId, {
+        exitReason: run.state.type === 'exited'
           ? classifyRunExit({
               stopRequested,
               exitCode: run.state.code,
               ...(run.state.signal === null ? {} : { exitSignal: run.state.signal })
             })
-          : undefined
-      )
+          : undefined,
+        // A snapshot carries no transition time; the first time Core sees this end is its time from now on.
+        endedAt: Date.now()
+      })
       const agentSession = this.registry.findByRun(runRef(run.runId))
       this.releaseEndedRunHook(runRef(run.runId), agentSession)
       if (agentSession) { this.invalidateEndedRunReadiness(agentSession, runRef(run.runId)); this.recovery.wake(agentSession.agentSessionId) }
@@ -11326,7 +11336,7 @@ export class AgentMuxClient {
     // 这个 run 的进程终结了 —— 连同刚分类出的原因一起记下来。这一条记录承两件事：此后它的 hook 一律
     // 拒收（见 acceptHookEvent），以及 snapshot 重投影时还能说出「它为什么没了」。必须记在分类**之后**：
     // 意图已经在上一行被读走并删掉，事后再没有第二次机会算出这个答案。
-    this.endedRuns.set(event.runId, exitReason)
+    this.endedRuns.set(event.runId, { exitReason, endedAt: event.observedAt })
     this.releaseEndedRunHook(runRef(event.runId), agentSession)
     if (agentSession) {
       const frontendWatch = this.terminalFrontendWatches.get(agentSession.agentSessionId)
