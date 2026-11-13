@@ -1,3 +1,4 @@
+import { importTaskRecording } from '../../../test/helpers/import-task-recording.js'
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -100,7 +101,7 @@ async function run() {
   assert.equal(receipt.native.slice(beforeNavigation).some((e: any) => e.params?.type === 'touchEnd'), false, 'No old contact may end in a replacement document')
   const click = await invoke('fresh-click-after-touch-navigation', `const p=await snapshot();await click(p.nodes.find(n=>n.name==='New document').ref);return 'clicked'`); assert.equal(click.outcome.kind, 'completed'); assert.equal(await contents.executeJavaScript('clicks'), 1)
   await contents.loadURL(url); await waitFor(() => contents.executeJavaScript('!!document.querySelector("#surface")'), 'fresh gesture page')
-  let asset = await tasks.importRecording({ id: 'original-empty', browserId: 'page', navigationId: 'native', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  let asset = await importTaskRecording(tasks, { id: 'original-empty', browserId: 'page', navigationId: 'native', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const trusted = (event: Electron.IpcMainInvokeEvent) => { assert.equal(event.sender, win.webContents); assert.equal(event.senderFrame, win.webContents.mainFrame) }
   ipcMain.handle('touch-proof:initial', event => { trusted(event); return asset })
   ipcMain.handle('touch-proof:current', async event => { trusted(event); const state = await manager.getTaskAssets('page'); return {asset:state.assets.find(item=>item.id===asset.id),run:state.runs.find(item=>item.id===state.selectedRunId)??null} })

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { importTaskRecording } from './helpers/import-task-recording.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
@@ -139,7 +140,7 @@ it('page-forged touch starts cannot confirm Main’s original native touch', () 
 it('real task editor declares, saves and reloads reviewed gestures through the original asset owner', async () => {
   let saved: BrowserTaskAssetDocument | null = null
   const store: BrowserTaskAssetStore = { load: async () => structuredClone(saved), save: async next => { saved = structuredClone(next) } }, owner = new BrowserTaskAssets(store)
-  let asset = await owner.importRecording({ id: 'recording', browserId: 'page', navigationId: 'nav', url: 'https://example.test/drag', revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  let asset = await importTaskRecording(owner, { id: 'recording', browserId: 'page', navigationId: 'nav', url: 'https://example.test/drag', revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const host = document.createElement('div'), root = createRoot(host), save = vi.fn(async (draft: BrowserTaskContent) => { asset = await owner.edit(asset.id, asset.revision, draft); asset = await owner.saveVersion(asset.id, asset.revision) })
   document.body.append(host)
   try {

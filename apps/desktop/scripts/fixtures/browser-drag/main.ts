@@ -1,3 +1,4 @@
+import { importTaskRecording } from '../../../test/helpers/import-task-recording.js'
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -101,7 +102,7 @@ async function run() {
   assert.ok(afterClick.inputs.some((e: any) => e.type === 'click' && e.target === 'new-target' && e.trusted))
   receipt.cases.push({label:'human-click-after-navigation',page:afterClick})
   await contents.loadURL(url); await waitFor(() => contents.executeJavaScript('!!document.querySelector("#basket")'), 'original page for task editor')
-  let asset = await tasks.importRecording({ id: 'empty-original', browserId: 'page', navigationId: 'native', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  let asset = await importTaskRecording(tasks, { id: 'empty-original', browserId: 'page', navigationId: 'native', url, revision: 1, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
   const trusted = (event: Electron.IpcMainInvokeEvent) => { assert.equal(event.sender, win.webContents); assert.equal(event.senderFrame, win.webContents.mainFrame) }
   ipcMain.handle('drag-proof:initial', event => { trusted(event); return asset })
   ipcMain.handle('drag-proof:save', async (event, draft) => { trusted(event); asset = await manager.saveTaskAssetVersion('page', asset.id, asset.revision, draft); receipt.savedVersion = asset; return asset })

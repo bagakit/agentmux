@@ -1,3 +1,4 @@
+import { importTaskRecording } from '../../../test/helpers/import-task-recording.js'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -60,7 +61,7 @@ async function capture(label: string) {
 }
 async function make(name: string, steps: BrowserTaskStep[], parameters: BrowserTaskContent['parameters'] = []) {
   const url = contents().getURL(), current = await manager!.create(id, url)
-  const imported = await assets.importRecording({ id: `private-setup-${name}`, browserId: id, navigationId: current.navigationId,
+  const imported = await importTaskRecording(assets, { id: `private-setup-${name}`, browserId: id, navigationId: current.navigationId,
     url, status: 'stopped', revision: 1, startedAt: Date.now(), updatedAt: Date.now(), steps: [] }, name)
   const changed = await manager!.saveTaskAssetDraft(id, imported.id, imported.revision, { ...imported.draft, steps, parameters })
   return await manager!.saveTaskAssetVersion(id, changed.id, changed.revision, changed.draft)
