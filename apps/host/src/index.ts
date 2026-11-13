@@ -4,6 +4,10 @@ import { startAgentMuxHost, agentMuxHostStore } from './host.js'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configuredHostClients } from './configured-host-clients.js'
+import { boundInheritedOutput } from './output-retention.js'
+
+// launchd appends this process's output to one file and never rotates it.
+boundInheritedOutput()
 
 const storePath = process.env.AGENTMUX_AGENT_SESSION_STORE
 if (!storePath || !isAbsolute(storePath)) throw new Error('The Host requires the original absolute Agent Session Store path.')
