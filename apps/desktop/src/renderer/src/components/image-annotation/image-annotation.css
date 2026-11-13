@@ -161,9 +161,9 @@
 .image-annotation-editor__capture-properties label { display: flex; align-items: center; gap: 5px; font-size: 10px; }
 .image-annotation-editor__capture-properties select { height: 24px; border: 1px solid var(--capture-chrome-line); border-radius: 4px; padding: 0 4px; background: transparent; color: var(--capture-chrome-text); font: inherit; }
 .image-annotation-editor__capture-properties option { color: initial; background: initial; }
-.image-annotation-editor .image-annotation-editor__capture-properties .image-annotation-toolbar__colors button { border-color: var(--capture-chrome-line); box-shadow: 0 0 0 1px var(--capture-chrome); }
+.image-annotation-editor .image-annotation-editor__capture-properties .image-annotation-toolbar__colors button { border-color: rgba(255, 255, 255, .28); box-shadow: 0 0 0 1px var(--capture-chrome); }
 .image-annotation-editor__capture-properties .image-annotation-toolbar__colors button.selected { box-shadow: 0 0 0 2px var(--capture-chrome), 0 0 0 3px var(--capture-chrome-text); }
-.image-annotation-editor__capture-properties .image-annotation-editor__custom-color { color: var(--capture-chrome-muted); }
+.image-annotation-editor__capture-properties .image-annotation-editor__custom-color { color: var(--capture-chrome-text); }
 .image-annotation-editor__capture-properties .image-annotation-editor__custom-color input { border-color: var(--capture-chrome-line); background: transparent; }
 .image-annotation-editor__capture-properties .image-annotation-editor__mode { border-color: var(--capture-chrome-line); background: transparent; }
 .image-annotation-editor .image-annotation-editor__capture-properties button { color: var(--capture-chrome-text); }
