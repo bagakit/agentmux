@@ -108,7 +108,7 @@ export function resolveCollaborationIdentities(recorded: { agents: ReadonlyMap<s
       if (live.tier != null) merged.tier = live.tier
       if (live.providerId != null) merged.providerId = live.providerId
       if (live.executorId != null) merged.executorId = live.executorId
-      if (live.lastActivityAt != null) merged.lastActivityAt = live.lastActivityAt
+      if (live.lastActivityAt !== undefined) merged.lastActivityAt = live.lastActivityAt
     }
     agents.set(canonical, merged)
   }
