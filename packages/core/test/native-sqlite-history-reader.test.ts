@@ -9,10 +9,20 @@ import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from '../s
 const probe = vi.hoisted(() => ({ root: '', opened: 0, closed: 0, reads: [] as Array<{ path: string; length: number; position: number }>,
   onReadStarted: undefined as undefined | (() => void), closeFailure: false,
   databaseClosed: 0, statements: new Set<number>(), virtualFiles: new Set<number>(),
-  progressCount: 0, onProgress: undefined as undefined | (() => void) }))
+  progressCount: 0, onProgress: undefined as undefined | (() => void), libraryReads: 0, libraryReadFailures: 0 }))
 vi.mock('node:fs/promises', async original => {
   const fs = await original<typeof import('node:fs/promises')>()
-  return { ...fs, open: async (...args: Parameters<typeof fs.open>) => {
+  const readFile = (async (...args: Parameters<typeof fs.readFile>) => {
+    if (String(args[0]).endsWith('wa-sqlite-async.wasm')) {
+      probe.libraryReads++
+      if (probe.libraryReadFailures > 0) {
+        probe.libraryReadFailures--
+        throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' })
+      }
+    }
+    return await fs.readFile(...args)
+  }) as typeof fs.readFile
+  return { ...fs, readFile, open: async (...args: Parameters<typeof fs.open>) => {
     const file = await fs.open(...args)
     if (String(args[0]).startsWith(probe.root)) {
       expect(Number(args[1]) & 3).toBe(0)
@@ -56,7 +66,7 @@ afterEach(async () => {
   while (cleanup.length) await cleanup.pop()!()
   vi.restoreAllMocks()
   Object.assign(probe, { root: '', opened: 0, closed: 0, reads: [], onReadStarted: undefined, closeFailure: false,
-    databaseClosed: 0, progressCount: 0, onProgress: undefined })
+    databaseClosed: 0, progressCount: 0, onProgress: undefined, libraryReads: 0, libraryReadFailures: 0 })
   probe.statements.clear(); probe.virtualFiles.clear()
 })
 
@@ -133,13 +143,15 @@ describe('Native SQLite physical read owner', () => {
     expect(await readFile(`${f.path}-wal`)).toEqual(wal)
   }, 20_000)
 
-  it('reserves the shared budget before the real read and refuses exhausted budget before any data I/O', async () => {
+  it('counts real reads against the shared budget without refusing a page that already read a lot', async () => {
+    // Bytes read earlier in the same composite page are not a reason to refuse the next physical read;
+    // only one read larger than the allocation budget is refused (readNativeHistoryBytes).
     const f = await fixture(), budget = { bytesRead: SESSION_HISTORY_MAX_PAGE_BYTES - 1, startedAt: Date.now() }
-    await expect(NativeSqliteHistoryReader.open(f.path, AbortSignal.timeout(10_000), budget)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_TOO_LARGE' })
-    expect(budget.bytesRead).toBe(SESSION_HISTORY_MAX_PAGE_BYTES - 1)
-    expect(probe.reads).toEqual([])
-    expect(probe.opened).toBeGreaterThan(0)
-    expect(probe.closed).toBe(probe.opened)
+    const reader = await NativeSqliteHistoryReader.open(f.path, AbortSignal.timeout(10_000), budget)
+    expect(await reader.get('SELECT data FROM blobs WHERE id=?', ['native-message'])).toEqual([new Uint8Array(Buffer.from(f.content))])
+    expect(probe.reads.length).toBeGreaterThan(0)
+    expect(budget.bytesRead).toBe(SESSION_HISTORY_MAX_PAGE_BYTES - 1 + probe.reads.reduce((sum, read) => sum + read.length, 0))
+    await release(reader)
   })
 
   it('honors cancellation before opening any native file', async () => {
@@ -239,5 +251,22 @@ describe('Native SQLite physical read owner', () => {
     await reader.close()
     expect(probe.closed).toBe(probe.opened)
     expect([...probe.virtualFiles]).toEqual([]); expect([...probe.statements]).toEqual([])
+  })
+
+  it('reads the SQLite library again after a transient failure instead of keeping that failure for the process', async () => {
+    // A fresh module: the reader caches its library per process, and earlier cases already loaded it.
+    vi.resetModules()
+    const { NativeSqliteHistoryReader: Reader } = await import('../dist/native-sqlite-history-reader.js')
+    const f = await fixture(); f.writer.close()
+    probe.libraryReadFailures = 1
+    // The library failed, not the native source: it is reported as an unavailable observation.
+    await expect(Reader.open(f.path, AbortSignal.timeout(10_000))).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE' })
+    expect(probe.closed).toBe(probe.opened)
+    const reader = await Reader.open(f.path, AbortSignal.timeout(10_000))
+    expect(await reader.get('SELECT data FROM blobs WHERE id=?', ['native-message'])).toEqual([new Uint8Array(Buffer.from(f.content))])
+    await release(reader)
+    await (await Reader.open(f.path, AbortSignal.timeout(10_000))).close()
+    // One failed read, one successful read, then the successful bytes are reused.
+    expect(probe.libraryReads).toBe(2)
   })
 })
