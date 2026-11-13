@@ -1,4 +1,4 @@
-import { type CSSProperties, type RefObject, useContext, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type RefObject, useCallback, useContext, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore, useStoreApi } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
@@ -29,16 +29,18 @@ function compareLabelSearchPoints(a: LabelSearchPoint, b: LabelSearchPoint) { re
 
 /** One screen-space identity layer. Natural text size is observed only when it
  * changes; camera movement projects the same boxes without measuring the world. */
-export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl, readingProxies }: {
+export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl, readingProxies, gesturing = false }: {
   areas: readonly { data: Region }[]; geometry: ReadonlyMap<string, CollaborationLayoutBox>
   selectedAgent?: string | undefined; locatedAreas?: readonly string[] | undefined; active: boolean; hud: RefObject<HTMLDivElement | null>
   contextControl: RefObject<HTMLButtonElement | null> | null
   readingProxies: readonly HTMLElement[]
+  /** A direct user camera gesture is in flight; placement waits for its end. */
+  gesturing?: boolean
 }) {
   const preferences = useContext(CollaborationMapPreferences)
-  // Placement consumes a settled camera: zoom and size changes place at once, a pure pan
-  // places once it rests. Between those, the layer travels with the world as one transform.
-  const camera = usePlacementCamera()
+  // Placement reads the camera except during a direct user gesture; then names keep their slot
+  // and travel with their territory, and are placed once the gesture ends.
+  const camera = usePlacementCamera(gesturing)
   const store = useStoreApi(), root = useRef<HTMLDivElement>(null)
   const [sizes, setSizes] = useState<ReadonlyMap<string, { budget: number; width: number; height: number; summaryHeight: number; inset: number }>>(new Map())
   const [occlusion, setOcclusion] = useState<readonly CollaborationBounds[]>([])
@@ -215,26 +217,19 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   return surface ? createPortal(layer, surface) : layer
 })
 
-const PAN_SETTLE_MS = 120
-/** The camera that label placement reads. A viewport resize is taken at once; any camera
- * movement is taken once it rests. In between, world-anchored labels keep their placed slot
- * and travel with their territory (see the follow effect), so nothing is re-placed per frame. */
-function usePlacementCamera() {
-  const store = useStoreApi()
-  const read = () => { const { transform, width, height } = store.getState(); return [...transform, width, height] as const }
-  const [camera, setCamera] = useState(read)
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const take = () => { timer = undefined; setCamera(previous => { const next = read(); return same(previous, next) ? previous : next }) }
-    const unsubscribe = store.subscribe(state => {
-      clearTimeout(timer)
-      setCamera(previous => previous[3] !== state.width || previous[4] !== state.height ? read() : previous)
-      timer = setTimeout(take, PAN_SETTLE_MS)
-    })
-    take()
-    return () => { clearTimeout(timer); unsubscribe() }
-  }, [store])
-  return camera
+/** The camera that label placement reads. While a direct user gesture (drag, wheel, pinch) is
+ * in flight it holds the last placed camera, so names are never re-placed per frame; a resize,
+ * the gesture's end, and every programmatic camera (locate, fit, keyboard) are taken at once. */
+function usePlacementCamera(gesturing: boolean) {
+  // During a gesture the selector returns the held array, so the layer does not even re-render
+  // per frame; the follow effect moves names by direct style writes instead.
+  const held = useRef<readonly number[] | null>(null)
+  const select = useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
+    const next = [...state.transform, state.width, state.height]
+    if (gesturing && held.current && held.current[3] === next[3] && held.current[4] === next[4]) return held.current
+    return held.current = next
+  }, [gesturing])
+  return useStore(select, same)
 }
 
 function RegionIdentity({ data, hasChildren, onToggle }: { data: Region; hasChildren: boolean; onToggle(): void }) {

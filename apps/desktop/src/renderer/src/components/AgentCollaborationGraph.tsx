@@ -129,6 +129,8 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   const now = useCollaborationRecencyClock(active)
   const steps = useMemo(() => new Map([...agents].map(([id, agent]) => [id, collaborationRecencyStep(agent, now)])), [agents, now])
   const [readingProxies, setReadingProxies] = useState<readonly HTMLSpanElement[]>([])
+  /** A direct user camera gesture is in flight (xyflow reports one only for real input). */
+  const [gesturing, setGesturing] = useState(false)
   const registerReadingProxy = useCallback((element: HTMLSpanElement | null) => {
     if (!element) return
     setReadingProxies(previous => previous.includes(element) ? previous : [...previous, element])
@@ -319,9 +321,10 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   return <CollaborationMapPreferences.Provider value={preferences}><MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph"
     tabIndex={0} aria-roledescription="map" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - Shift+1" onKeyDown={keyboardCamera}>
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
-      onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null } }}
+      onMoveStart={event => { if (event) { layout.settle(); ++gestures.current; cameraAnimation.current = null; setGesturing(true) } }}
+      onMoveEnd={() => setGesturing(false)}
       panOnScroll panOnScrollSpeed={1} paneClickDistance={4} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} gesturing={gesturing} />
       <Background gap={22} size={1} />
     </ReactFlow>
     {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
