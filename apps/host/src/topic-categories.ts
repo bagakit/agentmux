@@ -14,8 +14,13 @@ export function isKnowledgeTopic(topic: ScratchTopicSnapshot): boolean {
 export function isKnowledgeTopicInBindings(topic: ScratchTopicSnapshot, bindings: SpaceZoneBindings): boolean {
   return isKnowledgeTopic(topic) && !Object.values(bindings).some(binding => binding.topicId === topic.id && binding.contentKind === 'mote')
 }
-export function topicContentSpaceId(workspace: WorkspaceRecord, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath'>): string {
+export function topicContentSpaceId(workspace: Pick<WorkspaceRecord, 'hostId' | 'path'>, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath'>): string {
   return directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, topic))
+}
+/** A failed Host read cannot replace the durable original identity with a logical-path guess. */
+export function knownTopicContentSpaceId(workspace: Pick<WorkspaceRecord, 'hostId' | 'path'>,
+  topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath' | 'readError'>): string | null {
+  return topic.readError && !topic.identityDirectoryPath ? null : topicContentSpaceId(workspace, topic)
 }
 export function topicContentZoneId(workspace: WorkspaceRecord, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath'>): string {
   return homeZoneId(topicContentSpaceId(workspace, topic))

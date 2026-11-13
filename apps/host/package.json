@@ -118,6 +118,10 @@
       "types": "./dist/topic-search-history.d.ts",
       "import": "./dist/topic-search-history.js"
     },
+    "./snapshot-observation": {
+      "types": "./dist/snapshot-observation.d.ts",
+      "import": "./dist/snapshot-observation.js"
+    },
     "./note-file-writer": {
       "types": "./dist/note-file-writer.d.ts",
       "import": "./dist/note-file-writer.js"
