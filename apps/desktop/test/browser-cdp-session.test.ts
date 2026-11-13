@@ -196,4 +196,17 @@ describe('收摊要摘干净', () => {
         .toHaveLength(0)
     }
   })
+
+  it('observers learn which child frame session an event came from; the page itself has none', async () => {
+    // A file chooser in a cross-site frame arrives on that frame's session and must be answered there.
+    const contents = fakeContents()
+    const session = BrowserCdpSession.attach(contents)
+    await settle()
+    const seen: [string, string | undefined][] = []
+    session.observe((method, _params, sessionId) => { seen.push([method, sessionId]) })
+    contents.debugger.emit('message', 'Page.fileChooserOpened', { backendNodeId: 2 }, 'child-frame')
+    contents.debugger.emit('message', 'Page.javascriptDialogOpening', { type: 'alert' }, '')
+    contents.debugger.emit('message', 'Page.loadEventFired', {})
+    expect(seen).toEqual([['Page.fileChooserOpened', 'child-frame'], ['Page.javascriptDialogOpening', undefined], ['Page.loadEventFired', undefined]])
+  })
 })
