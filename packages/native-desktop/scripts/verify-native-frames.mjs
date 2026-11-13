@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 if (process.argv.includes('--help')) {
-  console.log('verify-native-frames.mjs [--keep]\nCompiles the Core frame reader and display lease and the exact production capture dispatch and captureDisplays/displayPixels/BlockingAsync source against a controlled display list, ScreenCaptureKit, PNG encoder and exact-source grabs, runs the checks and one-branch mutants. No AppKit, real pixels, permission prompt, App assembly or installation. The run directory is removed unless --keep.')
+  console.log('verify-native-frames.mjs [--keep]\nCompiles the Core frame reader and display lease and the exact production capture dispatch and captureDisplays/visibleWindows/displayPixels/BlockingAsync source against a controlled display list, window list, ScreenCaptureKit, PNG encoder and exact-source grabs, runs the checks and one-branch mutants. No AppKit, real pixels, permission prompt, App assembly or installation. The run directory is removed unless --keep.')
   process.exit(0)
 }
 assert.equal(process.platform, 'darwin', 'The production capture source compiles only on macOS')
@@ -39,7 +39,7 @@ function slice(source, from, until) {
 }
 const production = {
   dispatch: slice(operations, '    static func capture(_ params: [String: JSONValue]) -> [String: Any] {', '    private static func capturedRectangle(_ rect:'),
-  frames: slice(operations, '    static func captureDisplays() throws', '    private static func captureRect(_ rect:'),
+  frames: slice(operations, '    static func captureDisplays(hostPID: pid_t) throws', '    private static func captureRect(_ rect:'),
   blocking: slice(main, 'private final class AsyncBox<T>:', 'private struct BoundedPNG {'),
   lease: readFileSync(core[2], 'utf8'),
 }
@@ -86,6 +86,15 @@ const mutations = [
   { name: 'ignore-configuration-change', part: 'frames', before: 'guard match.frame == frame else {', after: 'guard true else {', kills: 'a display whose bounds changed since enumeration carries its issue and no pixels' },
   { name: 'enumerate-per-display', part: 'frames', before: 'content: content.get()', after: 'content: BlockingAsync.run(timeout: 10) { try await SCShareableContent.current }', kills: "one window enumeration serves every display's grab" },
   { name: 'timestamp-after-grabs', part: 'frames', before: '"capturedAt": capturedAt', after: '"capturedAt": Date().timeIntervalSince1970 * 1000', kills: 'capturedAt is taken before the first grab' },
+  { name: 'list-host-windows', part: 'frames', before: '[getpid(), hostPID]', after: '[getpid()]', kills: "the host's windows are not capture content" },
+  { name: 'list-helper-windows', part: 'frames', before: '[getpid(), hostPID]', after: '[hostPID]', kills: "the helper's own windows are not capture content" },
+  { name: 'list-every-layer', part: 'frames', before: '(info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,', after: '', kills: 'only normal-layer windows are listed' },
+  { name: 'list-transparent-windows', part: 'frames', before: '((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,', after: '', kills: 'windows absent from the pixels are not listed' },
+  { name: 'list-unshared-windows', part: 'frames', before: '(info[kCGWindowSharingState as String] as? NSNumber)?.intValue != 0,', after: '', kills: 'windows absent from the pixels are not listed' },
+  { name: 'list-windows-off-display', part: 'frames', before: 'windows.filter { $0.frame.intersects(frame) }', after: 'windows', kills: 'a window on no display is not listed' },
+  { name: 'windows-back-to-front', part: 'frames', before: '.filter { $0.frame.intersects(frame) }.map(\\.entry)', after: '.filter { $0.frame.intersects(frame) }.reversed().map(\\.entry)', kills: 'each display lists the normal windows over it front to back' },
+  { name: 'drop-window-owner', part: 'frames', before: 'entry["owner"] = owner', after: '_ = owner', kills: 'a window across displays is listed on each with its global frame and owner' },
+  { name: 'list-windows-per-display', part: 'frames', before: '"windows": windows.filter', after: '"windows": visibleWindows(excludingOwners: [getpid(), hostPID]).filter', kills: 'one window list serves every display' },
   { name: 'lease-never-busy', part: 'lease', before: 'guard !occupied else { lock.unlock(); throw Failure.busy }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },
 ]
 const receipt = { schema: 'agentmux.native-frames-verification.v1', passed: false, mutants: [] }

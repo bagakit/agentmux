@@ -47,6 +47,25 @@ private func CGDisplayBounds(_ display: CGDirectDisplayID) -> CGRect { bounds[di
 private func CGMainDisplayID() -> CGDirectDisplayID { 1 }
 private func CGDisplayIsActive(_ display: CGDirectDisplayID) -> boolean_t { bounds[display] == nil ? 0 : 1 }
 private func CGWindowListCreateImage(_ rect: CGRect, _ option: Int, _ window: Int, _ image: [Int]) -> CGImage? { nil }
+private func CGWindowListCopyWindowInfo(_ option: Int, _ window: Int) -> CFArray? { Controlled.shared.listedWindows() as CFArray }
+// The window server's on-screen list, front to back.
+private let hostPID: pid_t = 4242
+private func window(_ id: UInt32, pid: pid_t, _ frame: CGRect, layer: Int = 0, alpha: Double = 1, sharing: Int = 1, owner: String = "Editor") -> [String: Any] {
+    [kCGWindowNumber as String: NSNumber(value: id), kCGWindowOwnerPID as String: NSNumber(value: pid), kCGWindowLayer as String: NSNumber(value: layer),
+     kCGWindowAlpha as String: NSNumber(value: alpha), kCGWindowSharingState as String: NSNumber(value: sharing), kCGWindowOwnerName as String: owner,
+     kCGWindowBounds as String: frame.dictionaryRepresentation]
+}
+private func windowList() -> [[String: Any]] { [
+    window(11, pid: 500, CGRect(x: 10, y: 10, width: 100, height: 80)),
+    window(12, pid: getpid(), CGRect(x: 0, y: 0, width: 50, height: 50)),
+    window(13, pid: hostPID, CGRect(x: 20, y: 20, width: 60, height: 60)),
+    window(14, pid: 501, CGRect(x: 0, y: 0, width: 400, height: 24), layer: 25),
+    window(15, pid: 502, CGRect(x: -150, y: -40, width: 300, height: 120), owner: "Browser"),
+    window(16, pid: 503, CGRect(x: 2000, y: 2000, width: 100, height: 100)),
+    window(17, pid: 504, CGRect(x: 40, y: 40, width: 100, height: 100), alpha: 0),
+    window(18, pid: 505, CGRect(x: 30, y: 30, width: 300, height: 200), owner: "Finder"),
+    window(19, pid: 506, CGRect(x: 50, y: 50, width: 100, height: 100), sharing: 0),
+] }
 private let kCGNullWindowID = 0
 private extension Int { static let optionOnScreenOnly = 0, bestResolution = 0 }
 private struct NSDeviceDescriptionKey: Hashable { let rawValue: String; init(_ value: String) { rawValue = value } }
@@ -95,7 +114,7 @@ private final class Controlled: @unchecked Sendable {
     let suspended = DispatchSemaphore(value: 0), managerReturned = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var continuation: CheckedContinuation<CGImage, Error>?
-    private var grabs: [CGDirectDisplayID] = [], cursors = 0, encodes = 0, enumerations = 0, firstReturned = false
+    private var grabs: [CGDirectDisplayID] = [], cursors = 0, encodes = 0, enumerations = 0, windowLists = 0, firstReturned = false
     private var firstGrabAt: Double?
     var screens: [NSScreen] = []
     var holdFirst = false
@@ -107,6 +126,8 @@ private final class Controlled: @unchecked Sendable {
         return grabs.count
     }
     func enumerated() { lock.lock(); enumerations += 1; lock.unlock() }
+    func listedWindows() -> [[String: Any]] { lock.lock(); windowLists += 1; lock.unlock(); return windowList() }
+    var windowListings: Int { lock.lock(); defer { lock.unlock() }; return windowLists }
     private(set) var sources = 0
     func sourceCaptured() { lock.lock(); sources += 1; lock.unlock() }
     func encoded() { lock.lock(); encodes += 1; lock.unlock() }
@@ -121,7 +142,7 @@ private final class Controlled: @unchecked Sendable {
         do { value.resume(returning: try pixels(width: 800, height: 600)) } catch { value.resume(throwing: error) }
     }
     func reset(screens: [NSScreen], holdFirst: Bool = false, pngBytes: Int? = nil) {
-        lock.lock(); grabs = []; cursors = 0; encodes = 0; enumerations = 0; sources = 0; firstReturned = false; firstGrabAt = nil; lock.unlock()
+        lock.lock(); grabs = []; cursors = 0; encodes = 0; enumerations = 0; windowLists = 0; sources = 0; firstReturned = false; firstGrabAt = nil; lock.unlock()
         self.screens = screens; self.holdFirst = holdFirst; self.pngBytes = pngBytes
     }
     var observation: (grabs: [CGDirectDisplayID], cursors: Int, encodes: Int, enumerations: Int, firstReturned: Bool, firstGrabAt: Double?) {
@@ -141,7 +162,7 @@ private struct DisplayFramesChecks {
         func check(_ name: String, _ value: @autoclosure () -> Bool) { cases.append(name); if !value() { failures.append(name) } }
         func code(_ error: Error?) -> String? { if case let ProviderError.coded(code, _)? = error { return code }; return nil }
         func run() -> (result: [String: Any]?, error: Error?) {
-            do { return (try NativeDesktopOperations.captureDisplays(), nil) } catch { return (nil, error) }
+            do { return (try NativeDesktopOperations.captureDisplays(hostPID: hostPID), nil) } catch { return (nil, error) }
         }
         let io = Controlled.shared
         let all = [NSScreen(id: 1, backingScaleFactor: 2), NSScreen(id: 2, backingScaleFactor: 1), NSScreen(id: 3, backingScaleFactor: 1),
@@ -169,6 +190,20 @@ private struct DisplayFramesChecks {
             (entry(4)["issue"] as? String)?.hasPrefix("display_configuration_changed:") == true && entry(4)["png"] == nil && entry(4)["width"] == nil)
         check("a failed display keeps its identity and geometry", entry(3)["frame"] as? [String: Double] == ["x": 400, "y": 0, "width": 100, "height": 100] && entry(3)["scale"] as? CGFloat == 1)
         check("only captured displays are encoded", io.observation.encodes == 2)
+        func windows(_ id: CGDirectDisplayID) -> [[String: Any]]? { entry(id)["windows"] as? [[String: Any]] }
+        func windowIds(_ id: CGDirectDisplayID) -> [UInt32]? { windows(id)?.compactMap { $0["windowId"] as? UInt32 } }
+        let listed = Set([1, 2, 3, 4].flatMap { windowIds($0) ?? [] })
+        check("each display lists the normal windows over it front to back", windowIds(1) == [11, 15, 18])
+        check("a window across displays is listed on each with its global frame and owner", windows(2).map { $0.count == 1
+            && $0[0]["windowId"] as? UInt32 == 15 && $0[0]["frame"] as? [String: Double] == ["x": -150, "y": -40, "width": 300, "height": 120]
+            && $0[0]["owner"] as? String == "Browser" } == true)
+        check("a display no window covers lists none, even when its pixels failed", windowIds(3) == [] && windowIds(4) == [])
+        check("the helper's own windows are not capture content", !listed.contains(12))
+        check("the host's windows are not capture content", !listed.contains(13))
+        check("only normal-layer windows are listed", !listed.contains(14))
+        check("a window on no display is not listed", !listed.contains(16))
+        check("windows absent from the pixels are not listed", !listed.contains(17) && !listed.contains(19))
+        check("one window list serves every display", io.windowListings == 1)
 
         // Each encoded PNG alone fits the frame; together they do not.
         io.reset(screens: [NSScreen(id: 1, backingScaleFactor: 2), NSScreen(id: 2, backingScaleFactor: 1)], pngBytes: 10 * 1024 * 1024)
