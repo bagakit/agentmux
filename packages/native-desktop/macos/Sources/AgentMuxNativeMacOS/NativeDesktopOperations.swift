@@ -225,9 +225,10 @@ enum NativeDesktopOperations {
         do {
             return try NativeDisplayCaptureLease.shared.withCapture { ownership in
                 let capturedAt = Date().timeIntervalSince1970 * 1000
-                let screens: [(id: CGDirectDisplayID, scale: CGFloat)] = onMain {
+                // `safeTop` is the band a camera housing covers at the display's top, in points; zero without one.
+                let screens: [(id: CGDirectDisplayID, scale: CGFloat, safeTop: CGFloat)] = onMain {
                     NSScreen.screens.compactMap { screen in
-                        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { ($0.uint32Value, screen.backingScaleFactor) }
+                        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { ($0.uint32Value, screen.backingScaleFactor, screen.safeAreaInsets.top) }
                     }
                 }
                 guard !screens.isEmpty else { throw ProviderError.coded("display_not_found", "macOS reports no active display") }
@@ -245,7 +246,7 @@ enum NativeDesktopOperations {
                 var remainingFrameBytes = NativeNDJSONReader.maxFrameBytes - 64 * 1024
                 let displays = screens.map { screen -> [String: Any] in
                     let frame = CGDisplayBounds(screen.id)
-                    var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale,
+                    var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale, "safeTop": screen.safeTop,
                         "windows": windows.filter { $0.frame.intersects(frame) }.map(\.entry)]
                     do {
                         let capture = try pixels(screen.id, frame, screen.scale)

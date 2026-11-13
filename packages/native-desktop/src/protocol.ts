@@ -60,6 +60,8 @@ export type NativeDisplayFrame = {
   /** Global Quartz points. */
   frame: { x: number; y: number; width: number; height: number }
   scale: number
+  /** Points at the display's top covered by a camera housing; 0 without one. */
+  safeTop: number
   /** Windows intersecting this display, front to back, excluding AgentMux's own. */
   windows: NativeDisplayWindow[]
 } & (
