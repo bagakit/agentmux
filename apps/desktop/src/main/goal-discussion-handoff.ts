@@ -58,12 +58,15 @@ export async function attachLauncherAgentPosition(input: import('../shared/contr
   result: import('../shared/contracts.js').AgentLaunchResult, captured: Awaited<ReturnType<typeof captureGoalDiscussionLauncherLaunch>>,
   workspaces: import('../shared/contracts.js').AppConfig['workspaces'],
   spatial: Pick<import('@agentmux/core/spatial-state').AgentMuxSpatialStateStore, 'attachLauncherAgent'>): Promise<string | undefined> {
-  if (!input.launcher || captured) return undefined
+  // Only a confirmed Goal discussion Launcher has its own owned binding commit. An unreadable or absent
+  // document leaves that unknown, so this exact position is still attempted and reported on its own.
+  if (!input.launcher || captured && 'originals' in captured) return undefined
   const intent = launcherCreationSpatialIntent(input, workspaces), created = result.created, receipt = result.creation ?? created.creation
-  if (!intent || created.agentSessionId !== input.agentSessionId || receipt?.createOperationId !== input.createOperationId || !receipt.createdRun) return undefined
+  if (!intent || !receipt?.createdRun || created.agentSessionId !== input.agentSessionId || receipt.createOperationId !== input.createOperationId) return undefined
   try {
     await spatial.attachLauncherAgent({ tabId: intent.tabId, regionId: intent.regionId, agentSessionId: created.agentSessionId,
-      runId: receipt.createdRun.runId, execution: { hostId: created.hostId, cwd: input.workspacePath },
+      // The created Session's directory, not the launch request's: a scratch Topic runs in its own folder.
+      runId: receipt.createdRun.runId, execution: { hostId: created.hostId, cwd: created.workspacePath },
       resource: { workspaceId: intent.executionWorkspaceId, phase: 'attached',
         agentPresentation: { sessionId: created.agentSessionId, agentSessionId: created.agentSessionId, hostId: created.hostId } } })
     return undefined
