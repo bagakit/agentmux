@@ -5,6 +5,7 @@ import {
   BROWSER_PAGE_FUNCTION_NAMES,
   runBrowserScript
 } from '../src/main/browser-script-runner.js'
+import { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 
 /**
  * 页面函数库：注入子进程的那批函数，每次调用回主进程执行。
@@ -201,6 +202,29 @@ describe('页面函数库', () => {
 
     expect(result.completed, `脚本没跑完：${JSON.stringify(result)}`).toBe(true)
     expect(result.completed && result.value).toBe('caught: element is gone')
+  }, SPAWN_TIMEOUT_MS)
+
+  it('Main 的类型化失败带着 kind 与 effects 进入脚本，脚本按事实决定能否重试', async () => {
+    // effects 说页面有没有被碰过：not-dispatched 可以安全重试，unknown 要先看页面。
+    const result = await runBrowserScript({
+      code: `const seen = []
+        for (const ref of ["@e1", "@e2", "@e3"]) {
+          try { await click(ref) } catch (error) { seen.push([error.kind ?? null, error.effects ?? null, error.message]) }
+        }
+        return seen`,
+      onPageCall: async (_name, args) => {
+        if (args[0] === '@e1') throw new BrowserLocalRecoveryFailure('covered', 'locator-changed', 'not-dispatched')
+        if (args[0] === '@e2') throw new BrowserLocalRecoveryFailure('a dialog opened', 'page-dialog', 'unknown')
+        throw new Error('plain failure')
+      }
+    })
+    expect(result.completed, `脚本没跑完：${JSON.stringify(result)}`).toBe(true)
+    expect(result.completed && result.value).toEqual([
+      ['locator-changed', 'not-dispatched', 'covered'],
+      ['page-dialog', 'unknown', 'a dialog opened'],
+      // A failure that is not Main's typed one has no fact, so nothing claims the page was untouched.
+      [null, null, 'plain failure']
+    ])
   }, SPAWN_TIMEOUT_MS)
 
   it('没给页面能力时，调用被明确拒绝，而不是挂在那儿', async () => {
