@@ -33,7 +33,7 @@ open apps/mobile/ios/App/App.xcodeproj
 
 ## 连接
 
-1. 手机和 Mac 连接同一 Wi-Fi。在 Mac 的 Phone & Devices 设置或官方 Phone connection Toolkit 生成并复制完整链接。
+1. 手机和 Mac 连接同一 Wi-Fi。在 Mac 的 Settings → Remote → Mobile 或官方 Phone connection Toolkit 取得完整链接。
 2. 手机浏览器打开链接，沿 Paseo E2EE offer 接入；无需填写地址、证书、配对码或返回 Mac 批准。
 3. 连通后进入 Mote / Focus / Space。菜单里的手机设置可选择本设备默认主页；连接管理也在菜单中。
 4. 按原空间绑定选择已有 Agent。对话和终端为对象的下钻工作面；终端默认观看，控制和尺寸改变均需明确操作。回执不确定时先核对，不自动重发。

@@ -3,7 +3,8 @@
 The compiled `dist/index.js` owns Core independently of its public clients. Its
 trusted launcher supplies the original absolute `AGENTMUX_AGENT_SESSION_STORE`.
 An optional `--store` must identify that same file. The public Unix endpoint is
-`control.sock` in `AGENTMUX_RUNTIME_DIRECTORY`.
+`control.sock` in `AGENTMUX_RUNTIME_DIRECTORY`, or in Core's default runtime
+directory when that variable is unset.
 
 To host connectors in this process, additionally pass the original absolute
 `AGENTMUX_CONNECTOR_DIRECTORY`. The Host opens the connection database and
