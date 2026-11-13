@@ -25,7 +25,8 @@ import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { nativeSourceUnconfirmed, projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { CONNECTION_UNRECOVERABLE_DETAIL, pendingAgentLaunchResourceDiagnostic } from '../lib/session-state'
 import { originalFrontendRecovery } from '../lib/session-original-recovery'
-import { sessionExitPresentation, sessionFrontendPresentation, sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
+import { sessionExitPresentation, sessionFrontendPresentation, sessionRecoveryClassName, sessionRecoveryState, runEndedByRuntimeRestart } from '../lib/session-recovery-banner'
+import { AgentCloseAction } from './AgentCloseAction'
 import { currentContinuitySupervision } from '../lib/continuity-supervision'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
@@ -1117,7 +1118,7 @@ export function SessionPane({
     onClick={() => { setRetainedOutputKey(readingRetainedOutput ? null : activitySourceKey); setHistoryOpen(false); useAppStore.getState().setViewMode(sessionId, 'terminal') }}>
     {readingRetainedOutput ? 'Back to recovery' : 'Read original output'}
   </button>
-  const agentRecoveryActionAt = (origin = mailboxOrigin, displayId: string | null = null) => <>{agentRecoveryControlsAt(origin, displayId)}{needsSessionSurface && (!pendingResume || readingRetainedOutput) ? readOriginalOutputAction : null}{!pendingResume && recoverableFrontendNotice?.actionDetail ? <p className="session-startup-action-detail">{recoverableFrontendNotice.actionDetail}</p> : null}</>
+  const agentRecoveryActionAt = (origin = mailboxOrigin, displayId: string | null = null) => <>{agentRecoveryControlsAt(origin, displayId)}{session.kind === 'agent' && runEndedByRuntimeRestart(session) ? <AgentCloseAction session={session} /> : null}{needsSessionSurface && (!pendingResume || readingRetainedOutput) ? readOriginalOutputAction : null}{!pendingResume && recoverableFrontendNotice?.actionDetail ? <p className="session-startup-action-detail">{recoverableFrontendNotice.actionDetail}</p> : null}</>
   const agentRecoveryAction = agentRecoveryActionAt()
   const coreRestorePresentation = session.kind === 'agent' ? agentContinuityPresentation(session) : null
   const frontendOperation = session.kind === 'agent' && frontendSurface
@@ -1295,7 +1296,7 @@ export function SessionPane({
             }</div>
           ) : null}
           {(disconnected || missing || exited || recoverableFrontendNotice) && (!needsSessionSurface || readingRetainedOutput) ? (
-            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected: disconnected || Boolean(frontendNotice), exited, failed: !frontendNotice && session.status.state === 'error' }))} role="status" aria-live="polite">
+            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected: disconnected || Boolean(frontendNotice), exited: exited || runEndedByRuntimeRestart(session), failed: !frontendNotice && session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
                 {refreshing || recovering ? <ThemeStatusLoadingIcon animation="spin" size={16} /> : !frontendNotice && session.status.state === 'error' ? <ThemeStatusWarningIcon size={16} /> : disconnected || missing || frontendNotice ? <ThemeStatusHostUnavailableIcon size={16} /> : <ThemeActionStopIcon size={16} />}
               </span>

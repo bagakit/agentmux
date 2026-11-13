@@ -11,6 +11,8 @@ import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } f
 import { NotificationGroup } from './NotificationGroup'
 import { groupNotifications, notificationCategories, notificationTimestamp, type NotificationCategory, type NotificationFilter, type NotificationSection, type NotificationSubject } from '../lib/notification-center'
 import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
+import { runEndedByRuntimeRestart, sessionExitPresentation } from '../lib/session-recovery-banner'
+import { SessionRunEndedActions } from './SessionRunEndedActions'
 import { DORMANT_AGENT_INPUT_NOTICES, dormantByRecoveryPolicy } from '../lib/continuity-supervision'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
@@ -182,6 +184,11 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       return view
     }))
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
+  const endedSessions = sessions.filter((session): session is Extract<typeof sessions[number], { kind: 'agent' }> =>
+    session.kind === 'agent' && runEndedByRuntimeRestart(session))
+  const endedRunKey = (session: typeof endedSessions[number]) => JSON.stringify([session.control.hostId, session.id, session.control.run.runId])
+  const endedRunFacts = Object.fromEntries(endedSessions.map(session => [endedRunKey(session), 'runtime-restart']))
+  const endedRunInbox = useReadReceipts('global:ended-runs', endedRunFacts, !loading)
   const storage: ServiceNoticeItem[] = workbenchSaveWarning ? [{ id: 'workbench-save', notice: {
     kind: 'indeterminate', notice: {
       step: 'Saving the workbench is unconfirmed',
@@ -220,8 +227,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const chromeInbox = useServiceNotices('global:native-chrome', chrome, appIconIssue !== undefined)
   const inboxes = [agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
-  const currentCount = notices.length + projection.current.length
-  const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length)
+  const currentCount = notices.length + projection.current.length + endedSessions.length
+  const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length + endedRunInbox.unread.length)
   const available = inboxes.every((inbox) => inbox.available)
   const unreadEventIds = useMemo(() => new Set(eventInbox.unread), [eventInbox.unread])
   const readEvents = open ? projection.history.filter(event => !unreadEventIds.has(event.id)).length : 0
@@ -312,6 +319,19 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       return { key: JSON.stringify(['displaced', session?.control.hostId, item.id]), label: session?.label ?? 'Retained Session' }
     })
     append(sessionInbox, 'agents', item => { const session = sessionOwners.get(item.id)!; return { key: JSON.stringify(['agent', session.control.hostId, session.id, session.control.run.runId]), label: session.label, context: config?.hosts.find(host => host.id === session.control.hostId)?.label ?? session.control.hostId } }, 'View Session')
+    for (const session of endedSessions) {
+      const key = endedRunKey(session)
+      const presentation = sessionExitPresentation(session)!
+      currentEntries.push({ id: `ended-run:${key}`, noticeId: `ended-run:${key}`, category: 'agents', kind: 'healthy',
+        subject: { key: JSON.stringify(['agent', session.control.hostId, session.id, session.control.run.runId]), label: session.label },
+        title: presentation.title,
+        detail: `${presentation.detail} The original Session, saved history and unsent draft are kept.`,
+        observation: { source: 'sessions', subject: sessionIdentity(session), version: key, observedAt: session.status.observedAt },
+        unread: endedRunInbox.unread.includes(key), onRead: () => endedRunInbox.acknowledge([key]),
+        timestamp: notificationTimestamp(session.status.observedAt),
+        action: navigationAction({ label: 'View Session', run: () => selectSession(session.id) }),
+        actions: <SessionRunEndedActions key={key} session={session} /> })
+    }
     append(storageInbox, 'operations', item => ({ key: JSON.stringify(['storage', item.id]), label: item.id === 'workbench-save' ? 'Workbench storage' : 'Name change' }))
     append(chromeInbox, 'system', system('window', 'Application window'))
     append(navigationInbox, 'operations', system('navigation', 'Workspace navigation'))
@@ -398,6 +418,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   function markShownRead() {
     const ids = new Set(shownUnread.map(entry => entry.id))
     for (const inbox of inboxes) inbox.acknowledge(inbox.notices.filter(item => ids.has(JSON.stringify([inbox.scope, item.id]))))
+    endedRunInbox.acknowledge(endedSessions.map(endedRunKey).filter(key => ids.has(`ended-run:${key}`)))
     eventInbox.acknowledge(events.filter(event => ids.has(event.id)).map(event => event.id))
   }
   return <div className="global-system-notices">

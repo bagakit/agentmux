@@ -1,6 +1,7 @@
 import type { AgentMuxRunState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { CONNECTION_UNRECOVERABLE_DETAIL, CONNECTION_RETRYING_DETAIL } from './session-state'
+import { runEndedByRuntimeRestart } from './session-recovery-banner'
 
 /**
  * 服务窗（AGENTS.md 原则 11）的判定层：一处失败在阻断用户之前，先分清它是哪一种。
@@ -235,6 +236,8 @@ export function hookDeliveryServiceOutcome(session: SessionSnapshot): StepOutcom
 
 export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
+  // Recovery owns a confirmed ended Run; reconnecting that old Run cannot succeed.
+  if (runEndedByRuntimeRestart(session)) return { completed: true }
 
   // This exact Run's auxiliary observation cannot settle its old input transaction or
   // revoke its existing capability. Refresh reads facts; it never replays the handshake.

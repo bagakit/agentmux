@@ -1,6 +1,7 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { currentRunRecoveryOperation } from './continuity-presentation'
+import { classifyContinuityFailure } from './continuity-failure-notice'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
 export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown' | 'connecting'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; description?: string; detail: string; surfaceDetail?: string; actionLabel?: string; actionDetail?: string; diagnostic?: string } | null {
@@ -94,7 +95,14 @@ export function sessionFrontendPresentation(session: SessionSnapshot | undefined
 }
 
 /** A later restore refusal cannot replace the exact Run's confirmed exit facts. */
-export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 'processState' | 'status'> & Parameters<typeof currentRunRecoveryOperation>[0]): { title: string; detail: string } | null {
+export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 'processState' | 'status' | 'interruptionReason' | 'runUnobserved'> & Parameters<typeof currentRunRecoveryOperation>[0]): { title: string; detail: string } | null {
+  if (runEndedByRuntimeRestart(session)) return {
+    title: `${session.kind === 'agent' ? 'Agent' : 'Terminal'} Run ended by Runtime restart`,
+    detail: session.kind === 'agent'
+      ? 'The Runtime restarted and ended this Run. ' + (classifyContinuityFailure(session.status.continuity, session.status.continuityReason, session.status.continuityConflict)?.reason
+        ?? 'Resume the original conversation or close this Agent; its saved history is kept.')
+      : 'The Runtime restarted and ended this Run. Restart the terminal to continue.'
+  }
   if (session.processState !== 'exited') return null
   const reason = session.status.exitReason
   const detail = reason === 'user-stopped' ? 'You stopped this session.'
@@ -105,6 +113,11 @@ export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 
       : `${session.kind === 'agent' ? 'Agent' : 'Terminal'} process exited`,
     detail: detail + (session.status.exitCode === undefined ? '' : ` Exit code ${session.status.exitCode}.`)
   }
+}
+
+/** Presentation of the original Runtime fact; never a substitute for Session retirement. */
+export function runEndedByRuntimeRestart(session: Pick<SessionSnapshot, 'processState' | 'interruptionReason' | 'runUnobserved'>): boolean {
+  return session.processState === 'interrupted' && session.interruptionReason === 'daemon_restart' && !session.runUnobserved
 }
 
 /**

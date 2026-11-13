@@ -21,6 +21,7 @@ export type NotificationItemProps = {
   impact?: string | undefined
   children?: ReactNode
   action?: { label: string; run(): void } | undefined
+  actions?: ReactNode
   eventId?: string | undefined
   noticeId?: string | undefined
   unread?: boolean | undefined
@@ -31,7 +32,7 @@ export type NotificationItemProps = {
 }
 
 /** Shared compact presentation. Reading, copying and navigation never settle the original issue. */
-export function NotificationItem({ title, kind, detail, summary, impact, children, action, eventId, noticeId, unread, onRead, timestamp, occurrences, subjectHeading }: NotificationItemProps) {
+export function NotificationItem({ title, kind, detail, summary, impact, children, action, actions, eventId, noticeId, unread, onRead, timestamp, occurrences, subjectHeading }: NotificationItemProps) {
   const Icon = kind === 'agent-broken' ? FailureIcon : kind === 'process-degraded' ? WarningIcon : kind === 'indeterminate' ? UnknownIcon : InfoIcon
   const [copy, setCopy] = useState<{ detail: string; label: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -51,10 +52,11 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
   return <article className="notification-item" data-kind={kind} data-unread={unread ?? false} data-event-id={eventId} data-notice-id={noticeId}
     role={volume === 'assertive' ? 'alert' : 'status'} aria-live={volume}>
     <div className="notification-item__body">
-      {subjectHeading || action ? <div className="notification-item__toolbar">
+      {subjectHeading || action || actions ? <div className="notification-item__toolbar">
         {subjectHeading}
         <div className="notification-item__actions">
           {action ? <button type="button" className="notification-item__action" title={`${action.label}: ${heading}`} onClick={action.run}>{action.label}</button> : null}
+          {actions}
         </div>
       </div> : null}
       <div className="notification-item__reading">
