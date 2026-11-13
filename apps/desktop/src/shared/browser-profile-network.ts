@@ -20,6 +20,9 @@ export type BrowserProfileNetwork =
 
 export type BrowserProfileProxyServer = { scheme: BrowserProfileProxyScheme; host: string; port: number }
 
+/** A route as a caller sends it: the proxy server may still be the pasted line, which Main parses. */
+export type BrowserProfileNetworkInput = BrowserProfileNetwork | { mode: 'proxy'; server: string; bypass?: string[] }
+
 /** A route as stored on a Profile. System is never stored: it is what an absent route means. */
 export type BrowserProfileStoredNetwork = Exclude<BrowserProfileNetwork, { mode: 'system' }>
 

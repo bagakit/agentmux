@@ -64,6 +64,7 @@ import {
   scratchTopicIdFromDirectoryName
 } from '../../../shared/scratch-topics'
 import { bookmarkKindForPath, isBinaryContent, parseBookmarkUrl } from '../../../shared/bookmark-file'
+import { normalizeBrowserProfileNetwork } from '../../../shared/browser-profile-network'
 
 const configListeners = new Set<(config: AppConfig) => void>()
 const now = Date.now()
@@ -1435,8 +1436,10 @@ const mockApi: AgentMuxDesktopApi = {
       // Same stored shapes as Main: only a turned-off Agent switch is kept, and the system route is absence.
       if (edit.agentAccess === false) next.agentAccess = false
       else if (edit.agentAccess === true) delete next.agentAccess
-      if (edit.network === null || edit.network?.mode === 'system') delete next.network
-      else if (edit.network !== undefined) next.network = structuredClone(edit.network)
+      // Parsed by the same rule as Main, so a pasted proxy line is stored as its server, never as text.
+      const network = edit.network === undefined || edit.network === null ? edit.network : normalizeBrowserProfileNetwork(edit.network)
+      if (network === null || network?.mode === 'system') delete next.network
+      else if (network !== undefined) next.network = network
       mockBrowserProfiles = mockBrowserProfiles.map((profile) => profile.id === profileId ? next : profile)
       publishMockBrowserProfiles()
       return structuredClone(next)

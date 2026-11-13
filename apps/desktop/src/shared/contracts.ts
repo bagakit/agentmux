@@ -1348,8 +1348,8 @@ export type BrowserProfileList = { revision: number; profiles: BrowserProfileSum
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
 export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string
-  /** A new route, or null to follow the system settings again. */
-  network?: import('./browser-profile-network.js').BrowserProfileNetwork | null
+  /** A new route, or null to follow the system settings again; a proxy server may be the pasted line. */
+  network?: import('./browser-profile-network.js').BrowserProfileNetworkInput | null
   /** Whether Agents may drive Browsers in this Profile; only narrows the global switch. */
   agentAccess?: boolean }
 
