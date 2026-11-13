@@ -62,7 +62,7 @@ it('a failed surface start reports its reason and delivers nothing', async () =>
 
 it('⌘E opens the window editor on the full frozen frame with the marks, and its later Copy is the only delivery', async () => {
   const f = await fixture(), handoff = { shapes: [{ id: 'mark', kind: 'rect' }] as never, crop: { x: 2, y: 2, width: 4, height: 2 }, tool: 'arrow' as const }
-  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff })
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff, delivered: vi.fn() })
   let finish!: (png: BrowserPng) => Promise<void>, close!: () => void
   f.edit.mockImplementationOnce(async (_image, _attach, complete) => { finish = complete; await new Promise<void>(resolve => { close = resolve }) })
   const pending = f.owner.capture(true)
@@ -79,7 +79,7 @@ it('⌘E opens the window editor on the full frozen frame with the marks, and it
 
 it('closing the expanded editor without completion never delivers the frozen frame', async () => {
   const f = await fixture()
-  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' } })
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' }, delivered: vi.fn() })
   expect(await f.owner.capture(true)).toBeNull()
   expect(f.native.writeClipboardImage).not.toHaveBeenCalled()
   expect(await readdir(f.home)).toEqual([])
@@ -170,7 +170,7 @@ it('asks the surface to return focus only when another app was active at capture
   f.appActive.mockReturnValue(false)
   await f.owner.capture(false)
   expect(f.present.mock.calls[1]![0].returnFocus).toBe(true)
-  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' } })
+  f.present.mockResolvedValueOnce({ state: 'expanded', image, source, handoff: { shapes: [], crop: { x: 0, y: 0, width: 1, height: 1 }, tool: 'rect' }, delivered: vi.fn() })
   await f.owner.capture(false)
   expect(f.edit.mock.calls[0]![3], 'the expanded editor returns focus instead').toMatchObject({ returnFocus: true })
 })

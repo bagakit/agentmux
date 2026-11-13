@@ -183,7 +183,7 @@ it('expand ends the surface with the full frozen frame, the selection and the ma
   const handoff = { shapes: [{ id: 'r', kind: 'rect' }], crop: selection, tool: 'rect' }
   await overlays[0]!.call('expand', { handoff })
   expect(overlays.every(row => row.window.dead), 'the window editor replaces every overlay').toBe(true)
-  expect(await outcome).toEqual({ state: 'expanded', image: overlays[0]!.input.image, handoff,
+  expect(await outcome).toEqual({ state: 'expanded', image: overlays[0]!.input.image, handoff, delivered: expect.any(Function),
     source: { rect: { x: 1, y: 1, width: 2, height: 1 }, scale: 2, capturedAt: 1_700_000_000_000 } })
   expect(overlays.every(row => row.window.dead)).toBe(true)
   expect(ports.returnFocus, 'the window editor takes over focus').not.toHaveBeenCalled()
