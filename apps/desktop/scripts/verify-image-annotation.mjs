@@ -14,12 +14,34 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'inline'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|inline')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
+const inline = 'apps/desktop/test/image-annotation-inline.test.tsx'
 const specifications = {
+  inline: {
+    tests: [inline, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    mutations: [{ label: 'inline-view-fitted', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'const fitView = () => inline ? { scale: 1 / pixelRatio, x: 0, y: 0 } : fitImageView(', replace: 'const fitView = () => fitImageView(', test: inline,
+      consumer: 'draws on the selection at a fixed one-to-one pixel scale without zoom or pan', failure: /keeps one image pixel per screen pixel/ },
+    { label: 'inline-toolbar-never-flips', source: component + 'ImageAnnotationEditor.tsx',
+      find: "if (above >= 0) return { side: 'above', top: above }", replace: 'void above', test: inline,
+      consumer: 'right-aligns the floating bar below the selection, flips above, and moves inside when neither fits', failure: /flips the bar above/ },
+    { label: 'inline-toolbar-never-inside', source: component + 'ImageAnnotationEditor.tsx',
+      find: "return { side: 'inside', top: frame.y + frame.height - INLINE_BAR_GAP - INLINE_BAR_HEIGHT }", replace: "return { side: 'above', top: above }", test: inline,
+      consumer: 'right-aligns the floating bar below the selection, flips above, and moves inside when neither fits', failure: /moves the bar inside/ },
+    { label: 'inline-window-chrome-kept', source: component + 'ImageAnnotationEditor.tsx',
+      find: '  if (inline) {\n    const frame = inlineFrame', replace: '  if (false) {\n    const frame = inlineFrame', test: inline,
+      consumer: 'shows only the floating bar and property popover, without the window chrome or Pan', failure: /omits the window header/ },
+    { label: 'inline-expand-unwired', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'onClick={() => onExpand({ shapes: currentShapes(), crop: documentState.crop, tool })}', replace: 'onClick={() => {}}', test: inline,
+      consumer: 'hands the current marks and tool to the host on Expand', failure: /hands the edit to the host/ },
+    { label: 'inline-initial-tool-ignored', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'const requestedTool = initialTool ?? lastStyle.tool', replace: 'const requestedTool = lastStyle.tool', test: inline,
+      consumer: 'opens with initialTool and never opens on Pan', failure: /initialTool opens the inline editor/ }]
+  },
   modeless: {
     tests: [modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
     mutations: [{ label: 'hit-first-omitted', source: component + 'ImageAnnotationEditor.tsx',
