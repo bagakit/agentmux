@@ -109,20 +109,39 @@ const NETWORK_IDLE_QUIET_MS = 500
  * 写的，AgentMux 用的是窗口级 `WebContentsView`，**不能照搬**（不是漏抄）。
  */
 const RESTORE_FOCUS_SNIPPET = `
-  // A field inside an open shadow root reports its host as document.activeElement; the focused element
-  // is the deepest shadowRoot.activeElement. Both the check and the restore read that one answer.
+  // The deepest focused element reachable through open shadow roots: who had focus before we acted.
   const focusedElement = () => {
     let focused = document.activeElement
     while (focused && focused.shadowRoot && focused.shadowRoot.activeElement) focused = focused.shadowRoot.activeElement
     return focused
   }
-  const holdsFocus = (acted) => { const focused = focusedElement(); return focused === acted || (!!focused && acted.contains(focused)) }
+  // Whether an element holds focus, judged from its own side so it works in open and closed shadow
+  // roots and for a host that delegates focus: at each level up to the document, that level's root
+  // must have this node (or, in light DOM, something inside it) as its active element.
+  const holdsFocus = (element) => {
+    let node = element
+    while (node) {
+      const root = node.getRootNode()
+      const active = root.activeElement
+      if (!active || (active !== node && !node.contains(active))) return false
+      if (root === document) return true
+      node = root.host
+    }
+    return false
+  }
+  const focusable = (element) => element instanceof HTMLElement || element instanceof SVGElement
+  // After the action: give focus back only while it is still on what we acted on, so a page that moved
+  // focus itself (a submitted form, an opened dialog) is not fought.
   const restoreFocus = (acted, previous) => {
     if (previous === acted) return
     if (!holdsFocus(acted)) return
-    if (previous instanceof HTMLElement || previous instanceof SVGElement) previous.focus()
+    if (focusable(previous)) previous.focus()
     else if (acted instanceof HTMLElement) acted.blur()
-  }`
+  }
+  // After a refusal: focus() may already have moved focus (a page handler can bounce it elsewhere),
+  // so put it back where the person had it.
+  const returnFocus = (previous) => { if (focusable(previous) && !holdsFocus(previous)) previous.focus() }
+  const FOCUS_REFUSED = 'did not keep focus: it is inert (behind a modal dialog) or hidden, or the page moved focus elsewhere'`
 
 /**
  * Scroll before reading geometry. `instant`, because a page with `scroll-behavior: smooth` would still
@@ -183,7 +202,7 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {${RESTORE_FOCUS_SNIPPET}
   const previous = focusedElement();
   self.focus();
   // An inert field (behind a modal dialog) or a hidden one does not take focus.
-  if (!holdsFocus(self)) { restoreFocus(self, previous); return { ok: false, reason: 'did not take focus, so it is inert (behind a modal dialog) or hidden' }; }
+  if (!holdsFocus(self)) { returnFocus(previous); return { ok: false, reason: FOCUS_REFUSED }; }
   const before = editable ? self.textContent ?? '' : self.value;
   let caret = 'set';
   if (editable) {
@@ -213,9 +232,9 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {${RESTORE_FOCUS_SNIPPET}
  * - A select takes one option, named by its value or its visible label. When the text names two
  *   different options (one by value, another by label) or several by label, it is refused with the
  *   candidates, never resolved by a guess.
- * - The field must take focus, which an inert field (behind a modal dialog) or a hidden one does not. A
- *   field covered by another element still takes focus and takes its value, as it would from a person
- *   tabbing to it. Focus inside an open shadow root counts.
+ * - The field must keep focus, which an inert field (behind a modal dialog) or a hidden one does not. A
+ *   field covered by another element still takes focus and its value, as it would from a person
+ *   tabbing to it. Fields inside open or closed shadow roots count.
  *
  * The value then goes through the element's own setter, and input and change follow as a person's pick
  * would fire them. Returns what the setter left (`taken`, which differs from `wanted` only where the
@@ -255,7 +274,7 @@ const SET_PICKER_VALUE_DECLARATION = `function (value) {${RESTORE_FOCUS_SNIPPET}
   }
   const previous = focusedElement();
   self.focus();
-  if (!holdsFocus(self)) { restoreFocus(self, previous); return { ok: false, reason: 'did not take focus, so it is inert (behind a modal dialog) or hidden' }; }
+  if (!holdsFocus(self)) { returnFocus(previous); return { ok: false, reason: FOCUS_REFUSED }; }
   const before = self.value;
   if (index >= 0) Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex').set.call(self, index);
   else Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(self, next);
@@ -315,7 +334,7 @@ const FOCUS_FOR_KEY_DECLARATION = `function () {${RESTORE_FOCUS_SNIPPET}
   if (!self) return { ok: false, reason: 'is not an element that can take keyboard input' };
   const previous = focusedElement();
   self.focus();
-  if (!holdsFocus(self)) { restoreFocus(self, previous); return { ok: false, reason: 'did not take focus, so it is inert (behind a modal dialog) or hidden' }; }
+  if (!holdsFocus(self)) { returnFocus(previous); return { ok: false, reason: FOCUS_REFUSED }; }
   globalThis.__agentMuxTextFocus = previous;
   return { ok: true };
 }`
