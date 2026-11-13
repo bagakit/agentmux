@@ -3066,7 +3066,10 @@ export class AgentMuxRpcService {
     // A healthy Run stays available even when optional maintenance is paused. Only a new Start is fenced.
     if (observed.run.state !== 'running') {
       const prefs = this.ports.moteQuickPreferences && await this.ports.moteQuickPreferences.read({ kind:'quick', target:input.target })
-      if (!prefs || prefs.status !== 'ready' || prefs.maintenance?.status === 'unconfirmed') throw new AgentMuxError('The original main maintenance state is unconfirmed. Its history and manual recovery remain available.', 'CONTROL_UNAVAILABLE')
+      // Only an explicit pause, disable, stop or cancellation fences this person's own open. An unconfirmed
+      // maintenance reading is often the Host's own failed recovery attempt on this same Session; that
+      // observation gap does not take away the explicit entry, which reports its own Core result.
+      if (!prefs || prefs.status !== 'ready') throw new AgentMuxError('The original main settings are unconfirmed. Its history and manual recovery remain available.', 'CONTROL_UNAVAILABLE')
       if (prefs.defaults?.presence?.enabled === false || prefs.maintenance?.status === 'paused' || prefs.maintenance?.status === 'disabled' ||
           observed.run.exitReason === 'user-stopped' || observed.session.continuity?.supervision?.cancellation || observed.session.continuity?.supervision?.phase === 'cancelled')
         throw new AgentMuxError('The original main was explicitly paused, stopped or cancelled. Its history remains readable; use its original explicit recovery or maintenance control.', 'MOTE_MAIN_RECOVERY_PAUSED')
