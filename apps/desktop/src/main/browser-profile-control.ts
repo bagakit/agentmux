@@ -71,8 +71,8 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       return { operation: request.operation, revision: ports.profiles.listRevision(), deleted: true, ...receipt }
     }
     case 'browser.profile.view.create': case 'browser.profile.view.update': {
-      const view = await owned(() => ports.profiles.saveView(request.label, request.query, request.expectedRevision, request.operation === 'browser.profile.view.update' ? request.viewId : undefined))
-      return { operation: request.operation, revision: ports.profiles.listRevision(), view }
+      const receipt = await owned(() => ports.profiles.saveView(request.label, request.query, request.expectedRevision, request.operation === 'browser.profile.view.update' ? request.viewId : undefined))
+      return { operation: request.operation, ...receipt }
     }
     case 'browser.profile.view.delete':
       await owned(() => ports.profiles.deleteView(request.viewId, request.expectedRevision))

@@ -2049,7 +2049,7 @@ export type AgentMuxDesktopApi = {
     setDefaultProfile(profileId: string): Promise<void>
     createProfile(label: string): Promise<BrowserProfileSummary>
     copyProfile(profileId: string, label: string, expectedRevision: string): Promise<BrowserProfileSummary>
-    saveProfileView(label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<import('@agentmux/core/control').BrowserProfileView>
+    saveProfileView(label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<import('@agentmux/core/control').BrowserProfileViewSaveReceipt>
     deleteProfileView(viewId: string, expectedRevision: number): Promise<void>
     bulkUpdateProfiles(items: import('@agentmux/core/control').BrowserProfileSelectionItem[], action: import('@agentmux/core/control').BrowserProfileBulkAction): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
     createProfileFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseBrowserProfileQuery, queryBrowserProfiles, type BrowserProfileQuery, type BrowserProfileBulkAction, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
@@ -19,6 +19,8 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
   const [kind, setKind] = useState<BrowserProfileBulkAction['kind']>('pin'), [value, setValue] = useState(''), [unpin, setUnpin] = useState(false)
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [results, setResults] = useState<BrowserProfileBulkItemResult[] | null>(null)
   const [now, setNow] = useState(Date.now)
+  // A reply may advance only the exact view draft that submitted it. Later input has its own context.
+  const editingContext = useRef<object>({})
   const relativeTime = query.lastUsed !== undefined && query.lastUsed !== 'unknown'
   useEffect(() => {
     if (!active || !relativeTime) return
@@ -34,8 +36,12 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
   const visibleIds = new Set(visible.map(profile => profile.id)), hiddenCount = [...selected].filter(id => !visibleIds.has(id)).length
   const tags = useMemo(() => [...new Set(profiles.flatMap(profile => profile.tags ?? []))].sort(), [list.profiles])
   const selectedView = views.find(view => view.id === viewId)
-  const change = (patch: { [K in keyof BrowserProfileQuery]?: BrowserProfileQuery[K] | undefined }) => setQuery(current => parseBrowserProfileQuery(Object.fromEntries(Object.entries({ ...current, ...patch }).filter(([, v]) => v !== undefined))))
+  const change = (patch: { [K in keyof BrowserProfileQuery]?: BrowserProfileQuery[K] | undefined }) => {
+    editingContext.current = {}
+    setQuery(current => parseBrowserProfileQuery(Object.fromEntries(Object.entries({ ...current, ...patch }).filter(([, v]) => v !== undefined))))
+  }
   const applyView = (id: string) => {
+    editingContext.current = {}
     const view = views.find(candidate => candidate.id === id)
     setViewId(id); setViewRevision(list.revision); setError(null)
     setLabel(view?.label ?? ''); setQuery(view ? structuredClone(view.query) : {})
@@ -44,6 +50,24 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
     if (busy) return
     setBusy(true); setError(null)
     try { await action() } catch (cause) { setError(presentError(cause)) } finally { setBusy(false) }
+  }
+  const saveView = (id?: string) => {
+    const expectedRevision = id === undefined ? list.revision : viewRevision
+    if (expectedRevision === null) return
+    const submitted = editingContext.current
+    void run(async () => {
+      const receipt = await api.browser.saveProfileView(label, query, expectedRevision, id)
+      if (submitted !== editingContext.current) return
+      setViewId(receipt.view.id); setViewRevision(receipt.revision)
+    })
+  }
+  const deleteView = (id: string) => {
+    const submitted = editingContext.current
+    void run(async () => {
+      await api.browser.deleteProfileView(id, list.revision!)
+      if (submitted !== editingContext.current) return
+      setViewId(''); setViewRevision(null)
+    })
   }
   const bulk = () => {
     // Freeze exact IDs/tokens once; later snapshots or filter results cannot expand this batch.
@@ -63,13 +87,13 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
           <label>Saved route<select aria-label="Profile route filter" value={query.route ?? ''} onChange={event => change({ route: event.target.value as BrowserProfileQuery['route'] || undefined })}><option value="">Any route</option><option value="system">System settings</option><option value="direct">Direct</option><option value="proxy">Proxy configured</option></select></label>
           <label>Last observed use<select aria-label="Profile last use filter" value={query.lastUsed ?? ''} onChange={event => change({ lastUsed: event.target.value as BrowserProfileQuery['lastUsed'] || undefined })}><option value="">Any time</option><option value="day">Last day</option><option value="week">Last week</option><option value="month">Last month</option><option value="unknown">Unknown</option></select></label>
           <label>Order<select aria-label="Profile order" value={query.sort ?? ''} onChange={event => change({ sort: event.target.value as BrowserProfileQuery['sort'] || undefined })}><option value="">Original order</option><option value="name">Name</option><option value="recent">Last observed use</option><option value="observed-time">Confirmed Browser time</option></select></label>
-          <button className="small-button" onClick={() => { setQuery({}); setViewId(''); setNow(Date.now()) }}>Clear filters</button>
+          <button className="small-button" onClick={() => { editingContext.current = {}; setQuery({}); setViewId(''); setViewRevision(null); setNow(Date.now()) }}>Clear filters</button>
         </div>
         <p className="settings-hint">Times and status reflect confirmed native observations. Missing history stays unknown.</p>
       </details>
-      <details><summary>Save this view</summary><label>View name<input aria-label="Profile view name" value={label} onChange={event => setLabel(event.target.value)} /></label><div className="browser-profile-library__actions">
-        <button className="small-button" disabled={busy || list.revision === null || !label.trim()} onClick={() => void run(async () => { const saved = await api.browser.saveProfileView(label, query, list.revision!); setViewId(saved.id); setViewRevision(null) })}>Save new</button>
-        {selectedView ? <><button className="small-button" disabled={busy || viewRevision === null} onClick={() => void run(async () => { await api.browser.saveProfileView(label, query, viewRevision!, selectedView.id); setViewRevision(null) })}>Update view</button><button className="small-button" onClick={() => applyView(viewId)}>Reload view</button><button className="small-button" disabled={busy || list.revision === null} onClick={() => void run(async () => { await api.browser.deleteProfileView(selectedView.id, list.revision!); setViewId(''); setViewRevision(null) })}>Delete view</button></> : null}
+      <details><summary>Save this view</summary><label>View name<input aria-label="Profile view name" value={label} onChange={event => { editingContext.current = {}; setLabel(event.target.value) }} /></label><div className="browser-profile-library__actions">
+        <button className="small-button" disabled={busy || list.revision === null || !label.trim()} onClick={() => saveView()}>Save new</button>
+        {selectedView ? <><button className="small-button" disabled={busy || viewRevision === null} onClick={() => saveView(selectedView.id)}>Update view</button><button className="small-button" onClick={() => applyView(viewId)}>Reload view</button><button className="small-button" disabled={busy || list.revision === null} onClick={() => deleteView(selectedView.id)}>Delete view</button></> : null}
       </div></details>
     </div>
     {scopeError ? <p className="browser-profiles-settings__service" role="status">{scopeError}</p> : null}

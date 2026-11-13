@@ -1,4 +1,4 @@
-import { parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
+import { parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileViewSaveReceipt, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { mintCapabilityToken, mintObjectId } from '@agentmux/core/object-id'
 import { app, BrowserWindow, session, webContents, type Session } from 'electron'
 import type {
@@ -165,12 +165,12 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   listViews(): BrowserProfileView[] { this.assertInitialized(); return structuredClone(this.views) }
 
-  async saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<BrowserProfileView> {
+  async saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<BrowserProfileViewSaveReceipt> {
     this.assertInitialized()
     return this.trackMutation((async () => {
       const { snapshot, view } = await this.store.saveView(label, parseBrowserProfileQuery(query), expectedRevision, viewId)
       this.adopt(snapshot)
-      return view
+      return { view, revision: snapshot.revision }
     })())
   }
 

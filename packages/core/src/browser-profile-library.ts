@@ -12,6 +12,8 @@ export type BrowserProfileQuery = {
   sort?: 'name' | 'recent' | 'observed-time'
 }
 export type BrowserProfileView = { id: string; label: string; query: BrowserProfileQuery }
+/** The collection revision belongs to this confirmed view write, not a later list read. */
+export type BrowserProfileViewSaveReceipt = { view: BrowserProfileView; revision: number }
 export type BrowserProfileSelectionItem = { profileId: string; expectedRevision: string }
 export type BrowserProfileBulkAction = { kind: 'pin'; pinned: boolean } | { kind: 'move'; folderId: string | null }
   | { kind: 'add-tag' | 'remove-tag'; tag: string }
