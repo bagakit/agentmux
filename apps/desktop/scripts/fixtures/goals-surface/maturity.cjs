@@ -208,7 +208,7 @@ app.whenReady().then(async()=>{
    await capture('1280-dark-mixed-list',1280)
    await click('document.querySelector("[data-demand-id=\\\"goal:visual-0\\\"]")')
    await waitFor('Boolean(document.querySelector(".goals-detail"))')
-   const compact=await evaluate('({context:document.querySelector(".goals-common").dataset.commonContext,height:document.querySelector(".goals-common").getBoundingClientRect().height,hidden:document.querySelector(".goals-common__content").hidden,headings:[...document.querySelectorAll(".goals-document h2")].map(node=>node.textContent)})')
+   const compact=await evaluate('({context:document.querySelector(".goals-common").dataset.commonContext,height:document.querySelector(".goals-common").getBoundingClientRect().height,hidden:document.querySelector(".goals-common__content").hidden,headings:[...document.querySelectorAll(".goals-document h2")].map(node=>node.textContent.trim())})')
    assert.equal(compact.context,'compact');assert.equal(compact.hidden,true);assert.ok(compact.height<80,'Start area gives Goal navigation its reading space');assert.ok(compact.headings.includes('Goal definition'));result.observations.push({scene:'unoutlined',compact})
    await capture('1280-dark-unoutlined-detail',1280)
    await scenario('proposal',620,'light')
