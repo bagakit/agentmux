@@ -1,12 +1,12 @@
 /* File Region media player. The native element plays; this chrome is drawn in theme tokens only.
-   Over video the controls sit on a dark scrim in both themes, so they use their own ink roles. */
+   Over video the controls sit on a dark scrim in both themes, so they use their own ink roles. The accent
+   there is the theme green lifted toward the ink, which in a light theme is otherwise too dark to read on it. */
 .media-player { --media-ink: color-mix(in oklab, #ffffff 94%, transparent); --media-ink-2: color-mix(in oklab, #ffffff 72%, transparent);
-  --media-accent: var(--green); --media-glass: color-mix(in oklab, #ffffff 10%, transparent);
+  --media-accent: color-mix(in oklab, var(--green) 45%, #ffffff); --media-glass: color-mix(in oklab, #ffffff 10%, transparent);
   /* Behind the picture: neutral near-black in both themes, so letterboxing never reads as content. */
   --media-backdrop: color-mix(in srgb, var(--bg) 20%, black);
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4);
   padding: var(--sp-5); container-type: inline-size; outline: none; }
-:root[data-appearance="light"] .media-player { --media-accent: var(--green-text); }
 .media-player:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .media-player__announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -76,8 +76,8 @@
   height: 4px; border-radius: 999px; transition: height var(--dur-fast) ease;
   background: linear-gradient(to right, var(--media-accent) var(--media-fill, 0%), transparent var(--media-fill, 0%)),
     linear-gradient(to right, color-mix(in oklab, #ffffff 50%, transparent) var(--media-hover, 0%), transparent var(--media-hover, 0%)),
-    linear-gradient(to right, color-mix(in oklab, #ffffff 38%, transparent) var(--media-buffered, 0%), transparent var(--media-buffered, 0%)),
-    color-mix(in oklab, #ffffff 22%, transparent); }
+    linear-gradient(to right, color-mix(in oklab, #ffffff 30%, transparent) var(--media-buffered, 0%), transparent var(--media-buffered, 0%)),
+    color-mix(in oklab, #ffffff 18%, transparent); }
 .media-player__slider:hover::-webkit-slider-runnable-track, .media-player__slider:focus-visible::-webkit-slider-runnable-track { height: 6px; }
 .media-player__slider::-webkit-slider-thumb, .media-player__volume::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; translate: 0 -4px;
   border-radius: 50%; background: var(--media-ink); box-shadow: 0 1px 4px color-mix(in oklab, #000000 40%, transparent); opacity: 0; transition: opacity var(--dur-fast) ease; }
