@@ -41,6 +41,8 @@
 .browser-rsi-notice__line { display: flex; align-items: flex-start; gap: var(--sp-2); }
 .browser-rsi-notice__line > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .browser-rsi-notice__line > button { flex: none; min-height: 20px; padding-inline: var(--sp-2); }
+.browser-rsi-notice__line > .browser-rsi-notice__dismiss { padding-inline: var(--sp-1); color: var(--text-3); }
+.browser-rsi-notice__line > .browser-rsi-notice__dismiss:hover { color: var(--text); }
 .browser-rsi-notice pre { max-height: 200px; overflow: auto; margin: var(--sp-2) 0 0; color: inherit; font: var(--fs-micro)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .browser-rsi-timeline__list, .browser-rsi-replay__steps { list-style: none; margin: 0; padding: var(--sp-1) var(--sp-2); }
 .browser-rsi-timeline__step { min-width: 0; margin-block: 1px; }

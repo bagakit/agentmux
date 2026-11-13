@@ -22,6 +22,7 @@ import { api } from '../lib/api'
 
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectUserIcon = semanticIconComponent('object.user')
 const ThemeActionPanIcon = semanticIconComponent('action.pan')
 const ThemeActionReturnControlIcon = semanticIconComponent('action.return-control')
@@ -206,10 +207,16 @@ export function BrowserOperationStatus({
   )
 }
 
-/** Persistent service notice is separate from the optional operation disclosure. */
+/**
+ * Persistent service notice, separate from the optional operation disclosure. The person can put it
+ * away; that only hides this one notice on this page. The operation, its record and the timeline keep
+ * it, and a different notice (a new run, or Main saying something else) shows again on its own.
+ */
 export function BrowserOperationWarning({ activity }: { activity: BrowserActivityState }) {
   const message = activity.warning
-  return message ? <BrowserOperationNotice message={message} className="browser-operation-warning" /> : null
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  if (!message || dismissed === message) return null
+  return <BrowserOperationNotice message={message} className="browser-operation-warning" onDismiss={() => setDismissed(message)} />
 }
 
 /**
@@ -250,7 +257,7 @@ export function BrowserOperationTimeline({
   )
 }
 
-function BrowserOperationNotice({ message, className }: { message: string; className: string }) {
+function BrowserOperationNotice({ message, className, onDismiss }: { message: string; className: string; onDismiss?: () => void }) {
   const [open, setOpen] = useState(false)
   const panelId = useId()
   // The first reported line is the cause/recovery text. Stack traces remain exact and reachable,
@@ -261,6 +268,8 @@ function BrowserOperationNotice({ message, className }: { message: string; class
     <span className="browser-rsi-notice__line"><ThemeStatusWarningIcon size={12} aria-hidden="true" /><span>{summary}</span>
       {hasDetails ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet"
         aria-label="Show browser warning details" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>Details</button> : null}
+      {onDismiss ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet browser-rsi-notice__dismiss"
+        aria-label="Dismiss this Browser notice" title="Dismiss. The operation record keeps it." onClick={onDismiss}><ThemeActionCloseIcon size={11} aria-hidden="true" /></button> : null}
     </span>
     {open && hasDetails ? <pre id={panelId}>{message}</pre> : null}
   </div>
