@@ -16,7 +16,7 @@ const mainMoteOnly = flags.includes('--goal-main-mote-only'), coordinationOnly =
 const readabilityOnly = flags.includes('--goal-readability-only')
 const primaryStatusOnly = flags.includes('--goal-primary-status-only')
 const primaryStatusMutants = [
-  { label: 'retained-primary-agent-mislabelled-none', file: 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', before: "retainedPrimaryBot && targetStatus === 'No Agent yet' ? 'Status unknown' : targetStatus", after: 'targetStatus' }
+  { label: 'retained-primary-agent-mislabelled-none', file: 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', before: "const pendingPrimary = retainedPrimaryBot && target?.kind === 'no-target'", after: 'const pendingPrimary = false' }
 ]
 const readabilityMutants = [
   { label: 'unknown-primary-default-selection-claimed', file: 'apps/desktop/src/renderer/src/components/NewTabSurface.tsx', before: "const displayedExecutorId = primaryBotUnconfirmed && !explicitExecutorChoice ? '' : executorId", after: 'const displayedExecutorId = executorId' },
