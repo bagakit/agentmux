@@ -28,7 +28,7 @@ it('the real shared message displays standalone protocols and copies original wi
 
 it('reads a confirmed Capsule answer as its question and answer, links the original page and keeps the original wire', async () => {
   const { formatCapsuleAnswer } = await import('@agentmux/core/capsule')
-  const wire = formatCapsuleAnswer({ capsuleId: 'PAGE', interactionId: 'QUESTION', question: 'Which icon?', answer: 'B, with a lighter shadow' })
+  const wire = formatCapsuleAnswer({ capsuleId: 'Kd7mQ2xRb9Wp', interactionId: 'Q4nT8vHc2Jzs', question: 'Which icon?', answer: 'B, with a lighter shadow' })
   const host = document.createElement('div'); document.body.append(host)
   const root = createRoot(host); cleanup.push(() => { act(() => root.unmount()); host.remove() })
   const copy = vi.fn(async () => true)
@@ -41,7 +41,7 @@ it('reads a confirmed Capsule answer as its question and answer, links the origi
   expect(card.getAttribute('data-protocol-kind')).toBe('capsule-answer')
   expect(card.querySelector('.conversation-capsule-answer__question')?.textContent).toBe('Which icon?')
   expect(card.querySelector('.conversation-capsule-answer__answer')?.textContent).toBe('B, with a lighter shadow')
-  expect(links).toEqual(['amux://capsule/PAGE'])
+  expect(links).toEqual(['amux://capsule/Kd7mQ2xRb9Wp'])
   const visible = card.cloneNode(true) as HTMLElement
   visible.querySelector('details.conversation-protocol__original')?.remove()
   expect(visible.textContent).toContain('Which icon?')
