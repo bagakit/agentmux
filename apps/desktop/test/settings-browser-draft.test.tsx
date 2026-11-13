@@ -102,7 +102,7 @@ it('retains a later edit back to baseline while the first automation save awaits
   vi.mocked(f.runtime.prepare).mockImplementationOnce(async (...args) => { await held.promise; return original(...args) })
   await dom.click('[data-settings-pane="browser"] input[type="checkbox"]')
   await dom.click('[data-settings-pane="browser"] .settings-pane-actions button')
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Saving')
+  expect(dom.container.querySelector('[data-settings-pane="browser"] [data-settings-save-bar] [role="status"]')!.textContent).toContain('Saving')
   await dom.click('[data-settings-pane="browser"] input[type="checkbox"]')
   expect(checkbox().checked).toBe(false)
   await act(async () => held.resolve())

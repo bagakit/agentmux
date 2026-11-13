@@ -27,7 +27,7 @@ it('shows pending, saving, failure and successful retry without clearing the bro
   expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toBe('Unsaved changes')
   await dom.click('.primary-button')
   expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toContain('Saving changes')
-  expect(onSave).toHaveBeenCalledWith({ agentAutomation: true, automaticMemoryRelease: true }, { agentAutomation: false, automaticMemoryRelease: true })
+  expect(onSave).toHaveBeenCalledWith({ agentAutomation: true, automaticMemoryRelease: true, exitCheckUrl: '' }, { agentAutomation: false, automaticMemoryRelease: true, exitCheckUrl: '' })
   await act(async () => reject(new Error('Disk full')))
   expect(dom.container.querySelector('[role="alert"]')!.textContent).toBe('Disk full')
   expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(true)
@@ -54,10 +54,10 @@ it('preserves notification drafts when an unrelated save returns cloned config v
 it('keeps an unsaved SSH host across cloned configuration and saves the original host/workspace contract', async () => {
   const onSave = vi.fn(async () => {})
   await dom.render(<HostSettingsPane active={true} config={composerConfig} onSave={onSave} />)
-  await dom.click('.settings-pane-toolbar button')
-  await input('[placeholder="dev.example.com"]', 'host.example.test')
+  await dom.click('[data-add-host]')
+  await input('[placeholder="devbox or dev.example.com"]', 'host.example.test')
   await dom.render(<HostSettingsPane active={true} config={structuredClone(composerConfig)} onSave={onSave} />)
-  expect(dom.container.querySelector<HTMLInputElement>('[placeholder="dev.example.com"]')!.value).toBe('host.example.test')
+  expect(dom.container.querySelector<HTMLInputElement>('[placeholder="devbox or dev.example.com"]')!.value).toBe('host.example.test')
   await dom.click('.primary-button')
   expect(onSave).toHaveBeenCalledWith([
     composerConfig.hosts[0],
@@ -71,6 +71,6 @@ it('keeps prompt edits across cloned saved arrays', async () => {
   await input('[placeholder="eli5"]', 'review')
   await dom.render(<ShortcutSettingsPane active={true} config={structuredClone(config)} onSave={async () => {}} />)
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="eli5"]')!.value).toBe('review')
-  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Save prompts updates the whole library. 1 changed · 0 pending deletions.')
+  expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Saves the whole prompt library. 1 changed.')
   expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(false)
 })
