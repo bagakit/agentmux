@@ -168,7 +168,7 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
           </div>}
           <div className="workspace-agents-tool__actions" role="group" aria-label={selecting ? 'Selected Agent actions' : 'Agent list actions'}>
             {!selecting ? <WorkspaceCollaboration /> : null}
-            {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="去 Focus 中查看" title="View in Focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={15} aria-hidden="true" /></button> : null}
+            {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="View in Focus" title="View in Focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={15} aria-hidden="true" /></button> : null}
             {selecting ? <>
               <button type="button" aria-label="Select visible Agents" title="Select visible Agents" onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}><SemanticIcon name="object.criteria" size={15} /></button>
               <button type="button" aria-label="Clear selection" title="Clear selection" onClick={() => setSelected(new Set())}><SemanticIcon name="action.clear-list" size={15} /></button>
