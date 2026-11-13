@@ -79,7 +79,11 @@ export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex'
   inner.ensureTerminalHandshakeOrDegrade = async session => session
   client.onEvent(event => events.push(event))
   const nativeBefore = await readFile(path), timelineBefore = await store.loadTimeline(old.agentSessionId)
-  return { root, path, storePath, store, old, retired, client, inner, starts, stops, binds, events, run, nativeBefore, timelineBefore,
+  // The recovery owner keeps its own reference to the Hook server; a real server must replace both.
+  const useHookServer = (server: object) => { inner.hookServer = server as any; (client as any).recovery.ports.hooks.hookServer = server }
+  return { root, path, storePath, store, old, retired, client, inner, starts, stops, binds, events, run, nativeBefore, timelineBefore, useHookServer,
+    /** A second Core client in this process, sharing this fixture's controlled Runtime kernel everywhere it is held. */
+    useKernelIn: (other: AgentMuxClient) => { (other as any).kernel = inner.kernel; (other as any).recovery.ports.runtime.kernel = inner.kernel },
     input: { agentSessionId: old.agentSessionId, expectedRetiredAt: retired.observedAt, operationId: 'explicit-continue' },
     close: async () => { await client.dispose(); await rm(root, { recursive: true, force: true }); vi.unstubAllEnvs() } }
 }

@@ -1,11 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { fork } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentHookServer } from '../src/hook-server.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAgentSessions, loadSessionHistorySources, agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
+import { readStoreRows, rewriteStoreRow, storeSnapshot } from './helpers/session-store-rows.js'
 const fixtures: Awaited<ReturnType<typeof retiredReopenFixture>>[] = []
 afterEach(async () => { for (const f of fixtures.splice(0).reverse()) await f.close(); vi.restoreAllMocks() })
 async function fixture(provider: 'claude' | 'pi' | 'codex' = 'claude') { const f = await retiredReopenFixture(provider); fixtures.push(f); return f }
@@ -82,7 +83,7 @@ it('admits one winner across independent Clients sharing the same durable retire
   const f = await fixture(), { AgentMuxClient } = await import('../src/client.js')
   const second = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(f.storePath) })
   const inner = second as any; inner.connected = true
-  inner.kernel = f.inner.kernel
+  f.useKernelIn(second)
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'second-fresh-binding', endpoint: { url: 'http://127.0.0.1:0', token: 'second-fresh-token' },
     bindRun: async (id: string) => { second.agentSession(f.old.agentSessionId); f.binds.push(id) }, close: async () => {} })
@@ -98,12 +99,19 @@ it('admits one winner across independent Clients sharing the same durable retire
   } finally { await second.dispose() }
 })
 
-it('cleans only its uncommitted Run after confirmed persistence failure and retains original retired history', async () => {
+it('keeps the started Run and its prepared reopen after a rejected commit, then confirms the same operation without a second Start', async () => {
+  // A rejected commit cannot prove the started Run is unwanted: the reservation keeps the exact
+  // prepared Session, so the original operation completes it instead of stopping a healthy Run.
   const f = await fixture(); vi.spyOn(f.store, 'commitLifecycle').mockRejectedValueOnce(new Error('private persist rejected'))
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow('private persist rejected')
-  expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired]); expect(await loadAgentSessions(f.store)).toEqual([])
+  expect(f.stops).toEqual([]); expect(f.starts).toHaveLength(1); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(readStoreRows(f.storePath, 'reservations').map(row => row.json)).toMatchObject([{ kind: 'reopen', preparedSession: { nativeHandle: f.old.nativeHandle } }])
   expect(await f.store.loadTimeline(f.old.agentSessionId)).toEqual(f.timelineBefore)
-  expect(f.stops).toEqual(['new-run-1']); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  await expect(f.client.reopenAgent({ ...f.input, operationId: 'competing-intent' })).rejects.toMatchObject({ code: 'AGENT_SESSION_BUSY' })
+  const confirmed = await f.client.reconcileAgentReopen(f.input)
+  expect(confirmed).toMatchObject({ run: { runId: 'new-run-1' }, nativeHandle: f.old.nativeHandle })
+  expect(await f.store.loadRetiredAgentSessions()).toEqual([]); expect(readStoreRows(f.storePath, 'reservations')).toEqual([])
+  expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([])
 })
 
 it('reads canonical applied identity after a lost commit ACK and never stops or launches it again', async () => {
@@ -170,7 +178,7 @@ it('keeps the Run and reservation when the commit and canonical read are both un
   const f = await fixture()
   vi.spyOn(f.store, 'commitLifecycle').mockRejectedValueOnce(new Error('private unknown commit'))
   vi.spyOn(f.store, 'load').mockRejectedValueOnce(new Error('private canonical read unavailable'))
-  await expect(f.client.reopenAgent(f.input)).rejects.toThrow('Continue result is unconfirmed')
+  await expect(f.client.reopenAgent(f.input)).rejects.toThrow('private unknown commit')
   expect(f.stops).toEqual([]); expect(f.starts).toHaveLength(1)
   expect(await f.store.readLifecycleReservation(f.old.agentSessionId)).toMatchObject({ agentSessionId: f.old.agentSessionId })
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired])
@@ -203,9 +211,7 @@ it('serializes the exact retired identity across two real FileStore owner proces
 it('fences every retirement fact at the durable reservation, including a same-epoch native identity change', async () => {
   const f = await fixture(), reserve = f.store.reserveLifecycle.bind(f.store)
   vi.spyOn(f.store, 'reserveLifecycle').mockImplementationOnce(async reservation => {
-    const raw = JSON.parse(await readFile(f.storePath, 'utf8'))
-    raw.retiredAgentSessions[0].history.nativeHandle.sessionId = 'another-native'
-    await writeFile(f.storePath, JSON.stringify(raw, null, 2))
+    rewriteStoreRow(f.storePath, 'retired_sessions', f.old.agentSessionId, retired => { retired.history.nativeHandle.sessionId = 'another-native' })
     return await reserve(reservation)
   })
   await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION', controlFailure: { disposition: 'not_applied' } })
@@ -239,7 +245,7 @@ it('buffers a real early HTTP Hook until the same identity is canonical, then re
     expect(f.client.agentSession(f.old.agentSessionId).run.runId).toBe(event.runId)
     await (f.client as any).acceptHookEvent(event, signal); deliveries.push(event.receiptId)
   }, 0)
-  await hook.start(); f.inner.hookServer = hook
+  await hook.start(); f.useHookServer(hook)
   const start = f.inner.kernel.start.getMockImplementation()!
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => {
     const run = await start(input)
@@ -258,7 +264,7 @@ it('buffers a real early HTTP Hook until the same identity is canonical, then re
 
 it('keeps original native identity and a service window when the continued CLI reports another conversation', async () => {
   const f = await fixture(), hook = new AgentHookServer(async (event, signal) => await (f.client as any).acceptHookEvent(event, signal), 0)
-  await hook.start(); f.inner.hookServer = hook
+  await hook.start(); f.useHookServer(hook)
   const start = f.inner.kernel.start.getMockImplementation()!
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => {
     const run = await start(input)
@@ -268,7 +274,10 @@ it('keeps original native identity and a service window when the continued CLI r
   })
   const next = await f.client.reopenAgent(f.input)
   expect(next.nativeHandle).toEqual(f.old.nativeHandle); expect(f.client.agentSession(f.old.agentSessionId).nativeHandle).toEqual(f.old.nativeHandle)
-  expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_REOPEN_OBSERVATION_UNCONFIRMED' }))
+  // The foreign Hook subject is refused as an identity mismatch; its activity is not applied to the original target.
+  expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED',
+    evidence: expect.objectContaining({ run: { runId: 'new-run-1' } }) }))
+  expect(next.hookReceipt?.id).not.toBe('foreign-native-ready')
   expect(f.stops).toEqual([]); expect(f.starts).toHaveLength(1)
 })
 
@@ -276,31 +285,31 @@ it('keeps original native identity and a service window when the continued CLI r
 it('durably prepares original identity and fresh credentials before starting, then explicitly confirms a lost start ACK', async () => {
   const f = await fixture()
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => {
-    const raw = JSON.parse(await readFile(f.storePath, 'utf8')), prepared = raw.reservations[0].preparedSession
-    expect(raw.sessions).toEqual([]); expect(raw.retiredAgentSessions).toEqual([f.retired])
-    expect(raw.reservations[0].callerOperationId).toBe(f.input.operationId)
-    expect(raw.reservations[0].operationId).toBe(input.operationKey)
+    const reservations = readStoreRows(f.storePath, 'reservations').map(row => row.json), prepared = reservations[0]!.preparedSession
+    expect(readStoreRows(f.storePath, 'sessions')).toEqual([]); expect(readStoreRows(f.storePath, 'retired_sessions').map(row => row.json)).toEqual([f.retired])
+    expect(reservations[0]!.callerOperationId).toBe(f.input.operationId)
+    expect(reservations[0]!.operationId).toBe(input.operationKey)
     expect(prepared).toMatchObject({ agentSessionId: f.old.agentSessionId, nativeHandle: f.old.nativeHandle,
       hookBindingId: 'fresh-binding', hookToken: input.env.AGENTMUX_HOOK_TOKEN, capabilityHash: expect.any(String) })
     f.starts.push(input)
     throw new AgentMuxError('private lost start ACK', 'CTXMUX_io', undefined, { disposition: 'unknown', confirmedInputBytes: null })
   })
   await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({ code: 'AGENT_REOPEN_UNCONFIRMED' })
-  const before = await readFile(f.storePath)
-  expect(await f.client.readAgentSessions()).toEqual([]); expect(await readFile(f.storePath)).toEqual(before)
+  const before = storeSnapshot(f.storePath)
+  expect(await f.client.readAgentSessions()).toEqual([]); expect(storeSnapshot(f.storePath)).toEqual(before)
   expect(await f.store.loadReopenCorrelations()).toEqual([{ expectedRetirement: f.retired, operationId: f.input.operationId }])
   expect(await f.client.sessionHistorySources()).toEqual([{ agentSessionId: f.old.agentSessionId, hostId: f.old.hostId,
     state: 'retired', retiredAt: f.retired.observedAt, history: f.retired.history, pendingReopen: { operationId: f.input.operationId } }])
-  expect(await readFile(f.storePath)).toEqual(before)
-  const reservation = JSON.parse(before.toString()).reservations[0]
+  expect(storeSnapshot(f.storePath)).toEqual(before)
+  const reservation = before.reservations[0]!.json as any
   await expect(f.store.prepareReopen({ ...reservation, callerOperationId: 'changed-original-intent' }, reservation.preparedSession))
     .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
-  expect(await readFile(f.storePath)).toEqual(before)
+  expect(storeSnapshot(f.storePath)).toEqual(before)
   const confirmed = await f.client.reconcileAgentReopen(f.input)
   expect(confirmed.run).toEqual({ runId: 'new-run-1' }); expect(confirmed.nativeHandle).toEqual(f.old.nativeHandle)
   expect(confirmed.reopenedFrom).toEqual({ run: f.old.run, source: 'user', observedAt: f.retired.observedAt })
   expect(f.starts).toHaveLength(1); expect(f.binds).toEqual(['new-run-1']); expect(f.stops).toEqual([])
-  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations).toEqual([])
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(readStoreRows(f.storePath, 'reservations')).toEqual([])
   await expect(f.client.reconcileAgentReopen(f.input)).resolves.toMatchObject({ run: confirmed.run })
   expect(f.starts).toHaveLength(1); expect(f.binds).toEqual(['new-run-1'])
 })
@@ -339,10 +348,9 @@ it('cold stale owner completes the exact durable prepared healthy attempt withou
   const f = await fixture()
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => { f.starts.push(input); throw new Error('private ACK lost before owner death') })
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow()
-  const raw = JSON.parse(await readFile(f.storePath, 'utf8')); raw.reservations[0].ownerPid = 2147483647; raw.reservations[0].ownerId = 'dead-owner'
-  await writeFile(f.storePath, JSON.stringify(raw))
+  rewriteStoreRow(f.storePath, 'reservations', f.old.agentSessionId, reservation => { reservation.ownerPid = 2147483647; reservation.ownerId = 'dead-owner' })
   const { AgentMuxClient } = await import('../src/client.js'), cold = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(f.storePath) }), inner = cold as any
-  inner.kernel = f.inner.kernel
+  f.useKernelIn(cold)
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = (sid: string, provider: string, bindingId: string, token: string) => ({ bindingId, endpoint: { url: 'private-restored', token },
     bindRun: async (id: string) => { expect(cold.agentSession(sid).run.runId).toBe(id); f.binds.push(id) }, close: async () => {} })
@@ -351,7 +359,7 @@ it('cold stale owner completes the exact durable prepared healthy attempt withou
     expect(cold.agentSession(f.old.agentSessionId)).toMatchObject({ nativeHandle: f.old.nativeHandle, run: { runId: 'new-run-1' } })
     expect(f.binds).toEqual(['new-run-1']); expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
     expect(await f.store.loadRetiredAgentSessions()).toEqual([]); expect(await f.store.loadTimeline(f.old.agentSessionId)).toEqual(f.timelineBefore)
-    expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations).toEqual([])
+    expect(readStoreRows(f.storePath, 'reservations')).toEqual([])
   } finally { await cold.dispose() }
 })
 
@@ -362,7 +370,7 @@ it('explicit confirmation flushes the original buffered real HTTP Hook after unk
     expect(f.client.agentSession(f.old.agentSessionId).run.runId).toBe(event.runId)
     await (f.client as any).acceptHookEvent(event, signal); delivered.push(event.receiptId)
   }, 0)
-  await hook.start(); f.inner.hookServer = hook
+  await hook.start(); f.useHookServer(hook)
   const start = f.inner.kernel.start.getMockImplementation()!
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => {
     const run = await start(input)
@@ -370,12 +378,12 @@ it('explicit confirmation flushes the original buffered real HTTP Hook after unk
       authorization: `Bearer ${input.env.AGENTMUX_HOOK_TOKEN}`, 'content-type': 'application/json' },
       body: JSON.stringify({ receiptId: 'uncertain-early-native-ready', payload: { hook_event_name: 'SessionStart', session_id: 'native-main',
         transcript_path: f.path, cwd: f.root } }) })
-    expect(response.status).toBe(204); expect(delivered).toEqual([]); return run
+    expect(response.status).toBe(202); expect(delivered).toEqual([]); return run
   })
   vi.spyOn(f.store, 'commitLifecycle').mockRejectedValueOnce(new Error('private unknown commit'))
   vi.spyOn(f.store, 'load').mockRejectedValueOnce(new Error('private canonical read unknown'))
   try {
-    await expect(f.client.reopenAgent(f.input)).rejects.toThrow('Continue result is unconfirmed')
+    await expect(f.client.reopenAgent(f.input)).rejects.toThrow('private unknown commit')
     expect(delivered).toEqual([])
     const confirmed = await f.client.reconcileAgentReopen(f.input)
     expect(confirmed.run).toEqual({ runId: 'new-run-1' }); expect(confirmed.nativeHandle).toEqual(f.old.nativeHandle)
@@ -390,7 +398,7 @@ it('explicit disposal releases only its settled reopen ownership for a new Clien
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => { f.starts.push(input); throw new Error('private native start ACK lost') })
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow()
   const { AgentMuxClient } = await import('../src/client.js'), replacement = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(f.storePath) }), inner = replacement as any
-  inner.connected = true; inner.kernel = f.inner.kernel
+  inner.connected = true; f.useKernelIn(replacement)
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = (_sid: string, _provider: string, bindingId: string, token: string) => ({ bindingId, endpoint: { url: 'private-restored', token },
     bindRun: async (id: string) => { expect(replacement.agentSession(f.old.agentSessionId).run.runId).toBe(id); f.binds.push(id) }, close: async () => {} })
@@ -398,7 +406,7 @@ it('explicit disposal releases only its settled reopen ownership for a new Clien
     await expect(replacement.reconcileAgentReopen(f.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
     expect(await loadAgentSessions(f.store)).toEqual([])
     await f.client.dispose()
-    const released = JSON.parse(await readFile(f.storePath, 'utf8')).reservations[0]
+    const released = readStoreRows(f.storePath, 'reservations')[0]!.json
     expect(released).toMatchObject({ ownerPid: process.pid, ownerReleased: true, preparedSession: { nativeHandle: f.old.nativeHandle } })
     const next = await replacement.reconcileAgentReopen(f.input)
     expect(next.run).toEqual({ runId: 'new-run-1' }); expect(next.nativeHandle).toEqual(f.old.nativeHandle)
@@ -423,7 +431,7 @@ it('disposal waits for an executing explicit confirmation before releasing its o
     expect(stopObserving).not.toHaveBeenCalled()
     await new Promise<void>(resolve => setImmediate(resolve))
     expect(disposed).toBe(false)
-    expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations[0]).not.toHaveProperty('ownerReleased')
+    expect(readStoreRows(f.storePath, 'reservations')[0]!.json).not.toHaveProperty('ownerReleased')
     await expect(f.client.reconcileAgentReopen(f.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
   } finally { finish() }
   await expect(confirmation).resolves.toMatchObject({ run: { runId: 'new-run-1' }, nativeHandle: f.old.nativeHandle })
@@ -436,15 +444,15 @@ it.each(['missing', 'drifted'] as const)('keeps a %s caller correlation observab
   const f = await fixture()
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => { f.starts.push(input); throw new Error('private lost start ACK') })
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow()
-  const raw = JSON.parse(await readFile(f.storePath, 'utf8'))
-  if (shape === 'missing') delete raw.reservations[0].callerOperationId
-  else raw.reservations[0].callerOperationId = 'another-original-intent'
-  await writeFile(f.storePath, JSON.stringify(raw))
-  const before = await readFile(f.storePath)
+  rewriteStoreRow(f.storePath, 'reservations', f.old.agentSessionId, reservation => {
+    if (shape === 'missing') delete reservation.callerOperationId
+    else reservation.callerOperationId = 'another-original-intent'
+  })
+  const before = storeSnapshot(f.storePath)
   expect(await f.client.sessionHistorySources()).toEqual([{ agentSessionId: f.old.agentSessionId, hostId: f.old.hostId,
     state: 'retired', retiredAt: f.retired.observedAt, history: f.retired.history, pendingReopen: {} }])
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired])
-  expect(await readFile(f.storePath)).toEqual(before)
+  expect(storeSnapshot(f.storePath)).toEqual(before)
   expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
@@ -452,16 +460,16 @@ it.each(['host', 'epoch', 'native'] as const)('does not project another %s retir
   const f = await fixture()
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => { f.starts.push(input); throw new Error('private lost start ACK') })
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow()
-  const raw = JSON.parse(await readFile(f.storePath, 'utf8')), reservation = raw.reservations[0]
-  delete reservation.preparedSession
-  if (shape === 'host') reservation.expectedRetirement.hostId = 'another-host'
-  if (shape === 'epoch') reservation.expectedRetirement.observedAt++
-  if (shape === 'native') reservation.expectedRetirement.history.nativeHandle.sessionId = 'another-native'
-  await writeFile(f.storePath, JSON.stringify(raw))
-  const before = await readFile(f.storePath)
+  rewriteStoreRow(f.storePath, 'reservations', f.old.agentSessionId, reservation => {
+    delete reservation.preparedSession
+    if (shape === 'host') reservation.expectedRetirement.hostId = 'another-host'
+    if (shape === 'epoch') reservation.expectedRetirement.observedAt++
+    if (shape === 'native') reservation.expectedRetirement.history.nativeHandle.sessionId = 'another-native'
+  })
+  const before = storeSnapshot(f.storePath)
   expect(await f.client.sessionHistorySources()).toEqual([{ agentSessionId: f.old.agentSessionId, hostId: f.old.hostId,
     state: 'retired', retiredAt: f.retired.observedAt, history: f.retired.history }])
-  expect(await readFile(f.storePath)).toEqual(before)
+  expect(storeSnapshot(f.storePath)).toEqual(before)
   expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
@@ -494,11 +502,9 @@ it('preserves accepted unflushed activity across retirement preparation and cano
     latestCommitted: false,
     pending: { id: 'accepted-earlier', source: 'agentmux' as const, createdAt: 2, activityState: { run: f.old.run, state: 'working' as const } }
   }
-  const raw = JSON.parse(await readFile(f.storePath, 'utf8'))
-  raw.retiredAgentSessions[0].activityCommit = activityCommit
-  await writeFile(f.storePath, JSON.stringify(raw))
+  rewriteStoreRow(f.storePath, 'retired_sessions', f.old.agentSessionId, retired => { retired.activityCommit = activityCommit })
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => {
-    const prepared = JSON.parse(await readFile(f.storePath, 'utf8')).reservations[0]
+    const prepared = readStoreRows(f.storePath, 'reservations')[0]!.json
     expect(prepared.expectedRetirement.activityCommit).toEqual(activityCommit)
     expect(prepared.preparedSession.activityCommit).toEqual(activityCommit)
     f.starts.push(input); throw new Error('private start ACK unavailable')
