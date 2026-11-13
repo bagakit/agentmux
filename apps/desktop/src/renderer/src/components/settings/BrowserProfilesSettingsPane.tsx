@@ -112,6 +112,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const [errorCode, setErrorCode] = useState<string | null>(null)
   // A delete that committed while its site data still clears: the Profile is gone, so the notice outlives its editor.
   const [notice, setNotice] = useState<string | null>(null)
+  const [copyTarget, setCopyTarget] = useState<{ id: string; label: string } | null>(null)
   const selected = profiles.find(profile => profile.id === selectedId) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
   useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
 
@@ -142,6 +143,19 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     }
   }
 
+
+  const copy = async (profile: BrowserProfileSummary, revision: number) => {
+    const taken = new Set(profiles.map(value => value.label))
+    let n = 1, label: string
+    do { const suffix = n === 1 ? ' copy' : ` copy ${n}`; label = profile.label.slice(0, 128 - suffix.length).trimEnd() + suffix; n += 1 } while (taken.has(label))
+    let copied: BrowserProfileSummary | null = null
+    if (await run('copy', async () => { copied = await api.browser.copyProfile(profile.id, label, revision) })) {
+      // Keep the source editor mounted: its unsaved route/sign-in inputs belong to the person.
+      setCopyTarget({ id: copied!.id, label: copied!.label })
+      setNotice(`Copied saved settings to “${copied!.label}”. Sign-ins, site data and approvals stay with the original Profile.`)
+    }
+  }
+
   return (
     <div className="settings-resource-workbench settings-browser-profiles" data-resource-view={view} data-settings-field="browser-profiles">
       <div className="settings-pane-toolbar">
@@ -152,7 +166,8 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
         <ImportMenu disabled={busy !== null || !list.profiles} onImported={id => { setSelectedId(id); setView('editor') }} />
       </div>
       {notice ? <p className="browser-profiles-settings__service" role="status">{notice}{' '}
-        <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>Dismiss</button></p> : null}
+        {copyTarget ? <button type="button" onClick={() => { setSelectedId(copyTarget.id); setView('editor'); setRenameRequest(copyTarget.id); setCopyTarget(null); setNotice(null) }}>Edit copy</button> : null}{' '}
+        <button type="button" aria-label="Dismiss" onClick={() => { setNotice(null); setCopyTarget(null) }}>Dismiss</button></p> : null}
       {list.error ? <p className="browser-profiles-settings__service" role="status">
         Couldn’t refresh Profiles{list.profiles ? '; showing the last list' : ''}. {list.error}{' '}
         <button type="button" disabled={list.reading} onClick={() => void browserProfiles.refresh()}>{list.reading ? 'Retrying…' : 'Retry'}</button>
@@ -172,8 +187,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
           {selected && list.revision !== null ? <ProfileEditor key={selected.id} profile={selected} revision={list.revision}
             uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
+            onCopy={() => void copy(selected, list.revision!)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
-            onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setNotice(pending) }} />
+            onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setCopyTarget(null); setNotice(pending) }} />
             : <p className="settings-resource-empty" role="status">{list.reading ? 'Loading Profiles…' : 'No Profile selected.'}</p>}
         </div>
       </div>
@@ -181,7 +197,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen }: {
+function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy }: {
   profile: BrowserProfileSummary
   revision: number
   uses: Use[]
@@ -199,6 +215,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
   onDeleted(pending: string | null): void
   onShow(use: Use): void
   onOpen(): void
+  onCopy(): void
 }) {
   const [naming, setNaming] = useState(editName)
   const [name, setName] = useState(profile.label)
@@ -268,6 +285,7 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
                 {profile.isDefault ? 'Default for new Browsers' : 'Make default'}
               </Menu.Item>
               <Menu.Item className="tab-context-menu__item" onSelect={() => setNaming(true)}>Rename</Menu.Item>
+              <Menu.Item className="tab-context-menu__item" disabled={busy !== null} onSelect={onCopy}>Copy settings</Menu.Item>
               <Menu.Separator className="tab-context-menu__separator" />
               <Menu.Item className="tab-context-menu__item browser-profile-menu__delete" disabled={blockedDelete !== null} onSelect={() => setConfirm('delete')}>
                 <span>Delete Profile…</span>{blockedDelete ? <small>{blockedDelete}</small> : null}

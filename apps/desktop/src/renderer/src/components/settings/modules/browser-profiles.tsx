@@ -8,7 +8,7 @@ export const browserProfilesSettingsModule = {
   id: 'browser-profiles', archetype: 'library',
   group: 'browser-use',
   title: 'Browser Profiles',
-  description: 'Each Profile keeps its own sign-ins and site data. Device, fonts and user agent are the same in every Profile.',
+  description: 'Each Profile keeps its own sign-ins, site data and saved settings.',
   icon: ThemeObjectProfilesIcon,
   keywords: 'browser profile profiles sign-in signin login cookies site data identity account import chrome default proxy network route',
   searchTargets: [
