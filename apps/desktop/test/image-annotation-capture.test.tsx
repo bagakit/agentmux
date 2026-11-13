@@ -485,6 +485,26 @@ describe('capture image annotation', () => {
     expect((await last()).shapes.at(-1), 'with Command held a moved mark follows the pointer').toMatchObject({ from: { x: 484, y: 144 }, to: { x: 776, y: 156 } })
   })
 
+  it('a resized selection snaps only its moving edge, and a dragged mark handle snaps its corner', async () => {
+    // The front window spans frame points 200 to 400 across and 150 to 250 down.
+    const { drag, key, props, bar } = await mount(undefined, [FRONT])
+    const last = async () => { await key('Enter'); return props.onComplete.mock.lastCall![0] }
+    await drag([100, 160], [300, 230])
+    // The east edge at 300 dragged to 396 lands on the window's right edge 4 points beyond it.
+    fills = []; await drag([300, 190], [396, 190])
+    expect((await last()).crop, 'a resized east edge lands on the window edge').toEqual({ x: 200, y: 320, width: 600, height: 140 })
+    await act(async () => button(bar()!, 'Rectangle').click()); await frame()
+    await drag([220, 170], [300, 200])
+    // The rectangle's south-east handle at 300, 200 dragged to 396, 247 lands on the window's bottom-right corner.
+    await drag([300, 200], [396, 247])
+    expect((await last()).shapes.at(-1), 'a dragged mark handle lands on the window corner').toMatchObject({ kind: 'rect', from: { x: 440, y: 340 }, to: { x: 800, y: 500 } })
+    // Dragging the east edge 46 points would put the west edge, shifted as far, 4 points from the window's left edge;
+    // a resize moves only the east edge, 54 points from any line, so it follows the pointer.
+    const near = await mount(undefined, [FRONT])
+    await near.drag([150, 160], [300, 230]); await near.drag([300, 190], [346, 190]); await near.key('Enter')
+    expect(near.props.onComplete.mock.lastCall![0].crop, 'a resize far from any line leaves its moving edge on the pointer').toEqual({ x: 300, y: 320, width: 392, height: 140 })
+  })
+
   it('moving a selection forces no layout of the toolbar or size chip', async () => {
     const { press, move, release } = await selected()
     await press([400, 150]); const before = measures
