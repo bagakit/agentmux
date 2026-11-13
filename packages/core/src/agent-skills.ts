@@ -16,7 +16,8 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', 'cove
 // already the "conventional locations" — no separate fixed-candidate list is needed. This depth cap only
 // stops a stray symlink or a mislabelled root from turning discovery into a full-tree descent.
 const MAX_DEPTH = 6
-// Hard ceiling on directories visited so a pathological tree degrades to "fewer skills", never a hang.
+// Ceiling on directories visited per declared root, so a pathological tree degrades to "fewer skills from
+// that root", never a hang. Counting per root keeps one noisy root from taking discovery from the next.
 const MAX_DIRS = 2048
 
 function isMissingPath(error: unknown): boolean {
@@ -28,8 +29,10 @@ function isMissingPath(error: unknown): boolean {
 async function walkSkills(bases: readonly (readonly [string, AgentSkill['source']])[], roots: readonly string[]): Promise<AgentSkill[]> {
   const found: AgentSkill[] = []
   const seen = new Set<string>()
+  // Directories visited under the root currently being walked; reset for each declared root.
+  let visited = 0
   async function visit(directory: string, source: AgentSkill['source'], depth = 0): Promise<void> {
-    if (depth > MAX_DEPTH || seen.size >= MAX_DIRS) return
+    if (depth > MAX_DEPTH || visited >= MAX_DIRS) return
     let physical: string
     try { physical = await realpath(directory) } catch (error) {
       if (isMissingPath(error)) return
@@ -37,7 +40,10 @@ async function walkSkills(bases: readonly (readonly [string, AgentSkill['source'
     }
     // check+add is synchronous, so even the concurrent sibling walk below visits each physical dir once.
     if (seen.has(physical)) return
+    // Siblings start together and all pass the entry check; this synchronous check keeps the ceiling exact.
+    if (visited >= MAX_DIRS) return
     seen.add(physical)
+    visited++
     let text: string | undefined
     try { text = await readFile(join(directory, 'SKILL.md'), 'utf8') } catch (error) {
       if (!isMissingPath(error)) throw error
@@ -69,7 +75,7 @@ async function walkSkills(bases: readonly (readonly [string, AgentSkill['source'
   // Roots are walked project-before-user so a skill reachable from both wins its `project` source; the
   // `seen` set then keeps the user walk from re-visiting a directory the project walk already claimed.
   for (const [base, source] of bases) {
-    for (const root of roots) await visit(join(base, root), source)
+    for (const root of roots) { visited = 0; await visit(join(base, root), source) }
   }
   return found.sort((a, b) => a.name.localeCompare(b.name))
 }
