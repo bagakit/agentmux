@@ -235,7 +235,10 @@ function drawBlur(context: CanvasRenderingContext2D, shape: BlurShape): void {
   const right = Math.min(canvas.width, Math.ceil((rect.x + rect.width) * transform.a + transform.e))
   const bottom = Math.min(canvas.height, Math.ceil((rect.y + rect.height) * transform.d + transform.f))
   if (right <= left || bottom <= top) return
-  const radius = Math.max(1, shape.radius * transform.a), pad = Math.ceil(radius * 3)
+  // An unsupported filter would silently repaint the sharp pixels.
+  if (typeof context.filter !== 'string') throw new Error('Screenshot blur requires canvas filters')
+  // The filter reaches about three radii; four keep every clipped pixel opaque.
+  const radius = Math.max(1, shape.radius * transform.a), pad = Math.ceil(radius * 4)
   const sampleLeft = Math.max(0, left - pad), sampleTop = Math.max(0, top - pad)
   const sampleWidth = Math.min(canvas.width, right + pad) - sampleLeft, sampleHeight = Math.min(canvas.height, bottom + pad) - sampleTop
   const sample = canvas.ownerDocument.createElement('canvas')
