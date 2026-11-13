@@ -410,7 +410,7 @@ function record(value: unknown, keys: readonly string[], code: string, label: st
   return value as Record<string, unknown>
 }
 function text(value: unknown, code: string, label: string, max = 4096): string {
-  if (typeof value !== 'string' || value.includes('\0') || Buffer.byteLength(value) > max) fail(code, `${label} is invalid.`)
+  if (typeof value !== 'string' || value.includes('\0') || new TextEncoder().encode(value).byteLength > max) fail(code, `${label} is invalid.`)
   return value
 }
 function identity(value: unknown, code: string, label: string): string {
