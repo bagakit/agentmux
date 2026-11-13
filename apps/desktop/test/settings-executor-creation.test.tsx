@@ -143,7 +143,7 @@ it('identity: new configurations use opaque short identities without reusing a r
   expect(editor().dataset.resourceEditor).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   expect(name().value).toBe('Renamed independent configuration')
   expect(providerSelect().isConnected).toBe(true); expect(document.activeElement).toBe(providerSelect())
-  expect(field('Command').value).toBe(catalog[1]!.executable)
+  expect(field('Executable').value).toBe(catalog[1]!.executable)
   expect(Object.keys(config.executors)).not.toContain(first)
 })
 
@@ -151,7 +151,7 @@ it('keeps the complete unsaved draft, custom command, disclosure and focus when 
   const save = vi.fn(async (_next: Record<string, AgentExecutorConfig>, _expected: Record<string, AgentExecutorConfig>) => {})
   await render(save); await click('Add executor'); const oldId = editor().dataset.resourceEditor!
   await openLaunch(); await fill(name(), 'My authored agent')
-  await fill(field('Command'), 'my-custom-command'); await fill(field('Arguments'), '--model "literal model"')
+  await fill(field('Executable'), 'my-custom-command'); await fill(field('Arguments'), '--model "literal model"')
   await fill(field('Environment'), '{"LITERAL":"$HOME stays literal"}')
   await fill(editor().querySelector<HTMLInputElement>('input[type="color"]')!, '#112233')
   const badge = editor().querySelector<HTMLSelectElement>('[aria-label="My authored agent avatar icon"]')!
@@ -160,7 +160,7 @@ it('keeps the complete unsaved draft, custom command, disclosure and focus when 
   await changeProvider(catalog[1]!.id); const nextId = editor().dataset.resourceEditor!
   expect(nextId).not.toBe(oldId); expect(name().value).toBe('My authored agent')
   expect(editor().querySelector<HTMLDetailsElement>('.settings-launch-config')!.open).toBe(true)
-  expect(field('Command').value).toBe('my-custom-command')
+  expect(field('Executable').value).toBe('my-custom-command')
   expect(field('Arguments').value).toBe('--model "literal model"')
   expect(field('Environment').value).toBe('{"LITERAL":"$HOME stays literal"}')
   expect(editor().querySelector<HTMLInputElement>('input[type="color"]')!.value).toBe('#112233')
@@ -257,7 +257,7 @@ it('keeps saved Provider identities visible when catalog declarations disappear'
 
 it('retains the exact unsaved Provider option after a confirmed catalog change', async () => {
   await render(); await click('Add executor')
-  const id = editor().dataset.resourceEditor!, selected = providerSelect().value, command = field('Command').value
+  const id = editor().dataset.resourceEditor!, selected = providerSelect().value, command = field('Executable').value
   await fill(name(), 'Keep my unsaved adapter')
   vi.spyOn(api.providers, 'list').mockResolvedValue([])
   await act(async () => { useAppStore.setState({ providerCatalog: [] }) })
@@ -265,6 +265,6 @@ it('retains the exact unsaved Provider option after a confirmed catalog change',
   expect(editor().dataset.resourceEditor).toBe(id)
   expect(providerSelect().value).toBe(selected)
   expect([...providerSelect().options].some(option => option.value === selected)).toBe(true)
-  expect(field('Command').value).toBe(command)
+  expect(field('Executable').value).toBe(command)
   expect(name().value).toBe('Keep my unsaved adapter')
 })

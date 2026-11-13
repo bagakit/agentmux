@@ -40,7 +40,7 @@ async function settled(){
 async function save(){await dom.click('.settings-pane-actions button');await settled()}
 async function external(id:string,changes:Record<string,string>){await act(async()=>{await execute({requestId:'external',schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,operation:'settings.resource.update',resource:'prompts',id,changes},f.owner)})}
 const executorName=()=>dom.container.querySelector<HTMLInputElement>('#executor-settings-first [data-executor-name]')!
-const envInput=()=>dom.container.querySelectorAll<HTMLTextAreaElement>('#executor-settings-first .settings-launch-config textarea')[1]!
+const envInput=()=>dom.container.querySelectorAll<HTMLTextAreaElement>('#executor-settings-first .settings-launch-config textarea')[0]!
 describe('resource editors keep authored baselines through real SettingsPanel saves',()=>{
  it('displays an accepted additional Provider filter, preserves it through Save and explicitly unbinds it',async()=>{
   const providerId='additional-provider'
