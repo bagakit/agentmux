@@ -63,20 +63,22 @@ export function ConsoleProfileProgress({ progress, started, sourceConfirmed, unc
 }
 
 /** A disposable reader of the original management task. All progression belongs to Setup. */
-export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperation }: {
-  operation: MoteConnectionOperation; hostingTarget: ConnectionHostingTarget; automatic: boolean; onOperation(value: MoteConnectionOperation): void
+export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperation, active: visible = true, readOnOpen = true }: {
+  operation: MoteConnectionOperation; hostingTarget: ConnectionHostingTarget; automatic: boolean; onOperation(value: MoteConnectionOperation): void; active?: boolean; readOnOpen?: boolean
 }) {
   const id = operation.setupOperationId!, parentId = operation.operationId
   const [reading, setReading] = useState<{ view: ConnectionSetupView | null; issue: string; issueSource?: 'inspect' | 'advance' }>({ view: null, issue: '' })
   const [busy, setBusy] = useState(false), [checking, setChecking] = useState(true), [checked, setChecked] = useState(false), [driving, setDriving] = useState(automatic)
   const [manualPending, setManualPending] = useState(0)
   const [busyAction, setBusyAction] = useState<Action['kind'] | null>(null)
-  const active = useRef(true), sequence = useRef(0), pending = useRef(false), callback = useRef(onOperation)
+  const mounted = useRef(true), sequence = useRef(0), pending = useRef(false), callback = useRef(onOperation)
+  const presentation = useRef(visible), privateEpoch = useRef(0), privateReader = useRef(true), opened = useRef<string | null>(null)
+  presentation.current = visible
   callback.current = onOperation
   const original = operation.setup
   const summary = !original || reading.view?.operation && reading.view.operation.revision >= original.revision ? reading.view?.operation : original
   const currentReading = summary === reading.view?.operation
-  const view = reading.issueSource === 'advance' || !currentReading ? null : reading.view
+  const view = !visible || reading.issueSource === 'advance' || !currentReading ? null : reading.view
   const progress = reading.view?.profileUpdate
   function accept(value: ConnectionSetupView) {
     const target = operation.connection
@@ -84,53 +86,72 @@ export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperat
     setReading(previous => previous.view?.operation && value.operation && previous.view.operation.revision > value.operation.revision ? previous : { view: value, issue: '' })
   }
   async function inspect(manual = false) {
-    const request = ++sequence.current
+    if (!presentation.current) return
+    privateReader.current = true
+    const request = ++sequence.current, visibility = privateEpoch.current
     if (manual) setManualPending(count => count + 1)
     setChecking(true)
     try {
       const value = await api.connections.call('connection.setup.inspect', { operationId: id }, hostingTarget)
-      if (active.current && request === sequence.current) { accept(value); setChecked(true) }
-    } catch (error) { if (active.current && request === sequence.current) setReading(previous => previous.issueSource === 'advance' ? previous : { ...previous, issue: presentError(error), issueSource: 'inspect' }) }
-    finally { if (active.current) { if (request === sequence.current) setChecking(false); if (manual) setManualPending(count => count - 1) } }
+      if (mounted.current && presentation.current && visibility === privateEpoch.current && request === sequence.current) { accept(value); setChecked(true) }
+    } catch (error) { if (mounted.current && presentation.current && visibility === privateEpoch.current && request === sequence.current) setReading(previous => previous.issueSource === 'advance' ? previous : { ...previous, issue: presentError(error), issueSource: 'inspect' }) }
+    finally { if (mounted.current) { if (request === sequence.current) setChecking(false); if (manual) setManualPending(count => count - 1) } }
   }
   async function perform(setup?: ConnectionSetupAdvance, drive = false, actionKind: Action['kind'] | null = null) {
     if (pending.current) return
+    if (presentation.current) privateReader.current = true
+    const visibility = privateEpoch.current
     pending.current = true; setBusyAction(actionKind); setBusy(true)
     try {
       const receipt = await api.moteConnections.call('space.mote.connection.advance', {
         operationId: parentId, ...(setup ? { setup } : {})
       }, hostingTarget)
-      if (!active.current) return
+      if (!mounted.current) return
       const authentication = receipt.setup?.authentication
       const stillWaiting = authentication?.request === 'confirmed' && authentication.secureStorage === 'stored' && (authentication.stage === 'waiting' || authentication.stage === 'scanned')
       // Refresh the private view before its still-waiting parent revision can unmount the QR.
       // Terminal or unknown results take effect immediately, even if the next local read stalls.
       if (!stillWaiting) callback.current(receipt)
-      await inspect()
-      if (!active.current) return
+      if (presentation.current && visibility === privateEpoch.current) await inspect()
+      if (!mounted.current) return
       if (stillWaiting) callback.current(receipt)
-      if (drive) setDriving(true)
-    } catch (error) { if (active.current) { setDriving(false); setReading(previous => ({ ...previous, issue: presentError(error), issueSource: 'advance' })) } }
-    finally { pending.current = false; if (active.current) { setBusy(false); setBusyAction(null) } }
+      if (drive && presentation.current && visibility === privateEpoch.current) setDriving(true)
+    } catch (error) { if (mounted.current) { setDriving(false); setReading(previous => ({ ...previous, issue: presentError(error), issueSource: 'advance' })) } }
+    finally { pending.current = false; if (mounted.current) { setBusy(false); setBusyAction(null) } }
   }
   function advance(action: Action) {
     return perform({ operationId: id, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) }, ...(action.kind === 'create-application-version' && view?.profileUpdate?.publicationDraft ? { publicationDraft: view.profileUpdate.publicationDraft } : {}) }, action.kind === 'continue' || action.kind === 'renew', action.kind)
   }
   useEffect(() => {
-    active.current = true; void inspect()
-    return () => { active.current = false; sequence.current++ }
+    mounted.current = true
+    return () => { mounted.current = false; sequence.current++ }
   }, [id])
   useEffect(() => {
-    const action = view?.continuation?.actions.find(action => action.kind === 'continue')
-    if (!driving || busy || !action) return
-    const timer = setTimeout(() => void advance(action), view?.challenge ? Math.max(0, view.challenge.nextPollAt - Date.now()) : 0)
-    return () => clearTimeout(timer)
-  }, [view, driving, busy])
+    privateEpoch.current++
+    if (!visible) {
+      privateReader.current = false
+      sequence.current++; setReading({ view: null, issue: '' }); setDriving(false); setChecking(false); setChecked(false)
+    }
+  }, [visible])
   useEffect(() => {
-    if (!busy) return
+    if (opened.current === id) return
+    opened.current = id
+    if (visible && readOnOpen) void inspect()
+  }, [visible, readOnOpen, id])
+  useEffect(() => {
+    const action = view?.continuation?.actions.find(action => action.kind === 'continue')
+    if (!visible || !driving || busy || !action) return
+    const visibility = privateEpoch.current
+    const timer = setTimeout(() => { if (presentation.current && visibility === privateEpoch.current) void advance(action) }, view?.challenge ? Math.max(0, view.challenge.nextPollAt - Date.now()) : 0)
+    return () => clearTimeout(timer)
+  }, [visible, view, driving, busy])
+  // A pending write can outdate the view without releasing this reader.
+  const observing = visible && busy && privateReader.current
+  useEffect(() => {
+    if (!observing) return
     const timer = setInterval(() => void inspect(), 1000)
     return () => clearInterval(timer)
-  }, [busy])
+  }, [observing])
   const account = view?.continuation?.account
   const authentication = summary?.authentication
   const authActions = view?.continuation?.stage !== 'confirmed' ? view?.continuation?.actions ?? [] : []
@@ -197,6 +218,6 @@ export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperat
       <p className="mote-profile-scope">Updates this same bot using the saved Mote profile. Its current audience is kept. Other Motes and groups sharing the bot will see the published change.</p>
       <details className="bot-profile-details"><summary>Original update details</summary><dl className="connector-identity"><div><dt>Application</dt><dd><code>{operation.connection?.application.appId}</code></dd></div><div><dt>Management request</dt><dd><code>{id}</code></dd></div>{progress?.versionId ? <div><dt>Original version</dt><dd><code>{progress.versionId}</code></dd></div> : null}</dl></details>
     </div>
-    <ConnectionRequestTrace hostingTarget={hostingTarget} source={{ kind: 'setup', operationId: id }} revision={reading.view?.operation?.revision} setupView={reading.view} diagnosisTarget={{ kind: 'mote', operationId: parentId, sourceTarget: operation.source.target, action: 'sync' }} title="Profile update requests" />
+    <ConnectionRequestTrace hostingTarget={hostingTarget} source={{ kind: 'setup', operationId: id }} revision={reading.view?.operation?.revision} setupView={visible ? reading.view : null} diagnosisTarget={{ kind: 'mote', operationId: parentId, sourceTarget: operation.source.target, action: 'sync' }} title="Profile update requests" />
   </div>
 }

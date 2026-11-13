@@ -35,6 +35,7 @@ const enrollmentActionLabel: Record<ConnectionEnrollmentActionKind, string> = {
 }
 
 export function MoteBotSetup({
+  active = true,
   target,
   topicId,
   record,
@@ -46,6 +47,7 @@ export function MoteBotSetup({
   onContinue,
   hostingTarget
 }: {
+  active?: boolean
   target: MotePreferencesTarget | null
   hostingTarget?: ConnectionHostingTarget | null | undefined
   topicId: string
@@ -57,7 +59,7 @@ export function MoteBotSetup({
   onCreateIntentConsumed?: (() => void) | undefined
   onContinue?: ((record: ConnectionRecord, source: { kind: 'enrollment'; operationId: string; expectedRevision: number }, hostingTarget: ConnectionHostingTarget) => void) | undefined
 }) {
-  const setup = useMoteBotSetup(target, topicId, hostingTarget),
+  const setup = useMoteBotSetup(target, topicId, hostingTarget, active),
     [avatar, setAvatar] = useState(true),
     [issuer, setIssuer] = useState('')
   const [nameSource, setNameSource] = useState('mote'), [manualName, setManualName] = useState<string | null>(null)
@@ -93,6 +95,7 @@ export function MoteBotSetup({
     unfinished?.operationId ??
     setup.requests.find((item) => item.action === 'create' && !ids.has(item.input.operationId))?.input.operationId
   useEffect(() => {
+    if (!setup.active) { shortcut.current = false; return }
     if (!shortcut.current) return
     if (setup.selectedId) {
       if (setup.checking) return
@@ -115,7 +118,7 @@ export function MoteBotSetup({
     shortcut.current = false
     onCreateIntentConsumed?.()
     if (resumeId) void setup.check(resumeId)
-  }, [setup.selectedId, setup.checking, operation, setup.historyReady, setup.loading, setup.profile, capability, resumeId])
+  }, [setup.active, setup.selectedId, setup.checking, operation, setup.historyReady, setup.loading, setup.profile, capability, resumeId])
   const enrollment = setup.enrollmentView?.operation && setup.enrollmentView.operation.operationId === operation?.enrollmentOperationId && setup.enrollmentView.operation.revision >= (operation?.enrollment?.revision ?? 0) && (!operation?.enrollment?.initialSetup || setup.enrollmentView.operation.initialSetup?.operationId === operation.enrollment.initialSetup.operationId) ? setup.enrollmentView.operation : operation?.enrollment
   const initialSetup = enrollment?.initialSetup, initialProgress = initialSetup?.progress
   const completedCreation = operation?.action === 'create' && !!enrollment?.initialPublication && creationComplete(operation, enrollment)
@@ -224,7 +227,7 @@ export function MoteBotSetup({
     : completedCreation ? 'Published and saved for this Mote.' : primaryEnrollmentAction?.kind === 'confirm-account' ? 'Your confirmation is needed to continue.' : 'Continue from the saved result below.'
   if (profileTask && operation?.setupOperationId) return <section className="mote-bot-setup" aria-label="Mote bot profile">
     <button type="button" className="small-button" onClick={() => { newDraft(); onCurrent() }}>Back to bot profile</button>
-    <MoteProfileSetup key={operation.operationId} operation={operation} hostingTarget={operation.hostingTarget} automatic={setup.driving} onOperation={setup.acceptOperation} />
+    <MoteProfileSetup active={setup.active} readOnOpen={setup.readPrivate} key={operation.operationId} operation={operation} hostingTarget={operation.hostingTarget} automatic={setup.driving} onOperation={setup.acceptOperation} />
     {setupFeedback}
   </section>
   return (

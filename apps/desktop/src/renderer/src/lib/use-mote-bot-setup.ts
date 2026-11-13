@@ -18,6 +18,8 @@ import type {
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { topicPublicCopy } from '../../../shared/scratch-topics'
 import { api } from './api'
+import { useWorkbenchDocument } from './workbench-document'
+import { useWorkbenchDocumentVisibility, workbenchDocumentVisible } from './workbench-window-registry'
 import { retainMoteBotRequest, retireMoteBotRequest, setBotTaskSelection, useAppStore } from '../store'
 import type { MoteBotRequest } from './mote-bot-request'
 import { botTaskSelectionKey, readBotTaskLocator } from './bot-task-selection'
@@ -73,7 +75,11 @@ export async function readSavedMoteBotProfile(
 }
 
 /** A bounded UI reading window. Main owns the original operation and every child receipt. */
-export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string, newHostingTarget?: ConnectionHostingTarget | null) {
+export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string, newHostingTarget?: ConnectionHostingTarget | null, active = true) {
+  const document = useWorkbenchDocument(), documentVisible = useWorkbenchDocumentVisibility(document)
+  const enabled = active && documentVisible, presentation = useRef(active), privateEpoch = useRef(0), privateReader = useRef(true), firstRead = useRef<string | null>(null)
+  presentation.current = active
+  const privateCurrent = (epoch: number) => presentation.current && workbenchDocumentVisible(document) && epoch === privateEpoch.current
   const retainedSelection = () => target ? readBotTaskLocator(useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'mote', target })]) : null
   const identity = JSON.stringify(target),
     historySource = JSON.stringify([identity, topicId, newHostingTarget]),
@@ -205,8 +211,15 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     }
   }
   useEffect(() => {
+    privateEpoch.current++
+    if (!enabled) {
+      privateReader.current = false
+      setDriving(false); setEnrollmentView(null); setChecking(null); setProgressIssue(null)
+      enrollmentRead.current++
+    }
+  }, [enabled])
+  useEffect(() => {
     lifetime.current++
-    const token = lifetime.current
     setOperations([])
     setHistoryRead(null)
     setEnrollmentView(null)
@@ -216,19 +229,23 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     setIssue('')
     setNext(null)
     draft.current++
+    setCapabilities([])
+    return () => { lifetime.current++ }
+  }, [historySource])
+  useEffect(() => {
+    if (!enabled) return
+    const token = lifetime.current, retained = retainedSelection(), opening = firstRead.current !== historySource
+    firstRead.current = historySource
     void refreshSource()
     void list()
-    if (retained) void check(retained.operationId)
-    setCapabilities([])
-    void newOwner().then(hostingTarget => api.connections.call('connection.enrollment.ls', { limit: 1 }, hostingTarget))
-      .then((value) => {
-        if (token === lifetime.current) setCapabilities(value.capabilities)
-      })
+    // Reopening a retained panel refreshes public facts, not private sign-in material.
+    if (opening && retained) void check(retained.operationId)
+    let current = true
+    void newOwner().then(hostingTarget => current ? api.connections.call('connection.enrollment.ls', { limit: 1 }, hostingTarget) : null)
+      .then(value => { if (value && current && token === lifetime.current) setCapabilities(value.capabilities) })
       .catch(() => {})
-    return () => {
-      lifetime.current++
-    }
-  }, [identity, topicId, JSON.stringify(newHostingTarget)])
+    return () => { current = false }
+  }, [enabled, historySource])
   const pending = (id: string, value: boolean) => {
     if (value) writing.current.add(id)
     else writing.current.delete(id)
@@ -246,7 +263,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       return
     }
     if (writing.current.has(id)) return
-    const token = lifetime.current,
+    if (enabled) privateReader.current = true
+    const token = lifetime.current, visibility = privateEpoch.current,
       order = occurrence(id)
     let dispatched = false
     pending(id, true)
@@ -278,18 +296,19 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       const retentionIssue = retired && !retired.clientStateWritten ? 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' : ''
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         accept(result, request.hostingTarget)
-        if (result.enrollmentOperationId) {
+        if (result.enrollmentOperationId && privateCurrent(visibility)) {
           const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: result.enrollmentOperationId
           }, request.hostingTarget)
           if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
-            if (observation === enrollmentRead.current) acceptEnrollment(id, view)
+            if (observation !== enrollmentRead.current || !privateCurrent(visibility)) return
+            acceptEnrollment(id, view)
             setDriving(request.action === 'create' && result.issue !== 'child-unconfirmed' &&
               view.actions.some(action => action.kind === 'continue-authentication'))
           }
         }
-        if (result.setupOperationId && token === lifetime.current && selection.current === id) setDriving(true)
+        if (result.setupOperationId && token === lifetime.current && selection.current === id && privateCurrent(visibility)) setDriving(true)
         if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
           setMessage({ kind: retentionIssue ? 'issue' : 'notice', text: retentionIssue })
       }
@@ -372,7 +391,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       setMessage({ kind: 'owner-unconfirmed', text: 'The original bot hosting owner is unconfirmed. The original task and request are kept without contacting another Host.' })
       return
     }
-    const token = lifetime.current,
+    if (enabled) privateReader.current = true
+    const token = lifetime.current, visibility = privateEpoch.current,
       order = occurrence(id)
     pick(id)
     setChecking(advance ? null : id)
@@ -409,13 +429,14 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           if (token !== lifetime.current || order !== occurrences.current.get(id)) return
           accept(operation, hostingTarget)
         }
-        if (operation?.enrollmentOperationId) {
+        if (operation?.enrollmentOperationId && privateCurrent(visibility)) {
           const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: operation.enrollmentOperationId
           }, hostingTarget)
           if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
-            if (observation === enrollmentRead.current) acceptEnrollment(id, view)
+            if (observation !== enrollmentRead.current || !privateCurrent(visibility)) return
+            acceptEnrollment(id, view)
             setDriving(advance && !!action && ['continue-authentication', 'renew-authentication'].includes(action.kind) &&
               operation.issue !== 'child-unconfirmed' &&
               view.actions.some(item => item.kind === 'continue-authentication'))
@@ -436,26 +457,27 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     }
   }
   useEffect(() => {
-    if (!driving || !selectedId || busy.includes(selectedId) || enrollmentView?.parentId !== selectedId) return
+    if (!enabled || !driving || !selectedId || busy.includes(selectedId) || enrollmentView?.parentId !== selectedId) return
     const view = enrollmentView.value,
       action = view.actions.find(item => item.kind === 'continue-authentication')
     if (!action) return
-    const id = selectedId, token = lifetime.current, chosen = feedback.current
+    const id = selectedId, token = lifetime.current, chosen = feedback.current, visibility = privateEpoch.current
     const timer = setTimeout(() => {
-      if (token === lifetime.current && selection.current === id && chosen === feedback.current)
+      if (privateCurrent(visibility) && token === lifetime.current && selection.current === id && chosen === feedback.current)
         void check(id, true, action, true)
     }, view.challenge ? Math.max(0, view.challenge.nextPollAt - Date.now()) : 0)
     return () => clearTimeout(timer)
-  }, [driving, selectedId, busy, enrollmentView])
+  }, [enabled, driving, selectedId, busy, enrollmentView])
   const selectedOperation = operations.find(item => item.operationId === selectedId) ?? null
-  const observing = !!selectedId && busy.includes(selectedId) && selectedOperation?.enrollment?.authentication?.stage === 'confirmed', childId = selectedOperation?.enrollmentOperationId
+  const observing = enrollmentView?.parentId === selectedId && !!selectedId && busy.includes(selectedId) && selectedOperation?.enrollment?.authentication?.stage === 'confirmed', childId = selectedOperation?.enrollmentOperationId
   useEffect(() => {
-    if (!observing || !selectedId || !childId) { setProgressIssue(null); return }
+    if (!enabled || !observing || !selectedId || !childId) { setProgressIssue(null); return }
     let current = true, timer: ReturnType<typeof setTimeout>
-    const token = lifetime.current, parentId = selectedId, hostingTarget = ownerFor(parentId)
+    const token = lifetime.current, visibility = privateEpoch.current, parentId = selectedId, hostingTarget = ownerFor(parentId)
     if (!hostingTarget) return
     const originalOwner = hostingTarget
     async function observe() {
+      if (!current || !privateCurrent(visibility)) return
       try {
         const observation = enrollmentRead.current
         const value = await api.connections.call('connection.enrollment.inspect', { operationId: childId! }, originalOwner)
@@ -463,26 +485,28 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       } catch {
         if (current && token === lifetime.current && selection.current === parentId && writing.current.has(parentId)) setProgressIssue({ id: parentId, text: 'The request is still pending here. Its latest progress could not be read; earlier results are kept.' })
       }
-      if (current) timer = setTimeout(() => void observe(), 1000)
+      if (current && privateCurrent(visibility)) timer = setTimeout(() => void observe(), 1000)
     }
     void observe()
     return () => { current = false; clearTimeout(timer) }
-  }, [observing, selectedId, childId])
+  }, [enabled, observing, selectedId, childId])
   return {
+    active: enabled,
+    readPrivate: enabled && privateReader.current,
     profile,
     capabilities,
     operations,
     requests,
     selectedId,
-    checking: checkingId === selectedId && selectedId !== null,
-    enrollmentView: enrollmentView?.parentId === selectedId ? enrollmentView.value : null,
+    checking: enabled && checkingId === selectedId && selectedId !== null,
+    enrollmentView: enabled && enrollmentView?.parentId === selectedId ? enrollmentView.value : null,
     operation: selectedOperation,
     issue: message.text,
     issueKind: message.kind,
     busy,
     loading,
     historyReady: historyRead === historySource,
-    driving,
+    driving: enabled && driving,
     progressIssue: progressIssue?.id === selectedId ? progressIssue.text : '',
     next: next?.cursor ?? null,
     list,

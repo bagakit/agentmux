@@ -85,11 +85,11 @@ function MoteConnectionDialog({ hostingTarget, target, topicId, moteName, onClos
 }
 
 /** The same original preference and operation window in Settings and the Mote dialog. */
-type MoteConnectionPanelProps = { hostingTarget?: ConnectionHostingTarget | null | undefined; target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord, hostingTarget: ConnectionHostingTarget) => void) | undefined; onContinueSetup?: ((record: ConnectionRecord, source: ConnectionSetupEnrollmentSource, hostingTarget: ConnectionHostingTarget) => void) | undefined }
+type MoteConnectionPanelProps = { active?: boolean; hostingTarget?: ConnectionHostingTarget | null | undefined; target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord, hostingTarget: ConnectionHostingTarget) => void) | undefined; onContinueSetup?: ((record: ConnectionRecord, source: ConnectionSetupEnrollmentSource, hostingTarget: ConnectionHostingTarget) => void) | undefined }
 export function MoteConnectionPanel(props: MoteConnectionPanelProps) {
   return <MoteConnectionPanelBody key={JSON.stringify([props.target, props.hostingTarget])} {...props} />
 }
-function MoteConnectionPanelBody({ hostingTarget, target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection, onContinueSetup }: MoteConnectionPanelProps) {
+function MoteConnectionPanelBody({ active = true, hostingTarget, target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection, onContinueSetup }: MoteConnectionPanelProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [selection, setSelection] = useState(''), fieldId = useId()
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
   const [attempt, setAttempt] = useState<{ input: MoteConnectionPreferencesSaveParams; receipt: MoteConnectionPreferencesSaveResult | null } | null>(null)
@@ -163,7 +163,7 @@ function MoteConnectionPanelBody({ hostingTarget, target, topicId, moteName, onR
   return <div className="mote-connection-panel" data-mote-identity-panel={topicId}>
         <div className="mote-connection-dialog__body">
           {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={choose}>Review saved bot</button></section> : null}
-          <MoteBotSetup hostingTarget={snapshot?.hostingTarget ?? hostingTarget} target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
+          <MoteBotSetup active={active} hostingTarget={snapshot?.hostingTarget ?? hostingTarget} target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
             createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source, hostingTarget) => {
               onSaved?.()
               settings.openMoteLark({ target, topicId, moteName, hostingTarget, setup: { connectionId: record.config.connectionId, source } })
