@@ -322,7 +322,8 @@ function ProfileEditor({ profile, revision, uses, busy, run, error, errorCode, a
       <ProfileNetworkRoute profile={profile} revision={revision} openBrowsers={open.length} run={run} />
       {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
 
-      <ProfileExitCheck profile={profile} address={exitCheckUrl} />
+      {/* A reading belongs to the route and check address that produced it, including late results. */}
+      <ProfileExitCheck key={JSON.stringify([profile.network ?? null, exitCheckUrl])} profile={profile} address={exitCheckUrl} />
 
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>

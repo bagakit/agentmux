@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import type { BrowserProfileEdit, BrowserProfileSummary } from '../../../../shared/contracts'
 import { formatBrowserProfileProxyServer, normalizeBrowserProfileNetwork, type BrowserProfileNetwork } from '../../../../shared/browser-profile-network'
 import { api } from '../../lib/api'
@@ -75,17 +75,29 @@ export function ProfileProxySignIn({ profile }: { profile: BrowserProfileSummary
   const [editing, setEditing] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [state, setState] = useState<{ kind: 'idle' | 'saving' } | { kind: 'failed'; message: string }>({ kind: 'idle' })
+  const [state, setState] = useState<{ kind: 'idle' | 'saving' } | { kind: 'failed' | 'partial'; message: string }>({ kind: 'idle' })
+  const [readError, setReadError] = useState<string | null>(null)
+  const [readAttempt, setReadAttempt] = useState(0)
+  const readGeneration = useRef(0)
   useEffect(() => {
-    let live = true
-    api.browser.readProfileProxySignIn(profile.id).then(result => { if (live) setSaved(result?.username ?? null) }, () => { if (live) setSaved(null) })
-    return () => { live = false }
-  }, [profile.id])
+    const generation = ++readGeneration.current
+    setReadError(null)
+    api.browser.readProfileProxySignIn(profile.id).then(result => {
+      if (generation === readGeneration.current) setSaved(result?.username ?? null)
+    }, cause => {
+      if (generation === readGeneration.current) setReadError(presentError(cause))
+    })
+    return () => { if (generation === readGeneration.current) readGeneration.current += 1 }
+  }, [profile.id, readAttempt])
   const save = async (signIn: { username: string; password: string } | null) => {
+    // A late observation must not replace the result of the person's newer save.
+    readGeneration.current += 1
+    setReadError(null)
     setState({ kind: 'saving' })
     try {
-      await api.browser.setProfileProxySignIn(profile.id, signIn)
-      setSaved(signIn ? signIn.username.trim() : null); setEditing(false); setPassword(''); setState({ kind: 'idle' })
+      const result = await api.browser.setProfileProxySignIn(profile.id, signIn)
+      setSaved(signIn ? signIn.username.trim() : null); setEditing(false); setPassword('')
+      setState(result.reconnected ? { kind: 'idle' } : { kind: 'partial', message: `${signIn ? 'Sign-in saved' : 'Sign-in forgotten'}. Open connections could not be updated. Reload this Profile’s pages to use the change.` })
     } catch (cause) { setPassword(''); setState({ kind: 'failed', message: presentError(cause) }) }
   }
   return (
@@ -93,17 +105,20 @@ export function ProfileProxySignIn({ profile }: { profile: BrowserProfileSummary
       <h4>Proxy sign-in</h4>
       {editing ? <form className="browser-profile-editor__sign-in" onSubmit={event => { event.preventDefault(); void save({ username, password }) }}
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(false); setPassword('') } }}>
-        <TextInput aria-label="Proxy user name" autoComplete="off" autoFocus value={username} maxLength={256} onChange={event => setUsername(event.target.value)} />
-        <TextInput aria-label="Proxy password" type="password" autoComplete="new-password" value={password} maxLength={1024} onChange={event => setPassword(event.target.value)} />
+        <TextInput aria-label="Proxy user name" placeholder="User name" autoComplete="off" autoFocus value={username} maxLength={256} onChange={event => setUsername(event.target.value)} />
+        <TextInput aria-label="Proxy password" placeholder="Password" type="password" autoComplete="new-password" value={password} maxLength={1024} onChange={event => setPassword(event.target.value)} />
         <button type="button" className="small-button" onClick={() => { setEditing(false); setPassword('') }}>Cancel</button>
         <button type="submit" className="primary-button" disabled={state.kind === 'saving' || !username.trim() || !password}>Save</button>
       </form> : <p className="browser-profile-editor__route">
-        <span>{saved === undefined ? 'Reading…' : saved ? `Signs in as ${saved}` : 'No sign-in'}</span>
-        <button type="button" className="small-button" disabled={saved === undefined} onClick={() => { setUsername(saved ?? ''); setEditing(true) }}>{saved ? 'Change' : 'Add sign-in'}</button>
+        <span>{saved === undefined ? readError ? 'Sign-in unknown' : 'Reading…' : saved ? `Signs in as ${saved}` : 'No sign-in'}</span>
+        <button type="button" className="small-button" disabled={state.kind === 'saving'} onClick={() => { setUsername(saved ?? ''); setEditing(true) }}>{saved ? 'Change' : saved === undefined ? 'Set sign-in' : 'Add sign-in'}</button>
         {saved ? <button type="button" className="small-button" disabled={state.kind === 'saving'} onClick={() => void save(null)}>Forget</button> : null}
       </p>}
-      <p className={state.kind === 'failed' ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={state.kind === 'failed' ? 'alert' : undefined}>
-        {state.kind === 'failed' ? state.message : 'Used only when this Profile’s own proxy asks. The password is kept in the system keychain and never shown again.'}
+      {readError ? <p className="browser-profile-editor__error" role="status">Couldn’t read proxy sign-in. {readError}{' '}
+        <button type="button" className="browser-profile-editor__link" onClick={() => setReadAttempt(attempt => attempt + 1)}>Retry</button>
+      </p> : null}
+      <p className={state.kind === 'failed' ? 'browser-profile-editor__error' : 'browser-profile-editor__quiet'} role={state.kind === 'failed' ? 'alert' : state.kind === 'partial' ? 'status' : undefined}>
+        {state.kind === 'failed' || state.kind === 'partial' ? state.message : 'Used only when this Profile’s own proxy asks. The password is kept in the system keychain and never shown again.'}
       </p>
     </section>
   )
