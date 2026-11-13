@@ -1,8 +1,8 @@
 import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, AgentMuxSpatialIssue, TopicCategory } from '@agentmux/core/control'
 import type { AgentMuxAgentForkSource } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicPhysicalPath } from './scratch-topics'
-import { categorySpaceFact, isKnowledgeTopic, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicPhysicalPath } from './scratch-topics'
+import { categorySpaceFact, isKnowledgeTopic, knownTopicContentSpaceId, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
 export { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
@@ -13,11 +13,11 @@ export function workspaceZoneId(spaceId: string, workspaceId: string): string {
 
 /** A failed Host read cannot replace the durable original identity with a logical-path guess. */
 export function originalTopicAddress(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath' | 'readError'>, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
-  if (topic.readError && !topic.identityDirectoryPath) {
+  const spaceId = knownTopicContentSpaceId(workspace, topic);
+  if (spaceId === null) {
     const original = Object.entries(bindings).filter(([, binding]) => binding.topicId === topic.id && binding.workspaceId === workspace.id);
     return original.length === 1 ? { spaceId: original[0]![1].spaceId, zoneId: original[0]![0] } : null;
   }
-  const spaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, topic));
   return { spaceId, zoneId: homeZoneId(spaceId) };
 }
 
