@@ -7963,6 +7963,7 @@ export class AgentMuxClient {
    */
   async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, options: { operationId?: string } = {}): Promise<AgentMuxAgentStopReceipt> {
     this.requireConnected()
+    if (options.operationId !== undefined) safeId(options.operationId, 'Stop operation id')
     const flightKey = JSON.stringify([agentSessionId, expectedRun.runId])
     let flight = this.agentStopFlights.get(flightKey)
     const joined = Boolean(flight)
@@ -8020,8 +8021,10 @@ export class AgentMuxClient {
       // The taken-over resume's one retained Run belongs to this Session too, so it stops with it.
       let supersededResume = reservation.supersededResume
       if (supersededResume?.retainedRun) {
+        const retainedAt = Date.now()
         const retainedStop = await this.stopRetainedResumeRun(supersededResume.retainedRun)
-          .catch(error => fail('runtime-stop', Date.now(), error))
+          .catch(error => fail('retained-run-stop', retainedAt, error))
+        stages.push({ stage: 'retained-run-stop', startedAt: retainedAt, endedAt: Date.now(), outcome: retainedStop === 'not-found' ? 'not-found' : retainedStop === 'not-required' ? 'skipped' : 'ok' })
         supersededResume = { ...supersededResume, retainedStop }
       }
       // A late original reader joins the same retirement, even after the Session
@@ -8053,22 +8056,21 @@ export class AgentMuxClient {
     // before its caller identity was recorded has only its lifecycle identity.
     const operationId = retained ? retained.progress?.operationId ?? retained.operationId : callerOperationId ?? mintObjectId()
     const lifecycleOperationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, operationId)
-    const admitted: AgentMuxAgentStopStage = { stage: 'admission', startedAt, endedAt: startedAt, outcome: 'ok' }
-    // A prepared resume of this exact Run holds the Session; the Runtime fence for its creation key is
-    // the only witness that lets this Stop take it over. The fence refuses when no witness exists.
-    const holder = retained ? null : await this.store.readLifecycleReservation(agentSessionId)
-    const supersededResume = holder?.kind === 'resume' && holder.preparedSession && !holder.restart && sameRun(holder.expectedRun, expectedRun)
-      ? await this.fencePreparedResume(holder) : undefined
+    // A retained Stop keeps the admission it was first given; only a new Stop is admitted now.
+    const admitted: AgentMuxAgentStopStage = retained?.progress?.stages.find(stage => stage.stage === 'admission') ??
+      { stage: 'admission', startedAt, endedAt: startedAt, outcome: 'ok' }
+    // A prepared resume of this exact Run may hold the Session; the Runtime fence for its creation key is
+    // the only witness that lets this Stop take it over. The fence refuses when no witness can exist.
+    const supersededResume = retained ? undefined : await this.fencePreparedResume(agentSessionId, expectedRun)
     const stopOperation = retained ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, lifecycleOperationId)
-    admitted.endedAt = Date.now()
+    if (!retained) admitted.endedAt = Date.now()
     const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, lifecycleOperationId, stopOperation,
       { progress: { operationId, stages: [admitted] }, ...(supersededResume ? { supersededResume } : {}) })
     // Intent is recorded only after admission succeeds. Keep this prepared
     // identity through observation/receipt/cleanup failures until retirement;
     // no individual reader can release another reader's accepted operation.
     this.stopRequestedRuns.add(expectedRun.runId)
-    return { session, reservation, stopOperation, operationId, stages: [admitted],
-      admission: retained ? 'retained' : reservation.supersededResume ? 'superseded-resume' : 'new' }
+    return { session, reservation, stopOperation, operationId, stages: [admitted], admission: retained ? 'retained' : 'new' }
   }
 
   /** Stop the one Run a taken-over resume left under its key; an ended or absent Run needs no stop. */
@@ -8082,9 +8084,10 @@ export class AgentMuxClient {
     catch (error) { if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') return 'not-found'; throw error }
   }
 
-  private async fencePreparedResume(holder: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStopSupersededResume> {
-    const witness = await this.recovery.fencePreparedResumeForStop(holder)
-    const resumeOperationId = holder.preparedSession?.continuity?.operationId
+  private async fencePreparedResume(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStopSupersededResume | undefined> {
+    const fenced = await this.recovery.fencePreparedResumeForStop(agentSessionId, expectedRun)
+    if (!fenced) return undefined
+    const { holder, witness } = fenced, resumeOperationId = holder.preparedSession?.continuity?.operationId
     return { lifecycleOperationId: holder.operationId, fence: witness.fence, runtimeId: witness.runtimeId,
       ...(resumeOperationId ? { resumeOperationId } : {}), ...(witness.run ? { retainedRun: { runId: witness.run.runId } } : {}) }
   }
@@ -8100,6 +8103,8 @@ export class AgentMuxClient {
     }
     this.forgetHookBinding(session.run.runId)
     this.settleHookRestore(session)
+    // The retirement time is the commit's own fact, so the stage spans the time until that commit was
+    // requested; the retirement record's observedAt says when it landed.
     const commitAt = Date.now()
     const final: AgentMuxAgentStopRecord = { ...record, stages: [...record.stages, { stage: 'retire-commit', startedAt: commitAt, endedAt: commitAt, outcome: 'ok' }] }
     const cleanup = await Promise.allSettled([
@@ -8107,6 +8112,13 @@ export class AgentMuxClient {
       this.registry.commitStop(reservation, final).then(retired => { onRetired(); return retired })
     ])
     const stored = cleanup[1]?.status === 'fulfilled' ? cleanup[1].value : null
+    if (cleanup[1]?.status === 'rejected') {
+      // Inspect then shows how far the Stop got and that its retirement did not commit.
+      const error = cleanup[1].reason, code = error instanceof AgentMuxError ? error.code : 'AGENT_STOP_FAILED', endedAt = Date.now()
+      await this.registry.recordStopProgress(reservation, { operationId: record.operationId,
+        stages: [...record.stages, { stage: 'retire-commit', startedAt: commitAt, endedAt, outcome: 'failed', errorCode: code }],
+        failure: { stage: 'retire-commit', code, message: (error instanceof Error ? error.message : String(error)).slice(0, 1024), observedAt: endedAt } }).catch(() => {})
+    }
     if (stored) {
       this.recovery.wake(agentSessionId)
       this.runPids.delete(session.run.runId)
@@ -8204,21 +8216,14 @@ export class AgentMuxClient {
         continue
       }
       if (reservation.kind === 'stop') {
-        let run: CtxmuxAdapterRun | null = null
-        try {
-          run = await this.kernel.status(reservation.expectedRun.runId)
-        } catch (error) {
-          if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
+        // An open Stop finishes through the same flow an explicit retry takes; its own failure stays
+        // on its reservation for inspect and never blocks recovering the other Sessions.
+        try { await this.stopAgent(reservation.agentSessionId, reservation.expectedRun) }
+        catch (error) {
+          this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId, code: 'AGENT_STOP_UNCONFIRMED',
+            message: `The open Stop ${reservation.progress?.operationId ?? reservation.operationId} could not finish: ${error instanceof Error ? error.message : String(error)}. The Session and its Stop are kept; stop it again to continue, or inspect it with agent stop inspect.`,
+            failure: deliveryFailure(error), evidence: { source: 'agentmux', run: { ...reservation.expectedRun }, observedAt: Date.now() } })
         }
-        // Each attempt records its own stages after the original admission, so the row stays bounded.
-        const observedAt = Date.now(), stages = (reservation.progress?.stages ?? []).filter(stage => stage.stage === 'admission').slice(0, 1)
-        stages.push({ stage: 'runtime-observe', startedAt: observedAt, endedAt: Date.now(), outcome: run ? 'ok' : 'not-found' })
-        const stopAt = Date.now()
-        const disposition = run?.state.type === 'running' ? (await this.kernel.stop(reservation.stopOperation)).disposition : 'not-required'
-        stages.push({ stage: 'runtime-stop', startedAt: stopAt, endedAt: Date.now(), outcome: run?.state.type === 'running' ? 'ok' : 'skipped' },
-          { stage: 'retire-commit', startedAt: Date.now(), endedAt: Date.now(), outcome: 'ok' })
-        await this.registry.commitStop(reservation, { operationId: reservation.progress?.operationId ?? reservation.operationId,
-          lifecycleOperationId: reservation.operationId, runtime: { observed: run ? run.state.type : 'not-found', stop: disposition }, stages })
         continue
       }
       let retiredRuns: AgentMuxRunRef[] = []

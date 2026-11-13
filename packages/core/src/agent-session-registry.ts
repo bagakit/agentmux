@@ -15,6 +15,8 @@ import {
   agentLifecycleOperationIdentity,
   normalizeStoredAgentSession,
   reopenedPriorRuns,
+  stopRetiredRuns,
+  stoppablePreparedResume,
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
   type AgentMuxPreparedCreation,
@@ -502,6 +504,11 @@ export class AgentMuxAgentSessionRegistry {
     return retired
   }
 
+  /** The prepared resume of this exact Run that a Stop by this owner may take over, read from its own row. */
+  async stoppablePreparedResume(agentSessionId: string, expectedRun: AgentMuxRunRef) {
+    return stoppablePreparedResume(await this.store.readLifecycleReservation(agentSessionId), this.lifecycleOwnerId, expectedRun)
+  }
+
   /** Record how far one exact open Stop got, on its own reservation row. */
   async recordStopProgress(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, progress: AgentMuxAgentStopProgress): Promise<void> {
     await this.store.recordStopProgress(reservation, progress)
@@ -520,7 +527,8 @@ export class AgentMuxAgentSessionRegistry {
       if (previous) this.forget(previous)
       if (!normalized) {
         if (reservation.kind === 'stop' && previous) {
-          for (const run of [...previous.retiredRuns, previous.run]) {
+          // The same rule the Store retired by, so a taken-over resume's Run is retired here at once too.
+          for (const run of stopRetiredRuns(previous, reservation)) {
             this.noteMetadataChange('runs', run.runId)
             this.unboundRetiredRuns.add(run.runId)
           }

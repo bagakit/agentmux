@@ -639,17 +639,25 @@ function canSupersedeRestartWithStop(
 }
 
 /**
- * A Stop replaces a prepared resume (one that froze its Session before Start) only with the Runtime's
- * witness for that exact creation key: sealed, so no Run can start under it, or retained, so its one
- * Run is known and is stopped with the Session. Time passing or an owner process ending is no witness.
+ * A prepared resume (one that froze its Session before Start) that a Stop of the same Run may take
+ * over: its owner is this one, has released it, or has ended. A Stop never fences the creation key of
+ * a resume whose owner is still executing it.
+ */
+export function stoppablePreparedResume(holder: AgentMuxLifecycleReservation | null | undefined, ownerId: string,
+  expectedRun: AgentMuxRunRef): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> | null {
+  return holder?.kind === 'resume' && holder.preparedSession && !holder.restart && holder.expectedRun.runId === expectedRun.runId &&
+    (holder.ownerId === ownerId || holder.ownerReleased === true || !processIsAlive(holder.ownerPid)) ? holder : null
+}
+
+/**
+ * A Stop replaces that prepared resume only with the Runtime's witness for its exact creation key:
+ * sealed, so no Run can start under it, or retained, so its one Run is known and is stopped with the
+ * Session. Time passing or an owner process ending is no witness.
  */
 function canSupersedePreparedResumeWithStop(current: AgentMuxLifecycleReservation, requested: AgentMuxLifecycleReservation): boolean {
-  if (requested.kind !== 'stop' || current.kind !== 'resume' || !current.preparedSession || current.restart) return false
-  const witness = requested.supersededResume
-  return Boolean(witness && witness.lifecycleOperationId === current.operationId &&
-    current.reservationId !== requested.reservationId && current.agentSessionId === requested.agentSessionId &&
-    current.expectedRun.runId === requested.expectedRun.runId &&
-    (current.ownerId === requested.ownerId || current.ownerReleased === true || !processIsAlive(current.ownerPid)))
+  if (requested.kind !== 'stop' || current.reservationId === requested.reservationId || current.agentSessionId !== requested.agentSessionId) return false
+  const holder = stoppablePreparedResume(current, requested.ownerId, requested.expectedRun)
+  return Boolean(holder && requested.supersededResume?.lifecycleOperationId === holder.operationId)
 }
 
 function assertLifecycleReceiptFence(reservation: AgentMuxLifecycleReservation | null | undefined,
@@ -2525,7 +2533,7 @@ function stopProgressReservation(current: AgentMuxLifecycleReservation | undefin
 }
 
 /** A Stop retires the Session's Runs and the one Run a taken-over resume left under its key. */
-function stopRetiredRuns(previous: AgentMuxStoredAgentSession, reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>): AgentMuxRunRef[] {
+export function stopRetiredRuns(previous: AgentMuxStoredAgentSession, reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>): AgentMuxRunRef[] {
   const retained = reservation.supersededResume?.retainedRun
   return [...previous.retiredRuns, previous.run, ...(retained ? [retained] : [])]
 }

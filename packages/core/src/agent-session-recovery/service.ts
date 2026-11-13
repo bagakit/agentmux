@@ -20,7 +20,7 @@ import { parseMoteMainEntrySource } from '../mote-main-entry-source.js'
 import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
 import { normalizeAgentContinuityPolicy, parseAgentContinuityTrigger, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control-contract.js'
-import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../types.js'
+import type { AgentMuxAgentSession, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './resume-contract.js'
 import { safeId } from '../agent-runtime-helpers.js'
 import type { AgentSessionRecoveryPorts } from './ports.js'
@@ -301,8 +301,16 @@ export class AgentSessionRecoveryService {
     await this.continuitySupervisor.serialize(ref.key.agentSessionId, () => this.lifecycle.continuePreparedMessageInput(ref, carrier))
   }
 
-  async fencePreparedResumeForStop(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>) {
-    return this.continuitySupervisor.serialize(reservation.agentSessionId, () => this.lifecycle.fencePreparedResumeForStop(reservation))
+  /**
+   * Read, judge and fence a holding prepared resume as one step on the Session's continuity queue, so a
+   * resume of the same Session cannot settle or start between the read and the fence. Null: no prepared
+   * resume this Stop may take over; the Store then decides admission as for any other holder.
+   */
+  async fencePreparedResumeForStop(agentSessionId: string, expectedRun: AgentMuxRunRef) {
+    return this.continuitySupervisor.serialize(agentSessionId, async () => {
+      const holder = await this.ports.sessions.registry.stoppablePreparedResume(agentSessionId, expectedRun)
+      return holder ? { holder, witness: await this.lifecycle.fencePreparedResumeForStop(holder) } : null
+    })
   }
 
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {

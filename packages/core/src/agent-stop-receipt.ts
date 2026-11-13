@@ -9,7 +9,8 @@ import type { AgentMuxRunRef } from './types.js'
  * once it retires they move into the retirement record (`stop`). There is no separate journal, so a
  * read-only inspect always reads the single owner of the fact.
  */
-export type AgentMuxAgentStopStageName = 'admission' | 'runtime-observe' | 'runtime-stop' | 'retire-commit'
+/** `retained-run-stop`: stopping the one Run a taken-over prepared resume left under its key. */
+export type AgentMuxAgentStopStageName = 'admission' | 'runtime-observe' | 'runtime-stop' | 'retained-run-stop' | 'retire-commit'
 export type AgentMuxAgentStopStage = {
   stage: AgentMuxAgentStopStageName
   startedAt: number
@@ -23,8 +24,8 @@ export type AgentMuxAgentStopRuntime = {
   /** The Runtime's own receipt for the stop, when one was sent. */
   stop: 'graceful' | 'forced' | 'not-required' | 'not-found'
 }
-/** `superseded-resume`: this Stop took over a prepared resume after the Runtime gave a witness for its creation key. */
-export type AgentMuxAgentStopAdmission = 'new' | 'retained' | 'joined' | 'superseded-resume'
+/** How this reader reached the Stop. Whether the Stop took over a prepared resume is the receipt's `supersededResume`. */
+export type AgentMuxAgentStopAdmission = 'new' | 'retained' | 'joined'
 /**
  * The prepared resume a Stop took over and the Runtime witness that allowed it. The Stop keeps this
  * record of the original operation on its own reservation and then in the retirement; it never
@@ -94,7 +95,7 @@ export type AgentMuxAgentStopInspection = {
   observedAt: number
 }
 
-const STAGES: readonly AgentMuxAgentStopStageName[] = ['admission', 'runtime-observe', 'runtime-stop', 'retire-commit']
+const STAGES: readonly AgentMuxAgentStopStageName[] = ['admission', 'runtime-observe', 'runtime-stop', 'retained-run-stop', 'retire-commit']
 const OUTCOMES: readonly AgentMuxAgentStopStage['outcome'][] = ['ok', 'skipped', 'not-found', 'failed']
 const OBSERVED: readonly AgentMuxAgentStopRuntime['observed'][] = ['running', 'exited', 'interrupted', 'not-found']
 const DISPOSITIONS: readonly AgentMuxAgentStopRuntime['stop'][] = ['graceful', 'forced', 'not-required', 'not-found']
@@ -138,15 +139,15 @@ export function parseAgentStopRuntime(value: unknown): AgentMuxAgentStopRuntime 
   const source = object(value, 'runtime')
   return { observed: member(source.observed, OBSERVED, 'runtime observation'), stop: member(source.stop, DISPOSITIONS, 'runtime disposition') }
 }
+function parseAgentStopFailure(value: unknown): NonNullable<AgentMuxAgentStopProgress['failure']> {
+  const failure = object(value, 'failure')
+  return { stage: member(failure.stage, STAGES, 'failure stage'), code: id(failure.code, 'failure code'),
+    message: text(failure.message, 'failure message'), observedAt: time(failure.observedAt, 'failure time') }
+}
 export function parseAgentStopProgress(value: unknown): AgentMuxAgentStopProgress {
   const source = object(value, 'progress')
-  const progress: AgentMuxAgentStopProgress = { operationId: id(source.operationId, 'progress operation'), stages: parseAgentStopStages(source.stages) }
-  if (source.failure !== undefined) {
-    const failure = object(source.failure, 'failure')
-    progress.failure = { stage: member(failure.stage, STAGES, 'failure stage'), code: id(failure.code, 'failure code'),
-      message: text(failure.message, 'failure message'), observedAt: time(failure.observedAt, 'failure time') }
-  }
-  return progress
+  return { operationId: id(source.operationId, 'progress operation'), stages: parseAgentStopStages(source.stages),
+    ...(source.failure === undefined ? {} : { failure: parseAgentStopFailure(source.failure) }) }
 }
 export function parseStopSupersededResume(value: unknown): AgentMuxStopSupersededResume {
   const source = object(value, 'superseded resume')
@@ -170,7 +171,7 @@ export function parseAgentStopReceipt(value: unknown, expected?: { agentSessionI
   const receipt: AgentMuxAgentStopReceipt = {
     agentSessionId: id(source.agentSessionId, 'receipt Session'), expectedRun: { runId: id(run.runId, 'receipt Run') },
     operationId: id(source.operationId, 'receipt operation'), lifecycleOperationId: id(source.lifecycleOperationId, 'receipt lifecycle'),
-    admission: member(source.admission, ['new', 'retained', 'joined', 'superseded-resume'] as const, 'receipt admission'),
+    admission: member(source.admission, ['new', 'retained', 'joined'] as const, 'receipt admission'),
     runtime: parseAgentStopRuntime(source.runtime), retiredAt: time(source.retiredAt, 'receipt retirement'), stages: parseAgentStopStages(source.stages),
     ...(source.supersededResume === undefined ? {} : { supersededResume: parseStopSupersededResume(source.supersededResume) })
   }
@@ -179,6 +180,39 @@ export function parseAgentStopReceipt(value: unknown, expected?: { agentSessionI
   }
   return receipt
 }
+/** The one strict reading of an inspection, used wherever one crosses a boundary; it must answer the asked identity. */
+export function parseAgentStopInspection(value: unknown, asked: AgentMuxAgentStopIdentity): AgentMuxAgentStopInspection {
+  const bad = (): never => { throw new AgentMuxError('Stop inspection is malformed or answers another Stop.', 'CONTROL_PROTOCOL_ERROR') }
+  const source = value as Record<string, unknown>
+  const fields = ['agentSessionId', 'expectedRun', 'phase', 'canRetry', 'lifecycleOperationId', 'operationIdMatched', 'stages', 'runtime',
+    'failure', 'retiredAt', 'holder', 'supersededResume', 'observedAt']
+  if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => !fields.includes(key))) bad()
+  const run = object(source.expectedRun, 'inspection Run')
+  if (source.agentSessionId !== asked.agentSessionId || Object.keys(run).join() !== 'runId' || run.runId !== asked.expectedRun.runId) bad()
+  const phase = member(source.phase, ['not-requested', 'stopping', 'retired', 'unconfirmed'] as const, 'inspection phase')
+  if (typeof source.canRetry !== 'boolean') bad()
+  if (source.operationIdMatched !== undefined && (typeof source.operationIdMatched !== 'boolean' || asked.operationId === undefined)) bad()
+  const inspection: AgentMuxAgentStopInspection = { agentSessionId: asked.agentSessionId, expectedRun: { runId: asked.expectedRun.runId }, phase,
+    canRetry: source.canRetry as boolean, observedAt: time(source.observedAt, 'inspection time'),
+    ...(source.lifecycleOperationId === undefined ? {} : { lifecycleOperationId: id(source.lifecycleOperationId, 'inspection lifecycle') }),
+    ...(source.operationIdMatched === undefined ? {} : { operationIdMatched: source.operationIdMatched as boolean }),
+    ...(source.stages === undefined ? {} : { stages: parseAgentStopStages(source.stages) }),
+    ...(source.runtime === undefined ? {} : { runtime: parseAgentStopRuntime(source.runtime) }),
+    ...(source.retiredAt === undefined ? {} : { retiredAt: time(source.retiredAt, 'inspection retirement') }),
+    ...(source.supersededResume === undefined ? {} : { supersededResume: parseStopSupersededResume(source.supersededResume) }) }
+  if (source.failure !== undefined) inspection.failure = parseAgentStopFailure(source.failure)
+  if (source.holder !== undefined) {
+    const holder = object(source.holder, 'inspection holder')
+    if (Object.keys(holder).some(key => key !== 'kind' && key !== 'operationId')) bad()
+    inspection.holder = { kind: member(holder.kind, ['create', 'resume', 'reopen'] as const, 'holder kind'), operationId: id(holder.operationId, 'holder operation') }
+  }
+  // Each phase carries only the facts it can have.
+  if (phase === 'retired' && (inspection.retiredAt === undefined || inspection.canRetry) || phase !== 'retired' && inspection.retiredAt !== undefined ||
+    phase !== 'stopping' && inspection.failure || phase !== 'unconfirmed' && inspection.holder ||
+    inspection.supersededResume && phase !== 'stopping' && phase !== 'retired') bad()
+  return inspection
+}
+
 export function parseAgentStopIdentity(value: unknown): AgentMuxAgentStopIdentity {
   const source = value as Record<string, unknown>, bad = () => { throw new AgentMuxError('Stop inspection requires the exact original Session and Run.', 'INVALID_CONTROL_REQUEST') }
   const exact = (item: unknown) => typeof item === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(item)
