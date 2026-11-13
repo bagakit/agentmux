@@ -43,6 +43,8 @@ const PLAYLIST_RESOURCE_TYPES: Readonly<Record<string, string>> = {
 /** RFC 8216 tags whose URI attribute a client may fetch. */
 const URI_ATTRIBUTE_TAGS = new Set(['EXT-X-MAP', 'EXT-X-MEDIA', 'EXT-X-KEY', 'EXT-X-SESSION-KEY', 'EXT-X-I-FRAME-STREAM-INF',
   'EXT-X-PART', 'EXT-X-PRELOAD-HINT', 'EXT-X-RENDITION-REPORT'])
+/** Bytes read per positional read while serving a range. */
+const MEDIA_READ_CHUNK_BYTES = 256 * 1024
 /** An unchanged live playlist is re-checked at this interval while its reply is held. */
 const LIVE_PLAYLIST_RECHECK_MS = 250
 /** Never answer an unchanged live reload sooner than this after the previous reply. */
@@ -310,10 +312,11 @@ export class WorkspaceMediaStreams {
    * response is destroyed on seek, which would end every later range of the same lease.
    */
   private async pump(lease: Lease, path: string, handle: FileHandle, response: ServerResponse, start: number, end: number): Promise<boolean> {
-    const chunk = Buffer.allocUnsafe(256 * 1024)
     for (let position = start; position <= end && !response.destroyed && !lease.released;) {
+      // A fresh buffer per read: write() may keep it queued, so it is handed over, never reused or copied.
+      const chunk = Buffer.allocUnsafe(Math.min(MEDIA_READ_CHUNK_BYTES, end - position + 1))
       let bytesRead: number
-      try { ({ bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, end - position + 1), position)) }
+      try { ({ bytesRead } = await handle.read(chunk, 0, chunk.length, position)) }
       catch (error) {
         if (!lease.released) lease.fact = { state: 'read-error', path, code: errorCode(error) }
         response.destroy()
@@ -322,7 +325,7 @@ export class WorkspaceMediaStreams {
       // A file shorter than its opened length was changed underneath this response.
       if (bytesRead === 0) { if (!lease.released) lease.fact = { state: 'changed', path }; response.destroy(); return false }
       position += bytesRead
-      const more = response.write(Buffer.from(chunk.subarray(0, bytesRead)))
+      const more = response.write(bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead))
       if (!more && !response.destroyed) await new Promise<void>(resolve => {
         const done = () => { response.off('drain', done); response.off('close', done); resolve() }
         response.once('drain', done); response.once('close', done)
