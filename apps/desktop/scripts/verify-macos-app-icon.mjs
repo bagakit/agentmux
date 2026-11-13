@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Resvg } from '@resvg/resvg-js'
 import { APP_ICON_IDS } from '../../../packages/client-ui/src/lib/app-icon-catalog.ts'
+import { renderClassicAppIcon } from './lib/classic-app-icon.mjs'
 import { renderMacOSAppIcon } from './lib/macos-app-icon.mjs'
 
 const root = resolve(import.meta.dirname, '../../..')
@@ -15,7 +16,7 @@ const inputs = {}
 const resourceRoot = join(root, 'apps/desktop/resources')
 
 // Decode the actual output, independently of the shaping SVG's geometry.
-function assertMacShape(png, size, fullPlate = true) {
+function assertMacShape(png, size) {
   const decoded = new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><image width="${size}" height="${size}" href="data:image/png;base64,${png.toString('base64')}"/></svg>`, { font: { loadSystemFonts: false } }).render()
   assert.equal(decoded.width, size)
   const pixels = decoded.pixels
@@ -26,28 +27,23 @@ function assertMacShape(png, size, fullPlate = true) {
   }
   const bounds = [left, top, right + 1, bottom + 1]
   const expected = [size * 100 / 1024, size * 100 / 1024, size * 924 / 1024, size * 924 / 1024]
-  if (fullPlate) bounds.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) <= 1, `Dock artwork has balanced transparent margins: ${bounds}`))
-  else {
-    assert.ok(left >= expected[0] && top >= expected[1] && right < expected[2] && bottom < expected[3], 'The classic transparent silhouette remains within the safe outline')
-    assert.ok(right - left > size * .4 && bottom - top > size * .6, 'Classic artwork remains visible, without adding a background plate')
-  }
+  bounds.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) <= 1, `Dock artwork has balanced transparent margins: ${bounds}`))
   for (const [x, y] of [[.12, .12], [.88, .12], [.12, .88], [.88, .88]]) {
     assert.equal(alpha(size * x, size * y), 0, 'All four inset artwork corners are rounded, not square')
   }
-  if (fullPlate) {
-    assert.ok(alpha(size * .5, size * .13) > 128, 'The centered top edge remains visible')
-    assert.ok(alpha(size * .22, size * .22) > 128, 'Rounded corner retains artwork inside its contour')
-  }
+  assert.ok(alpha(size * .5, size * .13) > 128, 'The centered top edge remains visible')
+  assert.ok(alpha(size * .22, size * .22) > 128, 'Rounded corner retains artwork inside its contour')
   return bounds
 }
 
 for (const id of APP_ICON_IDS) {
-  const source = await readFile(join(root, 'packages/client-ui/brand/app-icons', id + '.png'))
+  const raw = await readFile(join(root, 'packages/client-ui/brand/app-icons', id + '.png'))
+  const source = id === 'classic' ? renderClassicAppIcon(raw) : raw
   const native = await readFile(join(resourceRoot, 'app-icons/macos', id + '.png'))
   const shared = await readFile(join(root, 'packages/client-ui/src/assets/app-icons', id + '.png'))
   assert.equal(sha(native), sha(renderMacOSAppIcon(source, 512)), 'Production build consumes the real shaping owner')
   assert.equal(sha(shared), sha(await readFile(join(resourceRoot, 'app-icons', id + '.png'))), 'Non-macOS and browser assets remain unpadded')
-  inputs[id] = { source: sha(source), native: sha(native), bounds: assertMacShape(native, 512, id !== 'classic') }
+  inputs[id] = { source: sha(raw), native: sha(native), bounds: assertMacShape(native, 512) }
 }
 assertMacShape(await readFile(join(resourceRoot, 'icon.png')), 1024)
 const iconset = join(evidence, 'default.iconset')
