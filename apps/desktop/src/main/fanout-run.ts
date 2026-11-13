@@ -1,3 +1,4 @@
+import { AgentMuxError } from '@agentmux/core'
 import type { AppConfig, FanOutLaneOutcome, WorktreeRetention } from '../shared/contracts'
 import type { FanOutBranch } from './fanout-plan'
 import { classifyRetention, WorktreeRetainedError } from './worktree-service.js'
@@ -169,7 +170,18 @@ export async function runFanOut(input: {
         // because there is no failure of git's to report either.
         reason: 'No worktree teardown is wired, so the lane kept its checkout.'
       }
-      if (input.ports.removeWorktree) {
+      // Only Core's structured `not_applied` receipt says no Agent was created in this checkout. Any other
+      // failure (a lost reply, an unknown creation) may have left an Agent working there, so the checkout
+      // stays for a person instead of being removed from under it.
+      const creation = error instanceof AgentMuxError ? error.creationFailure : undefined
+      if (creation?.disposition !== 'not_applied') {
+        cleanup = {
+          retention: 'creation-unconfirmed',
+          reason: creation
+            ? `Agent creation ${creation.operationId} is unconfirmed; inspect it before removing this checkout.`
+            : 'The Agent launch reply is unknown; inspect this checkout before removing it.'
+        }
+      } else if (input.ports.removeWorktree) {
         try {
           await input.ports.removeWorktree(
             { workspaceId: created.workspace.id },

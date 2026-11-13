@@ -220,7 +220,9 @@ const RETENTION_HEADLINE: Record<WorktreeRetention, (count: number) => string> =
   'git-failed': (count) => `Git step incomplete for ${count} worktree(s); nothing was discarded`,
   // 唯一一句不许说「kept」「remain」的：那两个词都在暗示目录还在，而它已经被删了。
   'record-not-withdrawn': (count) =>
-    `${count} worktree(s) were deleted, but the workspace list was not updated`
+    `${count} worktree(s) were deleted, but the workspace list was not updated`,
+  // The only state where an Agent may be working in the directory. It names the action that settles it.
+  'creation-unconfirmed': (count) => `Inspect the Agent launch before removing ${count} worktree(s)`
 }
 
 /**
@@ -246,6 +248,7 @@ export type RetainedLaneNotice = {
 const RETENTION_ORDER: readonly WorktreeRetention[] = [
   'uncommitted-changes',
   'git-failed',
+  'creation-unconfirmed',
   'record-not-withdrawn'
 ]
 

@@ -749,6 +749,13 @@ export type WorktreeRetention =
    * from git as "already gone" when the directory is likewise gone, so the retry reaches the record.
    */
   | 'record-not-withdrawn'
+  /**
+   * An Agent launch into this checkout failed without Core confirming that no Agent was created (the
+   * reply was lost, or Core reported the creation unknown). The directory and its record are both
+   * intact on purpose: an Agent may already be working in it, so nothing removes it automatically. The
+   * reason names the original creation operation to inspect.
+   */
+  | 'creation-unconfirmed'
 
 /**
  * Mirrors the batch teardown's states rather than inventing a second vocabulary: `removed` means git
