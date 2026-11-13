@@ -380,6 +380,8 @@ Remote 分组下以 Hosts 进入同一 Host 工作台；总览、项目、应用
 
 连接配置在原 Host 编辑面内呈现 SSH、SSH 优先且 Tailcat 备选、仅 Tailcat 三种选择；字段标签、字号与原控件保持同一密度，SSH 高级参数仍按需展开。本机连接页以一个明确的 Tailcat 入站开关承接 server key 与允许的 client public key，保存草稿提示邻近原 Save hosts。监听观察及刷新保持紧凑的一行，完整失败原因就地可读；私有地址使用密码字段与显式复制动作，拓扑、连线和列表仅显示 Tailcat 传输名称。行为与凭据边界唯一见[Remote 管理合同](../behavior/remote-management.md#tailcat-传输与本机接入)。
 
+当前 Runtime RPC 通信方式沿原 Host 身份保持安静、紧凑：确认时可在名称邻近显示短 `SSH`／`Tailcat`，不挤主名称、不新增状态栏。hover 或键盘 focus 复用原有防裁切 tooltip，先呈当前方式及连接状态，再呈备选采用情况、原确认时间和保存偏好；断线时明确最后确认，未知以中性文字表达，不用绿色暗示正常或红色宣判 Agent 死亡。Space 设备行、Host badge、Remote 节点与等价列表消费同一准确 Host 投影，交互只阅读，不改变标题打开 home、箭头折叠、`+` 选目录或原节点选择。详细原因与配置项保持层级，不显示私有地址、密钥路径或原始命令；行为唯一见[当前通信方式](../behavior/remote-management.md#当前通信方式)。
+
 ### 网络观察与配置路径
 
 选中环境的网络区以一项明确的读取／刷新入口展开，先呈本次可确认结论，再呈配置路径、保活策略与分源地址；读取范围和事实语义只见[所选 Host 的只读网络观察](../behavior/remote-management.md#所选-host-的只读网络观察)。图、列表和详情使用同一观察，当前选择、草稿与详情滚动不因刷新改变。Fleet map / Selected link 范围控件置于拓扑页头，与原 Topology / List 控件保持层级区别；所选 Host 名称邻近范围可见，未取得链路观察时指向原读取入口，不铺虚构中转或空指标。

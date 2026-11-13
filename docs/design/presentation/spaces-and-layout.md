@@ -108,7 +108,7 @@ Branch／Worktree 与 Topic 沿同一控件语言选择原工作面；资源身�
 
 ### Project Rail 与 Topic 行密度
 
-设备目录分区的名称是可点击的 home 入口，沿原行密度与命中区呈现；折叠箭头和 `+` 各保有独立动作。零目录时名称仍清楚可用，本机也使用准确设备名。打开中的轻量反馈与失败原因贴近该设备行，不挤压名称、不另铺导航面板；所选目录与原工作面继续沿既有选中语言。行为唯一见[设备主目录工作面](../behavior/spaces-and-layout.md#设备主目录工作面)。
+设备目录分区的名称是可点击的 home 入口，名称同行始终可见的 `~` 使用次级等宽短标记；仅长名称省略，标记、计数与独立动作不互挤。沿原行密度与命中区呈现；折叠箭头和 `+` 各保有独立动作。零目录时名称仍清楚可用，本机也使用准确设备名。打开中的轻量反馈贴近该设备行；失败收为一行 `Home unavailable` 与原小型文字 Retry，不堆原始长错误、大按钮或卡片。安全原因以同一 tooltip 在 hover／键盘聚焦时就近完整可读，Esc 可收起；设备行的通信提示沿[Remote 呈现](settings-and-observation.md#remote-管理拓扑)。所选目录与原工作面继续沿既有选中语言。行为唯一见[设备主目录工作面](../behavior/spaces-and-layout.md#设备主目录工作面)。
 
 
 - Folder/Project、Topic 与 Mote 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 总入口使用特殊图标，Category 树行与分类页 Topic 列表的导航层级按[知识库呈现合同](#topics-知识库的导航与内容层级)表达；产品归属与共同框架分别见交互 SSOT[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)与[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。

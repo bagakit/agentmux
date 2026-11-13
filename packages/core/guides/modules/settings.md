@@ -55,6 +55,25 @@ settings hosts inspect --host local reads the same listener state. Configuration
 still require the original user's settings authority; Agent possession of a key is not
 settings authority. Tailcat does not install a remote Core or expand the Linux SSH upgrade.
 
+## Current remote communication
+
+settings hosts inspect --host HOST also reports the observing service's original
+Host Runtime RPC carrier, when available. It is not the saved preference or the
+remote listener's state. SSH-first with Tailcat backup can currently use SSH or
+Tailcat; a candidate route is not current until adopted. A closed channel's last
+confirmed transport is retained as history, never relabeled currently connected.
+An unopened or unavailable observation remains unknown. The carrier fact does not
+prove Agent health or a measured Tailcat direct/relay path.
+
+In Desktop, hover or focus the exact device/Host identity for current communication,
+confirmation time and saved preference. This reads existing transient state and
+does not connect, probe, scan Sessions or start a polling loop. The device title's
+~ marks its home action, not a guessed path. Home failures stay local to that action
+with a compact retry; original workfaces and healthy capabilities remain usable.
+A recognized older remote Core owner protocol requires an explicit Core update,
+not a fallback to an older contract, Session replacement or automatic operation replay.
+Private Tailcat addresses, key paths and raw process errors are never connection labels.
+
 ## Local readable protocol reference
 
 Documentation → amux Protocols shows this app version's formats and original wire
