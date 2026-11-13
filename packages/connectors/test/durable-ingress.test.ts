@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { DurableIngressHost } from '../src/durable-ingress.js'
+import { AgentMuxError } from '@agentmux/core'
+import { AgentMuxRpcError } from '@agentmux/core/public-rpc-http'
 import { ConnectionHost } from '../src/connection-host.js'
 import { ingressFixture } from './fixtures/ingress.js'
 import { config, context } from './fixtures/room-binding.js'
@@ -109,7 +111,9 @@ it('a firstsave ensure keeps an unqualified old Run unknown while later messages
   const originalSession = (await f.store.readMetadata(f.input.agentSessionId))!
   await f.store.compareAndSwap(originalSession, { ...originalSession, run: { runId: 'replacement-run' } })
   const restarted = new DurableIngressHost(f.options)
-  expect((await restarted.dispatch(received.ingress.ingressId)).ingress!.input).toEqual(frozen)
+  // Core states its refusal of the old Run; the receiver sees it, and the frozen request is retained.
+  await expect(restarted.dispatch(received.ingress.ingressId)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect((await restarted.inspect({ ingressId: received.ingress.ingressId })).ingress!.input).toEqual(frozen)
   expect(submit).toHaveBeenCalledTimes(2)
   const later = await f.receive({ eventId: 'later-event', messageId: 'later-message' })
   const next = await restarted.dispatch(later.ingress.ingressId)
@@ -169,10 +173,49 @@ it('a wrong original Core input result stays unavailable and cannot rejoin anoth
   await vi.waitFor(async () => expect((await f.ingress.inspect({ ingressId: accepted.ingress.ingressId })).inputReceipt!.control.waiting?.phase).toBe('runtime'))
   const key = { ...original.inputReceipt!.key, agentSessionId: 'foreign-session' }, ref = { ...original.inputReceipt!.ref, key }
   vi.spyOn(f.client, 'inspectAgentInput').mockResolvedValue({ ...original.inputReceipt!, key, ref, control: { ...original.inputReceipt!.control, ref } })
-  const rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
+  const rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting'), submit = vi.spyOn(f.client, 'submitAgentMessage')
   expect(await f.ingress.dispatch(accepted.ingress.ingressId)).toMatchObject({ ingress: original.ingress, inputReceipt: null, observation: 'unavailable' })
-  expect(rejoin).toHaveBeenCalledOnce()
-  expect(rejoin.mock.calls.every(([input]) => input.ref.key.agentSessionId === f.session.agentSessionId)).toBe(true); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  // An unconfirmed observation is not Core's confirmed absence: no re-submit, no rejoin of any producer.
+  expect(submit).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('a claimed input re-submits only after an observed absent receipt, and its retries share the original backoff', async () => {
+  const f = await fixture(), received = await f.receive(), owner = new DurableIngressHost(f.options), id = received.ingress.ingressId
+  const submit = vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValue(new Error('Lost before original Core save'))
+  expect(await owner.dispatch(id)).toMatchObject({ ingress: { state: 'claimed' }, inputReceipt: null, observation: 'observed' })
+  expect(submit).toHaveBeenCalledOnce()
+  const inspect = vi.spyOn(f.client, 'inspectAgentInput').mockRejectedValueOnce(new Error('Core observation unavailable'))
+  expect(await owner.dispatch(id)).toMatchObject({ ingress: { state: 'claimed' }, inputReceipt: null, observation: 'unavailable' })
+  expect(submit).toHaveBeenCalledOnce()
+  inspect.mockRestore()
+  expect(await owner.dispatch(id)).toMatchObject({ inputReceipt: null, observation: 'observed' })
+  expect(submit).toHaveBeenCalledTimes(2)
+  expect(await owner.dispatch(id)).toMatchObject({ inputReceipt: null, observation: 'observed' })
+  expect(submit).toHaveBeenCalledTimes(2)
+  const frozen = submit.mock.calls.map(([input]) => input.envelope.operationId)
+  expect(new Set(frozen).size).toBe(1); expect(frozen[0]).toBe((await owner.inspect({ ingressId: id })).ingress!.input!.operationId)
+})
+
+it('a stated Core refusal of a claimed input rejects the receiver dispatch and stays its outcome during backoff', async () => {
+  const f = await fixture(), received = await f.receive(), owner = new DurableIngressHost(f.options), id = received.ingress.ingressId
+  const submit = vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValue(new AgentMuxError('Refused before original Core save', 'STALE_AGENT_SESSION'))
+  await expect(owner.dispatch(id)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  const retained = await owner.inspect({ ingressId: id })
+  expect(retained).toMatchObject({ ingress: { state: 'claimed', body: received.ingress.body }, inputReceipt: null, observation: 'observed', rejoinSource: { kind: 'firstsave' } })
+  await expect(owner.dispatch(id)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect(submit).toHaveBeenCalledOnce()
+  expect((await owner.inspect({ ingressId: id })).ingress).toEqual(retained.ingress)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('a local transport absence before Core stays unknown, while a stated remote outcome with the same code is surfaced', async () => {
+  const f = await fixture(), first = await f.receive(), owner = new DurableIngressHost(f.options)
+  const submit = vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValueOnce(new AgentMuxError('Transport absent before Core', 'CONTROL_UNAVAILABLE'))
+  await expect(owner.dispatch(first.ingress.ingressId)).resolves.toMatchObject({ ingress: { state: 'claimed' }, inputReceipt: null, observation: 'observed' })
+  const second = await f.receive({ eventId: 'remote-event', messageId: 'remote-message' })
+  submit.mockRejectedValueOnce(new AgentMuxRpcError('Remote Core unavailable for this operation', 'CONTROL_UNAVAILABLE', -32000))
+  await expect(owner.dispatch(second.ingress.ingressId)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  expect(submit).toHaveBeenCalledTimes(2); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
 it('bounds machine identities while retaining the complete authenticated body and raw payload', async () => {

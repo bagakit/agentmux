@@ -157,7 +157,8 @@ it.each(['missing-root', 'ambiguous-chain', 'native-drift', 'executor-drift'] as
     ...(scenario === 'native-drift' ? { nativeHandle: { ...nativeTarget, sessionId: 'unrelated-native' } } : {}),
     ...(scenario === 'missing-root' ? {} : { continuityExecutors: { [operation.operationId]: { providerId: prior.providerId, executorId: scenario === 'executor-drift' ? 'wrong-executor' : prior.executorId, source: 'provider' } } }) } as typeof prior)
   await expect(f.client.submitAgentMessage(...first.original)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
-  expect((await f.ingress.dispatch(first.request.ingressId)).inputReceipt).toBeNull()
+  await expect(f.ingress.dispatch(first.request.ingressId)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect((await f.ingress.inspect({ ingressId: first.request.ingressId })).inputReceipt).toBeNull()
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
   await f.client.submitAgentPrompt({ agentSessionId: prior.agentSessionId, expectedRun: operation.newRun, operationId: 'independent-current-input',
     prompt: 'Independent accurate healthy input', authorHuman: true, execution: 'immediate', admissionIntent: { kind: 'manual-actor' } })

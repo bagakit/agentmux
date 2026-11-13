@@ -1,8 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { DurableIngressHost } from '../src/durable-ingress.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import { channelContextFixture } from './fixtures/channel-context.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+import { preparedFixtureRun as defineRun } from '../../core/test/helpers/prepared-fixture-run.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice(0).reverse()) await close() })
@@ -332,4 +334,88 @@ it('a durable local context result returns while strong target and later Core in
   expect(settled.inputReceipt!.originalControlOperationId).toBe(frozen.operationId)
   releaseNative(); await new Promise(resolve => setTimeout(resolve, 100))
   expect(f.nativeSend).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)
+
+/** End the original Run and let Core's own Level B continuity relaunch the same Session on `newRunId`. */
+function resumeOnNewRun(f: Awaited<ReturnType<typeof channelContextFixture>>, endedRunId: string, newRunId: string) {
+  const core = f.inner as any, provider = f.client.providers.get('claude'), starts: any[] = []
+  f.client.providers.replace({ ...provider, prepareManagedLaunch: async (plan: any) => ({ plan }) })
+  const recovered = () => ({ ...f.run(newRunId), program: starts[0]?.program ?? 'claude', args: starts[0]?.args ?? [], lifecycleOperationId: starts[0]?.operationKey ?? null })
+  core.kernel.launchIdentity = ({ program, args }: any) => ({ program, argsDigest: createHash('sha256').update(JSON.stringify(args)).digest('base64url') })
+  core.kernel.status = vi.fn(async (runId: string) => runId === endedRunId ? { ...f.run(runId), state: { type: 'exited', code: 0, signal: null } } : { ...recovered(), pid: 1234 })
+  core.kernel.list = vi.fn(async () => starts.length ? [recovered()] : [])
+  core.kernel.inspectCreation = vi.fn(async (operationId: string) => starts[0]?.operationKey === operationId ? recovered() : null)
+  core.kernel.start = vi.fn(async (request: any) => { starts.push(request); return recovered() })
+  core.kernel.creationRuntimeIdentity = () => ({ runtimeId: 'original-fixture-runtime', instanceId: 'fixture-instance', buildIdentity: 'fixture', protocolVersion: 1 })
+  core.kernel.prepareStart = (input: any) => defineRun(input.program, { args: input.args, cwd: input.cwd, env: input.env, initialSize: { cols: input.cols ?? 80, rows: input.rows ?? 24 } })
+  core.kernel.startPrepared = vi.fn(async (request: any, operationKey: string) => core.kernel.start({ program: request.program, args: request.args, cwd: request.cwd, env: request.env, operationKey }))
+  core.kernel.inspectPreparedStart = vi.fn(async (_request: any, operationKey: string) => await core.kernel.inspectCreation(operationKey))
+  core.probePreparedAgent = vi.fn(async () => ({ providerId: 'claude', executable: 'claude', installed: true, capabilities: provider.catalog.capabilities }))
+  core.ensureTerminalHandshakeOrDegrade = async (session: any) => session
+  core.hookServer.isRunning = () => true
+  core.hookServer.createBinding = (_session: string, _provider: string, bindingId: string) => ({ bindingId, endpoint: { url: 'http://127.0.0.1:0', token: 'token'.padEnd(43, 'T') }, bindRun: async () => {}, close: async () => {} })
+  vi.spyOn(core.screenEvidence, 'wait').mockResolvedValue(1)
+  return starts
+}
+
+it('a quote frozen by context cancellation still delivers once to the Agent resumed by Level B on a new Run', async () => {
+  const f = await channelContextFixture(cleanup)
+  await f.receive('baseline', 1000, 'Original baseline', false)
+  let nativeSignal: AbortSignal | undefined, release!: () => void
+  f.transport.override(input => {
+    if (input.params?.container_id_type !== 'chat') return
+    nativeSignal = (input as { signal: AbortSignal }).signal
+    return new Promise(resolve => { release = () => resolve({ code: 0, data: { items: f.nativeRows, has_more: false } }) })
+  })
+  cleanup.push(() => release?.())
+  const received = await f.receive('recovered-run-current', 2000, 'Deliver this original request after recovery')
+  await vi.waitFor(() => expect(nativeSignal).toBeDefined())
+  const observation = await f.inspect(received.ingressId), request = { ingressId: received.ingressId, operationId: 'end-before-recovery', source: observation.rejoinSource! }
+  const before = (await f.store.readMetadata('original-agent'))!
+  // While the observation is held, the original Run ends and Core's Level B continuity resumes the same Session on a new Run.
+  // Only then is the observation ended.
+  const starts = resumeOnNewRun(f, before.run.runId, 'recovered-original-run')
+  const resumed = await f.client.ensureAgentContinuity({ agentSessionId: before.agentSessionId, expectedRun: before.run, operationId: 'level-b-resume', trigger: 'manual' })
+  expect(resumed, JSON.stringify(resumed)).toMatchObject({ kind: 'resumed', session: { agentSessionId: before.agentSessionId, hostId: before.hostId, run: { runId: 'recovered-original-run' }, nativeHandle: before.nativeHandle } })
+  expect(starts).toHaveLength(1)
+  expect((await f.store.readMetadata(before.agentSessionId))?.nativeBinding).toMatchObject({ run: { runId: 'recovered-original-run' } })
+  // Level B issued the resumed process its own invocation capability; that same Agent ends the held observation.
+  const credentials = { agentSessionId: before.agentSessionId, capability: starts[0].env.AGENTMUX_AGENT_CAPABILITY as string }
+  expect(credentials.capability).toEqual(expect.any(String)); expect(credentials.capability).not.toBe(f.credentials.capability)
+  const result = await f.rpc.call('connection.ingress.rejoin', request, { credentials })
+  expect(result.action).toEqual({ ...request, outcome: 'context-ended' })
+  expect(nativeSignal!.aborted).toBe(true)
+  let refused: string | undefined
+  const settled = await vi.waitFor(async () => {
+    const value = await f.inspect(received.ingressId)
+    // The receiver's own recovery dispatch is the product path; repeat it here instead of waiting for the 5s scan.
+    if (value.ingress?.state !== 'claimed') await f.services.ingress!.dispatch(received.ingressId).catch(error => { refused = error?.code ?? String(error) })
+    expect(value.ingress?.state, JSON.stringify({ refused, code: (value.ingress as { code?: string } | null)?.code, phase: value.preparation?.phase })).toBe('claimed'); return value
+  }, { timeout: 10000 })
+  const ref = settled.ingress!.input!
+  expect(ref.expectedRun.runId).toBe('recovered-original-run'); expect(ref.expectedRun.runId).not.toBe(before.run.runId)
+  expect(ref.channelQuote).toMatchObject({ gaps: expect.arrayContaining([{ reason: 'context-observation-cancelled' }]) })
+  expect(settled.ingress!.body).toBe('Deliver this original request after recovery')
+  // Core saved this original input once, keyed by its frozen message identity, for the recovered Run.
+  await vi.waitFor(async () => {
+    const value = await f.inspect(received.ingressId)
+    expect(value.inputReceipt?.key, JSON.stringify(value.inputReceipt ?? value.observation)).toMatchObject({ kind: 'message', expectedRun: { runId: 'recovered-original-run' }, messageId: ref.messageId })
+  }, { timeout: 10000 })
+  expect((await f.rpc.call('connection.ingress.rejoin', request, { credentials })).action).toEqual(result.action)
+  release(); await new Promise(resolve => setTimeout(resolve, 100))
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)
+
+it('a stated Core refusal of the claimed original input reaches the real receiver as a check-failed service window', async () => {
+  const f = await channelContextFixture(cleanup)
+  await f.receive('baseline', 1000, 'Original baseline', false)
+  const { AgentMuxError } = await import('@agentmux/core')
+  const submit = vi.spyOn(f.client, 'submitAgentMessage').mockRejectedValue(new AgentMuxError('Refused before original Core save', 'STALE_AGENT_SESSION'))
+  const received = await f.receive('refused-current', 2000, 'Original request Core refuses')
+  await vi.waitFor(async () => expect((await f.inspect(received.ingressId)).ingress?.state).toBe('claimed'), { timeout: 10000 })
+  await vi.waitFor(async () => expect((await f.rpc.call('connection.inspect', { connectionId: f.config.connectionId })).connection!.observation.intake)
+    .toEqual({ state: 'unknown', reason: 'check-failed' }), { timeout: 10000 })
+  expect(submit).toHaveBeenCalledOnce()
+  expect(await f.inspect(received.ingressId)).toMatchObject({ ingress: { state: 'claimed', body: 'Original request Core refuses' }, inputReceipt: null, observation: 'observed' })
+  expect(f.nativeSend).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
