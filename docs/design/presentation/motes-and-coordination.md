@@ -41,7 +41,7 @@ Mote 设置中的教程 Banner 用三幕故事说明伙伴如何建立。产品�
 
 | 画像创建：按画像建立 Mote | 从事情成长：在 Topic 中开始 | 从事情成长：晋升为 Mote |
 | --- | --- | --- |
-| ![专家画像引入团队，Mote 标识下有三位分工的 Agent](../../../apps/desktop/src/renderer/src/assets/mote-origin/role-team.png) | ![开放的 Topic 工作区里，三位 Agent 处理图表、任务与笔记](../../../apps/desktop/src/renderer/src/assets/mote-origin/topic-work.png) | ![同一组 Agent 和成果延续，工作区建立 Mote 团队人格](../../../apps/desktop/src/renderer/src/assets/mote-origin/grown-team.png) |
+| ![专家画像引入团队，Mote 标识下有三位分工的 Agent](../../../packages/client-ui/brand/illustrations/mote-origin/role-team.png) | ![开放的 Topic 工作区里，三位 Agent 处理图表、任务与笔记](../../../packages/client-ui/brand/illustrations/mote-origin/topic-work.png) | ![同一组 Agent 和成果延续，工作区建立 Mote 团队人格](../../../packages/client-ui/brand/illustrations/mote-origin/grown-team.png) |
 
 三幕沿用当前 Mote 角色家族与原主题的形体、材质和配色语言。Mote 的形象承担团队对外的人格标识，内部 Agent 通过独立位置、动作、工具及适量标签被辨认；代表团队的形象不能被读成其中某一位成员的放大版。跨第二、三幕保留足够相同的成员特征和成果线索，让用户一眼看见延续；不同职责以正在做的事表达，不靠更多光效、体积或虚构职级证明成长。画面人数服务叙事，不成为产品人数限制。
 
