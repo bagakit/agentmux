@@ -17,7 +17,11 @@ The program is read from stdin as a whole — there is no --code flag, because a
 contains quotes, backslashes and newlines that every shell layer would re-escape.
 
 It runs as an async function body in an isolated subprocess, so `await` and `return` both
-work, and a runaway program cannot take AgentMux down with it. Page functions ([Current browser-capability-examples](../../dist/browser-page-capability.js "amux:generated browser-capability-examples"), …)
+work, and a runaway program cannot take AgentMux down with it. A program has 30 seconds. Waits
+(`waitForElement`, `waitForLoad`, `waitForNetworkIdle`) and `js()` never outlast that: when the
+program is almost out of time they throw "… because this program's time is almost up" while the
+program still runs, so you can catch it, return what you have, and continue in a new program.
+Prefer several short programs to one long one. Page functions ([Current browser-capability-examples](../../dist/browser-page-capability.js "amux:generated browser-capability-examples"), …)
 are injected into that subprocess. The current capability registry exposes:
 [Current browser-capability-directory](../../dist/browser-page-capability.js "amux:generated browser-capability-directory")
 Elements are addressed by the refs a snapshot hands you — never coordinates.
@@ -101,9 +105,11 @@ including on failure), and `outcome`, which is one of four:
   script-failed  the program threw — fix the program
   stopped        we cut it off — the program is fine. Either its scale is (too slow, too much
                  output), or a person took the page back mid-run. Actions before that point
-                 did happen; nothing after did. Run it again once the page is free.
+                 did happen; nothing after did. The message names the call it was in and how
+                 many had completed. Run it again once the page is free.
   indeterminate  WHAT ACTUALLY HAPPENED IS UNKNOWN, for a reason the message names:
                  the process died partway (an action may already have been applied once), or a
                  ref from an earlier run was matched back by appearance and may have landed on a
-                 look-alike, or the actions ran but their result could not be retained.
+                 look-alike, or the actions ran but their result could not be retained, or the
+                 time ran out while a click, input or navigation was still in flight.
                  Look at the page before retrying — do not blind-retry.
