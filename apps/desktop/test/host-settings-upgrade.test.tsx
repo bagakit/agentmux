@@ -11,7 +11,7 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const host: SshHostConfig = { id: 'build', kind: 'ssh', label: 'Build server', hostname: 'build.invalid',
   runtimeId: 'original-runtime', remoteCommand: fixturePath('opt/original/agentmux'), remoteSocketPath: fixturePath('srv/original/control.sock') }
-const check: RemoteCoreUpgradeCheck = { input: host, eligible: true, reason: 'ready', detail: 'Original owner is qualified',
+const check: RemoteCoreUpgradeCheck & { candidate: NonNullable<RemoteCoreUpgradeCheck['candidate']> } = { input: host, eligible: true, reason: 'ready', detail: 'Original owner is qualified',
   current: { state: 'available', observedAt: 1700000000000, version: '0.1.0', sourceCommit: 'd'.repeat(40), deploymentDigest: 'e'.repeat(64),
     ownerProtocolVersion: 1, runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', processId: 100,
     native: { instanceId: 'native-owner', buildId: 'native-build', protocolVersion: 25 } },
@@ -243,4 +243,59 @@ it('a completed older update awaiting adoption does not block review of a newly 
   expect(inspectCall).not.toHaveBeenCalled()
   expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
   expect(dom.container.textContent).toContain('Last read before upgrade')
+})
+
+it('shows an unavailable app candidate without hiding current deployment or inventing an upgrade target', async () => {
+  checkCall.mockResolvedValue({ ...check, candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: 'Local candidate archive was not assembled.' }, eligible: false, reason: 'unverified', expected: undefined })
+  await render()
+  expect(dom.container.querySelector('[data-upgrade-current-version]')!.textContent).toContain('0.1.0Source dddddddddd')
+  expect(dom.container.querySelector('[data-upgrade-candidate-version]')!.textContent).toBe('UnavailableSource unknown')
+  expect(dom.container.querySelector('[data-upgrade-candidate-unavailable]')!.closest('details')).toBeNull()
+  const explanation = dom.container.querySelector('.host-upgrade__description')!.textContent!
+  expect(explanation).toContain('local update bundle could not be prepared')
+  expect(explanation).toContain('Check versions')
+  expect(explanation).toContain('Technical details')
+  expect(explanation).not.toContain('Read the original service')
+  expect(explanation).not.toContain('operations remain available')
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Check versions')
+  expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(dom.container.textContent).toContain('Local candidate archive was not assembled.')
+})
+it.each(['unknown', 'completed'] as const)('candidate failure preserves original %s operation and its exact safe action', async status => {
+  const original = { ...receipt(status), candidate: { ...check.candidate, version: '0.0.9', digest: 'f'.repeat(64) } }
+  checkCall.mockResolvedValue({ ...check, candidate: null, candidateUnavailable: { code: 'CORE_ARTIFACT_UNAVAILABLE', detail: 'App candidate missing' }, eligible: false, reason: 'unverified', expected: undefined, latestOperation: original })
+  inspectCall.mockResolvedValue(original)
+  await render()
+  expect(dom.container.querySelector('[data-upgrade-candidate-version]')!.textContent).not.toContain('0.0.9')
+  expect(dom.container.textContent).toContain('Original upgrade candidate version0.0.9')
+  expect(dom.container.querySelectorAll('[data-upgrade-candidate-unavailable]')).toHaveLength(1)
+  expect(dom.container.querySelector('.host-upgrade__description')!.textContent).toBe('A new update candidate is unavailable. The original operation below is retained.')
+  await action()
+  expect(status === 'unknown' ? inspectCall : reconnectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
+})
+it.each([['inspect','throw'],['inspect','null'],['reconnect','throw'],['reconnect','null']] as const)('original %s %s failure is visible while the receipt and safe action remain intact', async(kind,outcome) => {
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', expected: undefined, latestOperation: receipt(kind === 'inspect' ? 'unknown' : 'completed') })
+  const call = kind === 'inspect' ? inspectCall : reconnectCall
+  if (outcome === 'throw') call.mockRejectedValue(new Error('Controlled original request failure'))
+  else call.mockResolvedValue(null)
+  await render()
+  const observations = () => dom.container.querySelector('[aria-label="Original update receipt"] .host-upgrade__observation')!.textContent
+  const prior = observations()
+  await action()
+  const feedback = dom.container.querySelector('[data-upgrade-attempt-feedback]')!
+  expect(feedback).not.toBeNull()
+  expect(feedback.closest('details')).toBeNull()
+  expect(feedback.textContent).toContain(kind === 'inspect' ? 'This original result check was not confirmed' : 'This connection attempt was not confirmed')
+  expect(feedback.textContent).not.toContain('Controlled original request failure')
+  expect(observations()).toBe(prior)
+  expect(dom.container.textContent).toContain('original-operation')
+  expect(dom.container.textContent).toContain(outcome === 'throw' ? 'Controlled original request failure' : 'No confirmed receipt')
+  expect(dom.container.querySelector<HTMLButtonElement>('[data-upgrade-action]')!.disabled).toBe(false)
+  expect(call).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(checkCall).toHaveBeenCalledTimes(1)
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(dom.draft()).toBe('Keep my draft')
 })
