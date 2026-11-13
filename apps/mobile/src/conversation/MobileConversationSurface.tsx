@@ -309,6 +309,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const readMoteInput = useMemo(() => createMobileMoteInputReader(pageClient ?? null, pageSessionId ?? null), [pageClient, pageSessionId])
   const conversationPlatform = useMemo(() => ({ ...conversationIoPlatform,
     conversationToolLabels: mobileConversationToolLabels,
+    messageLayout: 'stacked' as const,
     readMoteInput,
     moteMemberName: (...args: Parameters<NonNullable<ClientUiPlatform['moteMemberName']>>) =>
       pageClient === client && pageSessionId === agentSessionId ? moteMemberName?.(...args) : undefined
