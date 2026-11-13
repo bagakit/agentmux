@@ -8,6 +8,6 @@ export function MobileMoteSourceNotice({ roleIssue, readingIssue, configurationI
     <dl>{roleIssue && <><dt>主角色</dt><dd>{roleIssue}</dd></>}{readingIssue && <><dt>读取</dt><dd>{readingIssue}</dd></>}
       {configurationIssue && <><dt>配置</dt><dd>{configurationIssue}</dd></>}</dl>
     <button type="button" onClick={refresh}>重新核对主对话信息</button>
-    {onMain && <button type="button" onClick={onMain}>返回当前主对话</button>}
+    {onMain && <button type="button" onClick={() => onMain()}>返回当前主对话</button>}
   </details>
 }
