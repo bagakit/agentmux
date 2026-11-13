@@ -135,7 +135,7 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共享 Region �
 
 ## 接手的中央 Agent 选择
 
-接手在准确来源 Region 的当前画面中央呈现初始 Launcher 共用的 Agent 选择区域，保留原内容作工作上下文，不使用独立 Dialog、全局遮罩或 captured / native 来源下拉框。身份、材料与提交保护只见[《接手原会话的工作》](../behavior/session-recovery.md#接手原会话的工作)；候选的头像、名称、选中反馈与可用性表达沿[《初始 Launcher 的现代工作台密度》](spaces-and-layout.md#初始-launcher-的现代工作台密度)，不另画一套普通 Executor select。
+接手在准确来源 Region 的当前画面中央呈现初始 Launcher 共用的 Agent 选择区域，保留原内容作工作上下文，不使用独立 Dialog、全局遮罩或 captured / native 来源下拉框。Focus 卡片有唯一已确认位置时先导航到该 Region 再就地展开；无位置或多位置时同一区域覆盖 Focus 工作区一侧，并在其中显式选择目的地。用户的新 Agent 派生动作复用同一区域：标题为动作名，起点行显示「原 Agent → 动作名」，指令以三行内的引用块预览，悬停可读全文，默认 Agent 排在候选首位并获初始焦点。身份、材料与提交保护只见[《接手原会话的工作》](../behavior/session-recovery.md#接手原会话的工作)；候选的头像、名称、选中反馈与可用性表达沿[《初始 Launcher 的现代工作台密度》](spaces-and-layout.md#初始-launcher-的现代工作台密度)，不另画一套普通 Executor select。
 
 选择区域以短促有限的进入与退出回应 Take over，内容与可点击目标稳定，减少动态时直接呈现完整静态状态，输入、取消与提交不等待动画完成。沿共享动态 token 和控件呈现实际选择，不画假加载或循环装饰。宽窄、明暗和短 Region 中，长名称、完整候选、选中标记、键盘焦点、取消及真实失败均清楚可达；局部关闭返回原入口，不抢旁侧健康工作面的焦点。动效中间帧与静态终态均需独立实际看图。
 
