@@ -41,7 +41,7 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 | Cursor | 当前 Run 打开的原 `store.db` 与 native metadata；canonical conversation protobuf | DB/WAL/journal 原生 commit 的实际 revision | Conversation UUID |
 | TraeX | 当前 Run 打开的 rollout 与 `session_meta`；由原生 app-server 解释 indexed history | 同一 rollout | Session ID |
 
-上述是源码能力，不代表任意厂商版本、当前安装或所有真实运行场景已验收。Client 共同消费 `AgentSessionHistoryPage`，不按 Provider 另建阅读界面、轮询或消息账本。保存的用户输入、Agent 回复与过程记录保留各自原顺序、ID 和 content parts；未提供的作者、渠道、设备、时间与状态保持未知。终端输入须等原生 CLI 保存为记录后才能由原生读取接口取得，不能把尚未保存的终端编辑缓冲当成已提交消息。
+上表只列出部分 Provider 的原生来源与身份，不是完整清单；各内置 Provider 是否提供原生读取与更新观察，以 [内置 Provider](src/providers/index.ts) 组合的各模块是否贡献 `readSessionHistoryPage`／`observeSessionHistory` 为准。上述是源码能力，不代表任意厂商版本、当前安装或所有真实运行场景已验收。Client 共同消费 `AgentSessionHistoryPage`，不按 Provider 另建阅读界面、轮询或消息账本。保存的用户输入、Agent 回复与过程记录保留各自原顺序、ID 和 content parts；未提供的作者、渠道、设备、时间与状态保持未知。终端输入须等原生 CLI 保存为记录后才能由原生读取接口取得，不能把尚未保存的终端编辑缓冲当成已提交消息。
 
 Provider 明确标记的运行时上下文或系统指令使用 `AgentSessionHistoryItem.kind = 'system-message'`，与 `user-message`、`assistant-message` 和 `activity` 区分，仍保留原 source、记录 ID、title 与完整 content parts。此类型是只读历史语义，不授予指令优先级或控制权限；用户正文中的标签不改变分类。原 `sessionHistoryPage`、RPC 和 `agent history --source native` 直接传递该类型，客户端可复用系统卡片，不把它加入用户输入历史。
 
@@ -65,7 +65,7 @@ CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 
 
 现有 `agent.execution.create`、`agent.execution.binding`、`agent.execution.rejoin` 与 `agent.execution.inspect` RPC／同名对象 CLI 复用 [Core 执行协调器](src/agent-execution-coordinator.ts)。Provider 贡献原生接法；客户端继续使用同一绑定、原 Session 与操作回执。`rejoin` 重接原 reader，不重发未知的工具操作。
 
-[Claude Provider](src/providers/claude.ts) 的分端适配当前限定于 Claude Code 2.1.314 的原生模块与 `mcp serve` 合同。原文件工具由资源端原生服务执行，`Bash`／资源任务 `TaskStop` 由该原 helper 的进程句柄执行；资源授权为绑定中明确给出的 `host-user`。原工具池、主 Agent 的原生权限查询与资源 MCP 许可分别成立，不添加整类工具自动授权。用户已有 MCP、插件、提示与原生会话配置继续由 Claude 加载。
+[Claude Provider](src/providers/claude.ts) 的分端适配当前限定于 [`qualifyClaudeExecutionExecutable`](src/providers/claude-tool-execution-launch.ts) 精确核验的单一 Claude Code 版本及其原生模块与 `mcp serve` 合同。原文件工具由资源端原生服务执行，`Bash`／资源任务 `TaskStop` 由该原 helper 的进程句柄执行；资源授权为绑定中明确给出的 `host-user`。原工具池、主 Agent 的原生权限查询与资源 MCP 许可分别成立，不添加整类工具自动授权。用户已有 MCP、插件、提示与原生会话配置继续由 Claude 加载。
 
 文件校验与读取状态由资源端原生服务持有；不在 Agent 本机重放整条原工具调用作为权限探测。原生配置、Hooks 与 Skills 从 Agent 运行端加载，不自动同步资源端的同名项目配置。实际 Hook 使用 MCP 工具名与调用 ID，审批处于主循环；按原工具名匹配的 Hook 或按子 Agent 身份审批的配置需要核对该差异。当前公开权限查询无法指定子 Agent，因此子调用仅保留原生工具确认 `isReadOnly` 且原查询已允许的操作；其余本次操作明确报告权限上下文未确认，主 Agent 与其他已确认操作继续工作。原生工具池仍负责准入，直接调用替换名不能扩大子 Agent 工具范围。这些边界由原绑定 notice 公开，不能由连接成功宣称任意扩展完全等价，也不要求删除用户 Hook 才能使用分端执行。
 
@@ -116,7 +116,7 @@ Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTermin
 
 Replay 和 `terminal-output` 的 `dataBytes: Uint8Array` 是终端消费者应写入的原始字节；`data` 是给语义观察者的流式文本，不用于字节裁剪。CLI `agent output` 与 `agent output --follow` 使用 `dataBase64` 表达同一字节流，调用方用 base64 解码后按范围去重。行为合同见设计 SSOT 的[「ordered bytes 的公开传输边界」](../../docs/design/behavior/terminal-reading.md#ordered-bytes-的公开传输边界)。
 
-Shell packed consumer 的验证义务包括 same Run/PID reconnect、fragmented UTF-8、interior byte replay、lost-receipt Input dedup、resize、interrupt-still-live 和 complete stubborn-tree Stop。源码与历史通过记录不代签当前候选；oracle 和证据范围见[测试策略](../../docs/testing/strategy.md)。
+Shell packed consumer 的验证义务、oracle 和证据范围见[测试策略《Shell 与 Desktop 的验证义务》](../../docs/testing/strategy.md#shell-与-desktop-的验证义务)；源码与历史通过记录不代签当前候选。
 
 ## Agent 调用与输入
 
