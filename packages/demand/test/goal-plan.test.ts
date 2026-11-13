@@ -19,7 +19,7 @@ const delegation = (nodeId: string, worker = 'worker-a', attempt = 1): DemandDel
   operationId: `delegate-${nodeId}-${attempt}`, sourceMessageId: `source-${nodeId}-${attempt}`, hostId: 'local', ownerAgentSessionId: 'mote', workerAgentSessionId: worker,
   ownerRunId: 'mote-run', workerRunId: `${worker}-run`, threadId: `thread-${nodeId}`, text: `Do ${nodeId}`, alignmentRevision: 1, criterionIds: ['api'], planNodeId: nodeId })
 const report = (task: DemandDelegationIntent) => ({ operationId: `report-${task.operationId}`, replyMessageId: `reply-${task.operationId}`, authorAgentSessionId: task.workerAgentSessionId,
-  grounding: { alignmentRevision: 1, summary: `Delivered ${task.planNodeId}`, checks: [{ criterionId: 'api', outcome: 'met' as const, evidence: [`log/${task.planNodeId}.txt:3`], note: '' }] } })
+  grounding: { alignmentRevision: task.alignmentRevision, summary: `Delivered ${task.planNodeId}`, checks: task.criterionIds.map(criterionId => ({ criterionId, outcome: 'met' as const, evidence: [`log/${task.planNodeId}.txt:3`], note: '' })) } })
 const pass = (nodeId: string, delegationOperationId: string, operationId = `review-${delegationOperationId}`) => ({ operationId, nodeId, delegationOperationId, verdict: 'pass' as const,
   check: { command: `pnpm test ${nodeId}`, result: '12 passed', evidence: [`ci/${nodeId}.log:1`] }, note: '' })
 
@@ -76,6 +76,38 @@ describe('plan revision', () => {
     expect(await states()).toEqual({ a: 'cancelled', b: 'ready' })
   })
 
+  it('keeps a reviewed node bound to its original outcome, check and criteria while allowing names and reassignment', async () => {
+    await store.revisePlan('goal', { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes: [node('a')] }, supervisor)
+    const task = delegation('a')
+    await deliver(task)
+    await store.reviewPlanNode('goal', pass('a', task.operationId), { kind: 'agent', id: 'reviewer' })
+    const original = (await store.get('goal'))!
+    for (const [field, patch] of Object.entries({ outcome: { outcome: 'An unrelated new outcome' }, check: { check: 'pnpm test unrelated' }, criteria: { criterionIds: ['ui'] } })) {
+      await expect(store.revisePlan('goal', { operationId: `replace-${field}`, expectedRevision: 1, alignmentRevision: 1, nodes: [node('a', [], patch)] }, supervisor))
+        .rejects.toThrow('cancel it and add a new node')
+    }
+    await store.revisePlan('goal', { operationId: 'rename-and-reassign', expectedRevision: 1, alignmentRevision: 1,
+      nodes: [node('a', [], { title: 'A clearer name', executor: { hostId: 'local', agentSessionId: 'worker-b' } })] }, supervisor)
+    const renamed = (await store.get('goal'))!
+    expect(renamed.plan!.nodes[0]).toMatchObject({ title: 'A clearer name', executor: { agentSessionId: 'worker-b' } })
+    expect(renamed.plan!.reviews).toEqual(original.plan!.reviews)
+    expect(renamed.delegations).toEqual(original.delegations)
+    expect(await states()).toEqual({ a: 'done' })
+    await store.revisePlan('goal', { operationId: 'replace-explicitly', expectedRevision: 2, alignmentRevision: 1,
+      nodes: [{ ...renamed.plan!.nodes[0]!, cancelled: true }, node('new-task', [], { criterionIds: ['ui'] })] }, supervisor)
+    expect(await states()).toEqual({ a: 'cancelled', 'new-task': 'ready' })
+    expect((await store.get('goal'))!.plan!.reviews).toEqual(original.plan!.reviews)
+  })
+
+  it('allows work semantics to change before a node has recorded work, and criteria can be reordered afterward', async () => {
+    await store.revisePlan('goal', { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes: [node('a')] }, supervisor)
+    const revised = node('a', [], { outcome: 'A refined result', check: 'pnpm test refined', criterionIds: ['api', 'ui'] })
+    await store.revisePlan('goal', { operationId: 'refine', expectedRevision: 1, alignmentRevision: 1, nodes: [revised] }, supervisor)
+    await store.prepareDelegation('goal', { ...delegation('a'), criterionIds: ['api', 'ui'] }, 'mote')
+    await store.revisePlan('goal', { operationId: 'reorder', expectedRevision: 2, alignmentRevision: 1, nodes: [{ ...revised, criterionIds: ['ui', 'api'] }] }, supervisor)
+    expect((await store.get('goal'))!.plan!.nodes[0]!.criterionIds).toEqual(['ui', 'api'])
+  })
+
   it('is written only through its own owner, never through a Goal update patch', async () => {
     await expect(store.update('goal', { plan: { revision: 1 } } as never)).rejects.toThrow('plan revision')
   })
@@ -106,6 +138,16 @@ describe('node delegation and review', () => {
   it('refuses a second current attempt on the same node', async () => {
     await store.prepareDelegation('goal', delegation('a'), 'mote')
     await expect(store.prepareDelegation('goal', delegation('a', 'worker-b', 2), 'mote')).rejects.toThrow('only a ready node')
+  })
+
+  it('delegates exactly the node criteria, preventing a partial task report from completing the whole node', async () => {
+    await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1,
+      nodes: [node('a', [], { criterionIds: ['api', 'ui'] })] }, supervisor)
+    await expect(store.prepareDelegation('goal', delegation('a'), 'mote')).rejects.toThrow('same success criteria')
+    expect((await store.get('goal'))!.delegations ?? []).toEqual([])
+    await deliver({ ...delegation('a'), criterionIds: ['ui', 'api'] })
+    await store.reviewPlanNode('goal', pass('a', 'delegate-a-1'), { kind: 'agent', id: 'reviewer' })
+    expect(await states()).toEqual({ a: 'done' })
   })
 
   it('sends a node only to the executor its plan names', async () => {
@@ -168,6 +210,30 @@ describe('node delegation and review', () => {
     await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1, nodes: [node('a', [], { criterionIds: ['api', 'gone'] })] }, supervisor)
     const goal = (await store.get('goal'))!
     expect(projectGoalPlan(goal.plan!, [], goal.alignment!.criteria).nodes[0]!.staleCriteria).toEqual(['gone'])
+  })
+
+  it('does not carry an old pass to changed or missing standards, while preserving work on unchanged standards', async () => {
+    const nodes = [node('a'), node('b', [], { criterionIds: ['ui'] }), node('c', ['a'])]
+    await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1, nodes }, supervisor)
+    for (const task of [delegation('a'), { ...delegation('b'), criterionIds: ['ui'] }]) {
+      await deliver(task)
+      await store.reviewPlanNode('goal', pass(task.planNodeId!, task.operationId), { kind: 'agent', id: 'reviewer' })
+    }
+    const original = (await store.get('goal'))!
+    await store.proposeAlignment('goal', { summary: 'Same IDs, changed API requirement', criteria: [{ ...criteria[0]!, text: 'The API authenticates callers and returns the plan' }, criteria[1]!], openQuestions: [] })
+    await store.revisePlan('goal', { operationId: 'plan-3', expectedRevision: 2, alignmentRevision: 2, nodes }, supervisor)
+    const changed = (await openDemandStore({ root }).get('goal'))!
+    const projection = projectGoalPlan(changed.plan!, changed.delegations!, changed.alignment!.criteria)
+    expect(projection.nodes.map(item => [item.node.id, item.state, item.staleCriteria])).toEqual([
+      ['a', 'unknown', ['api']], ['b', 'done', []], ['c', 'waiting', []]
+    ])
+    expect(projection).toMatchObject({ done: 1, total: 3, next: [] })
+    expect(changed.plan!.reviews).toEqual(original.plan!.reviews)
+    expect(changed.delegations).toEqual(original.delegations)
+    await expect(store.prepareDelegation('goal', { ...delegation('c'), alignmentRevision: 2 }, 'mote')).rejects.toThrow('only a ready node')
+    const missing = projectGoalPlan(changed.plan!, changed.delegations!, [criteria[1]!])
+    expect(missing.nodes[0]).toMatchObject({ state: 'unknown', staleCriteria: ['api'] })
+    expect(missing.nodes[1]).toMatchObject({ state: 'done', staleCriteria: [] })
   })
 
   it('survives a fresh store read with the same plan, reviews and history', async () => {
