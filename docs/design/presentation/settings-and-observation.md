@@ -56,6 +56,8 @@ Browser Profiles 沿 Agents／Hosts 的资源库与单对象编辑构图：左�
 - **同一标识贯穿所有入口。** 设置库行、编辑页头、Browser 工具栏 chip 与切换菜单绘制同一个标识元素；Browser tools 只保留标识摘要与「Manage Browser Profiles」入口，不另设第二个编辑器。
 - **In use 与阻断原因先于动作。** In use 分开列出已打开与尚未加载的已保存 Browser，每行可直接回到那个 Browser；页头的主动作「Open Browser」在当前 Space 用这个 Profile 新开一页。默认 Profile 或仍被使用的 Profile 在更多菜单中直接禁用「Delete Profile…」并写明原因，可删时在编辑区就地确认并点名删除范围，确认块打开即聚焦 Cancel，Escape 关闭。新建直接进入为新 Profile 命名；导入在菜单中列出本机可用来源。
 - **删除先落列表，再清数据。** 删除先从列表移除并记下待清理，再清登录态与网站数据；写入失败时 Profile 与数据原样保留。清理未完成时删除仍算完成：编辑区退出，列表上方给一条可关闭的说明，下次启动再清，不把已删 Profile 当作仍在编辑的对象报错。
+- **Agents 是一个开关。** 编辑区的 Agents 一节只有「Let agents use Browsers in this Profile」，就地提交并带列表 revision；开关下一行说明当前实际效果：Agent 可用这个 Profile 的登录态操作、此处拒绝 Agent 但人仍可运行自己的步骤，或总开关已关、此刻没有 Agent 使用任何 Profile。控件复用 Settings › Browser 总开关的同一种开关，看得出它收窄的正是那个总开关。
+- **站点数据按站点清理。** 「Sites with sign-ins」在人点开时才读取，只列站点名与 Cookie 数；每行「Clear…」在行内确认、聚焦 Cancel、Escape 取消，清完说明已从该站点登出并提示重新加载其已打开页面，失败保留该行与原因。
 - **刷新失败不拿走能力。** 列表读取失败只给一行服务说明与 Retry，保留最后一份列表与全部动作；写入资格由 Main 按 revision 判定。
 
 ### Browser use 与实时模拟

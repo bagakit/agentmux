@@ -242,6 +242,7 @@ Viewport 直接入口与 More 的二级菜单共用相同选择与已应用状�
 - 清理站点数据的作用域是「一个 Profile 内的一个可注册域」。Chromium 按站点清掉其下全部 Cookie，网站存储按 origin 保存，所以清理覆盖该站点下持有 Cookie 的每个 origin；比可注册域更窄或更宽的名字一律拒绝，结果不少于确认时说出的范围。批准事实写明操作 `clear-site-data`、作用域 `profile-site`、目标 Profile 与站点；站点列表只显示站点名与 Cookie 数量，不显示 Cookie 名或值，只在人打开时读取。完成后说明已从该站点登出，并提示重新加载其已打开的页面；失败保留原站点与原因。
 - 破坏性操作必须经过用户在当前界面明确确认。调用入口传递结构化批准事实（操作、作用域、目标 Profile），主进程再次校验目标未被打开的 Browser 使用、不能是默认 Profile，并拒绝缺少批准事实的请求。
 - Agent 浏览器自动化不能借用人的 UI 确认；没有专用的人批准事实时必须返回类型化拒绝，健康 Browser 与其登录态保持不变。
+- 是否允许驱动页面由一处判定，依据是谁在请求：Core 附上的托管 Agent 调用方，或人（GUI，或不带调用方的 CLI）。Settings › Browser 的总开关对两者同样生效，关闭时以 `BROWSER_AUTOMATION_DISABLED` 拒绝。每个 Profile 另有一个 Agents 开关，只收窄 Agent 调用方：关闭后 Agent 以 `BROWSER_PROFILE_AGENT_ACCESS_OFF` 被拒，人仍可在该 Profile 里运行自己的步骤。没有 Profile 的页面（匿名页、Capsule、外部标签）只看总开关；保存时未记 Profile 的普通页会恢复进默认 Profile，因此按默认 Profile 判定。读不到 Profile 时对 Agent 明确为未知（`BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN`），不猜作允许，也不拦人。Agents 开关只能由人在设置页修改，公共命令不提供 setter；停止操作永远不经这道判定。
 
 
 ## 多位置呈现、局部遮挡与输入交接
