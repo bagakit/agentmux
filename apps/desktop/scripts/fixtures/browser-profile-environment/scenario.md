@@ -26,6 +26,16 @@ must restore the spoofed value and fail the native clear assertion; the restored
 candidate must restore the original isolated native value without changing the
 page's getter, input, navigation or other consumer.
 
+`--scope --binding-proof` follows the actual BVM Profile switch with a preparing
+candidate and a retiring original native incarnation. A bounded navigation gate
+and deferred original close retain both exact handles for observation; no close
+is claimed before the original native call. Public targets and Profile inspect
+must agree on the current Browser binding, the original environment event stream
+must publish promotion/retirement, and the committed view must keep the new
+Profile's screen. `--mutations` with this scene omits the current-binding filter
+and substitutes the old Profile's screen separately; each must fail its native
+business assertion. The scene does not reopen the full-scope/restart proof.
+
 Without `--scope`, the retained session-default scenario checks public edits,
 request headers, a failed native session setter's Profile-scoped service notice,
 retry, release/restore and restart. Its warning mutation must fail the real public
