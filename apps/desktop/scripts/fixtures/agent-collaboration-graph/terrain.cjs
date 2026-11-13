@@ -170,7 +170,7 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
       const current = await zoom()
       if (Math.abs(Math.log(target / current)) < .0008) return current
       const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect(),anchor=window.__terrainAnchor?.isConnected?window.__terrainAnchor.getBoundingClientRect():null,candidates=[...(anchor?[{x:anchor.x+anchor.width/2,y:anchor.y+anchor.height/2}]:[]),...[ [.52,.52],[.82,.3],[.18,.3],[.82,.72],[.18,.72] ].map(([x,y])=>({x:r.x+r.width*x,y:r.y+r.height*y}))];const point=candidates.find(p=>{const hit=document.elementFromPoint(p.x,p.y);return hit?.closest('.collaboration-canvas')===canvas&&!hit.closest('.collaboration-region-labels,.collaboration-canvas__hud,.agent-information-reader')});if(!point)throw Error('No real Map surface exposed for native wheel input');return point})()`)
-      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, modifiers: 2, deltaX: 0, deltaY: Math.max(-18, Math.min(18, -Math.log2(target / current) / .02)) })
       await pause(120)
     }
     assert.ok(Math.abs(Math.log(target / await zoom())) < .002, 'Native wheel reaches the intended intermediate reading scale')

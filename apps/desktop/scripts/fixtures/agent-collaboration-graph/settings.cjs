@@ -121,7 +121,7 @@ module.exports = async function settings({ win, result, read, click, key, move, 
       if (Math.abs(Math.log(target / current)) < .0008) return current
       const point = await backgroundPoint()
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
-      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, modifiers: 2, deltaX: 0, deltaY: Math.max(-18, Math.min(18, -Math.log2(target / current) / .02)) })
       await pause(120)
     }
     assert.ok(Math.abs(Math.log(target / await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`))) < .002, 'Native wheel reaches the information-budget scale')

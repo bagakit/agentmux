@@ -139,7 +139,7 @@ module.exports = async function adaptive({ win, result, read, click, key, move, 
         const current = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
         if (Math.abs(Math.log(target / current)) < .001) return
         const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect();for(const [x,y] of [[.5,.5],[.25,.25],[.75,.25],[.25,.75],[.75,.75]]){const point={x:r.x+r.width*x,y:r.y+r.height*y},hit=document.elementFromPoint(point.x,point.y);if(hit?.closest('.collaboration-canvas')===canvas&&!hit.closest('.collaboration-region-labels,.collaboration-canvas__hud,.agent-information-reader'))return point}throw Error('No actual native wheel surface')})()`)
-        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) }); await pause(100)
+        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, modifiers: 2, deltaX: 0, deltaY: Math.max(-18, Math.min(18, -Math.log2(target / current) / .02)) }); await pause(100)
       }
       throw Error('The actual adaptive native camera did not reach its readable scale')
     }

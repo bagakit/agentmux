@@ -186,7 +186,7 @@ module.exports = async function endpoints({ win, result, read, click, key, move,
       const zoom = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.collaboration-map .react-flow__viewport')).transform).a`)
       if (Math.abs(zoom - target) < .002) return
       const pane = await read(`(()=>{const r=document.querySelector('.collaboration-canvas').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...pane, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / zoom) / .002)), modifiers: 0 })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...pane, modifiers: 2, deltaX: 0, deltaY: Math.max(-18, Math.min(18, -Math.log2(target / zoom) / .02)), modifiers: 0 })
       await pause(120)
     }
     throw Error('Actual native wheel did not reach endpoint scale')
