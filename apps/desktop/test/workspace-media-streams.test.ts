@@ -154,6 +154,34 @@ describe('workspace media stream leases', () => {
     expect(f.streams.status(rewritten.id)).toMatchObject({ state: 'changed' })
   })
 
+  it('ends a response already sending when the pinned file is rewritten in place, never mixing in new bytes', async () => {
+    const f = await fixture(), size = 4 * 1024 * 1024, path = join(f.root, 'clips/long.mp4')
+    await writeFile(path, Buffer.alloc(size, 3))
+    const opened = await ready(f, 'clips/long.mp4')
+    const target = new URL(opened.url), received: Buffer[] = []
+    const outcome = await new Promise<{ status: number; ended: 'complete' | 'aborted' }>((resolve, reject) => {
+      const req = request(target, { headers: { Range: `bytes=0-${size - 1}` } }, response => {
+        // Hold the reader after the first chunk so the owner is mid-response, then rewrite the same inode.
+        response.once('data', async chunk => {
+          received.push(chunk); response.pause()
+          const later = new Date(Date.now() + 5_000)
+          await writeFile(path, Buffer.alloc(size, 9), { flag: 'r+' }); await utimes(path, later, later)
+          response.on('data', more => received.push(more)); response.resume()
+        })
+        response.on('end', () => resolve({ status: response.statusCode!, ended: 'complete' }))
+        response.on('aborted', () => resolve({ status: response.statusCode!, ended: 'aborted' }))
+        response.on('error', () => resolve({ status: response.statusCode!, ended: 'aborted' }))
+      })
+      req.on('error', reject); req.end()
+    })
+    const body = Buffer.concat(received)
+    expect(outcome.status).toBe(206)
+    expect(outcome.ended).toBe('aborted')
+    expect(body.length).toBeLessThan(size)
+    expect(body.includes(9)).toBe(false)
+    expect(f.streams.status(opened.id)).toEqual({ state: 'changed', path: 'clips/long.mp4' })
+  })
+
   it('reports a growing file as changed rather than serving past its pinned length', async () => {
     const f = await fixture(), growing = await ready(f)
     const before = await import('node:fs/promises').then(fs => fs.stat(join(f.root, 'clips/clip.mp4')))
