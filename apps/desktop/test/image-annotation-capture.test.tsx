@@ -448,6 +448,18 @@ describe('capture image annotation', () => {
     expect(off.props.onComplete.mock.lastCall![0].crop, 'a drag still makes a free selection').toEqual({ x: 420, y: 320, width: 160, height: 60 })
   })
 
+  it('outside an untouched remembered selection a window still lights and a click selects it', async () => {
+    // The remembered selection sits inside the front window's top-left; the pointer hovers the front window outside it.
+    const remembered = { x: 420, y: 320, width: 100, height: 60 }
+    const { move, press, release, key, props } = await mount(undefined, [FRONT, BACK], remembered)
+    strokes = []; await move([350, 220], 0)
+    expect(outlines().at(-1), 'the front window lights outside the untouched remembered selection').toMatchObject({ rect: [401, 301, 398, 198] })
+    strokes = []; await move([235, 175], 0)
+    expect(outlines(), 'inside the remembered selection no window lights').toEqual([])
+    await press([350, 220]); await release([350, 220]); await key('Enter')
+    expect(props.onComplete.mock.lastCall![0].crop, 'a click outside the untouched remembered selection selects the window under it').toEqual(FRONT)
+  })
+
   it('a press that drags away and comes back to its start selects no window', async () => {
     const { move, press, release, bar, props } = await mount(undefined, [FRONT, BACK])
     // The press lights the front window, the drag puts the highlight out, and the release lands within a click of the press.
