@@ -58,8 +58,9 @@ function button(scope: ParentNode, name: string): HTMLButtonElement {
   const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === name)
   expect(found, 'real ' + name + ' control').toBeDefined(); return found!
 }
-async function mount(origin?: { x: number; y: number }, windows?: Array<{ x: number; y: number; width: number; height: number }>) {
+async function mount(origin?: { x: number; y: number }, windows?: Array<{ x: number; y: number; width: number; height: number }>, initialCrop?: { x: number; y: number; width: number; height: number }) {
   const props = { image, busy: false, presentation: 'capture' as const, pixelRatio: 2, ...(origin ? { origin } : {}), ...(windows ? { windows } : {}),
+    ...(initialCrop ? { initialState: { shapes: [], crop: initialCrop } } : {}),
     onCancel: vi.fn(), onComplete: vi.fn(), onSavePng: vi.fn(), onPin: vi.fn(), onExpand: vi.fn(), onCopyColor: vi.fn(), onSelect: vi.fn() }
   const instance = Math.random()
   // The host's lock for this display arrives later than the editor mounts, as another display's claim does.
@@ -300,6 +301,32 @@ describe('capture image annotation', () => {
     expect(props.onSelect, 'moving or resizing claims nothing more').toHaveBeenCalledOnce()
     await mouse('contextmenu', [100, 50]); await drag([100, 50], [200, 150])
     expect(props.onSelect, 'a new selection after clearing claims again').toHaveBeenCalledTimes(2)
+  })
+
+  it('opens on a remembered selection at rest, claims it only once acted on, and delivers it only on Enter', async () => {
+    const { editor, bar, hint, loupe, move, key, drag, props } = await mount(undefined, undefined, SELECTED)
+    expect(bar(), 'the toolbar shows at rest on the remembered selection').not.toBeNull()
+    expect(editor.querySelector('[aria-label="Selection size"]')?.textContent, 'the size chip names it').toContain('400 × 200')
+    expect([hint(), loupe()], 'no hint and no loupe on a kept selection').toEqual([null, null])
+    await move([100, 100], 0); await frame()
+    expect([props.onComplete.mock.calls.length, props.onSelect.mock.calls.length, props.onCancel.mock.calls.length], 'opening on it delivers, claims and cancels nothing').toEqual([0, 0, 0])
+    await key('Enter')
+    expect(props.onComplete, 'actual Enter delivers the remembered selection').toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ crop: SELECTED, shapes: [] }))
+    expect(props.onSelect, 'an unchanged remembered selection is claimed by its host on output, not by the editor').not.toHaveBeenCalled()
+    await drag([400, 150], [420, 160])
+    expect(props.onSelect, 'moving the remembered selection claims it once').toHaveBeenCalledOnce()
+    await drag([520, 160], [570, 160]); await key('ArrowLeft')
+    expect(props.onSelect, 'later edits claim nothing more').toHaveBeenCalledOnce()
+    await key('Enter')
+    expect(props.onComplete.mock.lastCall![0].crop, 'the moved selection is what Enter delivers').toEqual({ x: 638, y: 220, width: 500, height: 200 })
+    const cleared = await mount(undefined, undefined, SELECTED)
+    await cleared.mouse('contextmenu', [100, 50])
+    expect([cleared.bar(), cleared.props.onSelect.mock.calls.length], 'clearing the remembered selection claims nothing').toEqual([null, 0])
+    await cleared.drag([100, 50], [200, 150])
+    expect(cleared.props.onSelect, 'a selection drawn in its place claims as usual').toHaveBeenCalledOnce()
+    const redrawn = await mount(undefined, undefined, SELECTED)
+    await redrawn.drag([100, 50], [200, 150])
+    expect(redrawn.props.onSelect, 'a selection re-drawn over the remembered one claims once').toHaveBeenCalledOnce()
   })
 
   it('a locked display keeps its dimmed frozen frame and Cancel but makes no selection, loupe or color copy', async () => {

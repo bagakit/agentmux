@@ -78,9 +78,10 @@ function session(overrides: Partial<CaptureSurfaceSession> = {}): CaptureSurface
   return { attachToDraft: true, expandable: true, returnFocus: false, complete: vi.fn(async () => {}), ...overrides }
 }
 async function opened(value = session()) {
-  const outcome = surface.present(value)
+  const before = electron.windows.length, outcome = surface.present(value)
   await vi.advanceTimersByTimeAsync(0)
-  const overlays = await Promise.all(electron.windows.map(async window => {
+  // Only this capture's overlays; an earlier capture's windows are closed.
+  const overlays = await Promise.all(electron.windows.slice(before).map(async window => {
     const call = (action: string, params: Record<string, unknown> = {}, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }) =>
       electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, action, { requestId: input.requestId, ...params })
     const input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'load')
@@ -295,4 +296,86 @@ it('the public selection returns the processed selection as captured, or cancell
 it('the public selection reports a failed native grab as failed with its code', async () => {
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => { throw Object.assign(new Error('Screen recording is not allowed'), { code: 'permission_denied' }) }) })
   expect(await surface.captureSelection(false)).toEqual({ state: 'failed', error: { code: 'permission_denied', message: 'Screen recording is not allowed' } })
+})
+
+// The remembered selection: display 1 at 2x, frame pixels 2, 2, 4 × 2 are global points 1, 1, 2 × 1.
+async function delivered(overlay = 0, rect = selection) {
+  const { overlays, outcome } = await opened()
+  await overlays[overlay]!.call('select')
+  expect(await overlays[overlay]!.call('finish', { image: result, selection: rect })).toEqual({ status: 'completed' })
+  // Checked before waiting, so a delivery that never ends the capture fails here instead of timing out.
+  expect(overlays.every(row => row.window.dead), 'the delivery ended the capture').toBe(true)
+  await outcome
+}
+
+it('the next capture opens on the last delivered selection, only on that display', async () => {
+  const first = await opened()
+  expect(first.overlays.map(row => row.input.initialCrop), 'nothing is remembered before a delivery').toEqual([undefined, undefined])
+  await first.overlays[0]!.call('cancel'); await first.outcome
+  await delivered()
+  const { overlays } = await opened()
+  expect(overlays[0]!.input.initialCrop, 'the same frame pixels on the same display').toEqual(selection)
+  expect(overlays[1]!.input.initialCrop, 'every other display opens without one').toBeUndefined()
+  expect(await overlays[1]!.call('select'), 'opening on it claims nothing').toBe(true)
+  await overlays[1]!.call('finish', { image: pngFromBytes(png(1, 1)), selection: { x: 1, y: 0, width: 1, height: 1 } })
+  const next = await opened()
+  expect(next.overlays.map(row => row.input.initialCrop), 'the newest delivery replaces it').toEqual([undefined, { x: 1, y: 0, width: 1, height: 1 }])
+})
+
+it('cancel, expand, Save PNG, Pin and a failed delivery remember nothing', async () => {
+  await delivered()
+  const cancelled = await opened()
+  await cancelled.overlays[0]!.call('select')
+  await cancelled.overlays[0]!.call('save-png', { image: result })
+  await cancelled.overlays[0]!.call('pin', { operationId: 'pin-1', image: result, selection: { x: 0, y: 0, width: 2, height: 2 } })
+  await cancelled.overlays[0]!.call('cancel'); await cancelled.outcome
+  const expanded = await opened()
+  expect(expanded.overlays[0]!.input.initialCrop, 'Save PNG, Pin and cancel kept the delivered selection').toEqual(selection)
+  await expanded.overlays[0]!.call('select')
+  await expanded.overlays[0]!.call('expand', { handoff: { shapes: [], crop: { x: 0, y: 0, width: 8, height: 6 }, tool: 'rect' } }); await expanded.outcome
+  const failing = await opened(session({ complete: vi.fn(async () => { throw new Error('Clipboard copy was not confirmed') }) }))
+  expect(failing.overlays[0]!.input.initialCrop, 'expand kept the delivered selection').toEqual(selection)
+  await failing.overlays[0]!.call('select')
+  expect(await failing.overlays[0]!.call('finish', { image: result, selection: { x: 0, y: 0, width: 2, height: 2 } })).toMatchObject({ status: 'failed' })
+  await failing.overlays[0]!.call('cancel'); await failing.outcome
+  const { overlays } = await opened()
+  expect(overlays[0]!.input.initialCrop, 'a failed delivery kept the delivered selection').toEqual(selection)
+})
+
+it.each([
+  ['the display moved', { id: 1, bounds: { ...main, x: 4 } }, { ...main, x: 4 }, 2],
+  ['the display resized', { id: 1, bounds: { ...main, width: 5 } }, { ...main, width: 5 }, 2],
+  ['the display scale changed', { id: 1, bounds: main }, main, 1],
+  ['the display id changed', { id: 3, bounds: main }, main, 2]
+] as const)('a changed display layout gives no remembered selection: %s', async (_case, display, frame, scale) => {
+  await delivered()
+  electron.displays = [display, { id: 7, bounds: side }]
+  ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => ({ ...frames(), displays: [
+    { displayId: display.id, frame, scale, png: png(frame.width * scale, frame.height * scale).toString('base64'), width: frame.width * scale, height: frame.height * scale, engine: 'fixture-engine' },
+    frames().displays[1]!] })) })
+  const { overlays } = await opened()
+  expect(overlays.map(row => row.input.initialCrop)).toEqual([undefined, undefined])
+})
+
+it('the public selection capture uses the same remembered selection', async () => {
+  await delivered()
+  const pending = surface.captureSelection(false)
+  await vi.advanceTimersByTimeAsync(0)
+  const window = electron.windows.at(-2)!, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
+  const handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!, input = await handler(event, 'load')
+  expect(input.initialCrop).toEqual(selection)
+  await handler(event, 'select', { requestId: input.requestId })
+  await handler(event, 'finish', { requestId: input.requestId, image: result, selection: { x: 0, y: 0, width: 4, height: 4 } })
+  expect(window.dead, 'the delivery ended the capture').toBe(true)
+  expect(await pending).toMatchObject({ state: 'captured', selectionRect: { x: 0, y: 0, width: 2, height: 2 } })
+  const { overlays } = await opened()
+  expect(overlays[0]!.input.initialCrop, 'a public delivery is remembered too').toEqual({ x: 0, y: 0, width: 4, height: 4 })
+})
+
+it('the display that carries the remembered selection takes the keys', async () => {
+  await delivered()
+  const { overlays } = await opened()
+  await overlays[0]!.call('presented'); await overlays[1]!.call('presented')
+  expect(overlays[0]!.window.focus, 'Enter and the arrows reach the remembered selection, not the display under the pointer').toHaveBeenCalledOnce()
+  expect(overlays[1]!.window.focus).not.toHaveBeenCalled()
 })

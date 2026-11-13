@@ -20,6 +20,7 @@ const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
 const capture = 'apps/desktop/test/image-annotation-capture.test.tsx'
+const overlayHost = 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx', overlay = 'apps/desktop/test/capture-surface-view.test.tsx'
 const pointing = 'apps/desktop/test/image-annotation-pointing-marks.test.ts'
 const snapping = 'apps/desktop/test/image-annotation-snapping.test.ts'
 const pointingTools = 'apps/desktop/test/image-annotation-pointing-tools.test.tsx'
@@ -84,7 +85,7 @@ const specifications = {
       consumer: 'draws the leader only when it is long enough to read and never a stub between touching frames', failure: /a 3 point gap draws no leader/ }]
   },
   capture: {
-    tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
+    tests: [capture, overlay, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
     mutations: [{ label: 'capture-expand-external-link', source: component + 'CaptureToolbar.tsx',
       find: "ExpandIcon = icon('layout.expand')", replace: "ExpandIcon = icon('action.open-external')", test: capture,
       consumer: 'draws every capture control with its own glyph, and Expand editor with the expand glyph rather than an external link', failure: /expanding stays in the editor/ },
@@ -156,7 +157,35 @@ const specifications = {
       consumer: 'keeps the size chip off the toolbar side and leaves room for the property popover', failure: /flips above when the popover has no room below/ },
     { label: 'capture-measure-every-render', source: component + 'ImageAnnotationEditor.tsx',
       find: '}, [capture, barShown, sizeText, label, busy, busyLabel, confirmingDiscard])', replace: '})', test: capture,
-      consumer: 'moving a selection forces no layout of the toolbar or size chip', failure: /pointer moves that keep the size measure nothing/ }]
+      consumer: 'moving a selection forces no layout of the toolbar or size chip', failure: /pointer moves that keep the size measure nothing/ },
+    // A remembered selection opens at rest, claims only once acted on, and its host claims before an unchanged output.
+    { label: 'capture-remembered-claims-on-open', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (!start || documentState === start) return\n', replace: '    if (!start) return\n', test: capture,
+      consumer: 'opens on a remembered selection at rest, claims it only once acted on, and delivers it only on Enter', failure: /opening on it delivers, claims and cancels nothing/ },
+    { label: 'capture-remembered-never-claimed', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (documentState.crop) claimSelection?.()\n', replace: '', test: capture,
+      consumer: 'opens on a remembered selection at rest, claims it only once acted on, and delivers it only on Enter', failure: /moving the remembered selection claims it once/ },
+    { label: 'capture-remembered-cleared-claims', source: component + 'ImageAnnotationEditor.tsx',
+      find: '    if (documentState.crop) claimSelection?.()\n', replace: '    claimSelection?.()\n', test: capture,
+      consumer: 'opens on a remembered selection at rest, claims it only once acted on, and delivers it only on Enter', failure: /clearing the remembered selection claims nothing/ },
+    { label: 'capture-remembered-redraw-claims-twice', source: component + 'ImageAnnotationEditor.tsx',
+      find: '  const onSelect = () => { opening.current = null; claimSelection?.() }', replace: '  const onSelect = () => { claimSelection?.() }', test: capture,
+      consumer: 'opens on a remembered selection at rest, claims it only once acted on, and delivers it only on Enter', failure: /re-drawn over the remembered one claims once/ },
+    { label: 'capture-remembered-not-opened', source: overlayHost,
+      find: "{...(input.initialCrop ? { initialState: { shapes: [], crop: input.initialCrop } } : {})} ", replace: '', test: overlay,
+      consumer: 'a remembered selection claims the capture only when the person outputs it, then delivers that selection', failure: /opens on the remembered selection at rest/ },
+    { label: 'capture-remembered-output-unclaimed', source: overlayHost,
+      find: '      if (!await claim()) return false\n', replace: '', test: overlay,
+      consumer: 'a remembered selection claims the capture only when the person outputs it, then delivers that selection', failure: /Save PNG claims the selection before its output/ },
+    { label: 'capture-remembered-lost-claim-delivers', source: overlayHost,
+      find: '      if (!await claim()) return false\n', replace: '      await claim()\n', test: overlay,
+      consumer: 'a remembered selection whose claim another display won outputs nothing and locks this display', failure: /a lost claim delivers nothing/ },
+    { label: 'capture-remembered-expand-unclaimed', source: overlayHost,
+      find: 'void claim().then(owned => owned ? api.expand(input.requestId, handoff) : undefined)', replace: 'void api.expand(input.requestId, handoff)', test: overlay,
+      consumer: 'a remembered selection whose claim another display won outputs nothing and locks this display', failure: /Command E claims before the marks move/ },
+    { label: 'capture-claim-asked-per-output', source: overlayHost,
+      find: '    claimed.current ??= api.select(', replace: '    claimed.current = api.select(', test: overlay,
+      consumer: 'a remembered selection claims the capture only when the person outputs it, then delivers that selection', failure: /one answer serves every later output/ }]
   },
   snapping: {
     tests: [snapping, capture],
