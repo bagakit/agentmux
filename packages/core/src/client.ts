@@ -35,10 +35,10 @@ import { parseStartupDiagnosticTarget, type AgentStartupDiagnosticOwner, type Ag
 import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
 import type { ReadingDiagnosticExactTarget, ReadingDiagnosticFindParams, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
-import { AgentMuxMessageNotifications } from './agent-message-notifications.js'
+import { AgentMuxMessageNotifications, automaticNotification } from './agent-message-notifications.js'
 import { MoteInputOwner, type AutomaticInputOpportunity } from './mote-input-owner.js'
 import { moteInputObservationId, moteInputMember, type MoteInputOrigin, type MoteInputInspection, type AgentInputMoteResolver } from './mote-input.js'
-import type { AgentMuxMessageNotification } from './agent-message-notification.js'
+import type { AgentMuxMessageNotification, AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { isMessageNotificationInput } from './agent-message-notification.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
 import { type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './agent-session-recovery/restart-contract.js'
@@ -4817,7 +4817,16 @@ export class AgentMuxClient {
     const key = originalMessageInputKey(message)
     // Optional membership observation cannot revoke the original authorized body read.
     const inputOrigin = key ? await this.messageQueue.readConversationInputOrigin(key).catch(() => null) : null
-    return { ...message, inputOrigin }
+    return { ...this.withAutomaticNotification(message), inputOrigin }
+  }
+
+  /** A saved reference still waiting for an automatic path names it; an unknown recipient or Provider stays absent. */
+  private withAutomaticNotification<T extends { envelope: { recipientSessionId: string | null }; deliveryMode?: 'reference'; notification?: AgentMuxMessageNotificationStatus }>(message: T): T {
+    const notification = message.notification, recipient = message.envelope.recipientSessionId
+    if (message.deliveryMode !== 'reference' || notification?.state !== 'pending' || notification.notificationId !== undefined ||
+        !recipient || !this.registry.has(recipient)) return message
+    const provider = this.providers.list().find(candidate => candidate.id === this.registry.get(recipient).providerId)
+    return provider ? { ...message, notification: { ...notification, automatic: automaticNotification(provider) } } : message
   }
 
   /** Original A2A metadata only; no connection, Run probe, input or acknowledgement. */
@@ -4827,9 +4836,10 @@ export class AgentMuxClient {
       'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
     this.messageReadUsed = true
     void this.observeMessageReads()?.refresh()
-    return this.messageQueue.listMessages(input, async () => {
+    const page = await this.messageQueue.listMessages(input, async () => {
       if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
     })
+    return { ...page, messages: page.messages.map(message => this.withAutomaticNotification(message)) }
   }
 
   /** Batch coordination freezes once; every target consumes the existing single-message Inbox owner. */
@@ -6082,18 +6092,14 @@ export class AgentMuxClient {
 
   private async readAutomaticInputOpportunity(id: string): Promise<AutomaticInputOpportunity | null> {
     if (!this.registry.has(id)) return null
+    // The path is a fact of the Provider's contribution; only a native idle queue reads Runtime state.
+    const automatic = automaticNotification(this.providers.get(this.registry.get(id).providerId))
+    if (automatic !== 'idle-queue') return { automatic }
     const current = await this.registry.refresh(id, this.registry.get(id).run)
     const run = await this.requireCurrentAgentRun(current)
     const session = this.projectSession(current)
     const provider = this.providers.get(session.providerId)
-    const observation = { session, inputByte: run.acceptedInputBytes }
-    // A Provider's turn-end decision carries automatic notices by itself; it has no idle-input opportunity to read.
-    if (!provider.prepareNativeInput && provider.hook.turnEndDecision) return { ...observation, unavailable: new AgentMuxError(
-      'This Provider delivers automatic Inbox notifications when its current turn ends. The recipient is idle or between turns, so the notice waits for its next turn end; explicitly notify the original MID to deliver it now.',
-      'A2A_NOTIFICATION_AWAITS_TURN_END') }
-    if (!provider.prepareNativeInput) return { ...observation, unavailable: new AgentMuxError(
-      'This Provider has no automatic Inbox notification path. The original message is retained; explicitly notify the original MID to deliver it.',
-      'AGENT_NATIVE_INPUT_UNAVAILABLE') }
+    const observation = { automatic, session, inputByte: run.acceptedInputBytes }
     if (agentTurnCompletionIdentity(session)) return observation
     if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
       return observation

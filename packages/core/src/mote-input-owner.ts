@@ -43,7 +43,9 @@ type SourceRead = {
   confirmedQuestion?: MoteInputObservation['confirmedQuestion']
   result?: MoteInputObservation['result']
 }
-export type AutomaticInputOpportunity = {
+/** The recipient's automatic path; only the native idle queue has an input opportunity to read. */
+export type AutomaticInputOpportunity = { automatic: 'turn-end' | 'none' } | {
+  automatic: 'idle-queue'
   session: AgentMuxAgentSession
   inputByte: number | null
   nativeIdle?: AgentPromptExecutionEvidence
@@ -571,9 +573,11 @@ export class MoteInputOwner {
       return record
     }
     const current = await this.deps.opportunity(record.binding!.primary.agentSessionId)
-    if (!current || current.unavailable) {
+    if (!current || current.automatic !== 'idle-queue' || current.unavailable) {
       const issue =
-        current?.unavailable instanceof Error
+        current && current.automatic !== 'idle-queue'
+          ? "The primary's Provider has no native idle queue, so this coordination notice cannot be delivered automatically. The original observation is retained; nothing was sent."
+          : current?.unavailable instanceof Error
           ? current.unavailable.message
           : 'The original primary is unavailable or unconfirmed. Its original observation is retained; restore that Session to continue.'
       this.issue(moteInputMember(record.origin), issue)

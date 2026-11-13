@@ -3420,7 +3420,10 @@ export class AgentMuxRpcService {
         ...(sourceDevice ? { sourceDevice } : {}), caller: { agentSessionId: caller!.agentSessionId, capability: caller!.capability } }, this.inputCallContext(context))
       const { input: _internal, ...saved } = await appendGlobalMessage({ ...envelope, messageId, execution: 'default', sourceChannel,
         ...(sourceDevice ? { sourceDevice } : {}) }, queuePath)
-      return saved
+      // The recipient's owner names its automatic notification path on the same status a read returns.
+      const current = await recipientOwner.client.readMessage({ messageId: saved.messageId,
+        caller: { agentSessionId: caller!.agentSessionId, capability: caller!.capability } })
+      return current?.notification ? { ...saved, notification: current.notification } : saved
     }
     const historical = terminalManual ? await recipientOwner.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: recipientId,
       expectedRun: recipient.run, messageId }) : null

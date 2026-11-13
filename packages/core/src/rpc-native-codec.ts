@@ -257,8 +257,10 @@ function notificationStatus(value: unknown, envelope: ReturnType<typeof validate
   }
   if (p.deliveryMode === undefined) { if (p.notification !== undefined) fail(); return }
   if (p.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' || !envelope.recipientRunId) fail()
-  const status = record(p.notification, ['state', 'notificationId', 'key', 'reason', 'mode', 'preparedAt', 'resultRecordedAt'])
+  const status = record(p.notification, ['state', 'notificationId', 'key', 'reason', 'mode', 'preparedAt', 'resultRecordedAt', 'automatic'])
   member(status.state, ['pending', 'submitted', 'unconfirmed', 'not-applied'])
+  // The automatic path describes only a reference still waiting for one, never a prepared notice.
+  if (status.automatic !== undefined && (member(status.automatic, ['idle-queue', 'turn-end', 'none']), status.state !== 'pending' || status.key !== undefined)) fail()
   if ((status.notificationId === undefined) !== (status.key === undefined) || status.state !== 'pending' && status.key === undefined) fail()
   if (status.key !== undefined) {
     const key = validateAgentPromptInputKey(status.key); string(status.notificationId)

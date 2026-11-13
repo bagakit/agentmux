@@ -49,7 +49,15 @@ export type AgentMuxMessageNotificationStatus = {
   mode?: AgentMuxMessageNotification['mode']
   preparedAt?: number | null
   resultRecordedAt?: number | null
+  /**
+   * The recipient Session's automatic notification path, present only while a saved reference
+   * still waits for one and Core can name the recipient's Provider; absent means unknown.
+   */
+  automatic?: AgentMuxAutomaticNotification
 }
+
+/** idle-queue: the native idle queue; turn-end: the next native turn end; none: only explicit notify. */
+export type AgentMuxAutomaticNotification = 'idle-queue' | 'turn-end' | 'none'
 
 /** Only the original platform producer can supply a notification's input outcome. */
 export function isMessageNotificationInput(notice: AgentMuxMessageNotification, record: AgentPromptSubmissionRecord | null): record is AgentPromptSubmissionRecord {

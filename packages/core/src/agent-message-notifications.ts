@@ -3,16 +3,18 @@ import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptCondition, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { agentTurnCompletionIdentity, sameRun } from './agent-session-identity.js'
 import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
-import type { AgentMuxMessageNotification } from './agent-message-notification.js'
+import type { AgentMuxAutomaticNotification, AgentMuxMessageNotification } from './agent-message-notification.js'
+import type { AgentProvider } from './agent-provider.js'
+import type { AutomaticInputOpportunity } from './mote-input-owner.js'
 import type { AgentNativeHookSpecification } from './hook-normalizer.js'
-import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
+import type { AgentMuxAgentSession } from './types.js'
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { AgentMuxError } from './errors.js'
 
 type Dependencies = {
   queue: DurableAgentMuxMessageQueue
   connected(): boolean
-  read(agentSessionId: string): Promise<{ session: AgentMuxAgentSession; inputByte: number | null; nativeIdle?: AgentPromptExecutionEvidence; unavailable?: unknown } | null>
+  read(agentSessionId: string): Promise<AutomaticInputOpportunity | null>
   submit(notification: AgentMuxMessageNotification): Promise<void>
   inputAbsent(key: AgentPromptInputKey): Promise<boolean>
   unavailable(agentSessionId: string | undefined, error: unknown, run?: AgentMuxAgentSession['run']): void
@@ -23,6 +25,11 @@ type Dependencies = {
 }
 
 type TurnEndDecision = NonNullable<AgentNativeHookSpecification['turnEndDecision']>
+
+/** Which automatic path a recipient's Provider actually contributes; the one owner of this fact. */
+export function automaticNotification(provider: Pick<AgentProvider, 'prepareNativeInput' | 'hook'>): AgentMuxAutomaticNotification {
+  return provider.prepareNativeInput ? 'idle-queue' : provider.hook.turnEndDecision ? 'turn-end' : 'none'
+}
 
 /** One authenticated native turn-end callback of an exact Run's main session. */
 export type TurnEndCallback = { session: AgentMuxAgentSession; nativeTurnId: string; hookReceiptId: string; decision: TurnEndDecision }
@@ -86,7 +93,9 @@ export class AgentMuxMessageNotifications {
   private async drain(agentSessionId: string): Promise<void> {
     if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId); this.unavailableReads.delete(agentSessionId); return }
     const current = await this.deps.read(agentSessionId)
-    if (!current || this.disposed) return
+    // A turn-end path is carried by its own callback, and a recipient without a path waits for an
+    // explicit notification. Both are known capabilities of a healthy Agent, not failed observations.
+    if (!current || this.disposed || current.automatic !== 'idle-queue') return
     const { session, inputByte, nativeIdle } = current
     if ('unavailable' in current) {
       const error = current.unavailable
