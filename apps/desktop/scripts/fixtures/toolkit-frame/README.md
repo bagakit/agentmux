@@ -46,3 +46,13 @@ checks current capture and component evidence together with the independent code
 and image reviews. It does not launch another Native window or turn capture
 success into aesthetic approval. Review every final full PNG according to the
 [independent visual review guide](../../../../../docs/guides/agent-visual-e2e-review.md).
+
+For a correction limited to Phone connection, call the same capture with
+`scope: "phone-only"` and a fresh evidence directory. It captures only the
+actual Phone Toolkit popover at 320/640 widths in both themes, after the
+original QR is current and its finite reveal finishes. Original Copy and
+Survey use the same controlled display URL; the Survey port records an
+unconfirmed request without creating a user Browser. The named Phone settings
+control records its original `mobile` target. Controlled online-device facts
+and full images need independent review; this proves no live Host or OS
+clipboard result and does not rerun unrelated Toolkit frame mutants.
