@@ -29,12 +29,12 @@ describe('brand realm hero resolution', () => {
     expect(resolveBrandHero('launch', 'launch').art).not.toBe(resolveBrandHero('banner', 'launch').art)
   })
 
-  it('treats unset as the documented default and an unknown or unobserved value as Origin with no lineage claim', () => {
+  it('keeps unknown or unobserved choices distinct from the Origin art they show', () => {
     expect(resolveBrandHero('banner', undefined)).toEqual(resolveBrandHero('banner', DEFAULT_APP_ICON))
     for (const unknown of ['from-a-newer-client', null, 7, {}]) {
-      expect(resolveBrandHero('banner', unknown)).toEqual(resolveBrandHero('banner', ORIGIN_REALM))
+      expect(resolveBrandHero('banner', unknown)).toEqual({ ...resolveBrandHero('banner', ORIGIN_REALM), realm: null })
     }
-    expect(resolveBrandHero('launch', DEFAULT_APP_ICON, false)).toEqual(resolveBrandHero('launch', ORIGIN_REALM))
+    expect(resolveBrandHero('launch', DEFAULT_APP_ICON, false)).toEqual({ ...resolveBrandHero('launch', ORIGIN_REALM), realm: null })
   })
 
   it('a realm with its own painting shows it; the others keep borrowing from Origin', () => {
@@ -71,7 +71,7 @@ describe('first launch frame', () => {
   it('an unavailable bootstrap still paints Origin art and its own colophon', () => {
     api.ui.initialTheme = { status: 'unavailable', message: 'not confirmed' }
     const markup = renderToStaticMarkup(createElement(FullPageLoadingSurface, { phase: 'loading', scope: 'app', title: 'Starting', detail: '' }))
-    expect(markup).toContain(`data-realm="${ORIGIN_REALM}"`)
+    expect(markup).not.toContain('data-realm=')
     expect(markup).toContain(`data-art-realm="${ORIGIN_REALM}"`)
     expect(markup).toContain(`>${APP_ICON_CATALOG[ORIGIN_REALM].realm}</span>`)
   })
@@ -84,7 +84,9 @@ describe('saved-choice surfaces', () => {
       const config = { ...composerConfig, appearance: { ...composerConfig.appearance, ...(appIcon === undefined ? {} : { appIcon }) } } as typeof composerConfig
       const markup = renderToStaticMarkup(createElement(SettingsOverviewPane, { config, groups: [], onOpen: () => {} }))
       const expected = resolveBrandHero('banner', appIcon)
-      expect(markup).toContain(`data-realm="${expected.realm}"`)
+      if (appIcon === 'from-a-newer-client') expect(markup).not.toContain('data-realm=')
+      else expect(markup).toContain(`data-realm="${expected.realm}"`)
+      expect(markup).toContain(`data-art-realm="${expected.artRealm}"`)
       expect(markup).toContain(`src="${expected.art}"`)
       expect(markup).toContain(`>${expected.colophon}</span>`)
     }
