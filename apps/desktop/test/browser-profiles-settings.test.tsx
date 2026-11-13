@@ -30,6 +30,8 @@ const port = vi.hoisted(() => {
     deleteProfile: vi.fn(async () => {}),
     listProfileSites: vi.fn(async () => [{ site: 'github.com', cookies: 3 }, { site: 'example.com', cookies: 1 }]),
     clearProfileSite: vi.fn(async () => {}),
+    readProfileProxySignIn: vi.fn(async (_id: string) => null as { username: string } | null),
+    setProfileProxySignIn: vi.fn(async (_id: string, _signIn: { username: string; password: string } | null) => {}),
     checkProfileExit: vi.fn(async () => ({ status: 'reachable' as const, httpStatus: 200, latencyMs: 184.4, ip: '203.0.113.7' })),
     detectProfileImportSources: vi.fn(async () => []),
     importProfile: vi.fn()
@@ -482,5 +484,51 @@ describe('Settings › Browser Profiles exit check', () => {
     expect(section().querySelector('[role="status"]')?.textContent).toBe('→ unknown · ERR_PROXY_CONNECTION_FAILED')
     expect([...section().querySelectorAll('button')].map(button => button.textContent)).toEqual(['Check again'])
     delete store.config.browser.exitCheckUrl
+  })
+})
+
+describe('Settings › Browser Profiles proxy sign-in', () => {
+  const SENTINEL = 'S3NTINEL-pa55word'
+  const section = () => container.querySelector('[aria-label="Proxy sign-in"]')
+  const type = async (element: HTMLInputElement, value: string) => {
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+  async function proxied() {
+    port.set({ revision: 4, profiles: [{ ...personal, network: { mode: 'proxy', server: { scheme: 'http', host: 'gw.corp.test', port: 3128 } } }, client] })
+    await act(async () => { await browserProfiles.refresh() })
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    // The saved user name is read once on open; Add sign-in waits for that answer.
+    await vi.waitFor(() => expect(section()?.textContent).not.toContain('Reading…'))
+  }
+
+  it('appears only for a Profile whose route is a proxy', async () => {
+    expect(section()).toBeNull()
+    await proxied()
+    expect(section()?.textContent).toContain('No sign-in')
+  })
+
+  it('sends the password to Main once, then shows only the user name and an empty field', async () => {
+    await proxied()
+    await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add sign-in')!.click())
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy user name"]')!, 'alice')
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!, SENTINEL)
+    await act(async () => section()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    expect(port.setProfileProxySignIn).toHaveBeenCalledExactlyOnceWith('p-personal', { username: 'alice', password: SENTINEL })
+    expect(section()!.textContent).toContain('Signs in as alice')
+    expect(container.innerHTML).not.toContain(SENTINEL)
+    await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Change')!.click())
+    expect(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!.value, 'the password is never put back into the field').toBe('')
+  })
+
+  it('a refused save says why and clears the typed password', async () => {
+    port.setProfileProxySignIn.mockRejectedValueOnce(Object.assign(new Error('The system keychain is not available, so a proxy password cannot be kept.'), { code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' }))
+    await proxied()
+    await act(async () => [...section()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add sign-in')!.click())
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy user name"]')!, 'alice')
+    await type(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!, SENTINEL)
+    await act(async () => section()!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    expect(section()!.querySelector('[role="alert"]')?.textContent).toContain('keychain is not available')
+    expect(section()!.querySelector<HTMLInputElement>('input[aria-label="Proxy password"]')!.value).toBe('')
+    expect(container.innerHTML).not.toContain(SENTINEL)
   })
 })
