@@ -16,6 +16,11 @@ import { layoutForLogicalRegionFocus } from '../src/renderer/src/lib/region-focu
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { createBrowserAgent } from '../src/renderer/src/lib/browser-agent-creation'
+import { act, createElement } from 'react'
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
+import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 
 const initial = useAppStore.getState()
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }],
@@ -74,6 +79,65 @@ function browserAgentSource() {
 }
 
 describe('public Desktop spatial Control owner', () => {
+  it.each(['none', 'save', 'launch'] as const)('mounted Survey Browser creation keeps local focus and later %s navigation', async later => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const { source, browser } = browserAgentSource()
+    const zone = spatialCatalog(useAppStore.getState(), []).tabs.find(tab => tab.tabId === source.tabId)!.zoneId!
+    const workTab = createWorkbenchTab('held-work', { kind: 'launcher', regionId: 'held-work-region', workspaceId: 'other' })
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [workTab.id]: workTab }, layouts: { ...state.layouts, other: createWorkspaceLayout('held-work-group', [workTab.id]) } }))
+    useAppStore.getState().focusRegion('other', workTab.id, 'held-work-region', 'navigation', 'held-work-group')
+    const heldWork = structuredClone(useAppStore.getState().workbenchSpaceSelection)
+    const survey = { zoneId: zone, selection: [source], active: source }
+    useAppStore.setState({ mainSurface: 'survey', surveyCollectedZones: { [zone]: true }, surveyZoneSelection: survey })
+    vi.spyOn(api.browser, 'create').mockResolvedValue(browser as never)
+    vi.spyOn(api.browser, 'restore').mockResolvedValue(browser as never)
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let saved = false, launching = false
+    vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
+      if (later === 'save' && Object.values(useAppStore.getState().tabs[source.tabId]!.regions).some(region => region.kind === 'agent')) {
+        saved = true; await gate
+      }
+    })
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      launching = true
+      if (later === 'launch') await gate
+      return launch(agent(input.agentSessionId!), input.createOperationId!)
+    })
+    const handoff = vi.spyOn(api.browser, 'returnControl').mockImplementation(async (_id, input) => ({ ...browser,
+      control: { ...browser.control, owner: 'agent', revision: 4, agent: { hostId: input!.agent.hostId, agentSessionId: input!.agent.agentSessionId } } }))
+    const input = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createClientUiRoot(host)
+    try {
+      await act(async () => root.render(createElement(WorkbenchPresentationContext.Provider, { value: { active: true, retainedRegionId: source.regionId,
+        surface: 'survey', reference: source } }, createElement(BrowserPane, { tab: browser, visible: true }))))
+      const button = host.querySelector<HTMLButtonElement>('[aria-label="在右侧创建 Agent"]')
+      expect(button, 'The actual Browser creation entry is mounted').not.toBeNull()
+      await act(async () => button!.click())
+      if (later !== 'none') {
+        await act(async () => vi.waitFor(() => expect(later === 'save' ? saved : launching).toBe(true)))
+        expect(useAppStore.getState().mainSurface).toBe('survey')
+        expect(useAppStore.getState().workbenchSpaceSelection).toEqual(heldWork)
+        // Leaving and returning must still supersede the original async focus.
+        await act(async () => { useAppStore.getState().setMainSurface('board'); useAppStore.getState().setMainSurface('survey') })
+        const laterSelection = { zoneId: zone, selection: [source], active: source }
+        useAppStore.getState().setSurveyZoneSelection(laterSelection)
+        await act(async () => release())
+      }
+      await act(async () => vi.waitFor(() => expect(input).toHaveBeenCalledTimes(1)))
+      const state = useAppStore.getState(), record = Object.values(state.spatialRequests).find(item => item.purpose === 'browser-agent')!
+      expect(state.mainSurface).toBe('survey'); expect(state.workbenchSpaceSelection).toEqual(heldWork)
+      expect(state.surveyCollectedZones).toEqual({ [zone]: true })
+      expect(state.surveyZoneSelection?.active).toEqual(later === 'none' ? { tabId: source.tabId, regionId: record.regionId } : { tabId: source.tabId, regionId: source.regionId })
+      expect(state.tabs[source.tabId]!.layout.root).toMatchObject({ type: 'split', direction: 'horizontal', first: { regionId: source.regionId }, second: { regionId: record.regionId } })
+      expect(state.tabs[source.tabId]!.regions[source.regionId]).toMatchObject({ browserId: browser.id, url: browser.url, navigationId: browser.navigationId, control: { owner: 'agent' } })
+      expect(launchAgent).toHaveBeenCalledTimes(1); expect(handoff).toHaveBeenCalledTimes(1)
+      expect(input).toHaveBeenCalledWith(record.agentSessionId, record.browserAgent!.messageOperationId)
+      expect(state.sessions.some(session => session.id === record.agentSessionId)).toBe(true)
+    } finally { release(); await act(async () => root.unmount()); host.remove() }
+  })
   it('holds the admitted first task against background drains while its save waits and a newer Take arrives', async () => {
     const { source, browser } = browserAgentSource()
     let handed = false, recipient = ''
@@ -391,8 +455,8 @@ describe('public Desktop spatial Control owner', () => {
     expect(useAppStore.getState().tabs).toEqual({ source: { ...source, space: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("repo")), 'repo') } } })
   })
 
-  it('explicit focus navigates from another Workspace/Board to the exact visible target and clears held focus', async () => {
-    useAppStore.setState({ activeWorkspaceId: 'repo', mainSurface: 'board', retainedSpatialFocus: {
+  it.each(['board', 'survey'] as const)('explicit focus navigates from %s to the exact visible target and clears held focus', async surface => {
+    useAppStore.setState({ activeWorkspaceId: 'repo', mainSurface: surface, retainedSpatialFocus: {
       spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("repo")), 'repo'),
       workspaceId: 'repo', tabId: 'old', regionId: 'held' } })
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, _hygiene_fixturePath("other")), input.createOperationId!))
