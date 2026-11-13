@@ -634,6 +634,9 @@ export type WorkspaceMediaHandle = {
   current(): Promise<WorkspaceMediaHandleState>
 }
 
+/** A replace-by-rename writer can land between open and read; retry on the new object a few times. */
+const MEDIA_PLAYLIST_READ_ATTEMPTS = 3
+
 function mediaWitness(info: BigIntStats): WorkspaceMediaWitness {
   return { device: info.dev.toString(), inode: info.ino.toString(), size: info.size, mtimeNs: info.mtimeNs, ctimeNs: info.ctimeNs }
 }
@@ -1113,6 +1116,40 @@ export class WorkspaceFiles {
     } catch (error) {
       await handle.close().catch(() => {})
       throw error
+    }
+  }
+
+  /**
+   * One complete, bounded read of a playlist through the same confinement as playback.
+   * Encoders replace playlists by rename, so nothing is pinned across reads; a read that
+   * observes a replacement retries on the new object, and only this request reports changed.
+   */
+  async readMediaPlaylist(workspace: WorkspaceRecord, requestedPath: string): Promise<Buffer> {
+    for (let attempt = 1; ; attempt++) {
+      let media: WorkspaceMediaHandle
+      try { media = await this.openMediaHandle(workspace, requestedPath) }
+      catch (error) {
+        if (attempt < MEDIA_PLAYLIST_READ_ATTEMPTS && (error as { code?: unknown } | null)?.code === 'WORKSPACE_FILE_CHANGED_WHILE_READING') continue
+        throw error
+      }
+      try {
+        // The same whole-read budget as every other bounded snapshot this owner hands to Main.
+        if (media.byteLength > WORKSPACE_FILE_MAX_BYTES) {
+          throw Object.assign(new Error(`This playlist exceeds the ${WORKSPACE_FILE_MAX_BYTES / 1024 / 1024} MiB read budget.`), { code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+        }
+        const bytes = Buffer.alloc(media.byteLength)
+        let filled = 0
+        while (filled < bytes.length) {
+          const { bytesRead } = await media.handle.read(bytes, filled, bytes.length - filled, filled)
+          if (bytesRead === 0) break
+          filled += bytesRead
+        }
+        // A short read or a newer object at the path means an in-place rewrite raced this read.
+        if (filled === bytes.length && await media.current() === 'same') return bytes
+        if (attempt >= MEDIA_PLAYLIST_READ_ATTEMPTS) {
+          throw Object.assign(new Error('The playlist changed while it was read. The next request reads it again.'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
+        }
+      } finally { await media.handle.close().catch(() => {}) }
     }
   }
 

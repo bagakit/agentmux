@@ -24,6 +24,8 @@ export const WORKSPACE_FILE_PREVIEW_FORMATS = {
   webm: { kind: 'video', mimeType: 'video/webm', sourceEditable: false },
   mov: { kind: 'video', mimeType: 'video/quicktime', sourceEditable: false },
   ogv: { kind: 'video', mimeType: 'video/ogg', sourceEditable: false },
+  // An HLS playlist plays as video through its playlist lease; it is never an editable text buffer.
+  m3u8: { kind: 'video', mimeType: 'application/vnd.apple.mpegurl', sourceEditable: false },
   pdf: { kind: 'pdf', mimeType: 'application/pdf', sourceEditable: false }
 } as const
 
