@@ -9,12 +9,12 @@
 
 <br>
 
-![Providers](https://img.shields.io/badge/built--in_providers-13-8de3ae?style=flat-square&labelColor=111419)
-![amux](https://img.shields.io/badge/amux-25_modules_·_400%2B_commands-8de3ae?style=flat-square&labelColor=111419)
-![JSON-RPC](https://img.shields.io/badge/typed_JSON--RPC-400%2B_methods-8de3ae?style=flat-square&labelColor=111419)
-![Tests](https://img.shields.io/badge/test_files-3.5k%2B-8de3ae?style=flat-square&labelColor=111419)
-![Platform](https://img.shields.io/badge/desktop-macOS_Apple_Silicon-edf1ee?style=flat-square&labelColor=111419)
-![Node](https://img.shields.io/badge/node-%E2%89%A524-edf1ee?style=flat-square&labelColor=111419)
+![Providers](https://img.shields.io/badge/built--in_providers-13-8de3ae?style=flat-square&labelColor=30363d)
+![amux](https://img.shields.io/badge/amux-25_modules_·_400%2B_commands-8de3ae?style=flat-square&labelColor=30363d)
+![JSON-RPC](https://img.shields.io/badge/typed_JSON--RPC-400%2B_methods-8de3ae?style=flat-square&labelColor=30363d)
+![Tests](https://img.shields.io/badge/test_files-3.5k%2B-8de3ae?style=flat-square&labelColor=30363d)
+![Platform](https://img.shields.io/badge/desktop-macOS_Apple_Silicon-6e7781?style=flat-square&labelColor=30363d)
+![Node](https://img.shields.io/badge/node-%E2%89%A524-6e7781?style=flat-square&labelColor=30363d)
 
 [English](README.md) · **简体中文**
 
