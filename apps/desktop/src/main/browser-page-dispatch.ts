@@ -458,7 +458,9 @@ export function createBrowserPageDispatch(
       )
     }
     const heal = healRef(ledger, ref, fresh)
-    if (!heal.healed) throw new Error(heal.reason)
+    // Nothing was dispatched: the ref could not be matched, so the same typed fact as any other gone
+    // element lets reviewed recovery and the program's own catch treat it as a safe miss.
+    if (!heal.healed) throw new BrowserLocalRecoveryFailure(heal.reason, 'locator-changed', 'not-dispatched')
     // 自愈是有损的，所以它必须留下痕迹。不阻断（页面好好的，是我们的快照没了——原则 11 第 2 类），
     // 但也绝不静默：静默自愈让一次"点中了长得一样的邻居"看起来和一次干净的成功完全一致。
     context.note(heal.note)
