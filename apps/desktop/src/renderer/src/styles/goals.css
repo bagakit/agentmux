@@ -213,6 +213,13 @@
 .goals-detail__toolbar > span { min-width: 0; flex: 1; color: var(--text-3); font-size: var(--fs-meta); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .goals-detail__menu { padding-inline: var(--sp-3); }
 .goals-delete-action { color: var(--red-text); }
+.goals-detail__stage-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3) var(--sp-5); margin: 0 0 var(--sp-4); }
+.goals-detail__stage-row > .goals-detail__stage { margin: 0; }
+.goals-detail__queue { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+/* One short ring when a shown Goal changes group because its facts changed; still when motion is reduced. */
+.goals-row[data-goal-stage-changed] { animation: goals-stage-changed 900ms ease-out 1; }
+@keyframes goals-stage-changed { from { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 55%, transparent), 0 0 0 3px color-mix(in srgb, var(--green) 14%, transparent); } to { box-shadow: inset 0 0 0 1px transparent, 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) { .goals-row[data-goal-stage-changed] { animation: none; } }
 .goals-detail__stage { display: flex; align-items: center; gap: var(--sp-4); margin: 0 0 var(--sp-4); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
 .goals-detail__stage strong { color: var(--text); font-weight: 600; }
 .goals-detail__stage .goal-stage-mark { width: 20px; height: 20px; }

@@ -14,15 +14,19 @@ import { GoalActivity } from './GoalActivity'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { goalNextStepFact } from '../lib/goal-presentation'
 import { GOAL_GROUP_LABELS, GoalStageMark } from '../lib/goal-groups'
+import type { GoalQueuePosition } from '../lib/goal-navigation'
+import type { GoalStage } from '../lib/goal-presentation'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
+const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
+const QUEUE_NAMES: Record<GoalStage, string> = { you: 'needs you', attention: 'needs attention', define: 'needs defining', agents: 'is with agents', unknown: 'is unknown', finished: 'is finished' }
 
 
-export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, draft = {}, onDraftChange, onDraftSaved }: { draft?: Partial<Record<'title' | 'description', string>>; onDraftChange?: (field: 'title' | 'description', value: string) => void; onDraftSaved?: (field: 'title' | 'description', value: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' } | null; onRetryMote: () => void }) {
+export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, draft = {}, onDraftChange, onDraftSaved, queue = null, onOpenGoal }: { queue?: GoalQueuePosition | null; onOpenGoal?: (id: string) => void; draft?: Partial<Record<'title' | 'description', string>>; onDraftChange?: (field: 'title' | 'description', value: string) => void; onDraftSaved?: (field: 'title' | 'description', value: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' } | null; onRetryMote: () => void }) {
   const updateDemand = useAppStore((state) => state.updateDemand)
   const deleteDemand = useAppStore((state) => state.deleteDemand)
   const [title, setTitle] = useState(draft.title ?? demand.title)
@@ -51,7 +55,8 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   return <aside className="goals-detail" data-goal-detail-id={demand.id} aria-label={`Goal workspace for ${demand.title}`}>
     <header className="goals-detail__toolbar"><button className="goals-button" type="button" onClick={onClose} aria-label="Back to goals"><ThemeNavigationBackIcon size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="goals-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}><ThemeActionOpenExternalIcon size={13} />{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</button> : null}<Menu.Root modal={false}><Menu.Trigger asChild><button ref={actionsRef} type="button" className="goals-button goals-detail__menu" aria-label="Goal actions"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger><DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} aria-label="Goal actions"><Menu.Item className="tab-context-menu__item goals-delete-action" onSelect={() => { actionsRef.current?.focus(); setDeleteRequested(true) }}><ThemeActionRemoveIcon size={13} />Delete goal</Menu.Item></Menu.Content></div></DocumentOverlayPortal></Menu.Root></header>
     <article className="goals-document">
-      <p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><strong>{GOAL_GROUP_LABELS[stage]}</strong> · {next}</span></p>
+      <div className="goals-detail__stage-row"><p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><strong>{GOAL_GROUP_LABELS[stage]}</strong> · {next}</span></p>
+        {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="goals-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
       <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
       <GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} />
       {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">Your intent · Not outlined yet</span></div>{intentBody}</section> : null}

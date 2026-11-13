@@ -2,12 +2,13 @@ import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
-import { goalNextStepFact } from '../lib/goal-presentation'
+import { goalNextStepFact, type GoalStage } from '../lib/goal-presentation'
 import { GOAL_GROUP_LABELS, GoalStageMark, goalGroupSummary, groupGoals } from '../lib/goal-groups'
+import { adjacentGoalId, goalQueuePosition, stageIndex, stageTransitions } from '../lib/goal-navigation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { executionFocusSessionId } from '../lib/agent-focus'
@@ -41,7 +42,7 @@ export const GOAL_STATUS_LABELS: Record<DemandStatus, string> = {
   backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled'
 }
 
-function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, onSelect }: { demand: DemandProjection; selected: boolean; selectedSessionId: string | null; acknowledgementFailed: boolean; onSelect: () => void }) {
+function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, stageChanged, onSelect }: { demand: DemandProjection; selected: boolean; selectedSessionId: string | null; acknowledgementFailed: boolean; stageChanged: boolean; onSelect: () => void }) {
   const execution = useAppStore(useShallow((state) => {
     const byId = agentSessionPresentationIndex(state.sessions)
     let count = 0, unconfirmed = 0; const statuses = new Set<string>()
@@ -60,7 +61,7 @@ function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, o
   const fact = goalNextStepFact(demand)
   const nextStep = acknowledgementFailed ? 'Acknowledgement unconfirmed' : fact.text
   const stage = acknowledgementFailed ? 'you' : fact.stage
-  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
+  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(stageChanged ? { 'data-goal-stage-changed': true } : {})} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
@@ -119,6 +120,19 @@ export function GlobalBoardSurface() {
   const acknowledgementFailed = (id: string) => Boolean(acknowledgementFeedback[id]?.failure)
   const groups = useMemo(() => groupGoals(filteredDemands, id => Boolean(acknowledgementFeedback[id]?.failure)), [filteredDemands, acknowledgementFeedback])
   const summaryGroups = groups.filter(group => group.stage !== 'finished')
+  // A Goal that was already shown and moved group because its facts changed gets one short cue.
+  const shownStages = useRef(new Map<string, GoalStage>())
+  const [changedStages, setChangedStages] = useState<Set<string>>(() => new Set())
+  useEffect(() => {
+    const moved = stageTransitions(shownStages.current, groups)
+    shownStages.current = stageIndex(groups)
+    if (moved.size) setChangedStages(moved)
+  }, [groups])
+  const queue = selectedDemandId ? goalQueuePosition(groups, selectedDemandId) : null
+  function moveFocus(from: HTMLElement, step: 1 | -1) {
+    const id = adjacentGoalId(groups, from.dataset.demandId ?? null, step)
+    if (id) surfaceRef.current?.querySelector<HTMLElement>(`[data-demand-id="${CSS.escape(id)}"]`)?.focus()
+  }
   const visibleStatuses = statusFilter === 'all' ? DEMAND_STATUS_IDS : [statusFilter]
   const appliedFilters = [
     ...(statusFilter !== 'all' ? [{ label: GOAL_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
@@ -151,9 +165,14 @@ export function GlobalBoardSurface() {
     if (projectFilter !== 'all' && !project) setProjectFilter('all')
     void startDirectGoal(project)
   }
-  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={acknowledgementFailed(demand.id)} selectedSessionId={selectedSessionId} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
+  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={acknowledgementFailed(demand.id)} stageChanged={changedStages.has(demand.id)} selectedSessionId={selectedSessionId} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
   return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>('.goals-collection [data-demand-id]')
+    if (row && event.target === row && !event.nativeEvent.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const step = event.key === 'j' || event.key === 'ArrowDown' ? 1 : event.key === 'k' || event.key === 'ArrowUp' ? -1 : 0
+      if (step) { event.preventDefault(); moveFocus(row, step); return }
+    }
     if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return
     if ((event.target as HTMLElement).closest('[role="menu"], [role="dialog"]')) return
     if (filtersOpen) { setFiltersOpen(false); queueMicrotask(() => filterRef.current?.focus()) }
@@ -191,7 +210,7 @@ export function GlobalBoardSurface() {
       </div>
       <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals{view === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
     </div>
-    {selectedDemand ? <GoalDetail key={selectedDemand.id} demand={selectedDemand} acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={(patch) => setAcknowledgementFeedback(current => ({ ...current, [selectedDemand.id]: { ...(current[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT), ...patch } }))} draft={goalDrafts.current.get(selectedDemand.id) ?? {}} onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }} onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }} onClose={closeDetail} onOpenMote={() => void openMote(selectedDemand.id)} onGrill={() => void openMote(selectedDemand.id, 'grill')} onGrounding={() => void openMote(selectedDemand.id, 'grounding')} motePending={motePending[selectedDemand.id] ?? null} moteError={moteErrors[selectedDemand.id] ?? null} onRetryMote={() => { const mode = moteErrors[selectedDemand.id]?.mode; void openMote(selectedDemand.id, mode === 'open' ? undefined : mode) }} /> : selectedDemandId ? <aside className="goals-detail"><button className="goals-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
+    {selectedDemand ? <GoalDetail key={selectedDemand.id} demand={selectedDemand} acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={(patch) => setAcknowledgementFeedback(current => ({ ...current, [selectedDemand.id]: { ...(current[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT), ...patch } }))} draft={goalDrafts.current.get(selectedDemand.id) ?? {}} onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }} onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }} onClose={closeDetail} onOpenMote={() => void openMote(selectedDemand.id)} onGrill={() => void openMote(selectedDemand.id, 'grill')} onGrounding={() => void openMote(selectedDemand.id, 'grounding')} motePending={motePending[selectedDemand.id] ?? null} moteError={moteErrors[selectedDemand.id] ?? null} onRetryMote={() => { const mode = moteErrors[selectedDemand.id]?.mode; void openMote(selectedDemand.id, mode === 'open' ? undefined : mode) }} queue={queue} onOpenGoal={setSelectedDemand} /> : selectedDemandId ? <aside className="goals-detail"><button className="goals-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
     </div>
   </section>
 }
