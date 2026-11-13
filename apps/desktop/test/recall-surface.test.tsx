@@ -475,6 +475,15 @@ it('closes the Notebook portal when its sidebar collapses without restoring it o
   expect(document.querySelector('[aria-label="Choose notebook"]')).toBeNull(); healthy()
 })
 
+it('tells notebook capture apart from page creation in the collapsed Notebook actions', async () => {
+  await renderApp(); await enterSurvey()
+  await vi.waitFor(() => expect(useAppStore.getState().recallNotebookId).toBe('quick-notes'))
+  await dom.click('[aria-label="Hide Recall items"]')
+  const icon = (label: string) => dom.container.querySelector(`.survey-item-actions [aria-label="${label}"] [data-semantic-icon]`)?.getAttribute('data-semantic-icon')
+  expect(icon('Save notebook to Topic')).toBe('action.collect-sources')
+  expect(icon('New page')).toBe('action.create-note'); healthy()
+})
+
 it('keeps a restored unavailable Notebook and its original workface instead of replacing it with the default', async () => {
   const selection = { zoneId: originalZoneId(), selection: [referenceA], active: referenceA }
   useAppStore.setState({ recallNotebookId: 'original-unavailable-book', recallNoteId: 'original-unavailable-note', recallZoneSelection: selection })

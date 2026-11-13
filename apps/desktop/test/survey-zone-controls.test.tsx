@@ -94,6 +94,7 @@ it('offers explicit research and current-panel capture without changing location
   expect(document.querySelector('[aria-label="Link Topics"]')).toBeNull()
   expect(document.querySelector('[aria-label="Organize into Topic"]')).toBeNull()
   expect(props.onSaveToTopic).not.toHaveBeenCalled()
+  for (const label of ['Save research to Topic…', 'Save current panel to Topic…']) expect(action(label).querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('action.collect-sources')
   await act(async () => action('Save research to Topic…').click())
   expect(props.onSaveToTopic).toHaveBeenCalledExactlyOnceWith('research')
   expect(props.onOpenWorkspace).not.toHaveBeenCalled(); expect(props.onCollectedChange).not.toHaveBeenCalled()
