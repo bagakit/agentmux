@@ -78,6 +78,11 @@ describe('failure explanation', () => {
     expect(describeMediaFailure('external-reference', 4)?.title).toBe('Playlist points outside the Workspace')
     expect(describeMediaFailure('released', 4)).toBeNull()
   })
+  it('a source error after frames were decoded is a stopped stream, never an unsupported format', () => {
+    expect(describeMediaFailure('active', 4, true)?.title).toBe('Playback stopped')
+    expect(describeMediaFailure('active', 4, true)?.retry).toBe(true)
+    expect(describeMediaFailure('deleted', 4, true)?.title).toBe('File was deleted')
+  })
   it('only an active lease lets code 4 mean an unsupported format; otherwise the cause stays unknown', () => {
     expect(describeMediaFailure('active', 4)?.title).toBe('Format not supported')
     expect(describeMediaFailure('unknown', 4)?.title).toBe('Playback failed')
@@ -167,6 +172,17 @@ describe('mounted player', () => {
     define(media(), { error: { code: 4 } })
     await act(async () => { media().dispatchEvent(new Event('error')) })
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Format not supported')
+  })
+
+  it('a live stream that stalls after playing says it stopped, not that the format is unsupported', async () => {
+    vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
+    await render(<MediaPlayer lease={lease('playlist')} name="live/live.m3u8" onRetry={() => {}} />)
+    define(media(), { videoWidth: 1280, videoHeight: 720, duration: Number.POSITIVE_INFINITY })
+    await act(async () => { media().dispatchEvent(new Event('loadeddata')) })
+    define(media(), { error: { code: 4 } })
+    await act(async () => { media().dispatchEvent(new Event('error')) })
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Playback stopped')
+    expect(container.textContent).not.toContain('Format not supported')
   })
 
   it('video with no decodable picture says so and moves to the audio card without reloading the element', async () => {
