@@ -158,6 +158,27 @@ it('Escape dismisses the actual Original menu before a second Canvas Escape canc
   expect(api.cancel).toHaveBeenCalledExactlyOnceWith('original-request')
 })
 
+it.each([['completed', false], ['failed', true]] as const)('the actual System host closes a marked image on Escape only after a %s Copy is confirmed', async (status, failed) => {
+  const api: SystemScreenshotEditorApi = { load: vi.fn(), finish: vi.fn(async () => failed ? { status: 'failed' as const, message: 'Clipboard refused' } : { status: 'completed' as const }),
+    cancel: vi.fn(async () => {}), savePng: vi.fn(), pin: vi.fn(), inspectPin: vi.fn(),
+    copyContext: vi.fn(), openOriginal: vi.fn(), saveOriginal: vi.fn(), inspectOriginal: vi.fn(), inspectOriginalOperation: vi.fn() }
+  await act(async () => root.render(<SystemScreenshotEditorView input={{ requestId: 'original-request', image, attachToDraft: false,
+    theme: { status: 'unavailable', message: 'Private fixture appearance' } }} api={api} />))
+  await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load')))
+  const canvas = node.querySelector('canvas')!; canvas.setPointerCapture = vi.fn()
+  await act(async () => { for (const [type, x] of [['pointerdown', 40], ['pointermove', 160], ['pointerup', 160]] as const)
+    canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: x })) })
+  await act(async () => button('Copy').click())
+  expect(api.finish).toHaveBeenCalledOnce()
+  const escape = async () => act(async () => { canvas.focus(); canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+  await escape(); await escape()
+  if (failed) {
+    expect(node.querySelector('.image-annotation-editor__discard'), 'a failed Copy keeps the discard confirmation').not.toBeNull()
+    expect(api.cancel).not.toHaveBeenCalled()
+    await escape()
+  } else expect(node.querySelector('.image-annotation-editor__discard'), status + ' Copy closes without asking').toBeNull()
+  expect(api.cancel).toHaveBeenCalledExactlyOnceWith('original-request')
+})
 
 it('an earlier Copy settles the original attachment without overwriting a newly opened document status', async () => {
   function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }

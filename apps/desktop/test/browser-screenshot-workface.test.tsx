@@ -377,6 +377,26 @@ describe('original Browser screenshot workface', () => {
     originalPageKept()
   })
 
+  it.each([['succeeds', false], ['fails', true]] as const)('Escape after a marked PNG copy that %s closes only when the copy was confirmed', async (_outcome, failed) => {
+    if (failed) clipboard.mockRejectedValueOnce(new Error('Clipboard unavailable'))
+    await mount(); const opened = await openScreenshot(), pointer = pointerInput(opened)
+    await act(async () => button(opened, 'Rectangle').click())
+    await act(async () => { pointer('pointerdown', 30, 40); pointer('pointermove', 90, 80); pointer('pointerup', 90, 80) }); await flushFrames()
+    await act(async () => button(opened, 'Copy PNG').click()); await flushFrames()
+    expect(clipboard).toHaveBeenCalledOnce()
+    // Escape clears the selection, returns from Rectangle when another tool was remembered, then closes or asks.
+    for (let press = 0; press < 3 && container.contains(opened) && !opened.querySelector('.image-annotation-editor__discard'); press++)
+      await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    if (failed) {
+      expect(opened.querySelector('.image-annotation-editor__discard'), 'an unconfirmed copy keeps the discard confirmation').not.toBeNull()
+      expect(editor()).toBe(opened)
+      expect(fixture.state.reportError).toHaveBeenCalledExactlyOnceWith(new Error('Clipboard unavailable'))
+      await cancel('Escape'); fixture.state.reportError.mockClear()
+    } else expect(opened.querySelector('.image-annotation-editor__discard'), 'a confirmed copy closes without asking').toBeNull()
+    expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
+    originalPageKept()
+  })
+
   it('keeps screenshot editing and context copy available when the exact captured viewport is unknown', async () => {
     captureScreenshot.mockResolvedValueOnce({ ...capture, source: { ...capture.source, viewport: null, viewportWarning: 'Viewport observation unavailable' } })
     await mount(); const opened = await openScreenshot()

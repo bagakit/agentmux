@@ -11,6 +11,13 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
+const compose = vi.hoisted(() => vi.fn())
+// Raster drawing and PNG encoding need a real canvas; the editor state, Escape layers and host delivery stay production code.
+vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: compose
+}))
+
 const dom = composerDOM()
 const operation: BrowserOperation = { id: 'live-operation', browserId: 'opinion-browser', operator: { id: 'agent-1', name: 'Original Agent' },
   phase: 'running', summary: 'Working', startedAt: _batchFixtureEpoch(0, 0, 1), url: 'https://example.invalid/live', steps: [] }
@@ -126,6 +133,39 @@ it('keeps the same selected scene and input identity across an unknown freeze an
   await dom.render(<Harness />); await click('Discuss'); await click('Queue opinion')
   expect(freeze.mock.calls[1]![0]).toEqual(first); expect(first.scene).toEqual(receipt.scene.reference)
   expect(api.browser.readInputSelection).not.toHaveBeenCalled()
+})
+
+it.each([['accepted', false], ['refused', true]] as const)('closes a marked image on Escape only after an %s attachment', async (_outcome, failed) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ x: 0, y: 0, left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, toJSON() {} }))
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+  const png = { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 40, height: 30, byteLength: 1 }
+  compose.mockResolvedValue(png)
+  vi.mocked(api.browser.captureInputFrame).mockResolvedValue({ scene: { ...scene, reference: { hostId: 'local', captureId: 'original-frame' } }, capture: {
+    browserId: operation.browserId, navigationId: 'frame-navigation', image: png, source: { url: operation.url, title: 'Original frame', viewport: null, viewportWarning: null } } })
+  const prepare = vi.spyOn(api.browser, 'prepareInputSelection').mockImplementation(async intent => failed ? Promise.reject(new Error('Selection refused'))
+    : { ...structuredClone(receipt), operationId: intent.operationId })
+  await dom.render(<Harness />); await click('Discuss'); await type('About this region'); await click('Mark captured image…')
+  const editor = () => document.querySelector<HTMLElement>('[aria-label="Captured image"]')
+  expect(editor(), 'the actual opinion editor opens on the captured frame').not.toBeNull()
+  await act(async () => editor()!.querySelector('img')!.dispatchEvent(new Event('load')))
+  const canvas = editor()!.querySelector('canvas')!; canvas.setPointerCapture = vi.fn()
+  await click('Rectangle')
+  await act(async () => { for (const [type, x] of [['pointerdown', 40], ['pointermove', 160], ['pointerup', 160]] as const)
+    canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: x })) })
+  await click('Attach processed image')
+  expect(prepare).toHaveBeenCalledOnce()
+  if (!failed) {
+    expect(editor(), 'an accepted attachment closes the editor without asking').toBeNull()
+    expect(useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!.selection?.operationId).toBe(prepare.mock.lastCall![0].operationId)
+    return
+  }
+  const escape = async () => act(async () => { canvas.focus(); canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+  await escape(); await escape()
+  expect(document.querySelector('[aria-label="Captured image"] .image-annotation-editor__discard'), 'a refused attachment keeps the discard confirmation').not.toBeNull()
+  await escape()
+  expect(editor(), 'the second Escape on the discard bar confirms').toBeNull()
+  expect(useAppStore.getState().browserOpinionDrafts[operation.browserId]!.original!.selection).toBeUndefined()
 })
 
 it('ignores a late frame after hiding and never treats opening a frame as image attachment', async () => {
