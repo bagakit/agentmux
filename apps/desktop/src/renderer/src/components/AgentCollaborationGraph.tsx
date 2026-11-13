@@ -406,7 +406,13 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
     if (anchor) tooltip.showFor(anchor)
   }
   const preferences = useContext(CollaborationMapPreferences)
-  const visibleRoute = collaborationVisibleRoute(record.route, record.sourceBox, record.targetBox, zoom, record.sourceRadius, record.targetRadius, record.sourcePointRadius, record.targetPointRadius, preferences)
+  // The clipped curve depends on zoom only through the two painted endpoint bodies, which hold
+  // still across much of the zoom range; re-clip only when either body actually changes.
+  const sourceHull = collaborationVisibleHull(record.sourceBox, zoom, record.sourceRadius, record.sourcePointRadius, preferences)
+  const targetHull = collaborationVisibleHull(record.targetBox, zoom, record.targetRadius, record.targetPointRadius, preferences)
+  const hullKey = `${sourceHull.x},${sourceHull.y},${sourceHull.width},${sourceHull.height},${sourceHull.radius};${targetHull.x},${targetHull.y},${targetHull.width},${targetHull.height},${targetHull.radius}`
+  const visibleRoute = useMemo(() => collaborationVisibleRoute(record.route, record.sourceBox, record.targetBox, zoom, record.sourceRadius, record.targetRadius, record.sourcePointRadius, record.targetPointRadius, preferences),
+    [record, hullKey, preferences])
   const { path, points } = visibleRoute
   const end = points.at(-1)
   let before = end
