@@ -43,6 +43,29 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await tap('.mobile-needs-you-ticket', 'Needs-you ticket')
   await until('!!document.querySelector("[data-request-id=request-original]")')
   assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-waiting', 'The ticket opens the exact waiting Agent')
+  // The push motion is navigation-declared; measure the settled layer, not a frame mid-slide.
+  assert.equal(await read('document.querySelector(".mobile-main")?.dataset.motion'), 'push', 'Opening the request pushed the conversation layer')
+  await until('!document.querySelector(".mobile-main[data-motion]")')
+  const reading = await read(`(()=>{const r=n=>n?n.getBoundingClientRect().toJSON():null
+    const turns=[...document.querySelectorAll('.mobile-conversation .log-turn[data-message-bubble="true"]')]
+    const last=turns.at(-1),composer=document.querySelector('.mobile-conversation__composer'),card=document.querySelector('[data-request-id=request-original]')
+    return {turns:turns.map(n=>({role:n.dataset.speakerRole,rect:r(n),body:r(n.querySelector('.log-turn__body'))})),composer:r(composer),card:r(card),lastBottom:last?r(last).bottom:null,
+      who:turns.map(n=>n.querySelector('.log-turn__who')?.textContent)}})()`)
+  result.matureReading = { reading }
+  const bodies = reading.turns.map(turn => Math.round(turn.body.left))
+  const agentBodies = reading.turns.filter(turn => turn.role === 'agent').map(turn => Math.round(turn.body.left))
+  assert.ok(new Set(agentBodies).size <= 1, 'Agent speech shares one reading column')
+  for (const turn of reading.turns) assert.ok(turn.rect.left >= 15 && turn.rect.right <= 390 - 15, `Every message keeps the 16px gutter: ${JSON.stringify(turn.rect)}`)
+  assert.ok((reading.card ? reading.card.top : reading.composer.top) - reading.lastBottom <= 48, 'Short conversation rests on the decision card and composer')
+  assert.ok(!reading.who.includes('You'), 'The person reads as 我')
+  const overlap = await read(`(()=>{const n=[...document.querySelectorAll('.mobile-conversation .log-turn[data-message-bubble="true"][data-speaker-role="human"]')].at(-1);if(!n)return null
+    const body=n.querySelector('.log-turn__body').getBoundingClientRect(),actions=[...n.querySelectorAll('.log-turn__head button')].map(b=>b.getBoundingClientRect())
+    const head=n.querySelector('.log-turn__head').getBoundingClientRect()
+    return {hit:actions.some(a=>a.top<body.bottom-2&&a.bottom>body.top+2&&a.left<body.right-2&&a.right>body.left+2),body:body.toJSON(),head:head.toJSON(),actions:actions.map(a=>a.toJSON()),
+      rows:getComputedStyle(n).gridTemplateRows,bodyRow:getComputedStyle(n.querySelector('.log-turn__body')).gridRowStart,headRow:getComputedStyle(n.querySelector('.log-turn__head')).gridRowStart}})()`)
+  result.matureBubble = overlap
+  assert.equal(overlap.hit, false, "Copy and details never cover the person's text")
+  result.matureReading = { bodies, reading }
   await capture('mature-request-390-dark')
   await read('mobileProductScene.setAppearance("light")'); await capture('mature-request-390-light')
   await read('mobileProductScene.setAppearance("dark")')
@@ -56,6 +79,12 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   for (const label of ['Goals', 'Topics', 'Mote', 'Space']) {
     await button(label, '.mobile-navigation')
     await read('new Promise(resolve=>setTimeout(resolve,250))')
+    await until('!document.querySelector(".mobile-main[data-motion]")')
+    if (label === 'Mote') {
+      const gap = await read(`(()=>{const turns=[...document.querySelectorAll('.mobile-conversation .log-turn[data-message-bubble="true"]')].filter(n=>n.getClientRects().length),composer=document.querySelector('.mobile-conversation__composer');return turns.length&&composer?composer.getBoundingClientRect().top-turns.at(-1).getBoundingClientRect().bottom:null})()`)
+      result.matureMoteGap = gap
+      assert.ok(gap !== null && gap <= 48, `A short Mote discussion rests on the composer (gap ${gap})`)
+    }
     await capture(`mature-${label.toLowerCase()}-390-dark`)
   }
   result.matureShellBoundary = 'Actual MobileApp shell with controlled original catalog facts in private Chromium; physical phone, OS keyboard and live Host are not observed.'
