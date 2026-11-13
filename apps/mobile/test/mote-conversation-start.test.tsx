@@ -126,6 +126,18 @@ it('an explicit Mobile new round hands over before its first Query and keeps the
   const setup = await f.host.setup(packet.operationId, false)
   expect(setup.handoverInput?.record).toBeTruthy(); expect(setup.deferredInput?.record).toBeTruthy()
   expect(await f.host.h.client.readAgentSession(firstSession)).toBeTruthy()
+  const secondSession = f.owner.snapshot().record.selectedSessionId!
+  await openNewRound(f)
+  await wait(() => expect(f.scene().querySelector('[data-mote-period]')).toBeTruthy())
+  const page = await f.host.rpc.call('space.mote.dialogue.read', { target: f.host.target })
+  const live = page.links.find(link => link.kind === 'main' && link.reference.sessionId === secondSession)!
+  if (live.kind !== 'main') throw Error('Current Main source required')
+  const liveId = live.period?.id ?? JSON.stringify(['legacy-main', live.roleRevision, live.operationId])
+  const liveRow = [...f.scene().querySelectorAll<HTMLElement>('[data-mote-period]')].find(row => row.dataset.motePeriod === liveId)!
+  expect(liveRow.textContent).toContain('当前对话'); expect(liveRow.textContent).not.toContain('结束未记录')
+  await click(liveRow.querySelector('button')!)
+  await wait(() => expect(f.view.element.querySelector('[aria-label="原主对话历史"]')).toBeNull())
+  await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(secondSession))
   await openNewRound(f)
   await wait(() => expect(f.scene().querySelector('[data-mote-period]')).toBeTruthy())
   const source = (await f.host.rpc.call('space.mote.dialogue.read', { target: f.host.target })).links.find(link => link.kind === 'main' && link.reference.sessionId === firstSession)!

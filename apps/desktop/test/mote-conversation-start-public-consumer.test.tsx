@@ -13,7 +13,8 @@ import { agentPromptSubmissionOutcome } from '../../../packages/core/src/agent-i
 import type { MoteDialogueLink } from '../../../packages/core/src/mote-dialogue'
 import type { ConversationChangesInput } from '../../../packages/core/src/conversation-changes'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
-import { MoteConversationStart, desktopMoteStartHistory } from '../src/renderer/src/components/MoteConversationStart'
+import { MoteConversationStart } from '../src/renderer/src/components/MoteConversationStart'
+import { moteConversationHistoryRows } from '@agentmux/client-ui/components/MoteConversationStart'
 import { MoteMainActions } from '../src/renderer/src/components/MoteMainActions'
 import * as originalMainActions from '../src/renderer/src/lib/mote-main-action'
 import { MoteConversationThreads } from '@agentmux/client-ui/components/MoteConversationThreads'
@@ -379,7 +380,7 @@ it('same Host and SID in separate real Host Main tenures stay separate in shared
     values: { ...baseline.defaults, conversation: a.reference! }, destination: { kind: 'occurrence', displayWorkspaceId: a.reference!.displayWorkspaceId,
       groupId: a.reference!.groupId, tabId: a.reference!.tabId, regionId: a.reference!.regionId } })
   const page = await f.rpc.call('space.mote.dialogue.read', { target: f.target, kind: 'main' })
-  const rows = desktopMoteStartHistory(page.links, page.main.roleRevision)
+  const rows = moteConversationHistoryRows(page.links, page.main.roleRevision)
   expect(new Set(rows.map(row => row.item.id)).size).toBe(3)
   const view = await mounted(<MoteConversationThreads page={page} issue={null} actor={{ hostId: a.reference!.hostId, agentSessionId: a.reference!.sessionId }}
     name="Original Mote" visible conversationClient={null} renderCurrent={() => <p>Current exact Main</p>} />)

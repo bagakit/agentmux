@@ -5,7 +5,8 @@ import base from '../../desktop/test/mote-main-policy-settings.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const files = ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/MobileMoteConversationStart.tsx', 'apps/mobile/src/navigation/MobileMoteMainActions.tsx',
   'apps/mobile/src/conversation/MobileConversationSurface.tsx', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', 'apps/mobile/src/conversation/mote-main-input.ts', 'apps/mobile/src/navigation/MobileMoteStartPortrait.tsx',
-'apps/mobile/src/conversation/MobileMoteSourceNotice.tsx', 'apps/mobile/src/conversation/MobileMoteConversation.tsx']
+'apps/mobile/src/conversation/MobileMoteSourceNotice.tsx', 'apps/mobile/src/conversation/MobileMoteConversation.tsx',
+  'packages/client-ui/src/components/MoteConversationStart.tsx']
 const mutations: Record<string, { file: string; edits: [string, string][] }> = {
   'welcome-wire': { file: files[0]!, edits: [['welcomeVisible && moteTarget && objectIdentity && !historyVisible &&', 'false && welcomeVisible && moteTarget && objectIdentity && !historyVisible &&']] },
   'first-query': { file: files[2]!, edits: [['deferredInput: { operationId: query.operationId, prompt: query.prompt }', "deferredInput: { operationId: query.operationId, prompt: 'Wrong original question' }"]] },
@@ -14,7 +15,7 @@ const mutations: Record<string, { file: string; edits: [string, string][] }> = {
   'mote-scope': { file: files[1]!, edits: [['target.spaceId, target.zoneId,', '/* omitted original Mote/Zone */']] },
   'inspect-advance': { file: files[2]!, edits: [["await client.forwardRpc!('space.mote.dialogue.setup.inspect', input)", "await client.forwardRpc!('space.mote.dialogue.setup.advance', input)"]] },
   'handover': { file: files[2]!, edits: [["...(baseline.defaults.conversation ? { handover: true as const } : {})", '...({})']] },
-  'history-period': { file: files[1]!, edits: [["source.period?.id ?? JSON.stringify(['legacy-main', source.roleRevision, source.operationId])", 'JSON.stringify([source.reference.hostId, source.reference.sessionId])']] },
+  'history-period': { file: files[9]!, edits: [["source.period?.id ?? JSON.stringify(['legacy-main', source.roleRevision, source.operationId])", 'JSON.stringify([source.reference.hostId, source.reference.sessionId])']] },
   'unknown-reader': { file: files[0]!, edits: [["if ((!facts || facts.quickMode.status === 'unconfirmed') && objectIdentity", "if (false && (!facts || facts.quickMode.status === 'unconfirmed') && objectIdentity"]] },
   'due-wire': { file: files[4]!, edits: [["if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision)", "if (false && result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision)"]] },
   'late-due': { file: files[4]!, edits: [["producer && draftEdits.current === producer.revision && drafts.current.get(producer.key) === original.draft && mounted.current", 'producer && mounted.current']] },
