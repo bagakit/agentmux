@@ -39,7 +39,7 @@ beforeEach(() => {
     detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}), prewarmTerminal: vi.fn(async () => {}), warmTerminals: {} })
   onSave.mockClear()
 })
-const card = () => dom.container.querySelector<HTMLDetailsElement>('#executor-settings-codex')!
+const card = () => dom.container.querySelector<HTMLElement>('#executor-settings-codex')!
 const status = () => card().querySelector('.check-pill')?.textContent
 async function fill(input: HTMLInputElement, value: string) {
   await act(async () => {
@@ -56,21 +56,21 @@ async function list() {
 
 it('actual Agent Command keeps the editor connected, open and focused at every character; stale Available never decorates the draft', async () => {
   await dom.render(<AgentSettingsPane config={config} onSave={onSave} />)
-  expect(status()).toBe('Available'); expect(dom.container.querySelectorAll('.agent-settings-card')).toHaveLength(2)
+  expect(status()).toBe('Available'); expect(dom.container.querySelectorAll('.agent-settings-card')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('[data-resource-row="codex"], [data-resource-row="review"]')).toHaveLength(2)
   const editor = card(), launch = editor.querySelector<HTMLDetailsElement>('.settings-launch-config')!
-  await act(async () => { editor.open = true; launch.open = true })
-  const input = [...launch.querySelectorAll<HTMLInputElement>('input')].find(node => node.value === 'codex')!
+  await act(async () => { launch.open = true; launch.dispatchEvent(new Event('toggle')) })
+  const input = editor.querySelector<HTMLInputElement>('[aria-label="Executor executable"]')!
   expect(input).not.toBeUndefined(); input.focus()
   for (const value of ['codexx', 'codexxy', 'codexxyz']) {
     await fill(input, value)
     expect(status()).toBe('Not checked'); expect(document.activeElement).toBe(input)
     expect(input.isConnected).toBe(true); expect(input.value).toBe(value)
-    expect(card()).toBe(editor); expect(editor.open).toBe(true); expect(launch.open).toBe(true)
+    expect(card()).toBe(editor); expect(launch.open).toBe(true)
   }
   expect(useAppStore.getState().executorDetections[executorDetectionKey('local', 'codex')]!.state).toBe('ready')
-  expect(dom.container.textContent).toContain('Checks use saved commands. Save a changed command before refreshing.')
   const refresh = dom.container.querySelector<HTMLButtonElement>('[aria-label="Refresh saved executor availability"]')!
-  expect(refresh.title).toBe('Refresh saved commands')
+  expect(refresh.title).toBe('Refresh saved commands'); expect(refresh.disabled).toBe(false)
   vi.mocked(useAppStore.getState().detectExecutors).mockClear()
   await act(async () => refresh.click())
   expect(useAppStore.getState().detectExecutors).toHaveBeenCalledExactlyOnceWith('local')
