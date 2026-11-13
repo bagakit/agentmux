@@ -6,6 +6,7 @@ enum NativeSelectionCompletionAction: String, Sendable { case capture, edit }
 struct NativeSelectionChoice: Sendable {
     let rectangle: CGRect
     let completionAction: NativeSelectionCompletionAction
+    let pixels: NativeSelectionPixels
 }
 
 private final class NativeSelectionResult: @unchecked Sendable {
@@ -15,12 +16,13 @@ private final class NativeSelectionResult: @unchecked Sendable {
 /// Production capture and the isolated preview consume this same request. Only
 /// its calling worker waits; AppKit remains on the ordinary main event loop.
 enum NativeSelectionRequest {
-    static func run(allowEditing: Bool = false) throws -> NativeSelectionChoice? {
+    static func run(allowEditing: Bool = false,
+                    load: @escaping @Sendable (NativeSelectionLoading) throws -> NativeSelectionPixels) throws -> NativeSelectionChoice? {
         let result = NativeSelectionResult()
         let semaphore = DispatchSemaphore(value: 0)
         DispatchQueue.main.async {
             do {
-                try NativeScreenSelection.begin(allowEditing: allowEditing) { value in
+                try NativeScreenSelection.begin(allowEditing: allowEditing, load: load) { value in
                     result.result = value
                     semaphore.signal()
                 }

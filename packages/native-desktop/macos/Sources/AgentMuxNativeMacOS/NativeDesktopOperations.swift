@@ -19,9 +19,13 @@ enum NativeDesktopOperations {
             if mode == "selection" {
                 return try NativeSelectionCaptureLease.shared.withCapture { ownership in
                     let allowEditing = params["allowEditing"]?.bool == true
-                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing)
+                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing) { loading in
+                        try frozenSelectionPixels(loading: loading, ownership: ownership)
+                    }
                     guard let selection else { return ["state": "cancelled"] }
-                    var result = try capturedRectangle(selection.rectangle, ownership: ownership)
+                    let frozen = try selection.pixels.compose(selection.rectangle)
+                    var result: [String: Any] = ["state": "captured", "screenshot": try png(frozen.image, scale: frozen.scale),
+                        "engine": frozen.engine, "selectionRect": renderRect(selection.rectangle)]
                     if allowEditing { result["completionAction"] = selection.completionAction.rawValue }
                     return result
                 }
@@ -230,6 +234,76 @@ enum NativeDesktopOperations {
         }
         guard let image else { throw ProviderError.coded("capture_failed", "macOS returned no image for the exact requested window") }
         return CapturedImage(image: image, engine: engine)
+    }
+
+    /// Capture only once per physical display, before enabling selection. Our
+    /// temporary loading/chooser windows are excluded by their exact OS owner.
+    private static func frozenSelectionPixels(loading: NativeSelectionLoading,
+        ownership: NativeSelectionCaptureLease.Ownership) throws -> NativeSelectionPixels {
+        let descriptors: [(id: CGDirectDisplayID?, appKit: CGRect, quartz: CGRect, scale: CGFloat)] = onMain {
+            let screens = NSScreen.screens
+            let primaryTop = screens.first?.frame.maxY ?? 0
+            return screens.map { screen in
+                let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+                let quartz = id.map { CGDisplayBounds($0) } ?? NativeCaptureGeometry.quartzRect(appKitRect: screen.frame, primaryDisplayTop: primaryTop)
+                return (id, screen.frame, quartz, screen.backingScaleFactor)
+            }
+        }
+        var displays: [NativeSelectionDisplay] = []
+        for descriptor in descriptors {
+            if loading.isCancelled { throw NativeScreenSelectionError(code: "capture_cancelled", message: "the original screenshot was cancelled") }
+            guard let displayID = descriptor.id else {
+                displays.append(NativeSelectionDisplay(displayID: nil, appKitFrame: descriptor.appKit, quartzFrame: descriptor.quartz,
+                    image: nil, engine: "unavailable", issue: "macOS did not confirm this display identity; other captured displays remain available"))
+                continue
+            }
+            do {
+                guard NativeImageLimits.permits(width: Double(ceil(descriptor.quartz.width * descriptor.scale)), height: Double(ceil(descriptor.quartz.height * descriptor.scale))) else {
+                    throw ProviderError.coded("image_too_large", "display pixels exceed the host image allocation limit")
+                }
+                let image: CGImage
+                let engine: String
+                if #available(macOS 14.0, *) {
+                    image = try BlockingAsync.run(timeout: 10) {
+                        defer { withExtendedLifetime(ownership) {} }
+                        let content = try await SCShareableContent.current
+                        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+                            throw ProviderError.coded("display_not_found", "the exact original display disappeared")
+                        }
+                        guard display.frame == descriptor.quartz else {
+                            throw ProviderError.coded("display_configuration_changed", "the original display bounds changed before its pixels were captured")
+                        }
+                        let ownWindows = content.windows.filter { $0.owningApplication?.processID == getpid() }
+                        let filter = SCContentFilter(display: display, excludingWindows: ownWindows)
+                        let configuration = SCStreamConfiguration()
+                        configuration.width = Int(ceil(descriptor.quartz.width * descriptor.scale))
+                        configuration.height = Int(ceil(descriptor.quartz.height * descriptor.scale))
+                        configuration.showsCursor = false
+                        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+                    }
+                    engine = "screenCaptureKit"
+                } else {
+                    let windows = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
+                        .filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value != getpid() }
+                        .compactMap { $0[kCGWindowNumber as String] as? NSNumber }
+                    guard let captured = CGImage(windowListFromArrayScreenBounds: descriptor.quartz, windowArray: windows as CFArray, imageOption: [.bestResolution]) else {
+                        throw ProviderError.coded("capture_failed", "macOS did not return pixels for the original display")
+                    }
+                    image = captured
+                    engine = "coreGraphics"
+                }
+                guard NativeImageLimits.permits(width: Double(image.width), height: Double(image.height)) else {
+                    throw ProviderError.coded("image_too_large", "the returned display pixels exceed the host image allocation limit")
+                }
+                displays.append(NativeSelectionDisplay(displayID: descriptor.id, appKitFrame: descriptor.appKit,
+                    quartzFrame: descriptor.quartz, image: image, engine: engine, issue: nil))
+            } catch {
+                let error = nativeErrorPayload(error)
+                displays.append(NativeSelectionDisplay(displayID: descriptor.id, appKitFrame: descriptor.appKit,
+                    quartzFrame: descriptor.quartz, image: nil, engine: "unavailable", issue: "\(error["code"] ?? "capture_failed"): \(error["message"] ?? "screen pixels are unavailable")"))
+            }
+        }
+        return NativeSelectionPixels(displays: displays)
     }
 
     private static func captureRect(_ rect: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> (image: CGImage, scale: Double, engine: String) {
