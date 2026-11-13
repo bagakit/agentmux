@@ -45,42 +45,25 @@ type CompleteUnit = ReturnType<typeof projection>['units'][number]
 type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: CompleteUnit[]; deferredUnits?: ConversationUnit[]; coverage: ConversationSourceCoverage[];
   order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionEvidence; inputRecords: ConversationSourceRecord[]; navigation: ReturnType<typeof historyNavigation> }
 type ReadingView = ConversationRef & { processDetails?: 'deferred'; id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
-  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputWitnesses: ConversationInputWitnessIndex }
-const MAX_UNOBSERVED_VIEWS = 16
-/** Temporary state of this original Reader. Durable originals remain in their original owners. */
+  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputWitnesses: ConversationInputWitnessIndex }
+/** Temporary views live until their explicit release or this Reader owner's disposal.
+ * Stopping observation parks a workface; unrelated reads cannot expire its continuation. */
 export class ConversationReaderState {
   private readonly views = new Map<string, ReadingView>()
-  private trimParked(limit = MAX_UNOBSERVED_VIEWS): void {
-    const parked = [...this.views.values()].filter(view => view.observers === 0 && view.readers === 0)
-    for (const view of parked.slice(0, Math.max(0, parked.length - limit))) this.views.delete(view.id)
-  }
   create(ref: ConversationRef, checkpoint: ConversationFrontier, processDetails?: 'deferred'): ReadingView {
-    this.trimParked(MAX_UNOBSERVED_VIEWS - 1)
-    const view: ReadingView = { ...ref, ...(processDetails ? { processDetails } : {}), id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputWitnesses: new ConversationInputWitnessIndex() }
+    const view: ReadingView = { ...ref, ...(processDetails ? { processDetails } : {}), id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), outside: { older: null, newer: null }, inputWitnesses: new ConversationInputWitnessIndex() }
     this.views.set(view.id, view); return view
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
     const view = this.views.get(id)
     if (!view) return fail('The original temporary reading window expired. Retain its displayed originals and exact source references for a new read.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
     if (view.hostId !== ref.hostId || view.agentSessionId !== ref.agentSessionId || !same(view.scope, scope)) return fail('The original temporary reading window changed scope. Retain its displayed originals and exact anchor.')
-    this.views.delete(id); this.views.set(id, view); return view
+    return view
   }
-  holdRead(view: ReadingView): () => void {
-    view.readers++
-    return () => {
-      view.readers--
-      // Explicit release/disposal owns removal; finishing IO cannot revive it.
-      if (this.views.get(view.id) !== view) return
-      this.views.delete(view.id); this.views.set(view.id, view)
-      this.trimParked()
-    }
-  }
-  observe(token: string, ref: ConversationRef, scope: ConversationFrontier['scope']): { scope: ConversationFrontier['scope']; dispose(): void } {
+  scope(token: string, ref: ConversationRef, available: ConversationFrontier['scope']): ConversationFrontier['scope'] {
     const cursor = decode(token, ref, 'inspect')
-    if (!cursor.viewId || !cursor.scope.sources.every(source => scope.sources.some(available => same(source, available)))) return fail('The observation names another original reading scope.')
-    const view = this.get(cursor.viewId, ref, cursor.scope); view.observers++
-    let closed = false
-    return { scope: view.scope, dispose: () => { if (!closed) { closed = true; view.observers--; this.trimParked() } } }
+    if (!cursor.viewId || !cursor.scope.sources.every(source => available.sources.some(value => same(source, value)))) return fail('The observation names another original reading scope.')
+    return this.get(cursor.viewId, ref, cursor.scope).scope
   }
   release(token: string, ref: ConversationRef): { viewId: string; released: boolean } {
     const cursor = decode(token, ref, 'inspect')
@@ -507,9 +490,10 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     if (!token.viewId || !Number.isSafeInteger(token.viewRevision) || token.snapshotId || !same(token.scope, state.scope) || state.viewId && state.viewId !== token.viewId) return fail('The view belongs to another original accepted scope.')
     if (!state.viewId) { state.viewId = token.viewId; state.viewRevision = token.viewRevision! }
   }
+  const created = !state.viewId
   const view = state.viewId ? port.state.get(state.viewId, ref, state.scope) : port.state.create(ref, state.checkpoint!, state.processDetails)
   if (view.processDetails !== state.processDetails) return fail('The accepted view changed its original process detail representation.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
-  const releaseRead = port.state.holdRead(view)
+  let delivered = false
   try {
     state.viewId = view.id
     if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
@@ -690,8 +674,13 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
       view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputWitnesses.accept(snapshot.inputRecords); snapshot.committed = true
     }
+    delivered = true
     return parsed
-  } finally { releaseRead() }
+  } finally {
+    // Before the first response the caller has no release token. A failed new
+    // read owns its own cleanup; failures on an existing view preserve that view.
+    if (created && !delivered) port.state.release(encode({ ...state, mode: 'inspect' }), ref)
+  }
 }
 export async function readAgentConversation(input: ConversationTimelineReadInput, port: ConversationReaderPort): Promise<AgentConversationReadPage> {
   return await read(parseConversationTimelineReadInput(input), port, 'inspect') as AgentConversationReadPage

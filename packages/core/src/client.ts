@@ -3088,7 +3088,7 @@ export class AgentMuxClient {
     resources.add(resource); this.historyObservationControllers.set(input.agentSessionId, resources)
     let native: AgentSessionHistoryObservationHandle | undefined, opening: import('./conversation-changes.js').ConversationWatchOpening | undefined
     let pendingCaptured = false, pendingNative: AgentSessionHistoryObservation | undefined
-    let nativeFailure: { error: unknown } | undefined, unsubscribe = () => {}, nativeEnded = () => {}, releaseView = () => {}, disposed = false
+    let nativeFailure: { error: unknown } | undefined, unsubscribe = () => {}, nativeEnded = () => {}, disposed = false
     let onNative = (value: AgentSessionHistoryObservation): void => { pendingNative = value }
     const emit = (value: ConversationObservation): void => {
       if (!opening || controller.signal.aborted) return
@@ -3105,7 +3105,7 @@ export class AgentMuxClient {
     }
     const dispose = () => {
       if (disposed) return
-      disposed = true; unsubscribe(); native?.closed?.removeEventListener('abort', nativeEnded); native?.dispose(); releaseView()
+      disposed = true; unsubscribe(); native?.closed?.removeEventListener('abort', nativeEnded); native?.dispose()
       diagnostic?.recorder.record({ phase: 'source-watch-closed', reason: 'disposed', sourceHostId: ref.hostId })
       diagnostic?.recorder.record({ phase: 'consumer-ended', reason: 'disposed' })
       diagnostic?.recorder.flush('release'); diagnostic?.end()
@@ -3126,9 +3126,7 @@ export class AgentMuxClient {
         owner = await this.conversationReader(input, { signal: controller.signal })
       }
       const cut = await cutUnifiedConversation(ref, owner.port)
-      const observed = input.view ? this.conversationReadState.observe(input.view, ref, cut.scope) : undefined
-      if (observed) releaseView = observed.dispose
-      const scope = observed?.scope ?? cut.scope
+      const scope = input.view ? this.conversationReadState.scope(input.view, ref, cut.scope) : cut.scope
       opening = parseConversationWatchOpening({ hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: ref.hostId, scope,
         coverage: cut.coverage.filter(value => scope.sources.some(source => isDeepStrictEqual(source, value.source))) }, input)
       const source = opening.scope.sources.find(s => s.kind === 'native')

@@ -312,9 +312,10 @@ export function useConversationView(client: ConversationViewClient | null, refer
         let currentSource: ConversationObservationHandle | undefined
         let admission: PendingFrame['admission']
         let released = false
+        let responseView: { id: string; token: string } | undefined
         const releaseComplete = () => {
-          if (!continuation && !released && complete && complete.window.id !== current.snapshot?.window.id) {
-            released = true; release(complete.window.view)
+          if (!continuation && !released && responseView && responseView.id !== current.snapshot?.window.id) {
+            released = true; release(responseView.token)
           }
         }
         try {
@@ -340,10 +341,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
           do {
             const page = change ? await client.readConversationChanges({ ...change, ...(cursor ? { cursor } : {}) }, { signal: requestSignal })
               : await client.readAgentConversation({ ...request, ...(cursor ? { cursor, limit: 100 } : {}) }, { signal: requestSignal })
-            if (!isCurrent()) {
-              if (!continuation && page.window.id !== current.snapshot?.window.id) release(page.window.view)
-              return
-            }
+            responseView = { id: page.window.id, token: page.window.view ?? page.window.replay }
+            if (!isCurrent()) { releaseComplete(); return }
             note({ phase: 'read-page', attemptId: attempt.id, operation: kind, sourceHostId: page.sourceHostId, itemCount: page.items.length })
             const result = consumeConversationWindowPage(page, assembly)
             if (result.kind === 'complete') { complete = result.snapshot; more = 'more' in page && Boolean(page.more); break }
