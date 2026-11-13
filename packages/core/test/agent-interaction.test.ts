@@ -37,7 +37,7 @@ const codexProtocol = createNumberedTerminalInteractionProtocol({
   permissionOptions: CODEX_OPTIONS
 })
 const claudeProtocol = createNumberedTerminalInteractionProtocol({
-  questionEvents: ['PermissionRequest', 'PreToolUse'],
+  questionEvents: ['PreToolUse'],
   questionTools: ['askuserquestion'],
   permissionOptions: CLAUDE_OPTIONS
 })
@@ -122,23 +122,26 @@ describe('Agent terminal interaction protocol', () => {
     }, 100, codexProtocol)).toBeUndefined()
   })
 
-  it('lets a Provider identify a question tool inside its permission event', () => {
-    const request = normalizeTerminalInteraction({
-      receiptId: 'claude-question',
+  it('opens a question only at its declared event; the same call\'s ask stage is neither a question nor a permission', () => {
+    const envelope = (eventName: string) => ({
+      receiptId: `claude-${eventName}`,
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'claude',
-      eventName: 'PermissionRequest',
+      eventName,
       payload: {
         tool_name: 'AskUserQuestion',
+        tool_use_id: 'toolu_question',
         tool_input: { question: 'Choose scope?', options: ['Focused', 'Full'] }
       }
-    }, 100, claudeProtocol, undefined, 'permission-request')
-
-    expect(request).toMatchObject({
+    })
+    expect(normalizeTerminalInteraction(envelope('PreToolUse'), 100, claudeProtocol)).toMatchObject({
       kind: 'question',
+      nativeToolCallId: 'toolu_question',
       questions: [{ prompt: 'Choose scope?', options: [{ label: 'Focused' }, { label: 'Full' }] }]
     })
+    // Claude reports its ask stage as a permission lifecycle event; it is the same question call.
+    expect(normalizeTerminalInteraction(envelope('PermissionRequest'), 100, claudeProtocol, undefined, 'permission-request')).toBeUndefined()
   })
 
   it('projects every declared scoped option and maps each to its own declared keystroke', () => {
