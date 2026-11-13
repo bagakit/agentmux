@@ -351,8 +351,8 @@ function renderDrafts() {
   $('#reset-all').disabled=!entries.length;
 }
 function attachEvents() {
-  const animationLabels={none:'静态',work:'写写停停',stream:'光标推进',execute:'箭头前送',wait:'流沙等待',orbit:'短弧环行',feedback:'单次反馈',spin:'旋转加载'};
-  $('#preview-animation').innerHTML=ThemeBridge.ICON_ANIMATIONS.map(value=>`<option value="${value}">${animationLabels[value]}</option>`).join('');
+  const animationLabels={none:'静态',work:'写写停停',stream:'光标推进',execute:'箭头前送',wait:'流沙等待',orbit:'短弧环行',feedback:'单次反馈',selection:'选中展开',spin:'旋转加载'};
+  $('#preview-animation').innerHTML=ThemeBridge.ICON_ANIMATIONS.map(value=>`<option value="${value}">${animationLabels[value]??value}</option>`).join('');
   $('#preview-animation').addEventListener('change',event=>{samplePresentation.animation=event.target.value;renderSamples();});
   $('#preview-color').addEventListener('input',event=>{samplePresentation.color=event.target.value;renderSamples();$('#inherit-color').disabled=false;});
   $('#inherit-color').disabled=true;
