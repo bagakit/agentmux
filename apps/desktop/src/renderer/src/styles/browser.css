@@ -294,3 +294,11 @@
 .browser-profile-chip__failure button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; font: inherit; cursor: pointer; }
 .browser-profile-chip__failure button[aria-label='Dismiss'] { margin-left: var(--sp-2); text-decoration: none; color: var(--text-3); }
 .browser-profile-chip--unknown { cursor: default; color: var(--text-3); padding-left: var(--sp-2); }
+
+.browser-site-permissions { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); font-size: var(--fs-micro); background: var(--surface-1); }
+.browser-site-permissions p { margin: 4px 0; overflow-wrap: anywhere; }
+.browser-permission-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.browser-permission-actions label { display: inline-flex; align-items: center; gap: 5px; margin-right: auto; }
+.browser-site-permissions details > p { display: flex; gap: 8px; align-items: baseline; }
+.browser-site-permissions details > p > span { flex: 1; min-width: 0; }
+.browser-site-permissions summary { cursor: pointer; }
