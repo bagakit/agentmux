@@ -35,14 +35,15 @@ export function markdownImageReferences(content: string, blocks: readonly BlockN
         if (reference) references.push(reference)
       }
       else if (node.kind === 'link' && (options.readOnlyImages || plainLink(node))) inline(node.children, Boolean(options.readOnlyImages))
-      else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') inline(node.children, inLink)
+      else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike' || node.kind === 'html-mark') inline(node.children, inLink)
     }
   }
   const visit = (nodes: readonly BlockNode[]) => {
     for (const node of nodes) {
       if (node.kind === 'heading' || node.kind === 'paragraph') inline(node.children)
       else if (node.kind === 'list') node.items.forEach(visit)
-      else if (node.kind === 'quote') visit(node.children)
+      else if (node.kind === 'quote' || node.kind === 'container' || node.kind === 'alert' || node.kind === 'details') visit(node.children)
+      else if (node.kind === 'html-table') node.rows.forEach(row => row.cells.forEach(cell => visit(cell.children)))
       else if (node.kind === 'table') [...node.header, ...node.rows.flat()].forEach(nodes => inline(nodes))
       else if (node.kind === 'footnotes') node.items.forEach(note => visit(note.children))
     }

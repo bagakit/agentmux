@@ -1,0 +1,69 @@
+import * as Dialog from './Modal.js'
+import { useState } from 'react'
+import { SemanticIcon } from '../theme/icons.js'
+
+export type MarkdownReadingWidth = 'standard' | 'wide' | 'full'
+export type MarkdownReadingTypeface = 'sans' | 'serif'
+export type MarkdownReadingLayoutValue = { width: MarkdownReadingWidth; typeface: MarkdownReadingTypeface; fontSize: number }
+/** The Host owns persistence; this control only reports the reader's next choice. */
+export type MarkdownReadingLayout = {
+  value: MarkdownReadingLayoutValue
+  fontSizes: { min: number; max: number; default: number }
+  onChange(next: MarkdownReadingLayoutValue): void
+}
+
+const WIDTHS: { id: MarkdownReadingWidth; label: string }[] = [{ id: 'standard', label: 'Standard' }, { id: 'wide', label: 'Wide' }, { id: 'full', label: 'Full' }]
+const TYPEFACES: { id: MarkdownReadingTypeface; label: string }[] = [{ id: 'sans', label: 'Sans' }, { id: 'serif', label: 'Serif' }]
+
+function Segmented<T extends string>({ label, options, value, onChange, sample }: {
+  label: string; options: { id: T; label: string }[]; value: T; onChange(next: T): void; sample?: boolean
+}) {
+  return <div className="md-reading__group" role="radiogroup" aria-label={label}>
+    <span className="md-reading__label">{label}</span>
+    <div className="md-reading__segments">{options.map(option => <button key={option.id} type="button" role="radio" aria-checked={value === option.id}
+      className="md-reading__segment" data-option={option.id} data-sample={sample ? option.id : undefined} onClick={() => onChange(option.id)}
+      onKeyDown={event => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+        event.preventDefault()
+        const index = options.findIndex(entry => entry.id === value), step = event.key === 'ArrowRight' ? 1 : -1
+        const next = options[(index + step + options.length) % options.length]!
+        onChange(next.id)
+        ;(event.currentTarget.parentElement?.querySelector(`[data-option="${next.id}"]`) as HTMLElement | null)?.focus()
+      }}>{sample ? <span className="md-reading__sample" aria-hidden="true">Aa</span> : null}{option.label}</button>)}</div>
+  </div>
+}
+
+/** Width, typeface and size for the document; each change applies in place. */
+export function MarkdownReadingLayoutControl({ layout }: { layout: MarkdownReadingLayout }) {
+  const [open, setOpen] = useState(false)
+  const { value, fontSizes } = layout
+  const change = (next: Partial<MarkdownReadingLayoutValue>) => layout.onChange({ ...value, ...next })
+  return <div className="md-reading"><Dialog.Root modal={false} open={open} onOpenChange={setOpen}>
+    <Dialog.Trigger asChild>
+      <button type="button" className="md-outline__trigger md-reading__trigger" aria-label="Reading layout" title="Reading layout">
+        <SemanticIcon name="editor.markdown-reading-layout" size={14} aria-hidden="true" />
+      </button>
+    </Dialog.Trigger>
+    <Dialog.Content className="md-outline__popover md-reading__popover" aria-describedby={undefined}>
+      <div className="md-outline__header">
+        <Dialog.Title className="md-outline__title">Reading layout</Dialog.Title>
+        <Dialog.Close asChild><button type="button" className="md-outline__close" aria-label="Close reading layout"><SemanticIcon name="action.close" size={13} aria-hidden="true" /></button></Dialog.Close>
+      </div>
+      <div className="md-reading__body">
+        <Segmented label="Width" options={WIDTHS} value={value.width} onChange={width => change({ width })} />
+        <Segmented label="Typeface" options={TYPEFACES} value={value.typeface} onChange={typeface => change({ typeface })} sample />
+        <div className="md-reading__group" role="group" aria-label="Text size">
+          <span className="md-reading__label">Size</span>
+          <div className="md-reading__stepper">
+            <button type="button" className="md-reading__step" aria-label="Smaller text" disabled={value.fontSize <= fontSizes.min}
+              onClick={() => change({ fontSize: value.fontSize - 1 })}><span aria-hidden="true" className="md-reading__step-glyph" data-step="down">A</span></button>
+            <button type="button" className="md-reading__size" aria-label={`Text size ${value.fontSize} pixels, reset to ${fontSizes.default}`}
+              title="Reset text size" onClick={() => change({ fontSize: fontSizes.default })}>{value.fontSize}px</button>
+            <button type="button" className="md-reading__step" aria-label="Larger text" disabled={value.fontSize >= fontSizes.max}
+              onClick={() => change({ fontSize: value.fontSize + 1 })}><span aria-hidden="true" className="md-reading__step-glyph" data-step="up">A</span></button>
+          </div>
+        </div>
+      </div>
+    </Dialog.Content>
+  </Dialog.Root></div>
+}

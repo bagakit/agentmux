@@ -9,6 +9,7 @@ function Inline({ nodes }: { nodes: InlineNode[] }) {
     if (node.kind === 'image') return <span key={index} title={node.href}>{node.alt || 'Image'}</span>
     if (node.kind === 'footnote-reference') return <sup key={index}>{node.number}</sup>
     if (node.kind === 'link') return <span key={index} title={node.href}><Inline nodes={node.children} /></span>
+    if (node.kind === 'html-mark') return <Fragment key={index}><Inline nodes={node.children} /></Fragment>
     const Tag = node.kind === 'strong' ? 'strong' : node.kind === 'emphasis' ? 'em' : 'del'
     return <Tag key={index}><Inline nodes={node.children} /></Tag>
   })}</>
@@ -21,7 +22,11 @@ function Block({ node }: { node: BlockNode }) {
     case 'code': return <code>{node.text}</code>
     case 'math': return node.text
     case 'rule': return null
-    case 'quote': return <Blocks nodes={node.children} />
+    case 'quote': case 'container': case 'alert': return <Blocks nodes={node.children} />
+    case 'details': return <><Inline nodes={node.summary} /> · <Blocks nodes={node.children} /></>
+    case 'html-table': return <>{node.rows.map((row, at) => <Fragment key={at}>{at ? ' · ' : null}
+      {row.cells.map((cell, col) => <Fragment key={col}>{col ? ' | ' : null}<Blocks nodes={cell.children} /></Fragment>)}
+    </Fragment>)}</>
     case 'list': return <>{node.items.map((item, at) => <Fragment key={at}>{at ? ' · ' : null}
       {node.ordered ? `${(node.start ?? 1) + at}. ` : null}
       {typeof node.checked?.[at] === 'boolean' ? node.checked[at] ? '☑ ' : '☐ ' : null}<Blocks nodes={item} />

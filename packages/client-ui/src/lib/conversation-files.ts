@@ -28,13 +28,16 @@ export function conversationFiles(parts: readonly AgentSessionHistoryContentPart
       else if (node.kind === 'code') for (const segment of splitMarkdownFileReferences(node.text, workspaceRoot, homeDir)) {
         if (segment.kind === 'file') add(segment.reference)
       }
-      else if (node.kind === 'strong' || node.kind === 'emphasis') inline(node.children)
+      else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'html-mark') inline(node.children)
     }
   }
   function blocks(nodes: readonly BlockNode[]): void {
     for (const node of nodes) {
       if (node.kind === 'paragraph' || node.kind === 'heading') inline(node.children)
       else if (node.kind === 'list') for (const item of node.items) blocks(item)
+      // Alerts, details and alignment are the author's own reply; quotes stay quoted examples.
+      else if (node.kind === 'container' || node.kind === 'alert' || node.kind === 'details') blocks(node.children)
+      else if (node.kind === 'html-table') for (const row of node.rows) for (const cell of row.cells) blocks(cell.children)
       else if (node.kind === 'table') {
         for (const cell of node.header) inline(cell)
         for (const row of node.rows) for (const cell of row) inline(cell)

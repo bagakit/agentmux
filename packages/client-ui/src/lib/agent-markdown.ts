@@ -2,7 +2,8 @@ import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import remarkMath from 'remark-math'
 import { unified } from 'unified'
-import type { Definition, FootnoteDefinition, Root, RootContent, PhrasingContent } from 'mdast'
+import type { Blockquote, Definition, FootnoteDefinition, Root, RootContent, PhrasingContent } from 'mdast'
+import { htmlBlocks, htmlInlines, type HtmlProjection } from './markdown-html.js'
 
 /** remark owns the grammar. This projection retains semantics as data, never executable HTML. */
 export type InlineNode =
@@ -14,15 +15,24 @@ export type InlineNode =
   | { kind: 'emphasis'; children: InlineNode[] }
   | { kind: 'strike'; children: InlineNode[] }
   | { kind: 'link'; href: string; children: InlineNode[] }
-  | { kind: 'image'; href: string; alt: string }
+  /** HTML images may declare a validated size and App-appearance variants (`<picture>`). */
+  | { kind: 'image'; href: string; alt: string; width?: string; height?: string; variants?: { dark?: string; light?: string } }
+  | { kind: 'html-mark'; tag: HtmlMarkTag; title?: string; children: InlineNode[] }
   | { kind: 'footnote-reference'; identifier: string; number: number; occurrence: number }
 
 export type TableAlign = 'left' | 'center' | 'right' | null
+export type HtmlAlign = 'left' | 'center' | 'right' | 'justify'
+export type HtmlVerticalAlign = 'top' | 'middle' | 'bottom'
+/** Inline HTML meanings with their own reading presentation; `samp` also covers `tt`. */
+export type HtmlMarkTag = 'kbd' | 'sub' | 'sup' | 'ins' | 'mark' | 'small' | 'abbr' | 'q' | 'samp' | 'var' | 'cite' | 'dfn'
+export type MarkdownAlertType = 'note' | 'tip' | 'important' | 'warning' | 'caution'
+export type HtmlTableCell = { header: boolean; width?: string; align?: HtmlAlign; valign?: HtmlVerticalAlign; colspan?: number; rowspan?: number; children: BlockNode[] }
+export type HtmlTableRow = { head: boolean; cells: HtmlTableCell[] }
 export type MarkdownFootnote = { identifier: string; number: number; references: number; children: BlockNode[] }
 
 export type BlockNode =
-  | { kind: 'heading'; level: number; anchor: string; sourceMarker?: string; children: InlineNode[] }
-  | { kind: 'paragraph'; children: InlineNode[] }
+  | { kind: 'heading'; level: number; anchor: string; sourceMarker?: string; align?: HtmlAlign; children: InlineNode[] }
+  | { kind: 'paragraph'; align?: HtmlAlign; children: InlineNode[] }
   | { kind: 'code'; language: string | null; text: string }
   | { kind: 'math'; text: string; source: string }
   | { kind: 'list'; ordered: boolean; start?: number; checked?: (boolean | null)[]; items: BlockNode[][] }
@@ -30,6 +40,12 @@ export type BlockNode =
   | { kind: 'rule' }
   | { kind: 'table'; align: TableAlign[]; header: InlineNode[][]; rows: InlineNode[][][] }
   | { kind: 'footnotes'; items: MarkdownFootnote[] }
+  /** `<div align>` and definition bodies: grouping with an alignment or indent, no other meaning. */
+  | { kind: 'container'; align?: HtmlAlign; indent?: boolean; children: BlockNode[] }
+  /** A layout table has only `td` cells (README cards); a data table has a header. */
+  | { kind: 'html-table'; layout: boolean; caption?: InlineNode[]; rows: HtmlTableRow[] }
+  | { kind: 'details'; open: boolean; summary: InlineNode[]; children: BlockNode[] }
+  | { kind: 'alert'; alert: MarkdownAlertType; children: BlockNode[] }
 
 export type MarkdownHeading = Extract<BlockNode, { kind: 'heading' }>
 export type MarkdownDocument = { blocks: BlockNode[]; headings: MarkdownHeading[] }
@@ -43,6 +59,8 @@ type ParseContext = {
   anchors: Set<string>
   nextAnchorSuffix: Map<string, number>
   headings: MarkdownHeading[] | null
+  /** GitHub only recognizes alerts in quotes at the document level, never nested. */
+  alertsAllowed: boolean
 }
 
 /** Definitions can occur in a quote or list; CommonMark uses the first definition. */
@@ -58,6 +76,8 @@ function originalText(node: PhrasingContent, context: ParseContext): Extract<Inl
 }
 
 function inlineFrom(nodes: readonly PhrasingContent[], context: ParseContext): InlineNode[] {
+  // Inline HTML is paired across siblings (`<sub>` … `</sub>`), so the whole run is projected together.
+  if (nodes.some(node => node.type === 'html')) return htmlInlines(nodes, htmlProjection(context))
   const out: InlineNode[] = []
   for (const node of nodes) {
     switch (node.type) {
@@ -128,7 +148,39 @@ function headingAnchor(children: readonly InlineNode[], context: ParseContext): 
   return anchor
 }
 
-function blocksFrom(nodes: readonly RootContent[], context: ParseContext): BlockNode[] {
+/** The same anchors, outline and footnote numbering serve Markdown and HTML headings. */
+function headingNode(level: number, children: InlineNode[], context: ParseContext, extra: { sourceMarker?: string; align?: HtmlAlign } = {}): MarkdownHeading {
+  const heading: MarkdownHeading = { kind: 'heading', level, anchor: headingAnchor(children, context), ...extra, children }
+  context.headings?.push(heading)
+  return heading
+}
+
+function htmlProjection(context: ParseContext): HtmlProjection {
+  return {
+    blocks: (nodes, atRoot) => blocksFrom(nodes, atRoot ? context : { ...context, alertsAllowed: false }, true),
+    inlines: nodes => inlineFrom(nodes, context),
+    heading: (level, children, align) => headingNode(level, children, context, align ? { align } : {}),
+    sourceOf: node => context.source.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0)
+  }
+}
+
+const ALERT_MARKER = /^\[!(note|tip|important|warning|caution)\][\t ]*(?:\r?\n|$)/iu
+/** GitHub alerts: the marker alone on the first line of a top-level quote that has a body. */
+function alertFrom(node: Blockquote, context: ParseContext): BlockNode | null {
+  const first = node.children[0]
+  if (!context.alertsAllowed || first?.type !== 'paragraph' || first.children[0]?.type !== 'text') return null
+  const marker = ALERT_MARKER.exec(first.children[0].value)
+  if (!marker) return null
+  const rest = first.children[0].value.slice(marker[0].length)
+  const paragraph = { ...first, children: [...(rest ? [{ ...first.children[0], value: rest }] : []), ...first.children.slice(1)] }
+  const body = [...(paragraph.children.length ? [paragraph] : []), ...node.children.slice(1)]
+  if (!body.length) return null
+  return { kind: 'alert', alert: marker[1]!.toLowerCase() as MarkdownAlertType, children: blocksFrom(body, { ...context, alertsAllowed: false }) }
+}
+
+function blocksFrom(nodes: readonly RootContent[], context: ParseContext, projectingHtml = false): BlockNode[] {
+  // Block HTML pairs across siblings (`<div>` … Markdown … `</div>`); the projection keeps the Markdown between.
+  if (!projectingHtml && nodes.some(node => node.type === 'html')) return htmlBlocks(nodes, htmlProjection(context))
   const out: BlockNode[] = []
   for (const node of nodes) {
     switch (node.type) {
@@ -136,10 +188,7 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
         const children = inlineFrom(node.children, context)
         const original = context.source.slice(node.position?.start.offset, node.position?.end.offset)
         const sourceMarker = /^(#{1,6})(?:[\t ]|$)/u.exec(original)?.[1]
-        const heading: MarkdownHeading = { kind: 'heading', level: node.depth, anchor: headingAnchor(children, context),
-          ...(sourceMarker ? { sourceMarker } : {}), children }
-        out.push(heading)
-        context.headings?.push(heading)
+        out.push(headingNode(node.depth, children, context, sourceMarker ? { sourceMarker } : {}))
         break
       }
       case 'paragraph':
@@ -156,11 +205,11 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
         out.push({ kind: 'list', ordered: node.ordered === true,
           ...(node.ordered && node.start !== null && node.start !== undefined ? { start: node.start } : {}),
           ...(checked.some(value => value !== null) ? { checked } : {}),
-          items: node.children.map(item => blocksFrom(item.children, context)) })
+          items: node.children.map(item => blocksFrom(item.children, { ...context, alertsAllowed: false })) })
         break
       }
       case 'blockquote':
-        out.push({ kind: 'quote', children: blocksFrom(node.children, context) })
+        out.push(alertFrom(node, context) ?? { kind: 'quote', children: blocksFrom(node.children, { ...context, alertsAllowed: false }) })
         break
       case 'thematicBreak':
         out.push({ kind: 'rule' })
@@ -173,7 +222,7 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
         break
       }
       case 'html':
-        out.push({ kind: 'paragraph', children: [{ kind: 'text', text: node.value }] })
+        out.push(...htmlBlocks([node], htmlProjection(context)))
         break
       case 'definition':
       case 'footnoteDefinition':
@@ -190,13 +239,13 @@ function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocume
     const tree = processor.parse(source) as Root
     const context: ParseContext = {
       source, definitions: new Map(), footnotes: new Map(), references: new Map(),
-      anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null
+      anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null, alertsAllowed: true
     }
     collectDefinitions(tree, context)
     const blocks = blocksFrom(tree.children, context), notes: MarkdownFootnote[] = []
     // Map iteration includes references introduced by a footnote; each definition is projected once.
     for (const [identifier, reference] of context.references) {
-      notes.push({ identifier, number: reference.number, references: 0, children: blocksFrom(context.footnotes.get(identifier)!.children, context) })
+      notes.push({ identifier, number: reference.number, references: 0, children: blocksFrom(context.footnotes.get(identifier)!.children, { ...context, alertsAllowed: false }) })
     }
     for (const note of notes) note.references = context.references.get(note.identifier)!.count
     if (notes.length) blocks.push({ kind: 'footnotes', items: notes })

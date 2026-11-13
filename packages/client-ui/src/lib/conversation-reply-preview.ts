@@ -12,6 +12,10 @@ function text(block: BlockNode): string {
     case 'quote': return first(block.children)
     case 'list': return first(block.items[0] ?? [])
     case 'table': return block.header.map(inline).join(' · ')
+    case 'container': case 'alert': return first(block.children)
+    case 'details': return inline(block.summary) || first(block.children)
+    case 'html-table': for (const row of block.rows) for (const cell of row.cells) { const value = first(cell.children); if (value) return value }
+      return ''
     case 'footnotes': case 'rule': return ''
   }
 }

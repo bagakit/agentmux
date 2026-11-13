@@ -1,13 +1,15 @@
-import { Fragment, useMemo, type ReactNode } from 'react'
+import { Fragment, useMemo, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { semanticIconComponent } from '../theme/icons.js'
+import { observeResolvedTheme, readResolvedTheme } from '../theme/runtime.js'
 const ThemeFootnoteReferenceIcon = semanticIconComponent('navigation.footnote-reference')
 const ImageReferenceIcon = semanticIconComponent('object.image')
-import { looksLikeMarkdown, parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode } from '../lib/agent-markdown.js'
+import { looksLikeMarkdown, parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode, type MarkdownAlertType } from '../lib/agent-markdown.js'
 import { classifyMarkdownLinkHref, referenceRevealLocation, splitMarkdownFileReferences, type MarkdownFileReference } from '../lib/markdown-file-reference.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
+import { MarkdownReadingLayoutControl, type MarkdownReadingLayout } from './MarkdownReadingLayout.js'
 import { objectLinkReference, splitObjectLinkReferences } from '../lib/object-link-reference.js'
 import { useObjectLinkRenderer, useMarkdownDiagramRenderer, useCapsuleEmbedRenderer, type ClientUiPlatform } from '../platform.js'
 import { MarkdownCodeBlock, markdownDiagramLanguage } from './MarkdownCodeBlock.js'
@@ -25,6 +27,24 @@ export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
 export type OpenWorkspaceFile = (path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => void
 export type RenderWorkspaceImage = (path: string, alt: string, linked?: boolean) => ReactNode
 export type RenderMarkdownImage = (href: string, alt: string, linked?: boolean) => ReactNode | undefined
+type ImageNode = Extract<InlineNode, { kind: 'image' }>
+
+/** `<picture>` follows the App appearance owner, not the operating system. */
+function useAppearanceMode(): 'dark' | 'light' {
+  return useSyncExternalStore(listener => observeResolvedTheme(() => listener()), () => readResolvedTheme().mode, () => 'dark')
+}
+
+/** The theme variant replaces only the address; size and alternative text stay the author's. */
+function ThemedImage({ node, render }: { node: ImageNode; render(href: string): ReactNode }) {
+  const mode = useAppearanceMode()
+  return <>{render(node.variants?.[mode] ?? node.href)}</>
+}
+
+/** A declared width/height only sizes the wrapper; it never reaches the image element as an attribute. */
+function imageFrame(node: ImageNode): CSSProperties | undefined {
+  if (!node.width && !node.height) return undefined
+  return { ...(node.width ? { width: node.width } : {}), ...(node.height && !node.width ? { height: node.height } : {}) }
+}
 
 // The Host owns file reads and link destinations; this renderer never opens a URL on its own.
 function defaultOpenHttpLink(): void {}
@@ -99,6 +119,29 @@ function resolveLink(node: Extract<InlineNode, { kind: 'link' }>, context: Inlin
   return url ? { kind: 'http', url } as const : { kind: 'text' } as const
 }
 
+/** One image decision for every port; a theme variant only changes the address. */
+function ImageContent({ node, href, context }: { node: ImageNode; href: string; context: InlineContext }) {
+  if (context.readOnly) {
+    if (context.readOnlyImages) {
+      const image = context.renderImage?.(href, node.alt, context.inLink)
+      if (image !== undefined) return <span data-reading-find-boundary>{image}</span>
+      const pasted = context.readPastedImage ? pastedMarkdownImageReference(href, node.alt) : undefined
+      if (pasted && context.readPastedImage) return <span data-reading-find-boundary><ConversationImage active={context.visible} interactive={false}
+        text={href} path={pasted.path} label={node.alt || href} readImage={context.readPastedImage} /></span>
+    }
+    return <span data-reading-find-boundary className="md-image-attachment md-image-attachment--unavailable" title="Image reference"><ImageReferenceIcon size={14} /> {node.alt || href}</span>
+  }
+  const image = context.renderImage?.(href, node.alt, context.inLink)
+  if (image !== undefined) return <span data-reading-find-boundary>{image}</span>
+  const file = classifyMarkdownLinkHref(href, context.workspaceRoot, context.homeDir, context.sourcePath)
+  if (file && context.documentMode && context.renderWorkspaceImage) return <span data-reading-find-boundary>{context.inLink
+    ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</span>
+  if (context.inLink) return <span data-reading-find-boundary>{node.alt || href}</span>
+  if (file && context.openWorkspaceFile) return <span data-reading-find-boundary><button type="button" className="md-image-attachment" title={file.path}
+    onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}><ImageReferenceIcon size={14} /> {node.alt || file.path}</button></span>
+  return <span data-reading-find-boundary className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed"><ImageReferenceIcon size={14} /> {node.alt || href}</span>
+}
+
 function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContext }) {
   return <>{nodes.map((node, index) => {
     const key = `${node.kind}-${index}`
@@ -119,25 +162,14 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote', String(node.number))}>{node.number}</button></sup>
     }
     if (node.kind === 'image') {
-      if (context.readOnly) {
-        if (context.readOnlyImages) {
-          const image = context.renderImage?.(node.href, node.alt, context.inLink)
-          if (image !== undefined) return <span key={key} data-reading-find-boundary>{image}</span>
-          const pasted = context.readPastedImage ? pastedMarkdownImageReference(node.href, node.alt) : undefined
-          if (pasted && context.readPastedImage) return <span key={key} data-reading-find-boundary><ConversationImage active={context.visible} interactive={false}
-            text={node.href} path={pasted.path} label={node.alt || node.href} readImage={context.readPastedImage} /></span>
-        }
-        return <span key={key} data-reading-find-boundary className="md-image-attachment md-image-attachment--unavailable" title="Image reference"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
-      }
-      const image = context.renderImage?.(node.href, node.alt, context.inLink)
-      if (image !== undefined) return <span key={key} data-reading-find-boundary>{image}</span>
-      const file = classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath)
-      if (file && context.documentMode && context.renderWorkspaceImage) return <span key={key} data-reading-find-boundary>{context.inLink
-        ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</span>
-      if (context.inLink) return <span key={key} data-reading-find-boundary>{node.alt || node.href}</span>
-      if (file && context.openWorkspaceFile) return <span key={key} data-reading-find-boundary><button type="button" className="md-image-attachment" title={file.path}
-        onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}><ImageReferenceIcon size={14} /> {node.alt || file.path}</button></span>
-      return <span key={key} data-reading-find-boundary className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
+      const frame = imageFrame(node)
+      const content = node.variants ? <ThemedImage node={node} render={href => <ImageContent node={node} href={href} context={context} />} />
+        : <ImageContent node={node} href={node.href} context={context} />
+      return frame ? <span key={key} className="md-image-frame" data-sized="" style={frame}>{content}</span> : <Fragment key={key}>{content}</Fragment>
+    }
+    if (node.kind === 'html-mark') {
+      const Tag = node.tag
+      return <Tag key={key} className={`md-${node.tag}`} {...(node.title ? { title: node.title } : {})}><Inline nodes={node.children} context={context} /></Tag>
     }
     const labelContext = { ...context, inLink: true }
     if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
@@ -165,7 +197,7 @@ function inlineLabel(nodes: InlineNode[]): string {
 
 function textOnlyLinkLabel(nodes: InlineNode[]): boolean {
   return nodes.every(node => node.kind === 'text' || node.kind === 'code' ||
-    (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') && textOnlyLinkLabel(node.children))
+    (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike' || node.kind === 'html-mark') && textOnlyLinkLabel(node.children))
 }
 
 function MarkdownTable({ node, context }: { node: Extract<BlockNode, { kind: 'table' }>; context: InlineContext }) {
@@ -176,6 +208,44 @@ function MarkdownTable({ node, context }: { node: Extract<BlockNode, { kind: 'ta
       {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></th>)}</tr></thead>
       <tbody>{node.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index}
         {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></td>)}</tr>)}</tbody></table>
+  </div>
+}
+
+const ALERT_PRESENTATION: Record<MarkdownAlertType, { label: string; Icon: ReturnType<typeof semanticIconComponent> }> = {
+  note: { label: 'Note', Icon: semanticIconComponent('editor.markdown-alert-note') },
+  tip: { label: 'Tip', Icon: semanticIconComponent('editor.markdown-alert-tip') },
+  important: { label: 'Important', Icon: semanticIconComponent('editor.markdown-alert-important') },
+  warning: { label: 'Warning', Icon: semanticIconComponent('editor.markdown-alert-warning') },
+  caution: { label: 'Caution', Icon: semanticIconComponent('editor.markdown-alert-caution') }
+}
+
+/** The type is named in text and by icon; color is a third, redundant signal. */
+function MarkdownAlert({ node, context, path }: { node: Extract<BlockNode, { kind: 'alert' }>; context: InlineContext; path: string }) {
+  const { label, Icon } = ALERT_PRESENTATION[node.alert]
+  return <div className="md-alert" data-alert-type={node.alert} role="note" aria-label={label}>
+    <p className="md-alert__title"><Icon size={14} aria-hidden="true" />{label}</p>
+    {node.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:alert:${index}`} />)}
+  </div>
+}
+
+/** Author widths are proportions of the reading column; cells keep Markdown structure. */
+function MarkdownHtmlTable({ node, context, path }: { node: Extract<BlockNode, { kind: 'html-table' }>; context: InlineContext; path: string }) {
+  const viewport = useVisibleWork<HTMLTableElement>(context.visible && !context.readOnly)
+  const reading = useHorizontalReading<HTMLDivElement>(viewport.visible, node)
+  const head = node.rows.filter(row => row.head), body = node.rows.filter(row => !row.head)
+  const row = (entry: (typeof node.rows)[number], rowIndex: number, section: string) => <tr key={rowIndex}>{entry.cells.map((cell, index) => {
+    const Cell = cell.header ? 'th' : 'td'
+    return <Cell key={index} className="md-html-cell" {...(cell.align ? { 'data-align': cell.align } : {})} {...(cell.valign ? { 'data-valign': cell.valign } : {})}
+      {...(cell.colspan ? { colSpan: cell.colspan } : {})} {...(cell.rowspan ? { rowSpan: cell.rowspan } : {})} style={cell.width ? { width: cell.width } : undefined}>
+      {cell.children.map((child, childIndex) => <Block key={childIndex} node={child} context={context} path={`${path}:${section}:${rowIndex}:${index}:${childIndex}`} />)}
+    </Cell>
+  })}</tr>
+  return <div className="md-table-scroll md-horizontal-reading" {...reading} aria-label={reading.tabIndex === 0 ? 'Scrollable table' : undefined}>
+    <table ref={viewport.ref} className={`md-html-table${node.layout ? ' md-html-table--layout' : ''}`} {...(node.layout ? { role: 'presentation' } : {})}>
+      {node.caption ? <caption><Inline nodes={node.caption} context={context} /></caption> : null}
+      {head.length ? <thead>{head.map((entry, index) => row(entry, index, 'head'))}</thead> : null}
+      <tbody>{body.map((entry, index) => row(entry, index, 'body'))}</tbody>
+    </table>
   </div>
 }
 
@@ -198,7 +268,7 @@ function capsuleBlockReferences(nodes: InlineNode[]): CapsuleBlockReference[] {
       }
       else if (node.kind === 'link') add(node.href, inlineLabel(node.children), position)
       else if (node.kind === 'image') add(node.href, node.alt, position)
-      else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') visit(node.children, String(position))
+      else if (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike' || node.kind === 'html-mark') visit(node.children, String(position))
     })
   }
   visit(nodes)
@@ -211,7 +281,7 @@ function onlyCapsuleReferences(nodes: InlineNode[]): boolean {
     if (node.kind === 'text') return splitObjectLinkReferences(node.text).every(segment => segment.kind === 'object'
       ? segment.reference.target.kind === 'capsule' : !segment.text.trim())
     if (node.kind === 'link' || node.kind === 'image') return objectLinkReference(node.href)?.target.kind === 'capsule'
-    return (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') && onlyCapsuleReferences(node.children)
+    return (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike' || node.kind === 'html-mark') && onlyCapsuleReferences(node.children)
   })
 }
 
@@ -239,16 +309,17 @@ function Block({ node, context, path, topLevel = false }: { node: BlockNode; con
     if (link && target?.kind === 'http' && textOnlyLinkLabel(link.children)) return <ConversationLinkCard url={target.url} href={link.href} label={inlineLabel(link.children)} open={context.openHttpLink} />
   }
   if (node.kind === 'paragraph') {
+    const align = node.align ? { 'data-align': node.align } : {}
     const explicit = node.children.some(child => child.kind === 'image') && node.children.every(child =>
       child.kind === 'break' || child.kind === 'text' && !child.text.trim() || child.kind === 'image' && objectLinkReference(child.href)?.target.kind === 'capsule')
     const references = context.embedCapsules || explicit ? capsuleBlockReferences(node.children) : []
     const pages = <MarkdownCapsuleReferences references={references} context={context} path={path} />
     if (references.length && (explicit || onlyCapsuleReferences(node.children))) return pages
-    return <><p className="md-paragraph"><Inline nodes={node.children} context={context} /></p>{pages}</>
+    return <><p className="md-paragraph" {...align}><Inline nodes={node.children} context={context} /></p>{pages}</>
   }
   if (node.kind === 'heading') {
     const Heading = context.documentMode ? (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[node.level - 1] ?? 'h6' : 'p'
-    return <><Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
+    return <><Heading className="md-heading" data-level={node.level} {...(node.align ? { 'data-align': node.align } : {})} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
       {context.inputMode && node.sourceMarker ? `${node.sourceMarker}${node.children.length ? ' ' : ''}` : null}
       <Inline nodes={node.children} context={context} /></Heading>
       {context.embedCapsules ? <MarkdownCapsuleReferences references={capsuleBlockReferences(node.children)} context={context} path={path} /> : null}</>
@@ -267,6 +338,14 @@ function Block({ node, context, path, topLevel = false }: { node: BlockNode; con
   }
   if (node.kind === 'quote') return <blockquote className="md-quote">{node.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:quote:${index}`} />)}</blockquote>
   if (node.kind === 'rule') return <hr className="md-rule" />
+  if (node.kind === 'container') return <div className="md-container" {...(node.align ? { 'data-align': node.align } : {})} {...(node.indent ? { 'data-indent': '' } : {})}>
+    {node.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:container:${index}`} />)}</div>
+  if (node.kind === 'html-table') return <MarkdownHtmlTable node={node} context={context} path={path} />
+  if (node.kind === 'details') return <details className="md-details" open={node.open || undefined}>
+    <summary className="md-details__summary"><Inline nodes={node.summary} context={context} /></summary>
+    <div className="md-details__body">{node.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:details:${index}`} />)}</div>
+  </details>
+  if (node.kind === 'alert') return <MarkdownAlert node={node} context={context} path={path} />
   if (node.kind === 'table') return <><MarkdownTable node={node} context={context} />
     {context.embedCapsules ? <MarkdownCapsuleReferences references={capsuleBlockReferences([...node.header, ...node.rows.flat()].flat())} context={context} path={path} /> : null}</>
   return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
@@ -304,13 +383,15 @@ type AgentMarkdownProps = {
   renderImage?: RenderMarkdownImage
   /** Reveal one explicitly located original body, without changing semantic disclosures. */
   reveal?: boolean
+  /** Document reading layout owned by the Host; only an interactive file document offers it. */
+  readingLayout?: MarkdownReadingLayout
 }
 
 /** Shared safe content renderer. Parsing is lazy until display or an explicit local query. */
 export function AgentMarkdown(props: AgentMarkdownProps) {
   const { content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
     workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false,
-    readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true, reveal = false, embedIdentity } = props
+    readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true, reveal = false, embedIdentity, readingLayout } = props
   const renderObjectLink = useObjectLinkRenderer()
   const hasDiagramRenderer = Boolean(useMarkdownDiagramRenderer())
   const embedCapsules = Boolean(useCapsuleEmbedRenderer() && embedIdentity && !readOnly && !documentMode)
@@ -341,12 +422,13 @@ export function AgentMarkdown(props: AgentMarkdownProps) {
   },
     [parse, content, isInput, documentMode, readOnly, readOnlyImages, renderObjectLink, readPastedImage, openWorkspaceFile, workspaceRoot, homeDir, sourcePath, hasDiagramRenderer, visible])
   return <ConversationProgressiveBody heavy={needsProgressiveText(content)} reveal={reveal} reading={reading}>
-    <AgentMarkdownBody content={content} className={className} context={context} parse={parse} />
+    <AgentMarkdownBody content={content} className={className} context={context} parse={parse}
+      readingLayout={documentMode && !readOnly ? readingLayout : undefined} />
   </ConversationProgressiveBody>
 }
 
-function AgentMarkdownBody({ content, className, context, parse }: {
-  content: string; className?: string | undefined; context: InlineContext
+function AgentMarkdownBody({ content, className, context, parse, readingLayout }: {
+  content: string; className?: string | undefined; context: InlineContext; readingLayout?: MarkdownReadingLayout | undefined
   parse: () => { document: ReturnType<typeof parseAgentMarkdownDocument> | null; blocks: BlockNode[] } | null
 }) {
   const parsed = parse()
@@ -358,8 +440,14 @@ function AgentMarkdownBody({ content, className, context, parse }: {
   [content, parsed, plainContent, readPastedImage, readOnly, renderObjectLink, documentMode, openWorkspaceFile, workspaceRoot, homeDir, sourcePath])
   if (plainContent) return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p></ConversationImageCollection>
   const { document, blocks } = parsed!
-  return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
-    {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
+  const layout = readingLayout?.value
+  const tools = Boolean(document?.headings.length || readingLayout)
+  return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}
+    {...(layout ? { 'data-reading-width': layout.width, 'data-reading-typeface': layout.typeface, style: { '--md-reading-size': `${layout.fontSize}px` } as CSSProperties } : {})}>
+    {tools ? <div className="md-document-tools" data-reading-find-exclude>
+      {readingLayout ? <MarkdownReadingLayoutControl layout={readingLayout} /> : null}
+      {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
+    </div> : null}
     {blocks.map((block, index) => <Block key={index} node={block} context={context} path={String(index)} topLevel />)}
   </div></ConversationImageCollection>
 }
@@ -402,7 +490,11 @@ function markdownReadingBlocks(blocks: BlockNode[] | null, content: string, cont
         ...inline(node.children)
       ])
       if (node.kind === 'code') return context.hasDiagramRenderer && context.visible && !context.readOnly && markdownDiagramLanguage(node.language) ? [] : [node.text]
-      if (node.kind === 'quote') return project(node.children)
+      if (node.kind === 'quote' || node.kind === 'container') return project(node.children)
+      if (node.kind === 'alert') return [ALERT_PRESENTATION[node.alert].label, ...project(node.children)]
+      // Matches the DOM walker: a summary is a control and a closed body is not readable.
+      if (node.kind === 'details') return node.open ? project(node.children) : []
+      if (node.kind === 'html-table') return node.rows.flatMap(row => row.cells.flatMap(cell => project(cell.children)))
       if (node.kind === 'list') return node.items.flatMap(project)
       if (node.kind === 'table') return [node.header, ...node.rows].flatMap(row => row.flatMap(cell => segments(inline(cell))))
       if (node.kind === 'footnotes') return node.items.flatMap(note => project(note.children))
