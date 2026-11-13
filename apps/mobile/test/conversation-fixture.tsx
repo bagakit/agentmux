@@ -27,6 +27,7 @@ export function fixture() {
   const sessions = new Map([['session-original', session()], ['other', session('other')], ['peer', session('peer')]])
   let page = history(), timeline: AgentTimelineSnapshot = { agentSessionId: 'session-original', revision: 1, items: [] }
   const listeners = new Set<(event: AgentMuxClientEvent) => void>()
+  const statusListeners = new Set<(event: AgentMuxClientEvent) => void>()
   const observers = new Set<(observation: AgentSessionHistoryObservation) => void>()
   const disposeHistory = vi.fn(), unsubscribe = vi.fn()
   const submit = vi.fn<AgentMuxHostedClient['submitAgentPrompt']>().mockImplementation(acceptedPrompt)
@@ -46,6 +47,7 @@ export function fixture() {
     agentSession: (id: string) => { const value = sessions.get(id); if (!value) throw new Error('unknown Session'); return value },
     agentSessions: () => [...sessions.values()],
     onEvent(listener: (event: AgentMuxClientEvent) => void) { listeners.add(listener); return () => { listeners.delete(listener); unsubscribe() } },
+    onStatusEvent(listener: (event: AgentMuxClientEvent) => void) { statusListeners.add(listener); return () => { statusListeners.delete(listener); unsubscribe() } },
     observeSessionHistory: vi.fn<AgentMuxHostedClient['observeSessionHistory']>(async (id, listener) => {
       observers.add(listener)
       return { source: history(id).source, dispose() { observers.delete(listener); disposeHistory() } }
@@ -60,6 +62,9 @@ export function fixture() {
     emit(event: AgentMuxClientEvent) {
       if (event.type === 'agent-session') sessions.set(event.session.agentSessionId, event.session)
       for (const listener of listeners) listener(event)
+      if (event.type === 'agent-session' || event.type === 'connection-state' || event.type === 'agent-error') {
+        for (const listener of statusListeners) listener(event)
+      }
     },
     observe(observation: AgentSessionHistoryObservation) { for (const listener of observers) listener(observation) }
   }

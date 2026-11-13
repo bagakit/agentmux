@@ -111,11 +111,19 @@ const appearanceSnapshot = (appAppearance: 'dark' | 'light') => ({
 })
 const submittedBySession = new Map<string, Array<{ id: string; text: string }>>()
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
+const statusListeners = new Set<(event: AgentMuxClientEvent) => void>()
+function publishClientEvent(event: AgentMuxClientEvent) {
+  for (const listener of listeners) listener(event)
+  if (event.type === 'agent-session' || event.type === 'connection-state' || event.type === 'agent-error') {
+    for (const listener of statusListeners) listener(event)
+  }
+}
 const client = {
   agentSession: (id: string) => { record('sdk.agentSession', { id }); if (missingSessionMetadata && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
   agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
+  onStatusEvent: (listener: (event: AgentMuxClientEvent) => void) => { statusListeners.add(listener); record('sdk.onStatusEvent'); return () => { statusListeners.delete(listener); record('sdk.releaseStatusEvent') } },
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', availability: connected ? 'connected' : 'disconnected' }),
   statusAgent: async (id: string) => {
     if (!densityScene) throw Error('Run status is not observed by this metadata fixture')
@@ -405,7 +413,7 @@ function Scene() {
       waiting.pendingInteraction = undefined
       const row = catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!
       Object.assign(row, { group: 'working', state: 'working', stateMark: 'working', stateLabel: '执行中' })
-      for (const listener of listeners) listener({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
+      publishClientEvent({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
     },
     /** The capture's later steps open the same waiting request again. */
     restoreWaitingRequest: () => {
@@ -414,7 +422,7 @@ function Scene() {
       Object.assign(waiting.pendingInteraction!.request, { id: 'request-next', permissionHook: { receiptId: 'request-next' } })
       const row = catalog.agentPresentation!.find(value => value.agentSessionId === waiting.agentSessionId)!
       Object.assign(row, { group: 'attention', state: 'waiting', stateMark: 'attention', stateLabel: '需要你回应' })
-      for (const listener of listeners) listener({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
+      publishClientEvent({ type: 'agent-session', session: structuredClone(waiting) } as AgentMuxClientEvent)
     },
     prepareFocusState: () => {
       catalog.agentPresentation![1]!.stateMark = 'unknown'
@@ -435,7 +443,7 @@ function Scene() {
     resolveDirectoryIssues: () => { directoryReadFails = false; for (const space of catalog.spaces) delete space.issue },
     unconfirmSelectedMetadata: () => {
       missingSessionMetadata = true
-      for (const listener of listeners) listener({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as AgentMuxClientEvent)
+      publishClientEvent({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as AgentMuxClientEvent)
     },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
     prepareDensity: () => {
