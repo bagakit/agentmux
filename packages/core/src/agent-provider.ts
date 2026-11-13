@@ -86,6 +86,23 @@ export type AgentProviderHookActivationContext = {
 
 export type AgentProviderHookActivation = { active: boolean; code: string; action: string | null }
 
+/** A directory AgentMux itself creates and owns (a Mote or Topic home), never a user Project. */
+export type AgentWorkspaceTrustContext = {
+  ownedRoot: string
+  workspacePath: string
+  env: Readonly<Record<string, string>>
+  signal?: AbortSignal
+}
+
+/** What the Provider's own trust record says after preparation; `unconfirmed` never blocks a launch. */
+export type AgentWorkspaceTrustReceipt = {
+  status: 'trusted' | 'already-trusted' | 'not-applicable' | 'unconfirmed'
+  trustKey: string | null
+  configPath: string | null
+  code: string
+  issue?: string
+}
+
 export type AgentProviderHookNormalizationContext = Readonly<{
   nativeHandle?: Readonly<AgentNativeSessionHandle>
   /** Only the existing durable receipt of this exact Core Run. */
@@ -180,6 +197,8 @@ export type AgentProvider = {
   /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
   planManagedHooks?(context: AgentManagedHookPlanContext): AgentManagedHookPlan | null
   inspectHookActivation?(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation>
+  /** Pre-accept the Provider's folder-trust prompt for an AgentMux-owned home, as a person would. */
+  prepareOwnedWorkspaceTrust?(context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt>
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
@@ -241,6 +260,7 @@ export type AgentProviderDefinition = {
   observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
+  prepareOwnedWorkspaceTrust?: AgentProvider['prepareOwnedWorkspaceTrust']
   buildResumeArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
@@ -485,6 +505,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
+    ...(definition.prepareOwnedWorkspaceTrust ? { prepareOwnedWorkspaceTrust: definition.prepareOwnedWorkspaceTrust } : {}),
     ...(definition.buildForkArgs ? { buildForkLaunch(context: AgentProviderForkContext): AgentLaunchPlan {
       const handle = context.nativeHandle
       if (handle.kind !== 'provider' || handle.providerId !== catalog.id) {

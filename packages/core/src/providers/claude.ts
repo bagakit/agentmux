@@ -5,6 +5,7 @@ import { inspectHookDisableSetting } from './shared.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
+import { prepareClaudeOwnedWorkspaceTrust } from './claude-workspace-trust.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   claudeNativeActivity,
@@ -161,6 +162,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     prepareToolExecutionLaunch: prepareClaudeToolExecutionLaunch,
     prepareExecutionHelper: prepareClaudeExecutionHelper,
     planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
+    prepareOwnedWorkspaceTrust: prepareClaudeOwnedWorkspaceTrust,
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
     readConversationChanges: readClaudeConversationChanges,
