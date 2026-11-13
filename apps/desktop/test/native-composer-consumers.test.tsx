@@ -27,14 +27,15 @@ beforeEach(async () => {
   useLauncherState.setState({ sections: { workspace: { agents: 'expanded', terminal: 'hidden', browser: 'hidden', note: 'hidden' } }, drafts: {}, executors: {} })
 })
 afterEach(async () => { await rm(home, { recursive: true, force: true }) })
-function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
+function connect(captureScreenshot: ReturnType<typeof vi.fn>, countdown = vi.fn(async (_seconds: number) => true)) {
   const handlers = new Map<string, (...args: any[]) => any>()
   const native = { captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: vi.fn() }
-  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: vi.fn(), reportIssue: vi.fn() })
-  registerNativeDesktopIpc({ capture: () => capture.capture(true), native: () => native,
+  const capture = new ScreenCapture({ home, native: () => native, appActive: () => true, edit: vi.fn(), reportIssue: vi.fn(), countdown })
+  registerNativeDesktopIpc({ capture: (mode, options) => capture.capture(true, mode, options), native: () => native,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
-  vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => handlers.get('ui:captureScreenshot')!({}))
+  vi.spyOn(api.ui, 'captureScreenshot').mockImplementation((mode, options) => handlers.get('ui:captureScreenshot')!({}, mode, options))
   vi.spyOn(api.ui, 'readPastedImage').mockImplementation(path => readPastedImage(home, path))
+  return { countdown }
 }
 async function mount(launcher: boolean) {
   if (launcher) {
@@ -103,5 +104,20 @@ it('keeps a late native selection out of the same live Launcher editor after its
   expect(dom.container.querySelector('.tiptap')).toBe(originalEditor)
   await act(async () => { done(result); await vi.mocked(api.ui.captureScreenshot).mock.results[0]!.value })
   expect(dom.draft('region')).toBe('alpha omega')
+  expect(useAppStore.getState().error).toBeNull()
+})
+
+it('the Composer source menu starts a delayed region capture after the chosen countdown', async () => {
+  const captureScreenshot = vi.fn(async () => ({ state: 'cancelled' as const }))
+  const { countdown } = connect(captureScreenshot)
+  await mount(false)
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Choose screenshot source"]')!
+  await act(async () => { trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 })) })
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  expect(items.map(item => item.textContent)).toEqual(['Screen region', 'Region in 3 s', 'Region in 5 s', 'Region in 10 s', 'Entire display…', 'Application window…'])
+  await act(async () => { items.find(item => item.textContent === 'Region in 5 s')!.click() })
+  await vi.waitFor(() => expect(captureScreenshot).toHaveBeenCalledOnce())
+  expect(countdown).toHaveBeenCalledExactlyOnceWith(5)
+  expect(captureScreenshot).toHaveBeenCalledWith({ mode: 'selection', allowEditing: true })
   expect(useAppStore.getState().error).toBeNull()
 })

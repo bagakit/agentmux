@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_OUTPUT_MUTATION ? JSON.parse(process.env.AGENTMUX_OUTPUT_MUTATION) : null
 const selected = process.env.AGENTMUX_OUTPUT_SLICE === 'capture'
-  ? ['apps/desktop/test/screenshot-sources.test.ts', 'apps/desktop/test/screen-capture.test.ts']
+  ? ['apps/desktop/test/screenshot-sources.test.ts', 'apps/desktop/test/screen-capture.test.ts', 'apps/desktop/test/screenshot-countdown.test.ts']
   : process.env.AGENTMUX_OUTPUT_SLICE === 'documents'
     ? ['apps/desktop/test/screenshot-original-files.test.ts', 'apps/desktop/test/system-screenshot-original.test.tsx']
     : ['apps/desktop/test/screenshot-files.test.ts', 'apps/desktop/test/system-screenshot-editor.test.ts']

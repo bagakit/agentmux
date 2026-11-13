@@ -20,6 +20,12 @@ const original = await readFile(source, 'utf8')
 const mutations = slice === 'capture' ? [
   { id: 'exact-source-key', source, from: 'request.choices.get(input.key)', to: 'request.choices.values().next().value', owner: 'selects the exact original display key rather than the first or similarly labelled display' },
   { id: 'original-source-request', source, from: 'input?.requestId !== request.input.requestId', to: 'false', owner: 'rejects stale source requests and embedded frames without changing a healthy selection' },
+  { id: 'delay-waits-for-countdown', source: 'apps/desktop/src/main/screen-capture.ts', from: 'if (!await this.ports.countdown(delaySeconds)) return null', to: 'void this.ports.countdown(delaySeconds)', owner: 'a delayed region capture waits for its countdown and a cancelled countdown captures nothing' },
+  { id: 'countdown-full-delay', source: 'apps/desktop/src/main/screenshot-countdown.ts', from: 'if (run.seconds === 0) { run.finish(true); return }', to: 'if (run.seconds === 1) { run.finish(true); return }', owner: 'counts down each second in an unfocusable window at the bottom of the pointer display, then starts selection' },
+  { id: 'countdown-never-focuses', source: 'apps/desktop/src/main/screenshot-countdown.ts', from: 'window.showInactive(); timer', to: 'window.show(); timer', owner: 'counts down each second in an unfocusable window at the bottom of the pointer display, then starts selection' },
+  { id: 'countdown-escape', source: 'apps/desktop/src/main/screenshot-countdown.ts', from: "escape = globalShortcut.register('Escape', () => run.finish(false))", to: "escape = globalShortcut.register('Escape', () => {})", owner: 'Cancel, Esc and closing the window each resolve without starting selection' },
+  { id: 'countdown-exact-sender', source: 'apps/desktop/src/main/screenshot-countdown.ts', from: '|| event.sender !== run.window.webContents', to: '', owner: 'accepts only the exact countdown window, one countdown at a time and listed delays' },
+  { id: 'countdown-foreign-escape', source: 'apps/desktop/src/main/screenshot-countdown.ts', from: "if (escape) globalShortcut.unregister('Escape')", to: "globalShortcut.unregister('Escape')", owner: 'keeps Cancel when another owner holds Esc and leaves that owner registered' },
   { id: 'capture-source-metadata', source: 'apps/desktop/src/main/screen-capture.ts', from: 'scale: shot.scale, capturedAt } } : {}', to: 'scale: 1, capturedAt } } : {}', owner: 'hands the editor the capture rectangle, scale and start time' }
 ] : slice === 'documents' ? [
   { id: 'original-file-revision', source, from: 'expectedRevision, ...(expectedRevision === null ? { exclusive: true } : {})',
@@ -43,12 +49,12 @@ const mutations = slice === 'capture' ? [
 const originals = Object.fromEntries(await Promise.all([...new Set([source, ...mutations.map(row => row.source)])].map(async path => [path, await readFile(path, 'utf8')])))
 await mkdir(resolve('.tmp'), { recursive: true })
 const out = await mkdtemp(resolve('.tmp/screenshot-output-proof-'))
-const testFiles = slice === 'capture' ? ['screenshot-sources.test.ts', 'screen-capture.test.ts'] : slice === 'documents'
+const testFiles = slice === 'capture' ? ['screenshot-sources.test.ts', 'screen-capture.test.ts', 'screenshot-countdown.test.ts'] : slice === 'documents'
   ? ['screenshot-original-files.test.ts', 'system-screenshot-original.test.tsx'] : ['screenshot-files.test.ts', 'system-screenshot-editor.test.ts']
 const inputFiles = [...new Set([...Object.keys(originals), ...testFiles.map(file => 'apps/desktop/test/' + file),
   'apps/desktop/test/screenshot-outputs.config.mts', 'apps/desktop/scripts/verify-screenshot-outputs.mjs',
   ...(slice === 'export' ? ['apps/desktop/src/main/system-screenshot-editor.ts'] : []),
-  ...(slice === 'capture' ? ['apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/shared/screenshot-source.ts'] : [])])]
+  ...(slice === 'capture' ? ['apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/shared/screenshot-source.ts', 'apps/desktop/src/main/screenshot-countdown.ts', 'apps/desktop/src/shared/screenshot-countdown.ts'] : [])])]
 const inputHashes = async () => Object.fromEntries(await Promise.all(inputFiles.map(async file => [file, sha(await readFile(file))])))
 const sourceHashes = await inputHashes()
 const receipt = { schema: 'agentmux.screenshot-output-proof.v1', passed: false, slice, sourceHash: sha(original), sourceHashes, runs: [] }

@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import { ScreenshotSourcePicker } from '../../../src/main/screenshot-source-picker'
+import { ScreenshotCountdown } from '../../../src/main/screenshot-countdown'
 
 const out = process.env.SCREENSHOT_SOURCES_OUT!
 app.setPath('userData', join(import.meta.dirname, 'user-data'))
@@ -177,6 +178,31 @@ async function run() {
   assert.equal(await next.result, null, 'a new exact selection remains usable after a cancelled late read')
   await until('final private source window closes', async () => next.window.isDestroyed())
   receipt.cases.push({ name: 'pending-discovery-cancel-late-read-and-next-selection' })
+
+  const countdown = new ScreenshotCountdown(() => ({ terminalTheme: 'graphite', appAppearance: appearance }))
+  for (const [theme, file] of [['dark', 'countdown-dark.png'], ['light', 'countdown-light.png']] as const) {
+    appearance = theme
+    const waiting = countdown.wait(3)
+    window = await until('production countdown window', async () => BrowserWindow.getAllWindows().at(-1))
+    await until('countdown shows its first second', async () => { try { return await evaluate(`document.querySelector('.screenshot-countdown__digit')?.textContent==='3'`) } catch { return false } })
+    assert.equal(window.isFocusable(), false, 'the countdown never takes focus from the app being captured')
+    assert.equal(window.isAlwaysOnTop(), true)
+    await settle()
+    await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG())
+    receipt.screenshots.push({ file, appearance, contentSize: window.getContentSize() })
+    if (theme === 'dark') {
+      window.webContents.debugger.attach('1.3')
+      await click('Cancel')
+      assert.equal(await waiting, false, 'Cancel ends the countdown without starting selection')
+    } else {
+      const started = performance.now()
+      assert.equal(await waiting, true, 'the elapsed countdown starts selection')
+      assert.ok(performance.now() - started > 1500, 'selection waits for the remaining seconds')
+    }
+    await until('countdown window closes', async () => window.isDestroyed())
+  }
+  countdown.dispose()
+  receipt.cases.push({ name: 'delayed-capture-countdown-cancel-and-elapse' })
   receipt.passed = true
 }
 void run().catch(async error => {

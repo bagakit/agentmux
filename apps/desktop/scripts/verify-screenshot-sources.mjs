@@ -54,6 +54,8 @@ try {
     external: ['electron'], plugins: [coreModules, sources], alias, logLevel: 'silent' })
   await build({ entryPoints: ['apps/desktop/src/preload/screenshot-source.ts'], outfile: join(preloadRoot, 'screenshot-source.cjs'), bundle: true, platform: 'node', format: 'cjs',
     external: ['electron'], plugins: [sources], logLevel: 'silent' })
+  await build({ entryPoints: ['apps/desktop/src/preload/screenshot-countdown.ts'], outfile: join(preloadRoot, 'screenshot-countdown.cjs'), bundle: true, platform: 'node', format: 'cjs',
+    external: ['electron'], plugins: [sources], logLevel: 'silent' })
   await build({ entryPoints: ['apps/desktop/src/renderer/screenshot-editor/entry.tsx'], outfile: join(rendererRoot, 'entry.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic',
     conditions: ['browser'], plugins: [sources], alias, logLevel: 'silent' })
   const htmlPath = 'apps/desktop/src/renderer/screenshot-editor/index.html', html = await readFile(htmlPath, 'utf8')
@@ -79,8 +81,8 @@ try {
   receipt.native = JSON.parse(await readFile(join(out, 'native.json'), 'utf8'))
   assert.equal(result.code, 0, JSON.stringify(receipt.native.failure) + result.log)
   assert.equal(receipt.native.passed, true)
-  assert.deepEqual(receipt.native.cases.map(row => row.name), ['exact-second-display-with-partial-discovery', 'same-label-application-filter-and-exact-window', 'failed-window-discovery-retries-exact-original-application', 'failed-discovery-retry-and-escape', 'pending-discovery-cancel-late-read-and-next-selection'])
-  assert.deepEqual(receipt.native.screenshots.map(row => row.file), ['displays-dark.png', 'displays-narrow-dark.png', 'applications-light.png', 'applications-narrow-light.png', 'windows-narrow-light.png', 'discovery-failure-dark.png'])
+  assert.deepEqual(receipt.native.cases.map(row => row.name), ['exact-second-display-with-partial-discovery', 'same-label-application-filter-and-exact-window', 'failed-window-discovery-retries-exact-original-application', 'failed-discovery-retry-and-escape', 'pending-discovery-cancel-late-read-and-next-selection', 'delayed-capture-countdown-cancel-and-elapse'])
+  assert.deepEqual(receipt.native.screenshots.map(row => row.file), ['displays-dark.png', 'displays-narrow-dark.png', 'applications-light.png', 'applications-narrow-light.png', 'windows-narrow-light.png', 'discovery-failure-dark.png', 'countdown-dark.png', 'countdown-light.png'])
   for (const [path, sha] of consumed) assert.equal(hash(await readFile(path)), sha, 'Source selection candidate changed during proof: ' + path)
   receipt.passed = true
 } finally {
