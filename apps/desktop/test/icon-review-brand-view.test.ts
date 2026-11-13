@@ -46,10 +46,10 @@ it('opens on the Brand view, shows every realm through the product resolver and 
       // Like the product: launch and the Settings strip name the art's realm; the Launcher does not.
       expect(figure.querySelector('.brand-colophon')?.textContent).toBe(colophon ? hero.colophon : undefined)
       expect(figure.getAttribute('data-borrowed')).toBe(String(hero.artRealm !== id))
-      // Borrowed art says so; only a realm's own painting shows without the lineage note.
-      expect(figure.querySelector('.brand-hero__lineage') !== null).toBe(hero.artRealm !== id)
     }
     expect(panel.textContent).toContain(APP_ICON_CATALOG[id].material)
+    // Borrowed art is explained once for the realm; a realm with its own painting has no note.
+    expect(panel.querySelectorAll('[data-lineage]')).toHaveLength(resolveBrandHero('launch', id).artRealm !== id ? 1 : 0)
   }
   // Arrow keys move the realm in focus across all columns together.
   document.querySelector<HTMLElement>(`[data-brand-realm="${ORIGIN_REALM}"]`)!.click()
