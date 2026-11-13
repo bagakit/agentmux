@@ -155,6 +155,12 @@ it('Survey URL entry preserves explicit preview, failed-image retry and the orig
 })
 
 const connectionUrl = 'https://relay.example.test/connect#offer=original-host-offer'
+/** A complete device.link result, as the Host returns it. */
+function linkResult(url: string, candidates: AgentMuxRpcResult<'device.link'>['candidates'] = []): AgentMuxRpcResult<'device.link'> {
+  const page = new URL(url); page.hash = ''
+  return { hostId: 'original-host', url, pageUrl: page.href, relay: { endpoint: page.host, useTls: page.protocol === 'https:' },
+    mobileAccess: { state: 'connected', message: 'Ready', origin: page.origin }, candidates }
+}
 function devices() {
   return vi.spyOn(api.deviceManagement, 'ls').mockResolvedValue({ hostId: 'original-host',
     mobileAccess: { state: 'connected', message: 'Ready' }, devices: [] })
@@ -162,7 +168,7 @@ function devices() {
 
 it('Mobile offers scanning independently of clipboard or device observation and copies the exact displayed link', async () => {
   devices().mockRejectedValue(new Error('Device observation is unavailable'))
-  const link = vi.spyOn(api.deviceManagement, 'link').mockResolvedValue({ hostId: 'original-host', url: connectionUrl })
+  const link = vi.spyOn(api.deviceManagement, 'link').mockResolvedValue(linkResult(connectionUrl))
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const revoke = vi.spyOn(api.deviceManagement, 'revoke')
   await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
@@ -179,7 +185,7 @@ it('Mobile offers scanning independently of clipboard or device observation and 
   expect(clipboard).toHaveBeenCalledExactlyOnceWith(connectionUrl)
   expect(link).toHaveBeenCalledOnce()
   const refreshed = connectionUrl + '-refreshed'
-  link.mockResolvedValueOnce({ hostId: 'original-host', url: refreshed })
+  link.mockResolvedValueOnce(linkResult(refreshed))
   expect(node('[data-device-action="scan"]').textContent).toBe('Refresh code')
   await dom.click('[data-device-action="scan"]')
   expect(node<HTMLTextAreaElement>('[aria-label="Phone connection link"]').value).toBe(refreshed)
@@ -191,7 +197,7 @@ it('Mobile offers scanning independently of clipboard or device observation and 
 
 it('Mobile can copy first and keeps the original QR and full link available after clipboard failure', async () => {
   devices()
-  const link = vi.spyOn(api.deviceManagement, 'link').mockResolvedValue({ hostId: 'original-host', url: connectionUrl })
+  const link = vi.spyOn(api.deviceManagement, 'link').mockResolvedValue(linkResult(connectionUrl))
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValue(undefined)
   await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
   await dom.click('[data-device-action="copy"]')
@@ -224,12 +230,48 @@ it('Mobile ignores a departed link read and retains the same original device rec
   expect(record.open).toBe(true)
   await dom.click('[data-device-action="copy"]')
   await dom.click('nav [data-settings-target="overview"]')
-  await act(async () => finish({ hostId: 'original-host', url: connectionUrl }))
+  await act(async () => finish(linkResult(connectionUrl)))
   await dom.click('nav [data-settings-target="mobile"]')
   expect(dom.container.querySelector('.connection-link-code')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Phone connection link"]')).toBeNull()
   expect(clipboard).not.toHaveBeenCalled()
-  link.mockResolvedValueOnce({ hostId: 'original-host', url: connectionUrl })
+  link.mockResolvedValueOnce(linkResult(connectionUrl))
   await dom.click('[data-device-action="scan"]')
   expect(node('.connection-link-code svg')).toBeDefined()
+})
+
+it('Mobile lets the person pick the network when this Mac has more than one, and the code follows the choice', async () => {
+  devices()
+  const wired = { address: '10.69.47.238', interface: 'en9', label: 'USB 10/100/1000 LAN', preferred: true }
+  const wifi = { address: '10.69.58.222', interface: 'en0', label: 'Wi-Fi', preferred: false }
+  const at = (address: string) => `http://${address}:8443/#offer=original-host-offer`
+  const link = vi.spyOn(api.deviceManagement, 'link').mockImplementation(async params =>
+    linkResult(at(params.address ?? wired.address), [wired, wifi]))
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
+  expect(dom.container.querySelector('[aria-label="Connection network"]')).toBeNull()
+  await dom.click('[data-device-action="scan"]')
+  const picker = node<HTMLSelectElement>('[aria-label="Connection network"]')
+  expect(picker.value).toBe(wired.address)
+  expect([...picker.options].map(option => option.textContent)).toEqual(['USB 10/100/1000 LAN · 10.69.47.238 · default', 'Wi-Fi · 10.69.58.222'])
+  await act(async () => { picker.value = wifi.address; picker.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
+  expect(node<HTMLTextAreaElement>('[aria-label="Phone connection link"]').value).toBe(at(wifi.address))
+  expect(node<HTMLSelectElement>('[aria-label="Connection network"]').value).toBe(wifi.address)
+  // Refresh and copy keep the chosen network instead of returning to the default one.
+  await dom.click('[data-device-action="scan"]')
+  expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
+  await dom.click('[data-device-action="copy"]')
+  expect(clipboard).toHaveBeenLastCalledWith(at(wifi.address))
+  expect(link).toHaveBeenCalledTimes(3)
+})
+
+it('Mobile hides the network picker when this Mac has one local address', async () => {
+  devices()
+  vi.spyOn(api.deviceManagement, 'link').mockResolvedValue(linkResult('http://192.168.1.20:8443/#offer=original-host-offer',
+    [{ address: '192.168.1.20', interface: 'en0', label: 'Wi-Fi', preferred: true }]))
+  await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
+  await dom.click('[data-device-action="scan"]')
+  expect(dom.container.querySelector('.connection-link-code')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Connection network"]')).toBeNull()
 })
