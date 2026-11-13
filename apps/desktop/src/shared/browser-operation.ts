@@ -29,6 +29,8 @@ export type BrowserOperationStep = {
   evidence?: BrowserStepEvidenceReference[]
   evidenceWarning?: string
   replay?: BrowserReplayStep
+  /** What this call caused, as Main observed it: Browsers the page opened, and the document it moved to. */
+  effects?: { opened?: string[]; navigatedTo?: string }
 }
 export type BrowserOperation = {
   id: string

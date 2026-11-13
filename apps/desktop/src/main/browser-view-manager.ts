@@ -58,6 +58,7 @@ import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './bro
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { beginOwnDispatch, isOwnDispatch, ownDispatchMark, ownDispatchSince, type BrowserOwnDispatch } from './browser-own-dispatch.js'
 import { installBrowserPageInterrupts, describeBrowserPageDialog, BROWSER_PAGE_DIALOG_ANSWERS, type BrowserPageInterrupts } from './browser-page-interrupts.js'
+import { createBrowserStepEffectRecorder, type BrowserStepEffectRecorder } from './browser-step-effects.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
@@ -178,7 +179,7 @@ type BrowserEntry = {
   certificateDecision: BrowserCertificateDecision | null
   activity: BrowserActivityState
   humanControl: boolean
-  activeRun: { operationId: string; signal: AbortSignal; stop: () => void } | undefined
+  activeRun: { operationId: string; signal: AbortSignal; stop: () => void; effects?: BrowserStepEffectRecorder } | undefined
   runInFlight: boolean
   controlRevision: number
   /** Main-owned relationship; absent legacy metadata is unknown, never inferred from the Journal. */
@@ -1558,6 +1559,8 @@ export class BrowserViewManager {
     const child = this.registerEntry(mintObjectId(), view.webContents.getURL() || 'about:blank', parent.storage, view,
       'responsive', parent.workspaceId, undefined, { source, agent: parent.agent, ...(parent.agentWarning ? { warning: parent.agentWarning } : {}) }, { window, originalRequest: true })
     this.observeNativeChild(child, () => this.markResourceRisk(parent, sourceView, 'document-used'))
+    // Main created this Browser for the parent's page; a program's call running now caused it.
+    parent.activeRun?.effects?.opened(child.id)
     child.nativeChild!.projectionPending = true
     this.publishNativeChildOpening(child)
     // Chromium, not startNavigation/loadURL, continues the original guest request.
@@ -2359,6 +2362,7 @@ export class BrowserViewManager {
     entry.activeRun = {
       operationId: operation.id,
       signal: stopController.signal,
+      effects: createBrowserStepEffectRecorder(),
       stop: () => {
         if (stopRequested) return
         stopRequested = true
@@ -3367,6 +3371,12 @@ export class BrowserViewManager {
       requireLive()
       const step = startBrowserOperationStep(operation, name, args)
       activeStep = step
+      const effects = entry.activeRun?.operationId === operation.id ? entry.activeRun.effects : undefined
+      effects?.begin(step.sequence, entry.navigationId)
+      const finishEffects = (): void => {
+        const caused = effects?.finish(step.sequence, entry.navigationId)
+        if (caused) step.effects = caused
+      }
       this.emit(entry)
       if (this.operationJournal) {
         await this.operationJournal.startStep(operation.id, {
@@ -3470,6 +3480,7 @@ export class BrowserViewManager {
         step.status = 'completed'
         step.finishedAt = Date.now()
         step.summary = summarizeBrowserValue(value)
+        finishEffects()
         if (this.stepEvidence && name === 'snapshot') {
           const snapshot = value as BrowserPageSnapshot
           await saveEvidence(pageStepEvidence(snapshot), snapshot.navigationId)
@@ -3486,13 +3497,16 @@ export class BrowserViewManager {
           ...(step.evidence ? { evidence: step.evidence } : {}),
           ...(step.evidenceWarning ? { evidenceWarning: step.evidenceWarning } : {}),
           ...(step.target ? { target: step.target } : {}),
-          ...(step.replay ? { replay: step.replay } : {})
+          ...(step.replay ? { replay: step.replay } : {}),
+          ...(step.effects ? { effects: step.effects } : {})
         })
         this.emit(entry)
         return value
       } catch (error) {
         step.status = signal?.aborted ? 'stopped' : 'failed'
         step.finishedAt = Date.now()
+        // A failed call can still have opened a page or moved this one; say so instead of hiding it.
+        finishEffects()
         step.summary = privateTaskParameters
           ? 'Browser task page call did not report completion. Raw error text is withheld because this invocation contains private parameters; inspect the page before retrying.'
           : (error instanceof Error ? error.message : String(error)).slice(0, 240)
@@ -3509,7 +3523,8 @@ export class BrowserViewManager {
           ...(step.evidence ? { evidence: step.evidence } : {}),
           ...(step.evidenceWarning ? { evidenceWarning: step.evidenceWarning } : {}),
           ...(step.target ? { target: step.target } : {}),
-          ...(step.replay ? { replay: step.replay } : {})
+          ...(step.replay ? { replay: step.replay } : {}),
+          ...(step.effects ? { effects: step.effects } : {})
         })
         this.emit(entry)
         throw error

@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { normalizeBrowserOutcomeJournal } from './browser-outcome-journal.js'
 import { isSensitiveBrowserPageCall } from './browser-operation-step.js'
+import { normalizeBrowserStepEffects } from './browser-step-effects.js'
 import type { BrowserOutcomeRegistration, BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
 
 import { BROWSER_OPERATION_JOURNAL_VERSION, type BrowserOperationJournalStore, type BrowserOperationJournalChanges } from './browser-operation-store.js'
@@ -98,6 +99,7 @@ export type BrowserOperationStepFinish = {
   target?: BrowserReplayTarget
   evidence?: BrowserOperationStep['evidence']
   evidenceWarning?: string
+  effects?: BrowserOperationStep['effects']
 }
 
 /**
@@ -271,6 +273,8 @@ export class BrowserOperationJournal {
     if (input.replay !== undefined) step.replay = sanitizeReplay(input.replay)
     if (input.evidence !== undefined) step.evidence = input.evidence
     if (input.evidenceWarning !== undefined) step.evidenceWarning = clampProse(input.evidenceWarning)
+    const effects = normalizeBrowserStepEffects(input.effects)
+    if (effects) step.effects = effects
     this.publish({ type: 'step-finished', operationId, at: step.finishedAt, step })
     await this.persist(operation, step)
     return cloneStep(step)
@@ -693,15 +697,22 @@ function sanitizeOperation(operation: BrowserOperation): BrowserOperation {
 }
 
 function sanitizeStep(step: BrowserOperationStep): BrowserOperationStep {
+  const { effects: stored, ...rest } = step
   return {
-    ...step,
+    ...rest,
     method: clamp(step.method),
     label: clamp(step.label),
     ...(step.ref ? { ref: clamp(step.ref) } : {}),
     ...(step.target ? { target: sanitizeTarget(step.target) } : {}),
     ...(step.summary ? { summary: clampProse(step.summary) } : {}),
-    ...(step.replay ? { replay: sanitizeReplay(step.replay) } : {})
+    ...(step.replay ? { replay: sanitizeReplay(step.replay) } : {}),
+    // Read back from disk: keep only well-formed facts, never a repaired claim.
+    ...withEffects(normalizeBrowserStepEffects(stored))
   }
+}
+
+function withEffects(effects: BrowserOperationStep['effects']): { effects?: BrowserOperationStep['effects'] } {
+  return effects ? { effects } : {}
 }
 
 function sanitizeTarget(target: BrowserReplayTarget): BrowserReplayTarget {
