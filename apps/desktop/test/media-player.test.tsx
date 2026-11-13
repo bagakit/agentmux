@@ -8,6 +8,7 @@ vi.mock('monaco-editor', () => ({}))
 import { MediaPlayer, type MediaLease } from '../src/renderer/src/components/MediaPlayer'
 import { api } from '../src/renderer/src/lib/api'
 import { classifyStream, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '../src/renderer/src/lib/media-player'
+import { readStyleSheet, stripCssComments } from './helpers/styles'
 
 function ranges(...pairs: [number, number][]): TimeRanges {
   return { length: pairs.length, start: (index: number) => pairs[index]![0], end: (index: number) => pairs[index]![1] } as TimeRanges
@@ -247,6 +248,16 @@ describe('mounted player', () => {
     expect(media().tagName).toBe('AUDIO')
     expect(container.querySelector('.media-player__card')).not.toBeNull()
     expect(container.querySelector('.media-player__primary')?.getAttribute('aria-label')).toBe('Play')
+  })
+
+  it('an audio player keeps no empty picture stage on screen', async () => {
+    await render(<MediaPlayer lease={lease('audio')} name="music/track.mp3" onRetry={() => {}} />)
+    // The element hidden for audio is the one whose own display rule must yield to [hidden].
+    const hidden = [...container.querySelectorAll<HTMLElement>('[hidden]')].filter(element => element.querySelector('.media-player__stage'))
+    expect(hidden).toHaveLength(1)
+    const owner = [...hidden[0]!.classList].find(name => name.startsWith('media-player__'))!
+    const rules = stripCssComments(readStyleSheet('./media-player.css'))
+    expect(rules).toMatch(new RegExp(`\\.${owner}\\[hidden\\]\\s*\\{\\s*display:\\s*none;?\\s*\\}`))
   })
 
   it('leaving stops reading: pause, drop the source and reload the empty element', async () => {
