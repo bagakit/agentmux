@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { loadOrCreateRelayKeyPair } from './rpc-relay-keypair.js'
 import { createAgentMuxRpcRelayClient, type AgentMuxRpcRelayClient } from './public-rpc-relay.js'
-import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
+import { hasConnectionOffer, parseConnectionOfferUrl } from '@agentmux/relay/offer'
 import { type KeyPair } from '@agentmux/relay/e2ee'
 import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection, Socket } from 'node:net'
@@ -80,7 +80,7 @@ export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<stri
   }
   let url: URL
   try { url = new URL(value) } catch { throw new AgentMuxError('Invalid RPC endpoint URI.', 'INVALID_CLI_ARGUMENT') }
-  if (url.hash.startsWith('#offer=')) {
+  if (hasConnectionOffer(value)) {
     try { const offer = parseConnectionOfferUrl(value); if (offer) return { transport: 'relay', offer } }
     catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : 'Invalid Relay offer.', 'INVALID_CLI_ARGUMENT') }
   }
