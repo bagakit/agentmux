@@ -1,10 +1,11 @@
+import { IMAGE_PAGE_STYLE } from '../../image-page-style'
 export const makeComicBook = ({ entries, loadBlob, getSize }, file, { urls: resourceURLs, sanitizeDocument }) => {
     const cache = new Map()
     const urls = new Map()
     const load = async name => {
         if (cache.has(name)) return cache.get(name)
         const src = resourceURLs.createObjectURL(await loadBlob(name))
-        const doc = new DOMParser().parseFromString(`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin: 0"><img src="${src}"></body></html>`, 'text/html')
+        const doc = new DOMParser().parseFromString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${IMAGE_PAGE_STYLE}</style></head><body><img src="${src}"></body></html>`, 'text/html')
         sanitizeDocument(doc)
         const page = resourceURLs.createObjectURL(new Blob([new XMLSerializer().serializeToString(doc)], { type: 'text/html' }))
         urls.set(name, [src, page])
@@ -20,7 +21,7 @@ export const makeComicBook = ({ entries, loadBlob, getSize }, file, { urls: reso
     const exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.jxl', '.avif']
     const files = entries
         .map(entry => entry.filename)
-        .filter(name => exts.some(ext => name.endsWith(ext)))
+        .filter(name => exts.some(ext => name.toLowerCase().endsWith(ext)))
         .sort(new Intl.Collator([], { numeric: true }).compare)
     if (!files.length) throw new Error('No supported image files in archive')
 

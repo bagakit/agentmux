@@ -1,4 +1,5 @@
 import type { ReaderBook } from '../types'
+import { IMAGE_PAGE_STYLE } from '../image-page-style'
 import { BOOK_CONTENT_CSP } from '../security'
 
 /** A fixed-page consumer retains one rendered page, never all pages visited. */
@@ -31,7 +32,7 @@ export function pageBook(name: string, pages: { id: string; size: number }[], co
         const document = URL.createObjectURL(new Blob([
           '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
           `<meta http-equiv="Content-Security-Policy" content="${BOOK_CONTENT_CSP}">`,
-          '<style>html,body{margin:0;height:100%;background:#fff}body{display:flex;justify-content:center}img{max-width:100%;max-height:100%;object-fit:contain}</style>',
+          `<style>${IMAGE_PAGE_STYLE}</style>`,
           `<img alt="Page ${index + 1}" src="${image}">`,
         ], { type: 'text/html' }))
         resident = { index, document, image }
