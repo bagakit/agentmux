@@ -14,7 +14,7 @@ Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: privateRoot, AGENTMUX_S
 const { AgentMuxControlServer } = await import('@agentmux/core')
 const { DesktopControlIpcBridge } = await import('../../../src/main/control-ipc-bridge')
 const execFile = promisify(execFileCallback)
-const receipt = { schema: 'agentmux.settings-navigation.native.v1', passed: false, pid: process.pid, steps: [], screenshots: [], rendererErrors: [] }
+const receipt = { schema: 'agentmux.settings-navigation.native.v1', passed: false, pid: process.pid, steps: [], screenshots: [], rendererErrors: [], nativeFocus: { events: [] } }
 let win, server
 const bridge = new DesktopControlIpcBridge({ isAvailable: () => Boolean(win && !win.isDestroyed()),
   sendRequest: request => win.webContents.send('agentmux:control-request', request),
@@ -34,10 +34,12 @@ const invoke = async (...args) => {
   return value.result
 }
 app.on('window-all-closed', () => {})
+if (process.platform === 'darwin') app.setActivationPolicy('regular')
 await app.whenReady()
 try {
-  win = new BrowserWindow({ width: 1280, height: 800, useContentSize: true, show: false,
+  win = new BrowserWindow({ width: 1280, height: 800, useContentSize: true, show: false, focusable: true,
     webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+  for (const type of ['focus', 'blur']) win.on(type, () => receipt.nativeFocus.events.push({ type, observedAt: Date.now() }))
   win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') receipt.rendererErrors.push(details.message) })
   server = new AgentMuxControlServer({ socketPath: path.join(privateRoot, 'control.sock'), coreClients: () => [], execute: (request, _names, context) => bridge.execute(request, context?.signal) })
   await server.start()
@@ -51,11 +53,30 @@ try {
   await until('Boolean(window.settingsNavigationProof)')
   await read('window.settingsNavigationProof.openMote()')
   await until('window.settingsNavigationProof.facts().inputMounted')
+  // Native activation is asynchronous on macOS. Follow the product's original
+  // document-focus contract, without replacing hasFocus or input observation.
+  // The product consumes document.hasFocus(); native key-window/WebContents
+  // queries remain separate observations rather than extra input gates.
+  receipt.nativeFocus.requestedAt = Date.now(); receipt.nativeFocus.windowId = win.id
+  console.log(`settings-navigation native focus acquiring pid=${process.pid} windowId=${win.id}`)
+  if (process.platform === 'darwin') await app.dock.show()
+  win.show(); app.focus({ steal: true }); win.focus(); win.webContents.focus()
+  const focusDeadline = Date.now() + 12000
+  while (Date.now() < focusDeadline) {
+    const sample = { observedAt: Date.now(), focusable: win.isFocusable(), visible: win.isVisible(),
+      windowFocused: win.isFocused(), contentsFocused: win.webContents.isFocused(), documentFocused: await read('document.hasFocus()') }
+    receipt.nativeFocus.lastObservation = sample
+    if (sample.documentFocused) { receipt.nativeFocus.acquired = sample; break }
+    await new Promise(resolve => setTimeout(resolve, 30))
+  }
+  assert.ok(receipt.nativeFocus.acquired, 'The original real document must acquire focus before testing preserve')
   const before = await read('window.settingsNavigationProof.prepareInput()')
+  assert.equal(await read('document.hasFocus()'), true, 'The original composing document is physically focused')
   assert.equal(before.sameInput, true); assert.equal(before.sameSelection, true)
   assert.equal(before.draft, 'Original Mote draft remains'); assert.equal(before.tabs.length, 1)
   const observed = await invoke('app', 'inspect')
   assert.ok(observed.observation.desktop.overlays.settingsPage.sectionIds.includes('appearance'))
+  assert.equal(observed.observation.desktop.input.provenance, 'observed', 'The product confirms the original physical input owner')
   const opened = await invoke('app', 'focus', '--settings-section', 'appearance')
   assert.equal(opened.navigation.state, 'applied'); assert.equal(opened.overlays.settingsPage.sectionId, 'appearance')
   assert.equal(opened.overlays.settingsPage.visible, true); assert.equal(opened.input.outcome, 'preserved')
@@ -88,6 +109,8 @@ finally {
   try { bridge.dispose() } catch (error) { errors.push(error.message) }
   try { await server?.stop() } catch (error) { errors.push(error.message) }
   try { if (win && !win.isDestroyed()) win.destroy() } catch (error) { errors.push(error.message) }
+  receipt.nativeFocus.releasedAt = Date.now(); receipt.nativeFocus.windowDestroyed = !win || win.isDestroyed()
+  console.log(`settings-navigation native focus released pid=${process.pid} windowDestroyed=${receipt.nativeFocus.windowDestroyed}`)
   receipt.cleanupErrors = errors
   await fs.writeFile(path.join(evidence, 'native.json'), JSON.stringify(receipt, null, 2))
   app.exit(receipt.passed && !errors.length ? 0 : 1)
