@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { channelMetadataSubjectKey, connectionDiagnosisActorKey, groupTarget, type ConnectionRecord, type ConnectionMemberAccess, type GroupDiagnosis, type RoomBinding } from '@agentmux/core/connections'
@@ -14,6 +15,10 @@ import '../styles/connector-group-status.css'
 const RefreshIcon = semanticIconComponent('action.refresh')
 /** A display initial from the shown name; it identifies nobody. */
 const initial = (name: string) => Array.from(name.trim())[0]?.toLocaleUpperCase() ?? '·'
+/** The card lives inside the group menu, which owns Tab and arrow keys; each action joins its
+ * roving focus, so Enter runs it, and stays open on selection like a button in a panel. */
+const menuItem = (control: ReactNode) => isValidElement(control)
+  ? <DropdownMenu.Item asChild disabled={(control.props as { disabled?: boolean }).disabled === true} onSelect={event => event.preventDefault()}>{control}</DropdownMenu.Item> : control
 const actorKey = (actor: ConnectionMemberAccess['actor']) => JSON.stringify([actor.application.domain, actor.application.appId, actor.idType, actor.userId])
 const clock = (value: number | null | undefined) => value === null || value === undefined ? 'Time not recorded' : new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const trafficTime = (value: number | null | undefined) => value === null || value === undefined ? 'Time not recorded' : <time dateTime={new Date(value).toISOString()} title={new Date(value).toLocaleString()}>{clock(value)}</time>
@@ -69,7 +74,7 @@ export function ConnectorGroupStatus({ binding, hostingTarget, report, onCheck, 
         <small>{sent?.receipt === 'confirmed' ? 'Delivery confirmed' : sentValue ? sent ? 'Latest reply to this group' : 'In this group’s recent window' : 'Recent replies unread'}</small></div>
       {model.hint ? <small className="connector-group-status__hint">{model.hint}</small> : null}
     </div>
-    <ConnectorConnectionOverview compact binding={binding} connection={connection} report={report} hostingTarget={hostingTarget} onCheck={onCheck} onNavigate={onNavigate} render={({ action, feedback }) => needsAction ? <div className="connector-group-status__recovery">{action}{feedback}</div> : null} />
+    <ConnectorConnectionOverview compact binding={binding} connection={connection} report={report} hostingTarget={hostingTarget} onCheck={onCheck} onNavigate={onNavigate} render={({ action, feedback }) => needsAction ? <div className="connector-group-status__recovery">{menuItem(action)}{feedback}</div> : null} />
     <div className="connector-group-status__people" role="table" aria-label="Members">
       <div className="connector-group-status__people-title" role="row"><strong role="columnheader">Members</strong><small role="columnheader">Messages</small><small role="columnheader">Agent access</small></div>
       {members.map(member => {
@@ -90,7 +95,7 @@ export function ConnectorGroupStatus({ binding, hostingTarget, report, onCheck, 
     {!members.length ? <small className="connector-group-status__note">{peopleReady ? 'No members in this page' : 'Members not checked'}</small> : null}
     <div className="connector-group-status__scope">
       <small>{unchecked ? 'Some details could not be checked' : incoming?.value ? `${incoming.value.included} recent messages${moreMembers ? ' · more members' : ''}` : 'Activity not checked'}{visible ? <span className="connector-group-status__checked"> · checked {clock(visible.checkedAt)}</span> : null}</small>
-      <button type="button" className="agent-connector-text-action" aria-label="Refresh group status" disabled={checking} onClick={() => { setRequest(value => value + 1); void facts.refresh(undefined, false) }}><RefreshIcon size={12} /></button>
+      {menuItem(<button type="button" className="agent-connector-text-action" aria-label="Refresh group status" disabled={checking} onClick={() => { setRequest(value => value + 1); void facts.refresh(undefined, false) }}><RefreshIcon size={12} /></button>)}
     </div>
   </section>
 }

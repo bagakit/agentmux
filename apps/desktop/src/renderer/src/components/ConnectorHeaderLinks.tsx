@@ -112,7 +112,7 @@ function GroupEntry(props: { binding: RoomBinding; visible: boolean; hostingTarg
     <DropdownMenu.Item className="tab-context-menu__item connector-header-menu__item" data-connection-action="overview" onSelect={event => { if (!props.expanded) { event.preventDefault(); props.onExpand() } else props.onSelect() }}
       title={`${name.label} · ${binding.application.appId} · ${binding.externalConversationId}`}
       aria-label={`${name.label}; ${model.title}; ${binding.externalConversationId}; ${binding.connectionId}`}>
-      <span className="connector-header-menu__group-heading"><ChannelProfileAvatar url={name.profile?.avatarUrl} size={24}><GroupIcon size={16} /></ChannelProfileAvatar><span><strong>{name.label}</strong>{props.identityLabel ? <small>Group {props.identityLabel}</small> : null}<small className="connector-header-menu__receiving" data-state={model.state}>{model.shortTitle}</small></span></span><DetailsIcon size={13} />
+      <span className="connector-header-menu__group-heading"><ChannelProfileAvatar url={name.profile?.avatarUrl} size={24}><GroupIcon size={16} /></ChannelProfileAvatar><span><strong>{name.label}</strong>{props.identityLabel ? <small>Group {props.identityLabel}</small> : null}<small className="connector-header-menu__receiving" data-state={model.state}>{model.shortTitle}</small>{name.issue ? <small className="connector-header-menu__name-issue">{name.issue}</small> : null}</span></span><DetailsIcon size={13} />
     </DropdownMenu.Item>
     {props.expanded ? <>
       <ConnectorGroupStatus key={JSON.stringify([binding.bindingId, binding.revision, props.hostingTarget])} binding={binding} report={snapshot?.report ?? null} hostingTarget={props.hostingTarget} onCheck={props.onCheck} onNavigate={props.onNavigate} />
