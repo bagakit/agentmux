@@ -53,7 +53,7 @@ export function A2ASettingsPane({ notifications, globalNotifications, onSave, on
       </div>
       {onOpenNotifications && <div className="a2a-settings__global"><span>Review global banner duration and sound.</span><button type="button" className="small-button" onClick={onOpenNotifications}>Open Notifications</button></div>}
     </section>
-    <p className="a2a-settings__scope">Agents still receive message references at a confirmed idle opportunity and read original messages by ID. A banner does not mark a message read or accepted.</p>
+    <p className="a2a-settings__scope">Agents still receive message references when their Provider offers an automatic opportunity, or when you notify them from the Inbox, and read original messages by ID. A banner does not mark a message read or accepted.</p>
     <SettingsSaveBar save={save} dirty={draft.dirty} label="Save A2A notifications" onSave={() => void persist()} />
   </div>
 }
