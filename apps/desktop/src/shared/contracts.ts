@@ -1347,6 +1347,9 @@ export type BrowserProfileSummary = {
   notes?: string
   /** How this Profile's pages reach the network; absent follows the system settings. Never holds a password. */
   network?: import('./browser-profile-network.js').BrowserProfileStoredNetwork
+  environment?: import('@agentmux/core/control').BrowserProfileEnvironment
+  /** Transient native application receipt; never stored with Profile metadata. */
+  environmentApplication?: import('@agentmux/core/control').BrowserProfileEnvironmentApplication
   /** False when the person turned Agents off for this Profile; absent means Agents may use it. */
   agentAccess?: false
 }
@@ -1357,6 +1360,8 @@ export type BrowserProfileList = { revision: number; profiles: BrowserProfileSum
 export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string
   /** A new route, or null to follow the system settings again; a proxy server may be the pasted line. */
   network?: import('./browser-profile-network.js').BrowserProfileNetworkInput | null
+  /** Replace UA/request-language settings, or null to restore native defaults. */
+  environment?: import('@agentmux/core/control').BrowserProfileEnvironment | null
   /** Whether Agents may drive Browsers in this Profile; only narrows the global switch. */
   agentAccess?: boolean }
 

@@ -740,8 +740,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' complete:false means saved Tabs could not be read; the list then names only open Browsers.'),
   command('browser.profile.create', '--label TEXT', 'Create an empty Browser Profile with its own sign-ins and site data.', { '--label': 'data' },
     f => ({ label: value(f, '--label', true)! }), PROFILE_NOTICE),
-  command('browser.profile.update', '--profile ID --expected-revision N [--label TEXT] [--hue N | --clear-hue] [--notes TEXT] [--network system|direct|SERVER] [--no-proxy HOST,...]', 'Rename a Browser Profile, change its hue or notes, or choose how its pages reach the network.',
-    { '--profile': 'data', '--expected-revision': 'value', '--label': 'data', '--hue': 'value', '--clear-hue': 'boolean', '--notes': 'data', '--network': 'data', '--no-proxy': 'data' }, f => {
+  command('browser.profile.update', '--profile ID --expected-revision N [--label TEXT] [--hue N | --clear-hue] [--notes TEXT] [--network system|direct|SERVER] [--no-proxy HOST,...] [--environment JSON]', 'Rename a Browser Profile, change its hue or notes, or choose how its pages reach the network.',
+    { '--profile': 'data', '--expected-revision': 'value', '--label': 'data', '--hue': 'value', '--clear-hue': 'boolean', '--notes': 'data', '--network': 'data', '--no-proxy': 'data', '--environment': 'data' }, f => {
       if (f.values.has('--hue') && f.booleans.has('--clear-hue')) invalid('Choose a hue or explicitly clear it, not both.')
       const revision = Number(value(f, '--expected-revision', true))
       if (!Number.isSafeInteger(revision) || revision < 0) invalid('--expected-revision must be the non-negative revision from browser profile ls.')
@@ -755,10 +755,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       const edit = { ...(f.values.has('--label') ? { label: value(f, '--label', true)! } : {}),
         ...(f.booleans.has('--clear-hue') ? { hue: null } : hue === undefined ? {} : { hue }),
         ...(f.values.has('--notes') ? { notes: value(f, '--notes', true)! } : {}),
-        ...(network ? { network } : {}) }
-      if (!Object.keys(edit).length) invalid('Name at least one of --label, --hue, --clear-hue, --notes or --network.')
+        ...(network ? { network } : {}),
+        ...(f.values.has('--environment') ? { environment: jsonValue(value(f, '--environment', true)!, '--environment') } : {}) }
+      if (!Object.keys(edit).length) invalid('Name at least one of --label, --hue, --clear-hue, --notes or --network or --environment.')
       return { profileId: id(f, '--profile', true), expectedRevision: revision, edit }
-    }, PROFILE_NOTICE + ' --expected-revision is the revision from browser profile ls or inspect; an older one is refused with BROWSER_PROFILE_REVISION_CONFLICT and nothing changes, so read again and retry. --hue is an identity color from 0 to 359; hues near red, amber, green or blue read as a status and are refused. An empty --notes clears the notes. --network system follows the system proxy settings, direct uses none, and anything else is one proxy server line such as proxy.example.com:8080 or socks5://proxy.example:1080; a user name or password in the line is refused (proxy sign-in is set in Settings). --no-proxy lists hosts that skip the proxy. A route that cannot be applied leaves the old one in use.'),
+    }, PROFILE_NOTICE + ' --expected-revision is the revision from browser profile ls or inspect; an older one is refused with BROWSER_PROFILE_REVISION_CONFLICT and nothing changes, so read again and retry. --hue is an identity color from 0 to 359; hues near red, amber, green or blue read as a status and are refused. An empty --notes clears the notes. --network system follows the system proxy settings, direct uses none, and anything else is one proxy server line such as proxy.example.com:8080 or socks5://proxy.example:1080; a user name or password in the line is refused (proxy sign-in is set in Settings). --no-proxy lists hosts that skip the proxy. A route that cannot be applied leaves the old one in use. --environment replaces the native session defaults with JSON {"userAgent":"Custom/1.0","acceptLanguages":["fr-FR","de-DE"]}; either field can be omitted, and null restores defaults. UA applies to new pages, request languages to subsequent requests; existing page content and UA are preserved. navigator.language/languages and UA client hints are not overridden by this capability. Inspect the Profile for saved settings and the native application receipt.'),
   command('browser.profile.set-default', '--profile ID', 'Make one Browser Profile the default for Browsers created later.', { '--profile': 'data' },
     f => ({ profileId: id(f, '--profile', true) }), PROFILE_NOTICE + ' Existing Browsers keep their Profile; only Browsers opened later without --profile use the new default.'),
   command('browser.profile.delete', '--profile ID', 'Delete one Browser Profile and clear its sign-ins and site data.', { '--profile': 'data' },

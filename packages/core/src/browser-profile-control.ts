@@ -16,7 +16,9 @@ export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPER
  * `socks5://proxy.example:1080`), with optional Don't proxy entries; Main owns what a valid route is.
  */
 export type BrowserProfileControlEdit = { label?: string; hue?: number | null; notes?: string;
-  network?: { mode: 'system' } | { mode: 'direct' } | { mode: 'proxy'; server: string; bypass?: string[] } }
+  network?: { mode: 'system' } | { mode: 'direct' } | { mode: 'proxy'; server: string; bypass?: string[] };
+  /** Replaces the environment bundle; null restores native defaults. */
+  environment?: BrowserProfileEnvironment | null }
 
 export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.ls' }
@@ -28,6 +30,36 @@ export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; signIn: BrowserProfileProxySignIn }
   | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string }
   | { operation: 'browser.profile.network.check'; profileId: string }
+
+/** Native session defaults, not a complete device identity or webpage language override. */
+export type BrowserProfileEnvironment = { userAgent?: string; acceptLanguages?: string[] }
+/** Native setter receipt. UA covers new pages; request language covers subsequent requests. */
+export type BrowserProfileEnvironmentApplication = { status: 'not-applied' | 'applied' | 'unknown'; scope: 'session-defaults';
+  userAgent?: string; acceptLanguages?: string[]; unsupported: string[]; reason?: string }
+
+export function parseBrowserProfileEnvironment(value: unknown): BrowserProfileEnvironment {
+  const code = 'INVALID_CONTROL_REQUEST', row = record(value, ['userAgent', 'acceptLanguages'], code, 'Browser Profile environment')
+  if (!Object.keys(row).length) fail(code, 'An environment needs a userAgent or acceptLanguages; use null to restore defaults.')
+  const userAgent = row.userAgent === undefined ? undefined : text(row.userAgent, code, 'User agent')
+  if (userAgent !== undefined && (!userAgent.trim() || /[^\x20-\x7e]/u.test(userAgent))) fail(code, 'User agent must be nonempty printable HTTP header text.')
+  let acceptLanguages: string[] | undefined
+  if (row.acceptLanguages !== undefined) {
+    if (!Array.isArray(row.acceptLanguages) || !row.acceptLanguages.length || row.acceptLanguages.some(item => typeof item !== 'string')) fail(code, 'Request languages must be a nonempty list of language tags.')
+    try { acceptLanguages = Intl.getCanonicalLocales(row.acceptLanguages as string[]) }
+    catch { fail(code, 'Request languages must be valid language tags, without HTTP quality weights.') }
+  }
+  return { ...(userAgent === undefined ? {} : { userAgent }), ...(acceptLanguages === undefined ? {} : { acceptLanguages }) }
+}
+
+function environmentApplication(value: unknown, code: string): BrowserProfileEnvironmentApplication {
+  const row = record(value, ['status', 'scope', 'userAgent', 'acceptLanguages', 'unsupported', 'reason'], code, 'Environment application')
+  if (!['not-applied', 'applied', 'unknown'].includes(row.status as string) || row.scope !== 'session-defaults' || !Array.isArray(row.unsupported)) fail(code, 'Environment application is invalid.')
+  const settings = row.userAgent === undefined && row.acceptLanguages === undefined ? {} : parseBrowserProfileEnvironment({
+    ...(row.userAgent === undefined ? {} : { userAgent: row.userAgent }), ...(row.acceptLanguages === undefined ? {} : { acceptLanguages: row.acceptLanguages }) })
+  return { status: row.status as BrowserProfileEnvironmentApplication['status'], scope: 'session-defaults', ...settings,
+    unsupported: row.unsupported.map(item => text(item, code, 'Unsupported environment field')),
+    ...(row.reason === undefined ? {} : { reason: text(row.reason, code, 'Environment application reason') }) }
+}
 
 /** Password input is transient; no read operation or receipt returns it. */
 export type BrowserProfileProxySignIn = { username: string; password: string }
@@ -54,6 +86,8 @@ export type BrowserProfileControlNetwork =
 export type BrowserProfileControlProfile = {
   id: string; label: string; createdAt: number; isDefault: boolean; source: BrowserProfileControlSource | null; hue?: number; notes?: string
   network?: BrowserProfileControlNetwork
+  environment?: BrowserProfileEnvironment
+  environmentApplication?: BrowserProfileEnvironmentApplication
   /** false when the person turned Agents off for this Profile; absent means Agents may use it. */
   agentAccess?: false
 }
@@ -143,13 +177,14 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
       return { operation, label }
     }
     case 'browser.profile.update': {
-      const edit = record(source.edit, ['label', 'hue', 'notes', 'network'], code, 'Browser Profile edit')
+      const edit = record(source.edit, ['label', 'hue', 'notes', 'network', 'environment'], code, 'Browser Profile edit')
       if (!Object.keys(edit).length) fail(code, 'Browser Profile edit names no field.')
       return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile revision'),
         edit: { ...(edit.label === undefined ? {} : { label: text(edit.label, code, 'Browser Profile label', 512) }),
           ...(edit.hue === undefined ? {} : { hue: edit.hue === null ? null : hue(edit.hue, code) }),
           ...(edit.notes === undefined ? {} : { notes: text(edit.notes, code, 'Browser Profile notes', 8192) }),
-          ...(edit.network === undefined ? {} : { network: networkEdit(edit.network, code) }) } }
+          ...(edit.network === undefined ? {} : { network: networkEdit(edit.network, code) }),
+          ...(edit.environment === undefined ? {} : { environment: edit.environment === null ? null : parseBrowserProfileEnvironment(edit.environment) }) } }
     }
     default: return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID') }
   }
@@ -194,7 +229,7 @@ function network(value: unknown, code: string): BrowserProfileControlNetwork {
 }
 
 function profile(value: unknown, code: string): BrowserProfileControlProfile {
-  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess'], code, 'Browser Profile')
+  const row = record(value, ['id', 'label', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess', 'environment', 'environmentApplication'], code, 'Browser Profile')
   if (row.agentAccess !== undefined && row.agentAccess !== false) fail(code, 'Browser Profile Agent access is invalid.')
   if (typeof row.isDefault !== 'boolean') fail(code, 'Browser Profile default flag is invalid.')
   const source = row.source === null ? null : (() => {
@@ -207,6 +242,8 @@ function profile(value: unknown, code: string): BrowserProfileControlProfile {
     isDefault: row.isDefault, source, ...(row.hue === undefined ? {} : { hue: hue(row.hue, code) }),
     ...(row.notes === undefined ? {} : { notes: text(row.notes, code, 'Browser Profile notes', 8192) }),
     ...(row.network === undefined ? {} : { network: network(row.network, code) }),
+    ...(row.environment === undefined ? {} : { environment: parseBrowserProfileEnvironment(row.environment) }),
+    ...(row.environmentApplication === undefined ? {} : { environmentApplication: environmentApplication(row.environmentApplication, code) }),
     ...(row.agentAccess === false ? { agentAccess: false as const } : {}) }
 }
 function usage(value: unknown, code: string): BrowserProfileControlUsage {

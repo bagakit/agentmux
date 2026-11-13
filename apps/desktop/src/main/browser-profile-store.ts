@@ -1,3 +1,4 @@
+import { parseBrowserProfileEnvironment, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -60,6 +61,9 @@ const profileRecordSchema = z
     hue: profileHueSchema.optional(),
     notes: profileNotesSchema.optional(),
     network: profileNetworkSchema.optional(),
+    environment: z.custom<BrowserProfileEnvironment>(value => {
+      try { parseBrowserProfileEnvironment(value); return true } catch { return false }
+    }, 'Browser Profile environment is invalid').optional(),
     // Stored only when Agents are turned off, so an untouched Profile keeps the global switch's answer.
     agentAccess: z.literal(false).optional()
   })
@@ -160,6 +164,7 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     ...(profile.hue === undefined ? {} : { hue: profile.hue }),
     ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes }),
     ...(profile.network === undefined ? {} : { network: structuredClone(profile.network) }),
+    ...(profile.environment === undefined ? {} : { environment: structuredClone(profile.environment) }),
     ...(profile.agentAccess === false ? { agentAccess: false as const } : {})
   }
 }
@@ -224,6 +229,8 @@ export class BrowserProfileStore {
         if (network.mode === 'system') delete updated.network
         else updated.network = network
       }
+      if (edit.environment === null) delete updated.environment
+      else if (edit.environment !== undefined) updated.environment = parseBrowserProfileEnvironment(edit.environment)
       const snapshot = await this.commit({
         ...metadata,
         profiles: metadata.profiles.map((profile) => profile.id === validatedProfileId ? updated : profile)

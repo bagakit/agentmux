@@ -1,3 +1,5 @@
+import type { BrowserProfileEnvironment } from '@agentmux/core/control'
+import { createBrowserProfileEnvironment } from './browser-profile-environment.js'
 import type { Session, WebContents } from 'electron'
 import { browserProfileProxyConfig, type BrowserProfileNetwork } from '../shared/browser-profile-network.js'
 
@@ -13,6 +15,8 @@ import { browserProfileProxyConfig, type BrowserProfileNetwork } from '../shared
 export type BrowserProfileSessionPorts = {
   session(profileId: string): Session
   network(profileId: string): BrowserProfileNetwork | undefined
+  environment?(profileId: string): BrowserProfileEnvironment | undefined
+  defaultLanguage?(): string
   /** Pages already open, so a route change also moves their WebRTC policy. */
   openContents(): readonly WebContents[]
 }
@@ -29,6 +33,9 @@ function routeKey(network: BrowserProfileNetwork | undefined): string {
 }
 
 export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) {
+  const environment = ports.environment && ports.defaultLanguage ? createBrowserProfileEnvironment({
+    session: ports.session, settings: ports.environment, defaultLanguage: ports.defaultLanguage
+  }) : undefined
   // What each session currently uses, and the one application in flight for it.
   const applied = new WeakMap<Session, string>()
   const pending = new WeakMap<Session, { key: string; done: Promise<void> }>()
@@ -67,12 +74,17 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
      * so a Profile without a route opens its page in the same turn, exactly as before routes existed.
      */
     prepare(profileId: string): Promise<void> | undefined {
+      environment?.prepare(profileId)
       const target = ports.session(profileId), network = ports.network(profileId)
       const key = routeKey(network)
       if (applied.get(target) === key) return undefined
       if (!applied.has(target) && !pending.has(target) && network === undefined) { applied.set(target, key); return undefined }
       return apply(target, network, profileId)
     },
+
+    applyEnvironment(profileId: string): void { environment?.prepare(profileId) },
+    environmentApplication(profileId: string) { return environment?.inspect(profileId) },
+    onEnvironmentApplicationChange(listener: (profileId: string) => void): () => void { return environment?.subscribe(listener) ?? (() => {}) },
 
     /** A saved route change: apply it now, so open pages reconnect through the new route. */
     async apply(profileId: string, network: BrowserProfileNetwork | undefined): Promise<void> {

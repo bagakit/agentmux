@@ -1,5 +1,5 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
-import { BrowserWindow, session, webContents, type Session } from 'electron'
+import { app, BrowserWindow, session, webContents, type Session } from 'electron'
 import type {
   BrowserProfileImportSourceSummary,
   BrowserProfileSummary,
@@ -32,7 +32,8 @@ type ImportSourceToken = {
 function cloneProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
   return {
     ...profile,
-    source: profile.source ? { ...profile.source } : null
+    source: profile.source ? { ...profile.source } : null,
+    ...(profile.environment ? { environment: structuredClone(profile.environment) } : {})
   }
 }
 
@@ -69,6 +70,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.sessions = sessions ?? createBrowserProfileSessions({
       session: profileId => session.fromPartition(this.resolvePartition(profileId)),
       network: profileId => this.profiles.get(profileId)?.network,
+      environment: profileId => this.profiles.get(profileId)?.environment,
+      defaultLanguage: () => app.getLocale(),
       openContents: () => webContents.getAllWebContents()
     })
   }
@@ -77,6 +80,11 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   prepareSession(profileId: string): Promise<void> | undefined {
     this.resolvePartition(profileId)
     return this.sessions.prepare(profileId)
+  }
+
+  environmentApplication(profileId: string) { return this.sessions.environmentApplication?.(profileId) }
+  onEnvironmentApplicationChange(listener: (profileId: string) => void): () => void {
+    return this.sessions.onEnvironmentApplicationChange?.(listener) ?? (() => {})
   }
 
   async initialize(): Promise<void> {
@@ -136,7 +144,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   listProfiles(): BrowserProfileSummary[] {
     this.assertInitialized()
-    return [...this.profiles.values()].map(cloneProfile)
+    return [...this.profiles.values()].map(profile => this.presentProfile(profile))
   }
 
   /** Revision of the list this Main last committed or loaded; edits must name it. */
@@ -165,7 +173,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         try {
           const { snapshot, profile } = await this.store.updateProfile(profileId, { ...edit, ...(network === null ? { network: null } : { network }) }, expectedRevision)
           this.adopt(snapshot)
-          return cloneProfile(profile)
+          this.sessions.applyEnvironment?.(profileId)
+          return this.presentProfile(profile)
         } catch (error) {
           // The record kept the old route; put the session back on it too.
           await this.sessions.apply(profileId, previous).catch(() => {})
@@ -174,8 +183,14 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       }
       const { snapshot, profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
       this.adopt(snapshot)
-      return cloneProfile(profile)
+      if (edit.environment !== undefined) this.sessions.applyEnvironment?.(profileId)
+      return this.presentProfile(profile)
     })())
+  }
+
+  private presentProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
+    const application = this.sessions.environmentApplication?.(profile.id)
+    return { ...cloneProfile(profile), ...(application ? { environmentApplication: application } : {}) }
   }
 
   /** Only Browsers created later without an explicit Profile use the new default. */

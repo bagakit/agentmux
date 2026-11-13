@@ -1,5 +1,6 @@
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
+import type { BrowserProfileEnvironmentApplication } from '@agentmux/core/control'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
@@ -349,6 +350,8 @@ export interface BrowserProfileResolver {
   listProfiles?(): readonly { id: string; label: string }[]
   /** Applies this Profile's network route to its session before any of its pages is created; nothing to wait for without a route. */
   prepareSession?(profileId: string): Promise<void> | undefined
+  environmentApplication?(profileId: string): BrowserProfileEnvironmentApplication | undefined
+  onEnvironmentApplicationChange?(listener: (profileId: string) => void): () => void
 }
 
 /**
@@ -433,6 +436,19 @@ export class BrowserViewManager {
     return `Profile “${name}”: ${issue} Browser controls remain available. Open Settings → Browser Profiles → ${name} → Proxy sign-in.`
   }
 
+  private profileEnvironmentWarning(storage: BrowserStorage): string | undefined {
+    if (storage.mode !== 'normal' || !storage.profileId || 'capsule' in storage) return undefined
+    if (this.profiles.environmentApplication?.(storage.profileId)?.status !== 'unknown') return undefined
+    return 'This Profile’s user agent and request-language session defaults could not be confirmed. Existing pages remain available and may still use earlier defaults. Open a new page in this Profile to retry. These settings do not change navigator.language/languages or userAgentMetadata.'
+  }
+
+  private refreshProfileEnvironment(profileId: string): void {
+    for (const entry of this.entries.values()) if (entry.storage.mode === 'normal' && entry.storage.profileId === profileId && !('capsule' in entry.storage)) {
+      try { this.emit(entry) }
+      catch { console.warn('Browser Profile environment feedback could not reach this page. Its original page and application outcome are retained.') }
+    }
+  }
+
   /** Facts from real embedded page owners; external tabs never enter this registry. */
   targets(): AgentMuxBrowserTarget[] {
     return [...this.entries.values()].map(entry => this.projectTarget(entry))
@@ -489,7 +505,8 @@ export class BrowserViewManager {
     const objectLink = this.objectLink(entry, url)
     const profile = this.profileRef(entry.storage)
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
-    const warnings = [entry.agentWarning, proxySignInWarning, !available
+    const environmentWarning = this.profileEnvironmentWarning(entry.storage)
+    const warnings = [entry.agentWarning, proxySignInWarning, environmentWarning, !available
       ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
         ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join('\n')
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, ...(profile ? { profile } : {}), status: available ? 'ready' : 'unavailable',
@@ -655,6 +672,7 @@ export class BrowserViewManager {
 
   private readonly taskExecutions = new Map<string, { entry: BrowserEntry; runId: string | undefined; operationId: string | undefined; stopRequested: boolean }>()
   private readonly unsubscribeTaskAssets: (() => void) | undefined
+  private readonly unsubscribeProfileEnvironment: (() => void) | undefined
 
   constructor(
     private readonly window: BrowserWindow,
@@ -684,6 +702,7 @@ export class BrowserViewManager {
     private readonly nativeWindows: { confirmLeave?(window: BrowserWindow): Promise<boolean> } = {},
     private readonly agents?: BrowserAgentAuthority
   ) {
+    this.unsubscribeProfileEnvironment = profiles.onEnvironmentApplicationChange?.(id => this.refreshProfileEnvironment(id))
     this.unsubscribeTaskAssets = taskAssets?.subscribe(browserId => {
       if (!this.entries.has(browserId)) return
       void this.getTaskAssets(browserId).catch(() => {})
@@ -4136,6 +4155,7 @@ export class BrowserViewManager {
     this.disposePresentationRequester = null
     this.presentationCaptures.clear()
     this.unsubscribeTaskAssets?.()
+    this.unsubscribeProfileEnvironment?.()
     for (const id of [...this.entries.keys(), ...this.releasedEntries.keys()]) {
       const storage = this.entries.get(id)?.storage ?? this.releasedEntries.get(id)?.storage
       if (storage?.mode === 'private') {
@@ -4825,7 +4845,8 @@ export class BrowserViewManager {
       ? appendWarning(entry.activity.warning ?? persistenceWarning, entry.agentWarning)
       : entry.activity.warning ?? persistenceWarning
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
-    const warning = this.closingWarning(entry.id, proxySignInWarning ? appendWarning(currentWarnings, proxySignInWarning) : currentWarnings || undefined)
+    const profileWarnings = [proxySignInWarning, this.profileEnvironmentWarning(entry.storage)].filter(Boolean).join('\n')
+    const warning = this.closingWarning(entry.id, profileWarnings ? appendWarning(currentWarnings, profileWarnings) : currentWarnings || undefined)
     return {
       id: entry.id,
       ...(entry.source ? { source: entry.source } : {}),
