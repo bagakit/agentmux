@@ -5,7 +5,7 @@ import { relative, resolve } from 'node:path'
 import owning from './mote-primary-agent.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations = {
-  'duplicate-banner': ['apps/desktop/src/renderer/src/components/MoteSpaceFrame.tsx', 'presentation="navigation"', 'presentation="bar"'],
+  'duplicate-banner': ['apps/desktop/src/renderer/src/components/MoteWorkface.tsx', 'presentation="navigation"', 'presentation="threads"'],
   'duplicate-profile': ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', "hidden={section !== 'profile' || discussion}", 'hidden={false}'],
   'eager-connections': ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', '<details className="mote-profile__preferences"', '<details open className="mote-profile__preferences"']
 } as const

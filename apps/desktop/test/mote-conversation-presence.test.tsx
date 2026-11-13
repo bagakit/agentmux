@@ -76,7 +76,7 @@ it('both actual navigation consumers share the saved original avatar, retaining 
   })
   expect(image.mock.calls.length).toBeGreaterThan(0)
   for (const call of image.mock.calls) expect(call).toEqual([scratchWorkspace.id, topic.id, { kind: 'image', fileName: 'original.png' }, targetKey()])
-  for (const label of ['Threads', 'Discussion']) await moteClick(button(floatHeader(), label))
+  for (const label of ['Threads', '返回主对话']) await moteClick(button(floatHeader(), label))
   for (const label of ['Profile', 'Discussion']) await moteClick(button(fullHeader(), label))
   expect(app.container.querySelector('.workbench-context-frame .pane-body')).toBe(body)
   expect(app.container.querySelector('.workbench-context-frame [data-activity-session="default-agent"]')).toBe(reader)
@@ -87,7 +87,7 @@ it('both actual navigation consumers share the saved original avatar, retaining 
   for (const key of ['tabs', 'layouts', 'sessions', 'drafts', 'queues'] as const) expect(after[key]).toBe(before[key])
   expect(after.selection).toEqual(before.selection)
   expect(button(floatHeader(), '原成员入口')).toBeDefined()
-  expect(button(fullHeader(), '团队协作')).toBeDefined()
+  expect(button(fullHeader(), '切换对话')).toBeDefined()
   noExecution()
 })
 

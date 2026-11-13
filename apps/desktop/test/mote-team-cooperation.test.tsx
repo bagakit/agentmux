@@ -30,6 +30,10 @@ beforeEach(() => {
     quickMode: { status: 'saved' as const, version: 'original-preference', defaults: { conversation: main } } } : topic)
   app.listTopics.mockResolvedValue(topics)
   vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
+  vi.spyOn(api.moteDialogue, 'read').mockImplementation(async ({ target }) => ({ main: { target,
+    identity: { hostId: 'local', moteId: PMO_TEAMS_TOPIC_ID }, status: 'ready', resource: null,
+    documentRevision: 'file-1', roleRevision: 'role-1', current: main, issue: null }, links: [], incarnation: 'links-1',
+    throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null }))
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([])
   useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === neighborAgent.id
@@ -44,10 +48,10 @@ it('the real Space header reveals only this Mote team and its original request w
   expect(header()).not.toBeNull()
   expect(header().querySelector('.mote-cooperation__identity')).toBeNull()
   expect(header().querySelector('[data-mote-team]')).toBeNull()
-  expect(button(header(), '团队协作').textContent).toContain('1 项待你处理')
-  await moteClick(button(header(), '团队协作'))
+  expect(button(header(), '切换对话').querySelector('[aria-label="1 项待你处理"]')).not.toBeNull()
+  await moteClick(button(header(), '切换对话'))
   const members = team().querySelector('[data-mote-team]')!
-  expect([...members.querySelectorAll('[data-mote-member]')].map(row => row.getAttribute('data-mote-member'))).toEqual([neighborAgent.id, defaultAgent.id])
+  expect([...members.querySelectorAll('[data-mote-member]')].map(row => row.getAttribute('data-mote-member'))).toEqual([neighborAgent.id])
   expect(members.textContent).toContain(request.title)
   expect(members.textContent).not.toContain(customAgent.id)
   expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
@@ -56,13 +60,13 @@ it('the real Space header reveals only this Mote team and its original request w
 it('the real Space team opens the original member and returns to main without losing either draft or layout', async () => {
   await app.mount()
   const before = useAppStore.getState()
-  await moteClick(button(header(), '团队协作'))
-  await moteClick(button(team(), 'Open Other goal'))
+  await moteClick(button(header(), '切换对话'))
+  await moteClick(button(team(), '打开 Other goal'))
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
-  await moteClick(button(header(), '团队协作'))
+  await moteClick(button(header(), '切换对话'))
   expect(team().textContent).toContain('成员')
   expect(team().textContent).toContain('Other goal')
-  await moteClick(button(team(), '返回主 Agent'))
+  await moteClick(button(team(), '主对话'))
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: main.tabId, regionId: main.regionId })
   expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
@@ -72,11 +76,11 @@ it('the real Space team opens the original member and returns to main without lo
 it('the actual floating team keeps navigation in its own workface and can return to the original main Agent', async () => {
   await app.mount(); await moteClick(app.entry())
   const panel = app.panel(), selected = useAppStore.getState().workbenchSpaceSelection
-  await moteClick(button(panel, '团队协作')); await moteClick(button(panel, 'Open Other goal'))
+  await moteClick(button(panel, '切换对话')); await moteClick(button(team(), '打开 Other goal'))
   expect(readPmoTeamsTopicFloatingState()?.reference).toMatchObject({ tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId })
   expect(useAppStore.getState().workbenchSpaceSelection).toBe(selected)
-  expect(panel.querySelector('[data-mote-cooperation]')?.textContent).toContain('Team member')
-  await moteClick(button(panel, '返回主 Agent'))
+  expect(panel.querySelector('[data-mote-cooperation]')?.textContent).toContain('Other goal')
+  await moteClick(button(panel, '返回主对话'))
   expect(readPmoTeamsTopicFloatingState()?.reference).toMatchObject({ tabId: main.tabId, regionId: main.regionId })
   expect(useAppStore.getState().workbenchSpaceSelection).toBe(selected)
   expect(app.send).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
@@ -86,24 +90,26 @@ it('a stale Run request is not promoted into a current human task and unrelated 
   useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === neighborAgent.id
     ? { ...session, pendingInteraction: { ...request, evidence: { ...request.evidence, run: { runId: 'previous-run' } } } } : session) }))
   await app.mount()
-  expect(button(header(), '团队协作').textContent).not.toContain('项待你处理')
-  await moteClick(button(header(), '团队协作'))
-  const row = team().querySelector('[data-mote-member="default-agent"]')
+  expect(button(header(), '切换对话').querySelector('[aria-label$="项待你处理"]')).toBeNull()
+  await moteClick(button(header(), '切换对话'))
+  const row = team().querySelector('[data-mote-member="neighbor-agent"]')
+  expect(row).not.toBeNull()
+  expect(row!.hasAttribute('data-attention')).toBe(false)
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === customAgent.id
     ? { ...session, status: { ...session.status, state: 'error' as const } } : session) })))
-  expect(team().querySelector('[data-mote-member="default-agent"]')).toBe(row)
-  expect(team().querySelectorAll('[data-mote-member]')).toHaveLength(2)
+  expect(team().querySelector('[data-mote-member="neighbor-agent"]')).toBe(row)
+  expect(team().querySelectorAll('[data-mote-member]')).toHaveLength(1)
 })
 
 it('unknown metadata retains the original member and healthy conversation with a local explanation', async () => {
-  await app.mount(); await moteClick(button(header(), '团队协作'))
+  await app.mount(); await moteClick(button(header(), '切换对话'))
   app.listTopics.mockRejectedValue(new Error('Original directory unavailable'))
   useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
     [SCRATCH_WORKSPACE_ID]: { ...state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!, topics: state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics!.map(topic =>
       topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic, readError: 'Original metadata unavailable' } : topic) }
   } }))
   await settleMoteApp()
-  expect(team().querySelectorAll('[data-mote-member]')).toHaveLength(2)
+  expect(team().querySelectorAll('[data-mote-member]')).toHaveLength(1)
   expect(app.container.textContent).toContain('Original metadata unavailable')
   expect(team().textContent).not.toContain('Original metadata unavailable')
   expect(useAppStore.getState().tabs[defaultTab.id]).toBeDefined()
@@ -140,11 +146,11 @@ it('the Mote team reserves human review for its original Goal owner and keeps fo
   await app.mount()
   await act(async () => useAppStore.setState({ demands: Object.fromEntries([goal('Human decision', 'human'), goal('Coordinator follow-up', 'manager'),
     goal('Foreign Host decision', 'human', 'different-original-host'), mixed].map(item => [item.id, item])) }))
-  await moteClick(button(header(), '团队协作'))
+  await moteClick(button(header(), '切换对话'))
   expect(team().querySelectorAll('.mote-cooperation__goal')).toHaveLength(1)
   expect(team().querySelector('.mote-cooperation__goal')?.textContent).toContain('Human decision')
   expect(team().textContent).not.toContain('Foreign Host decision')
-  expect(header().querySelector('.mote-cooperation__team')?.textContent).toContain('2 项待你处理')
+  expect(header().querySelector('[aria-label="2 项待你处理"]')).not.toBeNull()
   expect(app.send).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
 })
 
