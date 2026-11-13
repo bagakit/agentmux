@@ -91,6 +91,6 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
     </details>
     <p className="automation-save-scope">Saves progress, calendar and quiet follow-up defaults. Creates no task and sends no message.</p>
     {!!issue && <p className="settings-inline-error" role="alert">{issue}</p>}
-    <SettingsSaveBar save={save} dirty={draft.dirty} disabled={!!issue} label="Save task defaults" onSave={() => void commit()} />
+    <SettingsSaveBar save={save} dirty={draft.dirty} blocked={issue || undefined} label="Save task defaults" onSave={() => void commit()} />
   </div>
 }

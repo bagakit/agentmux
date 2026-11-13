@@ -280,7 +280,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><button type="button" className="small-button" onClick={undoDelete}>Undo</button></div> : null}
       <footer className="prompt-save-footer">
         <p className="prompt-save-summary" role="status">Saves the whole prompt library.{resource.dirty ? <> {changedCount} changed{deletedCount ? ` · ${deletedCount} pending ${deletedCount === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}</p>
-        <SettingsSaveBar save={saveState} dirty={resource.dirty} disabled={problems.length > 0} label="Save prompts" onSave={() => void save()} />
+        <SettingsSaveBar save={saveState} dirty={resource.dirty} blocked={problems.length ? `${problems.length === 1 ? 'one prompt needs' : `${problems.length} prompts need`} attention.` : undefined} label="Save prompts" onSave={() => void save()} />
       </footer>
     </div>
   )

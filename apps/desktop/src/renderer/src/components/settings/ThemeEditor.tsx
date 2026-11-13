@@ -94,6 +94,6 @@ export function ThemeEditor({ item, appearance, active, onSave, onClose }: {
       <button type="button" className="small-button" onClick={() => { setDraft(structuredClone(saved)); setReset(value => value + 1); setIconError(''); setLive(false); previewTheme(undefined); setFeedback(save.saving ? 'Editor draft restored. The earlier save is still awaiting confirmation.' : save.state === 'error' ? 'Editor draft restored. The earlier save remains unconfirmed.' : 'Editor draft restored to the last confirmed theme.') }}><SemanticIcon name="action.refresh" size={13} /> Restore saved version</button>
       <button type="button" className="small-button" onClick={() => { setLive(false); previewTheme(undefined); onClose() }}><SemanticIcon name="action.close" size={13} /> {dirty ? 'Discard draft and close' : 'Close editor'}</button>
     </div>
-    <SettingsSaveBar save={save} dirty={dirty} disabled={!parsed.success || Boolean(iconError)} label={readonly ? 'Save custom copy' : 'Save theme'} onSave={() => void commit()} />
+    <SettingsSaveBar save={save} dirty={dirty} blocked={iconError || (parsed.success ? undefined : 'review the highlighted theme fields.')} label={readonly ? 'Save custom copy' : 'Save theme'} onSave={() => void commit()} />
   </section>
 }

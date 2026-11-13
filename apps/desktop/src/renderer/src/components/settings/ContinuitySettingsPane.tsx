@@ -194,6 +194,6 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
       </div>
     </details>
     {!valid && <p className="settings-inline-error" role="alert">Enter nonnegative durations with whole millisecond precision and whole-number counts within the safe integer range. The maximum retry base delay must be at least the initial retry base delay.</p>}
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save recovery preferences" onSave={() => void save()} disabled={!valid} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save recovery preferences" onSave={() => void save()} blocked={valid ? undefined : 'review the highlighted durations and counts.'} />
   </div>
 }

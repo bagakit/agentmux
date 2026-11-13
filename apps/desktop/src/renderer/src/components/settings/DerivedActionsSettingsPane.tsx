@@ -204,7 +204,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     </div>
     <footer className="prompt-save-footer">
       {dirty ? <p className="prompt-save-summary" role="status">{`${changedCount} changed${deleted ? ` · ${deleted} pending ${deleted === 1 ? 'deletion' : 'deletions'}` : ''}`}</p> : null}
-      <SettingsSaveBar save={saveState} dirty={dirty} disabled={problems.size > 0} label="Save actions" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={dirty} blocked={problems.size ? `${problems.size === 1 ? 'one action needs' : `${problems.size} actions need`} attention.` : undefined} label="Save actions" onSave={() => void save()} />
     </footer>
   </div>
 }

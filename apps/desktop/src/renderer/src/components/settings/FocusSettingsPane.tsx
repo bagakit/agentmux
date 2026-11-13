@@ -80,6 +80,6 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
       </div>
       <FocusSettingsPreview values={{ ...draft.value, map: validMap.current }} mapPreviewLastValid={Boolean(mapIssue)} active={active} scene={scene} onScene={setScene} previewRef={preview.previewRef} returnAction={preview.returnAction} />
     </div>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} disabled={Boolean(mapIssue)} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} blocked={mapIssue || undefined} onSave={() => void save()} />
   </div>
 }
