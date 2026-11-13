@@ -4,9 +4,9 @@
 
 <br>
 
-**One UI-free Core that drives 13 coding-agent CLIs, with their sessions, permissions,<br>
-status and recovery, through a single typed API.<br>
-One agent-first, terminal-first desktop where people and agents keep working in the same place.**
+**AgentMux runs Codex, Claude Code, Gemini and ten other coding-agent CLIs side by side on your machine.<br>
+The agents live in a separate runtime, so closing or updating the app doesn't stop them,<br>
+and they can operate the workbench themselves through the `amux` CLI.**
 
 <br>
 
@@ -19,7 +19,7 @@ One agent-first, terminal-first desktop where people and agents keep working in 
 
 **English** · [简体中文](README.zh-CN.md)
 
-[Why](#why-agentmux) · [Highlights](#what-you-notice-first) · [Features](#feature-map) · [Architecture](#architecture-three-layers-one-owner-per-fact) · [Principles](#design-principles) · [Quick start](#quick-start) · [Core](#use-the-core) · [CLI](#amux-the-product-is-a-cli) · [Docs](docs/README.md)
+[What it is](#what-agentmux-is) · [Core](#what-the-core-handles) · [Workbench](#the-desktop-workbench) · [Architecture](#architecture) · [Design rules](#design-rules) · [Quick start](#quick-start) · [SDK](#use-the-core) · [CLI](#use-amux) · [Docs](docs/README.md)
 
 </div>
 
@@ -28,48 +28,64 @@ One agent-first, terminal-first desktop where people and agents keep working in 
 > [!NOTE]
 > AgentMux is in active development and has no published release yet. The desktop app currently has to be [built from source](#quick-start) on an Apple Silicon Mac. The design and engineering docs are written in Chinese.
 
-## Why AgentMux
+## What AgentMux is
 
-One agent in one terminal is easy. The trouble starts at five or ten. Every CLI stores sessions, asks for permission, keeps history and resumes in its own way. You find out which one is waiting on you, which one stalled and which one finished by flipping through windows. Restart the app and the original sessions often don't come back. The research and lessons from all those runs end up scattered across conversations you can't find again.
+One agent in one terminal is easy to manage. At five or ten, the differences between CLIs start to cost time: each one stores sessions, asks for permission, keeps history and resumes in its own way. Finding out which agent is waiting on you means flipping through windows, a restart often loses the sessions, and what earlier runs found ends up scattered across conversations.
 
-AgentMux works on three levels:
+AgentMux has three parts. The first can be used on its own.
 
-| Level | What AgentMux does |
+| Part | What it does |
 | --- | --- |
-| **Execution** | `@agentmux/core` keeps each agent's native protocol inside a Provider and exposes one typed API. Processes, PTYs and output bytes belong to **ctxmux**, a separate Rust runtime, not to the UI. Quitting or hot-updating the app never stops an agent mid-task. |
-| **Organization** | **Space**, **Focus** and **Goals** organize your attention. **Survey**, **Recall** and **Topic** accumulate knowledge. **Mote** turns a long-running collaboration into a partner with its own persona. |
-| **Connection** | The CLI and remote clients use public JSON-RPC; Desktop reuses the same business owners over trusted IPC. A unified public service for every capability is the architectural target. |
+| **`@agentmux/core`** | A Node package with no UI dependency. Each CLI's native protocol sits behind a Provider, and one typed API covers sessions, input, permissions, status, history and recovery. It also ships the `amux` CLI and the `agentmux-runtime` server for remote hosts. |
+| **ctxmux** | A Rust runtime bundled with Core as `ctxmux` and `ctxmuxd`. It owns the agent processes, PTYs and output bytes, so an agent's lifetime is independent of any window. |
+| **AgentMux Desktop** | A macOS workbench built on Core: terminals and conversations, layout, a cross-project attention view, goals, notes, an embedded browser and long-lived agent partners. |
 
-Use the Core alone to drive agents from your own host, or use the desktop app for the full workbench.
+## What the Core handles
 
-## What you notice first
+### Agents keep running when the app closes
 
-### 1 · Close the app. The agents keep working.
+Agent processes run in the ctxmux daemon. Quitting or restarting the app, or hot-updating only its UI, leaves healthy Runs alone. When the app comes back, Core reattaches to the **same PID and PTY**, and the terminal continues from its byte cursor.
 
-Agent processes live in the ctxmux daemon, not in a window. Quit or restart the app, or hot-update only the UI, and healthy Runs carry on. When you come back, Core reattaches to the **same PID and PTY** and the terminal resumes from its byte cursor. If a process really has ended and its Provider supports native resume, Core resumes it through the same Session and the Provider's own session handle. **It never quietly swaps in a blank conversation.** On a cold start, agents active in the last 24 hours (the default window) resume automatically; older ones get their tabs, layout, drafts and readable history back first and reconnect the first time you need them to act. After a reboot or power loss the original PTY is gone, so Core starts a new Run for the same Session from its native handle instead of pretending the old process survived.
+If a process has really ended and its CLI supports native resume, Core resumes the same Session through the CLI's own session handle; it does not open a blank conversation in its place. On a cold start, agents active in the last 24 hours (the default window) resume automatically. Older ones get their tabs, layout, drafts and readable history back first, and reconnect the first time you ask them to act. After a reboot or power loss the old PTY is gone, so Core starts a new Run for the same Session from its native handle.
 
 > See [Durable Runtime health](docs/design/behavior/session-recovery.md#durable-runtime-健康) · [On-demand cold-start recovery](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位) · [Terminal runtime](docs/architecture/terminal-runtime.md)
 
-### 2 · You move the view, not the agent
+### One API across 13 agent CLIs
 
-Space › Zone › Tab › Region is **where something is shown**. AgentSession / Run is **what is executing**. They never mix. Drag an agent into another tab, pop it into its own window or arrange a tab as `grid-4`: its Session, Run, host and working directory stay the same, and it keeps running. Core owns the spatial graph, so it can be read and edited without a GUI.
+A Provider absorbs one CLI's differences, and its catalog declares only capabilities that have been verified against that CLI. Clients call the same API for every agent, with no agent-specific branches for protocol behavior.
+
+| Provider | Permission | Native resume | Native fork | Native history |
+| --- | :---: | :---: | :---: | :---: |
+| Codex · Claude | answers | ● | ● | ● |
+| Grok · Antigravity · Cursor · Droid · OpenCode · Kimi | observes | ● | | ● |
+| Gemini · Copilot | observes | ● | | |
+| Hermes | observes | | | ● |
+| TraeX · Pi | — | ● | | ● |
+
+<sub>Source: [`providers/index.ts`](packages/core/src/providers/index.ts) and each Provider's catalog. "Answers" means AgentMux can answer that CLI's permission requests in a structured way; "observes" means it can only see them. A registered Provider doesn't mean the CLI is available on your machine: each one is installed and signed in separately. Custom Providers extend [`defineAgentProvider`](packages/core/src/agent-provider.ts) and [plugins](packages/core/src/agent-plugin.ts); the desktop app currently lists built-in Providers only.</sub>
+
+For the 11 Providers with native history, Core reads the CLI's own session records, either from its files or through the CLI's native app-server: Codex's JSONL session files, Cursor's SQLite `store.db`, Grok's `chat_history.jsonl`, Antigravity's presence lock and transcripts, and so on. The desktop conversation view, the mobile client and `amux agent history --source native` read those records through the same Core interface, and no client keeps a message cache of its own. What Core records itself, such as submission receipts and hook observations, stays a separate source. One Session can switch between its terminal and this conversation view.
+
+> See [Conversation view](docs/design/behavior/conversation-mode.md) · [Conversation protocol](docs/specs/conversation-protocol.md) · [Native conversation reading](packages/core/README.md#原生对话读取)
+
+### Every input is a tracked operation
+
+Sending text to an agent can fail halfway: the PTY may accept the bytes while the reply to the caller is lost. Every agent creation, prompt and structured answer therefore carries an operation ID. If a receipt is lost, look it up by that ID first; even a retry with the same ID never starts a second agent or types the same prompt twice. Receipts record how far an input got, such as saved, accepted by the PTY or confirmed by the CLI's own protocol, and say `unknown` when that can't be established.
+
+Agent-to-agent messages use the same model. Each message has its own identity and a receipt per recipient, and a lost receipt never triggers a resend.
+
+### Layout is separate from execution
+
+Where an agent is shown (Space › Zone › Tab › Region) and what is executing (AgentSession / Run) are separate identities. Dragging an agent into another tab, popping it into its own window or arranging a tab as `grid-4` changes only the layout. The Session, Run, host and working directory stay the same, and the agent keeps running. Core owns the spatial graph, so scripts and agents can read and change it without a GUI:
 
 ```sh
 amux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
 amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 · grid-6 · grid-9
 ```
 
-### 3 · See who needs you, at a glance
+### Agents operate the app through `amux`
 
-<img src="docs/assets/readme/focus-list.webp" alt="Focus: execution contexts grouped into Attention, Working, Results and Idle, with project lanes" width="100%">
-
-<p align="center"><sub>Product screenshots render real components with demo data. The current interface includes both English and Chinese labels.</sub></p>
-
-**Focus** sorts every agent across every project into Attention, Working, Results and Idle / Recovery, with project lanes and a timeline track along the bottom; the original workface loads on the right. Attention also rolls up the navigation tree, so an agent waiting inside a collapsed project shows on that project's row.
-
-### 4 · Agents drive the product through a CLI, not through screenshots
-
-`amux` is the product's public control surface: 25 object modules and 400+ commands over a typed JSON-RPC service of the same scale. Every agent AgentMux starts already has `amux` (`$AGENTMUX_CLI`). Opening an agent inside AgentMux to improve AgentMux itself is a supported, deliberate path.
+`amux` is the product's public control surface: 25 modules and 400+ commands over a typed JSON-RPC service of the same scale. Every agent AgentMux starts already has it (`$AGENTMUX_CLI`). An agent can use it to find out which Zone, Tab and Region it sits in, open other agents beside itself and message them, read what the main window shows and has selected (`app inspect`) or a global observation across objects (`app snapshot`), run programs in the embedded browser or schedule a follow-up prompt, all without screenshots or simulated clicks. Opening an agent inside AgentMux to work on AgentMux itself is a supported workflow.
 
 ```sh
 amux whoami                                   # who am I, which Zone / Tab / Region, which capabilities
@@ -78,67 +94,83 @@ amux agent open --executor codex --region '<my-region>' --split right \
 amux --endpoint 'ssh://user@build-node/' agent ls   # the same command against a remote Core
 ```
 
-## Feature map
+`amux --skill` prints a module catalog of about 4 KB, and `amux <module> --skill` loads one module's guide on demand. Both are generated from the [Core guides](packages/core/guides/README.md). `--endpoint` selects the transport: Unix socket (default), HTTP/SSE (opt-in, token required), SSH stdio, Tailcat stdio or an end-to-end encrypted Relay.
 
-### Work · attention
+### Agents and tools on other machines
 
-With many agents running, the bottleneck is your attention, not compute.
+Over SSH or Tailcat, AgentMux connects to a Core already running on another machine and manages the agents there; connecting deploys nothing on the remote side. A single agent can also be split across two machines, with the agent process and model access on one and the project files and tool execution on the other. Split execution currently works with Claude Code and Codex, each qualified for one specific CLI release.
+
+For a Linux server, build Core, then run `node scripts/linux-release/build.mjs --out DIR` in `packages/core` to produce a Linux x64 tarball that bundles its own Node 24. The target needs glibc 2.34 or newer, and no Node, npm, compiler or network access; the installer starts a headless Core service and prints the connection settings for the desktop app's Hosts list.
+
+> See [Remote management](docs/design/behavior/remote-management.md) · [Remote execution guide](packages/core/guides/actions/remote-execution.md) · [Split execution scope](packages/core/README.md#agent-与工具分端执行) · [Remote Runtime](packages/core/README.md#远程-runtime) · [Linux x64 package](packages/core/README.md#免装-node-的-linux-x64-发布包)
+
+## The desktop workbench
+
+The desktop app groups its views into Work (Space, Focus, Goals), Know (Survey, Recall) and Mote. Topics live inside Space.
+
+<img src="docs/assets/readme/focus-list.webp" alt="Focus: execution contexts grouped into Attention, Working, Results and Idle, with project lanes" width="100%">
+
+<p align="center"><sub>Product screenshots render real components with demo data. The current interface includes both English and Chinese labels.</sub></p>
+
+### Work
+
+**Focus** sorts every agent across every project into Attention, Working, Results and Idle / Recovery, with project lanes and a timeline along the bottom, and opens the selected agent's original workface on the right. Attention also rolls up the navigation tree, so an agent waiting inside a collapsed project shows on that project's row.
 
 <table>
 <tr>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-space-workchamber.webp" alt="Space" width="100%"><br>
-<b>Space · Where is my work?</b><br>
-<sub>A durable spatial model. A Zone binds a folder, a Git worktree or a Topic; a Tab is one complete workface, split into Regions that hold agents, terminals, files, browsers or a Launcher.<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">Spatial model</a></sub>
+<b>Space</b><br>
+<sub>A Zone binds a folder, a Git worktree or a Topic. Each Tab is one workface, split into Regions that hold agents, terminals, files, browsers or a Launcher for starting new work. The layout survives restarts.<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">Spatial model</a></sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-focus-workframe.webp" alt="Focus" width="100%"><br>
-<b>Focus · Who needs me now?</b><br>
-<sub>Execution context across projects, as a List or a collaboration <b>Map</b>. Hover the Focus button for counts per group and the top-priority contexts.<br><a href="docs/design/behavior/focus-context.md">Focus</a> · <a href="docs/design/behavior/collaboration-map.md">Collaboration map</a></sub>
+<b>Focus</b><br>
+<sub>The attention list above, plus a collaboration <b>Map</b>. Hovering the bottom-left Focus button previews the count per group and the top-priority items.<br><a href="docs/design/behavior/focus-context.md">Focus</a> · <a href="docs/design/behavior/collaboration-map.md">Collaboration map</a></sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-goals-companions.webp" alt="Goals" width="100%"><br>
-<b>Goals · What are we trying to achieve?</b><br>
-<sub>Agree on the goal and its success criteria first (Grill), then check results against evidence one criterion at a time (Grounding). Agents can only propose; <b>confirmation and acceptance come only from an authenticated person or device</b>.<br><a href="docs/design/behavior/goals-and-demand.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
+<b>Goals</b><br>
+<sub>Agree on a goal and its success criteria first (Grill), then check results against evidence one criterion at a time (Grounding). Agents can only propose; only an authenticated person or device confirms a goal or accepts a result.<br><a href="docs/design/behavior/goals-and-demand.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
 </td>
 </tr>
 </table>
 
-Hand short tasks to an agent right in a Space workface. Put long ones in a Goal: start one bounded run, or, once the goal is confirmed, let a Supervisor keep it moving (it checks in every 30 minutes by default). Stalled execution is visible, and one click on **PMO patrol** sends an inspection request to the responsible Supervisor. Automation never confirms a goal or accepts a result on your behalf.
+Short tasks go straight to an agent in a workface. Longer ones go into a Goal: start one bounded run, or, once the goal is confirmed, hand it to a Supervisor that checks in every 30 minutes by default. Stalled execution shows up in the list, and **PMO patrol** sends an inspection request to the responsible Supervisor. Automation never confirms a goal or accepts a result on your behalf.
 
 <img src="docs/assets/readme/goals.webp" alt="Goals list: goals, related sessions and execution bindings" width="100%">
 
-### Know · knowledge
+### Know
 
-Work shouldn't disappear with the conversation that produced it. The Know group (Survey, Recall) and Topics in Space turn browsing, notes and experience into one flow.
+Survey and Recall, together with Topics in Space, keep what you and your agents find after the conversation that produced it has ended.
 
 <table>
 <tr>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-survey-prism.webp" alt="Survey" width="100%"><br>
-<b>Survey · Follow a question</b><br>
-<sub>Works as an everyday browser and can be the system default browser on macOS. Anything worth keeping goes explicitly into Recall or a Topic.</sub>
+<b>Survey</b><br>
+<sub>An everyday browser that can also be the macOS default browser. Anything worth keeping goes explicitly into Recall or a Topic.</sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-recall-fold.webp" alt="Recall" width="100%"><br>
-<b>Recall · Keep what you find</b><br>
-<sub>A note is a plain <code>.note.md</code> file. <code>^blockID</code> marks a stable block and <code>[[page #^block]]</code> links to it. Browse the catalog as a tree, as cards or as an infinite-canvas graph.</sub>
+<b>Recall</b><br>
+<sub>Notes are plain <code>.note.md</code> files. <code>^blockID</code> marks a stable block and <code>[[page #^block]]</code> links to it. Browse the catalog as a tree, as cards or as an infinite-canvas graph.</sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-topic-atlas.webp" alt="Topic" width="100%"><br>
-<b>Topic · Build up one subject</b><br>
-<sub>Comes with a wiki, sources, outputs and agent name cards, organized as Category › Topic › Chat › Thread. An enabled wiki is injected into sessions started after it.</sub>
+<b>Topic</b><br>
+<sub>A wiki, sources, outputs and agent name cards, organized as Category › Topic › Chat › Thread. An enabled wiki is injected into sessions started after it.</sub>
 </td>
 </tr>
 </table>
 
-- **People and agents edit the same note at the same time.** Saves are three-way merged: non-overlapping edits merge on their own; on a conflict nothing is written and the receipt returns the base, current and proposed text. Every save goes into immutable history: restore a whole page, or undo just one person's or one agent's round of edits.
-- **The index rebuilds from the files alone.** Bodies are Markdown, metadata and history are local files, and there is no database. `amux notebook scan` rebuilds outline, backlinks and full-text search straight from the files.
-- **Pass on experience.** Distill a reusable practice from a real agent session, review and revise it, then hand it to a Topic or Mote. Only your actual action in the app confirms it; an agent cannot approve itself.
+People and agents can edit the same note at the same time. Saves are three-way merged: edits that don't overlap merge automatically, and on a conflict nothing is written and the receipt returns the base, current and proposed text. Every save goes into an immutable history, so you can restore a whole page or undo one person's or one agent's round of edits. Bodies, metadata and history are local files with no database behind them, and `amux notebook scan` rebuilds outline, backlinks and full-text search from the files alone.
+
+You can also distill a reusable practice from a real agent session, revise it and hand it to a Topic or Mote. Only your action in the app confirms that handoff; an agent cannot approve itself.
 
 > See [Knowledge workflows](docs/design/behavior/knowledge-workflows.md) · [Note file format](docs/specs/note-markdown.md)
 
-### Mote · partners
+### Mote
 
 <table>
 <tr>
@@ -147,11 +179,9 @@ Work shouldn't disappear with the conversation that produced it. The Know group 
 </td>
 <td valign="top">
 
-**A Mote is a team with a persona.** Agents take on tasks; a Mote takes on a standing responsibility. Its identity outlives any single session. Persona, behavior preferences and memory index live in readable, editable `SOUL.md`, `BEHAVIOR.md` and `MEMORY.md` files, loaded when a new session starts.
+A **Mote** is a team with a persona. Agents take on individual tasks; a Mote takes on a standing responsibility, and its identity outlives any single session. The agents doing the work inside it keep their own identities. The Mote's persona, behavior preferences and memory index are readable, editable files (`SOUL.md`, `BEHAVIOR.md`, `MEMORY.md`) loaded whenever a new session starts.
 
-Partners come from two places. Start from a profile: the built-in PMO, or a new Mote whose `SOUL.md` you write yourself. Or start from the work: let agents do concrete tasks in a Topic, and when that direction becomes important, ongoing or frequent, **promote** the Topic to a Mote.
-
-**Promotion doesn't restart agents.** The Topic's knowledge, discussions, outputs, member agents and workface all carry over. If a promotion is interrupted, continue it explicitly with the same operation ID.
+A Mote can start from a profile, such as the built-in PMO or a new Mote whose `SOUL.md` you write yourself. It can also grow out of existing work: when a Topic becomes important, ongoing or frequent, promote it. Promotion carries over the Topic's knowledge, discussions, outputs, member agents and workface without restarting any agent. If a promotion is interrupted, continue it explicitly with the same operation ID.
 
 </td>
 </tr>
@@ -161,23 +191,26 @@ Partners come from two places. Start from a profile: the built-in PMO, or a new 
 
 ### Tools
 
-| Capability | What you can do | Where |
+| Capability | What you can do | Docs |
 | --- | --- | --- |
-| **Agents and conversation** | Switch one Session between terminal and conversation views; read native history, traces, permission and question requests. Conversation, permission cards and the composer come from `@agentmux/client-ui`, shared by desktop and mobile. | [Conversation view](docs/design/behavior/conversation-mode.md) · [Input and mailbox](docs/design/behavior/conversation-input.md) |
-| **Agent-to-agent** | Agents discover each other, send messages, address an exact group, or spawn child agents with a queryable lineage. Every message has its own identity and per-target receipts; a lost receipt never triggers a resend. | [A2A collaboration](docs/design/behavior/a2a-collaboration.md) · [amux protocol](docs/specs/amux-protocol.md) |
-| **Browser** | The embedded browser is a first-class agent workface. `browser run` acts on refs from a page snapshot, not on coordinates; a human demonstration can become a reusable task asset; destructive actions need human approval. Agent automation is off by default; turn it on in Settings › Browser. | [Browser workface](docs/design/behavior/browser-workface.md) |
-| **Remote execution** | Connect over SSH or Tailcat to a Core already running elsewhere and manage agents there, or keep the agent and model on one machine while files and tools execute on another. Connecting deploys nothing remotely. | [Remote management](docs/design/behavior/remote-management.md) · [Remote execution guide](packages/core/guides/actions/remote-execution.md) |
-| **Capsule** | A page an agent builds becomes a durable artifact: after a restart, you and the agent can still find the same page, instead of a localhost URL that died with its shell. | [Capsule PRD](docs/design/behavior/local-page-hosting.md) · [`@agentmux/capsule`](packages/capsule/README.md) |
-| **Toolkit** | Put your own tools in the status bar: scripts, action buttons and result views. Saving or viewing a tool never runs its script. The built-in Performance panel is itself a Toolkit that reads everything through the public CLI. | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
+| **Requests and conversation** | Permission requests, questions and traces appear as cards in the conversation view, next to a rich composer. These components come from `@agentmux/client-ui` and are shared by desktop and mobile. | [Conversation view](docs/design/behavior/conversation-mode.md) · [Input and mailbox](docs/design/behavior/conversation-input.md) |
+| **Agent-to-agent** | Agents discover each other, message one agent or an exact group, and spawn child agents with a queryable lineage. | [A2A collaboration](docs/design/behavior/a2a-collaboration.md) · [amux protocol](docs/specs/amux-protocol.md) |
+| **Browser** | The embedded browser is a workface agents can use. `browser run` acts on refs from a page snapshot rather than coordinates, a human demonstration can become a reusable task, and destructive actions need human approval. Agent automation is off until you enable it in Settings › Browser. | [Browser workface](docs/design/behavior/browser-workface.md) |
+| **Screenshots** | System and browser screenshots open in one annotation editor. From there you can copy the image, save a PNG, pin it on screen or attach it to an agent's draft. | [Capture and recording](docs/design/behavior/capture-and-recording.md) |
+| **macOS native control** | `amux native` lets an authorized agent list apps, windows and displays, read accessibility trees, capture the screen, use the clipboard and send typed input. Each mutating action carries an operation ID and reports its own native verification. | [Native layer](docs/design/behavior/native-desktop.md) · [`native` guide](packages/core/guides/modules/native.md) |
+| **Schedules** | Send an agent a prompt at a calendar time (once, daily, weekly, monthly or yearly), after a countdown, or every N minutes. Arrangements within a Mote's scope show up in its calendar. Delivery while the app is closed or the Mac is asleep isn't guaranteed. | [`schedule` guide](packages/core/guides/modules/schedule.md) |
+| **Capsule** | A page an agent builds becomes a durable artifact on a fixed local address, so you and the agent can still open the same page after a restart. | [Capsule PRD](docs/design/behavior/local-page-hosting.md) · [`@agentmux/capsule`](packages/capsule/README.md) |
+| **Toolkit** | Put your own scripts, action buttons and result views in the status bar. Saving or viewing a tool doesn't run its script. The built-in Performance panel is itself a Toolkit that reads everything through the public CLI. | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
 | **Connectors** | Bring agent conversations into Feishu and Discord (the two built-in adapters): messages, files, questions and permission prompts. Core doesn't depend on this optional package. | [`@agentmux/connectors`](packages/connectors/README.md) |
-| **Files and Git** | Browse, edit and preview files in the working directory, review diffs, manage workspaces and worktrees. | [Files and Git](docs/design/behavior/files-and-git.md) |
+| **Application access sync** | With a command connector you configure, compare one application's account authorization between two machines and copy it one way, then check that the target can use it. It runs manually, one application at a time. | [Application access sync](docs/design/behavior/remote-application-access.md) |
+| **Files and Git** | Browse, edit and preview files in the working directory, review diffs, and manage workspaces and worktrees. | [Files and Git](docs/design/behavior/files-and-git.md) |
 | **Mobile** | On the same Wi-Fi as the Mac, scan a code on your phone to continue existing agents' conversations or watch their terminals over the Mac's end-to-end encrypted local Relay. Agents and history stay on the Mac. | [AgentMux Mobile](apps/mobile/README.md) |
 
 <img src="docs/assets/readme/focus-map.webp" alt="Focus Map: agents as nodes inside nested areas, connected by their messages" width="100%">
 
 <p align="center"><sub>Focus Map: nested areas show where agents belong, edges show real messages and creation links between them, and any node opens its original workface.</sub></p>
 
-## Architecture: three layers, one owner per fact
+## Architecture
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/architecture-dark.svg">
@@ -192,29 +225,19 @@ Partners come from two places. Start from a profile: the built-in PMO, or a new 
 | **AgentMux Core** | Providers, AgentSession, Hooks, Permission, readiness, semantic recovery, and frontend-independent spatial identity, topology and bindings |
 | **Desktop / client** | Screen presentation, focus, host editing, files, Git and browser capabilities; operates agents through Core |
 
-Core doesn't depend on Electron, React or any editor. Three kinds of identity stay separate: Space / Zone / Tab / Region is **presentation**, Project / Workspace is **resources and working directory**, AgentSession / Run is **execution**. Full definitions live in the [concept glossary](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址); the source-level map is [system ownership](docs/architecture/system-ownership.md).
+Core doesn't depend on Electron, React or any editor. Three kinds of identity stay separate: Space / Zone / Tab / Region is **presentation**, Project / Workspace is **resources and working directory**, and AgentSession / Run is **execution**. Full definitions live in the [concept glossary](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址); the source-level map is [system ownership](docs/architecture/system-ownership.md).
+
+The CLI, mobile client and your own programs call Core's public JSON-RPC service. The desktop app reuses the same business owners over trusted IPC, so the GUI and the CLI read the same facts. Moving every capability onto that one public service is the architectural target.
 
 Core ships a pinned ctxmux daemon, CLI and SDK for macOS arm64 and Linux x64 (exact versions in the [darwin-arm64](packages/core/vendor/ctxmux/darwin-arm64/manifest.json) and [linux-x64](packages/core/vendor/ctxmux/linux-x64/manifest.json) manifests), and checks every SHA-256 before installing or activating them. The ctxmux CLI can manage Runs without AgentMux; AgentMux is one of its clients.
 
-### 13 built-in Providers
+## Design rules
 
-Every difference between agents stays inside its Provider and is declared honestly in its catalog. Nothing is declared that hasn't been verified. Clients don't need agent-specific branches for protocol behavior.
+The full text is in [AGENTS.md](AGENTS.md). These five shape most of the product's behavior.
 
-| Provider | Permission | Native resume | Native fork | Native history |
-| --- | :---: | :---: | :---: | :---: |
-| Codex · Claude | answers | ● | ● | ● |
-| Grok · Antigravity · Cursor · Droid · OpenCode · Kimi | observes | ● | | ● |
-| Gemini · Copilot | observes | ● | | |
-| Hermes | observes | | | ● |
-| TraeX · Pi | — | ● | | ● |
+### A failed check doesn't take away a working agent
 
-<sub>Source: [`providers/index.ts`](packages/core/src/providers/index.ts) and each Provider's catalog. "Answers" means it can answer permission requests in a structured way; "observes" means it only observes them. A registered Provider doesn't mean that agent is available on your machine; each CLI is installed and signed in separately.</sub>
-
-## Design principles
-
-The full text is in [AGENTS.md](AGENTS.md). These are the ones that shape product behavior most.
-
-**When a step fails, ask one question: can the agent still work?** Not "did our check pass?"
+When a handshake, probe or bookkeeping step fails, AgentMux decides by whether the agent itself can still work:
 
 | Situation | What AgentMux does |
 | --- | --- |
@@ -223,15 +246,23 @@ The full text is in [AGENTS.md](AGENTS.md). These are the ones that shape produc
 | Confirmed healthy | Stay out of the way |
 | Can't tell | Say it's unknown. Don't guess healthy, and don't guess dead |
 
-A real P0 incident showed that stating this rule was not enough: an agent whose process was alive and whose PTY was still receiving bytes [could never receive another message](docs/casestudy/prompt-refused-after-readiness-consumed.md), because our own readiness bookkeeping was never renewed. Since then, every new `throw`, early return or disabled control has to answer the four questions in [RED-LINES.md](RED-LINES.md) first. The most important one: **"If this code is bypassed, does the path still work?"**
+A real P0 incident showed that stating the rule was not enough: an agent whose process was alive and whose PTY was still receiving bytes [could never receive another message](docs/casestudy/prompt-refused-after-readiness-consumed.md), because AgentMux's own readiness bookkeeping was never renewed. Since then, every new `throw`, early return or disabled control has to answer the four questions in [RED-LINES.md](RED-LINES.md), with file or symbol evidence for each in its commit message. Question 2 must be answered explicitly: "If this code is bypassed, does the path still work?"
 
-**Durable sessions are the foundation.** Resuming the original Session with its original identity comes before everything else. A new process, a screen that merely looks right or a fresh empty session never counts as a successful recovery.
+### Recovery means the original Session
 
-**The terminal must not be slower than a bare terminal.** This is a P0 baseline: AgentMux adds conveniences on top of the terminal, so typing, scrolling and output must feel exactly like the CLI on its own. Otherwise there is no reason for AgentMux to exist. The keystroke and output hot paths never read or write the persistent store, spawn processes, fan out RPCs or queue behind unrelated sessions. See [Continuous terminal reading](docs/design/behavior/terminal-reading.md#terminal-连续向上阅读历史).
+Resuming the original Session with its original identity comes before everything else. A new process, a screen that looks right or a fresh empty session doesn't count as a recovery.
 
-**Control decisions use protocol facts only.** Input eligibility, permissions, state transitions and operation completion come from the runtime's and Provider's native protocols and real operation receipts, never from on-screen text, titles, icons or colors.
+### The terminal must keep up with a bare terminal
 
-**One fact, one owner.** Every fact has exactly one authoritative owner; other layers reference it instead of copying it. Obsolete implementations are deleted outright, with no compatibility shims. Deleting code never means discarding a user's data, identity or workface.
+This is a P0 baseline: typing, scrolling and output have to feel the same as running the CLI on its own. The keystroke and output hot paths don't read or write the persistent store, spawn processes, fan out RPCs or queue behind unrelated sessions. See [Continuous terminal reading](docs/design/behavior/terminal-reading.md#terminal-连续向上阅读历史).
+
+### Control decisions use protocol facts
+
+Input eligibility, permissions, state transitions and operation completion come from the runtime's and the Provider's native protocols and from real operation receipts. On-screen text, titles, icons and colors are never used to decide them.
+
+### One owner per fact
+
+Each fact has one authoritative owner, and other layers reference it. Obsolete implementations are deleted outright, without compatibility shims; deleting code never means discarding a user's data, identity or workface.
 
 ## Quick start
 
@@ -252,7 +283,7 @@ pnpm install --frozen-lockfile   # postinstall verifies the bundled ctxmux binar
 pnpm dev                         # predev builds the dependency chain, Swift native layer and brand assets
 ```
 
-Development mode uses its own user data and never touches the sessions or settings of an installed app.
+Development mode uses its own user data and doesn't touch the sessions or settings of an installed app.
 
 ### Build and install the macOS app
 
@@ -263,7 +294,7 @@ pnpm package:mac           # build AgentMux.app and a DMG (not notarized)
 pnpm package:mac:install   # build and install to ~/Applications/AgentMux.app
 ```
 
-Updating an existing install picks a route by what changed, and never kills a healthy Run:
+Updating an existing install picks a route by what changed, and doesn't kill healthy Runs:
 
 ```sh
 pnpm update:local               # picks the route: UI-only changes hot-update; a changed shell reinstalls; a changed ctxmux stops for a compatibility review
@@ -306,19 +337,13 @@ try {
 }
 ```
 
-- `creation.initialPrompt` records whether the first prompt was delivered (`confirmed`, `unconfirmed`, `unknown` or `not-requested`). It doesn't mean the task is done.
-- Keep the `createOperationId`. If the result is unclear, use it to check this creation as the [Core guide](packages/core/README.md#agent-调用与输入) describes; the same intent never starts a second agent. Don't create again with a new id.
-- For terminals only, use `connectLocalAgentMuxRuntime()`: it connects to the physical runtime without waiting for session and Provider observation.
+- `creation.initialPrompt` records whether the first prompt was delivered: `confirmed`, `unconfirmed`, `unknown` or `not-requested`. It says nothing about whether the task is done.
+- Keep the `createOperationId`. If the result is unclear, check this creation with it as the [Core guide](packages/core/README.md#agent-调用与输入) describes; the same ID never starts a second agent. Don't create again with a new ID.
+- For terminals only, use `connectLocalAgentMuxRuntime()`. It connects to the physical runtime without waiting for session and Provider observation.
 
-Reattaching, follow-up prompts, structured answers, terminals, attachments and recoverable input are covered in the [Core guide](packages/core/README.md#agent-调用与输入). Custom Providers extend [`defineAgentProvider`](packages/core/src/agent-provider.ts) and [plugins](packages/core/src/agent-plugin.ts); the desktop app currently lists built-in Providers only.
+Reattaching, follow-up prompts, structured answers, terminals, attachments and recoverable input are covered in the [Core guide](packages/core/README.md#agent-调用与输入).
 
-## `amux`: the product is a CLI
-
-The design target is that every capability goes through one typed JSON-RPC public service. The CLI, mobile and your own programs call that service directly; the desktop app reuses the same business owners over trusted IPC, so the GUI and the CLI always see the same facts.
-
-- **Agents operate the product without simulated clicks.** `app inspect` reads what the main window actually shows and has selected, `app snapshot` reads a global observation across objects, and object commands do the work. Nothing the product already offers is done through screenshots and coordinates.
-- **The surface describes itself.** `amux --skill` is a module catalog of about 4 KB, and `amux <module> --skill` loads one module's guide on demand. Both are generated from the same source as the [Core guides](packages/core/guides/README.md).
-- **One flag switches transport.** Unix socket (default), HTTP/SSE (opt-in, token required), SSH stdio, Tailcat stdio and an end-to-end encrypted Relay, all selected with `--endpoint`.
+## Use `amux`
 
 `amux` is already on `PATH` in agents and terminals started by AgentMux. Discover real resources first, then substitute their IDs below:
 
@@ -335,9 +360,7 @@ amux agent send --to-session '<session-id>' --text 'Keep verifying this change'
 amux agent broadcast --to-sessions '<sid-a>,<sid-b>' --text 'Sync your progress'
 ```
 
-Use the Session and spatial address from the creation receipt for follow-up operations; never infer a target from a name or from focus. If a receipt is lost, query the original `operation-id` before doing anything else. Don't recreate the agent or resend the first task. The full command guide is [object operations](docs/guides/agentmux-cli-object-control.md); exact arguments always come from `--help` / `--skill` of the version you run.
-
-New features must decide whether they reuse, change or add JSON-RPC and CLI surface; shipping only a GUI doesn't count as done. See [object-first CLI](docs/design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) and the [public capability contribution rules](docs/guides/public-capability-contributions.md).
+Follow-up operations use the Session and spatial address from the creation receipt, not a name or the current focus. If a receipt is lost, query the original `operation-id` first; don't recreate the agent or resend the first task. The full command guide is [object operations](docs/guides/agentmux-cli-object-control.md). Exact arguments come from `--help` / `--skill` of the version you run.
 
 ## Repository layout
 
@@ -379,7 +402,7 @@ pnpm check        # typecheck + test:fast + test:native + build
 
 CI is defined in [`.github/workflows`](.github/workflows): Verify runs `pnpm check` on ubuntu-24.04 and macos-14, and Nightly runs `pnpm test:nightly` every day. The desktop build needs the macOS toolchain, and `test:native` plus the reliability tests only really execute on macOS arm64.
 
-Pick verification by the kind of change. An implementation task counts as done only when it passes **mutation testing** (break the implementation and its test must fail) and a check of the real product call chain. Visual changes get an independent agent's review of real screenshots. Layout or session-lifecycle changes must show the original workface still recovers after a real process restart. See the [testing strategy](docs/testing/strategy.md) and the [visual review guide](docs/guides/agent-visual-e2e-review.md).
+Pick verification by the kind of change. An implementation task counts as done only when it passes **mutation testing** (break the implementation and its test must fail) and a check of the real product call chain. Visual changes get an independent agent's review of real screenshots, and layout or session-lifecycle changes must show the original workface still recovers after a real process restart. See the [testing strategy](docs/testing/strategy.md) and the [visual review guide](docs/guides/agent-visual-e2e-review.md).
 
 ## Contributing
 
@@ -390,6 +413,8 @@ Before you start, read:
 3. [Document truth and maintenance](docs/guides/document-truth-and-maintenance.md): what each kind of document answers and how to maintain it.
 
 Requirements start as ideas: capture and consolidate them in `docs/ideas/`, merge confirmed ones into the owning design document, and register a Tracker task once execution is decided. Research, plans and reviews stay on your machine and are never committed; see the [process material rules](docs/process-directories.md). Each commit carries one responsibility and lands on the latest `main` as a single-parent commit once accepted.
+
+A new feature must decide whether it reuses, changes or adds JSON-RPC and CLI surface; a GUI alone doesn't count as done. See [object-first CLI](docs/design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) and the [public capability contribution rules](docs/guides/public-capability-contributions.md).
 
 ## Documentation
 
