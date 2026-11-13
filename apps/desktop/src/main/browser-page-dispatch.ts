@@ -160,6 +160,10 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {
   const self = this;
   if (!(self instanceof HTMLElement)) return { ok: false, reason: 'is not an element' };
   const editable = self.isContentEditable;
+  // Pickers have no caret and drop inserted text, so they take a value instead of typing.
+  if ((self instanceof HTMLInputElement && ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'].includes(self.type)) || self instanceof HTMLSelectElement) {
+    return { ok: false, picker: true, reason: 'is a picker' };
+  }
   const field = self instanceof HTMLInputElement || self instanceof HTMLTextAreaElement;
   if (!editable && !field) return { ok: false, reason: 'is not a text field or editable element' };
   if (field && (self.disabled || self.readOnly)) return { ok: false, reason: self.disabled ? 'is disabled' : 'is read-only' };
@@ -180,6 +184,58 @@ const PREPARE_TEXT_DECLARATION = `function (replace) {
   }
   globalThis.__agentMuxTextFocus = previous;
   return { ok: true, before, caret };
+}`
+
+/**
+ * A picker field (date, time, month, week, color, range, select) takes a value, not typed text.
+ *
+ * The value is checked first, so a value the field would not take changes nothing: Chromium answers
+ * a malformed date by clearing the field, and an unknown option by deselecting it. A select is matched
+ * by option value, then by its visible label. The value then goes through the element's own setter, and
+ * input and change follow as a person's pick would fire them. Returns what the setter left (`taken`,
+ * which differs from the given value only where the field normalizes it, such as a range clamped to its
+ * maximum or seconds dropped from a time) and what the field holds once the page's own handlers ran (`after`).
+ */
+const SET_PICKER_VALUE_DECLARATION = `function (value) {${RESTORE_FOCUS_SNIPPET}
+  const self = this;
+  if (self.disabled || self.readOnly) return { ok: false, reason: self.disabled ? 'is disabled' : 'is read-only' };
+  const quoted = JSON.stringify(value);
+  let next = value;
+  if (self instanceof HTMLSelectElement) {
+    const options = Array.from(self.options);
+    const option = options.find((item) => item.value === value) ?? options.find((item) => item.label.trim() === value.trim());
+    if (!option) return { ok: false, reason: 'has no option with the value or label ' + quoted };
+    if (option.disabled) return { ok: false, reason: 'has the option ' + quoted + ' turned off' };
+    next = option.value;
+  } else if (self.type === 'range') {
+    if (!value.trim() || !Number.isFinite(Number(value))) return { ok: false, reason: 'takes a number, not ' + quoted };
+  } else if (self.type === 'color') {
+    if (!/^#[0-9a-fA-F]{6}$/.test(value)) return { ok: false, reason: 'takes a color written #rrggbb, not ' + quoted };
+  } else if (value !== '') {
+    // A detached input of the same type applies the same sanitizing rule without touching the page.
+    const trial = document.createElement('input');
+    trial.type = self.type;
+    trial.value = value;
+    if (trial.value === '') {
+      const examples = { date: '2026-03-04', time: '14:30', 'datetime-local': '2026-03-04T14:30', month: '2026-03', week: '2026-W10' };
+      return { ok: false, reason: 'does not take ' + quoted + ' as a ' + self.type + '; write it like ' + (examples[self.type] ?? 'the field shows') };
+    }
+  }
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(self), 'value')?.set;
+  if (!setter) return { ok: false, reason: 'has no value to set' };
+  const before = self.value;
+  const previous = document.activeElement;
+  self.focus();
+  setter.call(self, next);
+  const taken = self.value;
+  if (taken !== before) {
+    self.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    self.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  const after = self.value;
+  // The page's focus goes back where the person had it, as after typing.
+  restoreFocus(self, previous);
+  return { ok: true, before, taken, after, wanted: next };
 }`
 
 /** The value after native text input, read in the same isolated world; page code cannot answer for it. */
@@ -671,6 +727,22 @@ export function createBrowserPageDispatch(
     return undefined
   }
 
+  /** Set a picker's value. typeText on a picker has nothing to append to, so it is refused before anything changes. */
+  async function pickerValue(ref: string, send: typeof session.sendCommand, target: string, value: string, replace: boolean, guard: () => void): Promise<undefined> {
+    if (!replace) throw notDispatched(`${ref} is a picker (date, time, color, range or select), so text cannot be appended. Nothing changed; use fillInput with the whole value.`)
+    guard()
+    const set = await inWorld(send, target, SET_PICKER_VALUE_DECLARATION, [{ value }]) as
+      { ok?: boolean; reason?: string; taken?: string; after?: string; wanted?: string } | undefined
+    // Every refusal is decided before the setter runs, so the field keeps its value.
+    if (set?.ok !== true) throw notDispatched(`${ref} ${set?.reason ?? 'could not take a value'}. Nothing changed.`)
+    if (set.taken !== set.wanted) {
+      context.note(`${ref} holds ${JSON.stringify(set.taken)} rather than ${JSON.stringify(value)}; the field normalized it. Read it before relying on it.`)
+    } else if (set.after !== set.taken) {
+      context.note(`${ref} now holds ${JSON.stringify(set.after)}; the page changed the value after it was set. Read it before relying on it.`)
+    }
+    return undefined
+  }
+
   /**
    * Trusted native text input into the target: `Input.insertText` after placing the caret, then the
    * value is read back.
@@ -679,7 +751,8 @@ export function createBrowserPageDispatch(
    * caret placed in an isolated world; then Main's own-dispatch receipt opens and the text is inserted.
    * Page handlers may reformat what was typed (masks, upper-casing), so a read-back that differs is not
    * a failure by itself: it is reported with the value the page now holds. A read-back that still
-   * equals the text from before means the insert did not reach the field; that is not-dispatched.
+   * equals the text from before is unknown: the insert was acknowledged, and an editor with its own
+   * text model may have taken it. A picker (date, select and the like) takes a value instead.
    */
   async function nativeText(scope: BrowserPageActionScope | undefined, ref: string, text: string, replace: boolean): Promise<undefined> {
     const { objectId, send, node, guard, actionFeedback } = await actionTarget(scope, ref)
@@ -703,6 +776,7 @@ export function createBrowserPageDispatch(
     try {
       const ready = await inWorld(send, target, PREPARE_TEXT_DECLARATION, [{ value: replace }]) as
         { ok?: boolean; reason?: string; before?: unknown; caret?: string } | undefined
+      if ((ready as { picker?: boolean } | undefined)?.picker) return await pickerValue(ref, send, target, text, replace, guard)
       if (ready?.ok !== true || typeof ready.before !== 'string') {
         throw notDispatched(`${ref} ${ready?.reason ?? 'could not be prepared for text input'}. Nothing was typed; choose the actual text field or take a new snapshot().`)
       }
@@ -734,7 +808,10 @@ export function createBrowserPageDispatch(
       }
       if (after !== expected) {
         if (after === ready.before && expected !== ready.before) {
-          throw notDispatched(`The text did not reach ${ref}: its value is unchanged. Nothing was typed; check that the field accepts typing.`)
+          // The trusted insert was acknowledged, so the page received it; an editor that keeps its own
+          // text model may have taken it without showing it here. Typing again could enter it twice.
+          throw new BrowserLocalRecoveryFailure(`${ref} still shows its earlier value after the text was sent. The page may have taken the text anyway; read the field before typing again.`,
+            'locator-changed', 'unknown')
         }
         context.note(`${ref} now holds a different value than was typed; the page changed it (for example a mask or a formatter). ` +
           `Read the field before relying on it.`)
