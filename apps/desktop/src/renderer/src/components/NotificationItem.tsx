@@ -70,7 +70,6 @@ export function NotificationItem({ title, kind, detail, summary, impact, childre
             <Icon size={14} className="notification-item__icon" aria-hidden="true" />
             <span className="notification-item__level">{notificationLevels[kind].label}</span>
             <strong className="notification-item__title">{heading}</strong>
-            {unread ? <span className="notification-item__unread" aria-label="Unread" title="Unread" /> : null}
             <ChevronIcon size={12} className="notification-item__disclosure" aria-hidden="true" />
           </summary>
           {expanded ? <div className="notification-item__original" tabIndex={0} aria-label={`Complete details: ${heading}`}>

@@ -113,7 +113,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-group__heading > div > span { flex: 0 1 auto; max-width: 45%; color: var(--text-3); font-size: var(--fs-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .notification-group__more { display: flex; flex: none; align-items: center; gap: var(--sp-1); min-height: 26px; padding: 0 var(--sp-2); font-size: var(--fs-meta); color: var(--text-3); }
 .notification-group__more[aria-expanded="true"] > svg { transform: rotate(90deg); }
-.notification-group__unread { width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
+.notification-group__unread, .notification-item__read::before { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
 .notification-item { font-size: var(--fs-body); line-height: 1.5; }
 .notification-item + .notification-item { border-top: 1px solid var(--line-soft); }
 .notification-item__icon { flex: none; color: var(--text-3); }
@@ -122,8 +122,7 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-item__body { min-width: 0; }
 .notification-item__toolbar { display: flex; align-items: center; gap: var(--sp-2); min-height: 26px; }
 .notification-item__title { display: block; flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 450; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.notification-item__unread { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); }
-.notification-item[data-kind="agent-broken"] .notification-item__unread { background: var(--red); }
+.notification-item[data-kind="agent-broken"] .notification-item__read::before { background: var(--red); }
 .notification-item__meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); padding-left: 20px; font-size: var(--fs-micro); line-height: 20px; color: var(--text-3); }
 .notification-item__level { flex: none; font-size: var(--fs-micro); font-weight: 500; color: var(--text-3); }
 .notification-item__reading { display: flex; align-items: flex-start; gap: var(--sp-1); }
@@ -143,6 +142,9 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .notification-item__actions { display: flex; flex: none; align-items: center; gap: var(--sp-1); margin-left: auto; font-size: var(--fs-meta); }
 .notification-item__action { max-width: 140px; min-height: 26px; padding: 0 var(--sp-2); white-space: normal; overflow-wrap: anywhere; font-weight: 500; }
 .notification-item__read { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; color: var(--text-3); }
+.notification-item__read::before { content: ''; }
+.notification-item__read > svg, .notification-item:is(:hover, :focus-within) .notification-item__read::before { display: none; }
+.notification-item:is(:hover, :focus-within) .notification-item__read > svg { display: block; }
 .global-system-notices__details button:hover { color: var(--text); background-color: var(--surface-3); }
 .global-system-notices__details :is(button, summary):focus-visible, .global-system-notices__trigger:focus-visible, .global-system-notices__connection:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 
