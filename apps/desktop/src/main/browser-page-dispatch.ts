@@ -185,8 +185,7 @@ const POINTER_ON_DECLARATION = `function () {
  */
 const PREPARE_TEXT_DECLARATION = `function (replace) {${RESTORE_FOCUS_SNIPPET}
   const self = this;
-  if (!(self instanceof HTMLElement)) return { ok: false, reason: 'is not an element' };
-  const editable = self.isContentEditable;
+  const editable = self.isContentEditable === true;
   // Pickers have no caret and drop inserted text, so they take a value instead of typing.
   if ((self instanceof HTMLInputElement && ['date', 'time', 'datetime-local', 'month', 'week', 'color', 'range'].includes(self.type)) || self instanceof HTMLSelectElement) {
     return { ok: false, picker: true, reason: 'is a picker' };
@@ -330,8 +329,7 @@ export function nativeKeyFor(key: string): { key: string; code: string; keyCode:
 
 /** Focus the target for a native key press and remember who had focus; refused when it cannot take focus. */
 const FOCUS_FOR_KEY_DECLARATION = `function () {${RESTORE_FOCUS_SNIPPET}
-  const self = this instanceof HTMLElement || this instanceof SVGElement ? this : null;
-  if (!self) return { ok: false, reason: 'is not an element that can take keyboard input' };
+  const self = this;
   const previous = focusedElement();
   self.focus();
   if (!holdsFocus(self)) { returnFocus(previous); return { ok: false, reason: FOCUS_REFUSED }; }
