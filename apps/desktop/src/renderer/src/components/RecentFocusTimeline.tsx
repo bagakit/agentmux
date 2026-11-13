@@ -258,6 +258,17 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const userName = useAppStore(state => state.agentNames[sessionId])
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
   const timeline = useAppStore(state => state.timelines[sessionId])
+  const resyncTimeline = useAppStore(state => state.resyncTimeline)
+  const requestedHistory = useRef<string | null>(null)
+  const sessionHostId = session?.kind === 'agent' ? session.control.hostId : undefined
+  useEffect(() => {
+    if (timeline) { requestedHistory.current = null; return }
+    if (!observing || context?.kind !== 'agent' || sessionHostId !== context.hostId) return
+    const key = JSON.stringify([context.hostId, sessionId])
+    if (requestedHistory.current === key) return
+    requestedHistory.current = key
+    void resyncTimeline(sessionId, { observationOnly: true })
+  }, [observing, context?.kind, context?.hostId, sessionHostId, sessionId, timeline, resyncTimeline])
   const name = agentDisplayName({ userName,
     firstPrompt: session?.kind === 'agent' ? firstPromptFromTimeline(timeline) : undefined,
     fallbackLabel: session?.kind === 'agent' ? session.label : context?.name ?? identity?.name ?? sessionId,
@@ -1074,6 +1085,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         onMessage: (message: ConversationRecord) => setPreview(current => current ? { ...current, message } : current),
         onContinue: () => { if (!historical) setEarlier(true); else nativeWindow.continueReading() },
         onRefresh: () => {
+          if (inputContext && !inputTimeline) void useAppStore.getState().resyncTimeline(inputContext.id, { observationOnly: true })
           if (historical) nativeWindow.refresh(); else void latest.refresh()
         }
       } } : {})} /> : null}
