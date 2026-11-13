@@ -3,7 +3,7 @@ import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/brows
 import { AnnotationDocumentError, createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import {
   alignShapes, createScreenshotDocument, distributeShapes, duplicateShapes, groupBounds, hitTestShape, moveShapes, pasteShapes,
-  reorderShapes, screenshotOutputShapes, setShapes, shapeBounds, toggleShapeLock, undoShape, unlockAllShapes,
+  reorderShapes, screenshotOutputShapes, setShapes, shapeBounds, setShapesLocked, undoShape,
   type NoteShape, type RectShape, type ScreenshotShape
 } from '../src/renderer/src/components/image-annotation/drawing-model'
 import { marqueeSelection } from '../src/renderer/src/components/image-annotation/selection-geometry'
@@ -85,20 +85,20 @@ describe('object editing model', () => {
     expect(groupBounds([scene[0]!, scene[1]!])).toEqual({ x: 10, y: 10, width: 90, height: 40 })
   })
 
-  it('locks marks out of hit testing and marquee selection and toggles or clears the lock', () => {
-    const locked = toggleShapeLock(scene, ids('a'))
+  it('locks marks out of hit testing and marquee selection and unlocks them again', () => {
+    const locked = setShapesLocked(scene, ids('a'), true)
     expect(locked[0]).toMatchObject({ locked: true })
+    expect(locked.slice(1), 'only the listed mark changes').toEqual(scene.slice(1))
     expect(hitTestShape(locked, { x: 10, y: 20 })).toBeNull()
     expect(hitTestShape(scene, { x: 10, y: 20 })?.id).toBe('a')
     expect(marqueeSelection(locked, { x: 0, y: 0, width: 300, height: 300 })).toEqual(['b', 'c', 'd'])
     expect(marqueeSelection(scene, { x: 55, y: 35, width: 10, height: 10 })).toEqual(['b'])
-    // A mixed selection locks all; an all-locked selection unlocks.
-    const both = toggleShapeLock(locked, ids('a', 'b'))
+    expect(setShapesLocked(locked, ids('a'), true), 'locking a locked mark records no change').toBe(locked)
+    const both = setShapesLocked(locked, ids('a', 'b'), true)
     expect([both[0]!.locked, both[1]!.locked]).toEqual([true, true])
-    const unlocked = toggleShapeLock(both, ids('a', 'b'))
-    expect(Object.hasOwn(unlocked[0]!, 'locked')).toBe(false)
-    expect(unlockAllShapes(both).some(shape => shape.locked)).toBe(false)
-    expect(unlockAllShapes(scene)).toBe(scene)
+    const unlocked = setShapesLocked(both, ids('a'), false)
+    expect([Object.hasOwn(unlocked[0]!, 'locked'), unlocked[1]!.locked], 'unlocking drops the field from that mark alone').toEqual([false, true])
+    expect(setShapesLocked(scene, ids('a'), false), 'unlocking an unlocked mark records no change').toBe(scene)
   })
 
   it('round trips the lock and rejects any other value for it', () => {
