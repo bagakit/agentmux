@@ -34,7 +34,7 @@ export interface NativeOverlayRegion {
   id: string
   bounds: BrowserBounds
   radius: number
-  /** An empty modal scrim is a colour plane, never a screenshot of the covered Browser. */
+  /** Original-document computed CSS colour, never a screenshot of the covered Browser. */
   scrim?: string
   /** Only the required scrim/content pair shares failure; accessories remain independent. */
   modal?: { id: string; part: 'scrim' | 'content' }
@@ -47,6 +47,19 @@ export interface NativeOverlayReceipt {
   capturedPixels: number
   warning?: string
   failures?: { modalId: string; message: string }[]
+}
+
+/** Descriptor delivery equality only. It says nothing about native paint readiness. */
+export function sameNativeOverlayRegions(left: readonly NativeOverlayRegion[] | undefined, right: readonly NativeOverlayRegion[]): boolean {
+  const boundsEqual = (a: BrowserBounds, b: BrowserBounds): boolean =>
+    a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+  return left !== undefined && left.length === right.length && left.every((a, index) => {
+    const b = right[index]!
+    const stages = a.browserStages ?? [], otherStages = b.browserStages ?? []
+    return a.id === b.id && boundsEqual(a.bounds, b.bounds) && a.radius === b.radius && a.scrim === b.scrim &&
+      a.modal?.id === b.modal?.id && a.modal?.part === b.modal?.part && stages.length === otherStages.length &&
+      stages.every((stage, stageIndex) => stage.browserId === otherStages[stageIndex]!.browserId && boundsEqual(stage.bounds, otherStages[stageIndex]!.bounds))
+  })
 }
 
 /** Native page notices for its original DOM float; never duplicate page clicks, text or focus. */

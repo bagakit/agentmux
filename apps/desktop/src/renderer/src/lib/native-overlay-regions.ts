@@ -3,7 +3,6 @@ import { NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT } from '../../../share
 import type { RendererOverlayObservation } from '@agentmux/core/control'
 import { boundsOverlap } from '../../../shared/native-overlay'
 import { rendererCssBoundsToWindowDip } from './browser-bounds-sync'
-import { autoUpdate } from '@floating-ui/dom'
 import { MODAL_PRESENTATION_FAILURE_EVENT } from '@agentmux/client-ui/components/Modal'
 import { compareOverlayPaintOrder, opaqueComputedColor } from './overlay-paint-order'
 
@@ -21,10 +20,11 @@ export function observeNativeOverlayRegions(
   let nextId = 0
   let disposed = false
   let frame = 0
+  let collectRequested = false
   let nativeDemand: NativeBrowserVisibility | null = initialDemand ?? null
   let watched: Element[] = []
   let geometry: Element[] = []
-  let releasePositions: Array<() => void> = []
+  let geometryBounds = new Map<Element, DOMRect>()
   let hoveredStage: Element | undefined
   let hoveredFloat: Element | undefined
   const topLayers = new Set<Element>()
@@ -35,6 +35,24 @@ export function observeNativeOverlayRegions(
   const element = (value: EventTarget | null | undefined): value is Element =>
     value != null && (value as Node).nodeType === 1 && (value as Node).ownerDocument === body.ownerDocument
   const html = (value: Element): value is HTMLElement => value.namespaceURI === body.namespaceURI
+  const canRead = (): boolean => !disposed && nativeDemand?.bounds.length !== 0 && body.ownerDocument.visibilityState !== 'hidden'
+  const ensureFrame = (): void => {
+    if (!frame && canRead() && (collectRequested || nativeDemand !== null && geometry.length > 0)) frame = win.requestAnimationFrame(tick)
+  }
+  function tick(): void {
+    frame = 0
+    if (!canRead()) return
+    let changed = false
+    if (!collectRequested) for (const [node, previous] of geometryBounds) {
+      if (!node.isConnected || node.ownerDocument !== body.ownerDocument) { changed = true; break }
+      const current = node.getBoundingClientRect()
+      if (current.x !== previous.x || current.y !== previous.y || current.width !== previous.width || current.height !== previous.height) {
+        changed = true; break
+      }
+    }
+    if (collectRequested || changed) collect()
+    ensureFrame()
+  }
   const resize = new win.ResizeObserver(() => schedule('resize'))
   const portals = (): Element[] => Array.from(body.children).filter(node => node.id !== 'root' && !node.hasAttribute('data-workbench-document-root'))
   const releaseMotion = (keep: Set<Element> = new Set()): void => {
@@ -44,8 +62,8 @@ export function observeNativeOverlayRegions(
     }
   }
   const collect = (): void => {
-    frame = 0
-    if (disposed || nativeDemand?.bounds.length === 0) return
+    collectRequested = false
+    if (!canRead()) return
     const started = win.performance.now()
     let geometryReadCount = 0
     const styles = new Map<Element, CSSStyleDeclaration>(), rects = new Map<Element, DOMRect>()
@@ -128,6 +146,7 @@ export function observeNativeOverlayRegions(
       // Main must validate a complete modal even when only its scrim crosses native pixels.
       if (!modal && !overlapping) continue
       const emptyScrim = modal?.part === 'scrim'
+      const scrim = emptyScrim ? style.backgroundColor : undefined
       // Chrome capture is composited against the Renderer. Only an opaque content box with
       // uniform native-clippable corners may be projected; never invent alpha by colour removal.
       const solid = opaqueComputedColor(style.backgroundColor) && Number(style.opacity || '1') === 1 &&
@@ -153,7 +172,7 @@ export function observeNativeOverlayRegions(
       })
       regions.push({ id, bounds, radius: (Number.parseFloat(style.borderTopLeftRadius) || 0) * zoomFactor(),
         ...(modal ? { modal } : {}),
-        ...(emptyScrim ? { scrim: style.backgroundColor } : {}), ...(browserStages.length ? { browserStages } : {}) })
+        ...(scrim !== undefined ? { scrim } : {}), ...(browserStages.length ? { browserStages } : {}) })
     }
     for (const [id, parts] of modalParts) if (!parts.has('content') || !parts.has('scrim')) {
       failedModals.set(id, 'The complete dialog surface could not be observed. Your original request is kept; retry displaying the dialog.')
@@ -181,21 +200,13 @@ export function observeNativeOverlayRegions(
     const acceptedIds = new Set(accepted.map(region => region.id))
     accepted.splice(0, accepted.length, ...regions.filter(region => acceptedIds.has(region.id)))
     releaseMotion(staticFloats)
-    const observed = [...activeFloats, ...stages]
+    const observed = [...new Set([...activeFloats, ...stages])]
     if (geometry.length !== observed.length || geometry.some((node, index) => node !== observed[index])) {
       resize.disconnect()
-      for (const release of releasePositions) release()
-      releasePositions = []
       for (const node of observed) resize.observe(node)
-      if (typeof win.IntersectionObserver === 'function') for (const node of observed) if (html(node)) {
-        let initial = true
-        const release = autoUpdate(node, node, () => { if (!initial) schedule('resize') }, {
-          ancestorScroll: false, ancestorResize: false, elementResize: false, layoutShift: true, animationFrame: false
-        })
-        initial = false; releasePositions.push(release)
-      }
       geometry = observed
     }
+    geometryBounds = new Map(observed.map(node => [node, rectOf(node)]))
     watched = activeFloats
     if (hoveredFloat && !watched.includes(hoveredFloat)) { hoveredFloat = undefined; hoveredStage = undefined }
     publish(accepted, warning)
@@ -205,13 +216,15 @@ export function observeNativeOverlayRegions(
     }
     observe?.({ reason: 'collect', scheduled: false, coalesced: false, candidateCount: unique.length,
       geometryReadCount, nativeDemandCount: nativeDemand?.bounds.length ?? null, collectMs: win.performance.now() - started })
+    ensureFrame()
   }
   const schedule = (reason: RendererOverlayObservation['reason']): void => {
     if (disposed) return
     const requested = nativeDemand?.bounds.length !== 0
     const coalesced = requested && Boolean(frame)
-    if (requested && !frame) frame = win.requestAnimationFrame(collect)
-    observe?.({ reason, scheduled: requested && !coalesced, coalesced, nativeDemandCount: nativeDemand?.bounds.length ?? null })
+    collectRequested ||= requested
+    ensureFrame()
+    observe?.({ reason, scheduled: requested && !coalesced && Boolean(frame), coalesced, nativeDemandCount: nativeDemand?.bounds.length ?? null })
   }
   const observer = new win.MutationObserver(records => {
     if (records.some(record => record.target === body && record.type === 'childList')) bind()
@@ -281,6 +294,10 @@ export function observeNativeOverlayRegions(
   }
   const onResize = (): void => schedule('resize')
   const onFont = (): void => schedule('font')
+  const onVisibility = (): void => {
+    if (body.ownerDocument.visibilityState === 'hidden') { win.cancelAnimationFrame(frame); frame = 0 }
+    else schedule('resize')
+  }
   bind()
   collect()
   win.addEventListener('resize', onResize)
@@ -289,15 +306,14 @@ export function observeNativeOverlayRegions(
   body.addEventListener('beforetoggle', onBeforeToggle, true)
   body.addEventListener('pointerleave', onPointerLeave, true)
   body.ownerDocument.fonts?.addEventListener('loadingdone', onFont)
+  body.ownerDocument.addEventListener('visibilitychange', onVisibility)
   return { setNativeDemand(visibility) {
     if (disposed) return
     nativeDemand = visibility
     if (visibility.bounds.length === 0) {
       releaseMotion()
       win.cancelAnimationFrame(frame); frame = 0
-      observer.disconnect(); resize.disconnect(); geometry = []; watched = []
-      for (const release of releasePositions) release()
-      releasePositions = []
+      observer.disconnect(); resize.disconnect(); geometry = []; geometryBounds.clear(); watched = []; collectRequested = false
       clearHover(); publish([]); schedule('demand')
     } else { bind(); schedule('demand') }
   }, handleNativeInput(input) {
@@ -364,13 +380,13 @@ export function observeNativeOverlayRegions(
     win.cancelAnimationFrame(frame)
     observer.disconnect()
     resize.disconnect()
-    for (const release of releasePositions) release()
     win.removeEventListener('resize', onResize)
     win.removeEventListener('scroll', onScroll, true)
     body.removeEventListener('toggle', onToggle, true)
     body.removeEventListener('beforetoggle', onBeforeToggle, true)
     body.removeEventListener('pointerleave', onPointerLeave, true)
     body.ownerDocument.fonts?.removeEventListener('loadingdone', onFont)
+    body.ownerDocument.removeEventListener('visibilitychange', onVisibility)
     publish([])
   } }
 }
