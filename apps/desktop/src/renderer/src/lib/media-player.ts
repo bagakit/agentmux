@@ -43,17 +43,18 @@ export function spokenDuration(seconds: number): string {
   return parts.join(' ')
 }
 
-export function nextPlaybackRate(rate: number, direction: 1 | -1): number {
+export function nextPlaybackRate(rate: number, direction: 1 | -1, wrap = false): number {
   const index = PLAYBACK_RATES.findIndex(value => value >= rate - 1e-6)
   const at = index < 0 ? PLAYBACK_RATES.length - 1 : PLAYBACK_RATES[index] === rate ? index : direction > 0 ? index - 1 : index
-  return PLAYBACK_RATES[Math.min(PLAYBACK_RATES.length - 1, Math.max(0, at + direction))]!
+  const next = at + direction
+  return PLAYBACK_RATES[wrap ? (next + PLAYBACK_RATES.length) % PLAYBACK_RATES.length : Math.min(PLAYBACK_RATES.length - 1, Math.max(0, next))]!
 }
 
 export type MediaPlayerAction =
   | { kind: 'toggle-play' } | { kind: 'toggle-mute' } | { kind: 'fullscreen' }
   | { kind: 'seek-by'; seconds: number } | { kind: 'seek-to-fraction'; fraction: number }
   | { kind: 'seek-start' } | { kind: 'seek-end' }
-  | { kind: 'volume-by'; amount: number } | { kind: 'rate'; direction: 1 | -1 }
+  | { kind: 'volume-by'; amount: number } | { kind: 'rate'; direction: 1 | -1; wrap?: boolean }
 
 export type MediaKeyContext = { stream: MediaStreamClass; video: boolean }
 export type MediaKeyEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'defaultPrevented' | 'repeat'> & { target: EventTarget | null }

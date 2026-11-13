@@ -199,7 +199,7 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
         flash({ text: `${Math.round(element.volume * 100)}%` }); announce(`Volume ${Math.round(element.volume * 100)}%`)
         return
       }
-      case 'rate': element.playbackRate = nextPlaybackRate(element.playbackRate, action.direction); flash({ text: `${element.playbackRate}×` }); announce(`Speed ${element.playbackRate}×`); return
+      case 'rate': element.playbackRate = nextPlaybackRate(element.playbackRate, action.direction, action.wrap); flash({ text: `${element.playbackRate}×` }); announce(`Speed ${element.playbackRate}×`); return
     }
   }, [announce, flash, live])
 
@@ -282,10 +282,11 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
       {live && facts.window ? `-${formatClock(facts.window.end - hover.time)}` : formatClock(hover.time)}</output> : null}
   </div> : null
   const liveBadge = live ? <button type="button" className="media-player__live" data-live-edge={edge}
-    aria-disabled={edge !== 'behind'} aria-label={edge === 'behind' ? 'Go to live' : 'Playing live'} title={edge === 'behind' ? 'Go to live (End)' : 'Live'}
+    aria-disabled={edge !== 'behind'} aria-label={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live' : 'Playing live'}
+    title={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live (End)' : 'Live'}
     onClick={() => { if (edge === 'behind') run({ kind: 'seek-end' }, 'pointer') }}>
     <span aria-hidden="true" className="media-player__live-dot" />
-    {edge === 'behind' && facts.window ? `-${formatClock(facts.window.end - shown)} LIVE` : 'LIVE'}
+    {edge === 'unknown' ? 'LIVE · position unknown' : edge === 'behind' && facts.window ? `-${formatClock(facts.window.end - shown)} LIVE` : 'LIVE'}
   </button> : null
   // Elapsed / total on video and audio alike; the total side toggles to remaining time.
   const endTime = remaining && Number.isFinite(facts.duration) ? `-${formatClock(facts.duration - shown)}` : formatClock(facts.duration)
@@ -296,7 +297,7 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
         onClick={() => setRemaining(value => !value)}>{endTime}</button></> : null}
   </span>
   const speed = stream === 'on-demand' ? <button type="button" className="media-player__button media-player__speed" aria-label={`Playback speed ${facts.rate}×`}
-    title="Speed (< and >)" onClick={() => run({ kind: 'rate', direction: 1 }, 'pointer')}>{facts.rate}×</button> : null
+    title="Cycle speed (< and >)" onClick={() => run({ kind: 'rate', direction: 1, wrap: true }, 'pointer')}>{facts.rate}×</button> : null
   const failurePanel = failure ? <div className="media-player__failure" role="alert">
     <strong>{failure.title}</strong><span>{failure.detail}</span>
     {failure.retry ? <button type="button" className="media-player__retry" onClick={onRetry}>Retry</button> : null}

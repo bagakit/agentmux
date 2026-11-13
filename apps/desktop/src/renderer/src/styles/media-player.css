@@ -99,6 +99,8 @@
 .media-player__live[data-live-edge="behind"] { color: var(--media-ink-2); cursor: pointer; }
 .media-player__live[data-live-edge="behind"]:hover { background: color-mix(in oklab, #ffffff 14%, transparent); color: var(--media-ink); }
 .media-player__live[data-live-edge="behind"] .media-player__live-dot { background: var(--media-ink-2); box-shadow: none; }
+.media-player__live[data-live-edge="unknown"] { color: var(--media-ink-2); }
+.media-player__live[data-live-edge="unknown"] .media-player__live-dot { background: var(--media-ink-2); box-shadow: none; }
 
 .media-player__buffering, .media-player__indicator { position: absolute; display: grid; place-items: center; pointer-events: none;
   color: var(--media-ink); background: color-mix(in oklab, #000000 45%, transparent); backdrop-filter: blur(16px) saturate(125%); }
