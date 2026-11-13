@@ -176,6 +176,17 @@ authorize it. These are not source-ready or delivery receipts. A lost reply can 
 scope without an operationId, recut, receiver rebuild or replay of an unknown platform effect.
 Managed callers need their exact original Host/Session binding and current Runtime, without bot
 enrollment ownership. Ordinary diagnose/list checks do not wake the source reader.
+For missing legacy scope evidence, the original authenticated user/device may use the same
+source recover command with --input FILE|- and review {action:prepare,operationId}. Prepare
+freezes a concrete public-content range without sending. Inspect the same operation with
+review.action:inspect, optional limit, and returned next as review.after. Read the frozen target,
+range, exclusions and unmapped old effects before approving its exact digest with action:approve;
+cancel retains the original offer and effects. Preserve the operationId and acceptedDigest after
+a lost reply. The target revision is the original publication revision; a trigger-only Binding
+revision still resolves that same scope. A new range grant cannot establish that an old unknown
+request was not applied. Unmapped effects remain blocked, with original prepared bytes and
+receipts. Managed Agents cannot grant a new sharing range. Current publication authority is
+required to prepare/approve; the original owner can still inspect/cancel after sharing is paused.
 For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
 the same requested order, while --after-content independently pages unresolved content. Managed callers
