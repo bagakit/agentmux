@@ -11,14 +11,15 @@ import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 export async function nativeHistoryFixture(
   providerId: 'codex' | 'claude' | 'pi' | 'antigravity' | 'droid' | 'grok' | 'kimi',
   data: string | Buffer | ((root: string) => string),
-  options: { nativeSessionId?: string; relativePath?: string; agentSessionId?: string } = {}
+  options: { nativeSessionId?: string; relativePath?: string; agentSessionId?: string; compiled?: boolean } = {}
 ) {
+  const core = options.compiled ? await import('../../dist/index.js') : { AgentMuxClient, AgentMuxFileAgentSessionStore }
   const root = await mkdtemp(join(tmpdir(), `agentmux-${providerId}-history-`))
   const path = join(root, options.relativePath ?? 'native.jsonl')
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, typeof data === 'function' ? data(root) : data)
   const storePath = join(root, 'agent-sessions.json')
-  const store = new AgentMuxFileAgentSessionStore(storePath)
+  const store = new core.AgentMuxFileAgentSessionStore(storePath)
   const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: options.agentSessionId ?? 'private-agent', providerId,
     executorId: providerId, hostId: 'local', workspacePath: root, run: { runId: 'unchanged-private-run' },
     retiredRuns: [], createdAt: 1, updatedAt: 1, hookBindingId: 'private-binding', hookToken: 'private-token',
@@ -34,7 +35,7 @@ export async function nativeHistoryFixture(
     physicalReads.push(reading)
     return reading
   })
-  const client = new AgentMuxClient({ store })
+  const client = new core.AgentMuxClient({ store })
   const kernel = (client as unknown as { kernel: CtxmuxRunAdapter }).kernel
   const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map((name) => vi.spyOn(kernel, name as 'start'))
   return { root, path, storePath, store, session, client, controls, before,

@@ -4,6 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { SessionSnapshot } from '../src/shared/contracts'
+import { act, createElement } from 'react'
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 
 // The composer's Send while a question or permission is pending. The store must hold the message
 // unbound until Core settles that exact request: no Core input call while it is known to be pending,
@@ -164,4 +167,51 @@ it('without a pending request Send still binds the direct input path', async () 
   await useAppStore.getState().flushAgentSteerQueue(sid)
   // The direct path asks Core for the original input first; that is the binding this change withholds.
   expect(api.sessions.inspectInput).toHaveBeenCalled()
+})
+
+const queuedNative = (): typeof idle => ({ ...pending(), nativeHandle: { kind: 'provider', providerId: idle.providerId, sessionId: 'original-native' },
+  capabilities: { ...idle.capabilities, nativeConversationInput: { managedRuns: true, interactionQueue: true, idleQueue: false } } })
+
+it('the mounted native queue composer keeps its empty input prompt consistent with fresh Send', async () => {
+  useAppStore.setState({ sessions: [queuedNative()], agentComposerDrafts: {} })
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createClientUiRoot(container)
+  try {
+    await act(async () => root.render(createElement(AgentSessionComposer, { sessionId: sid, visible: true })))
+    expect(container.querySelector('[data-placeholder]')?.getAttribute('data-placeholder')).toBe('Message the Agent; the request stays open…')
+  } finally { await act(async () => root.unmount()); container.remove() }
+})
+
+it('fresh Send uses the exact native queue without settling the request; unknown input releases the next Send', async () => {
+  useAppStore.setState({ sessions: [queuedNative()] })
+  vi.mocked(api.sessions.submitPrompt).mockImplementation(async (_control, _text, submissionId, binding) => {
+    const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: binding!.expectedRun, submissionId: submissionId! }
+    const ref = { key, waitGeneration: 1 }
+    return { key, ref, persistence: 'confirmed', status: 'unknown', observation: 'unknown', admission: null,
+      control: { ref, state: 'disabled', at: 3 } } as never
+  })
+  useAppStore.getState().send(sid, 'first native message', undefined, 'manual')
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(queue()[0]).toMatchObject({ text: 'first native message', inputIntakeStarted: true, inputReceipt: { status: 'unknown' },
+    directInputBinding: { expectedRun: { runId }, admissionIntent: { kind: 'native-conversation', source: { providerId: idle.providerId, nativeSessionId: 'original-native' } } } })
+  expect(useAppStore.getState().agentSteerInFlight[sid]).toBeUndefined()
+  const original = queue()[0]!
+  useAppStore.getState().send(sid, 'independent next message', undefined, 'manual')
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => call[1])).toEqual(['first native message', 'independent next message'])
+  expect(queue()[0]).toEqual(original)
+  expect(useAppStore.getState().sessions[0]).toMatchObject({ pendingInteraction: { id: 'first-request' }, control: idle.control })
+})
+
+it('new native queue capability never drains old after-request messages in the background', async () => {
+  useAppStore.getState().send(sid, 'old parked message', undefined, 'manual')
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  useAppStore.setState({ sessions: [queuedNative()] })
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+  expect(queue()[0]!.directInputBinding).toBeUndefined()
+  await useAppStore.getState().sendQueuedAgentSteer(sid, queue()[0]!.operationId)
+  // The existing attempt already owns its after-request condition; even explicit resend
+  // cannot silently replace that frozen plan with the new carrier.
+  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
 })

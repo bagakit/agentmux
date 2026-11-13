@@ -11,7 +11,8 @@ import { AgentMuxRpcService as SourceRpcService } from '../src/public-rpc-servic
 const AgentMuxRpcService: typeof SourceRpcService = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
   ? (await import(new URL('../dist/public-rpc-service.js', import.meta.url).href)).AgentMuxRpcService : SourceRpcService
 import { agentTurnCompletionIdentity, cloneSession } from '../src/agent-session-identity.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession, parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import { parsePromptSubmissionRecord } from '../src/prompt-submission-record.js'
 import { agentPromptCondition, validateAgentPromptAdmissionIntent, validateAgentPromptInputBinding, type AgentPromptInputKey } from '../src/agent-prompt-condition.js'
 import { parseAgentInputMailboxPage } from '../src/agent-input-mailbox-codec.js'
 import { AgentMuxError } from '../src/errors.js'
@@ -23,7 +24,7 @@ const actor = { protocolId: 'fixture-native-protocol', actorId: 'original-actor'
 const key = (submissionId: string) => ({ kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, submissionId })
 const input = (operationId: string) => ({ agentSessionId: 'recipient', operationId, expectedRun: { runId: 'run-recipient' },
   admissionIntent: { kind: 'native-conversation' as const, source: target }, execution: 'immediate' as const, prompt: 'Original selected-source input', authorHuman: true })
-async function owner(outcome: 'admitted' | 'unknown' | 'not-applied' = 'admitted', ids = ['recipient']) {
+async function owner(outcome: 'admitted' | 'unknown' | 'not-applied' = 'admitted', ids = ['recipient'], interactionQueue = false) {
   const h = await rpcOwnerFixture(ids); closes.push(h.close)
   const original = (await h.store.readMetadata('recipient'))!
   await h.store.compareAndSwap(original, { ...original, nativeActor: actor }); await h.inner.registry.load('local')
@@ -43,13 +44,169 @@ async function owner(outcome: 'admitted' | 'unknown' | 'not-applied' = 'admitted
     expect(context.nativeActor).toEqual(actor); expect(context.processId).toBe(1234)
     if (selected.providerId !== target.providerId || selected.nativeSessionId !== target.nativeSessionId) throw new AgentMuxError('Exact source is not loaded by this original actor', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]), actorId: actor.actorId,
-      threadId: selected.nativeSessionId, ...(selected.idleOnly ? { operation: 'queue-idle' } : selected.expectedTurnId ? { operation: 'steer', expectedTurnId: selected.expectedTurnId } : { operation: 'start-or-steer' }) }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
+      threadId: selected.nativeSessionId, ...(interactionQueue ? { interactionQueue: true as const } : {}), ...(selected.idleOnly ? { operation: 'queue-idle' } : selected.expectedTurnId ? { operation: 'steer', expectedTurnId: selected.expectedTurnId } : { operation: 'start-or-steer' }) }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
   })
-  inner.providers.get('codex').prepareNativeInput = prepare
+  const provider = inner.providers.get('codex')
+  const originalPrepare = provider.prepareNativeInput, originalPlan = provider.planPromptInput
+  // Some cases remove the port entirely; restore the shared contribution before the next owner is built.
+  closes.push(async () => {
+    if (originalPrepare) provider.prepareNativeInput = originalPrepare
+    else delete provider.prepareNativeInput
+    provider.planPromptInput = originalPlan
+  })
+  provider.prepareNativeInput = prepare
   // Deterministic Provider byte port for coordinator tests; the native binary E2E uses its real TUI renderer.
-  inner.providers.get('codex').planPromptInput = prompt => ({ kind: 'single-phase', data: prompt + '\r' })
+  provider.planPromptInput = prompt => ({ kind: 'single-phase', data: prompt + '\r' })
   return { ...h, send, prepare }
 }
+
+async function retainOriginalRequest(h: Awaited<ReturnType<typeof owner>>) {
+  const original = (await h.store.readMetadata('recipient'))!
+  // Missing native call identity is intentionally retained; an unrelated input must not settle it.
+  const pendingInteraction: NonNullable<AgentMuxStoredAgentSession['pendingInteraction']> = { request: {
+    kind: 'permission', id: 'unconfirmed-original-request', agentSessionId: 'recipient', title: 'Original request',
+    toolName: 'tool', toolInput: '{}', options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }],
+    evidence: { source: 'native-hook', observedAt: 1, run: original.run, hookReceiptId: 'original-hook' }
+  } }
+  await h.store.compareAndSwapMetadata(original, { ...original,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId }, pendingInteraction })
+  await h.inner.registry.load('local')
+  return pendingInteraction
+}
+
+async function waitingForOriginalRequest(h: Awaited<ReturnType<typeof owner>>, submissionId: string) {
+  await expect.poll(async () => (await h.client.inspectAgentInput({ key: key(submissionId) }))?.control.waiting).toMatchObject({
+    wake: 'explicit-rejoin', failure: { code: 'AGENT_INTERACTION_PENDING' }
+  })
+  expect(await h.client.inspectAgentPromptSubmission(key(submissionId))).toBeNull()
+}
+
+it.each(['native-conversation', 'session-conversation'] as const)('preserves the pending request while a fresh %s queue input becomes unknown, frees its lane and never replays', async kind => {
+  const h = await owner('unknown', ['recipient'], true), pending = await retainOriginalRequest(h)
+  const request = (id: string) => ({ ...input(id), admissionIntent: kind === 'native-conversation'
+    ? input(id).admissionIntent : { kind: 'session-conversation' as const } })
+  await h.client.submitAgentPrompt(request('pending-native-first'))
+  const first = await settledNative(h, key('pending-native-first'), 'unknown')
+  expect(first?.admission).toMatchObject({ acknowledged: false, transport: 'native',
+    native: { outcome: 'unknown', plan: { interactionQueue: true, operation: 'start-or-steer' } } })
+  expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(pending)
+  // A new operation cannot be starved behind an uncertain old native dispatch.
+  await h.client.submitAgentPrompt(request('pending-native-second'))
+  await settledNative(h, key('pending-native-second'), 'unknown')
+  expect(h.send).toHaveBeenCalledTimes(2)
+  expect(h.send.mock.calls[0]![1].clientCorrelation).not.toBe(h.send.mock.calls[1]![1].clientCorrelation)
+  expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(pending)
+  expect(await h.client.submitAgentPrompt(request('pending-native-first'))).toMatchObject({ status: 'unknown' })
+  expect(await h.client.inspectAgentPromptSubmission(key('pending-native-first'))).toEqual(first)
+  expect(h.send).toHaveBeenCalledTimes(2)
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(h.rawInput).not.toHaveBeenCalled()
+  // The healthy original terminal remains independently writable after that lane is released.
+  await h.client.writeTerminalBytes(key('unused').expectedRun, 'x')
+  expect(h.rawInput).toHaveBeenCalledWith('run-recipient', 'x')
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('a native method and published capability alone cannot bypass the original request without a prepared queue qualifier', async () => {
+  const h = await owner(), pending = await retainOriginalRequest(h)
+  const provider = (h.client as unknown as { providers: { get(id: string): AgentProvider } }).providers.get('codex')
+  const originalCapability = provider.catalog.capabilities.nativeConversationInput
+  closes.push(async () => {
+    if (originalCapability) provider.catalog.capabilities.nativeConversationInput = originalCapability
+    else delete provider.catalog.capabilities.nativeConversationInput
+  })
+  provider.catalog.capabilities.nativeConversationInput = { managedRuns: true, interactionQueue: true }
+  await h.client.submitAgentPrompt(input('pending-no-qualifier'))
+  await waitingForOriginalRequest(h, 'pending-no-qualifier')
+  expect(h.prepare).toHaveBeenCalledTimes(1); expect(h.send).not.toHaveBeenCalled()
+  expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(pending)
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it.each(['manual-actor', 'non-human', 'exact-turn'] as const)('the queue qualifier cannot convert %s input into fresh manual permission-independent input', async mode => {
+  const h = await owner('admitted', ['recipient'], true), pending = await retainOriginalRequest(h)
+  const request = { ...input('pending-ineligible-' + mode),
+    ...(mode === 'manual-actor' ? { admissionIntent: { kind: 'manual-actor' as const } } : {}),
+    ...(mode === 'non-human' ? { authorHuman: false } : {}),
+    ...(mode === 'exact-turn' ? { admissionIntent: { ...input('unused').admissionIntent, expectedTurnId: 'original-turn' } } : {}) }
+  await h.client.submitAgentPrompt(request)
+  await waitingForOriginalRequest(h, request.operationId)
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(pending)
+  if (mode === 'manual-actor') {
+    expect(h.prepare).not.toHaveBeenCalled()
+    // Reusing the old input key with another transport is a conflict, not a new Send.
+    await expect(h.client.submitAgentPrompt(input(request.operationId))).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+    expect(h.send).not.toHaveBeenCalled()
+  }
+})
+
+it('refuses an unsupported private idle-only restriction on controlled input instead of dropping it', async () => {
+  const h = await owner('admitted', ['recipient'], true), pending = await retainOriginalRequest(h)
+  await expect(h.client.submitAgentPrompt(input('pending-controlled-idle-only'), { nativeIdleOnly: true }))
+    .rejects.toMatchObject({ code: 'INVALID_AGENT_PROMPT' })
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(await h.client.inspectAgentPromptSubmission(key('pending-controlled-idle-only'))).toBeNull()
+  expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(pending)
+})
+
+it.each([false, true])('keeps exact default input pending with a prepared queue qualifier and idle-only=%s', async nativeIdleOnly => {
+  const h = await owner('admitted', ['recipient'], true), pending = await retainOriginalRequest(h)
+  await expect(h.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: 'pending-exact-idle-' + nativeIdleOnly,
+    expectedRun: key('unused').expectedRun, afterSubmissionId: null, prompt: 'Original automatic/default input', authorHuman: true },
+    nativeIdleOnly ? { nativeIdleOnly: true } : undefined)).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(pending)
+})
+
+it('strictly decodes published interaction and idle queue capabilities without accepting invented fields or truthy values', async () => {
+  const h = await owner(), provider = (h.client as unknown as { providers: { get(id: string): AgentProvider } }).providers.get('codex')
+  const result = (nativeConversationInput: unknown) => ({ hostId: 'local', executorId: 'codex', providerId: 'codex',
+    capabilities: { ...provider.catalog.capabilities, nativeConversationInput }, availability: 'available', sessions: [], issues: [] })
+  const decode = (nativeConversationInput: unknown) => parseRpcNativeResult('agent.native.ls', result(nativeConversationInput), { hostId: 'local', executorId: 'codex' })
+  for (const idleQueue of [false, true]) expect(decode({ managedRuns: true, interactionQueue: true, idleQueue })).toEqual(result({ managedRuns: true, interactionQueue: true, idleQueue }))
+  expect(decode({ managedRuns: true })).toEqual(result({ managedRuns: true }))
+  for (const invalid of [{ managedRuns: true, interactionQueue: false }, { managedRuns: true, interactionQueue: 1 },
+    { managedRuns: true, idleQueue: 'false' }, { managedRuns: true, idleQueue: null },
+    { managedRuns: true, interactionQueue: true, inferred: true }]) expect(() => decode(invalid)).toThrow()
+})
+
+it('preserves a durable native plan queue qualifier and strictly rejects false or unknown qualifier data', async () => {
+  const h = await owner('unknown', ['recipient'], true)
+  await h.client.submitAgentPrompt(input('strict-queue-plan'))
+  const original = (await settledNative(h, key('strict-queue-plan'), 'unknown'))!
+  expect(parsePromptSubmissionRecord(original)).toEqual(original)
+  const reopened = new AgentMuxFileAgentSessionStore(h.store.path)
+  expect(await reopened.readPromptAdmission('recipient', key('strict-queue-plan').expectedRun, 'strict-queue-plan')).toEqual(original)
+  const decode = (change: Record<string, unknown>) => {
+    const value = structuredClone(original)
+    Object.assign((value.admission!.intent!.plan as unknown as Record<string, unknown>), change)
+    const admission = value.admission!
+    if (admission.transport === 'native') Object.assign(admission.native.plan, change)
+    return () => parsePromptSubmissionRecord(value)
+  }
+  expect(decode({ interactionQueue: false })).toThrow()
+  expect(decode({ interactionQueue: 'true' })).toThrow()
+  expect(decode({ implicitPermissionAnswer: true })).toThrow()
+  expect(h.send).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the actual Claude reference notification on its turn-end path when ordinary native input has no idle-only queue', async () => {
+  const h = await rpcOwnerFixture(['sender', 'recipient'], undefined, () => ({ providerId: 'claude', executorId: 'claude' }))
+  closes.push(h.close)
+  const provider = (h.client as unknown as { providers: { get(id: string): AgentProvider } }).providers.get('claude')
+  expect(provider.prepareNativeInput).toBeDefined()
+  expect(provider.catalog.capabilities.nativeConversationInput).toMatchObject({ interactionQueue: true, idleQueue: false })
+  await h.client.submitAgentMessage({ agentSessionId: 'recipient', caller: h.credentials,
+    envelope: { schema: 'agentmux.a2a.v1', messageId: 'claude-reference-notice', operationId: 'claude-reference-send', createdAt: 1,
+      sender: { kind: 'agent-session', agentSessionId: 'sender' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
+      senderSessionId: 'sender', senderRunId: 'run-sender', recipientSessionId: 'recipient', recipientRunId: 'run-recipient',
+      threadId: 'original-thread', correlationId: 'original-correlation', replyTo: null, workspaceId: null, body: 'Original reference body' } })
+  expect((await h.client.readMessage({ messageId: 'claude-reference-notice', caller: h.credentials }))?.notification)
+    .toEqual({ state: 'pending', automatic: 'turn-end' })
+  expect(await h.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, messageId: 'claude-reference-notice' })).toBeNull()
+  expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.rawInput).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
 
 async function settledNative(h: Awaited<ReturnType<typeof owner>>, inputKey: AgentPromptInputKey, outcome: 'admitted' | 'unknown' | 'not-applied') {
   await expect.poll(async () => {

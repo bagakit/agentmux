@@ -4,6 +4,14 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const mutants: Record<string, [string, string, string]> = {
+  'interaction-queue-disabled': ['prompt-submission.ts', 'selectedCarrier.plan.interactionQueue === true', 'false'],
+  'interaction-queue-unqualified': ['prompt-submission.ts', 'selectedCarrier.plan.interactionQueue === true', 'true'],
+  'interaction-queue-nonhuman': ['prompt-submission.ts', "inputKey.kind === 'prompt' && message?.authorHuman === true &&", "inputKey.kind === 'prompt' && true &&"],
+  'forget-controlled-idle-only': ['client.ts', "if (context?.nativeIdleOnly) throw new AgentMuxError('Controlled input cannot drop its original idle-only restriction.', 'INVALID_AGENT_PROMPT')", ''],
+  'accept-false-interaction-capability': ['rpc-native-codec.ts', 'input.interactionQueue !== undefined && input.interactionQueue !== true', 'false'],
+  'accept-nonboolean-idle-capability': ['rpc-native-codec.ts', 'if (input.idleQueue !== undefined) bool(input.idleQueue)', ''],
+  'accept-false-interaction-plan': ['prompt-submission-record.ts', 'plan.interactionQueue !== undefined && plan.interactionQueue !== true', 'false'],
+  'ignore-native-idle-limit': ['agent-message-notifications.ts', 'provider.catalog.capabilities.nativeConversationInput?.idleQueue !== false', 'true'],
   'default-native-disabled': ['prompt-submission.ts', 'const source = nativeOriginal && defaultNativeSource(nativeOriginal)', 'const source = undefined'],
   'forget-default-predecessor': ['prompt-submission.ts', '(stored.promptCompletionAdmission === undefined ? null : stored.promptCompletionAdmission.submissionId) !== admissionIntent.condition.afterSubmissionId', 'false'],
   'forget-default-source': ['prompt-submission.ts', '!isDeepStrictEqual(defaultNativeSource(stored), source)', 'false'],
