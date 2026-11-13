@@ -259,6 +259,7 @@ Viewport 直接入口与 More 的二级菜单共用相同选择与已应用状�
 - Agent 浏览器自动化不能借用人的 UI 确认；没有专用的人批准事实时必须返回类型化拒绝，健康 Browser 与其登录态保持不变。
 - 是否允许驱动页面由一处判定，依据是谁在请求：Core 附上的托管 Agent 调用方，或人（GUI，或不带调用方的 CLI）。Settings › Browser 的总开关对两者同样生效，关闭时以 `BROWSER_AUTOMATION_DISABLED` 拒绝。每个 Profile 另有一个 Agents 开关，只收窄 Agent 调用方：关闭后 Agent 以 `BROWSER_PROFILE_AGENT_ACCESS_OFF` 被拒，人仍可在该 Profile 里运行自己的步骤。没有 Profile 的页面（匿名页、Capsule、外部标签）只看总开关；保存时未记 Profile 的普通页会恢复进默认 Profile，因此按默认 Profile 判定。读不到 Profile 时对 Agent 明确为未知（`BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN`），不猜作允许，也不拦人。Agents 开关只能由人在设置页修改，公共命令不提供 setter；停止操作永远不经这道判定。
 - Profile 代理登录的设置与清除由可信人或设备操作，GUI 与公共入口使用同一 Main 凭据 owner；托管 Agent 明确拒绝。CLI 只从文件或 stdin 接受密码，参数、回执、错误和日志不回显密码。凭据已保存／清除与既有连接已更新分别反馈；连接更新失败保留已确认的写入，不要求重复提交密码。出口检测复用准确 Profile 的原 session 和本人配置的 HTTPS 地址，返回可达或未知的本次观察；失败不关闭页面或改变 Profile。
+- 代理认证失败或凭据读取未知由原凭据 owner 保留非敏感原因，准确归属 Profile 与代理目标；原 Browser 服务提示及公开目标的 warning 消费同一事实。提示给出原设置入口，保留 Browser 控制、原页面与健康 Agent，不冒充页面死亡或写入 Agent 操作历史。换代理、明确清除或成功保存新凭据后收口原问题；原文件成功重读只解除读取问题，不冒称远端认证成功。本人隐藏一条提示不删除原事实，也不使其他 Profile 的新问题被隐藏。
 
 
 ## 多位置呈现、局部遮挡与输入交接
