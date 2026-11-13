@@ -56,3 +56,27 @@ it('keeps a visited channel editor mounted with its draft while another section 
   await choose('lark')
   expect(pane('lark')!.querySelector('[data-connection-hosting]')).toBe(before)
 })
+
+it('states a requested field that the section does not show, outside search too', async () => {
+  const request: SettingsNavigationRequest = { section: 'general', field: 'not-a-general-field' }
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="general" navigationRequest={request} />)
+  await settle()
+  expect(pane('general')!.querySelector('[data-settings-target-issue]')?.textContent).toContain('not shown in the current view')
+})
+
+it('lands the Host executors request on its real anchor without an issue', async () => {
+  const request: SettingsNavigationRequest = { section: 'agents', field: 'host-executors', hostId: 'local' }
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="agents" navigationRequest={request} />)
+  await settle()
+  const target = pane('agents')!.querySelector<HTMLElement>('[data-settings-field="host-executors"]')
+  expect(target).not.toBeNull()
+  expect(target!.hidden).toBe(false)
+  expect(pane('agents')!.querySelector('[data-settings-target-issue]')).toBeNull()
+})
+
+it('says on Overview that no section manages an unrecognized channel application', async () => {
+  const channelOrigin = { sessionId: 's', hostId: 'local', agentSessionId: 'a', connection: { connectionId: 'c', adapterId: 'matrix', application: { domain: 'matrix.example', appId: 'app' } } }
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="overview" navigationRequest={{ section: 'overview', channelOrigin }} />)
+  await settle()
+  expect(dom.container.querySelector('[data-settings-overview] [data-settings-target-issue]')?.textContent).toContain('matrix.example')
+})
