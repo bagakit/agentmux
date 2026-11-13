@@ -35,24 +35,26 @@ export function renderCommittedLayer(layer: HTMLCanvasElement, shapes: readonly 
   } finally { context.restore() }
 }
 
+/** `inProgress` is the mark under the pointer, or every mark of a group being moved, drawn above the cached committed layer. */
 export function renderScreenshotScene(target: HTMLCanvasElement, committed: HTMLCanvasElement,
-  inProgress: ScreenshotShape | null, viewport: ImageViewport, masks: readonly ScreenshotShape[] = []): void {
+  inProgress: ScreenshotShape | readonly ScreenshotShape[] | null, viewport: ImageViewport, masks: readonly ScreenshotShape[] = []): void {
+  const moving = inProgress === null ? [] : Array.isArray(inProgress) ? inProgress as readonly ScreenshotShape[] : [inProgress as ScreenshotShape]
   const context = prepare(target, viewport)
   if (!context) return
   context.setTransform(1, 0, 0, 1, 0, 0)
   if (committed.width && committed.height) context.drawImage(committed, 0, 0)
   applyView(context, viewport)
-  if (inProgress) {
+  if (moving.length) {
     context.save()
     try {
       context.beginPath(); context.rect(0, 0, viewport.imageWidth, viewport.imageHeight); context.clip()
-      drawScreenshotShapes(context, [inProgress])
+      drawScreenshotShapes(context, moving)
     } finally { context.restore() }
   }
-  // Restore already processed mask pixels instead of resampling pixelation on each frame.
-  // Pointing marks paint above masks in the output, so they keep painting above them here.
-  if (inProgress && screenshotOutputLayer(inProgress) > 1) masks = []
-  if (inProgress && !isScreenshotMask(inProgress) && masks.length) {
+  // Restore already processed mask pixels instead of resampling pixelation on each frame. Pointing marks paint above
+  // masks in the output, so they keep painting above them here; a moving mask draws its own pixels.
+  if (moving.some(shape => screenshotOutputLayer(shape) > 1)) masks = []
+  if (moving.length && !moving.some(isScreenshotMask) && masks.length) {
     const { view } = viewport, dpr = clampScreenshotScale(viewport.dpr)
     context.setTransform(1, 0, 0, 1, 0, 0)
     for (const mask of masks) {

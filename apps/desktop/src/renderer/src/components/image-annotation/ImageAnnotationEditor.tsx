@@ -237,7 +237,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const live = useRef({ size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe })
   live.current = { size, documentState, loaded, selected, selectedShapes, tool, active, pendingText, loupe }
   const cache = useRef<{ document: ScreenshotDocument; shapes: ScreenshotShape[]; view: AnnotationView; size: Size; loaded: boolean;
-    excluded: string | undefined; erased: number; masks: ScreenshotShape[] } | null>(null)
+    excluded: string | undefined; hidden: ReadonlySet<string> | undefined; erased: number; masks: ScreenshotShape[] } | null>(null)
   const scale = view.scale
 
   /** Copies the frozen pixels around the frame point into the sampler and reads the centre one. */
@@ -267,16 +267,19 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (!state.active || !canvas || !committed || !state.size.width || !state.size.height) return
       const viewport: ImageViewport = { ...state.size, imageWidth: image.width, imageHeight: image.height, view: currentView }
       const excluded = transformRef.current?.original.id ?? (state.pendingText?.existing ? state.pendingText.shape.id : undefined)
-      const erased = eraseRef.current?.size ?? 0, previous = cache.current, shapes = groupRef.current?.moved ?? state.documentState.shapes
+      // A moving group keeps the committed layer of everything else and draws only its members per frame, like one mark.
+      const group = groupRef.current, hidden = group?.ids
+      const erased = eraseRef.current?.size ?? 0, previous = cache.current, shapes = state.documentState.shapes
       try {
         if (!previous || previous.document !== state.documentState || previous.view !== currentView || previous.size !== state.size ||
-          previous.loaded !== state.loaded || previous.excluded !== excluded || previous.erased !== erased || previous.shapes !== shapes) {
-          const output = screenshotOutputShapes(shapes.filter(shape => shape.id !== excluded && !eraseRef.current?.has(shape.id)), state.documentState.crop)
+          previous.loaded !== state.loaded || previous.excluded !== excluded || previous.erased !== erased || previous.shapes !== shapes || previous.hidden !== hidden) {
+          const output = screenshotOutputShapes(shapes.filter(shape => shape.id !== excluded && !hidden?.has(shape.id) && !eraseRef.current?.has(shape.id)), state.documentState.crop)
           renderCommittedLayer(committed, output, viewport, state.loaded ? imageRef.current! : undefined)
-          cache.current = { document: state.documentState, shapes, view: currentView, size: state.size, loaded: state.loaded, excluded, erased,
+          cache.current = { document: state.documentState, shapes, hidden, view: currentView, size: state.size, loaded: state.loaded, excluded, erased,
             masks: output.filter(isScreenshotMask) }
         }
-        renderScreenshotScene(canvas, committed, currentGestureRef.current, viewport, cache.current?.masks)
+        const moving = group ? screenshotOutputShapes(group.moved.filter(shape => group.ids.has(shape.id)), state.documentState.crop) : currentGestureRef.current
+        renderScreenshotScene(canvas, committed, moving, viewport, cache.current?.masks)
         const context = canvas.getContext('2d')
         if (!context) return
         const fit = currentView.scale
@@ -301,7 +304,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             context.strokeRect(handle.point.x - 4 / fit, handle.point.y - 4 / fit, 8 / fit, 8 / fit)
           }
         }
-        const group = groupRef.current, marquee = marqueeRef.current
+        const marquee = marqueeRef.current
         const members = group ? group.moved.filter(shape => group.ids.has(shape.id)) : state.selectedShapes
         if (members.length > 1 && !state.pendingText) paintGroup(context, members, fit)
         if (marquee) paintMarquee(context, marquee, state.documentState, fit)
