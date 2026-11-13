@@ -15,7 +15,7 @@ function definitelyNotApplied(error: unknown): boolean {
 
 function inputObservationLabel(delivery: CapsuleInputObservation | undefined): string {
   if (!delivery) return ''
-  if (delivery.status === 'unknown') return 'input unconfirmed'
+  if (delivery.status === 'unknown') return 'result needs checking'
   if (delivery.status === 'unavailable') return 'input unavailable'
   switch (delivery.inputStatus) {
     case 'waiting': return 'input waiting in Core'
@@ -23,7 +23,7 @@ function inputObservationLabel(delivery: CapsuleInputObservation | undefined): s
     case 'not-applied': return 'input not applied'
     case 'terminal-confirmed': return 'terminal input confirmed'
     case 'admitted': return 'input admitted by Provider'
-    case 'unknown': return 'input unconfirmed'
+    case 'unknown': return 'result needs checking'
     default: return 'input registered in Core'
   }
 }
@@ -50,7 +50,7 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     update(saved => sameAttempt(saved.attempt, held) ? { ...saved,
       baseline: { value: value.answer ?? value.draft, revision: value.revision },
       attempt: unknown ? { ...held, pending: false } : null,
-      notice: unknown ? 'Your answer is saved. The original input result is unconfirmed; inspect it before any further action.' : '' } : saved)
+      notice: '' } : saved)
     accept(value)
   }
   const begin = (held: Attempt, continuing = false): boolean => update(saved => {
@@ -106,7 +106,7 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     setInspecting(true)
     try {
       const { operation } = await api.capsules.call('capsule.operation.inspect', { operationId: held.params.operationId })
-      if (!operation || operation.status === 'pending') { annotate(held, 'The original result is still unconfirmed. This operation has not been repeated.'); return }
+      if (!operation || operation.status === 'pending') { annotate(held, 'Checked: still unconfirmed. Nothing was sent again.'); return }
       if (operation.operationId !== held.params.operationId || operation.method !== held.method || operation.capsuleId !== held.params.capsuleId) {
         annotate(held, 'The original operation identity could not be confirmed. Your answer and operation are retained.'); return
       }
@@ -171,8 +171,8 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     </div>
     {issue ? <p className="capsule-question__notice" role="status">{issue}</p> : null}
     {notice ? <p className="capsule-question__notice" role="status">{notice}</p> : null}
-    {delivery?.reason ? <p className="capsule-question__notice">{delivery.reason}</p> : null}
-    {attempt || current.reply || retainedOperationId ? <details><summary>Original operation</summary><code>{retainedOperationId ?? attempt?.params.operationId ?? current.reply?.operationId}</code></details> : null}
+    {attempt || current.reply || retainedOperationId ? <details><summary>Original operation</summary><code>{retainedOperationId ?? attempt?.params.operationId ?? current.reply?.operationId}</code>
+      {delivery?.reason ? <p className="capsule-question__notice">{delivery.reason}</p> : null}</details> : null}
       </div>
     </details>
   </article>

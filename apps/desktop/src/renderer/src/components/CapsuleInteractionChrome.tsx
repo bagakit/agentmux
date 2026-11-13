@@ -73,7 +73,7 @@ export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible
       }}><QuestionsIcon size={13} aria-hidden="true" /><span className="capsule-toolbar__name">{embedded ? attention === 'pending' ? 'Needs your answer' : 'Questions' : page?.record.title ?? 'Saved page'}</span>
       {!embedded ? <span className="capsule-toolbar__mode">{mode}</span> : null}{pending ? <span className="capsule-toolbar__count">{pending}</span> : null}</button>, toolbarHost) : null}
     <section id={panelId} ref={panelRef} className="capsule-chrome" aria-label="Capsule page requests" hidden={!open} inert={!open || !visible}>
-      <div className="capsule-chrome__heading"><span>Review your answer before sending</span>
+      <div className="capsule-chrome__heading"><span>Page answers</span>
         <button type="button" className="icon-button" aria-label={loading ? 'Refreshing…' : 'Refresh'} title="Refresh questions" disabled={loading} onClick={() => void refresh()}><RefreshIcon size={14} aria-hidden="true" /></button></div>
       {!active ? <p className="capsule-chrome__notice">Browsing another site · saved requests retained</p> : null}
       {notice ? <p className="capsule-chrome__notice" role="status">{notice}</p> : null}

@@ -43,8 +43,6 @@
 .capsule-question__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
 .capsule-question__actions > span { margin-right: auto; color: var(--text-3); }
 .capsule-question__actions > .small-button { min-height: 28px; padding: var(--sp-1) var(--sp-2); font-weight: 500; }
-.capsule-question__actions > .capsule-question__save { background: transparent; box-shadow: none; color: var(--text-2); }
-.capsule-question__actions > .capsule-question__save:hover:not(:disabled) { background: var(--surface-2); box-shadow: none; color: var(--text); }
 .capsule-question__actions > .capsule-question__confirm { min-height: 28px; padding: var(--sp-1) var(--sp-3); box-shadow: var(--hl); }
 .capsule-question__notice { color: var(--text-2); line-height: 1.5; margin: var(--sp-2) 0 0; }
 .capsule-question__body > details, .capsule-chrome__source { margin-top: var(--sp-2); color: var(--text-3); }
