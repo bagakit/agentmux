@@ -72,7 +72,7 @@ export function classifyApplicationProcesses(psStdout, { executable, helperRoot 
   return { serving, crashReporter }
 }
 
-function processRows(psStdout) {
+function processRows(psStdout, allowEmpty = false) {
   const rows = psStdout.split('\n').filter(line => line.trim()).map(line => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/.exec(line)
     assert(match, 'Application process birth observation is unavailable.')
@@ -80,7 +80,7 @@ function processRows(psStdout) {
     assert(Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(ppid) && ppid >= 0)
     return { uid, pid, ppid, birth: match[4].replace(/\s+/g, ' '), command: match[5] }
   })
-  assert(rows.length > 0, 'The OS process observation is empty.')
+  assert(allowEmpty || rows.length > 0, 'The OS process observation is empty.')
   return rows
 }
 
@@ -95,7 +95,7 @@ function assertAdmissions(admissions) {
 }
 
 /** Commands discover candidates; bound OS identities keep them observable across title changes. */
-export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [], previousOwners = [], independentOwners = [] } = {}) {
+export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [], previousOwners = [], independentOwners = [], unconfirmedAncestors = new Set() } = {}) {
   assertAdmissions(previousOwners)
   const rows = processRows(psStdout), byPid = new Map(rows.map(row => [row.pid, row]))
   const classified = classifyApplicationProcesses(rows.map(row => `${row.pid} ${row.command}`).join('\n'), bundle)
@@ -129,6 +129,7 @@ export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [],
       const { uid, pid, ppid, birth } = parent
       path.push({ uid, pid, ppid, birth })
       visited.add(parent.pid)
+      if (unconfirmedAncestors.has(parent.pid)) uncertain = true
       if (independent.has(parent.pid)) { termination = 'independent-owner'; missingPid = null; if (!uncertain) classification = 'external'; break }
       if (gui.has(parent.pid)) { termination = 'gui-owner'; missingPid = null; if (!uncertain) classification = 'gui'; break }
       if (parent.pid === 1) { termination = 'system-root'; missingPid = null; if (!uncertain) classification = 'external'; break }
@@ -227,41 +228,65 @@ async function electronNodeModes(pids) {
   } catch { return [] } // Unknown stays protected. It is not proof of process exit.
 }
 
-async function osProcessSnapshot() {
-  return (await exec('/bin/ps', ['-axo', 'uid=,pid=,ppid=,lstart=,command='],
-    { timeout: 5_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } })).stdout
+async function osProcessSnapshot(pids) {
+  const args = pids ? ['-p', pids.join(','), '-o', 'uid=,pid=,ppid=,lstart=,command=']
+    : ['-axo', 'uid=,pid=,ppid=,lstart=,command=']
+  try {
+    return (await exec('/bin/ps', args,
+      { timeout: 5_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } })).stdout
+  } catch (error) {
+    // ps exits 1 when no selected PID exists. An OS read error is not absence.
+    if (pids && error.code === 1 && typeof error.stdout === 'string' && !error.stderr?.trim()) return error.stdout
+    throw error
+  }
 }
 
-/** Re-observe current OS owners after mode reads; an errno is never an exit fact. */
+/** A global discovery cut followed by a finite identity/ancestry fence, never a quiescence loop. */
 export async function observeApplicationProcesses(bundle, previousOwners = [],
   { processSnapshot = osProcessSnapshot, modes = electronNodeModes, independentOwners = [] } = {}) {
-  const first = processRows(await processSnapshot())
-  const needsMode = row => row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `) ||
-    row.command.startsWith(bundle.helperRoot) && !isCrashReporter(row.command) ||
-    previousOwners.some(owner => identityMatches(owner, row))
-  const candidates = first.filter(needsMode)
-  const requested = new Set(candidates.map(row => row.pid))
-  let nodeModes = await modes(candidates.map(row => row.pid))
-  let current = await processSnapshot()
-  const original = new Map(candidates.map(row => [row.pid, row]))
-  const additional = processRows(current).filter(row => {
-    if (!needsMode(row)) return false
-    const before = original.get(row.pid)
-    return !before || before.uid !== row.uid || before.birth !== row.birth || before.ppid !== row.ppid
-  })
-  // One reconciliation round covers new identities without chasing process churn.
-  // Any later or unreadable candidate stays protected by the existing classifier.
-  if (additional.length) {
-    for (const row of additional) requested.add(row.pid)
-    const additionalModes = await modes(additional.map(row => row.pid))
-    const replaced = new Set(additional.map(row => row.pid))
-    nodeModes = [...nodeModes.filter(row => !replaced.has(row.pid)), ...additionalModes]
-    current = await processSnapshot()
+  const candidates = (rows, owners) => {
+    const prior = new Map(owners.map(owner => [owner.pid, owner]))
+    return rows.filter(row => row.command === bundle.executable || row.command.startsWith(`${bundle.executable} `) ||
+      row.command.startsWith(bundle.helperRoot) && !isCrashReporter(row.command) || identityMatches(prior.get(row.pid), row))
   }
-  const scope = snapshotApplicationProcesses(current, bundle, { nodeModes, previousOwners, independentOwners })
-  const identities = new Map(processRows(current).map(({ uid, pid, ppid, birth }) => [pid, { uid, pid, ppid, birth }]))
-  return { ...scope, nodeModes: nodeModes.filter(mode => scope.processes.some(row =>
-    row.pid === mode.pid && row.birth === mode.birth && row.ppid === mode.ppid)),
+  const snapshot = (text, nodeModes, owners, unconfirmedAncestors) => snapshotApplicationProcesses(text, bundle,
+    { nodeModes, previousOwners: owners, independentOwners, unconfirmedAncestors })
+  const first = await processSnapshot(), initial = candidates(processRows(first), previousOwners)
+  const requested = new Set(initial.map(row => row.pid))
+  const original = snapshot(first, await modes(initial.map(row => row.pid)), previousOwners)
+  // This second global census is the discovery cut. Its late GUI/unknown births
+  // are included; births after this cut are not claimed to have been observed.
+  const cut = await processSnapshot(), rows = processRows(cut), selected = candidates(rows, original.admissions)
+  for (const row of selected) requested.add(row.pid)
+  const nodeModes = await modes(selected.map(row => row.pid))
+  const admitted = snapshot(cut, nodeModes, original.admissions)
+  const byPid = new Map(rows.map(row => [row.pid, row])), fence = new Set()
+  for (const candidate of selected) {
+    let row = candidate
+    const visited = new Set()
+    while (row && !visited.has(row.pid)) {
+      fence.add(row.pid); visited.add(row.pid)
+      if (row.ppid > 0) fence.add(row.ppid)
+      row = byPid.get(row.ppid)
+    }
+  }
+  // Keep the final OS read, but ask only about these finite identities and
+  // ancestors. A new global census here would introduce an unqueried CLI tail.
+  const observed = fence.size ? processRows(await processSnapshot([...fence]), true).filter(row => fence.has(row.pid)) : []
+  const current = new Map(observed.map(row => [row.pid, row]))
+  const merged = rows.flatMap(row => fence.has(row.pid) ? current.has(row.pid) ? [current.get(row.pid)] : [] : [row])
+  for (const row of observed) if (!byPid.has(row.pid)) merged.push(row)
+  // Preserve every unselected cut row for launch-baseline birth checks. Only
+  // exact queried objects are updated/removed by the successful targeted ps.
+  const text = merged.map(row => `${row.uid} ${row.pid} ${row.ppid} ${row.birth} ${row.command}`).join('\n')
+  const unconfirmedAncestors = new Set(observed.filter(row => {
+    const original = byPid.get(row.pid)
+    return !identityMatches(original, row) || original.ppid !== row.ppid
+  }).map(row => row.pid))
+  const scope = snapshot(text, nodeModes, admitted.admissions, unconfirmedAncestors)
+  const identities = new Map(merged.map(({ uid, pid, ppid, birth }) => [pid, { uid, pid, ppid, birth }]))
+  return { ...scope, nodeModes: nodeModes.filter(mode =>
+    identityMatches(mode, identities.get(mode.pid)) && mode.ppid === identities.get(mode.pid).ppid),
     // Internal point-time facts. The failure receipt selects only its affected
     // identity and ancestry; commands, argv and environment never enter it.
     ownershipObservation: { executable: bundle.executable, helperRoot: bundle.helperRoot, requested, admissions: new Map(scope.admissions.filter(admission =>
