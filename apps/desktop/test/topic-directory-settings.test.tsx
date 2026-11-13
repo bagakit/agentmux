@@ -122,6 +122,7 @@ it('Promotion discovers the original Club only on explicit entry and never write
   expect(pane.querySelector('input,select,[data-settings-save-bar]')).toBeNull()
   expect(open).not.toHaveBeenCalled()
   expect(api.topics.call).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('[data-open-mote-club] [data-semantic-icon]')).toBeNull()
   await dom.click('[data-open-mote-club]')
   expect(open).toHaveBeenCalledExactlyOnceWith()
   expect(close).toHaveBeenCalledOnce()

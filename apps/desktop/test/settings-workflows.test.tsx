@@ -35,6 +35,7 @@ it('real catalog and complete Shell expose Work once; object keywords reach thei
   expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
   await section('space')
   expect(pane('space').querySelectorAll('[data-workflows-manage]')).toHaveLength(2)
+  expect(pane('space').querySelectorAll('[data-workflows-manage] [data-semantic-icon="action.open-external"]')).toHaveLength(0)
   expect(pane('space').querySelectorAll('input[name=space-rail-density]')).toHaveLength(3)
   expect(pane('space').textContent).toContain('Saved: Comfortable')
   expect(dom.container.querySelector('[data-settings-pane="goals"]')).toBeNull()

@@ -112,6 +112,7 @@ it('session-navigation: existing Agent and Terminal rows on same-path Hosts navi
   try {
   await show(); await graph(H)
   expect([...dom.container.querySelectorAll<HTMLElement>('[data-host-session]')].map(node => node.dataset.hostSession)).toEqual([agent.id, shell.id])
+  expect(dom.container.querySelector('[data-host-session] [data-semantic-icon="action.open-external"]')).toBeNull()
   for (const session of [agent, shell]) {
     await dom.click(`[data-host-session="${session.id}"]`)
     expect(select).toHaveBeenLastCalledWith(session.id)
