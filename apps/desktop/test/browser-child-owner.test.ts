@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
+import { createBrowserProfilePageEnvironment } from '../src/main/browser-profile-page-environment.js'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview'
 import type { BrowserRecoveryPreviewScope } from '../src/shared/browser-recovery-preview'
@@ -114,6 +116,51 @@ async function fixture(mode: 'normal' | 'private' = 'normal', previews?: Browser
 }
 
 describe('Native child pages use the ordinary Browser owner', () => {
+  it('publishes environment fields only for the current native Profile binding across candidate promotion and delayed retirement', async () => {
+    const f=await fixture(),resolver=(f.manager as any).profiles
+    const publications:Array<{profileId:string;pages:any[]}>=[]
+    const settings:Record<string,any>={normal:{locale:'fr-FR',screen:{width:1080,height:720}},other:{locale:'ja-JP',screen:{width:1180,height:760}}}
+    const environment=createBrowserProfilePageEnvironment({settings:id=>settings[id],userAgent:()=>'',changed:id=>publications.push({profileId:id,pages:environment.inspect(id)})})
+    resolver.environmentSettings=(id:string)=>settings[id]
+    resolver.preparePageEnvironment=(...args:any[])=>environment.preparePage(...args as [string,string,any,any])
+    resolver.publishEnvironmentBindings=(ids:string[])=>environment.publishBindings(ids)
+    resolver.listProfiles=()=>[{id:'normal',label:'A'},{id:'other',label:'B'}]
+    const create=(f.manager as any).createView.bind(f.manager)
+    let count=0,unblock!:()=>void,entered!:()=>void
+    const loading=new Promise<void>(resolve=>{entered=resolve}),gate=new Promise<void>(resolve=>{unblock=resolve})
+    vi.spyOn(f.manager as any,'createView').mockImplementation((...args:any[])=>{
+      const view=create(...args),debuggerOwner=new EventEmitter() as any
+      debuggerOwner.attached=false;debuggerOwner.attach=()=>{debuggerOwner.attached=true};debuggerOwner.isAttached=()=>debuggerOwner.attached
+      debuggerOwner.detach=()=>{debuggerOwner.attached=false;debuggerOwner.emit('detach',{},'detached')}
+      debuggerOwner.sendCommand=async()=>({})
+      view.webContents.debugger=debuggerOwner;view.webContents.isDevToolsOpened=()=>false
+      vi.spyOn(view.webContents,'enableDeviceEmulation')
+      if(++count===2){const load=view.webContents.loadURL;view.webContents.loadURL=vi.fn(async(url:string)=>{entered();await gate;return await load(url)})}
+      return view
+    })
+    await f.manager.create('switch-environment','https://switch.invalid/','workspace','normal')
+    const original=f.window.children.find(view=>view.webContents.getURL()==='https://switch.invalid/')!.webContents
+    original.close.mockImplementation(()=>{})
+    const switching=f.manager.switchProfile('switch-environment','other')
+    await loading
+    const before={target:f.manager.target('switch-environment'),a:environment.inspect('normal'),b:environment.inspect('other')}
+    publications.length=0
+    unblock();await switching
+    const current=(f.manager as any).entries.get('switch-environment').view.webContents
+    const after={target:f.manager.target('switch-environment'),a:environment.inspect('normal'),b:environment.inspect('other'),retiredAlive:!original.isDestroyed(),screen:current.enableDeviceEmulation.mock.lastCall?.[0].screenSize}
+    const bindingPublications=[...publications]
+    original.destroyed=true;original.emit('destroyed')
+    expect(before.target!.profile!.id).toBe('normal')
+    expect(before.b).toEqual([])
+    expect(before.a.map(page=>page.browserId)).toEqual(['switch-environment'])
+    expect(after.retiredAlive).toBe(true)
+    expect(after.target!.profile!.id).toBe('other')
+    expect(after.a).toEqual([])
+    expect(after.b.map(page=>page.browserId)).toEqual(['switch-environment'])
+    expect(after.screen).toEqual({width:1180,height:760})
+    expect(bindingPublications.some(value=>value.profileId==='other'&&value.pages.some(page=>page.browserId==='switch-environment'))).toBe(true)
+    expect(bindingPublications.some(value=>value.profileId==='normal'&&value.pages.length===0)).toBe(true)
+  })
   it('excludes only a confirmed sole environment lease from debugger retention while preserving native DevTools and unknown consumers', async () => {
     const f=await fixture(),resolver=(f.manager as any).profiles
     let sole=true,devtools=false

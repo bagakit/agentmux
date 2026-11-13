@@ -46,6 +46,7 @@ export async function runProfileEnvironmentScope(input: {
   cli(args: string[]): Promise<any>
   report: any
   stage(name: string): void
+  targets():Promise<any>
 }) {
   const { home, phase, url, profiles, browsers, page, cli, report, stage } = input
   report.scopeCases = []
@@ -134,6 +135,48 @@ export async function runProfileEnvironmentScope(input: {
   let navigations = 0
   const track = () => navigations++
   original.on('did-start-navigation', track)
+  if(process.env.AGENTMUX_ENV_PROOF_BINDING==='1'){
+    await observe('current-native-binding-excludes-preparing-and-retired-incarnations',async()=>{
+      await settings(profileId,{locale:'fr-FR',screen:{width:1080,height:720}})
+      await applied(profileId,browserId)
+      const other=await profiles.createProfile('Candidate native binding')
+      await settings(other.id,{locale:'ja-JP',screen:{width:1180,height:760}})
+      const events:any[]=[],unsubscribe=profiles.onEnvironmentApplicationChange(id=>events.push({profileId:id,profiles:profiles.listProfiles()}))
+      const manager=browsers as any,create=manager.createView.bind(manager)
+      const oldClose=original.close.bind(original)
+      let candidate:Electron.WebContents|undefined,entered=false,release!:()=>void,releaseAck!:()=>void
+      const gate=new Promise<void>(resolve=>{release=resolve})
+      const acknowledgement=new Promise<void>(resolve=>{releaseAck=resolve})
+      Object.defineProperty(original,'close',{configurable:true,value:()=>{report.retiredNativeCloseRequested=true}})
+      manager.createView=(...args:any[])=>{
+        const view=create(...args),contents=view.webContents as Electron.WebContents,load=contents.loadURL.bind(contents)
+        const send=contents.debugger.sendCommand.bind(contents.debugger)
+        Object.defineProperty(contents.debugger,'sendCommand',{configurable:true,value:async(...values:Parameters<Electron.Debugger['sendCommand']>)=>{const result=await send(...values);if(values[0]==='Emulation.setLocaleOverride')await acknowledgement;return result}})
+        candidate=contents
+        Object.defineProperty(contents,'loadURL',{configurable:true,value:async(...values:Parameters<Electron.WebContents['loadURL']>)=>{entered=true;await gate;return await load(...values)}})
+        return view
+      }
+      let switching:Promise<unknown>|undefined
+      try{
+        switching=browsers.switchProfile(browserId,other.id);void switching.catch(()=>{})
+        await until(()=>entered,'original native Profile candidate prepared before navigation')
+        const before={targets:await input.targets(),a:await cli(['inspect','--profile',profileId]),b:await cli(['inspect','--profile',other.id]),originalContentsId:original.id,candidateContentsId:candidate!.id}
+        events.length=0;release();await switching
+        const after={targets:await input.targets(),a:await cli(['inspect','--profile',profileId]),b:await cli(['inspect','--profile',other.id]),originalAlive:!original.isDestroyed(),candidateAlive:!candidate!.isDestroyed(),screen:await candidate!.executeJavaScript('({width:screen.width,height:screen.height})'),events}
+        report.nativeBinding={before,after}
+        assert.equal(before.targets.targets.find((row:any)=>row.id===browserId).profile.id,profileId)
+        assert.equal((before.b.profile.environmentApplication?.pages??[]).some((row:any)=>row.browserId===browserId),false,'A prepared candidate must not claim the current public Browser')
+        assert.equal(after.targets.targets.find((row:any)=>row.id===browserId).profile.id,other.id)
+        assert.equal(after.originalAlive,true,'The original retiring native incarnation remains during this bounded close observation')
+        assert.equal((after.a.profile.environmentApplication?.pages??[]).some((row:any)=>row.browserId===browserId),false,'A retired incarnation must not claim the current public Browser')
+        assert.ok(after.b.profile.environmentApplication.pages.some((row:any)=>row.browserId===browserId))
+        assert.deepEqual(after.screen,{width:1180,height:760},'The committed native view must keep its new Profile screen')
+        assert.ok(events.some(value=>value.profileId===other.id&&value.profiles.find((row:any)=>row.id===other.id)?.environmentApplication?.pages?.some((row:any)=>row.browserId===browserId)),'Native candidate promotion must publish its current application')
+        assert.ok(events.some(value=>value.profileId===profileId&&!value.profiles.find((row:any)=>row.id===profileId)?.environmentApplication?.pages?.some((row:any)=>row.browserId===browserId)),'Native promotion must retire the previous Profile projection')
+      }finally{release();releaseAck();manager.createView=create;Object.defineProperty(original,'close',{configurable:true,value:oldClose});oldClose();unsubscribe();if(switching)await switching.catch(()=>{})}
+    })
+    return
+  }
   if(process.env.AGENTMUX_ENV_PROOF_HARDWARE_BASELINE==='1'){
     await observe('page-main-world-getter-cannot-corrupt-native-hardware-clear',async()=>{
       const program=BrowserCdpSession.attach(original)

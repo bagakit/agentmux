@@ -105,7 +105,7 @@ try {
       }
     }
     stage('native scope scenario entered')
-    await runProfileEnvironmentScope({home,phase,url,profiles,browsers,page,cli,report,stage})
+    await runProfileEnvironmentScope({home,phase,url,profiles,browsers,page,cli,report,stage,targets:()=>profileClient!.call('browser.targets',{})})
   } else if (phase === 'seed') {
     const id = profiles.defaultProfileId(), oldId = mintObjectId()
     stage('original Browser creating')

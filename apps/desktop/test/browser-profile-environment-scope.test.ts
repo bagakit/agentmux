@@ -82,7 +82,10 @@ function fixture(initial: BrowserProfileEnvironment | undefined = configured) {
   const screen = vi.fn()
   const prepare = () => {
     owner.prepare('profile')
-    return owner.preparePage('profile', 'browser', contents as any, { applyScreen: screen })
+    return owner.preparePage('profile', 'browser', contents as any, {
+      applyScreen: screen,
+      isCurrent: () => true
+    })
   }
   return {
     contents,
@@ -286,6 +289,26 @@ describe('one original Profile environment across native target scopes', () => {
       timezoneId: ''
     })
     expect(f.owner.inspect('profile')!.pages![0]!.status).toBe('applied')
+  })
+  it('a new saved session default cannot publish the old page acknowledgement as its current configuration', async () => {
+    const f = fixture()
+    cleanup.push(f.destroy)
+    await f.prepare()
+    const publications: any[] = []
+    f.owner.subscribe(() => publications.push(f.owner.inspect('profile')))
+    f.set({ ...configured, userAgent: 'NewSavedNative/2.0' })
+    expect(f.contents.debugger.sendCommand).not.toHaveBeenCalledWith(
+      'Emulation.setUserAgentOverride',
+      expect.objectContaining({ userAgent: 'NewSavedNative/2.0' })
+    )
+    expect(
+      publications.some(
+        (value) =>
+          value?.userAgent === 'NewSavedNative/2.0' &&
+          value.pages?.some((page: any) => page.fields.userAgent?.status === 'applied')
+      )
+    ).toBe(false)
+    await f.prepare()
   })
   it('a failed native field stays unknown while later supported fields and the healthy page remain usable', async () => {
     const f = fixture()
