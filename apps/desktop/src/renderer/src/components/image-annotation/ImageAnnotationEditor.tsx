@@ -24,7 +24,7 @@ import './image-annotation.css'
 const icon = semanticIconComponent
 const CancelIcon = icon('action.cancel'), ClipboardIcon = icon('object.clipboard'), CheckIcon = icon('status.copied')
 const ZoomInIcon = icon('action.zoom-in'), ZoomOutIcon = icon('action.zoom-out')
-const SaveIcon = icon('action.save'), PinIcon = icon('action.pin')
+const SaveIcon = icon('action.save'), PinIcon = icon('action.pin'), ExpandIcon = icon('action.open-external')
 type Size = { width: number; height: number; dpr: number }
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
 type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; handle?: SelectionHandleId }
@@ -43,11 +43,21 @@ function inlineEditorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>, finish:
 export type InlineAnnotationFrame = { x: number; y: number; width: number; height: number }
 /** The marks and tool an inline editor hands to a separate window editor on Expand. */
 export type InlineAnnotationHandoff = { shapes: ScreenshotShape[]; crop: ScreenshotDocument['crop']; tool: AnnotationTool }
+// The floating toolbar's height and its gap to the selection, in viewport CSS pixels.
+const INLINE_BAR_HEIGHT = 36, INLINE_BAR_GAP = 6
+/** Right-aligned to the selection: below it, else above it, else inside its bottom edge. */
+export function inlineToolbarPlacement(frame: InlineAnnotationFrame, viewportHeight: number): { side: 'below' | 'above' | 'inside'; top: number } {
+  const below = frame.y + frame.height + INLINE_BAR_GAP
+  if (below + INLINE_BAR_HEIGHT <= viewportHeight) return { side: 'below', top: below }
+  const above = frame.y - INLINE_BAR_GAP - INLINE_BAR_HEIGHT
+  if (above >= 0) return { side: 'above', top: above }
+  return { side: 'inside', top: frame.y + frame.height - INLINE_BAR_GAP - INLINE_BAR_HEIGHT }
+}
 const CLICK_DISTANCE = 4, REGION_KINDS: ReadonlySet<ScreenshotShape['kind']> = new Set(['rect', 'arrow', 'ellipse', 'pixelate', 'cover'])
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialTool, documentStatus,
-  ownerDocument, title = 'Screenshot', completeLabel = 'Copy PNG', busyLabel = 'Copying…',
-  onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onEdited, onError }: {
+  ownerDocument, title = 'Screenshot', completeLabel = 'Copy PNG', busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, inlineFrame,
+  onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onExpand, onEdited, onError }: {
   image: AnnotationImage
   busy: boolean
   copied?: string | null
@@ -99,11 +109,14 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   const textDraftRef = useRef<TextDraft | null>(null), noteEditorRef = useRef<string | null>(null), paintFrame = useRef(0), spaceHeld = useRef(false)
   const committedLayerRef = useRef<HTMLCanvasElement | null>(null)
   if (!committedLayerRef.current && typeof document !== 'undefined') committedLayerRef.current = document.createElement('canvas')
-  const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 })
+  const [loaded, setLoaded] = useState(false), [size, setSize] = useState<Size>({ width: 0, height: 0, dpr: 1 }), [hostHeight, setHostHeight] = useState(0)
   const [imageError, setImageError] = useState(false)
   const [documentState, setDocumentState] = useState<ScreenshotDocument>(() => ({ ...createScreenshotDocument(), ...initialState }))
   const [pendingText, setPendingText] = useState<TextDraft | null>(null)
-  const openingTool = useRef(initialTool ?? lastStyle.tool).current
+  const inline = presentation === 'inline'
+  // A fixed inline view has nothing to pan, so a requested or remembered Pan opens as Rectangle.
+  const requestedTool = initialTool ?? lastStyle.tool
+  const openingTool = useRef<AnnotationTool>(inline && requestedTool === 'pan' ? 'rect' : requestedTool).current
   // The opening document is already kept by its owner; only later edits need a discard confirmation.
   const [exported, setExported] = useState(documentState), [discarding, setDiscarding] = useState(false)
   const [tool, setTool] = useState<AnnotationTool>(openingTool), [selectedId, setSelectedId] = useState<string | null>(null)
@@ -200,13 +213,17 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const measure = () => { const rect = container.getBoundingClientRect()
       const next = { width: Math.max(1, rect.width), height: Math.max(1, rect.height), dpr: ownerWindow.devicePixelRatio || 1 }
       setSize(current => current.width === next.width && current.height === next.height && current.dpr === next.dpr ? current : next)
+      if (inline) setHostHeight(editorRef.current?.getBoundingClientRect().height ?? 0)
     }
     measure(); const observer = new ResizeObserver(measure); observer.observe(container)
+    if (inline && editorRef.current) observer.observe(editorRef.current)
     ownerWindow.addEventListener('resize', measure)
     return () => { observer.disconnect(); ownerWindow.removeEventListener('resize', measure) }
-  }, [active])
-  useEffect(() => { if (active && fitted && size.width && size.height) requestView(fitImageView(size.width, size.height, image.width, image.height)) },
-    [active, fitted, size, image.width, image.height, requestView])
+  }, [active, inline])
+  // Inline keeps one image pixel per physical screen pixel on the original selection; only the window view fits and zooms.
+  const fitView = () => inline ? { scale: 1 / pixelRatio, x: 0, y: 0 } : fitImageView(size.width, size.height, image.width, image.height)
+  useEffect(() => { if (active && fitted && size.width && size.height) requestView(fitView()) },
+    [active, fitted, size, image.width, image.height, inline, pixelRatio, requestView])
   useEffect(() => { if (active) schedulePaint() }, [active, documentState, selectedId, loaded, size, tool, pendingText, schedulePaint])
   useEffect(() => { if (!active) { ownerWindow.cancelAnimationFrame(paintFrame.current); paintFrame.current = 0; resetGesture(); spaceHeld.current = false; setPanHeld(false) } }, [active, resetGesture, ownerWindow])
   useEffect(() => () => { ownerWindow.cancelAnimationFrame(paintFrame.current); resetGesture() }, [resetGesture, ownerWindow])
@@ -214,14 +231,15 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   useEffect(() => { setNoteDraft(selectedNote?.note ?? '') }, [selectedNote?.id, selectedNote?.note])
   useEffect(() => { lastStyle = { tool, color, width, fontSize, blockSize, pixelateMode, brushWidth } }, [tool, color, width, fontSize, blockSize, pixelateMode, brushWidth])
 
-  function fitImage() { resetGesture(); setFitted(true); requestView(fitImageView(size.width, size.height, image.width, image.height)) }
+  function fitImage() { resetGesture(); setFitted(true); requestView(fitView()) }
   function zoomTo(next: number, anchor = { x: size.width / 2, y: size.height / 2 }) {
+    if (inline) return
     const fit = fitImageView(size.width, size.height, image.width, image.height).scale
     const bounded = Math.max(Math.min(1 / 16, fit / 4), Math.min(Math.max(8, fit), next))
     setFitted(false); requestView(zoomImageView(viewRef.current, bounded, anchor))
   }
   useEffect(() => {
-    if (!active) return
+    if (!active || inline) return
     const container = containerRef.current
     if (!container) return
     const wheel = (event: WheelEvent) => {
@@ -233,7 +251,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     }
     container.addEventListener('wheel', wheel, { passive: false })
     return () => container.removeEventListener('wheel', wheel)
-  }, [active, size, image.width, image.height, requestView])
+  }, [active, inline, size, image.width, image.height, requestView])
   function cancelGesture() {
     if (panRef.current) { requestView(panRef.current.view); setFitted(panRef.current.fitted) }
     resetGesture(); schedulePaint()
@@ -260,7 +278,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (event.target && 'tagName' in event.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(String(event.target.tagName))) return
       // A focused button activates itself on Enter, so only the canvas or editor surface confirms.
       if (confirmingDiscard && event.key === 'Enter' && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); onCancel(); return }
-      if (event.key === ' ' && target === canvasRef.current) { event.preventDefault(); spaceHeld.current = true; setPanHeld(true); return }
+      if (event.key === ' ' && target === canvasRef.current && !inline) { event.preventDefault(); spaceHeld.current = true; setPanHeld(true); return }
+      if (inline && ['0', '1', '+', '=', '-'].includes(event.key)) return
       if (event.key === '0') { event.preventDefault(); fitImage(); return }
       if (event.key === '1') { event.preventDefault(); zoomTo(1); return }
       if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomTo(viewRef.current.scale * 1.25); return }
@@ -306,9 +325,9 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     setTextRows(Math.max(2, screenshotTextLines(draft.shape.text).length))
   }
   function onPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (!active || (event.button !== 0 && event.button !== 1)) return
+    if (!active || (event.button !== 0 && event.button !== 1) || (inline && event.button !== 0)) return
     event.currentTarget.focus({ preventScroll: true }); setDiscarding(false)
-    if (tool === 'pan' || spaceHeld.current || event.button === 1) {
+    if (tool === 'pan' || (!inline && (spaceHeld.current || event.button === 1))) {
       event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId)
       panRef.current = { start: localPoint(event), view: viewRef.current, fitted }; setFitted(false); return
     }
@@ -423,9 +442,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
     const zoom = fit
     setFitted(false); requestView({ scale: zoom, x: size.width / 2 - (bounds.x + bounds.width / 2) * zoom, y: size.height / 2 - (bounds.y + bounds.height / 2) * zoom })
   }
-  function complete(action: 'png' | 'context' | 'save' | 'save-png' | 'pin' = 'png') {
-    const base = imageRef.current
-    if (!base || !loaded) return
+  // The exact marks an output or the Expand handoff sees, including an open text or note draft.
+  function currentShapes(): ScreenshotShape[] {
     let shapes = selectedNote ? documentState.shapes.map(shape => shape.id === selectedNote.id ? { ...selectedNote, note: noteDraft } : shape) : documentState.shapes
     const draft = textDraftRef.current
     if (draft) {
@@ -434,7 +452,12 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       if (draft.existing && draft.edited && text !== draft.shape.text) shapes = text.trim() ? shapes.map(shape => shape.id === draft.shape.id ? { ...draft.shape, text } : shape) : shapes.filter(shape => shape.id !== draft.shape.id)
       else if (!draft.existing && text.trim()) shapes = [...shapes, { ...draft.shape, text }]
     }
-    const input = { image: base, shapes, crop: documentState.crop, displayWidth: image.width, displayHeight: image.height }
+    return shapes
+  }
+  function complete(action: 'png' | 'context' | 'save' | 'save-png' | 'pin' = 'png') {
+    const base = imageRef.current
+    if (!base || !loaded) return
+    const input = { image: base, shapes: currentShapes(), crop: documentState.crop, displayWidth: image.width, displayHeight: image.height }
     const output = { context: onCopyContext, save: onSaveOriginal, 'save-png': onSavePng, pin: onPin, png: onComplete }[action]
     const kept = documentState, result = output?.(input)
     if (result instanceof Promise) void result.then(confirmed => { if (confirmed === true) { setExported(kept); setDiscarding(false) } })
@@ -460,32 +483,8 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   // Inline editors stay inside the viewport while their anchor keeps its image coordinates.
   const inlineEditorBox = (at: ScreenshotPoint, width: number, height: number) => ({ width, height,
     left: Math.max(0, Math.min(size.width - width, view.x + at.x * scale)), top: Math.max(0, Math.min(size.height - height, view.y + at.y * scale)) })
-  return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
-    <header className="image-annotation-editor__header">
-      <span className="image-annotation-editor__title"><strong>{title}</strong><small>{image.width} × {image.height}</small>
-        <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status" title={copied ?? documentStatus ?? undefined}>{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
-      </span>
-      <div className="image-annotation-toolbar__actions">
-        {confirmingDiscard ? <span className="image-annotation-editor__discard" role="alert">
-          <span>{documentState.shapes.length ? 'Discard ' + documentState.shapes.length + ' annotation' + (documentState.shapes.length === 1 ? '' : 's') + '?' : 'Discard the crop?'}</span>
-          <button type="button" onClick={() => setDiscarding(false)}>Keep editing</button>
-          <button type="button" className="danger-button" onClick={onCancel}>Discard</button>
-        </span> : <button type="button" className="image-annotation-editor__cancel" onClick={requestClose}><CancelIcon size={13} /> Cancel</button>}
-        <span className="image-annotation-toolbar__output" role="group" aria-label="Screenshot output">
-          <AnnotationOriginalMenu active={active} busy={busy} loaded={loaded} onOpen={onOpenOriginal} onSave={onSaveOriginal ? () => complete('save') : undefined} />
-          {onSavePng ? <button type="button" aria-label="Save PNG" title="Save the processed image as PNG" disabled={busy || !loaded} onClick={() => complete('save-png')}><SaveIcon size={13} /><span>Save PNG</span></button> : null}
-          {onPin ? <button type="button" className={onCheckPin ? 'image-annotation-editor__pin--uncertain' : undefined} aria-label="Pin image" title={onCheckPin ? 'Create a separate reference. Check pin cycles through unconfirmed original operations.' : 'Keep the processed image in a floating window'} disabled={busy || !loaded} onClick={() => complete('pin')}><PinIcon size={13} /><span>{onCheckPin ? 'Pin another' : 'Pin'}</span></button> : null}
-          {onCheckPin ? <button type="button" title="Cycle through unconfirmed original operations without creating another pin" disabled={busy} onClick={onCheckPin}>Check pin</button> : null}
-          {onCopyContext ? <button type="button" aria-label="Copy context" title="Copy the processed image context" disabled={busy || !loaded} onClick={() => complete('context')}><ClipboardIcon size={13} /><span>Copy context</span></button> : null}
-        </span>
-        <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : completeLabel}</button>
-      </div>
-    </header>
-    <AnnotationToolbar active={active} tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={!!selected}
-      clearable={!!documentState.shapes.length || !!documentState.crop} onTool={next => { resetGesture(); setTool(next); schedulePaint() }}
-      onUndo={undo} onRedo={redo} onDelete={removeSelected} onClear={() => { resetGesture(); textDraftRef.current = null; setPendingText(null); setSelectedId(null); edit(clearShapes); schedulePaint() }} />
-    <div className="image-annotation-editor__properties">
-      <span className="image-annotation-editor__tool-name">{ANNOTATION_TOOLS.find(item => item.id === tool)?.label}</span>
+  // Color, size and pixelation controls; the window shows them in its property row, inline in a popover beside the toolbar.
+  const propertyControls = <>
       {showColor ? <div className="image-annotation-toolbar__colors" aria-label="Markup color">{SCREENSHOT_COLORS.map(option => <button key={option} type="button" aria-label={'Color ' + option} title={option}
         aria-pressed={(properties?.color ?? color) === option} className={(properties?.color ?? color) === option ? 'selected' : ''} style={{ backgroundColor: option }} disabled={busy}
         onClick={() => setProperty('color', option)}>{(properties?.color ?? color) === option ? <CheckIcon size={10} /> : null}</button>)}</div> : null}
@@ -500,18 +499,31 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
         {pixelateMode === 'brush' ? <label>Brush<select aria-label="Pixelation brush width" value={brushWidth} disabled={busy} onChange={event => setBrushWidth(Number(event.target.value))}>{[16,32,64,96].map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
         <label>Blocks<select aria-label="Pixel size" value={blockSize} disabled={busy} onChange={event => setBlockSize(Number(event.target.value))}>{[8,16,24,32].map(option => <option key={option} value={option}>{option}px</option>)}</select></label>
       </> : null}
-      {tool === 'cover' || properties?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
-      {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
-      {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : 'Click an annotation to edit'}</span> : null}
-      {selected?.kind === 'text' ? <button type="button" disabled={busy} onClick={() => beginText(selected)}>Edit text</button> : null}
-      {tool === 'erase' ? <span className="image-annotation-editor__hint">Drag over annotations to remove them</span> : null}
-      {tool === 'note' ? <span className="image-annotation-editor__hint">Click a point or drag a region</span> : null}
-      {tool === 'pan' ? <span className="image-annotation-editor__hint">Drag to move the image · Fit to reset</span> : null}
-      {['rect', 'ellipse', 'arrow'].includes(tool) ? <span className="image-annotation-editor__hint">Hold Shift to constrain</span> : null}
-      {tool === 'text' || pendingText ? <span className="image-annotation-editor__hint">Enter for a new line · ⌘ / Ctrl + Enter to finish</span> : null}
-    </div>
-    <div className="image-annotation-editor__workarea">
-      <div ref={containerRef} className="image-annotation-editor__canvas-area">
+  </>
+  // Cancel or its inline discard confirmation, and the output buttons; both presentations place the same controls.
+  const closeControl = <>
+        {confirmingDiscard ? <span className="image-annotation-editor__discard" role="alert">
+          <span>{documentState.shapes.length ? 'Discard ' + documentState.shapes.length + ' annotation' + (documentState.shapes.length === 1 ? '' : 's') + '?' : 'Discard the crop?'}</span>
+          <button type="button" onClick={() => setDiscarding(false)}>Keep editing</button>
+          <button type="button" className="danger-button" onClick={onCancel}>Discard</button>
+        </span> : <button type="button" className="image-annotation-editor__cancel" onClick={requestClose}><CancelIcon size={13} /> Cancel</button>}
+  </>
+  const outputControls = <>
+        <span className="image-annotation-toolbar__output" role="group" aria-label="Screenshot output">
+          {inline ? null : <AnnotationOriginalMenu active={active} busy={busy} loaded={loaded} onOpen={onOpenOriginal} onSave={onSaveOriginal ? () => complete('save') : undefined} />}
+          {onSavePng ? <button type="button" aria-label="Save PNG" title="Save the processed image as PNG" disabled={busy || !loaded} onClick={() => complete('save-png')}><SaveIcon size={13} /><span>Save PNG</span></button> : null}
+          {onPin ? <button type="button" className={onCheckPin ? 'image-annotation-editor__pin--uncertain' : undefined} aria-label="Pin image" title={onCheckPin ? 'Create a separate reference. Check pin cycles through unconfirmed original operations.' : 'Keep the processed image in a floating window'} disabled={busy || !loaded} onClick={() => complete('pin')}><PinIcon size={13} /><span>{onCheckPin ? 'Pin another' : 'Pin'}</span></button> : null}
+          {onCheckPin ? <button type="button" title="Cycle through unconfirmed original operations without creating another pin" disabled={busy} onClick={onCheckPin}>Check pin</button> : null}
+          {onCopyContext ? <button type="button" aria-label="Copy context" title="Copy the processed image context" disabled={busy || !loaded} onClick={() => complete('context')}><ClipboardIcon size={13} /><span>Copy context</span></button> : null}
+        </span>
+        {inline && onExpand ? <button type="button" aria-label="Expand editor" title="Continue in a separate editor window" disabled={busy}
+          onClick={() => onExpand({ shapes: currentShapes(), crop: documentState.crop, tool })}><ExpandIcon size={13} /></button> : null}
+        <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : completeLabel}</button>
+  </>
+  const toolbar = <AnnotationToolbar active={active} tool={tool} busy={busy} undoable={canUndo(documentState)} redoable={canRedo(documentState)} selected={!!selected}
+    clearable={!!documentState.shapes.length || !!documentState.crop} withPan={!inline} onTool={next => { resetGesture(); setTool(next); schedulePaint() }}
+    onUndo={undo} onRedo={redo} onDelete={removeSelected} onClear={() => { resetGesture(); textDraftRef.current = null; setPendingText(null); setSelectedId(null); edit(clearShapes); schedulePaint() }} />
+  const canvasViewport = <>
         <div className="image-annotation-editor__viewport" style={{ width: size.width, height: size.height }}>
           <img ref={imageRef} src={image.dataUrl} alt="Captured image" draggable={false} onLoad={() => { setLoaded(true); setImageError(false) }}
             onError={() => { setLoaded(false); setImageError(true); onError?.(new Error('The image could not be decoded. Current annotations are kept.')) }} />
@@ -531,6 +543,52 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
             onPointerDown={event => event.stopPropagation()} onChange={event => { setNoteDraft(event.target.value); onEdited?.() }} onBlur={() => closeNoteEditor(true)} onKeyDown={event => inlineEditorKey(event, () => closeNoteEditor(true), () => closeNoteEditor(false))} /> : null}
           {imageError ? <p className="image-annotation-editor__image-error" role="alert">The image could not be loaded. Current annotations are kept.{onOpenOriginal ? ' Open another original or Cancel to return.' : ' Cancel to return.'}</p> : null}
         </div>
+  </>
+  if (inline) {
+    const frame = inlineFrame ?? { x: 0, y: 0, width: image.width / pixelRatio, height: image.height / pixelRatio }
+    const placement = inlineToolbarPlacement(frame, hostHeight)
+    // The bar and popover align their right edges with the selection, and the bar shrinks rather than leave the viewport.
+    // Below the selection the popover opens downward; above it or inside its bottom edge, upward.
+    const bar = { top: placement.top, right: 'calc(100% - ' + (frame.x + frame.width) + 'px)', maxWidth: 'min(calc(100% - 16px), ' + (frame.x + frame.width) + 'px)' }
+    const popoverSide = placement.side === 'below' ? 'below' : 'above'
+    const hasProperties = showColor || showWidth || showFont || tool === 'pixelate'
+    return <div ref={editorRef} className="image-annotation-editor image-annotation-editor--inline" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
+      <div ref={containerRef} className="image-annotation-editor__canvas-area" style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}>{canvasViewport}</div>
+      <div className="image-annotation-editor__inline-bar" data-side={placement.side} style={bar}>
+        {toolbar}
+        <div className="image-annotation-toolbar__actions">{closeControl}{outputControls}</div>
+        {hasProperties ? <div className="image-annotation-editor__inline-properties" role="group" aria-label="Markup properties" data-side={popoverSide}>{propertyControls}</div> : null}
+      </div>
+      {copied || documentStatus ? <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status">{copied ?? documentStatus}</span> : null}
+    </div>
+  }
+  return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
+    <header className="image-annotation-editor__header">
+      <span className="image-annotation-editor__title"><strong>{title}</strong><small>{image.width} × {image.height}</small>
+        <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status" title={copied ?? documentStatus ?? undefined}>{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
+      </span>
+      <div className="image-annotation-toolbar__actions">
+        {closeControl}
+        {outputControls}
+      </div>
+    </header>
+    {toolbar}
+    {inline ? null : <div className="image-annotation-editor__properties">
+      <span className="image-annotation-editor__tool-name">{ANNOTATION_TOOLS.find(item => item.id === tool)?.label}</span>
+      {propertyControls}
+      {tool === 'cover' || properties?.kind === 'cover' ? <span className="image-annotation-editor__hint">Opaque cover · Original stays editable</span> : null}
+      {tool === 'crop' ? <><span className="image-annotation-editor__hint">Drag to keep an area</span>{documentState.crop ? <button type="button" disabled={busy} onClick={() => edit(doc => setCrop(doc, null))}>Reset crop</button> : null}</> : null}
+      {tool === 'select' ? <span className="image-annotation-editor__hint">{selected ? (selectionHandles(selected).length ? 'Drag handles to resize · Arrow keys to nudge' : 'Drag to move · Arrow keys to nudge') : 'Click an annotation to edit'}</span> : null}
+      {selected?.kind === 'text' ? <button type="button" disabled={busy} onClick={() => beginText(selected)}>Edit text</button> : null}
+      {tool === 'erase' ? <span className="image-annotation-editor__hint">Drag over annotations to remove them</span> : null}
+      {tool === 'note' ? <span className="image-annotation-editor__hint">Click a point or drag a region</span> : null}
+      {tool === 'pan' ? <span className="image-annotation-editor__hint">Drag to move the image · Fit to reset</span> : null}
+      {['rect', 'ellipse', 'arrow'].includes(tool) ? <span className="image-annotation-editor__hint">Hold Shift to constrain</span> : null}
+      {tool === 'text' || pendingText ? <span className="image-annotation-editor__hint">Enter for a new line · ⌘ / Ctrl + Enter to finish</span> : null}
+    </div>}
+    <div className="image-annotation-editor__workarea">
+      <div ref={containerRef} className="image-annotation-editor__canvas-area">
+        {canvasViewport}
       </div>
       <AnnotationNotes notes={notes} selected={selectedNote} draft={noteDraft} busy={busy}
         onSelect={note => { commitNote(); setSelectedId(note.id) }} onDraft={value => { setNoteDraft(value); onEdited?.() }}

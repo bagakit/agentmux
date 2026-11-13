@@ -123,3 +123,17 @@
 @container screenshot-editor (max-height: 360px) and (max-width: 580px) {
   .image-annotation-editor__notes textarea { height: 50px; min-height: 50px; max-height: 50px; }
 }
+
+/* Inline: the frozen selection stays where it was; only a floating bar and its property popover sit beside it. */
+.image-annotation-editor--inline { display: block; overflow: visible; background: transparent; pointer-events: none; }
+.image-annotation-editor--inline .image-annotation-editor__canvas-area { position: absolute; flex: none; overflow: hidden; pointer-events: auto; background: transparent; outline: 1px solid var(--green); }
+.image-annotation-editor__inline-bar { position: absolute; z-index: 3; display: flex; align-items: center; gap: 4px; height: 36px; max-width: calc(100% - 16px); padding: 3px 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); box-shadow: 0 6px 20px var(--scrim-2); pointer-events: auto; }
+.image-annotation-editor__inline-bar .image-annotation-toolbar { flex: 0 1 auto; min-width: 0; padding: 0; border-bottom: 0; }
+.image-annotation-editor__inline-bar .image-annotation-toolbar__actions { flex: none; flex-wrap: nowrap; gap: 3px; padding-left: 4px; border-left: 1px solid var(--line-soft); }
+.image-annotation-editor__inline-bar .image-annotation-toolbar__output span, .image-annotation-editor__inline-bar .image-annotation-editor__cancel { font-size: 0; }
+.image-annotation-editor__inline-properties { position: absolute; right: 0; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); box-shadow: 0 6px 20px var(--scrim-2); color: var(--text-2); white-space: nowrap; }
+.image-annotation-editor__inline-properties[data-side='below'] { top: calc(100% + 4px); }
+.image-annotation-editor__inline-properties[data-side='above'] { bottom: calc(100% + 4px); }
+.image-annotation-editor__inline-properties label { display: flex; align-items: center; gap: 5px; font-size: 10px; }
+.image-annotation-editor__inline-properties select { height: 24px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--surface-1); color: var(--text-2); font: inherit; }
+.image-annotation-editor--inline > .image-annotation-editor__status { position: absolute; left: 8px; bottom: 8px; width: auto; max-width: 60%; padding: 2px 6px; border-radius: 4px; background: var(--surface-1); pointer-events: none; }
