@@ -54,6 +54,7 @@ const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeActionCreateBrowserIcon = semanticIconComponent('action.create-browser')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeActionCollectSourcesIcon = semanticIconComponent('action.collect-sources')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
@@ -474,7 +475,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       </div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}
         {currentBrowser && currentBrowser.url !== 'about:blank' && currentPanel ? <button type="button" className="survey-tab-view" aria-label="Save to Recall" title="Save this finding to Recall" onClick={saveToRecall}>
-          <ThemeActionOpenExternalIcon size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
+          <ThemeActionCollectSourcesIcon size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
         </button> : null}
       </div>
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Drag to resize Survey items · Double-click or Enter to reset"
