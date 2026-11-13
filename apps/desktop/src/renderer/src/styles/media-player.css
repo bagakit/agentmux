@@ -9,8 +9,14 @@
 .media-player__announcer { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Video stage: neutral letterboxing in both themes, the picture is the main layer. */
+/* The stage takes the picture's own shape once it is known, so the controls always sit on the picture
+   instead of on letterbox black; before that it fills the Region. */
 .media-player__stage { position: relative; width: 100%; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden;
   border-radius: var(--radius-lg); background: color-mix(in srgb, var(--bg) 20%, black); box-shadow: inset 0 0 0 1px var(--wash-1); }
+/* The frame is the free box; the stage inside it is sized to the picture so the controls sit on it. */
+.media-player__frame { flex: 1; min-height: 0; width: 100%; display: grid; place-items: center; }
+.media-player__frame > .media-player__stage { flex: none; height: 100%; }
+.media-player__stage[data-fitted] { width: var(--media-fit-width); height: var(--media-fit-height); }
 :root[data-appearance="light"] .media-player__stage { box-shadow: var(--elev-2); }
 .media-player__stage > video { width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
 .media-player__stage[hidden] { display: none; }
@@ -41,17 +47,19 @@
 
 .media-player__bar { min-height: 36px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3);
   border-radius: var(--radius-lg); background: var(--media-glass); backdrop-filter: blur(16px) saturate(125%);
-  box-shadow: var(--elev-2), inset 0 1px 0 color-mix(in oklab, #ffffff 10%, transparent), inset 0 0 0 1px color-mix(in oklab, #ffffff 5%, transparent); }
+  box-shadow: var(--elev-2), inset 0 1px 0 color-mix(in oklab, #ffffff 12%, transparent); }
 .media-player__spacer { flex: 1; }
 .media-player__button { width: 28px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm);
   color: inherit; background: transparent; cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease; }
 .media-player__button:hover { background: color-mix(in oklab, #ffffff 14%, transparent); }
-.media-player__button:focus-visible, .media-player__time:focus-visible, .media-player__live:focus-visible { outline: 2px solid var(--media-accent); outline-offset: 1px; }
+.media-player__button:focus-visible, .media-player__live:focus-visible { outline: 2px solid var(--media-accent); outline-offset: 1px; }
 .media-player__speed { width: auto; min-width: 28px; padding-inline: var(--sp-3); font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
 .media-player[data-fullscreen] .media-player__button { width: 32px; height: 32px; }
-.media-player__time { flex: none; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--media-ink); background: transparent;
-  font: inherit; font-size: var(--fs-meta); font-variant-numeric: tabular-nums; cursor: pointer; }
+.media-player__time { flex: none; padding: var(--sp-1) var(--sp-2); color: var(--media-ink); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
 .media-player__duration { color: var(--media-ink-2); }
+.media-player__time-toggle { padding: 0; border: 0; color: var(--media-ink-2); background: transparent; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+.media-player__time-toggle:hover { color: var(--media-ink); }
+.media-player__time-toggle:focus-visible { outline: 2px solid var(--media-accent); outline-offset: 1px; border-radius: var(--radius-sm); }
 
 .media-player__volume-group { display: flex; align-items: center; }
 .media-player--video .media-player__volume { width: 0; opacity: 0; transition: width var(--dur-enter) var(--ease-enter), opacity var(--dur-fast) ease; }
@@ -123,10 +131,11 @@
 .media-player--audio .media-player__slider:hover::-webkit-slider-thumb { translate: 0 -3px; }
 .media-player--audio .media-player__volume { width: 72px; }
 .media-player--audio .media-player__volume::-webkit-slider-runnable-track { height: 4px; }
-.media-player--audio .media-player__volume::-webkit-slider-thumb { background: var(--text); }
+.media-player--audio .media-player__volume::-webkit-slider-thumb { width: 12px; height: 12px; background: var(--green); }
 .media-player--audio .media-player__bubble { color: var(--text); background: var(--surface-3); backdrop-filter: none; box-shadow: var(--elev-1); }
 .media-player__clock { display: flex; justify-content: space-between; margin-top: calc(-1 * var(--sp-2)); color: var(--text); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
-.media-player__clock > span:last-child { color: var(--text-3); }
+.media-player__clock > .media-player__time--end { color: var(--text-3); font-size: var(--fs-meta); }
+.media-player__clock > .media-player__time--end:hover { color: var(--text); }
 .media-player__transport { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--sp-4); }
 .media-player__transport-main { display: flex; align-items: center; gap: var(--sp-5); }
 .media-player__transport-main .media-player__button { width: 32px; height: 32px; }

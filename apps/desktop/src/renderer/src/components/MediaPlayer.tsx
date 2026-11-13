@@ -56,6 +56,8 @@ function readFacts(element: HTMLMediaElement, previous: Facts): Facts {
  */
 export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name: string; onRetry: () => void }) {
   const root = useRef<HTMLDivElement>(null)
+  const frame = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState<{ width: number; height: number } | null>(null)
   const media = useRef<HTMLMediaElement | null>(null)
   const [facts, setFacts] = useState<Facts>(INITIAL)
   const [decode, setDecode] = useState<'loading' | 'ready' | 'no-picture' | 'error'>('loading')
@@ -74,6 +76,10 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   // The engine's own decoded fact, kept once seen: a later error never makes it unknown again.
   const decodedOnce = useRef(false)
   const audioOnly = lease.kind === 'audio' || decode === 'no-picture'
+  // Contain the picture's own shape in the free box, so controls sit on the picture, not on letterbox black.
+  const fitted = !fullscreen && box && box.width > 0 && box.height > 0 && facts.width > 0 && facts.height > 0
+    ? (() => { const scale = Math.min(box.width / facts.width, box.height / facts.height); return { width: Math.floor(facts.width * scale), height: Math.floor(facts.height * scale) } })()
+    : null
   const stream = classifyStream(facts.duration, facts.window)
   const live = stream === 'live' || stream === 'live-window'
   const edge = live ? liveEdgeState(facts.currentTime, facts.window) : 'unknown'
@@ -107,6 +113,18 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   useEffect(() => () => { if (idle.current) clearTimeout(idle.current); if (waiting.current) clearTimeout(waiting.current) }, [])
   useEffect(() => { if (!indicator) return; const timer = setTimeout(() => setIndicator(null), INDICATOR_MS); return () => clearTimeout(timer) }, [indicator])
   useEffect(() => { if (!announcement) return; const timer = setTimeout(() => setAnnouncement(null), INDICATOR_MS); return () => clearTimeout(timer) }, [announcement])
+
+  // The free box the picture can use; the stage is fitted to the picture inside it.
+  useEffect(() => {
+    const element = frame.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const measure = () => setBox(current => current?.width === element.clientWidth && current.height === element.clientHeight
+      ? current : { width: element.clientWidth, height: element.clientHeight })
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   // Full screen belongs to this player's own document, which may be a second window.
   useEffect(() => {
@@ -188,7 +206,6 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   const sliderVisible = stream === 'on-demand' || stream === 'live-window'
   const valueText = live ? (edge === 'at-live' ? 'Live' : edge === 'behind' && facts.window ? `${spokenDuration(facts.window.end - shown)} behind live` : 'Live position unknown')
     : `${spokenDuration(shown)} of ${spokenDuration(facts.duration)}`
-  const timeText = remaining && Number.isFinite(facts.duration) ? `-${formatClock(facts.duration - shown)}` : formatClock(shown)
 
   const onSliderPointer = (event: ReactPointerEvent<HTMLInputElement>) => {
     if (!sliderBounds || span <= 0) return
@@ -251,10 +268,14 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
     onClick={() => { if (edge === 'behind') run({ kind: 'seek-end' }, 'pointer') }}>
     <span aria-hidden="true" className="media-player__live-dot" />{edge === 'behind' ? 'Go live' : 'LIVE'}
   </button> : null
-  const clock = live ? null : <button type="button" className="media-player__time" aria-label={remaining ? 'Show elapsed time' : 'Show remaining time'}
-    onClick={() => setRemaining(value => !value)}>
-    <span aria-hidden="true">{timeText}</span>{Number.isFinite(facts.duration) ? <span aria-hidden="true" className="media-player__duration"> / {formatClock(facts.duration)}</span> : null}
-  </button>
+  // Elapsed / total on video and audio alike; the total side toggles to remaining time.
+  const endTime = remaining && Number.isFinite(facts.duration) ? `-${formatClock(facts.duration - shown)}` : formatClock(facts.duration)
+  const clock = live ? null : <span className="media-player__time">
+    <span aria-hidden="true">{formatClock(shown)}</span>
+    {Number.isFinite(facts.duration) ? <><span aria-hidden="true" className="media-player__duration"> / </span>
+      <button type="button" className="media-player__time-toggle" aria-label={remaining ? 'Show total time' : 'Show remaining time'}
+        onClick={() => setRemaining(value => !value)}>{endTime}</button></> : null}
+  </span>
   const speed = stream === 'on-demand' ? <button type="button" className="media-player__button media-player__speed" aria-label={`Playback speed ${facts.rate}×`}
     title="Speed (< and >)" onClick={() => run({ kind: 'rate', direction: 1 }, 'pointer')}>{facts.rate}×</button> : null
   const failurePanel = failure ? <div className="media-player__failure" role="alert">
@@ -280,8 +301,9 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
       {speed}
     </div>
     {timeline}
-    {sliderVisible ? <div className="media-player__clock" aria-hidden="true"><span>{formatClock(shown)}</span>
-      <span>{live || !Number.isFinite(facts.duration) ? '' : `-${formatClock(facts.duration - shown)}`}</span></div> : null}
+    {sliderVisible ? <div className="media-player__clock"><span aria-hidden="true">{formatClock(shown)}</span>
+      {live ? null : <button type="button" className="media-player__time-toggle media-player__time--end" aria-label={remaining ? 'Show total time' : 'Show remaining time'}
+        onClick={() => setRemaining(value => !value)}>{endTime}</button>}</div> : null}
     <div className="media-player__transport">
       <div className="media-player__transport-side">{liveBadge}</div>
       <div className="media-player__transport-main">
@@ -320,9 +342,12 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
     aria-label={`${audioOnly ? 'Audio' : 'Video'} player: ${name}`} tabIndex={0}
     data-decode-state={decode} data-stream={stream} data-controls={audioOnly || controlsVisible ? 'visible' : 'hidden'} data-fullscreen={fullscreen || undefined}
     onKeyDown={onKeyDown} onPointerMove={audioOnly ? undefined : wake} onPointerLeave={() => { if (!audioOnly && playing) setActive(false) }} onFocus={audioOnly ? undefined : wake}>
-    <div className="media-player__stage" hidden={audioOnly}>
-      {element}
-      {audioOnly ? null : videoChrome}
+    <div ref={frame} className="media-player__frame" hidden={audioOnly}>
+      <div className="media-player__stage" data-fitted={fitted ? '' : undefined}
+        style={fitted ? { '--media-fit-width': `${fitted.width}px`, '--media-fit-height': `${fitted.height}px` } as CSSProperties : undefined}>
+        {element}
+        {audioOnly ? null : videoChrome}
+      </div>
     </div>
     {audioOnly ? audioCard : statusLine}
     {announcer}
