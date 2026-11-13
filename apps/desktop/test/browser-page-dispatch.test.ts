@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import type { BrowserPageTransport } from '../src/main/browser-page-transport.js'
+import { nativeInputDouble } from './browser-native-input-double.js'
 
 /**
  * 派发层的判据：**够不着的东西必须说出来**，以及三类 ref 失败各自说到下一步为止。
@@ -24,8 +25,11 @@ function fakeSession(overrides: Partial<{
       childIds: []
     }
   ]
+  const native = nativeInputDouble()
   return {
-    sendCommand: async (method: string) => {
+    sendCommand: async (method: string, params?: Record<string, unknown>) => {
+      const answered = native.answer(method, params)
+      if (answered !== undefined) return answered
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
       if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
       if (method === 'Accessibility.getFullAXTree') return { nodes }
@@ -251,8 +255,15 @@ describe('导航之后旧快照必须被丢掉', () => {
     // 真正要证的是「派发层自己丢了缓存」，所以判据取"它重新取了一张快照"。
     let navigationId = 'nav-1'
     let axCalls = 0
+    // Without native answers every click would fail on a missing box, and the final rejection below
+    // would hold for the wrong reason.
+    const native = nativeInputDouble()
     const session = {
-      sendCommand: async (method: string) => {
+      sendCommand: async (method: string, params?: Record<string, unknown>) => {
+        const answered = native.answer(method, params)
+        if (answered !== undefined) return answered
+        if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
+        if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
         if (method === 'Accessibility.getFullAXTree') {
           axCalls += 1
           return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Submit' }, childIds: [] }] }

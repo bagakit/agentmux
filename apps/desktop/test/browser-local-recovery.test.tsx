@@ -9,9 +9,15 @@ import type { BrowserScopedSnapshot } from '../src/shared/browser-snapshot-query
 import type { BrowserTaskStep } from '../src/shared/browser-task-assets.js'
 import type { BrowserOutcomeEvaluation } from '../src/shared/browser-outcome-criteria.js'
 import { BrowserOperationJournal, type BrowserOperationJournalDocument } from '../src/main/browser-operation-journal.js'
+import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
 
 const identity: BrowserLocalRecoveryIdentity = { browserId: 'browser-a', operationId: 'operation-a',
   runId: 'run-a', assetId: 'asset-a', version: 7, stepId: 'step-b', sequence: 4 }
+/**
+ * Dispatch-guard checks one native click makes when no target feedback is shown: after resolving the ref,
+ * after scrolling, before opening Main's input receipt, after opening it and before the press.
+ */
+const GUARDS_PER_CLICK = 5
 const step: BrowserTaskStep = { id: 'step-b', kind: 'click', url: 'https://page.invalid/work', reviewed: true,
   target: { role: 'button', name: 'Continue', count: 1, ordinal: 1 } }
 /** Real snapshot/ref/dispatch Source; only the CDP transport and native load boundary are doubles. */
@@ -23,8 +29,18 @@ async function fixture() {
   const actions: { objectId: string; declaration: string }[] = [], observations: number[] = [], reports: BrowserLocalRecoveryReport[] = []
   const signal = new AbortController()
   let human = false, current = true, guardCalls = 0
+  const native = nativeInputDouble(objectId => Number(objectId.split('-')[1]))
   const session = {
     sendCommand: async (method: string, parameters: Record<string, any> = {}) => {
+      // A native press is the action reaching the page: record it, then apply any injected rejection.
+      if (method === 'Input.dispatchMouseEvent' && parameters.type === 'mousePressed') {
+        native.answer(method, parameters)
+        actions.push({ objectId: `object-${native.presses.at(-1)!.target}`, declaration: method })
+        if (actionError) throw actionError
+        return {}
+      }
+      const answered = native.answer(method, parameters)
+      if (answered !== undefined) return answered
       if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame-a', loaderId: navigationId } } }
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
       if (method === 'Accessibility.getFullAXTree') {
@@ -36,9 +52,12 @@ async function fixture() {
       if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
       if (method === 'DOM.resolveNode') {
         if (alwaysStale || (stale && parameters.backendNodeId === 11)) throw new Error('CDP backend disappeared')
-        await afterResolve?.()
+        // The ref's own resolution; the native click's isolated-world lookups carry an executionContextId.
+        if (parameters.executionContextId === undefined) await afterResolve?.()
         return { object: { objectId: `object-${parameters.backendNodeId}` } }
       }
+      // The native click's scroll before geometry is preparation, not the action.
+      if (method === 'Runtime.callFunctionOn' && isNativeScroll(parameters)) return { result: { value: null } }
       if (method === 'Runtime.callFunctionOn') {
         actions.push({ objectId: parameters.objectId, declaration: parameters.functionDeclaration })
         if (actionError) throw actionError
@@ -117,7 +136,7 @@ describe('Main local recovery of the original immutable task call', () => {
     expect(f.saved()!.events.map(event => event.type)).toEqual(['operation-started', 'operation-checked'])
     expect(f.saved()!.operations[0]!.outcome!.evaluation).toEqual(f.evaluation)
     expect(f.reports.map(report => report.status)).toEqual(['attempting', 'attempting', 'action-completed'])
-    expect(f.guardCalls()).toBe(2)
+    expect(f.guardCalls()).toBe(2 * GUARDS_PER_CLICK)
   })
 
   it.each(['user-rejected', 'permission-denied', 'credential-denied', 'human-control'] as const)('%s has no retry authority', async kind => {
@@ -196,7 +215,8 @@ describe('Main local recovery of the original immutable task call', () => {
     const f = await fixture(); f.afterResolve(() => { f.human() })
     expect((await recover(f)).status).toBe('interrupted')
     expect(f.actions.map(action => action.objectId)).toEqual(['object-11'])
-    expect(f.guardCalls()).toBe(2)
+    // The prior click's checks, then exactly one: the recovery action is refused at its first check.
+    expect(f.guardCalls()).toBe(GUARDS_PER_CLICK + 1)
   })
 
   it('an observer that never settles consumes only the time budget and sends no late action', async () => {
@@ -229,7 +249,7 @@ describe('Main local recovery of the original immutable task call', () => {
     expect((await pending).status).toBe('handoff')
     release(); await vi.advanceTimersByTimeAsync(1)
     expect(f.actions.map(action => action.objectId)).toEqual(['object-11'])
-    expect(f.guardCalls()).toBe(2)
+    expect(f.guardCalls()).toBe(GUARDS_PER_CLICK + 1)
   })
 
   it('evidence unavailable before dispatch preserves the page and sends no recovery action', async () => {

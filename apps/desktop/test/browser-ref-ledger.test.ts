@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { healRef, ledgerFromSnapshot } from '../src/main/browser-ref-ledger.js'
 import { BrowserRefLedgerStore, MAX_TRACKED_BROWSERS } from '../src/main/browser-ref-ledger-store.js'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
+import { nativeInputDouble } from './browser-native-input-double.js'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserPageSnapshot } from '../src/main/../shared/contracts.js'
 
@@ -197,8 +198,13 @@ describe('账本落盘：重启之后读得回来，读坏了不许把应用挡�
 
 /** 一个只回答 AX 树的假对端；`nodes` 每次现取，用来模拟两轮之间页面重新渲染。 */
 function fakeSession(nodes: () => unknown[]): BrowserCdpSession {
+  const native = nativeInputDouble()
   return {
-    sendCommand: async (method: string) => {
+    sendCommand: async (method: string, params?: Record<string, unknown>) => {
+      const answered = native.answer(method, params)
+      if (answered !== undefined) return answered
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
+      if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
       if (method === 'Accessibility.getFullAXTree') return { nodes: nodes() }
       if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
       if (method === 'DOM.resolveNode') return { object: { objectId: 'obj-1' } }
@@ -239,13 +245,19 @@ describe('派发层：上一轮的 ref 走账本，不许撞进这一轮的新�
     const second = axTree({ id: 91, role: 'button', name: 'Cancel' }, { id: 92, role: 'button', name: 'Save' })
 
     let resolved: number | null = null
+    const native = nativeInputDouble()
     const sessionFor = (nodes: unknown[]): BrowserCdpSession => ({
       ...fakeSession(() => nodes),
       sendCommand: async (method: string, params?: Record<string, unknown>) => {
+        const answered = native.answer(method, params)
+        if (answered !== undefined) return answered
+        if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
+        if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
         if (method === 'Accessibility.getFullAXTree') return { nodes }
         if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
         if (method === 'DOM.resolveNode') {
-          resolved = params?.backendNodeId as number
+          // The ref's own resolution; the native click's isolated-world lookups carry an executionContextId.
+          if (params?.executionContextId === undefined) resolved = params?.backendNodeId as number
           return { object: { objectId: 'obj-1' } }
         }
         if (method === 'Runtime.callFunctionOn') return { result: { value: null } }

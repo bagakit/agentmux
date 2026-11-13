@@ -5,6 +5,7 @@ import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserCdpSender } from '../src/main/browser-page-snapshot.js'
 import type { BrowserScopedSnapshot } from '../src/shared/browser-snapshot-query.js'
 import type { BrowserRefLedger } from '../src/main/browser-ref-ledger.js'
+import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
 
 const TREE = [
   { nodeId: 'root', role: { value: 'RootWebArea' }, childIds: ['left', 'right'] },
@@ -23,12 +24,24 @@ function harness(withFrames = false, initialLedger: BrowserRefLedger | null = nu
   const notes: string[] = []
   let ledger = initialLedger
   let navigationId = 'nav-1'
+  // The document whose element a native click targets; its Input command arrives on the top-level session.
+  let actingDocument = 'main'
   const frameTree = [
     { nodeId: 'frame-root', role: { value: 'RootWebArea' }, childIds: ['field'] },
     { nodeId: 'field', backendDOMNodeId: 30, role: { value: 'textbox' }, name: { value: 'Frame field' } }
   ]
+  const native: Record<string, ReturnType<typeof nativeInputDouble>> = {}
   const sender = (document: string): BrowserCdpSender => async (method, params) => {
     calls.push({ document, method, ...(params ? { params } : {}) })
+    native[document] ??= nativeInputDouble((objectId) => Number(objectId.split('-').at(-1)))
+    // Geometry is asked in the target's own document; Input arrives on the top-level session.
+    const geometry = method === 'Input.dispatchMouseEvent' ? native[actingDocument] ??= nativeInputDouble() : native[document]
+    const answered = geometry.answer(method, params)
+    if (answered !== undefined) {
+      // A native press is the click reaching the page.
+      if (method === 'Input.dispatchMouseEvent' && params?.type === 'mousePressed') acted.push({ document: actingDocument, backend: geometry.presses.at(-1)!.target })
+      return answered
+    }
     if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: document === 'main' ? 'main-document' : document, loaderId: 'loader-' + document, ...(document === 'main' ? {} : { parentId: 'main-document' }) } } }
     if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
     if (document === 'broken' && method === 'Accessibility.getFullAXTree') throw new Error('frame read unavailable')
@@ -47,6 +60,7 @@ function harness(withFrames = false, initialLedger: BrowserRefLedger | null = nu
     if (method === 'DOM.resolveNode') return { object: { objectId: `node-${params?.backendNodeId}` } }
     if (method === 'Runtime.callFunctionOn') {
       if (String(params?.functionDeclaration).includes('__agentmuxClickable')) return { result: { value: [] } }
+      if (isNativeScroll(params)) { actingDocument = document; return { result: { value: null } } }
       acted.push({ document, backend: Number(String(params?.objectId).split('-').at(-1)) })
       return { result: { value: null } }
     }
@@ -76,7 +90,7 @@ describe('bounded Browser observation through production dispatch', () => {
     expect(result.nodes.map((node) => [node.ref, node.backendNodeId])).toEqual([['@e1', 30]])
     expect(result.observation).toMatchObject({ fullObserved: 5, scoped: 3, matched: 2, returned: 1, truncated: true, scope: { kind: 'subtree', document: 'main-document' } })
     expect(h.ledger()?.entries).toEqual([{ ref: '@e1', role: 'button', name: 'Save', nth: 1 }])
-    await expect(h.dispatch('click', ['@e1'])).resolves.toBeNull()
+    await expect(h.dispatch('click', ['@e1'])).resolves.toBeUndefined()
     expect(h.acted).toEqual([{ document: 'main', backend: 30 }])
     await expect(h.dispatch('click', ['@e2'])).rejects.toThrow(/snapshot/i)
     expect(h.acted).toEqual([{ document: 'main', backend: 30 }])
@@ -142,7 +156,7 @@ describe('bounded Browser observation through production dispatch', () => {
     const h = harness(false, { url: 'https://fixture.invalid/', entries: [{ ref: '@e1', role: 'button', name: 'Far away', nth: 1 }] })
     const result = await h.dispatch('snapshot', [{ within: '#left', maxNodes: 1 }]) as BrowserScopedSnapshot
     expect(result.nodes.map((node) => node.ref)).toEqual(['@e2'])
-    await expect(h.dispatch('click', ['@e1'])).resolves.toBeNull()
+    await expect(h.dispatch('click', ['@e1'])).resolves.toBeUndefined()
     expect(h.acted).toEqual([{ document: 'main', backend: 80 }])
     expect(h.notes).toHaveLength(1)
   })

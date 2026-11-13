@@ -63,12 +63,17 @@ vi.mock('electron', async () => {
       sendCommand: async (method: string, params: any = {}) => {
         this.commands.push(method)
         if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main', loaderId: 'loaded' } } }
-        if (method === 'Page.createIsolatedWorld') return { executionContextId: 8 }
+        // The native click inspects its target in its own world (context 9); feedback draws in context 8.
+        if (method === 'Page.createIsolatedWorld') return { executionContextId: params.worldName === 'agentmux-native-input' ? 9 : 8 }
         if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Continue' }, childIds: [] }] }
         if (method === 'DOM.resolveNode') {
           if (!params.executionContextId && native.failResolves > 0) { native.failResolves--; throw new Error('Controlled original locator became stale') }
-          return { object: { objectId: params.executionContextId ? 'feedback-object' : 'action-object' } }
+          return { object: { objectId: params.executionContextId === 9 ? 'native-input-object' : params.executionContextId ? 'feedback-object' : 'action-object' } }
         }
+        if (method === 'DOM.getContentQuads') return { quads: [[10, 10, 50, 10, 50, 30, 10, 30]] }
+        if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
+        // A native press is the click reaching the page.
+        if (method === 'Input.dispatchMouseEvent') { if (params.type === 'mousePressed') this.actions++; return {} }
         if (method === 'Runtime.evaluate') {
           const code = params.expression ?? '', start = code.lastIndexOf(')(')
           if (start >= 0 && code.slice(start + 2, -1).startsWith('{')) this.documentPayloads.push(JSON.parse(code.slice(start + 2, -1)))
@@ -76,7 +81,9 @@ vi.mock('electron', async () => {
         }
         if (method === 'Runtime.callFunctionOn') {
           if (params.objectId === 'feedback-object') { this.feedbackCalls++; this.feedbackPayloads.push(params.arguments[0].value); native.onFeedback?.(); return { result: { value: true } } }
-          if (params.functionDeclaration.includes('this.click()') || params.functionDeclaration.includes('this.value') || params.functionDeclaration.includes('pointerover')) this.actions++
+          // The native click's own checks: the hit belongs to the target, and the pointer landed on it.
+          if (params.objectId === 'native-input-object') return { result: { value: true } }
+          if (params.functionDeclaration.includes('this.value') || params.functionDeclaration.includes('pointerover')) this.actions++
           return { result: { value: null } }
         }
         return {}
@@ -497,10 +504,10 @@ describe('actual resolved document and sender after display', () => {
       if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'child', parentId: 'main', loaderId: 'child-document' } } }
       if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: 'child-button', backendDOMNodeId: 22, frameId: 'child', role: { value: 'button' }, name: { value: 'Child' }, childIds: [] }] }
       if (method === 'DOM.resolveNode') return { object: { objectId: 'actual-child' } }
-      if (method === 'Runtime.callFunctionOn' && params.functionDeclaration.includes('this.click()')) actions++
       return { result: { value: null } }
     }
-    const main = async (method: string) => method === 'Page.getFrameTree'
+    // A native press goes to the top-level session; it is the click reaching the page.
+    const main = async (method: string, params?: any) => method === 'Input.dispatchMouseEvent' ? (params.type === 'mousePressed' && actions++, {}) : method === 'Page.getFrameTree'
       ? { frameTree: { frame: { id: 'main', loaderId: 'document-one' }, childFrames: [{ frame: { id: 'child', parentId: 'main', loaderId: 'child-document' } }] } }
       : method === 'Accessibility.getFullAXTree' ? { nodes: [{ nodeId: 'main', backendDOMNodeId: 10, frameId: 'main', role: { value: 'button' }, name: { value: 'Continue' }, childIds: [] }] } : {}
     const frames = new Map([['child-session', child]])

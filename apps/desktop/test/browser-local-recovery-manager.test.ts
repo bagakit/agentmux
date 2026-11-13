@@ -27,17 +27,29 @@ vi.mock('electron', async () => {
           return { nodes: [{ nodeId: '1', backendDOMNodeId: this.snapshots + 10, role: { value: 'button' }, name: { value: this.targetMissing ? 'Changed item' : 'Continue' }, childIds: [] }] }
         }
         if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
+        // The native click's own lookups in its isolated world are not ref resolutions.
+        if (method === 'DOM.resolveNode' && parameters.executionContextId !== undefined) return { object: { objectId: 'native-input-object' } }
         if (method === 'DOM.resolveNode') {
           this.resolves++
           if (this.failResolves > 0) { this.failResolves--; this.targetMissing = this.removeTargetOnFailure; throw new Error('Backend node detached') }
           await this.onResolve?.()
           return { object: { objectId: `object-${parameters.backendNodeId}` } }
         }
+        // A native click: an uncovered target at its box center, then a press that reaches the page.
+        if (method === 'DOM.getContentQuads') return { quads: [[10, 10, 50, 10, 50, 30, 10, 30]] }
+        if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
+        if (method === 'Runtime.callFunctionOn' && parameters.objectId === 'native-input-object') return { result: { value: true } }
         if (method === 'Runtime.callFunctionOn') {
-          expect(parameters.functionDeclaration).toContain('this.click()')
-          this.clicks++
-          if (this.rejectAction) return { exceptionDetails: { text: 'Explicit user rejection: do not retry' } }
+          // Only the scroll before reading geometry; the click itself is the native press below.
+          expect(parameters.functionDeclaration).toContain('scrollIntoView')
           return { result: { value: null } }
+        }
+        if (method === 'Input.dispatchMouseEvent') {
+          if (parameters.type !== 'mousePressed') return {}
+          this.clicks++
+          // A native press has no page exceptionDetails; a rejected dispatch surfaces as a protocol error.
+          if (this.rejectAction) throw new Error('Explicit user rejection: do not retry')
+          return {}
         }
         return {}
       }

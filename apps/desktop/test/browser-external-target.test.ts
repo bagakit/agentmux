@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { isNativeInputCheck } from './browser-native-input-double.js'
 import { ExternalBrowserBridge, ExternalBrowserRequestFailure } from '../src/main/browser-external-bridge.js'
 import { attachExternalBrowserTarget, type ExternalBrowserTargetSession } from '../src/main/browser-external-target.js'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
@@ -70,6 +71,11 @@ async function fixture() {
         if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
         if (method === 'Runtime.evaluate') return { result: { value: params.expression === 'counter' ? counter : '[]' } }
         if (method === 'DOM.resolveNode') return { object: { objectId: 'fixture-object' } }
+        // A native click: an uncovered target at its box center, then a press reaching the shared tab.
+        if (method === 'DOM.getContentQuads') return { quads: [[10, 10, 50, 10, 50, 30, 10, 30]] }
+        if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
+        if (method === 'Input.dispatchMouseEvent') { if (params?.type === 'mousePressed') counter++; return {} }
+        if (method === 'Runtime.callFunctionOn' && isNativeInputCheck(params)) return { result: { value: true } }
         if (method === 'Runtime.callFunctionOn') { if (params?.functionDeclaration?.includes('this.click()')) counter++; return { result: { value: null } } }
         return {}
       }) }

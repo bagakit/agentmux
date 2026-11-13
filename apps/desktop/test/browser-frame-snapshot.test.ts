@@ -5,6 +5,7 @@ import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import { parseBrowserSnapshotQuery, projectBrowserSnapshot } from '../src/main/browser-snapshot-query.js'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import type { BrowserScopedSnapshot } from '../src/shared/browser-snapshot-query.js'
+import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
 
 function fixture(options: { failed?: string; empty?: string; changed?: string; discoveryFailed?: boolean; nestedAx?: boolean; wrongRoot?: boolean; pageInterference?: boolean; selectorInterference?: boolean; evaluationFailure?: 'exception' | 'missing-value'; realmFailed?: boolean } = {}) {
   const calls: { session: string; method: string; params?: Record<string, unknown> }[] = []
@@ -17,8 +18,16 @@ function fixture(options: { failed?: string; empty?: string; changed?: string; d
   ])
   let afterAx = false
   let hiddenEffects = 0
+  // Geometry is asked of the target's own sender; the press arrives on the top-level session.
+  const native = nativeInputDouble(objectId => Number(objectId.split('-')[1]))
   const sender = (session: string): BrowserCdpSender => async (method, params) => {
     calls.push({ session, method, ...(params ? { params } : {}) })
+    const answered = native.answer(method, params)
+    if (answered !== undefined) {
+      if (method === 'Input.dispatchMouseEvent' && params?.type === 'mousePressed') actions.push([session, native.presses.at(-1)!.target])
+      return answered
+    }
+    if (method === 'Runtime.callFunctionOn' && isNativeScroll(params)) return { result: { value: null } }
     if (method === 'Page.getFrameTree') {
       if (options.discoveryFailed && session === 'main') throw new Error('native discovery unavailable')
       const frameTree = structuredClone(trees.get(session))!

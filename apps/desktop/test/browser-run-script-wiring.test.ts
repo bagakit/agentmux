@@ -118,6 +118,10 @@ const fakeElectron = vi.hoisted(() => {
     enableDeviceEmulation(): void {}
     setZoomFactor(): void {}
     getZoomFactor(): number { return 1 }
+    // Main's own-dispatch receipt wakes a hidden page for native input and puts it back afterwards.
+    backgroundThrottling = true
+    getBackgroundThrottling(): boolean { return this.backgroundThrottling }
+    setBackgroundThrottling(allowed: boolean): void { this.backgroundThrottling = allowed }
     getURL(): string { return this.url }
     getTitle(): string { return this.title }
     isLoading(): boolean { return false }
@@ -209,6 +213,7 @@ import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.
 import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '../src/shared/browser-result-artifact.js'
 import type { BrowserStructuredOutputReceipt } from '../src/shared/browser-structured-output.js'
 import type { BrowserPageContext } from '../src/main/browser-page-dispatch.js'
+import { isNativeInputCheck } from './browser-native-input-double.js'
 
 const profiles: BrowserProfileResolver = {
   defaultProfileId: () => 'default',
@@ -2511,9 +2516,17 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
         if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11,
           role: { value: 'link' }, name: { value: 'Export file' }, childIds: [] }] }
         if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
+        if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
+        if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
         if (method === 'DOM.resolveNode') return { object: { objectId: 'object-download' } }
-        if (method === 'Runtime.callFunctionOn') {
-          if (!String(params?.functionDeclaration).includes('this.click()')) return { result: { value: null } }
+        // A native click: an uncovered target at its box center; the checks report the hit and pointer on it.
+        if (method === 'DOM.getContentQuads') return { quads: [[10, 10, 50, 10, 50, 30, 10, 30]] }
+        if (method === 'DOM.getNodeForLocation') return { backendNodeId: 11 }
+        if (method === 'Runtime.callFunctionOn' && isNativeInputCheck(params)) return { result: { value: true } }
+        if (method === 'Runtime.callFunctionOn') return { result: { value: null } }
+        // The native press is the click reaching the page, so the download starts here.
+        if (method === 'Input.dispatchMouseEvent') {
+          if (params?.type !== 'mousePressed') return {}
           clicks += 1
           expect(f.contents.session.listenerCount('will-download')).toBe(downloadListenerBaseline + 1)
           if (mode !== 'none') {
@@ -2523,7 +2536,7 @@ describe('native downloads via the actual Manager → dispatch → Workspace own
             if (mode === 'complete') { await writeFile(item.path!, payload); item.bytes = payload.length; item.emit('done', {}, 'completed') }
             else item.cancel()
           }
-          return { result: { value: null } }
+          return {}
         }
         return {}
       }
