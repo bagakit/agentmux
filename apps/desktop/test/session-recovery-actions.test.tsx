@@ -32,7 +32,9 @@ const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', hostId: 'local',
 const topic: ScratchTopicSnapshot = { id: 'review-mote', directoryPath: 'review-mote', topicPath: 'review-mote/topic.md', title: 'Review Mote', summary: '', collaborators: [], soul: { path: 'review-mote/SOUL.md', content: 'Review', version: 'v1' }, moteArchive: { state: 'active', version: 'v1' } }
 let dispose: (() => void) | undefined
 function launched(input: AgentLaunchInput): AgentLaunchResult {
-  const session = { ...composerSession(input.agentSessionId!), executorId: input.executorId }
+  const template = composerSession(input.agentSessionId!), hostId = input.hostId ?? 'local'
+  const session = { ...template, executorId: input.executorId, hostId, workspacePath: input.workspacePath,
+    control: { ...template.control, hostId } }
   return { created: { ...agentCreationFixture(session), creation: { createOperationId: input.createOperationId!, initialPrompt: 'confirmed' } }, session,
     timeline: { agentSessionId: session.id, revision: 0, items: [] }, projectionFailures: [] }
 }
@@ -597,6 +599,41 @@ describe('a Session Core holds no native conversation for', () => {
     await dom.render(null); await mount(); await button('Start a new conversation here')
     expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
     expect(Object.keys(useAppStore.getState().spatialRequests)).toEqual([await recoveryOperationId(source, 'start-new')])
+  })
+  it.each(['local', 'remote'] as const)('keeps the original %s execution after its presentation moved to another directory', async hostId => {
+    const executorId = hostId === 'remote' ? 'remote-only' : 'codex', cwd = _hygiene_fixturePath('original-execution')
+    useAppStore.setState(state => ({ config: { ...state.config!,
+      hosts: [...state.config!.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'fixture.invalid' }],
+      workspaces: [...state.config!.workspaces, { id: 'execution', hostId, name: 'Original execution', path: cwd, kind: 'folder' }] },
+      sessions: state.sessions.map(session => session.id === 'original' && session.kind === 'agent' ? { ...session, hostId, executorId,
+        workspacePath: cwd, control: { ...session.control, hostId } } : session) }))
+    // Both scenarios display in the local Project; one differs in cwd and the other also in Host.
+    const state = useAppStore.getState(), originalTab = state.tabs['original-tab'], drafts = state.agentComposerDrafts
+    await mount(); await button('Start a new conversation here')
+    await vi.waitFor(() => expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1))
+    const input = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0]
+    expect(input).toMatchObject({ executorId, hostId, workspacePath: cwd })
+    expect(input.prompt).toBeUndefined(); expect(input.agentMuxNote).toBeUndefined()
+    const binding = Object.values(useAppStore.getState().spatialRequests)[0]!
+    expect(binding).toMatchObject({ executionHostId: hostId, recovery: { hostId, agentSessionId: 'original', executorId } })
+    expect(useAppStore.getState().layouts.workspace!.groups[0]!.tabOrder).toEqual(['original-tab', binding.tabId])
+    expect(api.sessions.recover).not.toHaveBeenCalled(); expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+    preserved(originalTab, drafts)
+  })
+  it('rechecks the original execution before dispatch when it changes during the new conversation action', async () => {
+    const execute = useAppStore.getState().executeControl
+    const changed = vi.spyOn(useAppStore.getState(), 'executeControl').mockImplementation(async (...args) => {
+      useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'original' ? {
+        ...session, workspacePath: _hygiene_fixturePath('changed-execution') } : session) }))
+      return execute(...args)
+    })
+    const state = useAppStore.getState(), originalTab = state.tabs['original-tab'], drafts = state.agentComposerDrafts
+    await mount(); await button('Start a new conversation here')
+    expect(changed).toHaveBeenCalled()
+    expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+    expect(dom.container.textContent).toContain('original recovery selection changed')
+    preserved(originalTab, drafts)
+    changed.mockRestore()
   })
   it('keeps the re-read path for a Session whose identity is only unconfirmed', async () => {
     useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'original' ? { ...session,

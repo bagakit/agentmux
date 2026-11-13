@@ -17,6 +17,14 @@ export const mutations: Record<string, Array<[string, string, string]>> = {
   'reason-as-refresh': [[notice, "        remedy: { kind: 'start-new' },\n        actionLabel: 'Start a new conversation here'", "        remedy: { kind: 'refresh' },\n        actionLabel: 'Start a new conversation here'"]],
   // The primary action starts a conversation that sends the original draft or a prompt.
   'start-sends-prompt': [[helper, "    content: { kind: 'new-agent', executorId }\n", "    content: { kind: 'new-agent', executorId, prompt: 'Continue the original task.' }\n"]],
+  // Moving the workface must not change the original execution Host or cwd.
+  'display-is-execution': [[helper, '    destination: { zoneId: zone.zoneId, displayWorkspaceId: location.displayWorkspaceId,',
+    '    destination: { zoneId: location.zoneId, displayWorkspaceId: location.displayWorkspaceId,']],
+  // The original remote Host can own an Executor absent from local templates.
+  'local-executor-required': [[helper, "  const session = state.sessions.find(item => item.id === source.agentSessionId)\n  if (session?.kind !== 'agent' || session.executorId !== executorId)",
+    "  if (!state.config?.executors[executorId]) throw new Error('Executor not in local templates')\n  const session = state.sessions.find(item => item.id === source.agentSessionId)\n  if (session?.kind !== 'agent' || session.executorId !== executorId)"]],
+  'execution-change-ignored': [[helper, '  }, undefined, { besideTabId: source.tabId, authorize: ownsExecution, recovery: {',
+    '  }, undefined, { besideTabId: source.tabId, authorize: () => current() && ownsRecoverySource(source), recovery: {']],
   // The new Tab is appended at the end of the Group instead of beside the original.
   'tab-not-beside': [[spatial, '    const placement = applySpatialPlacement(ports.get(), topics, target, surface, from, options?.besideTabId)', '    const placement = applySpatialPlacement(ports.get(), topics, target, surface, from)']],
   // A remount mints a fresh operation and creates a second conversation.

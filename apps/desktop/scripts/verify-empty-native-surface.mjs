@@ -11,6 +11,9 @@ const variants = [
   { name: 'candidate' },
   { name: 'reason-as-refresh', target: 'says only what Core knows when it holds no native conversation' },
   { name: 'start-sends-prompt', target: 'opens the original Executor in a new Tab beside the original' },
+  { name: 'display-is-execution', target: 'keeps the original local execution' },
+  { name: 'local-executor-required', target: 'keeps the original remote execution' },
+  { name: 'execution-change-ignored', target: 'rechecks the original execution before dispatch' },
   { name: 'tab-not-beside', target: 'opens the original Executor in a new Tab beside the original' },
   { name: 'remount-mints-fresh', target: 'repeated clicks and a remount reuse the one original creation' },
   { name: 'restore-kept', target: 'offers one solid action to start a new conversation' },
@@ -19,7 +22,7 @@ const variants = [
 ]
 // The cases this proof owns; the rest of each file stays in its ordinary suite.
 const filter = 'Core holds no native conversation|no native conversation to continue|with no native conversation as unavailable|whose native conversation exists'
-const CASES = 8
+const CASES = 11
 const output = join(root, 'apps/desktop/.tmp/empty-native-surface')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-'))
