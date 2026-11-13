@@ -78,6 +78,8 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 ## Production Desktop Control smoke
 
+Production Desktop Control smoke 是目标验证，当前没有实现脚本；[package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) 的 LaunchServices 验证（`verifyLaunchServices`）只覆盖 ready receipt 与产品身份、owner receipt 与 socket owner 归属、正常退出及隔离 runtime 清理，不执行下列 CLI 纵切。
+
 该 oracle 在隔离 runtime 的 packaged `AgentMux.app` 上检查以下纵切；是否完成、是否通过须查本轮 receipt，不能从本文推断：
 
 - ready receipt 确认 `packaged: true`；caller Agent Session 由 `.app` 内随包 Core/ctxmux artifact
@@ -86,7 +88,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
   `amux agent open --executor <executor-id> --region <region-id> --split right`；
   receipt 的 `result.agent` 返回新 Agent Session/Run，`result.to` 返回实际空间地址，
   新 Run 的 public status 为 `running`；
-- launch 前后 `owner.json.daemonInstanceId` 与 exact `ctxmuxd` PID 均不变；同一份受信 Core artifact
+- launch 前后按 [`ctxmuxOwnerReceiptPath`](../../packages/core/src/runtime-paths.ts) 寻址的 owner receipt 中 `daemonInstanceId` 与 exact `ctxmuxd` PID 均不变；同一份受信 Core artifact
   从 checkout 搬到 packaged App 后可以继续使用原 daemon，receipt 中的启动路径只作诊断，不参与身份判断；
 - 将随包 source/manifest 身份、正在服务的 Runtime identity/capability 与 cleanup 归属分别核对；
   兼容服务可以继续承载健康 Run，旧启动路径或缺失 owner receipt 不能代替不兼容判据；
