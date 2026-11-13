@@ -19,8 +19,10 @@ export type PixelateBrushShape = ShapeBase & { kind: 'pixelate-brush'; points: S
 export type CoverShape = ShapeBase & { kind: 'cover'; from: ScreenshotPoint; to: ScreenshotPoint }
 /** `radius` is the Gaussian blur radius in original image pixels. */
 export type BlurShape = ShapeBase & { kind: 'blur'; from: ScreenshotPoint; to: ScreenshotPoint; radius: number }
+/** Darkens everything outside from/to by `dim` (0..1 opacity). It points, it does not redact. */
+export type SpotlightShape = ShapeBase & { kind: 'spotlight'; from: ScreenshotPoint; to: ScreenshotPoint; dim: number }
 
-export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape
+export type ScreenshotShape = PenShape | HighlightShape | ArrowShape | RectShape | EllipseShape | TextShape | NoteShape | PixelateShape | PixelateBrushShape | CoverShape | BlurShape | SpotlightShape
 export type ScreenshotMask = PixelateShape | PixelateBrushShape | CoverShape | BlurShape
 
 export const SCREENSHOT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#111827', '#ffffff'] as const
@@ -34,10 +36,15 @@ export const SCREENSHOT_TEXT_LINE_HEIGHT = 1.2
 const HIGHLIGHT_WIDTH_MULTIPLIER = 4
 export const BLUR_RADIUS_RANGE = { min: 2, max: 64 } as const
 export const DEFAULT_BLUR_RADIUS = 12
+export const SPOTLIGHT_DIM_RANGE = { min: 0.3, max: 0.85 } as const
+export const DEFAULT_SPOTLIGHT_DIM = 0.6
 
 const clamp = (value: number, range: { min: number; max: number }) => Math.min(range.max, Math.max(range.min, value))
 export function createBlurShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, radius = DEFAULT_BLUR_RADIUS): BlurShape {
   return { id, color, kind: 'blur', from, to, radius: clamp(radius, BLUR_RADIUS_RANGE) }
+}
+export function createSpotlightShape(id: string, color: string, from: ScreenshotPoint, to: ScreenshotPoint, dim = DEFAULT_SPOTLIGHT_DIM): SpotlightShape {
+  return { id, color, kind: 'spotlight', from, to, dim: clamp(dim, SPOTLIGHT_DIM_RANGE) }
 }
 
 export function screenshotTextLines(text: string): string[] { return text.split(/\r\n|\r|\n/) }
@@ -146,6 +153,7 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
     case 'pixelate':
       return { ...shape, blockSize: shape.blockSize * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'cover':
+    case 'spotlight':
       return { ...shape, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
     case 'blur':
       return { ...shape, radius: shape.radius * scale, from: scalePoint(shape.from, scale), to: scalePoint(shape.to, scale) }
@@ -156,9 +164,23 @@ export function scaleShape(shape: ScreenshotShape, scale: number): ScreenshotSha
 
 export function moveShape(shape: ScreenshotShape, dx: number, dy: number): ScreenshotShape {
   const move = (at: ScreenshotPoint) => ({ x: at.x + dx, y: at.y + dy })
-  if (shape.kind === 'pen' || shape.kind === 'highlight' || shape.kind === 'pixelate-brush') return { ...shape, points: shape.points.map(move) }
-  if (shape.kind === 'text') return { ...shape, at: move(shape.at) }
-  return { ...shape, from: move(shape.from), to: move(shape.to) }
+  switch (shape.kind) {
+    case 'pen':
+    case 'highlight':
+    case 'pixelate-brush':
+      return { ...shape, points: shape.points.map(move) }
+    case 'text':
+      return { ...shape, at: move(shape.at) }
+    case 'arrow':
+    case 'rect':
+    case 'ellipse':
+    case 'note':
+    case 'pixelate':
+    case 'cover':
+    case 'blur':
+    case 'spotlight':
+      return { ...shape, from: move(shape.from), to: move(shape.to) }
+  }
 }
 
 export function shapeBounds(shape: ScreenshotShape, textWidth?: (shape: TextShape) => number): NormalizedRect {
@@ -190,8 +212,15 @@ export function intersectRect(a: NormalizedRect, b: NormalizedRect): NormalizedR
   return width > 0 && height > 0 ? { x, y, width, height } : null
 }
 
+/** Paint layers: marks, then masks, then pointing marks that only see processed
+ * pixels. A spotlight paints last so it dims every other mark outside it. */
+export function screenshotOutputLayer(shape: ScreenshotShape): number {
+  if (isScreenshotMask(shape)) return 1
+  return shape.kind === 'spotlight' ? 3 : 0
+}
+
 /** Both PNG and textual handoff consume this list. A cropped-away number or a
- * masked note must not survive solely as textual context. Masks paint last. */
+ * masked note must not survive solely as textual context. */
 export function screenshotOutputShapes(shapes: readonly ScreenshotShape[], crop?: NormalizedRect | null): ScreenshotShape[] {
   const masks = shapes.filter(isScreenshotMask)
   const visible = shapes.filter(shape => {
@@ -199,7 +228,8 @@ export function screenshotOutputShapes(shapes: readonly ScreenshotShape[], crop?
     if (crop && (shape.from.x < crop.x || shape.from.x >= crop.x + crop.width || shape.from.y < crop.y || shape.from.y >= crop.y + crop.height)) return false
     return !masks.some(mask => maskIntersectsRect(mask, shapeBounds(shape)))
   })
-  return [...visible.filter(shape => !isScreenshotMask(shape)), ...masks]
+  return visible.map((shape, index) => ({ shape, index, layer: screenshotOutputLayer(shape) }))
+    .sort((a, b) => a.layer - b.layer || a.index - b.index).map(item => item.shape)
 }
 
 /** A brush hides only its painted corridor, not everything in its bounding box. */
@@ -271,6 +301,11 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
         (head && Math.min(distanceToSegment(point, head.left, head.tip), distanceToSegment(point, head.tip, head.right)) <= tolerance + shape.width / 2)) return shape
       continue
     }
+    if (shape.kind === 'spotlight') {
+      // Its interior holds the marks it points at; only the frame selects it.
+      if (nearRectEdge(point, normalizeRect(shape.from, shape.to), tolerance, tolerance + 1)) return shape
+      continue
+    }
     if (shape.kind === 'note' && Math.hypot(point.x - shape.from.x, point.y - shape.from.y) <= shape.radius + tolerance) return shape
     const rect = shapeBounds(shape, textWidth)
     if (point.x < rect.x - tolerance || point.x > rect.x + rect.width + tolerance || point.y < rect.y - tolerance || point.y > rect.y + rect.height + tolerance) continue
@@ -278,12 +313,14 @@ export function hitTestShape(shapes: readonly ScreenshotShape[], point: Screensh
     const ink = tolerance + shape.width / 2
     if (shape.kind === 'ellipse') {
       if (distanceToEllipse(point, rect) <= ink) return shape
-    } else {
-      const box = normalizeRect(shape.from, shape.to)
-      if (Math.min(Math.abs(point.x - box.x), Math.abs(point.x - box.x - box.width), Math.abs(point.y - box.y), Math.abs(point.y - box.y - box.height)) <= ink) return shape
-    }
+    } else if (nearRectEdge(point, normalizeRect(shape.from, shape.to), tolerance, ink)) return shape
   }
   return null
+}
+
+function nearRectEdge(point: ScreenshotPoint, box: NormalizedRect, tolerance: number, ink: number): boolean {
+  if (point.x < box.x - tolerance || point.x > box.x + box.width + tolerance || point.y < box.y - tolerance || point.y > box.y + box.height + tolerance) return false
+  return Math.min(Math.abs(point.x - box.x), Math.abs(point.x - box.x - box.width), Math.abs(point.y - box.y), Math.abs(point.y - box.y - box.height)) <= ink
 }
 
 export function highlightWidth(width: number): number {

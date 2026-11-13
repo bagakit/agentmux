@@ -7,7 +7,7 @@ export type SelectionHandle = { id: SelectionHandleId; point: ScreenshotPoint }
  * keeps hit targets and painted handles consistent with their view scale. */
 export function selectionHandles(shape: ScreenshotShape): SelectionHandle[] {
   if (shape.kind === 'arrow') return [{ id: 'from', point: shape.from }, { id: 'to', point: shape.to }]
-  if (shape.kind !== 'rect' && shape.kind !== 'ellipse' && shape.kind !== 'note' && shape.kind !== 'pixelate' && shape.kind !== 'cover' && shape.kind !== 'blur') return []
+  if (shape.kind !== 'rect' && shape.kind !== 'ellipse' && shape.kind !== 'note' && shape.kind !== 'pixelate' && shape.kind !== 'cover' && shape.kind !== 'blur' && shape.kind !== 'spotlight') return []
   const rect = normalizeRect(shape.from, shape.to)
   return [
     { id: 'nw', point: { x: rect.x, y: rect.y } },
@@ -40,7 +40,7 @@ export function resizeShapeFromHandle(original: ScreenshotShape, handle: Selecti
     if (handle === 'to') return { ...original, to: { ...point } }
     return original
   }
-  if (original.kind !== 'rect' && original.kind !== 'ellipse' && original.kind !== 'note' && original.kind !== 'pixelate' && original.kind !== 'cover' && original.kind !== 'blur') return original
+  if (original.kind !== 'rect' && original.kind !== 'ellipse' && original.kind !== 'note' && original.kind !== 'pixelate' && original.kind !== 'cover' && original.kind !== 'blur' && original.kind !== 'spotlight') return original
   if (handle === 'from' || handle === 'to') return original
   const from = { ...original.from }, to = { ...original.to }
   const left = handle === 'nw' || handle === 'sw'

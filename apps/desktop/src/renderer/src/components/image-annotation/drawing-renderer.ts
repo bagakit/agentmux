@@ -19,6 +19,7 @@ import {
   type PixelateBrushShape,
   type CoverShape,
   type BlurShape,
+  type SpotlightShape,
   type ScreenshotShape,
   type TextShape
 } from './drawing-model'
@@ -49,6 +50,8 @@ export function drawScreenshotShape(context: CanvasRenderingContext2D, shape: Sc
       }
       case 'cover': drawCover(context, shape); break
       case 'blur': drawBlur(context, shape); break
+      case 'spotlight': drawSpotlight(context, shape); break
+      default: { const unhandled: never = shape; throw new Error('Unsupported screenshot mark: ' + (unhandled as ScreenshotShape).kind) }
     }
   } finally { context.restore() }
 }
@@ -247,3 +250,20 @@ function drawBlur(context: CanvasRenderingContext2D, shape: BlurShape): void {
   context.filter = `blur(${radius}px)`
   context.drawImage(sample, left - pad, top - pad)
 }
+
+/** Dim the whole canvas except the region; the even-odd hole keeps it untouched. */
+function drawSpotlight(context: CanvasRenderingContext2D, shape: SpotlightShape): void {
+  const rect = normalizeRect(shape.from, shape.to), inverse = context.getTransform().inverse()
+  const corner = (x: number, y: number) => inverse.transformPoint({ x, y })
+  const start = corner(0, 0), end = corner(context.canvas.width, context.canvas.height)
+  context.beginPath()
+  context.rect(start.x, start.y, end.x - start.x, end.y - start.y)
+  context.rect(rect.x, rect.y, rect.width, rect.height)
+  context.fillStyle = `rgba(0,0,0,${shape.dim})`
+  context.fill('evenodd')
+  if (rect.width <= 0 || rect.height <= 0) return
+  context.strokeStyle = 'rgba(255,255,255,0.6)'
+  context.lineWidth = 1 / Math.hypot(context.getTransform().a, context.getTransform().b)
+  context.strokeRect(rect.x, rect.y, rect.width, rect.height)
+}
+

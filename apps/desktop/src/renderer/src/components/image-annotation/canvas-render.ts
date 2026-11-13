@@ -3,7 +3,7 @@
 
 import { clampScreenshotScale } from './geometry'
 import { clipPixelateBrush, drawScreenshotShapes } from './drawing-renderer'
-import { isScreenshotMask, shapeBounds, type ScreenshotShape } from './drawing-model'
+import { isScreenshotMask, screenshotOutputLayer, shapeBounds, type ScreenshotShape } from './drawing-model'
 import type { ImageViewport } from './view'
 
 function prepare(canvas: HTMLCanvasElement, viewport: ImageViewport): CanvasRenderingContext2D | null {
@@ -50,6 +50,8 @@ export function renderScreenshotScene(target: HTMLCanvasElement, committed: HTML
     } finally { context.restore() }
   }
   // Restore already processed mask pixels instead of resampling pixelation on each frame.
+  // Pointing marks paint above masks in the output, so they keep painting above them here.
+  if (inProgress && screenshotOutputLayer(inProgress) > 1) masks = []
   if (inProgress && !isScreenshotMask(inProgress) && masks.length) {
     const { view } = viewport, dpr = clampScreenshotScale(viewport.dpr)
     context.setTransform(1, 0, 0, 1, 0, 0)
