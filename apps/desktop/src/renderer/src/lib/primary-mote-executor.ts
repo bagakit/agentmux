@@ -4,7 +4,7 @@ import type { useAppStore } from '../store'
 import { createPmoTeamsTopicTargetSelector } from './pmo-teams-topic-floating'
 import { sessionPresentationById } from './session-presentation'
 import { topicIdForSession } from './workbench-tabs'
-import { executorsForHost } from './executors'
+import { defaultExecutorChoice, executorsForHost } from './executors'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { useLauncherState } from './launcher-state'
 
@@ -31,7 +31,7 @@ export function primaryMoteExecutorChoice(state: PrimaryMoteState, savedExecutor
   const moteExecutorId = topic?.quickMode?.status === 'saved' ? topic.quickMode.defaults.executorId : undefined
   if (moteExecutorId || !primaryMoteHasBot(state)) {
     const choices = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories?.[workspace.hostId])
-      .filter(executor => executor.detection?.state !== 'missing').sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
+      .filter(executor => executor.detection?.state !== 'missing')
     if (moteExecutorId) {
       const executor = choices.find(item => item.id === moteExecutorId)
       return executor ? { executorId: executor.id } : { issue: `Mote new-chat Agent ${moteExecutorId} is unavailable or unconfirmed on Host ${workspace.hostId}. The saved configuration is kept.` }
@@ -39,7 +39,7 @@ export function primaryMoteExecutorChoice(state: PrimaryMoteState, savedExecutor
     // A genuinely new primary Mote uses the original launcher's explicit preference/default.
     // A retained Agent Region, even without a Session snapshot, never enters this branch.
     const preference = savedExecutorId
-    const executorId = preference ? choices.find(executor => executor.id === preference)?.id : choices.find(executor => executor.id === 'codex')?.id ?? choices[0]?.id
+    const executorId = preference ? choices.find(executor => executor.id === preference)?.id : defaultExecutorChoice(choices)?.id
     return executorId ? { executorId } : {}
   }
   const tabId = selectPrimaryTab(state)

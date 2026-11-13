@@ -36,6 +36,13 @@ export function executorsForHost(config: AppConfig | null | undefined, hostId: s
     } }))
 }
 
+/** One default for every new-Agent picker: the remembered choice while usable, then ready, then unconfirmed, in configured order. */
+export function defaultExecutorChoice<T extends Pick<ExecutorChoice, 'id' | 'detection'>>(choices: readonly T[], preferredId?: string): T | undefined {
+  const usable = (item: T) => item.detection?.state !== 'missing'
+  return choices.find(item => item.id === preferredId && usable(item)) ??
+    choices.find(item => item.detection?.state === 'ready') ?? choices.find(usable)
+}
+
 export function configuredExecutors(config: AppConfig | null | undefined): ConfiguredExecutor[] {
   return Object.entries(config?.executors ?? {}).map(([id, executor]) => ({ id, ...executor }))
 }

@@ -4,7 +4,7 @@ import type { SplitDirection } from '@agentmux/layout'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import type { SpatialRequestBinding } from '../../../shared/space-addresses'
 import { api } from './api'
-import { executorsForHost } from './executors'
+import { defaultExecutorChoice, executorsForHost } from './executors'
 import { useLauncherState } from './launcher-state'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { spatialCatalog } from './space-agent-control'
@@ -34,8 +34,7 @@ export function browserAgentCreationContext(state: CreationState, workspaceId: s
   const candidates = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId])
   const retainedRemote = preferred && !candidates.length && state.config?.hosts.find(host => host.id === workspace.hostId)?.kind === 'ssh'
     ? { id: preferred, label: state.config?.executors[preferred]?.label ?? preferred, detail: 'Host discovery unconfirmed' } : undefined
-  const executor = candidates.find(item => item.id === preferred && item.detection?.state !== 'missing') ?? retainedRemote ??
-    candidates.find(item => item.detection?.state === 'ready') ?? candidates.find(item => item.detection?.state !== 'missing')
+  const executor = defaultExecutorChoice(candidates, preferred) ?? retainedRemote
   const executors: BrowserAgentCreationExecutor[] = candidates.map(item => ({ id: item.id, label: item.label ?? item.id,
     ...(item.detection?.state === 'missing' ? { detail: 'Not found at last check' } : item.detection?.state !== 'ready' ? { detail: 'Availability unconfirmed' } : {}) }))
   if (retainedRemote) executors.push(retainedRemote)

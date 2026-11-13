@@ -14,7 +14,7 @@ import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { workbenchTabDisplayWorkspaceId } from '../lib/workbench-resource-display'
 import { currentHostCheck } from '../lib/host-check'
 import { formatPathForDisplay } from '../lib/copy-path-display'
-import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
+import { defaultExecutorChoice, hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
 import { useLauncherExecutorRecovery } from '../hooks/useLauncherExecutorRecovery'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
@@ -128,7 +128,7 @@ export function NewTabSurface({
   const moteExecutor = useAppStore(state => moteDefaultExecutor(state, tabId ? state.tabs[tabId]?.workspaceId ?? '' : mote?.workspace.id ?? '', moteId))
   const [executorId, setExecutorId] = useState(() => {
     const surface = tabId && regionId ? useAppStore.getState().tabs[tabId]?.regions[regionId] : undefined
-    return surface?.kind === 'launcher' ? surface.executorId ?? moteExecutor ?? 'codex' : moteExecutor ?? 'codex'
+    return (surface?.kind === 'launcher' ? surface.executorId : undefined) ?? moteExecutor ?? ''
   })
   const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string; moteId?: string | undefined } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
@@ -228,7 +228,7 @@ export function NewTabSurface({
     [config?.executors, config?.hosts, detections, agentWorkspace, inventory, splitExecution]
   )
   // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
-  const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing').sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
+  const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing')
   const detecting = inventory?.state === 'checking' || executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
   const sections = { ...DEFAULT_LAUNCHER_SECTIONS,
@@ -323,14 +323,15 @@ export function NewTabSurface({
 
   useEffect(() => {
     if (splitExecution) {
-      if (!agentTarget?.agentExecutor && installedExecutors[0] && launcherRef) chooseExecutor(installedExecutors[0].id)
+      const fallback = defaultExecutorChoice(executors)
+      if (!agentTarget?.agentExecutor && fallback && launcherRef) chooseExecutor(fallback.id)
       return
     }
     if (moteId && (explicitSavedExecutor || moteExecutor || manualChoice?.moteId === moteId)) return
     if (installedExecutors.some((executor) => executor.id === executorId)) return
-    const first = installedExecutors[0]
-    if (first) setExecutorId(first.id)
-  }, [executorId, installedExecutors, moteId, explicitSavedExecutor, moteExecutor, manualChoice, splitExecution, agentTarget?.agentExecutor])
+    const fallback = defaultExecutorChoice(executors, savedExecutor)
+    if (fallback) setExecutorId(fallback.id)
+  }, [executorId, executors, installedExecutors, savedExecutor, moteId, explicitSavedExecutor, moteExecutor, manualChoice, splitExecution, agentTarget?.agentExecutor])
 
   async function run<T>(kind: 'agent' | 'terminal' | 'browser' | 'note', action: () => Promise<T>): Promise<void> {
     if (busy) return

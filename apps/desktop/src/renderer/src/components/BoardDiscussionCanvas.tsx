@@ -46,7 +46,7 @@ export function BoardDiscussionCanvas({
   const activateWorkspaceSelection = useAppStore((state) => state.activateWorkspaceSelection)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const launchBoardAgent = useAppStore((state) => state.launchBoardAgent)
-  const [executorId, setExecutorId] = useState('codex')
+  const [executorId, setExecutorId] = useState('')
   const [prompt, setPrompt] = useState('')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
