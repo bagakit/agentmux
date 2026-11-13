@@ -87,9 +87,16 @@ struct AppDescriptor {
     let bundleId: String?
     let pid: pid_t
     let app: NSRunningApplication
+    /// Recorded once, so later checks compare the pid's occupant with this birth.
+    let processStartedAt: Double?
 
-    var processStartedAt: Double? { app.launchDate.map { $0.timeIntervalSince1970 * 1000 } }
-
+    init(name: String, bundleId: String?, pid: pid_t, app: NSRunningApplication) {
+        self.name = name
+        self.bundleId = bundleId
+        self.pid = pid
+        self.app = app
+        processStartedAt = NativeProcessStart.milliseconds(pid: pid)
+    }
 }
 
 final class ElementRecord {
@@ -2300,9 +2307,9 @@ private enum Input {
 
     private static func originalProcessIsLive(_ snapshot: Snapshot) -> Bool {
         guard let app = NSRunningApplication(processIdentifier: snapshot.app.pid),
-              let actualStart = app.launchDate?.timeIntervalSince1970,
-              let expectedStart = snapshot.app.app.launchDate?.timeIntervalSince1970 else { return false }
-        return !app.isTerminated && abs(actualStart - expectedStart) < 0.00001
+              let actualStart = NativeProcessStart.milliseconds(pid: snapshot.app.pid),
+              let expectedStart = snapshot.app.processStartedAt else { return false }
+        return !app.isTerminated && abs(actualStart - expectedStart) < 0.01
     }
 
     private static func requireRecipient(_ snapshot: Snapshot, deliveredEvents: Int) throws {
