@@ -198,5 +198,5 @@ describe('a user Stop retires one Session by its own rows', () => {
       ...facts.retiredRuns.map(run => [run, null]),
       ...current.flatMap(item => [item.run, ...item.retiredRuns].map(run => [run.runId, item.agentSessionId]))
     ].sort(([a], [b]) => String(a).localeCompare(String(b)))))
-  })
+  }, 60_000) // 60 steps against two stores; each File step is one fsync-confirmed transaction.
 })
