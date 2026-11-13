@@ -7,7 +7,7 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { useAppStore } from '../src/renderer/src/store'
-import { api } from '../src/renderer/src/lib/api'
+import { openHostGoalTransport } from './helpers/host-goal-transport'
 const config = { workspaces: [{ id: 'repo', hostId: 'local', name: 'Repo', path: _hygiene_fixturePath("repo"), kind: 'folder' }] } as AppConfig
 const baseline = useAppStore.getState()
 function makeSession(id = 'session-1'): SessionSnapshot { return { id, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: 'Build auth flow', createdAt: 1, updatedAt: 2, processState: 'running', latestOutputBytes: 0, status: { state: 'working', source: 'run-process', observedAt: 2 }, kind: 'terminal', providerId: null, control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } } } }
@@ -33,17 +33,23 @@ describe('Goal reading workspace', () => {
     expect(useAppStore.getState().demands['demand:one'].sessionIds).toEqual(['session-1'])
   })
   it('edits the title and body through the persisted owner instead of making a second entry', async () => {
-    const original = useAppStore.getState().demands['demand:one']
-    let current = { ...original, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, revision: 1, activities: [], decisions: [] }
-    const update = vi.spyOn(api.demands, 'update').mockImplementation(async (id, patch) => { current = { ...current, ...patch, revision: current.revision + 1 }; return { schema: 'agentmux.demand-receipt.v1', operation: 'update', operationId: 'update', revision: current.revision, demand: current } as never })
+    // Only Electron IPC is substituted: edits reach the original Host Goal owner through its public codec.
+    const host = await openHostGoalTransport({ config })
+    try {
+    const seeded = useAppStore.getState().demands['demand:one']
+    const saved = (await host.demands.create({ id: seeded.id, title: seeded.title, description: seeded.description, status: seeded.status, sessionIds: seeded.sessionIds })).demand
+    const original = { ...seeded, updatedAt: saved.updatedAt, createdAt: saved.createdAt }
+    useAppStore.setState({ demands: { [original.id]: original } })
     useAppStore.setState({ selectedDemandId: original.id }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     for (const [label, text] of [['Goal title', 'Readable goal'], ['Goal description', 'A directly editable body']]) {
       const input = container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!
       expect(input).toBeTruthy(); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })) })
-      await act(async () => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+      await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); await host.settle() })
     }
-    expect(update).toHaveBeenCalledWith(original.id, { title: 'Readable goal' }); expect(update).toHaveBeenCalledWith(original.id, { description: 'A directly editable body' })
+    expect(host.bodies('demand.update').map(({ demandId, patch }) => [demandId, patch])).toEqual([[original.id, { title: 'Readable goal' }], [original.id, { description: 'A directly editable body' }]])
     expect(Object.keys(useAppStore.getState().demands)).toEqual([original.id]); expect(useAppStore.getState().demands[original.id]).toMatchObject({ title: 'Readable goal', description: 'A directly editable body', sessionIds: ['session-1'] })
+    expect((await host.demands.list()).map(goal => [goal.id, goal.title, goal.description])).toEqual([[original.id, 'Readable goal', 'A directly editable body']])
+    } finally { await host.dispose() }
   })
   it('keeps all properties reachable in one closed disclosure and avoids zero-Session filler', async () => {
     useAppStore.setState({ selectedDemandId: 'demand:one', sessions: [], demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: [], tags: ['design'], phaseIndex: 1 } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))

@@ -10,10 +10,6 @@ import { chooseField } from './helpers/selection-field'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { useAppStore } from '../src/renderer/src/store'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { openDemandStore } from '@agentmux/demand'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
 import { directGoalRequest, retryDirectGoal } from '../src/renderer/src/lib/goals-direct-pmo'
@@ -23,6 +19,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { chooseField } from './helpers/selection-field'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { openHostGoalTransport, type HostGoalTransport, type GoalTransportGate } from './helpers/host-goal-transport'
 
 const baseline = useAppStore.getState()
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], workspaces: [{ id: 'repo', name: 'Repo', path: _hygiene_fixturePath("repo"), hostId: 'local', kind: 'folder' }, { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: _hygiene_fixturePath("topics"), hostId: 'local', kind: 'folder' }], executors: { configured: { label: 'Configured Agent', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } }, appearance: { terminalTheme: 'graphite' } } as AppConfig
@@ -36,22 +33,20 @@ function session(id: string, workspacePath = _hygiene_fixturePath("repo")): Extr
 const originalTab = createWorkbenchTab('original-tab', { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: 'repo', sessionId: 'healthy' })
 const primaryTab = { ...createWorkbenchTab('primary-tab', { kind: 'agent', phase: 'attached', regionId: 'primary-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'primary' }), topicId: PMO_TEAMS_TOPIC_ID }
 const topic = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: '', directoryPath: 'teams', topicPath: 'teams/topic.md', collaborators: [], quickMode: { status: 'saved' as const, version: 'original-mote-preference', defaults: { executorId: 'configured' } }, soul: { path: 'SOUL.md', content: '# SOUL', version: 'v1' } }
-let root: Root, container: HTMLDivElement, temporaryRoot: string, owner: ReturnType<typeof openDemandStore>
-let releaseHeldReceipt: (() => void) | undefined, tearingDown = false
+let root: Root, container: HTMLDivElement, host: HostGoalTransport, owner: HostGoalTransport['demands']
+let releaseHeldReceipt: (() => void) | undefined, releaseShowFailures: (() => void) | undefined, tearingDown = false
 beforeEach(async () => {
   expect(directGoalRequest(), 'the previous finite operation and cleanup completed').toBeNull()
-  releaseHeldReceipt = undefined; tearingDown = false
+  releaseHeldReceipt = undefined; releaseShowFailures = undefined; tearingDown = false
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-direct-goal-')); owner = openDemandStore({ root: temporaryRoot })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   useAppStore.setState({ ...baseline, config: structuredClone(config), sessions: [session('healthy'), session('primary', _hygiene_fixturePath("topics/topic--launcher--leader"))], demands: {}, selectedDemandId: null, mainSurface: 'board', activeWorkspaceId: null,
     agentFocus: { ...baseline.agentFocus, pmo: { sessionId: 'primary' } },
     tabs: { [originalTab.id]: originalTab, [primaryTab.id]: primaryTab }, layouts: { repo: createWorkspaceLayout('original-group', [originalTab.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [primaryTab.id]) },
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(config.workspaces[1]!), revision: 1, topics: [topic], reading: false, error: null } },
     agentComposerDrafts: { healthy: 'Original unsent draft' }, demandPmoTabIds: {}, pendingAgentLaunches: {}, error: null, errorNoticeContext: null })
-  vi.spyOn(api.demands, 'create').mockImplementation(input => owner.create(input))
-  vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
-  vi.spyOn(api.demands, 'update').mockImplementation((id, patch) => owner.update(id, patch))
+  // Only Electron IPC is substituted: Goal writes and reads reach the original Host owner through its public codec.
+  host = await openHostGoalTransport({ config: () => useAppStore.getState().config }); owner = host.demands
   vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue(topic)
   vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic)
   vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
@@ -73,16 +68,19 @@ afterEach(async () => {
     if (retained) {
       expect(retained.pending, 'the test settles its finite operation').toBe(false)
       if (!await owner.get(retained.id)) await owner.create({ id: retained.id, title: 'Cleanup existing caller identity' })
-      vi.mocked(api.demands.list).mockImplementation(() => owner.list())
+      releaseShowFailures?.()
       useAppStore.setState({ requestDemandPmoTask: vi.fn().mockResolvedValue('cleanup-tab') })
       await act(async () => retryDirectGoal())
     }
     expect(directGoalRequest()).toBeNull()
   } finally {
     try { await act(async () => root.unmount()) }
-    finally { container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); await rm(temporaryRoot, { recursive: true, force: true }) }
+    finally { container.remove(); useAppStore.setState(baseline, true); await host.dispose(); vi.restoreAllMocks() }
   }
 }, 5_000)
+const creates = () => host.executed('demand.create')
+// A held creation receipt: the original Host owner commits, the renderer's receipt waits for the test.
+function holdCreateReceipt(): GoalTransportGate { const gate = host.once('demand.create', { kind: 'hold-receipt' }); releaseHeldReceipt = gate.release; if (tearingDown) gate.release(); return gate }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }, { timeout: 3_000 }) }
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 function button(text: string) { const result = [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent?.trim() === text || node.getAttribute('aria-label') === text); expect(result, text).toBeDefined(); return result! }
@@ -98,7 +96,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     const saved = goals[0]!
     expect(saved).toMatchObject({ title: 'Untitled goal', description: '', status: 'backlog', projectId: null, projectName: null, sessionIds: [] })
     expect(saved.id.length).toBeGreaterThan(0); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
-    expect(api.demands.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: saved.id, title: 'Untitled goal', description: '', status: 'backlog' }), undefined)
+    expect(creates()).toHaveLength(1); expect(creates()[0]).toMatchObject({ demandId: saved.id, title: 'Untitled goal', description: '', status: 'backlog' })
     expect(container.querySelector('.goals-intake, [aria-label="Goal intent"]')).toBeNull()
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
     const state = useAppStore.getState(), tabId = state.demandPmoTabIds[saved.id]!, tab = state.tabs[tabId]!
@@ -112,39 +110,40 @@ describe('Goals direct PMO creation and reading surface', () => {
     await click('Board view'); expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
     await act(async () => useAppStore.getState().updateDemand(saved.id, { alignment: { summary: 'A real discussed goal', criteria: [{ id: 'observable', text: 'An observable result' }], openQuestions: [] } }))
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(false)
-    expect((await owner.list()).map(value => value.id)).toEqual([saved.id]); expect(api.demands.create).toHaveBeenCalledTimes(1)
+    expect((await owner.list()).map(value => value.id)).toEqual([saved.id]); expect(creates()).toHaveLength(1)
   })
 
   it('owns one click across duplicate activation and a mounted board unload/return before the save receipt', async () => {
-    let finish!: (receipt: Awaited<ReturnType<typeof owner.create>>) => void
-    let saved!: Awaited<ReturnType<typeof owner.create>>
-    vi.mocked(api.demands.create).mockImplementationOnce(async input => { saved = await owner.create(input); return await new Promise(resolve => { finish = resolve; releaseHeldReceipt = () => resolve(saved); if (tearingDown) releaseHeldReceipt() }) })
+    const held = holdCreateReceipt()
     await mount(); const newGoal = button('New Goal')
     await act(async () => { newGoal.click(); newGoal.click() })
-    await eventually(() => expect(finish).toBeTypeOf('function'))
-    expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().demands).toEqual({})
+    const saved = await held.committed
+    if (saved.operation !== 'demand.create') throw new Error('The held receipt belongs to another operation.')
+    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().demands).toEqual({})
     await act(async () => root.render(null)); await mount(); expect(button('New Goal').disabled).toBe(true)
-    await act(async () => finish(saved)); await eventually(() => expect(directGoalRequest()).toBeNull())
+    await act(async () => held.release()); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect((await owner.list()).map(value => value.id)).toEqual([saved.demand.id]); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
   })
 
   it('recovers an actually saved but lost creation receipt only by reading the exact frozen ID', async () => {
-    vi.mocked(api.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Saved IPC receipt missing') })
-    vi.mocked(api.demands.list).mockRejectedValueOnce(new Error('Owner read unavailable'))
+    const lost = host.once('demand.create', { kind: 'lose-receipt', error: new Error('Saved IPC receipt missing') })
+    // The exact frozen-ID read (demand.show) fails once before reaching the original owner.
+    host.once('demand.show', { kind: 'reject', error: new Error('Owner read unavailable') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const id = directGoalRequest()!.id
+    expect((await lost.committed).operation).toBe('demand.create')
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(useAppStore.getState().demands).toEqual({})
     expect(container.querySelector('.goals-creation')?.textContent).toContain('目标保存结果尚未确认'); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     expect(container.querySelector('.goals-empty')?.textContent).toBe('')
     await act(async () => root.render(null)); await mount(); await click('重新读取目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.demands.list.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(creates()).toHaveLength(1); expect(host.bodies('demand.show').filter(read => read.demandId === id).length).toBeGreaterThanOrEqual(2)
     expect(useAppStore.getState().selectedDemandId).toBe(id); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
     expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
   })
 
   it('saves again only after a complete owner read proves absence, using the same caller ID', async () => {
-    vi.mocked(api.demands.create).mockRejectedValueOnce(new Error('Disk unavailable'))
+    host.once('demand.create', { kind: 'reject', error: new Error('Disk unavailable') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const id = directGoalRequest()!.id
     expect(await owner.list()).toEqual([]); expect(useAppStore.getState().demands).toEqual({}); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
@@ -153,20 +152,20 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(container.querySelector('button[data-new-goal]')?.hasAttribute('disabled')).toBe(true)
     await act(async () => root.render(null)); await mount(); await click('保存这个目标')
     await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect(vi.mocked(api.demands.create).mock.calls.map(([input]) => input.id)).toEqual([id, id])
+    expect(creates().map(request => request.demandId)).toEqual([id, id])
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
     expect(vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].agentMuxNote).toContain(`existing Goal ${id}`)
   })
 
   it('keeps an unknown save read-only across repeated failed reads and never saves a new identity', async () => {
-    vi.mocked(api.demands.create).mockRejectedValueOnce(new Error('Receipt missing'))
-    vi.mocked(api.demands.list).mockRejectedValue(new Error('Complete owner read unavailable'))
+    host.once('demand.create', { kind: 'reject', error: new Error('Receipt missing') })
+    releaseShowFailures = host.failAll('demand.show', new Error('Complete owner read unavailable'))
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const id = directGoalRequest()!.id
     expect(directGoalRequest()?.notSaved).toBe(false)
     await click('重新读取目标'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    expect(directGoalRequest()?.id).toBe(id); expect(api.demands.create).toHaveBeenCalledTimes(1)
-    expect(api.demands.list).toHaveBeenCalledTimes(2); expect(await owner.list()).toEqual([])
+    expect(directGoalRequest()?.id).toBe(id); expect(creates()).toHaveLength(1)
+    expect(host.bodies('demand.show').map(read => read.demandId)).toEqual([id, id]); expect(await owner.list()).toEqual([])
     expect(useAppStore.getState().demands).toEqual({}); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     expect(container.querySelector('.goals-creation')?.textContent).toContain('不会重复创建')
     expect([...container.querySelectorAll('button')].filter(node => node.textContent === '保存这个目标')).toEqual([])
@@ -183,7 +182,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(tabId)
     await act(async () => root.render(null)); await mount(); await click('重试专属讨论'); await eventually(() => expect(directGoalRequest()).toBeNull())
     expect(useAppStore.getState().demandPmoTabIds[id]).toBe(tabId); expect(useAppStore.getState().tabs[tabId]!.regions[regionId]?.kind).toBe('agent')
-    expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(2)
+    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(2)
     expect(vi.mocked(api.sessions.launchAgent).mock.calls.map(([input]) => input.agentMuxNote?.includes(`existing Goal ${id}`))).toEqual([true, true])
   })
 
@@ -235,16 +234,16 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(useAppStore.getState().selectedDemandId).toBe('later-goal'); expect(useAppStore.getState().agentFocus.pmo).toBe(laterPmo)
     expect(readPmoTeamsTopicFloatingState()).toBe(laterFloating)
     expect(useAppStore.getState().tabs[mapped]!.regions[useAppStore.getState().tabs[mapped]!.layout.activeRegionId]?.kind).toBe('agent')
-    expect(api.demands.create).toHaveBeenCalledTimes(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(api.sessions.stop).not.toHaveBeenCalled()
+    expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 
   it('publishes the real saved Goal without stealing a later selection or navigation', async () => {
-    let finish!: (receipt: Awaited<ReturnType<typeof owner.create>>) => void
-    let saved!: Awaited<ReturnType<typeof owner.create>>
-    vi.mocked(api.demands.create).mockImplementationOnce(async input => { saved = await owner.create(input); return await new Promise(resolve => { finish = resolve; releaseHeldReceipt = () => resolve(saved); if (tearingDown) releaseHeldReceipt() }) })
-    await mount(); await click('New Goal'); await eventually(() => expect(finish).toBeTypeOf('function'))
+    const held = holdCreateReceipt()
+    await mount(); await click('New Goal')
+    const saved = await held.committed
+    if (saved.operation !== 'demand.create') throw new Error('The held receipt belongs to another operation.')
     await act(async () => useAppStore.setState({ selectedDemandId: 'later-goal', mainSurface: 'workbench', activeWorkspaceId: 'repo' }))
-    await act(async () => finish(saved)); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
+    await act(async () => held.release()); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     expect(useAppStore.getState().demands[saved.demand.id]?.id).toBe(saved.demand.id)
     expect(useAppStore.getState().selectedDemandId).toBe('later-goal'); expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(useAppStore.getState().activeWorkspaceId).toBe('repo')
     expect(api.sessions.launchAgent).not.toHaveBeenCalled()

@@ -2,8 +2,7 @@ import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-val
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { openDemandStore } from '@agentmux/demand'
+import { dirname } from 'node:path'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import * as projectProjection from '../src/renderer/src/lib/workspace-projects'
@@ -11,7 +10,7 @@ import { projectWorkspaces } from '../src/renderer/src/lib/workspace-projects'
 import { documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { act } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { api } from '../src/renderer/src/lib/api'
@@ -21,15 +20,16 @@ import { directGoalRequest } from '../src/renderer/src/lib/goals-direct-pmo'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { chooseField } from './helpers/selection-field'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
+import { openHostGoalTransport, type HostGoalTransport } from './helpers/host-goal-transport'
 
 const dom = composerDOM()
 const alignment = { summary: 'Keep the original work recoverable.', criteria: [{ id: 'tabs', text: 'The original tabs and splits remain.' }], openQuestions: [], revision: 1, confirmedAt: null }
 const grounding = { summary: 'The original tab identities match the saved log.', alignmentRevision: 1, submissionId: 'report:current', acceptedAt: null, checks: [{ criterionId: 'tabs', outcome: 'met' as const, note: 'Saved and restored identities agree.', evidence: ['artifacts/recovery.log:18'] }] }
 function goal(id = 'one', patch: Partial<DemandRecord> = {}): DemandRecord { return { id, title: `Recover the work ${id}`, description: 'Keep healthy Agents and existing work.', priority: 'normal', status: 'in_progress', projectId: null, projectName: null, sessionIds: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), source: 'default-topic', ...patch } }
 let f: Awaited<ReturnType<typeof configOwnerFixture>>
-const pendingDemand = new Set<Promise<unknown>>()
-function demandTransport<T>(value: Promise<T>) { pendingDemand.add(value); void value.finally(() => pendingDemand.delete(value)).catch(() => {}); return value }
-async function settleDemand() { for (let i = 0; i < 4; i++) { await Promise.resolve(); await Promise.allSettled([...pendingDemand]) } }
+let host: HostGoalTransport | undefined
+async function settleDemand() { await host?.settle() }
+afterEach(async () => { await host?.dispose(); host = undefined })
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: _hygiene_fixturePath("topics"), hostId: 'local', kind: 'folder' as const }
 const originalTopic = { id: 'original-topic', directoryPath: scratch.path, topicPath: 'topic.md', title: 'Original topic', summary: '', collaborators: [] }
 const createTopic = vi.fn(async () => originalTopic)
@@ -260,16 +260,16 @@ async function fieldOptions(trigger: HTMLElement) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)) })
   return options
 }
-function durableOwner() {
-  const owner = openDemandStore({ root: join(dirname(f.store.filePath), 'demands') })
-  vi.spyOn(api.demands, 'create').mockImplementation(input => demandTransport(owner.create(input)))
-  vi.spyOn(api.demands, 'update').mockImplementation((id, patch) => demandTransport(owner.update(id, patch)))
-  return owner
+// Only Electron IPC is substituted: the renderer reaches the original Host Goal owner, which projects
+// Projects from the Workspace registry Main has just published.
+async function durableOwner() {
+  host = await openHostGoalTransport({ config: () => useAppStore.getState().config })
+  return host.demands
 }
 
 describe('Goals consume opaque Project identities through original mounted product owners', () => {
   it('groups root/worktree once without mixing hosts, filters opaque IDs and writes only explicit Project choices to the durable Demand owner', async () => {
-    const { projects } = projectFixture(), owner = durableOwner()
+    const { projects } = projectFixture(), owner = await durableOwner()
     useAppStore.setState({ demands: { one: goal('one', { projectId: projects[0]!.id, projectName: 'Repo' }), remote: goal('remote', { projectId: projects[1]!.id, projectName: projects[1]!.name }) } })
     await mount(); await click('Goal filters')
     const filter = dom.container.querySelector<HTMLButtonElement>('[aria-label="Filter project"]')!
@@ -281,7 +281,10 @@ describe('Goals consume opaque Project identities through original mounted produ
     const id = request.mock.calls[0]![0]!
     expect(dom.container.querySelector('[aria-label="Goal intent"]')).toBeNull()
     expect((await owner.get(id))!).toMatchObject({ id, projectId: projects[0]!.id, projectName: 'Repo', description: '', title: 'Untitled goal' })
-    expect(request).toHaveBeenCalledExactlyOnceWith(id, 'grill', { creationOperationId: undefined })
+    // The original Host owner records the creation origin; the PMO request carries that exact operation, never a guess.
+    const creationOperationId = (await owner.get(id))!.creationOrigin?.operationId
+    expect(creationOperationId).toBe(host!.executed('demand.create')[0]!.requestId)
+    expect(request).toHaveBeenCalledExactlyOnceWith(id, 'grill', { creationOperationId })
     await vi.waitFor(() => expect(directGoalRequest()).toBeNull())
     const property = dom.container.querySelector<HTMLButtonElement>('[aria-label="Goal project"]')!
     expect(property.dataset.value).toBe(projects[0]!.id)
@@ -294,7 +297,7 @@ describe('Goals consume opaque Project identities through original mounted produ
   })
 
   it('never substitutes an opaque Project preferred Workspace for unbound evidence', async () => {
-    const directory = dirname(f.store.filePath), { projects } = projectFixture(directory), owner = durableOwner()
+    const directory = dirname(f.store.filePath), { projects } = projectFixture(directory), owner = await durableOwner()
     await owner.create({ id: 'one', title: 'Real evidence', projectId: projects[0]!.id, projectName: projects[0]!.name, sessionIds: ['healthy'], status: 'in_progress' })
     await owner.update('one', { alignment: { summary: alignment.summary, criteria: alignment.criteria, openQuestions: alignment.openQuestions } }); await owner.confirmAlignment('one', 1)
     await owner.update('one', { grounding: { alignmentRevision: 1, summary: grounding.summary, checks: [{ ...grounding.checks[0]!, evidence: ['artifacts/recovery.log:18:7', '../outside.log:2'] }] } })
@@ -312,7 +315,7 @@ describe('Goals consume opaque Project identities through original mounted produ
   it('retains unknown bindings and names through registry changes; Workspace UUIDs remain unavailable rather than a guessed Project', async () => {
     const { projects, workspaces } = projectFixture()
     const original = goal('one', { projectId: projects[0]!.id, projectName: 'Original bound Project', alignment: { ...alignment, confirmedAt: _reshape_fixtureEpoch(0, 0, 3) }, grounding })
-    const update = vi.spyOn(api.demands, 'update')
+    const writes = await openHostGoalTransport({ config: () => useAppStore.getState().config }); host = writes
     useAppStore.setState({ demands: { one: original }, selectedDemandId: 'one' }); await mount()
     const property = dom.container.querySelector<HTMLButtonElement>('[aria-label="Goal project"]')!
     expect(property.dataset.value).toBe(projects[0]!.id)
@@ -325,7 +328,7 @@ describe('Goals consume opaque Project identities through original mounted produ
     expect(property.dataset.value).toBe('uuid:root')
     expect(property.querySelector('.selection-field__choice')!.textContent).toBe('Original bound Project · Unavailable')
     expect(dom.container.querySelector('.goals-evidence__open')).toBeNull(); expect(dom.container.textContent).toContain('File source not recorded')
-    expect(read).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled(); expect(writes.executed('demand.update')).toEqual([])
     expect(useAppStore.getState().demands.one!).toMatchObject({ projectId: 'uuid:root', projectName: 'Original bound Project', grounding })
   })
 

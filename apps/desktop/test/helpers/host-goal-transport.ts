@@ -75,6 +75,7 @@ export async function openHostGoalTransport(options: {
   const faults: Array<{ operation: GoalOperation; match: (request: GoalRequest) => boolean; fault: GoalTransportFault;
     arrive(): void; commit(result: AgentMuxControlResult): void; fail(error: unknown): void; released: Promise<void>; release(): void }> = []
   const inflight = new Set<Promise<unknown>>()
+  const persistent = new Set<{ operation: GoalOperation; error: Error }>()
   const track = <T>(value: Promise<T>): Promise<T> => {
     inflight.add(value); void value.finally(() => inflight.delete(value)).catch(() => {})
     return value
@@ -85,6 +86,7 @@ export async function openHostGoalTransport(options: {
   }
   const execute = vi.spyOn(api.goals, 'execute').mockImplementation(request => track((async () => {
     requests.push(structuredClone(request) as GoalRequest)
+    for (const entry of persistent) if (entry.operation === request.operation) throw entry.error
     const index = faults.findIndex(item => item.operation === request.operation && item.match(request as GoalRequest))
     const gate = index < 0 ? undefined : faults.splice(index, 1)[0]!
     gate?.arrive()
@@ -116,6 +118,12 @@ export async function openHostGoalTransport(options: {
     /** The business fields of each request, without its envelope and random request ID. */
     bodies<O extends GoalOperation>(operation: O): Array<Omit<RequestFor<O>, 'schemaVersion' | 'requestId'>> {
       return this.executed(operation).map(({ schemaVersion: _schema, requestId: _id, ...body }) => body as Omit<RequestFor<O>, 'schemaVersion' | 'requestId'>)
+    },
+    /** Reject every matching request before the owner until the returned release is called. */
+    failAll<O extends GoalOperation>(operation: O, error: Error): () => void {
+      const entry = { operation, error }
+      persistent.add(entry)
+      return () => { persistent.delete(entry) }
     },
     /** Forget recorded requests (seeding writes), keeping pending faults. */
     clear() { requests.splice(0) },
