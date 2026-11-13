@@ -89,6 +89,56 @@ it('keeps the message waiting when the next card is already open after the first
   expect(queue()).toEqual([])
 })
 
+it('a request that opens after the client check leaves the message for an explicit Send, never resent by itself', async () => {
+  // The store sees no request, so this Send takes the direct input path. Core's CAS then finds a request
+  // that opened meanwhile and refuses. Bytes may already be written by then, so the queue must not retry.
+  useAppStore.setState({ sessions: [idle] })
+  const late = Object.assign(new Error('Answer the pending Agent interaction before submitting another prompt.'), { code: 'AGENT_INTERACTION_PENDING' })
+  vi.mocked(api.sessions.submitPrompt).mockRejectedValueOnce(late)
+  useAppStore.getState().send(sid, 'raced a new card', () => {}, 'manual')
+  await vi.waitFor(() => expect(queue()[0]?.status).toBe('deferred'))
+  expect(queue()[0]).toMatchObject({ text: 'raced a new card', awaitingExplicitSend: true, errorCode: 'AGENT_INTERACTION_PENDING' })
+  const attempts = vi.mocked(api.sessions.submitPrompt).mock.calls.length
+  // That request ends. The paused message stays put until the person sends it again.
+  useAppStore.setState({ sessions: [pending('late-request')] })
+  clearInteraction()
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(vi.mocked(api.sessions.submitPrompt).mock.calls.length).toBe(attempts)
+  expect(queue()).toHaveLength(1)
+  expect(queue()[0]!.awaitingExplicitSend).toBe(true)
+})
+
+it('a queued message refused by a request Core saw first is paused, not retried when that request ends', async () => {
+  // Bare Enter queues without a direct binding. The drain's fresh read shows no request, then Core
+  // refuses because one opened. The queue pauses that message; the request ending does not resend it.
+  useAppStore.setState({ sessions: [idle] })
+  const late = Object.assign(new Error('Answer the pending Agent interaction before submitting another prompt.'), { code: 'AGENT_INTERACTION_PENDING' })
+  vi.mocked(api.sessions.submitPrompt).mockRejectedValueOnce(late)
+  expect(useAppStore.getState().enqueueAgentSteer(sid, 'queued before the card', () => {}, undefined, 'manual')).toBeTruthy()
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(queue()[0]).toMatchObject({ text: 'queued before the card', status: 'deferred', awaitingExplicitSend: true, errorCode: 'AGENT_INTERACTION_PENDING' })
+  const attempts = vi.mocked(api.sessions.submitPrompt).mock.calls.length
+  useAppStore.setState({ sessions: [pending('late-request')] })
+  clearInteraction()
+  await useAppStore.getState().flushAgentSteerQueue(sid)
+  expect(vi.mocked(api.sessions.submitPrompt).mock.calls.length).toBe(attempts)
+  expect(queue()[0]!.awaitingExplicitSend).toBe(true)
+})
+
+it('the public message.pending.send of a never-sent composer message waits for the request instead of writing', async () => {
+  // A composer message queued with bare Enter, then sent by a trusted CLI or device while a card is open.
+  expect(useAppStore.getState().enqueueAgentSteer(sid, 'from the outbox', () => {}, undefined, 'manual')).toBeTruthy()
+  const pendingId = queue()[0]!.operationId
+  const receipt = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'pending-send', operation: 'message.pending.send', agentSessionId: sid, pendingId })
+  expect(receipt).toMatchObject({ operation: 'message.pending.send', pendingId, disposition: 'unconfirmed', message: { delivery: 'not-submitted' } })
+  expect(queue()[0]!.directInputBinding).toBeUndefined()
+  expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+  expect(api.sessions.inspectInput).not.toHaveBeenCalled()
+  clearInteraction()
+  await vi.waitFor(() => expect(queue()).toEqual([]))
+  expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => call[1])).toEqual(['from the outbox'])
+})
+
 it('without a pending request Send still binds the direct input path', async () => {
   useAppStore.setState({ sessions: [idle] })
   useAppStore.getState().send(sid, 'plain send', undefined, 'manual')

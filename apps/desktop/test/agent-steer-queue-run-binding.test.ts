@@ -4,6 +4,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import {
   steerEntryTargetsRun,
+  steerEntryWakesItself,
   steerQueueCanDrainNow,
   steerQueueCanEverDrain
 } from '../src/renderer/src/lib/agent-steer-queue-drain'
@@ -125,6 +126,18 @@ describe('排空判定只有一处', () => {
   it('run 身份判定按 runId 相等', () => {
     expect(steerEntryTargetsRun({ runId: 'run-1' }, 'run-1')).toBe(true)
     expect(steerEntryTargetsRun({ runId: 'run-1' }, 'run-2')).toBe(false)
+  })
+
+  it('只有队列自己会投到当前 run 的条目才算「自己会发」', () => {
+    // 待答时行上写「请求结束后发送」只能对这些条目成立；旧 run 的条目要明确发送才会走。
+    const fresh = { runId: 'run-1', promptCondition: null }
+    expect(steerEntryWakesItself(fresh, 'run-1')).toBe(true)
+    expect(steerEntryWakesItself(fresh, 'run-2')).toBe(false)
+    expect(steerEntryWakesItself({ promptCondition: null }, 'run-1')).toBe(false)
+    expect(steerEntryWakesItself({ ...fresh, awaitingExplicitSend: true }, 'run-1')).toBe(false)
+    expect(steerEntryWakesItself({ ...fresh, archived: true }, 'run-1')).toBe(false)
+    expect(steerEntryWakesItself({ ...fresh, directInputBinding: {} }, 'run-1')).toBe(false)
+    expect(steerEntryWakesItself({ runId: 'run-1', promptCondition: { expectedRun: { runId: 'run-1' } } }, 'run-1')).toBe(false)
   })
 
   it('store 的 flush 闸门走的就是这个谓词，不是第二份手抄', async () => {
