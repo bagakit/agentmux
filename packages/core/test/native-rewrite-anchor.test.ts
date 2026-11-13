@@ -6,12 +6,12 @@ import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.j
 const closes: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close() })
 
-const assistant = (id: string, text: string) => ({ timestamp: '2026-11-02T16:04:26.304Z', type: 'response_item',
+const assistant = (id: string, text: string) => ({ timestamp: '2000-01-01T00:00:01.000Z', type: 'response_item',
   payload: { type: 'message', id, role: 'assistant', content: [{ type: 'output_text', text }] } })
 // Records without payload.id: Codex names them by byte position (codex-record:<offset>).
-const call = (callId: string, args = '{}') => ({ timestamp: '2026-11-02T16:34:37.631Z', type: 'response_item',
+const call = (callId: string, args = '{}') => ({ timestamp: '2000-01-01T00:00:02.000Z', type: 'response_item',
   payload: { type: 'function_call', name: 'exec', arguments: args, call_id: callId } })
-const output = (callId: string, text: string) => ({ timestamp: '2026-11-02T16:34:40.932Z', type: 'response_item',
+const output = (callId: string, text: string) => ({ timestamp: '2000-01-01T00:00:03.000Z', type: 'response_item',
   payload: { type: 'function_call_output', call_id: callId, output: text } })
 
 async function codex() {
@@ -166,7 +166,7 @@ it('keeps a rewritten beginning a different source even when an anchor record st
   const before = await consumed(f, start)
   // Same inode and creation time, but the file's first bytes (its session header) were rewritten.
   const lines = (await readFile(f.path, 'utf8')).split('\n')
-  await writeFile(f.path, [JSON.stringify({ timestamp: '2026-11-03T00:00:00.000Z', ...JSON.parse(lines[0]!) }), ...lines.slice(1)].join('\n'))
+  await writeFile(f.path, [JSON.stringify({ timestamp: '2000-01-01T00:00:04.000Z', ...JSON.parse(lines[0]!) }), ...lines.slice(1)].join('\n'))
   const plain = await f.client.readConversationChanges({ ...f.ref, checkpoint: before.page.checkpoint, limit: 100 })
   expect(nativeCoverage(plain).gaps[0]?.code).toBe('AGENT_SESSION_HISTORY_SOURCE_CHANGED')
   const anchored = await f.client.readConversationChanges({ ...f.ref, checkpoint: before.page.checkpoint, limit: 100, rewrite: { anchors: anchorsOf(before.records) } })
