@@ -2,6 +2,8 @@ import type { BrowserPng } from './contracts'
 import type { ThemeBootstrap } from './theme-bootstrap'
 import type { ScreenshotFileResult } from './screenshot-output'
 import type { SystemScreenshotEditorFinish } from './system-screenshot-editor'
+import type { NormalizedRect, ScreenshotShape } from '../renderer/src/components/image-annotation/drawing-model'
+import type { AnnotationTool } from '../renderer/src/components/image-annotation/AnnotationToolbar'
 
 export const CAPTURE_SURFACE_CHANNEL = 'screenshot:capture-surface'
 /** Main to one overlay: another display took the selection, or a short status. */
@@ -26,7 +28,7 @@ export type CaptureSurfaceInput = {
 export type CaptureSurfaceEvent = { kind: 'locked' } | { kind: 'notice'; message: string }
 
 /** The marks ⌘E carries into the window editor; coordinates are this display's frozen-frame pixels. */
-export type CaptureSurfaceHandoff = { shapes: unknown[]; crop: { x: number; y: number; width: number; height: number } | null; tool: string }
+export type CaptureSurfaceHandoff = { shapes: ScreenshotShape[]; crop: NormalizedRect; tool: AnnotationTool }
 
 /** Isolated bridge of one overlay; every call is bound to its original request and display. */
 export type CaptureSurfaceApi = {
@@ -36,8 +38,8 @@ export type CaptureSurfaceApi = {
   /** A selection starts here. False when another display already owns the selection. */
   select(requestId: string): Promise<boolean>
   onEvent(listener: (event: CaptureSurfaceEvent) => void): () => void
-  /** Primary delivery of the processed selection; a completed delivery closes every overlay. */
-  finish(requestId: string, operationId: string, image: BrowserPng): Promise<SystemScreenshotEditorFinish>
+  /** Primary delivery of the processed selection in this display's frozen-frame pixels; a completed delivery closes every overlay. */
+  finish(requestId: string, image: BrowserPng, selection: CaptureSurfaceRect): Promise<SystemScreenshotEditorFinish>
   /** `selection` is in this display's frozen-frame pixels; Main places the pin there. */
   pin(requestId: string, operationId: string, image: BrowserPng, selection: CaptureSurfaceRect): Promise<import('@agentmux/core').ImageResult>
   savePng(requestId: string, image: BrowserPng): Promise<ScreenshotFileResult>

@@ -8,13 +8,20 @@ import { ScreenshotSourceView } from './ScreenshotSourceView'
 import type { ScreenshotSourceApi } from '../../shared/screenshot-source'
 import type { ScreenshotCountdownApi } from '../../shared/screenshot-countdown'
 import { ScreenshotCountdownView } from './ScreenshotCountdownView'
+import type { CaptureSurfaceApi } from '../../shared/capture-surface'
+import { CaptureSurfaceView } from './CaptureSurfaceView'
 
 const api = (window as unknown as { screenshotEditor: SystemScreenshotEditorApi }).screenshotEditor
 installFileDropGuard(window)
 const root = createRoot(document.getElementById('root')!)
 const sources = (window as unknown as { screenshotSources?: ScreenshotSourceApi }).screenshotSources
 const countdown = (window as unknown as { screenshotCountdown?: ScreenshotCountdownApi }).screenshotCountdown
-if (countdown) void countdown.load().then(({ theme, seconds }) => {
+const surface = (window as unknown as { captureSurface?: CaptureSurfaceApi }).captureSurface
+if (surface) void surface.load().then(input => {
+  mountThemeRuntime(window, input.theme.status === 'available' ? { kind: 'observed', document: input.theme.document, appearance: input.theme.appearance } : {})
+  root.render(<CaptureSurfaceView input={input} api={surface} />)
+}).catch(error => { mountThemeRuntime(window); root.render(<main className="capture-surface capture-surface--issue" role="alert">{String(error)}</main>) })
+else if (countdown) void countdown.load().then(({ theme, seconds }) => {
   mountThemeRuntime(window, theme.status === 'available' ? { kind: 'observed', document: theme.document, appearance: theme.appearance } : {})
   root.render(<ScreenshotCountdownView api={countdown} initial={seconds} />)
 }).catch(error => { mountThemeRuntime(window); root.render(<main className="screenshot-countdown" role="alert">{String(error)}</main>) })
