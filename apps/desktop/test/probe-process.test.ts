@@ -166,6 +166,46 @@ describe('probe process ownership', () => {
     expect(ports.readPs).not.toHaveBeenCalled(); expect(globalSignal).not.toHaveBeenCalled()
   })
 
+  it('waits for the original-owner barrier before either soft or hard worker termination', async () => {
+    const child = heldChild(); ports.spawn.mockReturnValue(child); vi.useFakeTimers()
+    let confirm!: () => void
+    const barrier = vi.fn(() => new Promise<void>(done => { confirm = done }))
+    const pending = runProbeProcess('private-probe', [], { timeoutMs: 10, graceMs: 20, beforeStop: barrier }).catch((error: any) => error)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(barrier).toHaveBeenCalledTimes(1); expect(child.kill).not.toHaveBeenCalled()
+    confirm(); await vi.advanceTimersByTimeAsync(0)
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']])
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']])
+    expect((await pending).probe.exitConfirmed).toBe(false)
+  })
+
+  it('preserves the Inspector owner and both errors when its original-owner barrier is unconfirmed', async () => {
+    const child = heldChild(), primary = new Error('observation failed'), barrier = new Error('original Main exit unknown')
+    ports.spawn.mockReturnValue(child); vi.useFakeTimers()
+    const pending = runProbeProcess('private-probe', [], { timeoutMs: 10000, graceMs: 20,
+      onLine: () => { throw primary }, beforeStop: async () => { throw barrier } }).catch((error: any) => error)
+    child.stderr.write('original-observation\n')
+    const error = await pending
+    await vi.advanceTimersByTimeAsync(2200)
+    expect(error.errors).toContain(primary); expect(error.errors).toContain(barrier)
+    expect(error.probe).toMatchObject({ exitConfirmed: false, cleanup: 'before-stop-unconfirmed', signals: [] })
+    expect(child.kill).not.toHaveBeenCalled(); expect(globalSignal).not.toHaveBeenCalled()
+  })
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('awaits the same owner barrier for %s', async signal => {
+    const child = heldChild(); ports.spawn.mockReturnValue(child)
+    let confirm!: () => void
+    const barrier = vi.fn(() => new Promise<void>(done => { confirm = done }))
+    child.kill.mockImplementation(() => { end(child, null, 'SIGTERM'); return true })
+    const pending = runProbeProcess('private-probe', [], { timeoutMs: 10000, beforeStop: barrier })
+    process.emit(signal); await Promise.resolve()
+    expect(child.kill).not.toHaveBeenCalled(); expect(barrier).toHaveBeenCalledTimes(1)
+    confirm()
+    expect(await pending).toMatchObject({ interruption: signal, exitConfirmed: true, exitSignal: 'SIGTERM' })
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']])
+  })
+
   it('does not mutate an ended unknown receipt when a later exit arrives', async () => {
     const child = heldChild(); ports.spawn.mockReturnValue(child); vi.useFakeTimers()
     const pending = runProbeProcess('private-probe', [], { timeoutMs: 10, graceMs: 20 }).catch((error: any) => error)
