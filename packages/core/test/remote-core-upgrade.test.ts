@@ -694,4 +694,35 @@ describe('reviewed Native replacement', () => {
     check.nativeReplacement.ending = check.nativeReplacement.ending.slice(1)
     expect(() => parseRemoteCoreUpgradeCheck(check)).toThrow('does not match its admission')
   })
+
+  it('carries the review, its admission and the replacement receipt through the public RPC and compiled CLI', async () => {
+    const f = await older()
+    const server = new AgentMuxControlServer({ socketPath: join(f.root, 'replacement.sock'), coreClients: () => [], execute: async request => {
+      if (request.operation === 'settings.hosts.upgrade-check') return { operation: request.operation, check: await f.manager.check(host) }
+      if (request.operation === 'settings.hosts.upgrade') return { operation: request.operation, receipt: await f.manager.upgrade(host, request.expected, request.requestId) }
+      if (request.operation === 'settings.hosts.upgrade-inspect') return { operation: request.operation, receipt: await f.manager.inspect(host, request.requestId) }
+      throw new Error('Unexpected replacement operation')
+    } })
+    await server.start()
+    try {
+      const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+      const checked = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-check', host.id], env)
+      expect(checked.code, checked.stderr).toBe(0)
+      const check = JSON.parse(checked.stdout).result.check
+      expect(check).toMatchObject({ reason: 'native-replacement', eligible: true,
+        nativeReplacement: { ending: [{ runId: 'original-run', agentSessionId: 'original-session' }, { runId: 'ordinary-terminal', agentSessionId: null }] },
+        expected: { nativeReplacement: { endingRunIds: ['original-run', 'ordinary-terminal'] } } })
+      const admission = join(f.root, 'replacement-admission.json')
+      await writeFile(admission, JSON.stringify({ operationId: 'public-replacement', expected: check.expected }))
+      const upgraded = await runCompiledObjectCli(['settings', 'hosts', 'upgrade', host.id, '--input', admission], env, '', 60_000)
+      expect(upgraded.code, upgraded.stderr).toBe(0)
+      const receipt = JSON.parse(upgraded.stdout).result.receipt
+      expect(receipt).toMatchObject({ operationId: 'public-replacement', status: 'completed', expected: check.expected,
+        nativeReplacement: { endedRunIds: ['original-run', 'ordinary-terminal'], stateCopy: fixturePath('scope/state/core-releases/public-replacement.native-state') } })
+      const inspected = await runCompiledObjectCli(['settings', 'hosts', 'upgrade-inspect', host.id, '--operation-id', 'public-replacement'], env)
+      expect(JSON.parse(inspected.stdout).result.receipt).toEqual(receipt)
+      expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native', 'start-new-core', 'select-current-release'])
+    } finally { await server.stop() }
+  }, 90_000)
 })
+
