@@ -272,7 +272,7 @@ async function kernelOwnerIdentity(pid, selected) {
 async function daemonDeclaration(selected) {
   const image = await lstat(selected.daemonPath, { bigint: true })
   fail(image.isFile(), 'The selected Runtime candidate is not a regular executable file.')
-  const response = await exec(selected.daemonPath, ['--version'], { timeout: 10_000, maxBuffer: 4096 })
+  const response = await exec(selected.daemonPath, ['--version'], { maxBuffer: 4096 })
   const declared = /^ctxmuxd (\S+) \(protocol (\d+), handoff ([^\s(),]+)\)\s*$/.exec(response.stdout)
   fail(declared && declared[1] === selected.daemonVersion && Number(declared[2]) === selected.manifest.product.protocol,
     'The selected Runtime candidate did not declare its selected version, protocol and handoff.')
