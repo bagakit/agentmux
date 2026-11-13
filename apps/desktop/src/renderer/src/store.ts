@@ -661,6 +661,38 @@ function settleNotificationRecords(state: Pick<AppState, 'notificationEvents' | 
   return { notificationEvents: retained, noticeReadReceipts: receipts }
 }
 
+/** Activity keeps this many of the newest events per window; its cost follows this window, not uptime. */
+export const ACTIVITY_RETENTION_LIMIT = 256
+/**
+ * Bound the Activity history after an append. Current problems their owner has not settled are
+ * outside the bound. Over the limit the oldest read events leave first, then the oldest unread
+ * ones; the count of what left is kept separately and is never presented as read or resolved.
+ */
+function retainActivity(state: Pick<AppState, 'notificationEvents' | 'notificationEventsNotRetained' | 'noticeReadReceipts'>,
+  records: NotificationEvent[]): Pick<AppState, 'notificationEvents'> & Partial<Pick<AppState, 'notificationEventsNotRetained' | 'noticeReadReceipts'>> {
+  let excess = records.length - ACTIVITY_RETENTION_LIMIT
+  if (excess <= 0) return { notificationEvents: records }
+  const history = records.filter(record => !notificationSourceOwner(record.context))
+  excess = history.length - ACTIVITY_RETENTION_LIMIT
+  if (excess <= 0) return { notificationEvents: records }
+  const read = state.noticeReadReceipts['global:events'] ?? {}
+  const leaving = new Set<NotificationEvent>()
+  for (const record of history) { if (leaving.size >= excess) break; if (read[record.id] === 'read') leaving.add(record) }
+  for (const record of history) { if (leaving.size >= excess) break; leaving.add(record) }
+  let receipts = state.noticeReadReceipts
+  const released = [...leaving].filter(record => read[record.id] === 'read')
+  if (released.length) {
+    const kept = { ...read }
+    for (const record of released) delete kept[record.id]
+    receipts = { ...receipts }
+    if (Object.keys(kept).length) receipts['global:events'] = kept
+    else delete receipts['global:events']
+  }
+  return { notificationEvents: records.filter(record => !leaving.has(record)),
+    notificationEventsNotRetained: state.notificationEventsNotRetained + leaving.size,
+    ...(released.length ? { noticeReadReceipts: receipts } : {}) }
+}
+
 function nativeIdentityNoticeResolved(sessions: readonly SessionSnapshot[], notice: ErrorNoticeContext | null | undefined): boolean {
   const subject = notice?.subject
   if (notice?.cause !== 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' || subject?.kind !== 'agent') return false
@@ -1260,6 +1292,8 @@ export type AppState = GitReadingActions & {
   errorNoticeContext: ErrorNoticeContext | null
   errorDismissed: boolean
   notificationEvents: NotificationEvent[]
+  /** Older Activity events this window did not keep (bounded retention); never counted as read. */
+  notificationEventsNotRetained: number
   clearReadNotificationEvents(): void
   /** UI projection of the latest save request failure, never a persistence or Agent health owner. */
   workbenchSaveWarning: string | null
@@ -5450,6 +5484,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   errorNoticeContext: null,
   errorDismissed: false,
   notificationEvents: [],
+  notificationEventsNotRetained: 0,
   clearReadNotificationEvents() {
     const read = get().noticeReadReceipts['global:events'] ?? {}
     set(state => ({ notificationEvents: state.notificationEvents.filter(event => notificationSourceOwner(event.context) || read[event.id] !== 'read'),
@@ -12757,14 +12792,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Another channel observing it later must not recreate it after an unrelated latest error.
     if (context?.event && !existing && current.noticeReadReceipts['global:events']?.[id] === 'read') return
     const event = observedRecord(id, existing)
-    const notificationEvents = !retainEvent ? current.notificationEvents
-      : existing ? current.notificationEvents.map(item => item === existing ? event : item)
-      : [...current.notificationEvents, event]
+    const retained = !retainEvent ? { notificationEvents: current.notificationEvents }
+      : existing ? { notificationEvents: current.notificationEvents.map(item => item === existing ? event : item) }
+      // Only a new event takes a place; a repeat updates its original record above.
+      : retainActivity(current, [...current.notificationEvents, event])
     // Ordinary failures have their own history now; they must not replace an unfinished startup source.
     const preserveStartupSource = retainEvent &&
       (current.errorNoticeContext?.startupSessionSnapshot || current.errorNoticeContext?.startupProviderCatalog)
     set({ ...(!preserveStartupSource
-      ? { error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false } : {}), notificationEvents })
+      ? { error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false } : {}), ...retained })
   },
   dismissError() {
     if (!get().error) return

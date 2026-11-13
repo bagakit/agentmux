@@ -17,6 +17,8 @@ export type NotificationProjection = {
   current: ObservedNotificationEntry[]
   activity: ObservedNotificationEntry[]
   unavailableSources: AgentMuxClientNotificationRecord['source'][]
+  /** Older Activity events the owner did not keep; reported with every Activity read. */
+  activityNotRetained: number
 }
 
 // A borrowed reader of the committed notification owner, not another notification
@@ -69,7 +71,8 @@ export function observeNotifications(request: AgentMuxControlInspectNotification
   result.data = { kind: 'client-notifications', client: { instanceId }, items: [], total: selected.length,
     nextCursor: null, snapshot,
     coverage: { state: projection.unavailableSources.length ? 'partial' : 'available', unavailableSources: projection.unavailableSources },
-    omissions: [] }
+    omissions: [], ...(projection.activityNotRetained && (!list?.section || list.section === 'activity') && !('notificationId' in target)
+      ? { activityNotRetained: projection.activityNotRetained } : {}) }
   const page = selected.slice(start, start + (list?.limit ?? 32))
   for (const { entry, section, notificationId } of page) {
     const record: AgentMuxClientNotificationRecord = { notificationId, version: digest(entry.observation.version),

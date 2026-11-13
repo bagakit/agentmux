@@ -4,7 +4,7 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
+import { ACTIVITY_RETENTION_LIMIT, notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
 import { useReadReceipts, useServiceNotices, type ServiceNoticeItem, serviceNoticeFingerprint } from '../lib/use-service-notices'
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
 import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } from '../lib/service-window-notice'
@@ -70,6 +70,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     !errorContext?.lifecycle && !errorContext?.cause ? notificationEventIdentity(currentError, errorContext) : null,
   [currentError, errorDismissed, errorContext])
   const clearReadEvents = useAppStore(state => state.clearReadNotificationEvents)
+  const notRetained = useAppStore(state => state.notificationEventsNotRetained)
   // Window records have no complete startup snapshot. Only reading facts persist across restarts.
   const eventReceiptFacts = useMemo(() => Object.fromEntries(events.map(event => [event.id, 'read'])), [events])
   const eventInbox = useReadReceipts('global:events', eventReceiptFacts, !loading, false)
@@ -383,7 +384,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
     }
-    return { current: currentEntries, activity: historyEntries, unavailableSources }
+    return { current: currentEntries, activity: historyEntries, unavailableSources, activityNotRetained: useAppStore.getState().notificationEventsNotRetained }
   }
   useLayoutEffect(() => registerNotificationReader(buildEntries))
   const visible = open ? buildEntries() : null
@@ -451,6 +452,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
             <p>{category !== 'all' ? 'Choose another category to review its notifications.' : section === 'current' ? 'New service issues will appear here. Past events stay in Activity.' : 'New events will appear here with their original details.'}</p>
           </div> : null}
           {!available ? <p className="global-system-notices__observation">Some sources are still being checked. Existing notices are kept.</p> : null}
+          {section === 'history' && notRetained ? <p className="global-system-notices__observation global-system-notices__retention">{`${notRetained === 1 ? '1 older event was' : `${notRetained} older events were`} not kept. Activity keeps the newest ${ACTIVITY_RETENTION_LIMIT}.`}</p> : null}
         </div>
         <div className="global-system-notices__footer">
           <span>{shownUnread.length ? `${shownUnread.length} unread in this view` : 'All read in this view'}</span>

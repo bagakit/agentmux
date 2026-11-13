@@ -53,6 +53,8 @@ export type AgentMuxClientNotificationsEvidence = {
   snapshot: string
   coverage: { state: 'available' | 'partial'; unavailableSources: AgentMuxClientNotificationSource[] }
   omissions: Array<'raw-query-budget'>
+  /** Older Activity events this client did not keep under its bounded retention; not read, not resolved. */
+  activityNotRetained?: number
 }
 export type AgentMuxClientNotificationsObservation = {
   schema: 'agentmux.client-notifications.v1'
@@ -109,8 +111,10 @@ export function clientNotificationsTargetMatches(a: AgentMuxClientNotificationsT
 }
 export function parseClientNotificationsEvidence(value: unknown, target: AgentMuxClientNotificationsTarget,
   includeRaw: boolean): AgentMuxClientNotificationsEvidence {
-  const p = object(value, ['kind', 'client', 'items', 'total', 'nextCursor', 'snapshot', 'coverage', 'omissions'])
+  const p = object(value, ['kind', 'client', 'items', 'total', 'nextCursor', 'snapshot', 'coverage', 'omissions', 'activityNotRetained'],
+    ['kind', 'client', 'items', 'total', 'nextCursor', 'snapshot', 'coverage', 'omissions'])
   member(p.kind, ['client-notifications']); id(object(p.client, ['instanceId']).instanceId); count(p.total); digest(p.snapshot)
+  if (p.activityNotRetained !== undefined) { count(p.activityNotRetained); if ((p.activityNotRetained as number) < 1) bad() }
   const seen = new Set<string>()
   list(p.items, 'list' in target ? target.list.limit ?? CLIENT_NOTIFICATIONS_MAX_PAGE : 1, value => {
     const r = object(value, ['notificationId', 'version', 'source', 'section', 'category', 'level', 'unread', 'subject', 'observedAt', 'occurrences', 'original'])
