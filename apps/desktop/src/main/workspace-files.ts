@@ -631,6 +631,11 @@ export type WorkspaceMediaHandle = {
   byteLength: number
   /** Compare the pinned object with the path visible inside the Workspace now. */
   current(): Promise<WorkspaceMediaHandleState>
+  /**
+   * Whether the pinned object itself is still as pinned: one fstat, no path walk. A rename leaves the
+   * pinned bytes intact; only an in-place write to this object changes what a response is reading.
+   */
+  unmodified(): Promise<boolean>
 }
 
 /** A replace-by-rename writer can land between open and read; retry on the new object a few times. */
@@ -640,10 +645,15 @@ function mediaWitness(info: BigIntStats): WorkspaceMediaWitness {
   return { device: info.dev.toString(), inode: info.ino.toString(), size: info.size, mtimeNs: info.mtimeNs, ctimeNs: info.ctimeNs }
 }
 
+/** The pinned object is unmodified since it was pinned: same size and content times. */
+function sameMediaContent(pinned: WorkspaceMediaWitness, opened: WorkspaceMediaWitness): boolean {
+  return opened.size === pinned.size && opened.mtimeNs === pinned.mtimeNs && opened.ctimeNs === pinned.ctimeNs
+}
+
 /** The path must still name the pinned object, and that object must be unmodified since it was pinned. */
 export function compareMediaWitness(pinned: WorkspaceMediaWitness, opened: WorkspaceMediaWitness, visible: WorkspaceMediaWitness): 'same' | 'changed' {
   if (visible.device !== pinned.device || visible.inode !== pinned.inode) return 'changed'
-  return opened.size === pinned.size && opened.mtimeNs === pinned.mtimeNs && opened.ctimeNs === pinned.ctimeNs ? 'same' : 'changed'
+  return sameMediaContent(pinned, opened) ? 'same' : 'changed'
 }
 
 /** The real target inside the real Workspace root, or the typed fact that it escapes it. */
@@ -1111,7 +1121,8 @@ export class WorkspaceFiles {
       const state = await current()
       if (state === 'outside-workspace') throw Object.assign(new Error('Path escapes the workspace root'), { code: 'WORKSPACE_PATH_ESCAPE' })
       if (state !== 'same') throw Object.assign(new Error('The file changed while it was opened. Reload to play the current file.'), { code: 'WORKSPACE_FILE_CHANGED_WHILE_READING' })
-      return { handle, byteLength: Number(pinned.size), current }
+      const unmodified = async () => sameMediaContent(witness, mediaWitness(await handle.stat({ bigint: true })))
+      return { handle, byteLength: Number(pinned.size), current, unmodified }
     } catch (error) {
       await handle.close().catch(() => {})
       throw error

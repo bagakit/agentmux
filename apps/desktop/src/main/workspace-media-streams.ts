@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WorkspaceRecord } from '../shared/contracts.js'
-import type { FileHandle } from 'node:fs/promises'
 import { workspaceFileExtension, workspaceFilePreviewFormat } from '../shared/workspace-file-preview.js'
 import { WORKSPACE_MEDIA_PLAYLIST_EXTENSION, type WorkspaceMediaStreamFact, type WorkspaceMediaStreamOpenResult } from '../shared/workspace-media-stream.js'
 import { LoopbackListener } from './loopback-listener.js'
@@ -263,7 +262,7 @@ export class WorkspaceMediaStreams {
           visible === 'deleted' ? 'This file no longer exists.' : visible === 'outside-workspace' ? 'This path now leaves the Workspace.' : 'This file changed. Reload to play the current file.')
         return
       }
-      await this.serveBytes(lease, path, lease.media.handle, lease.media.byteLength, lease.mimeType, request, response, fail)
+      await this.serveBytes(lease, path, lease.media, lease.mimeType, request, response, fail)
     } catch (error) {
       // An unexpected failure is recorded as unknown-but-retryable, never left looking like a served lease.
       const lease = this.leases.get(/^\/([A-Za-z0-9_-]{43})\//.exec(request.url ?? '')?.[1] ?? '')
@@ -276,19 +275,20 @@ export class WorkspaceMediaStreams {
    * Positional reads from the pinned handle. A FileHandle stream closes its handle when the
    * response is destroyed on seek, which would end every later range of the same lease.
    */
-  private async pump(lease: Lease, path: string, handle: FileHandle, response: ServerResponse, start: number, end: number): Promise<boolean> {
+  private async pump(lease: Lease, path: string, media: WorkspaceMediaHandle, response: ServerResponse, start: number, end: number): Promise<boolean> {
     for (let position = start; position <= end && !response.destroyed && !lease.released;) {
       // A fresh buffer per read: write() may keep it queued, so it is handed over, never reused or copied.
       const chunk = Buffer.allocUnsafe(Math.min(MEDIA_READ_CHUNK_BYTES, end - position + 1))
-      let bytesRead: number
-      try { ({ bytesRead } = await handle.read(chunk, 0, chunk.length, position)) }
+      let bytesRead: number, unmodified: boolean
+      try { ({ bytesRead } = await media.handle.read(chunk, 0, chunk.length, position)); unmodified = await media.unmodified() }
       catch (error) {
         if (!lease.released) lease.fact = { state: 'read-error', path, code: errorCode(error) }
         response.destroy()
         return false
       }
-      // A file shorter than its opened length was changed underneath this response.
-      if (bytesRead === 0) { if (!lease.released) lease.fact = { state: 'changed', path }; response.destroy(); return false }
+      // Rewritten in place, or shorter than its opened length: these bytes are not the pinned file's. End the
+      // response before sending them; the record says why, and the next request is refused as changed.
+      if (!unmodified || bytesRead === 0) { if (!lease.released) lease.fact = { state: 'changed', path }; response.destroy(); return false }
       position += bytesRead
       const more = response.write(bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead))
       if (!more && !response.destroyed) await new Promise<void>(resolve => {
@@ -307,9 +307,9 @@ export class WorkspaceMediaStreams {
   }
 
   /** Range headers and positional bytes for one opened file object. */
-  private async serveBytes(lease: Lease, path: string, handle: FileHandle, size: number, mimeType: string,
+  private async serveBytes(lease: Lease, path: string, media: WorkspaceMediaHandle, mimeType: string,
     request: IncomingMessage, response: ServerResponse, fail: Fail): Promise<boolean> {
-    const range = parseByteRange(request.headers.range as string | undefined, size)
+    const size = media.byteLength, range = parseByteRange(request.headers.range as string | undefined, size)
     if (range === 'unsatisfiable') { fail(416, 'Requested range is not available.', { 'Content-Range': `bytes */${size}` }); return false }
     const start = range?.start ?? 0, end = range?.end ?? size - 1, length = size === 0 ? 0 : end - start + 1
     response.writeHead(range ? 206 : 200, {
@@ -319,7 +319,7 @@ export class WorkspaceMediaStreams {
     if (request.method === 'HEAD' || length === 0) { response.end(); return true }
     lease.responses.add(response)
     response.once('close', () => lease.responses.delete(response))
-    return await this.pump(lease, path, handle, response, start, end)
+    return await this.pump(lease, path, media, response, start, end)
   }
 
   /** A served playlist's segment, opened for this request only through the same confinement. */
@@ -344,7 +344,7 @@ export class WorkspaceMediaStreams {
     }
     try {
       if (lease.released) { fail(410, 'This media lease was released.'); return }
-      if (await this.serveBytes(lease, path, media.handle, media.byteLength, mimeType, request, response, fail)) this.clear(lease, path)
+      if (await this.serveBytes(lease, path, media, mimeType, request, response, fail)) this.clear(lease, path)
     } finally { await media.handle.close().catch(() => {}) }
   }
 
