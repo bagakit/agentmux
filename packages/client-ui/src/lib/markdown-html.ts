@@ -29,6 +29,14 @@ const RAW_TEXT = new Map<string, number>([
   ['noembed', TokenizerMode.RAWTEXT], ['noframes', TokenizerMode.RAWTEXT], ['noscript', TokenizerMode.RAWTEXT],
   ['textarea', TokenizerMode.RCDATA], ['title', TokenizerMode.RCDATA], ['plaintext', TokenizerMode.PLAINTEXT]
 ])
+const RAW_TEXT_END = new RegExp(`</(${[...RAW_TEXT.keys()].join('|')})(?=[\\t\\n\\f\\r />]|$)`, 'giu')
+
+/** One pass over this source: only the last closing position is needed for a suffix query. */
+function rawTextEnds(source: string): Map<string, number> {
+  const ends = new Map<string, number>()
+  for (const match of source.matchAll(RAW_TEXT_END)) ends.set(match[1]!.toLowerCase(), match.index!)
+  return ends
+}
 
 type HtmlAttributes = Readonly<Record<string, string>>
 type HtmlToken =
@@ -47,6 +55,7 @@ type HtmlToken =
  */
 function tokenizeHtml(source: string): HtmlToken[] {
   const tokens: HtmlToken[] = []
+  const lastRawTextEnd = rawTextEnds(source)
   let cursor = 0, rawText: string | null = null, rawStart = 0
   const emit = (token: HtmlToken, start: number, end: number) => {
     if (start > cursor) tokens.push({ kind: 'literal', source: source.slice(cursor, start) })
@@ -69,7 +78,7 @@ function tokenizeHtml(source: string): HtmlToken[] {
       if (rawMode !== undefined) {
         // A raw-text body is not markup, so the whole element stays literal source. Only an element
         // whose end tag follows is one; an unclosed start tag is just visible text, never a swallow.
-        if (!rawTextEnd(source, name, end)) { emit({ kind: 'literal', source: raw, rawText: name }, start, end); return }
+        if ((lastRawTextEnd.get(name) ?? -1) < end) { emit({ kind: 'literal', source: raw, rawText: name }, start, end); return }
         rawText = name; rawStart = start
         tokenizer.state = rawMode
         return
@@ -114,11 +123,6 @@ function tokenizeHtml(source: string): HtmlToken[] {
   tokenizer.write(source, true)
   if (cursor < source.length) tokens.push({ kind: 'literal', source: source.slice(cursor) })
   return tokens
-}
-
-/** Whether the end tag of a raw-text element occurs after `from`. */
-function rawTextEnd(source: string, name: string, from: number): boolean {
-  return new RegExp(`</${name}[\\t\\n\\f\\r />]`, 'iu').test(source.slice(from) + ' ')
 }
 
 /** Non-negative integers (pixels) or percentages; anything else is dropped. */
@@ -184,8 +188,12 @@ type Run = { kind: 'node'; node: RootContent | PhrasingContent; tokens?: HtmlTok
 function rawTextRuns(nodes: readonly (RootContent | PhrasingContent)[], sourceOf: HtmlSourceOf): Run[] {
   const out: Run[] = []
   let open: { name: string; source: string } | null = null
+  const lastClosingNode = new Map<string, number>()
+  for (const [index, node] of nodes.entries()) {
+    if (node.type === 'html') for (const name of rawTextEnds(node.value).keys()) lastClosingNode.set(name, index)
+  }
   /** Only a later sibling html node with the matching end tag makes the start tag an element. */
-  const closedLater = (index: number, name: string) => nodes.slice(index + 1).some(node => node.type === 'html' && rawTextEnd(node.value, name, 0))
+  const closedLater = (index: number, name: string) => (lastClosingNode.get(name) ?? -1) > index
   for (const [index, node] of nodes.entries()) {
     if (open) {
       const text = node.type === 'html' ? node.value : sourceOf(node)
