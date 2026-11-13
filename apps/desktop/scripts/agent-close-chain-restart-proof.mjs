@@ -42,7 +42,40 @@ const report = { schema: 'agentmux.agent-close-chain-restart.v1', passed: false,
   boundary: 'Complete production Desktop Main/Renderer, original Core File Store, real ctxmux Run and public CLI. The private Provider protocol is controlled. The prepared resume freezes its real request, then its Runtime Start dispatch is deliberately withheld before CONTROL_UNAVAILABLE; this scene does not claim applied Start or lost acknowledgement after dispatch. T-011 separately proves an actually retained Run. No user Runtime or native conversation is accessed.' }
 const children = new Set(), sessions = new Map(), daemons = new Set()
 let client, daemon, first, second, host, failure, daemonOrdinal = 0
-const delay = ms => new Promise(done => setTimeout(done, ms)), save = async () => writeFile(receiptPath, JSON.stringify(report, null, 2))
+// Prepared launch requests can contain JSON-encoded inherited environments.
+// Project only saved diagnostics; the original request and Runtime inputs stay intact.
+function projectDerivedEvidence(value, redactions = [], path = '$') {
+  if (Array.isArray(value)) {
+    const next = value.map((item, index) => projectDerivedEvidence(item, redactions, path + '[' + index + ']'))
+    return next.some((item, index) => item !== value[index]) ? next : value
+  }
+  if (value && typeof value === 'object') {
+    let changed = false
+    const next = Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      let projected
+      if (key === 'env') {
+        if (item === undefined || (item?.format === 'agentmux.omitted-env.v1' && /^[a-f0-9]{64}$/.test(item.sha256) && item.omitted === true)) projected = item
+        else {
+          projected = { format: 'agentmux.omitted-env.v1', omitted: true, sha256: sha(JSON.stringify(item)), encoding: 'JSON.stringify', reason: 'Inherited environment values omitted from derived evidence; Runtime inputs are unchanged.' }
+          redactions.push({ path: path + '.env', sha256: projected.sha256 })
+        }
+      } else projected = projectDerivedEvidence(item, redactions, path + '.' + key)
+      changed ||= projected !== item
+      return [key, projected]
+    }))
+    return changed ? next : value
+  }
+  if (typeof value === 'string' && /^[\s]*[\[{]/u.test(value)) {
+    let decoded
+    try { decoded = JSON.parse(value) } catch { return value }
+    if (decoded && typeof decoded === 'object') {
+      const projected = projectDerivedEvidence(decoded, redactions, path + '<json>')
+      if (projected !== decoded) return JSON.stringify(projected)
+    }
+  }
+  return value
+}
+const delay = ms => new Promise(done => setTimeout(done, ms)), save = async () => writeFile(receiptPath, JSON.stringify(projectDerivedEvidence(report), null, 2))
 async function phase(name) { report.phases.push(name); await save(); console.log('agent_close_phase=' + name) }
 async function until(label, read, budget = 30000) {
   const end = Date.now() + budget
