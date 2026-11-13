@@ -98,25 +98,34 @@ describe('pointing-mark entry points in the mounted editor', () => {
     await click('Magnifier')
     await act(async () => { pointer('pointerdown', 20, 20); pointer('pointermove', 60, 50) }); await frame()
     const live = raster.scene.mock.lastCall![2] as CalloutShape
-    expect(live.at, 'the bubble follows the source as it grows, never over it').toEqual({ x: 76, y: 20 })
+    expect(live.at, 'the bubble follows the source as it grows, never over it').toEqual({ x: 80, y: 20 })
     await act(async () => { pointer('pointermove', 80, 60); pointer('pointerup', 80, 60) }); await frame()
     const drawn = (await shapes())[0] as CalloutShape
-    expect(drawn.at, 'the bubble sits right of the final source').toEqual({ x: 96, y: 20 })
+    expect(drawn.at, 'the bubble sits right of the final source').toEqual({ x: 100, y: 20 })
     const bubble = calloutBubble(drawn)
     await click('Select')
     await drag([bubble.x + 20, bubble.y + 20], [bubble.x + 50, bubble.y + 100])
     const moved = (await shapes())[0] as CalloutShape
-    expect(moved, 'dragging inside the bubble moves only the bubble').toMatchObject({ from: drawn.from, to: drawn.to, at: { x: 126, y: 100 } })
+    expect(moved, 'dragging inside the bubble moves only the bubble').toMatchObject({ from: drawn.from, to: drawn.to, at: { x: 130, y: 100 } })
     await drag([20, 40], [30, 50])
-    expect((await shapes())[0], 'dragging the source frame moves the whole mark').toMatchObject({ from: { x: 30, y: 30 }, to: { x: 90, y: 70 }, at: { x: 136, y: 110 } })
+    expect((await shapes())[0], 'dragging the source frame moves the whole mark').toMatchObject({ from: { x: 30, y: 30 }, to: { x: 90, y: 70 }, at: { x: 140, y: 110 } })
   })
 
   it('flips a magnifier bubble drawn near the image edge to the side that keeps it inside the image', async () => {
     const { drag, click, shapes } = await mount()
     await click('Magnifier'); await drag([350, 20], [380, 40])
     const drawn = (await shapes())[0] as CalloutShape, bubble = calloutBubble(drawn)
-    expect(drawn.at, 'the bubble flips left of a source at the right edge').toEqual({ x: 259, y: 20 })
+    expect(drawn.at, 'the bubble flips left of a source at the right edge').toEqual({ x: 255, y: 20 })
     expect(bubble.x + bubble.width).toBeLessThanOrEqual(image.width)
+  })
+
+  it('keeps a magnifier bubble the same screen distance from its source when the view is not one to one', async () => {
+    // An 800 × 600 image fitted into the 400 × 300 canvas: two image pixels per screen pixel.
+    const { drag, click, shapes } = await mount([], { ...image, width: 800, height: 600 })
+    await click('Magnifier'); await drag([20, 20], [60, 50])
+    const drawn = (await shapes())[0] as CalloutShape
+    expect(drawn.from, 'the source is drawn in image pixels').toEqual({ x: 40, y: 40 })
+    expect(drawn.at, 'twenty screen points are forty image pixels at half scale').toEqual({ x: 160, y: 40 })
   })
 
   it('changes a selected pointing mark through its strength control as one Undo step, else sets the next one', async () => {

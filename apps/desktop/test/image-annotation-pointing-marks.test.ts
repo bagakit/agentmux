@@ -88,26 +88,52 @@ describe('pointing marks in the shared annotation model', () => {
     expect(calloutLeader({ ...callout, at: { x: 10, y: 80 } }), 'source bottom edge to bubble top edge').toEqual({ from: { x: 30, y: 30 }, to: { x: 30, y: 80 } })
     expect(shapeBounds(callout), 'bounds cover the source and the bubble').toEqual({ x: 20, y: 10, width: 120, height: 20 })
     const fresh = createCalloutShape('fresh', '#ef4444', { x: 20, y: 20 }, { x: 40, y: 30 })
-    expect(fresh).toMatchObject({ zoom: 2.5, at: { x: 56, y: 20 } })
+    expect(fresh, 'without a view the gap is CALLOUT_GAP image pixels').toMatchObject({ zoom: 2.5, at: { x: 60, y: 20 } })
+    expect(createCalloutShape('g', '#ef4444', { x: 20, y: 20 }, { x: 40, y: 30 }, 2, undefined, { gap: 40 }).at, 'the editor passes its screen gap in image pixels').toEqual({ x: 80, y: 20 })
     expect(createCalloutShape('z', '#000', { x: 0, y: 0 }, { x: 1, y: 1 }, 99).zoom).toBe(6)
     expect(createCalloutShape('z', '#000', { x: 0, y: 0 }, { x: 1, y: 1 }, 1).zoom).toBe(1.5)
   })
 
   it('places a default bubble inside the image or selection: right, else left, else below or above, else clamped', () => {
     const at = (from: [number, number], to: [number, number], zoom: number, bounds: { x: number; y: number; width: number; height: number }) =>
-      createCalloutShape('b', '#ef4444', { x: from[0], y: from[1] }, { x: to[0], y: to[1] }, zoom, undefined, bounds).at
+      createCalloutShape('b', '#ef4444', { x: from[0], y: from[1] }, { x: to[0], y: to[1] }, zoom, undefined, { bounds }).at
     const image = { x: 0, y: 0, width: 200, height: 100 }
-    expect(at([20, 20], [40, 30], 2, image), 'right of the source when it fits').toEqual({ x: 56, y: 20 })
-    expect(at([170, 20], [190, 30], 2, image), 'flips left when the right side has no room').toEqual({ x: 114, y: 20 })
-    expect(at([30, 20], [70, 30], 2, { x: 0, y: 0, width: 100, height: 200 }), 'goes below when neither side fits').toEqual({ x: 10, y: 46 })
-    expect(at([30, 40], [70, 50], 2, { x: 0, y: 0, width: 100, height: 60 }), 'goes above when below has no room').toEqual({ x: 10, y: 4 })
-    expect(at([20, 20], [40, 30], 4, { x: 0, y: 0, width: 200, height: 50 }), 'a bubble taller than the space keeps its side and is clamped').toEqual({ x: 56, y: 10 })
-    const tight = { x: 0, y: 0, width: 100, height: 40 }, clamped = createCalloutShape('c', '#ef4444', { x: 30, y: 10 }, { x: 70, y: 20 }, 2, undefined, tight)
+    expect(at([20, 20], [40, 30], 2, image), 'right of the source when it fits').toEqual({ x: 60, y: 20 })
+    expect(at([170, 20], [190, 30], 2, image), 'flips left when the right side has no room').toEqual({ x: 110, y: 20 })
+    expect(at([30, 20], [70, 30], 2, { x: 0, y: 0, width: 100, height: 200 }), 'goes below when neither side fits').toEqual({ x: 10, y: 50 })
+    expect(at([30, 40], [70, 50], 2, { x: 0, y: 0, width: 100, height: 60 }), 'goes above when below has no room').toEqual({ x: 10, y: 0 })
+    expect(at([20, 20], [40, 30], 4, { x: 0, y: 0, width: 200, height: 50 }), 'a bubble taller than the space keeps its side and is clamped').toEqual({ x: 60, y: 10 })
+    const tight = { x: 0, y: 0, width: 100, height: 40 }, clamped = createCalloutShape('c', '#ef4444', { x: 30, y: 10 }, { x: 70, y: 20 }, 2, undefined, { bounds: tight })
     const bubble = calloutBubble(clamped)
     expect(clamped.at, 'clamps inside when no side fits').toEqual({ x: 10, y: 20 })
     expect(bubble.x >= tight.x && bubble.y >= tight.y && bubble.x + bubble.width <= tight.width && bubble.y + bubble.height <= tight.height).toBe(true)
-    expect(at([250, 120], [270, 130], 2, { x: 100, y: 100, width: 200, height: 100 }), 'a capture selection is its own bounds').toEqual({ x: 194, y: 120 })
-    expect(createCalloutShape('k', '#ef4444', { x: 0, y: 0 }, { x: 10, y: 10 }, 2, { x: 500, y: 500 }, image).at, 'an explicit position is kept').toEqual({ x: 500, y: 500 })
+    expect(at([250, 120], [270, 130], 2, { x: 100, y: 100, width: 200, height: 100 }), 'a capture selection is its own bounds').toEqual({ x: 190, y: 120 })
+    expect(createCalloutShape('k', '#ef4444', { x: 0, y: 0 }, { x: 10, y: 10 }, 2, { x: 500, y: 500 }, { bounds: image }).at, 'an explicit position is kept').toEqual({ x: 500, y: 500 })
+  })
+
+  it('clamps a bubble that fits nowhere to the place covering least of its source, ties going right, left, below, above', () => {
+    const at = (from: number, zoom = 4) => createCalloutShape('o', '#ef4444', { x: from, y: 15 }, { x: from + 10, y: 25 }, zoom, undefined,
+      { bounds: { x: 0, y: 0, width: 100, height: 40 } }).at
+    expect(at(55), 'the left clamp clears a source near the right, where below or the right clamp would cover it').toEqual({ x: 0, y: 0 })
+    expect(at(35), 'the right clamp clears a source near the left').toEqual({ x: 60, y: 0 })
+    expect(at(45), 'both side clamps clear a centred source, so the right one wins').toEqual({ x: 60, y: 0 })
+    expect(at(45, 2), 'a bubble that fits beside the source is not moved').toEqual({ x: 75, y: 15 })
+  })
+
+  it('draws the leader only when it is long enough to read and never a stub between touching frames', () => {
+    const leader = (at: { x: number; y: number }) => {
+      const lines: string[] = []
+      const context = {
+        canvas: { width: 0, height: 0 }, getTransform: () => ({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }), save: vi.fn(), restore: vi.fn(),
+        beginPath: vi.fn(), moveTo: vi.fn((x: number, y: number) => lines.push(x + ',' + y)), lineTo: vi.fn((x: number, y: number) => lines.push(x + ',' + y)),
+        stroke: vi.fn(), strokeRect: vi.fn(), roundRect: vi.fn(), fill: vi.fn(), clip: vi.fn()
+      } as unknown as CanvasRenderingContext2D
+      drawScreenshotShapes(context, [createCalloutShape('l', '#ef4444', { x: 20, y: 20 }, { x: 40, y: 30 }, 2, at)])
+      return lines
+    }
+    // At a 2x pixel ratio one image pixel is one point, so a 3 image pixel gap is 3 points.
+    expect(leader({ x: 43, y: 15 }), 'a 3 point gap draws no leader').toEqual([])
+    expect(leader({ x: 46, y: 15 }), 'a 6 point gap draws the leader between the facing edge midpoints').toEqual(['40,25', '46,25'])
   })
 
   it('hits, moves and scales a callout as one mark across its source, leader and bubble', () => {

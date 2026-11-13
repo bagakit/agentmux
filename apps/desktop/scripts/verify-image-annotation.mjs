@@ -49,7 +49,7 @@ const specifications = {
       find: "'cover', 'blur', 'spotlight', 'callout'])", replace: "'cover'])", test: pointingTools,
       consumer: 'draws each pointing tool as its own kind and commits nothing for a click without travel', failure: /a click with no drag commits no zero-size mark/ },
     { label: 'callout-bubble-fixed-while-drawing', source: component + 'ImageAnnotationEditor.tsx',
-      find: 'currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom, undefined, documentState.crop ?? originalBounds)', replace: 'shape.to = at', test: pointingTools,
+      find: 'currentGestureRef.current = createCalloutShape(shape.id, shape.color, shape.from, at, shape.zoom, undefined, bubblePlacement())', replace: 'shape.to = at', test: pointingTools,
       consumer: 'keeps the magnifier bubble beside its source while drawing, then drags only the bubble after release', failure: /the bubble follows the source as it grows/ },
     { label: 'callout-bubble-drags-whole-mark', source: component + 'ImageAnnotationEditor.tsx',
       find: "const bubble = !handle && shape?.kind === 'callout' && rectContains(calloutBubble(shape), at)", replace: 'const bubble = false', test: pointingTools,
@@ -70,8 +70,17 @@ const specifications = {
       find: '[strength.property]: value } as ScreenshotShape', replace: '[strength.property]: value / viewRef.current.scale } as ScreenshotShape', test: pointingTools,
       consumer: 'keeps a selected blur strength in image pixels within the model range when the fitted view is not one to one', failure: /the strongest blur stays at the model maximum/ },
     { label: 'callout-bubble-ignores-bounds', source: component + 'drawing-model.ts',
-      find: 'at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, bounds)', replace: 'at: at ?? { x: source.x + source.width + CALLOUT_GAP, y: source.y }', test: pointing,
-      consumer: 'places a default bubble inside the image or selection: right, else left, else below or above, else clamped', failure: /flips left when the right side has no room/ }]
+      find: 'at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, placement)', replace: 'at: at ?? { x: source.x + source.width + CALLOUT_GAP, y: source.y }', test: pointing,
+      consumer: 'places a default bubble inside the image or selection: right, else left, else below or above, else clamped', failure: /flips left when the right side has no room/ },
+    { label: 'callout-clamp-ignores-overlap', source: component + 'drawing-model.ts',
+      find: 'return candidates.map(clamped).reduce((best, next) => overlap(next) < overlap(best) ? next : best)', replace: 'return kept', test: pointing,
+      consumer: 'clamps a bubble that fits nowhere to the place covering least of its source, ties going right, left, below, above', failure: /the left clamp clears a source near the right/ },
+    { label: 'callout-gap-in-image-pixels', source: component + 'ImageAnnotationEditor.tsx',
+      find: 'gap: CALLOUT_GAP / viewRef.current.scale', replace: 'gap: CALLOUT_GAP', test: pointingTools,
+      consumer: 'keeps a magnifier bubble the same screen distance from its source when the view is not one to one', failure: /twenty screen points are forty image pixels/ },
+    { label: 'callout-leader-stub-drawn', source: component + 'drawing-renderer.ts',
+      find: '* transform.a >= CALLOUT_LEADER_MIN', replace: '* transform.a >= 0', test: pointing,
+      consumer: 'draws the leader only when it is long enough to read and never a stub between touching frames', failure: /a 3 point gap draws no leader/ }]
   },
   capture: {
     tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
