@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { readingMutations } from './fixtures/a2a-reference-reading/mutations.mjs'
 import { a2aProofSha as sha, runA2aReferenceReadingProductProof, verifyA2aReferenceReadingProductProof } from './lib/a2a-inbox-product-proof.mjs'
@@ -14,6 +14,7 @@ const sources = [
   'apps/desktop/scripts/probe-process.mjs',
   ...['runtime', 'native-agent'].map(name => `apps/desktop/scripts/fixtures/a2a-inbox-product/${name}.mjs`),
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
+  'packages/core/src/conversation.ts', 'packages/core/src/session-inputs.ts',
   'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',
   ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView', 'ConversationA2AReferences', 'ConversationA2AMetadata', 'ConversationNotificationDetails', 'ConversationMessageCard', 'ConversationToolPayload'].map(name => `packages/client-ui/src/components/${name}.tsx`),
   'packages/client-ui/src/lib/conversation-speaker.ts', 'packages/client-ui/src/styles/conversation-message.css',
@@ -84,23 +85,44 @@ function owningProductionInputs(facts) {
   for (const path of new Set(readingMutations.map(edit => edit.path))) assert.ok(inputs[path], 'Actual tests must consume their production mutation owner: ' + path)
   return inputs
 }
-async function prepare(preparation) {
+async function reusableTest(run, mutation, label, receipt) {
+  if (!run) return null
+  try { await testFacts(run, mutation); return run }
+  catch (error) {
+    (receipt.invalidatedTests ??= []).push({ label, reason: error.message })
+    console.log(label + ': original test conditions changed; running this subset anew')
+    return null
+  }
+}
+async function prepare(preparation, reusePath) {
+  for (const edit of readingMutations) {
+    assert.equal((await readFile(local(edit.path), 'utf8')).split(edit.before).length, 2, 'One exact current mutation owner: ' + edit.label)
+    await access(local(edit.test))
+  }
+  const reused = reusePath ? await json(reusePath) : undefined
+  if (reused) {
+    assert.equal(reused.schema, 'agentmux.a2a-reference-reading.v1')
+    assert.deepEqual(reused.mutations.map(item => item.label), readingMutations.map(item => item.label), 'Explicit test reuse requires the complete original mutation collection')
+  }
   const directory = join(area, 'run-' + Date.now()); await mkdir(directory, { recursive: true })
   const receipt = { schema: 'agentmux.a2a-reference-reading.v1', prepared: false, passed: false, sources: {}, artifacts: {}, mutations: [] }
   try {
     for (const path of sources) receipt.sources[path] = sha(await readFile(local(path)))
-    receipt.baseline = await tests(directory, 'baseline')
+    if (reused) receipt.reusedTests = { path: reusePath, sha256: sha(await readFile(reusePath)), boundary: 'Only original test runs whose actual source and compiler inputs are revalidated; changed test subsets, product execution and types run anew.' }
+    receipt.baseline = (reused && await reusableTest(reused.baseline, undefined, 'baseline', receipt)) || await tests(directory, 'baseline')
     const baseline = await testFacts(receipt.baseline)
     assert.ok(baseline.cases.length >= 100, 'Core, shared reading and Desktop adjacent consumers must all run')
     mergeSources(receipt.sources, Object.fromEntries(baseline.inputs.map(input => [input.path, input.sourceSHA256])))
-    for (const edit of readingMutations) {
-      const mutant = await tests(directory, edit.label, edit), restored = await tests(directory, edit.label + '-restored', undefined, edit.test)
+    for (const [index, edit] of readingMutations.entries()) {
+      const prior = reused?.mutations[index]
+      const mutant = (prior && await reusableTest(prior.mutant, edit, edit.label, receipt)) || await tests(directory, edit.label, edit)
+      const restored = (prior && await reusableTest(prior.restored, undefined, edit.label + '-restored', receipt)) || await tests(directory, edit.label + '-restored', undefined, edit.test)
       // A restored subset selects the same file, with no compiler mutation.
       const failed = await testFacts(mutant, edit), green = await testFacts(restored)
       assert.deepEqual(failed.cases, green.cases)
       mergeSources(receipt.sources, Object.fromEntries([...failed.inputs, ...green.inputs].map(input => [input.path, input.sourceSHA256])))
       receipt.mutations.push({ label: edit.label, mutant, restored })
-      console.log(edit.label + ': behavior RED → original GREEN')
+      console.log(edit.label + ': behavior RED → original GREEN' + (prior && mutant === prior.mutant && restored === prior.restored ? '; original runs reused after current-input validation' : ''))
     }
     receipt.types = await execute('pnpm', ['--filter', '@agentmux/client-ui', 'typecheck'], directory, 'types')
     assert.equal(receipt.types.exitCode, 0, 'Current Core and shared UI types: ' + receipt.types.log)
@@ -119,6 +141,7 @@ async function prepare(preparation) {
 async function verify() {
   const index = await json(join(area, 'current.json')), bytes = await readFile(local(index.path)); assert.equal(sha(bytes), index.sha256)
   const receipt = JSON.parse(bytes)
+  if (receipt.reusedTests) assert.equal(sha(await readFile(receipt.reusedTests.path)), receipt.reusedTests.sha256, 'Original explicit test reuse receipt')
   assert.equal(receipt.schema, 'agentmux.a2a-reference-reading.v1'); assert.equal(receipt.prepared, true)
   for (const path of sources) assert.ok(receipt.sources[path], 'Required owning source: ' + path)
   for (const [path, digest] of Object.entries(receipt.sources)) assert.equal(sha(await readFile(local(path))), digest, 'Current candidate: ' + path)
@@ -140,10 +163,13 @@ const preparedIndex = args.indexOf('--prepared-artifact')
 const input = preparedIndex < 0 ? undefined : args[preparedIndex + 1]
 if (preparedIndex >= 0) assert.ok(input && !input.startsWith('--'), '--prepared-artifact requires one input record')
 const preparation = input ? { kind: 'prepared-artifact', input: resolve(input) } : { kind: 'source-build' }
+const reuseIndex = args.indexOf('--reuse-tests'), reuse = reuseIndex < 0 ? undefined : args[reuseIndex + 1]
+if (reuseIndex >= 0) assert.ok(reuse && !reuse.startsWith('--'), '--reuse-tests requires one original receipt')
 const action = args.includes('--isolation-only') ? 'isolation' : args.includes('--prepare') ? 'prepare' : 'verify'
-const recognized = new Set(['--prepare', '--isolation-only', '--prepared-artifact'])
-for (const [index, value] of args.entries()) if (index !== preparedIndex + 1 || preparedIndex < 0) assert.ok(recognized.has(value), 'Unknown reference proof argument: ' + value)
+const recognized = new Set(['--prepare', '--isolation-only', '--prepared-artifact', '--reuse-tests'])
+for (const [index, value] of args.entries()) if (!(preparedIndex >= 0 && index === preparedIndex + 1 || reuseIndex >= 0 && index === reuseIndex + 1)) assert.ok(recognized.has(value), 'Unknown reference proof argument: ' + value)
 assert.ok(!args.includes('--prepare') || !args.includes('--isolation-only'), 'Choose one preparation stage')
+assert.ok(!reuse || action === 'prepare', 'Recorded tests belong to an explicit preparation stage')
 assert.ok(!input || action !== 'verify', 'Prepared input belongs to an explicit preparation stage')
 await mkdir(area, { recursive: true })
 if (action === 'isolation') {
@@ -151,5 +177,5 @@ if (action === 'isolation') {
   const directory = join(area, 'isolation-' + (await import('node:crypto')).randomUUID()); await mkdir(directory)
   const result = await runA2aReferenceReadingProductProof({ root, evidence: directory, preparation, isolationOnly: true })
   console.log(JSON.stringify({ isolated: true, passed: false, ...result, next: 'Actual seven-scene execution and independent image review remain required.' }))
-} else if (action === 'prepare') await prepare(preparation)
+} else if (action === 'prepare') await prepare(preparation, reuse ? resolve(reuse) : undefined)
 else { assert.equal(args.length, 0); await verify() }
