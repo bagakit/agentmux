@@ -157,8 +157,12 @@ th.md-html-cell { color: var(--text-2); font-weight: 620; }
 .md-html-cell { min-width: 0; overflow-wrap: anywhere; }
 /* A td-only table is layout: equal or authored columns that wrap instead of scrolling. */
 .md-html-table--layout { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: var(--sp-4) 0; }
-/* The outer card spacing sits in the gutter, so the card edges line up with the text column. */
-.md-table-scroll:has(> .md-html-table--layout) { overflow-x: visible; margin-inline: calc(var(--sp-4) * -1); width: calc(100% + var(--sp-4) * 2); max-width: none; }
+/* Layout cards wrap instead of scrolling. In a document the outer card spacing sits in the page gutter so the
+   card edges line up with the text column; a conversation bubble has no gutter, so its cards stay inside it. */
+.md-table-scroll:has(> .md-html-table--layout) { overflow-x: visible; }
+.md-document .md-table-scroll:has(> .md-html-table--layout) { margin-inline: calc(var(--sp-4) * -1); width: calc(100% + var(--sp-4) * 2); max-width: none; }
+.md:not(.md-document) .md-html-table--layout { border-spacing: var(--sp-2) 0; }
+.md:not(.md-document) .md-html-table--layout .md-html-cell { padding: var(--sp-3); background: var(--surface-2); }
 .md-html-table--layout .md-html-cell { padding: var(--sp-4); border: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
 .md-html-table--layout .md-html-cell .md-image-frame { margin-bottom: var(--sp-3); }
 .md-html-table--layout .md-html-cell img { border-radius: var(--radius-sm); }
