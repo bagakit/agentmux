@@ -118,3 +118,13 @@ describe('Goal stage marks', () => {
     expect(new Set(names).size).toBe(names.length)
   })
 })
+
+describe('Goal detail reading', () => {
+  it('does not repeat an empty responsibility block above Collaboration', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'agent' }); await dom.render(<GlobalBoardSurface />)
+    const detail = dom.container.querySelector('.goals-detail')!
+    expect(detail.querySelector('.goal-collaboration')).not.toBeNull()
+    expect(detail.textContent).not.toContain('尚无确认执行绑定')
+    expect(detail.querySelector('.goal-responsibility__heading')).toBeNull()
+  })
+})
