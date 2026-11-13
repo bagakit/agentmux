@@ -1086,7 +1086,9 @@ try {
   for(const probe of [...launchedProbes].reverse()){if(probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
   for(const connection of connections){try{connection.close()}catch(error){errors.push(error.message)}}
   // launchd restarts the private Host after every exit, so its job leaves before the owned processes are reaped.
-  try{if(await macosHostServiceRegistration(privateService))await exec('/bin/launchctl',['bootout',privateService.target],{timeout:10_000});assert.equal(await macosHostServiceRegistration(privateService),null)}catch(error){errors.push(error.message)}
+  // bootout returns while that Host is still exiting, and the job stays listed until it has.
+  try{if(await macosHostServiceRegistration(privateService))await exec('/bin/launchctl',['bootout',privateService.target],{timeout:10_000})
+    for(const deadline=Date.now()+10_000;await macosHostServiceRegistration(privateService);await delay(200))if(Date.now()>deadline)throw new Error('The private Host job is still registered with launchd')}catch(error){errors.push(error.message)}
   const ownedCleanup=await cleanupOwnedProbes(root)
   const cleanupObservations=privateCase&&ownedCleanup.remaining?.length===0?ownedCleanup.errors:[]
   if(!privateCase||ownedCleanup.remaining?.length!==0)errors.push(...ownedCleanup.errors)
