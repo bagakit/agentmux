@@ -68,6 +68,8 @@
   /* Motion roles. */
   --dur-fast: 120ms;
   --dur-enter: 120ms;
+  --dur-exit: 280ms;
+  --dur-indicator: 800ms;
   --dur-breath: 1.8s;
   --dur-sweep: 2.4s;
   --ease-enter: cubic-bezier(.16, 1, .3, 1);
