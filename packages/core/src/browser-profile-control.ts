@@ -9,8 +9,13 @@ export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.ls', 'browse
   'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete'] as const
 export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPERATIONS[number]
 
-/** Fields a person can change; null clears the chosen hue, an empty notes string clears the notes. */
-export type BrowserProfileControlEdit = { label?: string; hue?: number | null; notes?: string }
+/**
+ * Fields a person can change; null clears the chosen hue, an empty notes string clears the notes.
+ * network is the route as one line Main parses (`system`, `direct`, or a proxy such as
+ * `socks5://proxy.example:1080`), with optional Don't proxy entries; Main owns what a valid route is.
+ */
+export type BrowserProfileControlEdit = { label?: string; hue?: number | null; notes?: string;
+  network?: { mode: 'system' } | { mode: 'direct' } | { mode: 'proxy'; server: string; bypass?: string[] } }
 
 export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.ls' }
@@ -107,12 +112,13 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
       return { operation, label }
     }
     case 'browser.profile.update': {
-      const edit = record(source.edit, ['label', 'hue', 'notes'], code, 'Browser Profile edit')
+      const edit = record(source.edit, ['label', 'hue', 'notes', 'network'], code, 'Browser Profile edit')
       if (!Object.keys(edit).length) fail(code, 'Browser Profile edit names no field.')
       return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), expectedRevision: count(source.expectedRevision, code, 'Expected Browser Profile revision'),
         edit: { ...(edit.label === undefined ? {} : { label: text(edit.label, code, 'Browser Profile label', 512) }),
           ...(edit.hue === undefined ? {} : { hue: edit.hue === null ? null : hue(edit.hue, code) }),
-          ...(edit.notes === undefined ? {} : { notes: text(edit.notes, code, 'Browser Profile notes', 8192) }) } }
+          ...(edit.notes === undefined ? {} : { notes: text(edit.notes, code, 'Browser Profile notes', 8192) }),
+          ...(edit.network === undefined ? {} : { network: networkEdit(edit.network, code) }) } }
     }
     default: return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID') }
   }
@@ -127,6 +133,19 @@ function skipCounts(value: unknown, code: string): Record<string, number> {
     if (typeof key !== 'string' || !descriptor.enumerable || !('value' in descriptor)) fail(code, 'Skipped cookie reasons are invalid.')
     return [identity(key, code, 'Skipped cookie reason'), count(descriptor.value, code, 'Skipped cookie count')]
   }))
+}
+
+/** The route a request asks for; only its shape is checked here, and Main parses the server line. */
+function networkEdit(value: unknown, code: string): NonNullable<BrowserProfileControlEdit['network']> {
+  const route = record(value, ['mode', 'server', 'bypass'], code, 'Browser Profile network')
+  if ((route.mode === 'system' || route.mode === 'direct') && route.server === undefined && route.bypass === undefined) return { mode: route.mode }
+  if (route.mode !== 'proxy') fail(code, 'Browser Profile network mode is system, direct or proxy.')
+  const server = text(route.server, code, 'Proxy server', 512)
+  if (!server.trim()) fail(code, 'A proxy route needs a server, for example proxy.example.com:8080.')
+  const bypass = route.bypass === undefined ? undefined : Array.isArray(route.bypass) && route.bypass.length <= 64
+    ? route.bypass.map(rule => text(rule, code, 'Don’t proxy entry', 253))
+    : fail(code, 'Don’t proxy entries are invalid.')
+  return { mode: 'proxy', server, ...(bypass ? { bypass } : {}) }
 }
 
 function network(value: unknown, code: string): BrowserProfileControlNetwork {

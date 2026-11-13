@@ -137,7 +137,10 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   // The person turned Agents off for this Browser's Profile; retrying cannot change that, a person can.
   'BROWSER_PROFILE_AGENT_ACCESS_OFF',
   // The Profile is not confirmed yet, so whether Agents may use it is unknown; retry once Profiles load.
-  'BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN'
+  'BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN',
+  // The route line cannot be read (fix the line); the route could not be applied (the old one stays, retry).
+  'BROWSER_PROFILE_NETWORK_INVALID',
+  'BROWSER_PROFILE_NETWORK_UNAVAILABLE'
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 
