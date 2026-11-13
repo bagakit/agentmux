@@ -11,7 +11,9 @@ const fixture = vi.hoisted(() => ({ state: { applyBrowserEvent: vi.fn(), execute
   browserAnnotationsByBrowserId: {}, browserOpinionDrafts: {}, noticeReadReceipts: {}, toolsOpen: false, config: null as AppConfig | null },
 compose: vi.fn(), committed: vi.fn(), scene: vi.fn() }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-  { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }) }))
+  { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }),
+  // The client UI provider wires capsule reply editors through these store exports.
+  compareAndSwapCapsuleQuestionEditor: vi.fn(() => true), flushCapsuleQuestionEditors: vi.fn(async () => {}) }))
 vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.scene }))
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
   ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: fixture.compose
