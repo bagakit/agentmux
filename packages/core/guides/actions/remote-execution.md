@@ -3,43 +3,37 @@
 <!-- amux:content -->
 ## Use another device's Agent for this project
 
-Tasks, files and commands stay on the project machine. **Agent runs on** chooses
-where the Agent process, model access and native configuration run. The common
+Tasks, files and commands stay on the project machine. **Runs on** chooses where
+the Agent process, model access and native configuration run. The common
 arrangement keeps your project on this Mac and runs the Agent on a remote Host.
-Advanced settings also support the reverse arrangement and other supported pairs.
 
 Configure the remote Host in **Settings → Remote → Hosts** first. AgentMux must
 already run there; selecting a device does not install or upgrade its Core.
 
-1. In **Space**, open your project, then **New Tab** or **New Agent**.
-2. Choose the device in **Agent runs on**. Its confirmed home directory is the
+1. In **Space**, open your project, then **New Tab** or **New Agent**. The page
+   header shows the project and the device it lives on; to work elsewhere, open
+   that project or device from Space.
+2. In the Agent section, choose the device in **Runs on**. It appears when more
+   than one device is configured. The device's confirmed home directory is the
    default Agent startup directory; it does not need a copy of your project.
-   Looking at a device or cancelling selection leaves the original target intact.
-3. Check the project and Agent device, choose an Agent configuration from that
-   exact device, write your task and click **Launch**. Selecting a device does not
-   start an Agent.
+3. The Agent list switches to that device's configurations. Choose one, write
+   your task and click **Launch**. Selecting a device does not start an Agent.
 
-Use the advanced **Files & tools** and **Agent startup directory** choices to
-change the project side or choose a different runtime directory. They support a
-local Agent with remote project files, two remote devices, or different directories
-on one device. The directory label describes where the Agent starts, not a second
-project copy. Unavailable home observations keep their real cause and retry path;
-they do not silently select another device or guessed directory.
+While a device is being prepared you can keep writing. A failure stays next to
+**Runs on** with its real cause and **Retry**; it does not select another device
+or a guessed directory. Changing the Agent device keeps the same Launcher and
+draft. Existing Agents keep their original two-end bindings.
 
-Changing the Agent device within one project keeps the same Launcher and draft.
-Choosing another project opens that project's own work; the original project
-keeps its unsent prompts, file references, Browser and Note drafts. Existing
-Agents keep their original two-end bindings.
+## Other arrangements
 
-## Prepare from Settings
-
-In **Settings → Remote → Remote Agents**, check the current local project and
-choose **Agent runs on**. Use **Open in Launcher** to continue with both selections
-already filled in. If no local project is selected, choose one explicitly. The
-remote device's confirmed home is used by default, with its ordinary folder
-registration retained as the startup location; preparing does not navigate to
-that directory, create an Agent or send a task. Choose the Agent configuration
-and enter the task in the original Launcher, then **Launch**.
+In **Settings → Remote → Remote Agents**, choose the project, the device the
+Agent runs on and, under **More options**, the project-side folder or a
+different Agent startup directory. This covers a local Agent working on remote
+project files, two remote devices, and different directories on one device.
+**Open in Launcher** continues with these selections filled in; preparing does
+not create an Agent or send a task. A Launcher with such an arrangement shows it
+read-only in the Agent section, with **Use project device** and a link back to
+Remote Agents.
 
 ## Continue existing work
 
@@ -51,7 +45,7 @@ or repeating the command. Connection issues do not require closing healthy work.
 
 ## Environments and permissions
 
-Files and commands belong to **Files & tools**. Native login, settings, Hooks
+Files and commands belong to the project side. Native login, settings, Hooks
 and Skills load from the Agent device; they are not automatically
 copied between machines. Read file contents and tool results can enter the
 Agent's context. Selecting a project folder is not an operating-system sandbox.
