@@ -105,15 +105,14 @@
 .goals-page-header__summary > [data-goal-summary-stage='define'], .goals-page-header__summary > [data-goal-summary-stage='agents'] { color: var(--text-2); }
 .goals-page-header__summary > [data-goal-summary-stage='unknown'], .goals-page-header__summary > [data-goal-summary-clear] { color: var(--text-3); }
 .goals-page-header__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-left: auto; }
-.goals-page-header .goals-create { min-height: 30px; padding-inline: var(--sp-5); }
-.goals-page-header .small-button { min-height: 30px; }
+.goals-page-header :is(.primary-button, .small-button) { min-height: 30px; }
 /* Beside an open Goal the header keeps title and actions on one line and the counts below. */
 .goals-surface--detail-open .goals-page-header { gap: var(--sp-3) var(--sp-4); padding: var(--sp-5) var(--sp-5) var(--sp-4); }
 .goals-surface--detail-open .goals-page-header h1 { font-size: var(--fs-title); letter-spacing: -.01em; }
 .goals-surface--detail-open .goals-page-header__mark { width: 22px; height: 22px; border-radius: var(--radius-sm); }
 .goals-surface--detail-open .goals-page-header__summary { order: 3; flex-basis: 100%; gap: var(--sp-1) var(--sp-4); font-size: var(--fs-meta); }
 .goals-surface--detail-open .goals-page-header__actions { gap: var(--sp-2); }
-.goals-surface--detail-open .goals-page-header :is(.small-button, .goals-create) { min-height: 26px; padding-inline: var(--sp-4); }
+.goals-surface--detail-open .goals-page-header .small-button { min-height: 26px; }
 .goals-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .goals-toolbar { display: flex; align-items: center; gap: var(--sp-3); flex: none; min-height: 40px; width: 100%; padding: var(--sp-2) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .goals-surface--detail-open .goals-toolbar { flex-wrap: wrap; }
@@ -122,13 +121,10 @@
 .goals-search:focus-within { border-color: var(--focus-line); background: var(--surface-0); }
 .goals-search input { min-width: 0; width: 100%; border: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
 .goals-search button { padding: var(--sp-2); display: flex; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
-.goals-button, .goals-filter-chips button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 28px; flex-shrink: 0; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; white-space: nowrap; }
-.goals-button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.goals-filter-chips button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 28px; flex-shrink: 0; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; white-space: nowrap; }
 /* Light appearance: the brand primary keeps its dark label, as in dark appearance (5.5:1 against --text). */
 :root[data-appearance='light'] .goals-surface .primary-button { color: var(--text); background: linear-gradient(180deg, color-mix(in srgb, var(--green) 52%, #fff), color-mix(in srgb, var(--green) 66%, #fff)); }
 :root[data-appearance='light'] .goals-surface .primary-button:hover:not(:disabled) { background: linear-gradient(180deg, color-mix(in srgb, var(--green) 60%, #fff), color-mix(in srgb, var(--green) 74%, #fff)); }
-.goals-button:disabled { opacity: .45; cursor: default; }
-.goals-button.is-active { background: var(--surface-2); color: var(--text); box-shadow: var(--hl); }
 .goals-toolbar .surface-mode-switch { flex: none; }
 .goals-surface :is(button,select,[role='button'],summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .goals-toolbar .surface-mode-switch button:focus-visible { outline-offset: -2px; }
@@ -206,7 +202,6 @@
 .goals-detail { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; border-left: 1px solid var(--line-soft); background: var(--surface-0); }
 .goals-detail__toolbar { position: sticky; top: 0; z-index: 1; background: var(--surface-0); display: flex; flex: none; align-items: center; gap: var(--sp-4); min-height: 38px; padding: var(--sp-2) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .goals-detail__toolbar > span { min-width: 0; flex: 1; color: var(--text-3); font-size: var(--fs-meta); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.goals-detail__menu { padding-inline: var(--sp-3); }
 .goals-delete-action { color: var(--red-text); }
 .goals-detail__stage-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3) var(--sp-5); margin: 0 0 var(--sp-4); }
 .goals-detail__stage-row > .goals-detail__stage { margin: 0; }

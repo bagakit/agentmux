@@ -182,13 +182,13 @@ export function GlobalBoardSurface() {
         {projectedDemands.length ? <p className="goals-page-header__summary" aria-live="polite">{summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>)}{!groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p> : null}
         <div className="goals-page-header__actions">
           <GlobalGoalPatrolControl />
-          <button ref={newGoalRef} type="button" className={`${selectedDemandId ? 'small-button' : 'primary-button'} goals-create`} aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} />New Goal<span id="goals-create-effect" className="goals-visually-hidden">Draft + discussion</span></button>
+          <button ref={newGoalRef} type="button" className={selectedDemandId ? 'small-button' : 'primary-button'} aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} />New Goal<span id="goals-create-effect" className="goals-visually-hidden">Draft + discussion</span></button>
         </div>
       </header>
       <GoalsCommonActions contextCompact={Boolean(selectedDemandId)} onReturnToCommon={() => setSelectedDemand(null)} />
       <header className="goals-toolbar">
         <label className="goals-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><ThemeActionClearIcon size={12} /></button> : null}</label>
-        <button ref={filterRef} type="button" className={`goals-button${appliedFilters.length ? ' is-active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
+        <button ref={filterRef} type="button" className={`small-button${appliedFilters.length ? ' small-button--active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
         <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <ThemeObjectListIcon size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <ThemeLayoutColumns3Icon size={14} />, ariaLabel: 'Board view' }]} />
       </header>
       {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">
