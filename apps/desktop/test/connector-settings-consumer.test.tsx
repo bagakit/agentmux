@@ -1,45 +1,67 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
+import * as core from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxHostedRuntimeService, connectAgentMuxRpc } from '@agentmux/core'
+import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
+import { createCredentialAdministration } from '../../host/src/credential-administration.js'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { ConnectionHost } from '../../../packages/connectors/src/connection-host.js'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
-import { larkSettingsModule } from '../src/renderer/src/components/settings/modules/lark'
 import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { useAppStore } from '../src/renderer/src/store'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 
 const dom = composerDOM(), secret = 'credential-value-held-only-by-host'
 let directory: string, database: DatabaseSync, owner: ConnectionHost, secrets: ConnectionSecrets, server: AgentMuxControlServer
 let completedLists = 0, completedChecks = 0
-let handlers: Map<string, (...args: any[]) => Promise<any>>, trusted: ReturnType<typeof vi.fn>, originalCall: typeof api.connections.call
+let handlers: Map<string, (...args: any[]) => Promise<any>>, originalCall: typeof api.connections.call
+let originalHost: Awaited<ReturnType<typeof rpcOwnerFixture>>, hosted: AgentMuxHostedRuntimeService, rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>>, ipc: ReturnType<typeof registerConnectorIpc>
+const hostingTarget = { hostId: 'local', runtimeId: 'connector-settings-runtime' }
 beforeEach(async () => {
+  vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  window.localStorage.clear(); await useAppStore.persist.rehydrate()
+  const stopStartup = await useAppStore.getState().initialize(); stopStartup()
   directory = await mkdtemp(join(tmpdir(), 'connector-settings-'))
   database = new DatabaseSync(join(directory, 'connections.sqlite')); secrets = new ConnectionSecrets(database)
-  owner = new ConnectionHost({ database, secrets }); server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: owner, coreClients: () => [] }); await server.start()
-  handlers = new Map(); trusted = vi.fn()
-  registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },  socketPath: join(directory, 'public.sock'), secrets })
+  originalHost = await rpcOwnerFixture([], core)
+  const identity = { runtimeId: hostingTarget.runtimeId, ownerInstanceId: 'connector-settings-owner', protocolVersion: 2, processId: process.pid, availability: 'connected' as const, ctxmux: originalHost.client.runtimeIdentity() }
+  hosted = new AgentMuxHostedRuntimeService(originalHost.client, originalHost.store.path, () => identity)
+  owner = new ConnectionHost({ database, secrets })
+  owner.credential = createCredentialAdministration({ target: identity, secrets })
+  server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: owner, coreClients: () => [], hostedRuntime: () => hosted }); await server.start()
+  rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, runtimeFence: { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId } })
+  handlers = new Map()
+  const runtime: import('../src/main/connection-host-ipc').ConnectionHostIpc = {
+    connectionHostingTarget: async () => structuredClone(hostingTarget),
+    callConnectionHost: (target, method, input) => { expect(target).toEqual(hostingTarget); return rpc.call(method, input) },
+    watchConnectionMetadata: (target, callbacks) => { expect(target).toEqual(hostingTarget); return rpc.subscribe('connection.metadata.watch', {}, callbacks) }
+  }
+  ipc = registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, runtime, metadata: { publish() {}, observation() {} } })
+  vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
   completedLists = 0; completedChecks = 0
-  originalCall = async (method, params) => { const result = unwrapSessionInputOperationResult<ConnectionResultMap[typeof method]>(await handlers.get('connections:call')!({}, method, params)); if (method === 'connection.ls') completedLists++; if (method === 'connection.test') completedChecks++; return result }
+  originalCall = async (method, params, target) => { const result = unwrapSessionInputOperationResult<ConnectionResultMap[typeof method]>(await handlers.get('connections:call')!({}, method, params, target)); if (method === 'connection.ls') completedLists++; if (method === 'connection.test') completedChecks++; return result }
   vi.spyOn(api.connections, 'call').mockImplementation(originalCall)
-  vi.spyOn(api.connections, 'storeCredential').mockImplementation(async input => handlers.get('connections:storeCredential')!({}, input))
-  vi.spyOn(api.connections, 'inspectCredential').mockImplementation(async operationId => handlers.get('connections:inspectCredential')!({}, operationId))
+  vi.spyOn(api.connections, 'storeCredential').mockImplementation(async (input, target) => handlers.get('connections:storeCredential')!({}, input, target))
+  vi.spyOn(api.connections, 'inspectCredential').mockImplementation(async (operationId, target) => handlers.get('connections:inspectCredential')!({}, operationId, target))
 })
-afterEach(async () => { await server.stop(); owner.close(); database.close(); await rm(directory, { recursive: true, force: true }) })
+afterEach(async () => { await dom.render(null); ipc?.dispose(); await rpc?.dispose(); await server?.stop(); await hosted?.dispose(); await originalHost?.close(); owner?.close(); database?.close(); await rm(directory, { recursive: true, force: true }); vi.unstubAllEnvs() })
 async function fill(label: string, value: string) {
   const input = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
   expect(input).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
-async function open() { const Pane = larkSettingsModule.Pane; await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }); if (!dom.container.querySelector('[data-connection]')) await dom.click('[data-enrollment-existing]') }
+async function open() { await dom.render(<SettingsPanel initialSection="lark" onClose={() => {}} />); await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(1)) }); if (!dom.container.querySelector('[data-connection]')) await dom.click('[data-enrollment-existing]') }
 async function draft() { await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.connector-optional')!.open = true }); await fill('Connection name', 'Shared team'); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret) }
 
 describe('Settings uses the original connection owner through public service', () => {
@@ -48,8 +70,8 @@ describe('Settings uses the original connection owner through public service', (
     await open()
     let holdNextList = true, release: (() => void) | undefined
     const delayed = new Promise<void>(resolve => { release = resolve })
-    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
-      const result = await originalCall(method, params)
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: typeof hostingTarget): Promise<ConnectionResultMap[M]> => {
+      const result = await originalCall(method, params, target)
       if (method === 'connection.ls' && holdNextList) { holdNextList = false; await delayed }
       return result
     })
@@ -76,9 +98,9 @@ describe('Settings uses the original connection owner through public service', (
     await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
     await fill('Connection name', 'Updated application')
     let edited = false
-    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: typeof hostingTarget): Promise<ConnectionResultMap[M]> => {
       if (method === 'connection.ls' && edited) throw new Error('List refresh unavailable')
-      const result = await originalCall(method, params)
+      const result = await originalCall(method, params, target)
       if (method === 'connection.configure') edited = true
       return result
     })
@@ -97,7 +119,7 @@ describe('Settings uses the original connection owner through public service', (
     await vi.waitFor(async () => { await act(async () => {}); expect((await owner.inspect({ connectionId: 'original-application' })).connection?.revision).toBe(3) })
   })
 
-  it('contributes to Conversation Channels and stores encrypted credentials before the real configure/list path', async () => {
+  it('contributes to Conversation Channels and stores credentials on the private Host before the real configure/list path', async () => {
     expect(settingsNavGroups('').find(group => group.id === 'conversation-channels')!.items.map(item => item.id)).toContain('lark')
     expect(settingsNavGroups('扫码').flatMap(group => group.items).map(item => item.id)).toContain('lark')
     await open(); await draft(); await dom.click('[data-connection-editor] .primary-button')
@@ -109,8 +131,15 @@ describe('Settings uses the original connection owner through public service', (
     await vi.waitFor(() => expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('Saved · connection not yet confirmed'))
     expect(dom.container.querySelector('[aria-label="Connection app secret"]')).toBeNull()
     expect(JSON.stringify(await owner.list())).not.toContain(secret)
-    database.exec('PRAGMA wal_checkpoint(FULL)')
-    expect((await readFile(join(directory, 'connections.sqlite'))).includes(Buffer.from(secret))).toBe(false)
+    expect((await stat(directory)).mode & 0o777).toBe(0o700)
+    expect((await stat(join(directory, 'connections.sqlite'))).mode & 0o777).toBe(0o600)
+    const [entered, target] = vi.mocked(api.connections.storeCredential).mock.calls[0]!
+    expect(target).toEqual(hostingTarget)
+    expect(await api.connections.inspectCredential(entered.operationId, hostingTarget)).toEqual({ credentialRef: saved!.config.credentialRef })
+    await expect(rpc.call('connection.credential.inspect', { operationId: entered.operationId }, {
+      runtimeFence: { runtimeId: hostingTarget.runtimeId, ownerInstanceId: 'another-owner-instance' }
+    })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+    expect(vi.mocked(api.connections.call).mock.calls.find(([method]) => method === 'connection.configure')?.[2]).toEqual(hostingTarget)
 
     const editor = dom.container.querySelector<HTMLElement>('[data-connection-editor]')!
     expect(editor.querySelector('[aria-label="Saved application identity"]')?.textContent).toContain('app-a')
@@ -119,6 +148,7 @@ describe('Settings uses the original connection owner through public service', (
     expect(editor.querySelector('.primary-button')?.textContent).toBe('Check connection')
     expect(editor.querySelector('[data-connection-save]')).toBeNull()
     await dom.click('[data-connection-editor] .connector-editor-actions .small-button')
+    expect(editor.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('')
     await fill('Connection name', 'Updated team')
     expect(editor.querySelector('[data-connection-save]')?.classList.contains('primary-button')).toBe(true)
     expect(editor.textContent).toContain('Save changes')
@@ -127,8 +157,8 @@ describe('Settings uses the original connection owner through public service', (
   })
   it('reconciles a lost save response with the original operation without resending or creating a new connection', async () => {
     let configured = 0, operationId = ''
-    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
-      const result = await originalCall(method, params)
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: typeof hostingTarget): Promise<ConnectionResultMap[M]> => {
+      const result = await originalCall(method, params, target)
       if (method === 'connection.configure') { configured++; operationId = (params as ConnectionParamsMap['connection.configure']).operationId; throw new Error('Response interrupted') }
       return result
     })
@@ -190,12 +220,12 @@ describe('Settings uses the original connection owner through public service', (
   })
   it('only inspects an unknown save and explicitly continues its same frozen input when no receipt is recorded', async () => {
     const attempts: ConnectionParamsMap['connection.configure'][] = []
-    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: typeof hostingTarget): Promise<ConnectionResultMap[M]> => {
       if (method === 'connection.configure') {
         attempts.push(structuredClone(params as ConnectionParamsMap['connection.configure']))
         if (attempts.length === 1) throw new Error('Request transport interrupted before dispatch')
       }
-      return await originalCall(method, params)
+      return await originalCall(method, params, target)
     })
     await open(); await fill('Connection app ID', 'app-a'); await fill('Connection app secret', secret)
     await dom.click('[data-connection-save]')
@@ -217,18 +247,27 @@ describe('Settings uses the original connection owner through public service', (
     expect((await owner.list()).connections).toHaveLength(1)
     expect(vi.mocked(api.connections.storeCredential)).toHaveBeenCalledTimes(1)
   })
-  it('keeps the original credential draft through hidden settings and refresh without saving it', async () => {
+  it('keeps the original nonprivate draft through hidden settings while clearing the entered secret without saving it', async () => {
     await open(); await draft()
-    const Pane = larkSettingsModule.Pane
-    await dom.render(<Pane active={false} config={composerConfig} onClose={() => {}} onNavigate={() => {}} />)
-    expect(dom.container.textContent).toBe('')
-    await dom.render(<Pane active config={composerConfig} onClose={() => {}} onNavigate={() => {}} />)
+    const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')!
+    expect(input.value).toBe(secret)
+    await dom.render(<SettingsPanel initialSection="lark" visible={false} onClose={() => {}} />)
+    expect(dom.container.querySelector<HTMLElement>('[data-settings-pane="lark"]')?.hidden).toBe(true)
+    expect(input.closest('[inert]')).not.toBeNull()
+    expect(input.value).toBe('')
+    await dom.render(<SettingsPanel initialSection="lark" onClose={() => {}} />)
     await act(async () => { await vi.waitFor(() => expect(completedLists).toBe(2)) })
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection name"]')?.value).toBe('Shared team')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app ID"]')?.value).toBe('app-a')
-    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe(secret)
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('')
+    expect(dom.container.querySelector('[aria-label="Connection app secret"]')).toBe(input)
     expect((await owner.list()).connections).toHaveLength(0)
     expect(vi.mocked(api.connections.storeCredential)).not.toHaveBeenCalled()
+    expect(vi.mocked(api.connections.call).mock.calls.map(([method]) => method)).not.toContain('connection.configure')
+    expect(Object.values(useAppStore.getState().manualConnectionIntents)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ target: hostingTarget, draft: expect.objectContaining({ label: 'Shared team', appId: 'app-a' }) })
+    ]))
+    expect(window.localStorage.getItem('agentmux-workbench-v1')).not.toContain(secret)
   })
   it('rejects foreign IPC methods before contacting the owner', async () => {
     await expect(handlers.get('connections:call')!({}, 'agent.send', {})).rejects.toThrow('Unsupported connection operation')
