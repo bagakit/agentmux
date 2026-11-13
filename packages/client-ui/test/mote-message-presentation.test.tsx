@@ -1,8 +1,9 @@
-import { act, type ReactNode } from 'react'
+import { act, type ComponentProps, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
+import { conversationMessageSourceKey } from '../src/lib/conversation-message-location.js'
 import { StaticActivityView, StaticConversationView } from '../../../apps/desktop/test/helpers/conversation-static-fixture'
 
 const sid = 'mote-presentation-session', source = { providerId: 'codex', nativeSessionId: 'original-native' }
@@ -12,6 +13,7 @@ const copy = vi.fn(async () => true)
 const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
   renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
 let host: HTMLDivElement, root: Root
+let revealLoaded: Parameters<NonNullable<ComponentProps<typeof StaticActivityView>['renderReadingTools']>>[1]
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -27,11 +29,12 @@ const captured = (status: NonNullable<AgentTimelineItem['inputSubmission']>['sta
 })
 const native = (joined = false): AgentSessionHistoryPage => ({ agentSessionId: sid, sourceHostId: 'source-host', source, nextCursor: null,
   items: joined ? [{ id: 'native-input', kind: 'user-message', contentParts: [{ kind: 'text', text: original }] }] : [] })
-async function render(surface: 'shared' | 'desktop', item: AgentTimelineItem, joined = false, mote = true) {
+async function render(surface: 'shared' | 'desktop', item: AgentTimelineItem, joined = false, mote = true, locatedMessageKey?: string | null) {
   const timeline = { agentSessionId: sid, sourceHostId: 'source-host', revision: 1, items: [item] }
   const view: ReactNode = surface === 'shared'
-    ? <StaticConversationView sessionId={sid} page={native(joined)} timeline={timeline} detailsOnlyMetadata={mote} sourceLabelsInDetails={mote} showInputSource={!mote} />
-    : <StaticActivityView sessionId={sid} nativeHistoryPage={native(joined)} timelineSnapshot={timeline} items={timeline.items} capability="complete-events" moteConversation={mote} />
+    ? <StaticConversationView sessionId={sid} page={native(joined)} timeline={timeline} detailsOnlyMetadata={mote} sourceLabelsInDetails={mote} showInputSource={!mote} locatedMessageKey={locatedMessageKey} />
+    : <StaticActivityView sessionId={sid} nativeHistoryPage={native(joined)} timelineSnapshot={timeline} items={timeline.items} capability="complete-events" moteConversation={mote}
+      renderReadingTools={(_active, reveal) => { revealLoaded = reveal; return null }} />
   await act(async () => root.render(<ClientUiProvider platform={platform}>{view}</ClientUiProvider>))
 }
 const card = () => host.querySelector<HTMLElement>('.log-turn[data-speaker-role="human"]')!
@@ -73,6 +76,51 @@ it.each(['waiting', 'stopped', 'terminal-confirmed', 'launch-carried', 'not-appl
   expect(outerMetadata()).not.toContain('消息输入'); expect(outerMetadata().length).toBeGreaterThan(0)
   expect(card().querySelector('.conversation-input-details__body')).toBeNull()
   await click(card(), '[aria-label="Message details"]'); expect(card().textContent).toContain(status)
+})
+
+it('reveals an exactly located native contribution without losing its original owner or reopening an explicit close', async () => {
+  const surface = 'shared'
+  const item = captured('admitted', true), key = conversationMessageSourceKey(sid, { kind: 'captured', recordId: item.id })!
+  await render(surface, item, true, true, key)
+  const entry = host.querySelector<HTMLElement>('[data-submission-record]')!, details = entry.querySelector<HTMLDetailsElement>('details')!
+  expect(entry).not.toBeNull(); expect(details.open).toBe(true)
+  const body = entry.querySelector('.log-turn__body')!, range = document.createRange(); range.selectNodeContents(body.querySelector('p')!)
+  getSelection()!.addRange(range)
+  await render(surface, item, true, true, null)
+  expect(host.querySelector('[data-submission-record]')).toBe(entry); expect(entry.querySelector('.log-turn__body')).toBe(body)
+  expect(details.open).toBe(true); expect(getSelection()!.toString()).toContain('完整消息')
+  await click(card(), '[aria-label="Message details"]')
+  expect(card().querySelector('.conversation-input-details__body')).toBeNull()
+  await render(surface, item, true, true, null)
+  expect(card().querySelector('.conversation-input-details__body')).toBeNull()
+  await render(surface, item, true, true, key)
+  expect(card().querySelector('.conversation-input-details__body')).not.toBeNull()
+  await click(card(), '[aria-label="Message details"]')
+  await render(surface, item, true, true, key)
+  expect(card().querySelector('.conversation-input-details__body')).toBeNull()
+})
+
+it('locates a joined captured original through the actual Desktop loaded-record action', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const height = this.closest('[hidden], [inert]') ? 0 : 40
+    return { x: 0, y: 0, top: 0, left: 0, right: 360, bottom: height, width: 360, height, toJSON() {} } as DOMRect
+  })
+  const item = captured('admitted', true)
+  await render('desktop', item, true)
+  expect(host.querySelector('[data-submission-record]')).toBeNull()
+  let result: Awaited<ReturnType<typeof revealLoaded>> | undefined
+  let pending: ReturnType<typeof revealLoaded> | undefined
+  // A click returns to the renderer before the locator's animation frames read
+  // geometry. Flush that presentation commit before awaiting its receipt.
+  await act(async () => { pending = revealLoaded({ hostId: 'source-host', agentSessionId: sid, source: { kind: 'captured', recordId: item.id } }) })
+  await act(async () => { result = await pending })
+  expect(result?.kind, JSON.stringify(result)).toBe('located')
+  const entry = host.querySelector('[data-submission-record]')!
+  expect(entry.querySelector<HTMLDetailsElement>('details')!.open).toBe(true)
+  expect(entry.querySelector('.log-turn__body')?.textContent).toContain('完整消息')
+  await click(card(), '[aria-label="Message details"]')
+  await render('desktop', item, true)
+  expect(card().querySelector('.conversation-input-details__body')).toBeNull()
 })
 
 it('keeps a refused ingress and a failed record explicit without treating them as successful input', async () => {

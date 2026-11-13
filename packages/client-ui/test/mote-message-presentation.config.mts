@@ -9,7 +9,8 @@ const variants = {
     '...(reading.detailsOnlyMetadata === undefined ? {} : { detailsOnlyMetadata: reading.detailsOnlyMetadata }),', 'detailsOnlyMetadata: false,'],
   'native-details': ['packages/client-ui/src/components/ConversationMessage.tsx', '{detailsOnlyMetadata ? submissionMetadata : null}', ''],
   'captured-attention': ['packages/client-ui/src/components/CapturedConversationMessage.tsx', 'attentionOnly={props.detailsOnlyMetadata}', 'attentionOnly={false}'],
-  'system-preview': ['packages/client-ui/src/components/ConversationMessage.tsx', 'summary={detailsOnlyMetadata ? undefined : systemSummary}', 'summary={systemSummary}']
+  'system-preview': ['packages/client-ui/src/components/ConversationMessage.tsx', 'summary={detailsOnlyMetadata ? undefined : systemSummary}', 'summary={systemSummary}'],
+  'located-contribution': ['packages/client-ui/src/components/ConversationMessage.tsx', 'revealSourceKey={revealSubmission}', '']
 } as const
 const mutation = process.env.MOTE_MESSAGE_MUTATION as keyof typeof variants | undefined
 if (mutation && !variants[mutation]) throw Error('Unknown Mote presentation mutation')
