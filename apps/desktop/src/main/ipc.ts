@@ -1473,8 +1473,14 @@ export async function registerIpc(args: {
   // from the Dock or ⌘Tab. Nothing is minimized or closed. An open pin must stay on screen, so AgentMux is not hidden then.
   const returnScreenshotFocus = () => { if (!screenshotPins.hasOpenPins()) app.hide() }
   const copyScreenshotText = (text: string) => getDesktopNativeUiOwner().writeClipboardText(text)
+  let captureTimingWrite = Promise.resolve()
   const captureSurface = new CaptureSurface({ native: getNativeDesktopOwner, appearance: () => config.appearance, pin: pinScreenshot,
-    copyText: copyScreenshotText, returnFocus: returnScreenshotFocus })
+    copyText: copyScreenshotText, returnFocus: returnScreenshotFocus, recordTiming: timing => {
+      // Keep captures ordered even when a previous diagnostic write is slow; failure is reported by CaptureSurface.
+      const write = captureTimingWrite.then(() => writeFile(join(app.getPath('userData'), 'capture-timing.json'), JSON.stringify(timing) + '\n'))
+      captureTimingWrite = write.catch(() => {})
+      return write
+    } })
   // The editor returns focus only when no other AgentMux window has focus.
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance, { pin: pinScreenshot, inspectPin: inspectScreenshotPin,
     returnFocus: returnScreenshotFocus, copyText: copyScreenshotText,

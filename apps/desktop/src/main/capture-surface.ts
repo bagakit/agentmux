@@ -33,6 +33,23 @@ export type CaptureSurfaceOutcome =
       /** Called once the window editor delivers this selection, so the next capture opens on it. */
       delivered(): void }
 
+/** Latest capture's phase offsets only; never pixels, filenames or draft content. */
+export type CaptureSurfaceTiming = {
+  schema: 'agentmux.capture-timing.v1'
+  recordedAt: number
+  windowsStartedMs: number | null
+  windowsLoadedMs: Array<number | null>
+  includedMs: number | null
+  /** Null when no visible host required a second exposure. */
+  excludedMs: number | null
+  dataReadyMs: number | null
+  settleMs: number
+  framesMs: number | null
+  presentedMs: Array<number | null>
+  shownMs: number
+  displays: number
+}
+
 type Ports = {
   native(): Pick<NativeDesktop, 'captureDisplays'>
   appearance(): AppearanceConfig
@@ -40,15 +57,23 @@ type Ports = {
   copyText(text: string): Promise<void>
   /** Gives the app that was in front at capture start its focus back. */
   returnFocus(): void
+  recordTiming?(timing: CaptureSurfaceTiming): Promise<void>
 }
 /** `presentedMs`: since present(), when its renderer painted the frozen frame. */
-type Overlay = { window: BrowserWindow; input: CaptureSurfaceInput; presented: boolean; presentedMs: number | null }
+type Overlay = { window: BrowserWindow; display: { id: number; bounds: CaptureSurfaceRect; scaleFactor: number }; input?: CaptureSurfaceInput;
+  loadedMs: number | null; presented: boolean; presentedMs: number | null }
 type Active = {
   session: CaptureSurfaceSession
   overlays: Overlay[]
   background: CaptureBackground
   /** performance.now() at present(); the timing line counts from here. */
   startedAt: number
+  inputsReady: Promise<void>
+  releaseInputs(): void
+  windowsStartedMs: number | null
+  includedMs: number | null
+  excludedMs: number | null
+  dataReadyMs: number | null
   settleMs: number
   framesMs: number | null
   /** The display whose overlay holds the selection; the others only show their frozen frame and cancel. */
@@ -79,11 +104,14 @@ export class CaptureSurface {
     if (this.disposed) return Promise.reject(new Error('Screen capture is closed. Start a new capture after AgentMux restarts.'))
     // The GUI and the public capture both present here; a second surface would cover the first one's displays.
     if (this.active) return Promise.reject(new Error('A screen capture is already in progress. Finish or cancel that selection, then try again.'))
+    let releaseInputs!: () => void
+    const inputsReady = new Promise<void>(resolve => { releaseInputs = resolve })
     let end!: Active['end']
     const result = new Promise<CaptureSurfaceOutcome>((resolve, reject) => {
       end = outcome => {
         if (this.active !== active) return
         this.active = null
+        active.releaseInputs()
         screen.removeListener('display-added', changed); screen.removeListener('display-removed', changed); screen.removeListener('display-metrics-changed', resized)
         app.removeListener('before-quit', cancel)
         clearTimeout(active.fallback)
@@ -98,7 +126,9 @@ export class CaptureSurface {
         else resolve(outcome)
       }
     })
-    const active: Active = { session, overlays: [], background: session.background ?? 'included', startedAt: performance.now(), settleMs: 0, framesMs: null, owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
+    const active: Active = { session, overlays: [], background: session.background ?? 'included', startedAt: performance.now(), inputsReady, releaseInputs,
+      windowsStartedMs: null, includedMs: null, excludedMs: null, dataReadyMs: null, settleMs: 0, framesMs: null,
+      owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
     const changed = () => active.end(Object.assign(new Error('The display layout changed during this capture, so its selection no longer matches the screen. Take the screenshot again.'),
       { code: 'display_configuration_changed' }))
     // A work area change (Dock or menu bar) leaves every frozen frame where it was; bounds, scale or rotation do not.
@@ -123,8 +153,14 @@ export class CaptureSurface {
     const freeze = async (includeHostWindows: boolean): Promise<NativeDisplayFrames | Error> => {
       try { return await native.captureDisplays({ includeHostWindows }) }
       catch (error) { return error instanceof Error ? error : new Error(message(error)) }
+      finally { active[includeHostWindows ? 'includedMs' : 'excludedMs'] = since(active.startedAt) }
     }
-    const included = await freeze(true)
+    const includedPending = freeze(true)
+    if (this.active !== active) return
+    // The new windows stay hidden while their Renderer boots, in parallel with this capture's pixels.
+    // The faded-host snapshot above predates these shells, and hidden windows are absent from native capture content.
+    this.prepareWindows(active)
+    const included = await includedPending
     if (this.active !== active) return
     for (const { window } of active.faded) window.setOpacity(0)
     if (active.faded.length && process.platform === 'darwin') {
@@ -144,12 +180,13 @@ export class CaptureSurface {
     const usable = (mode: CaptureBackground) => !(results[mode] instanceof Error) && (results[mode] as NativeDisplayFrames).displays.some(frame => frame.issue === undefined)
     if (!usable('included') && !usable('excluded')) throw new Error('No display returned usable screenshot pixels. Take the screenshot again.')
     const successful = included instanceof Error ? excluded as NativeDisplayFrames : included
-    if (successful.displays.length !== displays.length || (!(excluded instanceof Error) && excluded.displays.length !== displays.length))
+    if (successful.displays.length !== displays.length || active.overlays.length !== displays.length || (!(excluded instanceof Error) && excluded.displays.length !== displays.length))
       throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
     const placed = successful.displays.map(frame => {
       const display = displays.find(display => display.id === frame.displayId)
       const bounds = display?.bounds
-      if (!bounds || !sameRect(bounds, frame.frame) || display.scaleFactor !== frame.scale)
+      const prepared = active.overlays.find(overlay => overlay.display.id === frame.displayId)?.display
+      if (!bounds || !sameRect(bounds, frame.frame) || display.scaleFactor !== frame.scale || !prepared || !sameRect(prepared.bounds, bounds) || prepared.scaleFactor !== display.scaleFactor)
         throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
       const background = (result: NativeDisplayFrames | Error): CaptureSurfaceFrame => {
         if (result instanceof Error) return { capturedAt: 0, issue: result.message }
@@ -166,53 +203,74 @@ export class CaptureSurface {
         ...(initialCrop ? { initialCrop } : {}) }
       return { frame, input }
     })
-    for (const { frame, input } of placed) {
+    for (const overlay of active.overlays) {
+      const prepared = placed.find(row => row.input.displayId === overlay.display.id)
+      if (!prepared) throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
+      overlay.input = prepared.input
+    }
+    active.dataReadyMs = since(active.startedAt)
+    active.releaseInputs()
+    // A renderer that never reports presented must not leave the workbench faded out with no visible overlay to cancel.
+    active.fallback = setTimeout(() => this.show(active), PRESENT_FALLBACK_MS)
+  }
+
+  private prepareWindows(active: Active): void {
+    active.windowsStartedMs = since(active.startedAt)
+    for (const observed of screen.getAllDisplays()) {
+      const display = { id: observed.id, bounds: { ...observed.bounds }, scaleFactor: observed.scaleFactor }
       const window = new BrowserWindow({
-        ...frame.frame, show: false, frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, roundedCorners: false,
+        ...display.bounds, show: false, frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, roundedCorners: false,
         resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true,
         alwaysOnTop: true, enableLargerThanScreen: true, title: 'Screenshot', ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
         webPreferences: { preload: join(import.meta.dirname, '../preload/capture-surface.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false }
       })
-      const overlay: Overlay = { window, input, presented: false, presentedMs: null }
+      const overlay: Overlay = { window, display, loadedMs: null, presented: false, presentedMs: null }
       active.overlays.push(overlay)
-      raise(window, frame.frame)
-      window.once('ready-to-show', () => raise(window, frame.frame))
+      raise(window, display.bounds)
+      window.once('ready-to-show', () => raise(window, display.bounds))
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       window.webContents.on('will-navigate', event => event.preventDefault())
       window.webContents.on('will-attach-webview', event => event.preventDefault())
       window.webContents.once('render-process-gone', () => active.end(new Error('The screenshot overlay stopped responding. Take the screenshot again.')))
       window.once('closed', () => active.end({ state: 'cancelled' }))
     }
-    // A renderer that never reports presented must not leave the workbench faded out with no visible overlay to cancel.
-    active.fallback = setTimeout(() => this.show(active), PRESENT_FALLBACK_MS)
-    await Promise.all(active.overlays.map(({ window }) => process.env.ELECTRON_RENDERER_URL
-      ? window.loadURL(new URL('screenshot-editor/index.html', process.env.ELECTRON_RENDERER_URL).href)
-      : window.loadFile(join(import.meta.dirname, '../renderer/screenshot-editor/index.html'))))
+    void Promise.all(active.overlays.map(async overlay => {
+      if (process.env.ELECTRON_RENDERER_URL) await overlay.window.loadURL(new URL('screenshot-editor/index.html', process.env.ELECTRON_RENDERER_URL).href)
+      else await overlay.window.loadFile(join(import.meta.dirname, '../renderer/screenshot-editor/index.html'))
+      overlay.loadedMs = since(active.startedAt)
+    })).catch(error => active.end(error))
   }
 
   /** Every overlay at once, so no display shows the live desktop while another is frozen; keys go to the display under the pointer. */
   private show(active: Active): void {
-    if (this.active !== active || active.shown) return
+    if (this.active !== active || active.shown || active.dataReadyMs === null) return
     active.shown = true
-    // One line per capture, so a packaged build started from a terminal shows where the time before the first frame went.
-    console.info('capture-surface timing ' + JSON.stringify({ settleMs: active.settleMs, framesMs: active.framesMs,
-      presentedMs: active.overlays.map(overlay => overlay.presentedMs), shownMs: since(active.startedAt), displays: active.overlays.length }))
     for (const { window } of active.overlays) window.showInactive()
     const pointer = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
-    const target = active.overlays.find(overlay => overlay.input.displayId === pointer) ?? active.overlays[0]
+    const target = active.overlays.find(overlay => overlay.display.id === pointer) ?? active.overlays[0]
     // A remembered selection is the one Enter and the arrows act on, so its display takes the keys.
-    const keys = active.overlays.find(overlay => overlay.input.initialCrop) ?? target
+    const keys = active.overlays.find(overlay => overlay.input?.initialCrop) ?? target
     if (process.platform === 'darwin') app.focus({ steal: true })
     keys?.window.focus()
+    const timing: CaptureSurfaceTiming = { schema: 'agentmux.capture-timing.v1', recordedAt: Date.now(), windowsStartedMs: active.windowsStartedMs,
+      windowsLoadedMs: active.overlays.map(overlay => overlay.loadedMs), includedMs: active.includedMs, excludedMs: active.excludedMs,
+      dataReadyMs: active.dataReadyMs, settleMs: active.settleMs, framesMs: active.framesMs,
+      presentedMs: active.overlays.map(overlay => overlay.presentedMs), shownMs: since(active.startedAt), displays: active.overlays.length }
+    // Keep the terminal diagnostic, and persist only after the workface has become usable.
+    console.info('capture-surface timing ' + JSON.stringify(timing))
+    void Promise.resolve().then(() => this.ports.recordTiming?.(timing)).catch(error => console.warn('Capture timing could not be recorded: ' + message(error)))
   }
 
   private async invoke(event: IpcMainInvokeEvent, action: unknown, input: unknown): Promise<unknown> {
     const active = this.active, overlay = active?.overlays.find(row => row.window.webContents === event.sender)
     if (!active || !overlay || overlay.window.isDestroyed() || event.senderFrame !== overlay.window.webContents.mainFrame)
       throw new Error('This screenshot overlay does not belong to the current capture.')
-    if (action === 'load') return overlay.input
+    await active.inputsReady
+    const frameInput = overlay.input
+    if (this.active !== active || overlay.window.isDestroyed() || !frameInput) throw new Error('The original screenshot request is no longer current.')
+    if (action === 'load') return frameInput
     const params = input as { background?: unknown; requestId?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
-    if (params?.requestId !== overlay.input.requestId) throw new Error('The original screenshot request is no longer current.')
+    if (params?.requestId !== frameInput.requestId) throw new Error('The original screenshot request is no longer current.')
     if (action === 'presented') {
       if (params.background !== active.background) return
       overlay.presented = true
@@ -225,17 +283,17 @@ export class CaptureSurface {
       const next = params.background
       if (next !== 'included' && next !== 'excluded') throw new Error('Choose the exact frozen screenshot background.')
       if (active.finishing) { send(overlay, { kind: 'notice', message: 'The current screenshot output is still in progress. Keep its background until that output finishes.' }); return }
-      if (active.owner !== null && active.owner !== overlay.input.displayId) { send(overlay, { kind: 'notice', message: 'Change the screenshot background on the display that holds the selection.' }); return }
-      if (!overlay.input.backgrounds[next].image) { send(overlay, { kind: 'notice', message: overlay.input.backgrounds[next].issue! }); return }
+      if (active.owner !== null && active.owner !== frameInput.displayId) { send(overlay, { kind: 'notice', message: 'Change the screenshot background on the display that holds the selection.' }); return }
+      if (!frameInput.backgrounds[next].image) { send(overlay, { kind: 'notice', message: frameInput.backgrounds[next].issue! }); return }
       active.background = next
       for (const other of active.overlays) send(other, { kind: 'background', background: next })
       return
     }
 
     if (action === 'select') {
-      if (overlay.input.backgrounds[active.background].image === undefined || (active.owner !== null && active.owner !== overlay.input.displayId)) return false
+      if (frameInput.backgrounds[active.background].image === undefined || (active.owner !== null && active.owner !== frameInput.displayId)) return false
       if (active.owner === null) {
-        active.owner = overlay.input.displayId
+        active.owner = frameInput.displayId
         for (const other of active.overlays) if (other !== overlay) send(other, { kind: 'locked' })
       }
       return true
@@ -245,22 +303,22 @@ export class CaptureSurface {
       if (typeof params.text !== 'string' || !params.text) throw new Error('Keep the exact text to copy.')
       return await this.ports.copyText(params.text).then((): SystemScreenshotEditorFinish => ({ status: 'completed' }), error => ({ status: 'failed', message: message(error) }))
     }
-    if (active.owner !== overlay.input.displayId) throw new Error('Only the display that holds the selection can output it.')
+    if (active.owner !== frameInput.displayId) throw new Error('Only the display that holds the selection can output it.')
     if (params.background !== active.background) throw new Error('The screenshot background changed before this output. Keep the selection and try the output again.')
-    const captured = overlay.input.backgrounds[active.background]
+    const captured = frameInput.backgrounds[active.background]
     if (!captured.image) throw new Error(captured.issue)
 
     if (action === 'expand') {
       if (!active.session.expandable) throw new Error('This capture returns its selection directly. Finish it with Done or cancel it.')
       const handoff = params.handoff
       if (!handoff || !Array.isArray(handoff.shapes) || typeof handoff.tool !== 'string' || !handoff.crop) throw new Error('Keep the original marks and selection to expand.')
-      const source = this.source(active, overlay, handoff.crop), remembered = this.remember(overlay, source.rect)
+      const source = this.source(active, frameInput, handoff.crop), remembered = this.remember(frameInput, source.rect)
       active.end({ state: 'expanded', image: captured.image, source, handoff, delivered: () => { this.recall = remembered } })
       return
     }
     pngBytes(params.image!)
     if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
-    const source = this.source(active, overlay, params.selection)
+    const source = this.source(active, frameInput, params.selection)
     if (action === 'pin') {
       if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pin operation.')
       // The pin opens on the selection at the image's own logical size.
@@ -275,15 +333,15 @@ export class CaptureSurface {
     try { await active.session.complete(params.image!, source, captured.engine) }
     catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorFinish }
     finally { active.finishing = false }
-    if (this.active === active) this.recall = this.remember(overlay, source.rect)
+    if (this.active === active) this.recall = this.remember(frameInput, source.rect)
     active.end({ state: 'completed' })
     return { status: 'completed' } satisfies SystemScreenshotEditorFinish
   }
 
   /** The remembered selection in this frame's pixels, only on its own display while that display's frame and scale are unchanged. */
   /** The selection a delivery confirms, with its display as it was then. */
-  private remember(overlay: Overlay, rect: CaptureSurfaceRect): Recall {
-    return { displayId: overlay.input.displayId, frame: overlay.input.frame, scale: overlay.input.scale, rect }
+  private remember(input: CaptureSurfaceInput, rect: CaptureSurfaceRect): Recall {
+    return { displayId: input.displayId, frame: input.frame, scale: input.scale, rect }
   }
   private recalled({ displayId, frame, scale }: NativeDisplayFrame): CaptureSurfaceHandoff['crop'] | undefined {
     const last = this.recall
@@ -293,9 +351,9 @@ export class CaptureSurface {
   }
 
   /** The selection in global points: this display's origin plus its frozen-frame pixels over the display scale. */
-  private source(active: Active, overlay: Overlay, selection: CaptureSurfaceRect | undefined): ScreenshotCaptureSource {
-    const { frame, scale } = overlay.input
-    const { image, capturedAt } = overlay.input.backgrounds[active.background]
+  private source(active: Active, input: CaptureSurfaceInput, selection: CaptureSurfaceRect | undefined): ScreenshotCaptureSource {
+    const { frame, scale } = input
+    const { image, capturedAt } = input.backgrounds[active.background]
     if (!selection || ![selection.x, selection.y, selection.width, selection.height].every(Number.isFinite) || selection.width <= 0 || selection.height <= 0
       || selection.x < 0 || selection.y < 0 || selection.x + selection.width > image!.width || selection.y + selection.height > image!.height)
       throw new Error('The selection must stay inside its display.')
@@ -321,8 +379,8 @@ export class CaptureSurface {
   notice(text: string): boolean {
     const active = this.active
     if (!active) return false
-    const target = active.overlays.find(overlay => overlay.input.displayId === active.owner) ?? active.overlays[0]
-    if (target && !target.window.isDestroyed()) { target.window.focus(); send(target, { kind: 'notice', message: text }) }
+    const target = active.overlays.find(overlay => overlay.display.id === active.owner) ?? active.overlays[0]
+    if (target?.input && !target.window.isDestroyed()) { target.window.focus(); send(target, { kind: 'notice', message: text }) }
     return true
   }
 
