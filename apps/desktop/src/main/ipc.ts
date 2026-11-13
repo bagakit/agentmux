@@ -1938,14 +1938,18 @@ export async function registerIpc(args: {
     await publishProfiles(browserProfiles.setDefaultProfile(profileId, expectedRevision))
   })
   handleWithEvent('browser:deleteProfile', async (event, profileId: string, approval: BrowserProfileDeleteApproval) => {
+    let graph: Awaited<ReturnType<typeof spatialState.read>>
+    try { graph = await spatialState.read() }
+    catch (cause) { throw new Error('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Nothing was deleted; try again.', { cause }) }
+    // Checked after the read and before the manager's synchronous removal, so a
+    // Browser that starts using this Profile while saved Tabs are read is still seen.
     if (browsers.usesProfile(profileId)) {
       throw new Error('Browser Profile is still used by an open Browser')
     }
-    let graph: Awaited<ReturnType<typeof spatialState.read>>
-    try { graph = await spatialState.read() }
-    catch { throw new Error('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Nothing was deleted; try again.') }
-    if (graph && savedBrowsersUsingProfile(graph.graph, profileId).length > 0) {
-      throw new Error('Browser Profile is still used by a saved Browser that has not been opened since restart')
+    const saved = graph ? savedBrowsersUsingProfile(graph.graph, profileId) : []
+    if (saved.length > 0) {
+      const name = saved[0]!.title || saved[0]!.url
+      throw new Error(`Browser Profile is still used by the saved Browser "${name}"${saved.length > 1 ? ` and ${saved.length - 1} more` : ''}. Open it and switch it to another Profile, or close it, then delete again.`)
     }
     await publishProfiles(browserProfiles.deleteProfile(profileId, approval))
     const cleared = await browserRecoveryPreviews.clearProfile(profileId)
