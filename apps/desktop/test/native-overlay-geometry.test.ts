@@ -5,13 +5,15 @@ import { observeNativeOverlayRegions } from '../src/renderer/src/lib/native-over
 const browser = { revision: 1, bounds: [{ x: 0, y: 0, width: 1200, height: 800 }] }
 let frames: Map<number, FrameRequestCallback>, serial: number, dispose: (() => void) | undefined
 let visibility: DocumentVisibilityState
+let layoutShifts: IntersectionObserverCallback[]
 beforeEach(() => {
-  frames = new Map(); serial = 0; visibility = 'visible'
+  frames = new Map(); serial = 0; visibility = 'visible'; layoutShifts = []
   document.body.innerHTML = '<div id="root"></div><div data-overlay-host></div>'
   vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.set(++serial, callback); return serial })
   vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id) })
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { constructor(callback: IntersectionObserverCallback) { layoutShifts.push(callback) } observe() {} disconnect() {} })
 })
 afterEach(() => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 function flush() { const current = [...frames.values()]; frames.clear(); for (const callback of current) callback(0) }
@@ -23,17 +25,41 @@ function float() {
   return { node, box }
 }
 
-it('one document frame only reads the known rectangles while geometry is stable', () => {
+it('each confirming frame only reads the known rectangles while geometry is stable', () => {
   const floats = Array.from({ length: 8 }, float), publish = vi.fn()
   const host = document.querySelector('[data-overlay-host]')!, query = vi.spyOn(host, 'querySelectorAll'), styles = vi.spyOn(window, 'getComputedStyle')
   const rootRead = vi.spyOn(document.getElementById('root')!, 'getBoundingClientRect')
   dispose = observeNativeOverlayRegions(document.body, () => 1, publish, undefined, browser).dispose
   publish.mockClear(); query.mockClear(); styles.mockClear()
   for (const { node } of floats) vi.mocked(node.getBoundingClientRect).mockClear()
-  for (let index = 0; index < 6; index++) { expect(frames.size).toBe(1); flush() }
+  for (let index = 0; index < 3; index++) { expect(frames.size).toBe(1); flush() }
   expect(query).not.toHaveBeenCalled(); expect(styles).not.toHaveBeenCalled(); expect(publish).not.toHaveBeenCalled()
   expect(rootRead).not.toHaveBeenCalled()
-  for (const { node } of floats) expect(node.getBoundingClientRect).toHaveBeenCalledTimes(6)
+  for (const { node } of floats) expect(node.getBoundingClientRect).toHaveBeenCalledTimes(3)
+})
+
+it('a long-open overlay with stable geometry releases its frame after a bounded confirmation', () => {
+  const { node, box } = float(), publish = vi.fn()
+  dispose = observeNativeOverlayRegions(document.body, () => 1, publish, undefined, browser).dispose
+  publish.mockClear(); vi.mocked(window.requestAnimationFrame).mockClear(); vi.mocked(node.getBoundingClientRect).mockClear()
+  // Two seconds of display frames next to an active terminal; nothing about the overlay changes.
+  for (let index = 0; index < 120 && frames.size; index++) flush()
+  expect(frames.size).toBe(0)
+  expect(window.requestAnimationFrame).toHaveBeenCalledTimes(2)
+  expect(node.getBoundingClientRect).toHaveBeenCalledTimes(3)
+  expect(publish).not.toHaveBeenCalled()
+  // A later position-only shift arrives through the layout-shift observation, not through polling.
+  box.x += 40
+  for (const callback of layoutShifts.splice(0)) callback([{ intersectionRatio: 0.8 } as IntersectionObserverEntry], {} as IntersectionObserver)
+  expect(frames.size).toBe(1)
+  flush()
+  expect(publish).toHaveBeenCalledTimes(1)
+  expect(publish.mock.calls[0]![0][0]).toMatchObject({ bounds: { x: 60 } })
+  // The new position is confirmed for a bounded number of frames, then the frame is released again.
+  vi.mocked(window.requestAnimationFrame).mockClear()
+  for (let index = 0; index < 120 && frames.size; index++) flush()
+  expect(frames.size).toBe(0)
+  expect(window.requestAnimationFrame).toHaveBeenCalledTimes(2)
 })
 
 it('discovers float and contained stage movement without mutation, resize or scroll events', () => {
