@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -99,5 +99,59 @@ describe('Profile proxy sign-in', () => {
     await kept.auth.clear('p-work')
     expect(await kept.auth.username('p-work')).toBeNull()
     expect(JSON.parse(await readFile(kept.path, 'utf8')).profiles).toEqual({})
+  })
+
+  it.each([
+    { name: 'malformed JSON', data: `{ "password": "${SENTINEL}"` },
+    { name: 'a different version', data: JSON.stringify({ version: 2, profiles: {} }) },
+    { name: 'an array of Profiles', data: JSON.stringify({ version: 1, profiles: [] }) },
+    { name: 'an invalid credential', data: JSON.stringify({ version: 1, profiles: { 'p-kept': { username: 7, password: SENTINEL } } }) },
+    { name: 'unknown stored fields', data: JSON.stringify({ version: 1, profiles: {}, retained: SENTINEL }) }
+  ])('keeps $name untouched, then reads the same file after repair', async ({ data }) => {
+    const { auth, path } = await setup()
+    await writeFile(path, data)
+    const unavailable = { code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' }
+    for (const change of [
+      () => auth.set('p-work', { username: 'alice', password: SENTINEL }),
+      () => auth.clear('p-kept'),
+      () => auth.forgetExcept(new Set(['p-work']))
+    ]) {
+      const failure = await change().then(() => null, error => error)
+      expect(await readFile(path, 'utf8')).toBe(data)
+      expect(failure).toMatchObject(unavailable)
+    }
+    await expect(auth.username('p-kept')).rejects.toMatchObject(unavailable)
+    const failure = await auth.username('p-kept').catch(error => error)
+    expect(failure.message).not.toContain(SENTINEL)
+    expect(failure.message).toContain('Retry')
+
+    const original = { version: 1, profiles: { 'p-kept': { username: 'kept', password: Buffer.from('encrypted').toString('base64') } } }
+    await writeFile(path, JSON.stringify(original))
+    expect(await auth.username('p-kept')).toBe('kept')
+    await auth.set('p-work', { username: 'alice', password: SENTINEL })
+    expect(JSON.parse(await readFile(path, 'utf8')).profiles['p-kept']).toEqual(original.profiles['p-kept'])
+  })
+
+  it('treats an IO failure as unavailable, then reads the original path after repair', async () => {
+    const { auth, path } = await setup()
+    // A directory produces a real read failure on every platform, even when tests run as root.
+    await mkdir(path)
+    await expect(auth.set('p-work', { username: 'alice', password: SENTINEL })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_PROXY_AUTH_UNAVAILABLE' })
+    await rm(path, { recursive: true })
+    await writeFile(path, JSON.stringify({ version: 1, profiles: { 'p-kept': { username: 'kept', password: 'encrypted' } } }))
+    expect(await auth.username('p-kept')).toBe('kept')
+  })
+
+  it('reports an unreadable login store without exposing its contents or rejecting the login callback', async () => {
+    const { auth, path, work, reports, decrypt, contents } = await setup()
+    const broken = `{ "password": "${SENTINEL}"`
+    await writeFile(path, broken)
+    const callback = vi.fn()
+    await expect(auth.answer(contents(work), { isProxy: true, host: 'gw.corp.test', port: 3128 }, callback)).resolves.toBe(false)
+    expect(callback).not.toHaveBeenCalled()
+    expect(decrypt).not.toHaveBeenCalled()
+    expect(reports).toEqual([['p-work', expect.stringContaining('could not be read')]])
+    expect(JSON.stringify(reports)).not.toContain(SENTINEL)
+    expect(await readFile(path, 'utf8')).toBe(broken)
   })
 })
