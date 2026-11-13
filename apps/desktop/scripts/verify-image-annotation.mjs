@@ -14,13 +14,34 @@ for (let index = 0; index < args.length; index++) {
   else if (args[index] === '--mutations') mutations = true
   else throw new Error('Unsupported image annotation proof option: ' + args[index])
 }
-assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture')
+assert.ok(['boundary', 'editing', 'documents', 'text-preservation', 'enhancements', 'modeless', 'capture', 'pointing'].includes(slice), 'Use --slice boundary|editing|documents|text-preservation|enhancements|modeless|capture|pointing')
 const adapter = 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx'
 const component = 'apps/desktop/src/renderer/src/components/image-annotation/'
 const host = 'apps/desktop/src/renderer/src/components/browser-screenshot/'
 const modeless = 'apps/desktop/test/image-annotation-modeless.test.tsx'
 const capture = 'apps/desktop/test/image-annotation-capture.test.tsx'
+const pointing = 'apps/desktop/test/image-annotation-pointing-marks.test.ts'
 const specifications = {
+  pointing: {
+    tests: [pointing, 'apps/desktop/test/image-annotation-enhancements.test.ts', 'apps/desktop/test/image-annotation-geometry.test.ts'],
+    mutations: [{ label: 'blur-not-a-mask', source: component + 'drawing-model.ts',
+      find: "return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover' || shape.kind === 'blur'",
+      replace: "return shape.kind === 'pixelate' || shape.kind === 'pixelate-brush' || shape.kind === 'cover'", test: pointing,
+      consumer: 'treats blur as a redaction mask that hides the notes under it from processed output and context', failure: /blur must join the redaction family/ },
+    { label: 'spotlight-before-masks', source: component + 'drawing-model.ts',
+      find: "  return shape.kind === 'callout' ? 2 : shape.kind === 'spotlight' ? 3 : 0", replace: "  return shape.kind === 'callout' ? 2 : 0", test: pointing,
+      consumer: 'orders output as marks, masks, callouts, then spotlights while keeping order within each layer', failure: /spotlights paint after every other mark/ },
+    { label: 'callout-samples-before-masks', source: component + 'drawing-model.ts',
+      find: "  return shape.kind === 'callout' ? 2 : shape.kind === 'spotlight' ? 3 : 0", replace: "  return shape.kind === 'spotlight' ? 3 : 0", test: pointing,
+      consumer: 'orders output as marks, masks, callouts, then spotlights while keeping order within each layer', failure: /callouts sample only processed mask pixels/ },
+    { label: 'remove-keeps-number-gaps', source: component + 'drawing-model.ts',
+      find: '  return shapes.length === doc.shapes.length ? doc : setShapes(doc, renumberNotes(shapes))',
+      replace: '  return shapes.length === doc.shapes.length ? doc : setShapes(doc, shapes)', test: pointing,
+      consumer: 'renumbers notes to 1..n after removal and restores the earlier numbers with one Undo', failure: /removing note 2 of 3 must leave 1, 2/ },
+    { label: 'parser-accepts-any-zoom', source: component + 'document.ts',
+      find: "zoom: inRange(base.zoom, CALLOUT_ZOOM_RANGE, 'The callout zoom is out of range.')", replace: 'zoom: positive(base.zoom)', test: pointing,
+      consumer: 'rejects pointing marks with out-of-range strength, extra fields or missing geometry', failure: /callout zoom below 1\.5 must be rejected/ }]
+  },
   capture: {
     tests: [capture, modeless, 'apps/desktop/test/image-annotation-editing.test.tsx'],
     mutations: [{ label: 'capture-no-crop-delivery-allowed', source: component + 'ImageAnnotationEditor.tsx',
@@ -274,7 +295,7 @@ try {
   }
   await run('source')
   if (mutations) { for (const mutation of specification.mutations) await run(mutation.label, mutation); await run('restored-source') }
-  if (slice === 'editing' || slice === 'enhancements') {
+  if (slice === 'editing' || slice === 'enhancements' || slice === 'pointing') {
     const result = await new Promise((done, reject) => {
       const child = spawn(process.execPath, ['apps/desktop/scripts/verify-browser-screenshot-model.mjs', ...(mutations ? ['--mutations'] : [])], { cwd: process.cwd(), env: process.env, stdio: 'inherit' })
       // Each finite native case owns its timeout and cleanup. A shared total

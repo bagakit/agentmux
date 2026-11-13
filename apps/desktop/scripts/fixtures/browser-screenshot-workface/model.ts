@@ -1,6 +1,6 @@
 import { composeScreenshot } from '../../../src/renderer/src/components/image-annotation/compose'
 import { drawScreenshotShapes } from '../../../src/renderer/src/components/image-annotation/drawing-renderer'
-import { commitShape, createScreenshotDocument, hitTestShape, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
+import { calloutBubble, commitShape, createBlurShape, createCalloutShape, createScreenshotDocument, createSpotlightShape, hitTestShape, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
 import { renderCommittedLayer, renderScreenshotScene } from '../../../src/renderer/src/components/image-annotation/canvas-render'
 import { resizeShapeFromHandle } from '../../../src/renderer/src/components/image-annotation/selection-geometry'
 import type { ImageViewport } from '../../../src/renderer/src/components/image-annotation/view'
@@ -128,7 +128,42 @@ async function decode(dataUrl: string) {
   const multiline = canvas(160, 100), multilineContext = multiline.getContext('2d')!
   drawScreenshotShapes(multilineContext, [{ id: 'multiline', kind: 'text', color: '#ef4444', fontSize: 20, at: { x: 10, y: 8 }, text: 'First\nSecond' }])
   check(multilineContext.getImageData(8, 32, 110, 25).data.some((byte, index) => index % 4 === 3 && byte > 200), 'multiline text must paint its actual second line')
-  return { passed: true, cases: ['actual-pixel-blocks', 'crop-dimensions', 'preview-export-pixel-equality', 'outside-scaled-pixelation', 'identity-move-erase-undo', 'ellipse-ink-distance', 'pixelation-failure',
+  // Pointing marks consume the same output order and painted pixels as the PNG.
+  const paintOutput = (shapes: ScreenshotShape[]) => {
+    const target = canvas(160, 100), paintContext = target.getContext('2d')!
+    paintContext.drawImage(base, 0, 0); drawScreenshotShapes(paintContext, screenshotOutputShapes(shapes))
+    return paintContext
+  }
+  const blurred = paintOutput([createBlurShape('blur', '#000', { x: 20, y: 20 }, { x: 70, y: 70 }, 6)])
+  const stripe = (target: CanvasRenderingContext2D, x: number) => Array.from({ length: 4 }, (_, offset) => target.getImageData(x + offset, 45, 1, 1).data[0]!)
+  const sharp = stripe(context, 40), soft = stripe(blurred, 40)
+  check(Math.max(...sharp) - Math.min(...sharp) > 150 && Math.max(...soft) - Math.min(...soft) < 40, 'blur must remove the actual stripe contrast inside its region')
+  check(stripe(blurred, 100).every((value, index) => value === stripe(context, 100)[index]), 'blur must leave pixels outside its region untouched')
+  check(blurred.getImageData(20, 20, 50, 50).data.every((byte, index) => index % 4 !== 3 || byte === 255), 'blur must keep every edge pixel opaque')
+  const under = { x: 30, y: 30, width: 20, height: 20 }
+  const dimmed = paintOutput([createSpotlightShape('spot', '#fff', { x: 100, y: 20 }, { x: 140, y: 60 }, 0.6),
+    { id: 'cover-out', kind: 'cover', color: '#111827', from: { x: under.x, y: under.y }, to: { x: under.x + under.width, y: under.y + under.height } }])
+  const coverOutside = dimmed.getImageData(40, 40, 1, 1).data
+  check(coverOutside[0]! < 17 && coverOutside[1]! < 24 && coverOutside[2]! < 39, 'spotlight must dim masks outside it after they paint')
+  check(dimmed.getImageData(120, 40, 1, 1).data[0] === context.getImageData(120, 40, 1, 1).data[0], 'spotlight must keep its region at original brightness')
+  check(dimmed.getImageData(5, 5, 1, 1).data[0]! < context.getImageData(5, 5, 1, 1).data[0]! || context.getImageData(5, 5, 1, 1).data[0] === 0,
+    'spotlight must darken ordinary pixels outside its region')
+  const zoom = createCalloutShape('zoom', '#ef4444', { x: 20, y: 20 }, { x: 40, y: 40 }, 2, { x: 90, y: 30 })
+  const zoomedMask: ScreenshotShape = { id: 'zoom-mask', kind: 'pixelate', color: '#000', blockSize: 10, from: { x: 20, y: 20 }, to: { x: 40, y: 40 } }
+  const bubble = calloutBubble(zoom), inner = { x: bubble.x + 6, y: bubble.y + 6, width: bubble.width - 12, height: bubble.height - 12 }
+  const masked = paintOutput([zoom, zoomedMask]), unmasked = paintOutput([zoom])
+  const blockSpread = (target: CanvasRenderingContext2D) => {
+    const row = target.getImageData(inner.x, inner.y + 4, 8, 1).data
+    const reds = Array.from({ length: 8 }, (_, index) => row[index * 4]!)
+    return Math.max(...reds) - Math.min(...reds)
+  }
+  check(blockSpread(unmasked) > 120, 'callout must enlarge the actual source stripes')
+  check(blockSpread(masked) < 40, 'callout bubble must show the pixelated pixels, never the original under a mask')
+  const zoomPng = await composeScreenshot({ image: base, shapes: [zoom, zoomedMask], displayWidth: 160, displayHeight: 100, outputScale: 1 })
+  const zoomExport = canvas(160, 100), zoomExportContext = zoomExport.getContext('2d')!
+  zoomExportContext.drawImage(await decode(zoomPng.dataUrl), 0, 0)
+  check(blockSpread(zoomExportContext) < 40, 'exported callout bubble must show the pixelated pixels, never the original under a mask')
+  return { passed: true, pointing: ['blur-stripe-contrast', 'blur-outside-untouched', 'blur-edge-opacity', 'spotlight-after-masks', 'callout-enlarges-source', 'callout-masked-preview', 'callout-masked-PNG'], cases: ['actual-pixel-blocks', 'crop-dimensions', 'preview-export-pixel-equality', 'outside-scaled-pixelation', 'identity-move-erase-undo', 'ellipse-ink-distance', 'pixelation-failure',
     'cover-note-filtering', 'fractional-cover-opacity', 'live-ink-mask-protection', 'viewport-bounded-high-zoom', 'tiny-pixelate-sample-bounds', 'actual-resized-ink', 'processed-PNG-cover-opacity'],
     enhancements: ['brush-corridor-pixels', 'brush-preview-PNG-equality', 'live-brush-mask-protection', 'multiline-raster'],
     pixelCount: a.length / 4, viewportAllocation: { width: scene.width, height: scene.height, scale: highZoom.view.scale }, png: brushedPng }

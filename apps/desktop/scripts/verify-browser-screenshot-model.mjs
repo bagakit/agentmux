@@ -56,7 +56,7 @@ await writeFile(${JSON.stringify(join(compiled, 'receipt.json'))}, JSON.stringif
   })
   const receipt = JSON.parse(await readFile(join(compiled, 'receipt.json'), 'utf8').catch(error => { throw new Error('Model child produced no receipt: ' + JSON.stringify(result), { cause: error }) }))
   if (mutation) { assert.equal(result.code, 1, JSON.stringify(receipt)); assert.equal(receipt.passed, false); assert.match(receipt.failure, mutation.failure) }
-  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14); assert.equal(receipt.enhancements.length, 4) }
+  else { assert.equal(result.code, 0, result.output + JSON.stringify(receipt)); assert.equal(receipt.passed, true); assert.equal(receipt.cases.length, 14); assert.equal(receipt.enhancements.length, 4); assert.equal(receipt.pointing.length, 7) }
   if (receipt.png) { await writeFile(join(output, label + '.png'), Buffer.from(receipt.png.dataUrl.split(',')[1], 'base64')); delete receipt.png }
   await writeFile(join(output, label + '.json'), JSON.stringify({ ...receipt, process: result }, null, 2))
   evidence.cases.push({ label, result: mutation ? 'RED' : 'GREEN' }); console.log(label + ': ' + (mutation ? 'expected RED' : 'GREEN'))
@@ -73,6 +73,9 @@ try {
     await run('brush-clip-omitted', { file: 'drawing-renderer.ts', find: 'clipPixelateBrush(context, shape)', replace: 'void shape', failure: /brush pixelation must preserve the empty corridor/ })
     await run('multiline-raster-omitted', { file: 'drawing-renderer.ts', find: 'shape.at.y + index * shape.fontSize * SCREENSHOT_TEXT_LINE_HEIGHT', replace: 'shape.at.y', failure: /multiline text must paint its actual second line/ })
     await run('viewport-allocation-magnified', { file: 'canvas-render.ts', find: 'Math.round(viewport.width * dpr)', replace: 'Math.round(viewport.width * dpr * viewport.view.scale)', failure: /viewport allocation must use visible area/ })
+    await run('blur-filter-omitted', { file: 'drawing-renderer.ts', find: 'context.filter = `blur(${radius}px)`', replace: "context.filter = 'none'", failure: /blur must remove the actual stripe contrast/ })
+    await run('spotlight-under-masks', { file: 'drawing-model.ts', find: "  return shape.kind === 'callout' ? 2 : shape.kind === 'spotlight' ? 3 : 0", replace: "  return shape.kind === 'callout' ? 2 : 0", failure: /spotlight must dim masks outside it/ })
+    await run('callout-under-masks', { file: 'drawing-model.ts', find: "  return shape.kind === 'callout' ? 2 : shape.kind === 'spotlight' ? 3 : 0", replace: "  return shape.kind === 'spotlight' ? 3 : 0", failure: /callout bubble must show the pixelated pixels/ })
     await run('restored-source')
   }
   for (const [file, source] of Object.entries(sources)) assert.equal(await readFile(sourcePaths[file], 'utf8'), source, 'Model source changed during native verification: ' + file)
