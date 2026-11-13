@@ -11,6 +11,8 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await size(width)
     await waitFor('document.querySelectorAll("[data-goal-plan-node]").length === 7')
     const original = await evaluate('goalsPlan.facts()')
+    assert.ok(original.delegations.every(delegation => delegation.hostId !== delegation.workerHostId && delegation.workerHostId === 'plan-worker'),
+      'Plan frames keep the original owner and remote worker Hosts separate')
     assert.deepEqual(parseGoalResponsibility(original.responsibility, demandExecutionReferences({ delegations: original.delegations })), original.responsibility,
       'Preview responsibility observations pass the production schema at the Node boundary')
     const facts = await evaluate(`({states:[...document.querySelectorAll('[data-goal-plan-node]')].map(node=>node.dataset.goalPlanState),
@@ -23,6 +25,8 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.deepEqual(facts.highlight, ['history'])
     assert.deepEqual(facts.columns, [['outline', 'guide'], ['workspace', 'drafts', 'history', 'reconnect'], ['verify']])
     assert.equal(facts.theme, theme, 'Actual App theme matches the frame')
+    assert.ok(await evaluate(`[...document.querySelectorAll('.goal-plan-node__place')].every(node=>node.textContent==='Remote · Recovery worker')`),
+      'Node locations name the configured remote Host, not only its route id')
     result.observations.push({ scene: 'plan', width, theme, facts })
     await capture(`${width}-${theme}-plan-context`, width)
     await evaluate(`(()=>{const graph=document.querySelector('.goal-plan'),detail=graph.closest('.goals-detail');graph.scrollIntoView({block:'start'});detail.scrollTop-=detail.querySelector('.goals-detail__toolbar').getBoundingClientRect().height+12})()`)
@@ -32,6 +36,8 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     if (width === 620) {
       assert.equal(geometry.columnFlow, 'row', 'Narrow graph reads as vertical dependency groups')
       assert.equal(geometry.edges, 'none', 'Narrow graph hides crossing curves')
+      assert.ok(await evaluate(`[...document.querySelectorAll('[data-goal-plan-depends]')].every(node=>{const text=node.querySelector('.goal-plan-node__depends');return text&&getComputedStyle(text).display!=='none'&&text.textContent.includes('Depends on')})`),
+        'Every narrow dependent card keeps its dependency names without requiring expansion')
     } else {
       assert.equal(geometry.columnFlow, 'column', 'Wide graph preserves the left-to-right dependency columns')
       assert.ok(geometry.paths > 0, 'Wide graph has real dependency curves')

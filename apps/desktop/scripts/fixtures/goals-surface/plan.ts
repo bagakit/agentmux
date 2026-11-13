@@ -14,7 +14,10 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
-      const worker = agents[0]!, owner = agents[1] ?? worker
+      const originalWorker = agents[0]!, owner = agents[1] ?? originalWorker
+      const worker = { ...originalWorker, id: 'plan-worker-session', hostId: 'plan-worker', control: {
+        ...originalWorker.control, hostId: 'plan-worker', agentSessionId: 'plan-worker-session', run: { runId: 'plan-worker-run' }
+      } }
       const criterion = goal.alignment!.criteria[0]!
       const executor = { hostId: worker.control.hostId, agentSessionId: worker.control.agentSessionId }
       const node = (id: string, title: string, dependsOn: string[], outcome: string): GoalPlanNodeInput => ({
@@ -30,7 +33,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         node('verify', 'Review the complete recovery', ['workspace', 'drafts', 'history', 'reconnect', 'guide'], 'Verify the complete workface and leave inspectable evidence.')
       ]
       const attempt = (nodeId: string, reported: boolean, linked = true): DemandDelegation => ({
-        operationId: `attempt:${nodeId}`, sourceMessageId: `request:${nodeId}`, hostId: executor.hostId,
+        operationId: `attempt:${nodeId}`, sourceMessageId: `request:${nodeId}`, hostId: owner.control.hostId, workerHostId: executor.hostId,
         ownerAgentSessionId: owner.control.agentSessionId, workerAgentSessionId: executor.agentSessionId,
         ownerRunId: owner.control.run.runId, workerRunId: worker.control.run.runId, threadId: `thread:${nodeId}`,
         text: nodes.find(item => item.id === nodeId)!.outcome, alignmentRevision: goal.alignment!.revision,
@@ -51,7 +54,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         reviews: [review('outline', 'pass'), review('history', 'changes')],
         history: [1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: revision })) })
       const next = { ...goal, title: 'Return to the same work, without rebuilding it', plan,
-        supervisorSessionId: owner.control.agentSessionId, assigneeSessionIds: [executor.agentSessionId],
+        supervisorSessionId: owner.control.agentSessionId, sessionIds: [...new Set([...goal.sessionIds, executor.agentSessionId])], assigneeSessionIds: [executor.agentSessionId],
         delegations: parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false)]) }
       const references = demandExecutionReferences(next)
       // The private Electron probe validates these DTOs with the production parser outside the browser.
@@ -75,7 +78,11 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations: [], plan, responsibility }
         : originalDelegation(operation, input)
       flushSync(() => {
-        useAppStore.setState({ demands: { [next.id]: observed }, agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review' } })
+        useAppStore.setState({ demands: { [next.id]: observed },
+          sessions: [...state.sessions.filter(session => session.id !== worker.id), worker],
+          config: { ...state.config!, hosts: [...state.config!.hosts.filter(host => host.id !== 'plan-worker'),
+            { id: 'plan-worker', kind: 'ssh', label: 'Recovery worker', hostname: 'plan-worker.invalid' }] },
+          agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review' } })
         render()
       })
     },
