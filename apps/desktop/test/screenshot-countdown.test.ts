@@ -35,6 +35,8 @@ it('counts down each second in an unfocusable window at the bottom of the pointe
   const waiting = owner.wait(3), window = electron.windows[0]
   expect(window.options).toMatchObject({ focusable: false, frame: false, transparent: true, alwaysOnTop: true, show: false, skipTaskbar: true,
     x: 1440 + (1920 - 176) / 2, y: 1080 - 132 - 48 })
+  // Without skipTransformProcessType Electron turns the whole app into a UIElement and the Dock icon never returns.
+  expect(window.setVisibleOnAllWorkspaces).toHaveBeenCalledExactlyOnceWith(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   await vi.advanceTimersByTimeAsync(0)
   expect(window.showInactive, 'the countdown never takes focus from the app being captured').toHaveBeenCalledOnce()
   expect(window.show).not.toHaveBeenCalled(); expect(window.focus).not.toHaveBeenCalled()
