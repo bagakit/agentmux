@@ -393,6 +393,37 @@ export class AgentMuxSpatialStateStore {
   }
   /** Host-owned metadata and an exact producer-confirmed Agent attachment share one transaction.
    * The caller verifies its original creation receipt; this transaction never creates one. */
+  /**
+   * Record a created Agent at its exact Launcher Region under the store lock, independent of any
+   * client's background layout save. Reads the current revision itself, so a concurrent writer
+   * never forces a retry. An already attached matching Region is settled without a new revision.
+   */
+  async attachLauncherAgent(input: { tabId: string; regionId: string; agentSessionId: string; runId: string;
+    execution: { hostId: string; cwd: string }; resource: SpatialJson }): Promise<{ state: AgentMuxSpatialState; outcome: 'attached' | 'already-attached' }> {
+    const agentRegion = structuredClone(input);
+    for (const value of [agentRegion.tabId, agentRegion.regionId, agentRegion.agentSessionId, agentRegion.runId, agentRegion.execution?.hostId, agentRegion.execution?.cwd])
+      if (typeof value !== 'string' || !value || value.includes('\0')) invalid('An exact Launcher Region, Agent Session, Run and execution location are required.');
+    return this.locked(async () => {
+      const current = await this.requiredState(), graph = structuredClone(current.graph);
+      const tab = graph.tabs.find(tab => tab.tabId === agentRegion.tabId);
+      const index = graph.regions.findIndex(region => region.regionId === agentRegion.regionId && region.tabId === agentRegion.tabId);
+      const original = graph.regions[index];
+      if (!tab?.regionIds.includes(agentRegion.regionId) || !original)
+        throw new AgentMuxError('The exact Launcher Region is not in the spatial document. The Agent and its Run are retained.', 'SPATIAL_RESOURCE_TARGET_CONFLICT');
+      if (original.kind === 'agent' && original.agentSessionId === agentRegion.agentSessionId && original.runId === agentRegion.runId &&
+          original.execution?.hostId === agentRegion.execution.hostId && original.execution.cwd === agentRegion.execution.cwd &&
+          isDeepStrictEqual(graph.resources['region:' + agentRegion.regionId], agentRegion.resource))
+        return { state: projectSpatialState(current), outcome: 'already-attached' as const };
+      if (!(original.kind === 'launcher' && original.agentSessionId === null) &&
+          !(original.kind === 'agent' && original.agentSessionId === agentRegion.agentSessionId))
+        throw new AgentMuxError('The exact Region no longer matches this Agent attachment. Its original binding and all Runs are retained.', 'SPATIAL_RESOURCE_TARGET_CONFLICT');
+      graph.regions[index] = { tabId: agentRegion.tabId, regionId: agentRegion.regionId, kind: 'agent',
+        agentSessionId: agentRegion.agentSessionId, runId: agentRegion.runId, execution: agentRegion.execution };
+      graph.resources['region:' + agentRegion.regionId] = agentRegion.resource;
+      const state = projectSpatialState(await this.writeLocked(current, parseAgentMuxSpatialGraph(graph)));
+      return { state, outcome: 'attached' as const };
+    });
+  }
   async commitOwnedResource(input: { key: string; expectedRevision: number; value: SpatialJson;
     agentRegion?: { tabId: string; regionId: string; agentSessionId: string; runId: string;
       execution: { hostId: string; cwd: string }; resource: SpatialJson };
