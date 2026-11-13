@@ -1,3 +1,4 @@
+import { readStyleSheet } from './helpers/styles.js'
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
@@ -253,7 +254,7 @@ it('cycles the real Composer without replacing its editor or draft, with a disti
 })
 
 it('uses the Region width to shed tool text while retaining labelled icon controls', () => {
-  const css = readFileSync(resolve(import.meta.dirname, '../../../packages/client-ui/src/styles/composer.css'), 'utf8')
+  const css = readStyleSheet('@agentmux/client-ui/styles/composer.css')
   const start = css.indexOf('@container composer (max-width: 560px)')
   const end = css.indexOf('\n.composer__toolbar > div:first-child', start)
   expect(start).toBeGreaterThan(-1)

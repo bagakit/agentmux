@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (path: string) => readFileSync(join(packageRoot, path), 'utf8')
+const readStyle = (path: string): string => read(path).replace(/@import\s+['"]\.\/([^'"]+\.css)['"]\s*;/gu, (_match, file: string) => readStyle(`src/styles/${file}`))
 const cssFiles = readdirSync(join(packageRoot, 'src/styles')).filter(file => file.endsWith('.css'))
 describe('shared overlay style ownership', () => {
   it('keeps window layer definitions in the shared overlay owner while allowing local content order', () => {
@@ -23,7 +24,7 @@ describe('shared overlay style ownership', () => {
     const reactions = read('src/components/ConversationReactionActions.tsx')
     expect(completion).toContain('className="composer-completion-popover"')
     expect(reactions).toContain('className="conversation-reactions__hint"')
-    expect(read('src/styles/composer.css').match(/\.composer-completion-popover\s*\{([^}]+)\}/)?.[1]).toContain('z-index: var(--layer-popover)')
+    expect(readStyle('src/styles/composer.css').match(/\.composer-completion-popover\s*\{([^}]+)\}/)?.[1]).toContain('z-index: var(--layer-popover)')
     expect(read('src/styles/conversation-reactions.css').match(/\.conversation-reactions__hint\s*\{([^}]+)\}/)?.[1]).toContain('z-index: var(--layer-tooltip)')
     expect(read('src/styles/palette.css')).toContain('--overlay-surface: var(--surface-2);')
     expect(cssFiles.flatMap(file => [...read(`src/styles/${file}`).matchAll(/--z-menu/g)])).toHaveLength(0)

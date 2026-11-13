@@ -1,7 +1,8 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import { basename, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { clearsSemanticHues } from '../src/renderer/src/lib/conversation-avatar-color.js'
-import { allStyles, styleFiles } from './helpers/styles.js'
+import { allStyles, allStyleRules, allStyleFiles, styleFiles } from './helpers/styles.js'
 
 /** The single ordered surface manifest lives in the design SSOT; do not copy another list into tests. */
 function documentedStyleFiles(): string[] {
@@ -11,6 +12,16 @@ function documentedStyleFiles(): string[] {
   const files = [...block![1]!.matchAll(/^\s{2}([\w-]+\.css)/gm)].map((match) => match[1]!)
   expect(files.length, '自证：清单里一个文件名都没抓到，正则与文档的形状对不上了').toBeGreaterThan(5)
   return files
+}
+
+/** Only the final compound selector owns declarations; an ancestor :root merely reads appearance. */
+function definesRootProperties(css: string): boolean {
+  const code = css.replace(/\/\*[\s\S]*?\*\//gu, '')
+  return [...code.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].some(match =>
+    /--[\w-]+\s*:/u.test(match[2]!) && match[1]!.split(',').some(selector => {
+      const compounds = selector.replace(/\[[^\]]*\]/gu, '').replace(/\([^)]*\)/gu, '').trim().split(/[\s>+~]+/u)
+      return /:root\b/u.test(compounds.at(-1) ?? '')
+    }))
 }
 
 /**
@@ -49,30 +60,30 @@ describe('样式表的组织', () => {
   it('Desktop 主题适配只在 tokens.css 定义，共享 palette 由该入口引入', () => {
     const files = styleFiles()
     expect(files.length).toBeGreaterThan(1)
-    const rootDefinitions: string[] = []
-    for (const { name, text } of files) {
-      const code = text.replace(/\/\*[\s\S]*?\*\//g, '')
-      for (const match of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        if (!/(?:^|[\s,]):root\b/.test(match[1]!)) continue
-        // Reading resolved appearance on a descendant is not a second value table.
-        if (!/(--[\w-]+)\s*:/.test(match[2]!)) continue
-        rootDefinitions.push(name)
-      }
-    }
+    const desktopStyles = resolve(import.meta.dirname, '../src/renderer/src/styles') + '/'
+    const rootDefinitions = allStyleFiles().filter(file => file.name.startsWith(desktopStyles) && definesRootProperties(file.text)).map(file => basename(file.name))
     expect(rootDefinitions.length).toBeGreaterThan(0)
     expect([...new Set(rootDefinitions)]).toEqual(['tokens.css'])
     expect(files.find(file => file.name === 'tokens.css')?.text).toContain("@import '@agentmux/client-ui/styles/palette.css'")
   })
 
+  it('root-value ownership rejects another global table and accepts appearance on a descendant', () => {
+    expect(definesRootProperties(':root[data-appearance="light"] { --surface-0: white; }')).toBe(true)
+    expect(definesRootProperties('html:root[data-theme="mint"], :root { --surface-0: white; }')).toBe(true)
+    expect(definesRootProperties(':root[data-appearance="light"] .map { --map-ground: white; }')).toBe(false)
+    expect(definesRootProperties(':root[data-theme="mint"] > .map { --map-ground: white; }')).toBe(false)
+    expect(definesRootProperties(':root[data-appearance="light"] .map { color: var(--text); }')).toBe(false)
+  })
+
   it('单文件不超过 400 行——超出的按表面继续拆，不靠注释分节假装分层', () => {
-    const oversized = styleFiles()
+    const oversized = allStyleFiles()
       .map(({ name, text }) => ({ name, lines: text.split('\n').length }))
       .filter(({ lines }) => lines > 400)
     expect(oversized.map(({ name, lines }) => `${name} 有 ${lines} 行`)).toEqual([])
   })
 
-  it('没有孤儿文件：每个样式文件都被入口 @import', () => {
-    // styleFiles() 自身会在发现未被 @import 的文件时抛错——一个没进入口的样式文件是死文件，
+  it('没有孤儿文件：每个样式文件沿入口导入图可达', () => {
+    // styleFiles() 自身会在发现不在导入图中的文件时抛错——一个没进入口的样式文件是死文件，
     // 它的规则永不生效，而契约测试会照常扫描它并放行。这里把那条检查变成一条显式断言。
     expect(() => styleFiles()).not.toThrow()
     expect(styleFiles().length).toBeGreaterThan(1)
@@ -89,7 +100,7 @@ describe('样式表的组织', () => {
     // 正确写法是 `calc(-1 * var(--sp-N))`，或者干脆用不依赖高度的 `translate` 做居中。这条断言
     // 报出每一处的文件与行号，因为一处一处地找是这类 bug 唯一的排查方式。
     const offenders: string[] = []
-    for (const { name, text } of styleFiles()) {
+    for (const { name, text } of allStyleFiles()) {
       // 注释里出现 `-var(` 通常正是在**告诫**别这么写（selector.css 就有一句），那不是声明，
       // 报出来会把一句正确的提醒变成红灯。所以先剥注释，只在真声明上找。剥注释也顺带避免
       // 「注释里写了个反例」与「代码里真写错」在报告里长得一样。
@@ -103,35 +114,28 @@ describe('样式表的组织', () => {
   })
 
   it('共用坐标框的承重声明——删掉它们不会报错，只会让两条轴悄悄与刻度错位', () => {
-    // 这条守的是一类**没有任何可见报错**的失效。`.activity-ruler__stack` 是接替 `__track` 当 ruler
-    // 行 flex 子项的那个元素（见 conversation-axis.css 的文件头），所以它必须继承 `flex: 1`：少了
-    // 它，stack 收缩成内容宽度，每枚标记的 `left: N%` 又回到一个更窄的盒子上算——正是这个 stack
-    // 存在要消掉的那个漂移。页面不报错、不空白，只是轴与刻度不再对齐，而对齐是这两条轴存在的
-    // 全部理由。
-    //
-    // 渲染层那侧已经有断言（activity-view.test.tsx 判 stack/轴/track 的嵌套结构），但结构对了、
-    // 声明被删掉，那条仍然全绿——本仓没有能跑布局的测试环境，所以这三条只有在样式表上判。
-    // 落点选这个文件而不是渲染测试：读 CSS 这件事集中在契约测试里，渲染测试不碰文件系统。
-    const files = new Map(styleFiles().map((file) => [file.name, file.text]))
-    const axisCss = files.get('conversation-axis.css')
-    expect(axisCss, 'conversation-axis.css 不在 @import 列表里了').toBeDefined()
-
+    // Identity marks and ticks must resolve percentages against the same full-width coordinate box.
+    // Keep this tied to the current Grid parent and marker-height token, including imported sheets.
+    const css = allStyleRules()
     const ruleOf = (selector: string): string => {
       const escaped = selector.replace(/[.[\]]/g, '\\$&')
-      const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(axisCss!)
+      const match = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)
       expect(match, `${selector} 的规则不见了`).not.toBeNull()
       return match![1]!
     }
 
-    // 共用盒：必须占满 ruler 行的剩余宽度，且纵向排布（三行叠起来才谈得上"同一列"）。
+    // The current ruler uses Grid: the coordinate stack spans both columns below its summary.
+    // It is not a flex item, so adding flex: 1 here would not prove its actual width.
+    expect(ruleOf('.activity-ruler')).toMatch(/display:\s*grid/u)
+    expect(ruleOf('.activity-ruler')).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/u)
     const stack = ruleOf('.activity-ruler__stack')
-    expect(stack).toMatch(/flex:\s*1\b/)
-    expect(stack).toMatch(/flex-direction:\s*column/)
-    // 每条轴：它是每枚标记 `left: N%` 解析的那个包含块，所以必须自己建立定位上下文；高度要与组件
-    // 传下去的头像边长（16）相等——短了裁掉头像，高了在 ruler 上方加一条死白。
+    expect(stack).toMatch(/grid-row:\s*2\b/u)
+    expect(stack).toMatch(/grid-column:\s*1\s*\/\s*-1/u)
+    expect(stack).toMatch(/min-width:\s*0\b/u)
+    // 每条轴：它是每枚标记 `left: N%` 解析的那个包含块，所以必须自己建立定位上下文；高度读取共享 marker token，随同一密度定义变化。
     const axis = ruleOf('.conversation-axis')
     expect(axis).toMatch(/position:\s*relative/)
-    expect(axis).toMatch(/height:\s*16px/)
+    expect(axis).toMatch(/height:\s*var\(--timeline-marker-height\)/)
     // 标记：`translate(-50%, -50%)` 的两半各有承重理由——横向把中心（而非左边缘）拉到它所指的刻度
     // 上，纵向让命中区能在不移动头像的前提下变大。少任何一半都会让整条轴系统性偏移半个头像。
     const mark = ruleOf('.conversation-axis__mark')

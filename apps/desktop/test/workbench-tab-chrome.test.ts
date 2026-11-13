@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { expect, it } from 'vitest'
+import { readStyleSheet } from './helpers/styles.js'
 
 const renderer = new URL('../src/renderer/src/', import.meta.url).pathname
 const workbench = readFileSync(`${renderer}components/WorkspaceWorkbench.tsx`, 'utf8')
-const styles = readFileSync(`${renderer}styles/workbench.css`, 'utf8')
+const styles = readStyleSheet('./workbench.css')
 
 it('lets Session tabs own the first row when panes are parallel', () => {
   const splitNodeStart = workbench.indexOf('function SplitNode(')

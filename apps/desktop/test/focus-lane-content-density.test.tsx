@@ -1,8 +1,8 @@
+import { readStyleSheet } from './helpers/styles.js'
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
-import { readFileSync, appendFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { appendFileSync } from 'node:fs'
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -107,7 +107,7 @@ beforeEach(async () => {
   })
   Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true })
   style = document.createElement('style')
-  style.textContent = readFileSync(resolve(process.cwd(), 'apps/desktop/src/renderer/src/styles/focus.css'), 'utf8')
+  style.textContent = readStyleSheet('./focus.css')
     + '\n.focus-project-lanes__groups { padding: 2px; column-gap: 2px } .focus-context-group__cards { column-gap: 2px }'
   document.head.append(style)
   const config = await api.config.get(), snapshot = await api.sessions.snapshot()

@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { allStyleRules, stripCssComments, styleFiles } from './helpers/styles.js'
+import { allStyleRules, readStyleSheet, stripCssComments, styleFiles } from './helpers/styles.js'
 
 function stylesheet(name: string): string {
   const found = styleFiles().find(file => file.name === name)
   expect(found, `${name} must be in the real production import graph`).toBeDefined()
   expect(found!.text.trim().length).toBeGreaterThan(0)
-  return stripCssComments(found!.text)
+  return stripCssComments(readStyleSheet(found!.specifier))
 }
 
 function bodies(source: string, selector: string): string[] {

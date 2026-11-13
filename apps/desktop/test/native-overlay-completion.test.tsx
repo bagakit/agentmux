@@ -1,6 +1,5 @@
+import { readStyleSheet } from './helpers/styles.js'
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Editor } from '@tiptap/core'
@@ -29,7 +28,7 @@ it.each(['choices', 'feedback-only'] as const)('projects the complete painted %s
   const overlay = document.createElement('div'); overlay.setAttribute('data-overlay-host', ''); document.body.append(overlay)
   sheet = document.createElement('style')
   sheet.textContent = ':root { --surface-1: rgb(31, 36, 43); --radius: 8px; }' +
-    ['composer.css', 'overlays.css'].map(file => readFileSync(resolve(import.meta.dirname, '../../../packages/client-ui/src/styles', file), 'utf8')).join('\n')
+    ['composer.css', 'overlays.css'].map(file => readStyleSheet('@agentmux/client-ui/styles/' + file)).join('\n')
   document.head.append(sheet)
   const platform: ClientUiPlatform = { overlayContainer: () => overlay, copyText: async () => true,
     bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }

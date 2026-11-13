@@ -25,9 +25,11 @@ function importOrder(): string[] {
   const order = [...index.matchAll(/@import\s+'([^']+\.css)'/g)].map((match) => match[1]!)
   if (order.length === 0) throw new Error('index.css 里没有 @import——样式入口变了，这个读取器要跟着改')
   const present = readdirSync(STYLES_DIR).filter((name) => name.endsWith('.css') && name !== 'index.css')
-  const missing = present.filter((name) => !order.includes(`./${name}`))
-  // 一个没被 @import 的样式文件是死文件：它的规则永远不生效，而契约测试会照常扫描它并放行。
-  if (missing.length > 0) throw new Error(`这些样式文件没有被 index.css @import：${missing.join(', ')}`)
+  const reachable = new Set<string>()
+  importedStyles(join(STYLES_DIR, 'index.css'), [], file => reachable.add(file))
+  const missing = present.filter((name) => !reachable.has(join(STYLES_DIR, name)))
+  // 一个不在入口导入图中的样式文件是死文件：它的规则永远不生效，而契约测试会照常扫描它并放行。
+  if (missing.length > 0) throw new Error(`这些样式文件不在 index.css 导入图中：${missing.join(', ')}`)
   return order
 }
 
@@ -39,12 +41,13 @@ function stylesheetPath(specifier: string, from = STYLES_DIR): string {
 }
 
 /** Include client theme imports in their real cascade position, not just the outer manifest. */
-function importedStyles(file: string, ancestors: string[] = []): string {
+function importedStyles(file: string, ancestors: string[] = [], visit?: (file: string, text: string) => void): string {
   if (ancestors.includes(file)) throw new Error(`Circular stylesheet import: ${file}`)
   const text = readFileSync(file, 'utf8')
   if (!text.trim()) throw new Error(`Empty stylesheet: ${file}`)
+  visit?.(file, text)
   return text.replace(/@import\s+(['"])([^'"]+\.css)\1\s*;/g, (_, _quote: string, specifier: string) =>
-    importedStyles(stylesheetPath(specifier, dirname(file)), [...ancestors, file]))
+    importedStyles(stylesheetPath(specifier, dirname(file)), [...ancestors, file], visit))
 }
 
 /**
@@ -82,9 +85,17 @@ export function allStyleRules(): string {
 }
 
 /** 每个样式文件的内容，用于逐文件的断言（比如 :root 只能出现在 tokens.css）。 */
-export function styleFiles(): Array<{ name: string; text: string }> {
+export function styleFiles(): Array<{ name: string; specifier: string; text: string }> {
   return importOrder().map((name) => ({
     name: basename(stylesheetPath(name)),
+    specifier: name,
     text: readFileSync(stylesheetPath(name), 'utf8')
   }))
+}
+
+/** Every reachable stylesheet, including a shared entry's own surface imports, once. */
+export function allStyleFiles(): Array<{ name: string; text: string }> {
+  const files = new Map<string, string>()
+  importedStyles(join(STYLES_DIR, 'index.css'), [], (file, text) => files.set(file, text))
+  return [...files].map(([file, text]) => ({ name: file, text }))
 }
