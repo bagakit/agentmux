@@ -38,7 +38,7 @@ AgentMux works on three levels:
 | --- | --- |
 | **Execution** | `@agentmux/core` keeps each agent's native protocol inside a Provider and exposes one typed API. Processes, PTYs and output bytes belong to **ctxmux**, a separate Rust runtime, not to the UI. Quitting or hot-updating the app never stops an agent mid-task. |
 | **Organization** | **Space**, **Focus** and **Goals** organize your attention. **Survey**, **Recall** and **Topic** accumulate knowledge. **Mote** turns a long-running collaboration into a partner with its own persona. |
-| **Connection** | Remote execution, agent-to-agent messaging, the embedded browser, Toolkit, external connectors and the `amux` CLI all go through one public service. People, agents and programs operate the product the same way. |
+| **Connection** | The CLI and remote clients use public JSON-RPC; Desktop reuses the same business owners over trusted IPC. A unified public service for every capability is the architectural target. |
 
 Use the Core alone to drive agents from your own host, or use the desktop app for the full workbench.
 
@@ -62,6 +62,8 @@ amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 ·
 ### 3 · See who needs you, at a glance
 
 <img src="docs/assets/readme/focus-list.webp" alt="Focus: execution contexts grouped into Attention, Working, Results and Idle, with project lanes" width="100%">
+
+<p align="center"><sub>Product screenshots render real components with demo data. The current interface includes both English and Chinese labels.</sub></p>
 
 **Focus** sorts every agent across every project into Attention, Working, Results and Idle / Recovery, with project lanes and a timeline track along the bottom; the original workface loads on the right. Attention also rolls up the navigation tree, so an agent waiting inside a collapsed project shows on that project's row.
 
@@ -179,8 +181,10 @@ Partners come from two places. Start from a profile: the built-in PMO, or a new 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/architecture-dark.svg">
-  <img src="docs/assets/readme/architecture-light.svg" alt="AgentMux in three layers: every client calls Core through one public service; Core drives ctxmux through a single adapter; ctxmux owns the agent CLI processes and PTYs" width="100%">
+  <img src="docs/assets/readme/architecture-light.svg" alt="AgentMux's target architecture: clients converge on a public Core service; Core drives ctxmux through a single adapter; ctxmux owns the agent CLI processes and PTYs" width="100%">
 </picture>
+
+<p align="center"><sub>Target architecture. Desktop currently reuses the same business owners through trusted IPC.</sub></p>
 
 | Layer | Facts it alone owns |
 | --- | --- |

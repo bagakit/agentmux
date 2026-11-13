@@ -37,7 +37,7 @@ AgentMux 在三个层面处理这些问题：
 | --- | --- |
 | **执行** | `@agentmux/core` 把各家 Agent 的原生协议收进 Provider，对外只给一套类型化 API。进程、PTY 与输出字节由独立的 Rust Runtime **ctxmux** 持有，与界面分开；App 退出或热更新都不会停掉正在干活的 Agent。 |
 | **组织** | **Space**、**Focus**、**Goals** 组织人的注意力；**Survey**、**Recall**、**Topic** 积累知识；**Mote** 把长期合作确立为有人格的伙伴。 |
-| **连接** | 远端执行、A2A 协作、内嵌 Browser、Toolkit、外部连接器和 `amux` CLI 都走同一套公共服务。人、Agent 与程序用同一种方式操作产品。 |
+| **连接** | CLI 与远端 client 使用公开 JSON-RPC；Desktop 通过可信 IPC 复用同一批业务 owner。所有能力经统一公共服务开放，是架构目标。 |
 
 你可以只用 Core，在自己的宿主里驱动 Agent；也可以直接用 Desktop，得到完整的工作台。
 
@@ -61,6 +61,8 @@ amux space arrange --tab '<tab-id>' --preset grid-4     # columns-3 · grid-4 ·
 ### 3 · 一眼看出谁需要你
 
 <img src="docs/assets/readme/focus-list.webp" alt="Focus：按 Attention、Working、Results、Idle 分组的执行上下文与项目泳道" width="100%">
+
+<p align="center"><sub>产品截图使用真实组件和演示数据；当前界面包含中英文标签。</sub></p>
 
 **Focus** 把所有项目里的 Agent 分成 Attention、Working、Results、Idle / Recovery 四组，配上项目泳道和底部的时间音轨，右侧直接加载原工作面。导航树上的注意力会逐层上卷：某个折叠项目里有 Agent 在等你，你在项目那一行就能看到。
 
@@ -178,8 +180,10 @@ Agent 的工作成果不该随对话一起消失。Know 分组（Survey、Recall
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/architecture-dark.zh-CN.svg">
-  <img src="docs/assets/readme/architecture-light.zh-CN.svg" alt="AgentMux 三层架构：client 经同一公共服务调用 Core，Core 通过唯一适配器驱动 ctxmux，ctxmux 持有 Agent CLI 的 PTY 与进程" width="100%">
+  <img src="docs/assets/readme/architecture-light.zh-CN.svg" alt="AgentMux 三层架构目标：client 汇入公共 Core 服务，Core 通过唯一适配器驱动 ctxmux，ctxmux 持有 Agent CLI 的 PTY 与进程" width="100%">
 </picture>
+
+<p align="center"><sub>架构目标示意。Desktop 当前通过可信 IPC 复用同一批业务 owner。</sub></p>
 
 | 层 | 唯一持有的事实 |
 | --- | --- |
