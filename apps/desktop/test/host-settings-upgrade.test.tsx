@@ -347,7 +347,7 @@ describe('Native replacement review', () => {
   const ending = [{ runId: 'run-a', agentSessionId: 'agent-a' }, { runId: 'run-b', agentSessionId: 'agent-b' }, { runId: 'run-c', agentSessionId: null }]
   const replacementCheck = (runs = ending): RemoteCoreUpgradeCheck & { candidate: NonNullable<RemoteCoreUpgradeCheck['candidate']> } => ({ ...check, reason: 'native-replacement',
     current: { ...check.current, native: { ...(check.current as Extract<RemoteCoreUpgradeCheck['current'], { state: 'available' }>).native, protocolVersion: 22 } } as RemoteCoreUpgradeCheck['current'],
-    nativeReplacement: { ending: runs, stateBytes: 4096 }, expected: { ...check.expected!, nativeReplacement: { endingRunIds: runs.map(run => run.runId) } } })
+    nativeReplacement: { ending: runs }, expected: { ...check.expected!, nativeReplacement: { endingRunIds: runs.map(run => run.runId) } } })
 
   it('names the reason, what ends and what is kept, and confirms with a danger button that counts the processes', async () => {
     checkCall.mockResolvedValue(replacementCheck())

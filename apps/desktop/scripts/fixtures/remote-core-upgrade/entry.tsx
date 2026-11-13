@@ -40,7 +40,7 @@ Object.assign(api.hosts, {
     if (mode === 'replacement' || mode === 'replacement-idle') {
       const runs = mode === 'replacement' ? ending : []
       return { input, current: { ...current, native: { ...current.native, protocolVersion: 22 } }, eligible: true, reason: 'native-replacement', candidate,
-        nativeReplacement: { ending: runs, stateBytes: 1163264 }, expected: { ...expected, nativeReplacement: { endingRunIds: runs.map(run => run.runId) } },
+        nativeReplacement: { ending: runs }, expected: { ...expected, nativeReplacement: { endingRunIds: runs.map(run => run.runId) } },
         detail: 'Native Runtime 使用协议 22，本 App 需要协议 25，无法在原进程中交接。' }
     }
     return mode === 'ready' ? { input, current, eligible: true, reason: 'ready', candidate, expected, detail: 'The original owner is qualified for a Core deployment.' } : mode === 'unknown' ?

@@ -12,7 +12,7 @@ input() { printf '{"pid":%s,"startTicks":"%s","nativeSha256":"%s","stateDirector
   "$native" "$2" "$sha" "$state" "$state" "$3" "$1" "$state"; }
 fail() { echo "FAIL: $*"; exit 1; }
 start_native
-echo "== the plan reads the state size"; input false "$ticks" 0 | node /t/replace-native.cjs | grep -q '"stateBytes":6' || fail "plan"
+echo "== the plan confirms the process and the room for a copy"; input false "$ticks" 0 | node /t/replace-native.cjs | grep -q '"ready":true' || fail "plan"
 echo "== a changed birth identity is refused before any signal"
 input true 1 0 | node /t/replace-native.cjs | grep -q '"outcome":"refused"' || fail "changed process accepted"; kill -0 "$native" || fail "signalled a changed process"
 echo "== too little space is refused before any signal"

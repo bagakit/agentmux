@@ -33,7 +33,7 @@ async function fixture() {
   let receiptStatus = 'matching', physicalDrift = false
   const physical = () => { const { nativeInstanceId, nativeRuntimeId, nativeBuildId, ...value } = launch; return value }
   let shutdownUnknown = false, startUnknown = false, selectUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false, savedRunMissing = false
-  let replacementOutcome: 'replaced' | 'lost' | 'copy-failed' | 'no-copy' | 'refused' = 'replaced', replacementSpace: 'enough' | 'short' = 'enough', replaced = false, extraRunning = false
+  let replacementOutcome: 'replaced' | 'lost' | 'copy-failed' | 'no-copy' | 'refused' = 'replaced', replacementSpace: 'enough' | 'short' | 'unconfirmed' = 'enough', replaced = false, extraRunning = false
   // What the replaced Native reports, so verification can be shown wrong in each way.
   let afterReplacement: 'kept' | 'new-runtime' | 'still-running' | 'history-lost' = 'kept'
   let stageCommand = fixturePath("scope/state/core-releases/") + digest + '/launcher/amux'
@@ -97,20 +97,20 @@ async function fixture() {
       output = { processId: owner.processId }
     } else if (args[1] === REPLACE_NATIVE) {
       expect(p.pid).toBe(launch.nativeProcessId); expect(p.startTicks).toBe(launch.nativeStartTicks); expect(p.nativeStateDirectory).toBe(fixturePath('scope/state/ctxmux'))
-      if (!p.stop) { if (replacementSpace === 'short') throw new Error('Keeping a copy of the Native state needs more free space.'); output = { stateBytes: 4096, availableBytes: 1 << 30 } }
+      if (!p.stop) { if (replacementSpace === 'short') throw new Error('Keeping a copy of the Native state needs more free space.'); output = replacementSpace === 'unconfirmed' ? {} : { ready: true } }
       else {
         effects.push('replace-native')
         if (replacementOutcome === 'lost') throw new Error('replace response lost')
         if (replacementOutcome === 'copy-failed') output = { outcome: 'copy-failed', detail: 'The Native state copy differs from state.sqlite3' }
         else if (replacementOutcome === 'refused') output = { outcome: 'refused', detail: 'Keeping a copy of the Native state needs more free space.' }
-        else if (replacementOutcome === 'no-copy') output = { outcome: 'replaced', stateCopy: fixturePath('elsewhere'), stateBytes: 4096, survivingProcessIds: [] }
+        else if (replacementOutcome === 'no-copy') output = { outcome: 'replaced', stateCopy: fixturePath('elsewhere'), survivingProcessIds: [] }
         else {
           // The replaced Native keeps the durable Runtime; its running Runs end without an owner.
           native.instanceId = 'native-replacement'; native.protocolVersion = PROTOCOL_VERSION; compatibility.daemonInstanceId = 'native-replacement'
           if (afterReplacement === 'new-runtime') compatibility.runtimeId = 'another-native-runtime'
           launch = { ...launch, nativeProcessId: 909, nativeStartTicks: '9090', nativeInstanceId: 'native-replacement' }
           replaced = true
-          output = { outcome: 'replaced', stateCopy: p.copyDirectory, stateBytes: 4096, survivingProcessIds: [] }
+          output = { outcome: 'replaced', stateCopy: p.copyDirectory, survivingProcessIds: [] }
         }
       }
     } else if (args[1] === SELECT_CORE_RELEASE) {
@@ -134,7 +134,8 @@ async function fixture() {
     setSavedRunMissing: () => { savedRunMissing = true },
     setReplacementOutcome: (value: 'replaced' | 'lost' | 'copy-failed' | 'no-copy' | 'refused') => { replacementOutcome = value },
     setAfterReplacement: (value: 'new-runtime' | 'still-running' | 'history-lost') => { afterReplacement = value },
-    setReplacementSpaceShort: () => { replacementSpace = 'short' }, setExtraRunning: () => { extraRunning = true },
+    setReplacementSpaceShort: () => { replacementSpace = 'short' }, setReplacementSpace: (value: 'enough' | 'short' | 'unconfirmed') => { replacementSpace = value },
+    setExtraRunning: () => { extraRunning = true },
     pauseStage: () => { stagePause = new Promise(resolve => { resumeStage = resolve }) }, resumeStage: () => resumeStage?.() }
 }
 
@@ -609,7 +610,7 @@ describe('reviewed Native replacement', () => {
   it('reviews what ends, replaces the Native on the same state and keeps the durable Runtime and Sessions', async () => {
     const f = await older(), check = await f.manager.check(host)
     expect(check).toMatchObject({ eligible: true, reason: 'native-replacement',
-      nativeReplacement: { stateBytes: 4096, ending: [{ runId: 'original-run', agentSessionId: 'original-session' }, { runId: 'ordinary-terminal', agentSessionId: null }] },
+      nativeReplacement: { ending: [{ runId: 'original-run', agentSessionId: 'original-session' }, { runId: 'ordinary-terminal', agentSessionId: null }] },
       expected: { nativeReplacement: { endingRunIds: ['original-run', 'ordinary-terminal'] } } })
     expect(parseRemoteCoreUpgradeCheck(JSON.parse(JSON.stringify(check)))).toEqual(check)
     expect(f.effects).toEqual([])
@@ -658,9 +659,24 @@ describe('reviewed Native replacement', () => {
     const f = await older(), check = await f.manager.check(host); f.setReplacementOutcome('lost')
     const receipt = await f.manager.upgrade(host, check.expected!, 'replace-lost')
     expect(receipt).toMatchObject({ status: 'unknown', stage: 'replacing-native' })
+    // The Core was stopped and nothing replaced it; the receipt says how to bring it back.
+    expect(receipt.detail).toContain('原 Core 已停止；请在该 Host 上用原启动方式重新启动 Core')
     expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native'])
     expect(await new RemoteCoreUpgradeManager(f.options).inspect(host, 'replace-lost')).toMatchObject({ status: 'unknown' })
     expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'replace-native'])
+  })
+
+  it('refuses before stopping anything when the plan cannot confirm the Native or the room for a copy', async () => {
+    const f = await older(), check = await f.manager.check(host); f.setReplacementSpaceShort()
+    const receipt = await f.manager.upgrade(host, check.expected!, 'no-room')
+    expect(receipt).toMatchObject({ status: 'failed', stage: 'staged' })
+    expect(f.effects).toEqual(['stage-offline-candidate'])
+  })
+
+  it('offers no replacement when the remote plan does not confirm it is ready', async () => {
+    const f = await older(); f.setReplacementSpace('unconfirmed')
+    expect(await f.manager.check(host)).toMatchObject({ eligible: false, reason: 'unverified' })
+    expect(f.effects).toEqual([])
   })
 
   it('offers no replacement when the state copy would not fit', async () => {
