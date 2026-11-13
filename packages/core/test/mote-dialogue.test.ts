@@ -567,10 +567,21 @@ it('explicit main entry records an exited Main with no native conversation as un
   vi.spyOn(g.quick,'read').mockImplementation(async input=>({...await read(input),maintenance:{status:'unconfirmed',schedule:null,
     issue:'Original maintenance recovery is unavailable; inspect mote-maintain-original.'}}))
   const accepted=await g.rpc.call('space.mote.dialogue.recovery.ensure',request)
-  expect(accepted.operation,JSON.stringify(accepted)).toMatchObject({kind:'unavailable',reason:'native-handle-unavailable',operationId:request.operationId,
+  expect(accepted.operation,JSON.stringify(accepted)).toMatchObject({kind:'unavailable',reason:'native-conversation-absent',operationId:request.operationId,
     moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}})
   expect(await g.rpc.call('space.mote.dialogue.recovery.inspect',request)).toEqual(accepted)
   expect(runtime.started).toEqual([]);expect(g.writes).toEqual([])
+})
+
+// An unconfirmed maintenance reading still names its last schedule. An explicit pause there is the
+// person's own decision and fences the open; only the observation gap stops counting as a refusal.
+it('explicit main entry keeps a paused schedule fenced while its maintenance reading is unconfirmed',async()=>{
+  const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-paused-unconfirmed'),runtime=endedMainRuntime(f)
+  const read=f.quick.read.bind(f.quick)
+  vi.spyOn(f.quick,'read').mockImplementation(async input=>({...await read(input),maintenance:{status:'unconfirmed',
+    schedule:{loopId:'original-maintenance',status:'paused'} as never,issue:'Observing the original main Run is unconfirmed.'}}))
+  await expect(f.rpc.call('space.mote.dialogue.recovery.ensure',request)).rejects.toMatchObject({code:'MOTE_MAIN_RECOVERY_PAUSED'})
+  expect(runtime.started).toEqual([]);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('explicit main entry keeps stopped or disabled original execution and its healthy manual capabilities',async()=>{
