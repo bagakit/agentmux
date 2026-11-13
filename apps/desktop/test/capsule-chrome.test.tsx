@@ -190,7 +190,7 @@ it('keeps an unobserved confirmation frozen and inspect-only without guessing th
   await click('Inspect original operation')
   expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId: original.operationId })
   expect(button('Confirm answer').disabled).toBe(true); expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(0)
-  expect(editor().value).toBe(original.answer); expect(container.textContent).toContain('Checked: still unconfirmed. Nothing was sent again.')
+  expect(editor().value).toBe(original.answer); expect(container.textContent).toContain('Checked just now. Nothing was sent again.')
 })
 
 it('retains current editor text across a late request refresh and keeps the native page in a separate bounded surface', async () => {
