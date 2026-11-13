@@ -58,12 +58,16 @@ export type MediaPlayerAction =
 export type MediaKeyContext = { stream: MediaStreamClass; video: boolean }
 export type MediaKeyEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing' | 'defaultPrevented' | 'repeat'> & { target: EventTarget | null }
 
-/** Text inputs keep every key; a native control keeps the keys it already handles itself. */
+/**
+ * Text inputs keep every key; a native control keeps the keys it already handles itself. The timeline is the
+ * exception: its native step is a thousandth of the duration, so the player's own seek keys drive it instead.
+ */
 function ownsKey(target: EventTarget | null, key: string): boolean {
   if (!(target instanceof Element)) return false
   if (target.closest('textarea, select, [contenteditable=""], [contenteditable="true"], .xterm')) return true
   if (target instanceof HTMLInputElement) {
     if (target.type !== 'range') return true
+    if (target.dataset.mediaTimeline !== undefined) return false
     return ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(key)
   }
   return (key === ' ' || key === 'Enter') && target.closest('button, a[href], [role="button"], [role="menuitem"]') !== null

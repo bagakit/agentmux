@@ -270,7 +270,7 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
     style={{ '--media-fill': `${(facts.muted ? 0 : facts.volume) * 100}%` } as CSSProperties}
     onChange={event => { const element = media.current; if (!element) return; element.muted = false; element.volume = Number(event.currentTarget.value) / 100 }} />
   const timeline = sliderVisible ? <div className="media-player__timeline">
-    <input className="media-player__slider" type="range" aria-label={live ? 'Live position' : 'Seek'} aria-valuetext={valueText}
+    <input className="media-player__slider" type="range" data-media-timeline="" aria-label={live ? 'Live position' : 'Seek'} aria-valuetext={valueText}
       min={0} max={1000} step={1} value={Math.round(fraction * 1000)} style={sliderStyle}
       onPointerMove={onSliderPointer} onPointerLeave={() => setHover(null)}
       onPointerDown={event => { event.currentTarget.setPointerCapture?.(event.pointerId) }}
