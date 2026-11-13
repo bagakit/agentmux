@@ -23,7 +23,7 @@ let pendingPolls: number[]
 const releases: Array<() => void> = []
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'settings-continuation-')); native = []; calls = []; afterCall = undefined; pendingPolls = []
-  const asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
+  const asset = await readFile(join(import.meta.dirname, '../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
     if (String(url) === appIconUrl()) return new Response(new Uint8Array(asset))

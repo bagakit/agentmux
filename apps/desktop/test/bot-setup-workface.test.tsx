@@ -87,7 +87,7 @@ it('keeps the original QR during a held sign-in and exposes safe diagnosis witho
 
 it('holds the configuration result until the original write settles and then presents complete setup without a required refresh', async () => {
   const web = enrollmentInitialWeb({ name: 'Saved public name', description: 'Saved public summary.' })
-  const image = await readFile(resolve('apps/desktop/resources/icon-512.png'))
+  const image = await readFile(resolve('packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   let release!: () => void
   const pending = new Promise<void>(resolve => { release = resolve; releasePending = resolve })
   let writeStarted = false

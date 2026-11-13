@@ -57,7 +57,7 @@ beforeEach(async () => {
   window.localStorage.clear(); await useAppStore.persist.rehydrate()
   const stop = await useAppStore.getState().initialize(); stop()
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-  const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
+  const image = await readFile(join(import.meta.dirname, '../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   vi.stubGlobal('fetch', vi.fn(async (url: string) => { expect(url).toBe(appIconUrl()); return new Response(new Uint8Array(image)) }))
 })
 afterEach(async () => { await dom.render(null); await fixture?.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })

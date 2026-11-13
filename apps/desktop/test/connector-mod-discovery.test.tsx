@@ -24,7 +24,7 @@ const trusted = vi.fn()
 beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', fileURLToPath(new NodeURL('../../../packages/core/bin/amux', import.meta.url)))
-  asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
+  asset = await readFile(join(import.meta.dirname, '../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   directory = await mkdtemp(join(tmpdir(), 'lark-settings-'))
   services = await createConnectionServices({ directory })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: services.connections,

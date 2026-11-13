@@ -31,7 +31,7 @@ let releaseInit: Set<() => void>, initSignals: Array<AbortSignal | null | undefi
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'settings-web-'))
-  asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
+  asset = await readFile(join(import.meta.dirname, '../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   failList = false; loseCreate = false; loseCredential = false; lastBegin = null; deliverBegin = null; platform = []; calls = []
   initWait = null; releaseInit = new Set(); initSignals = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })

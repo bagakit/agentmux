@@ -226,7 +226,7 @@ it('ignores a late original Mote read after Settings moves to another exact targ
 }, 30_000)
 
 it('restores the selected general enrollment through actual Settings navigation and remount using only original reads', async () => {
-  const transport = f.registration.getMockImplementation()!, asset = await readFile(resolve('apps/desktop/resources/icon-512.png'))
+  const transport = f.registration.getMockImplementation()!, asset = await readFile(resolve('packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   f.registration.mockImplementation(async (url, input) => String(url) === appIconUrl() ? new Response(new Uint8Array(asset)) : String(url).includes('/manifest/upsert_by_template') ? new Response(null, { status: 502 }) : transport(url, input))
   await f.renderSettings(); await f.click('Create a general identity'); await click('[data-enrollment-create]')
   await click('[data-enrollment-action="confirm-account"]'); await click('[data-enrollment-action="create"]')
@@ -268,7 +268,7 @@ it('keeps a general enrollment locator whose original result cannot be read out 
 }, 30_000)
 
 it('reads fresh permitted general account actions again after departure instead of retaining a private UI view', async () => {
-  const transport = f.registration.getMockImplementation()!, asset = await readFile(resolve('apps/desktop/resources/icon-512.png'))
+  const transport = f.registration.getMockImplementation()!, asset = await readFile(resolve('packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   f.registration.mockImplementation(async (url, input) => String(url) === appIconUrl() ? new Response(new Uint8Array(asset)) : transport(url, input))
   await f.renderSettings(); await f.click('Create a general identity'); await click('[data-enrollment-create]')
   await ready(() => expect(document.querySelector('[data-enrollment-action="confirm-account"]')).not.toBeNull())

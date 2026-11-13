@@ -18,7 +18,7 @@ async function click(selector: string) {
 }
 const progress = () => document.querySelector('[data-initial-setup-stage]')
 async function native(options: Parameters<typeof enrollmentInitialWeb>[0]) {
-  const web = enrollmentInitialWeb(options), asset = await readFile(resolve('apps/desktop/resources/icon-512.png'))
+  const web = enrollmentInitialWeb(options), asset = await readFile(resolve('packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   vi.stubGlobal('fetch', vi.fn(async (input, init) => String(input) === appIconUrl() ? new Response(new Uint8Array(asset)) : web.fetch(input, init)))
   return web
 }

@@ -37,7 +37,7 @@ beforeEach(async () => {
   original = await ingressFixture(true, feishuConfig)
   sdk = defaultFeishuSdkTransport()
   calls = []; platformCalls = []
-  const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
+  const image = await readFile(join(import.meta.dirname, '../../../packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url) === appIconUrl()) return new Response(new Uint8Array(image))
     const target = new URL(String(url))
