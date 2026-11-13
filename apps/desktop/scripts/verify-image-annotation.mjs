@@ -73,7 +73,7 @@ const specifications = {
       find: 'at: at ?? calloutPlacement(source, source.width * scale, source.height * scale, placement)', replace: 'at: at ?? { x: source.x + source.width + CALLOUT_GAP, y: source.y }', test: pointing,
       consumer: 'places a default bubble inside the image or selection: right, else left, else below or above, else clamped', failure: /flips left when the right side has no room/ },
     { label: 'callout-clamp-ignores-overlap', source: component + 'drawing-model.ts',
-      find: 'return candidates.map(clamped).reduce((best, next) => overlap(next) < overlap(best) ? next : best)', replace: 'return kept', test: pointing,
+      find: 'return candidates.map(clamped).reduce((best, next) => cover(next) < cover(best) ? next : best)', replace: 'return kept', test: pointing,
       consumer: 'clamps a bubble that fits nowhere to the place covering least of its source, ties going right, left, below, above', failure: /the left clamp clears a source near the right/ },
     { label: 'callout-gap-in-image-pixels', source: component + 'ImageAnnotationEditor.tsx',
       find: 'gap: CALLOUT_GAP / viewRef.current.scale', replace: 'gap: CALLOUT_GAP', test: pointingTools,
