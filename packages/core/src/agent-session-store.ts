@@ -3261,6 +3261,11 @@ type AgentSessionStoreDocument = {
   retiredAgentSessions: AgentMuxRetiredAgentSession[]
 }
 
+/** SQLITE_BUSY: another connection holds the lock this step needs; nothing was applied. */
+function sqliteBusy(error: unknown): boolean {
+  return (error as { errcode?: unknown } | null)?.errcode === 5
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
@@ -4200,6 +4205,19 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal, committedOnly = false): Promise<T> {
     signal?.throwIfAborted()
     if (this.database && !committedOnly) return read(this.database)
+    for (let attempt = 1; ; attempt += 1) {
+      try { return await this.readCommittedSnapshot(read, rescue, signal) } catch (error) {
+        // A rollback-journal writer refuses new readers while it commits, from the very first
+        // validation PRAGMA. The writer's COMMIT already waits out readers; a read has no side
+        // effects, so it waits out the writer on the same budget and takes a whole new snapshot.
+        if (!sqliteBusy((error as { cause?: unknown }).cause) || attempt >= LOCK_ATTEMPTS) throw error
+        await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
+      }
+    }
+  }
+
+  private async readCommittedSnapshot<T>(read: (db: DatabaseSync) => T,
+    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal): Promise<T> {
     let db: DatabaseSync | null = null
     let failure: unknown
     try {
@@ -4633,7 +4651,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       } catch (error) {
         // A rollback-journal reader can briefly prevent COMMIT. SQLite keeps
         // this transaction active: yield for that reader, never replay mutation.
-        if ((error as { errcode?: unknown } | null)?.errcode !== 5 || !database.isTransaction || attempt + 1 >= LOCK_ATTEMPTS) throw error
+        if (!sqliteBusy(error) || !database.isTransaction || attempt + 1 >= LOCK_ATTEMPTS) throw error
         await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
         signal?.throwIfAborted()
         if (!database.isTransaction) throw error
