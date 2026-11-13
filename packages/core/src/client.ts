@@ -10716,6 +10716,9 @@ export class AgentMuxClient {
       normalized.lifecycleEvent,
       provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent, provider.hook.lifecycle))
     ) && (normalized.semanticState !== 'unknown' || normalized.lifecycleEvent === 'turn-end')
+    // A tool end reports that one call finished and never starts work, so it cannot retire an accepted
+    // native idle, live or durable. Only a start can; a late end still settles its exact request.
+    const retiresNativeIdle = normalized.lifecycleEvent !== 'tool-use-end'
     if (updatesSemanticStatus && acceptsAgentActivityState(session.activityCommit, session.run, normalized.status)) {
       // This bounded lookup is only for a candidate transition, never each tool/output observation.
       try {
@@ -10896,7 +10899,8 @@ export class AgentMuxClient {
         const promptSubmissionId = this.nativeTurnAdmissionId(next, nativeActivity)
         next.recoveryActivity = { ...structuredClone(nativeActivity), run: { ...current.run }, hookReceiptId: receipt.id,
           observedAt: receipt.observedAt, ...(promptSubmissionId ? { promptSubmissionId } : {}) }
-      } else if (!nativeActivity && updatesSemanticStatus && !interactionAlreadyEnded && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity) {
+      } else if (!nativeActivity && updatesSemanticStatus && !interactionAlreadyEnded && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity &&
+          (next.recoveryActivity.state !== 'idle' || retiresNativeIdle)) {
         // In-turn tools refresh the original main activity. A new prompt or an old idle end
         // cannot inherit that turn's interruption; neither fact grants live input eligibility.
         const ongoing = next.recoveryActivity.state === 'active' && normalized.semanticState === 'working' &&
@@ -11083,7 +11087,7 @@ export class AgentMuxClient {
       if (previous?.runId === next.run.runId && previous.fact) {
         if (normalized.lifecycleEvent === 'turn-end' || normalized.semanticState === 'error' || normalized.semanticState === 'blocked') {
           delete previous.fact
-        } else if (!normalized.childActivity && (previous.fact.state === 'idle' || previous.invalidated)) {
+        } else if (!normalized.childActivity && (previous.fact.state === 'idle' && retiresNativeIdle || previous.invalidated)) {
           // A new classic activity is independently authoritative; do not resurrect old main work.
           delete previous.fact
         }
