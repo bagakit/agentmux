@@ -171,9 +171,13 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     contentEligibility = system || payload.role === 'user' && paginated ? 'private'
       : payload.role === 'assistant' ? 'public' : 'unconfirmed'
     title = system?.title
-    kind = system?.kind ?? (payload.role === 'user' ? (paginated ? 'activity' : 'user-message') : payload.role === 'assistant' ? 'assistant-message' : 'activity')
-    if (!system && paginated && payload.role === 'user') title = 'Model context'
     parts = contentParts(payload.content)
+    // As for Claude, an assistant message is speech only when it carries readable content.
+    // An empty final_answer (the reply went out through a tool) is a step of the turn.
+    const readable = parts.some(part => part.kind === 'text' ? part.text.length > 0 : part.kind === 'resource')
+    kind = system?.kind ?? (payload.role === 'user' ? (paginated ? 'activity' : 'user-message')
+      : payload.role === 'assistant' ? readable ? 'assistant-message' : 'activity' : 'activity')
+    if (!system && paginated && payload.role === 'user') title = 'Model context'
   } else if (record.type === 'response_item' && type === 'reasoning') {
     contentEligibility = 'public'
     parts = contentParts(payload.summary).map(part => part.kind === 'text' ? { ...part, kind: 'reasoning' } : part)
