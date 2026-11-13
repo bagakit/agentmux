@@ -1,5 +1,5 @@
 import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
-import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict } from './spatial-merge';
+import { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 export { reconcileSpatialGraphs, sameSpatialValue, type SpatialConflict, type SpatialMerge } from './spatial-merge';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
@@ -207,6 +207,8 @@ export class SpatialConflictError extends Error {
     super(`Another writer changed ${conflicts.length === 1 ? 'one workface item' : conflicts.length + ' workface items'} you also edited (${conflicts.map(conflict => conflict.key).join(', ')}). Their saved version is kept and every other change was saved; edit the item again to apply yours.`);
   }
 }
+const withConflicts = (merge: SpatialMerge, earlier: readonly SpatialConflict[]): SpatialMerge =>
+  earlier.length ? { graph: merge.graph, conflicts: [...earlier, ...merge.conflicts] } : merge;
 /** A save re-merges against a newer revision this many times before reporting it as unconfirmed. */
 const STALE_REVISION_ATTEMPTS = 3;
 /**
@@ -457,8 +459,9 @@ export class DesktopSpatialPersistence {
         // Equal values permit a merge; they never prove who applied the write.
         // Each key merges on its own: a conflict keeps the committed remote value for that
         // key and is retained by name, while every other change is still committed.
-        merged = uncertain ? reconcileSpatialGraphs(uncertain.baseline.graph,
-          reconcileSpatialGraphs(uncertain.input, local, uncertain.graph).graph, remote.graph, uncertain.graph)
+        // A later local edit that the attempted graph had already changed elsewhere is a conflict like any other.
+        const carried = uncertain && reconcileSpatialGraphs(uncertain.input, local, uncertain.graph);
+        merged = uncertain && carried ? withConflicts(reconcileSpatialGraphs(uncertain.baseline.graph, carried.graph, remote.graph, uncertain.graph), carried.conflicts)
           : remote.revision === baseline.revision ? { graph: local, conflicts: [] } : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
         try {
           next = await this.port.commit({ expectedRevision: remote.revision, graph: merged.graph, allowEntityRemoval: removals.size > 0,
@@ -482,20 +485,20 @@ export class DesktopSpatialPersistence {
       if (!next || !merged) throw new Error('The durable spatial document kept changing during this save. Pending work is retained.');
       this.unconfirmed = null;
       this.state = next;
-      this.retain(merged.conflicts);
+      // Later local edits were made against our in-flight graph. Preserve the remote changes accepted by
+      // that write, without treating our own ACK as a conflict; a later edit to a key another writer changed
+      // meanwhile is reported with this save's conflicts.
+      const later = this.pending !== pending && this.pending ? reconcileSpatialGraphs(local, this.pending.graph, next.graph) : null;
+      this.retain(later ? [...merged.conflicts, ...later.conflicts] : merged.conflicts);
       for (const id of removals)
         this.removed.delete(id);
       for (const id of groupRemovals) this.removedProjectGroups.delete(id);
-      if (this.pending === pending) {
+      if (later) this.pending = { baseline: next, graph: later.graph };
+      else if (this.pending === pending) {
         this.pending = null;
-        // `local` is the baseline the UI already shows. A retained conflict then applies the
-        // committed value for that key, so the next capture starts from what Core holds.
+        // `local` is the baseline the UI already shows. A conflicting key then applies the
+        // committed value, so the next capture starts from what Core holds.
         this.publish(next, local);
-      }
-      else if (this.pending) {
-        // Later local edits were made against our in-flight graph. Preserve the
-        // remote changes accepted by that write, without treating our own ACK as a conflict.
-        this.pending = { baseline: next, graph: reconcileSpatialGraphs(local, this.pending.graph, next.graph).graph };
       }
     })();
     try {
