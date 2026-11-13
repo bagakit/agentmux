@@ -122,6 +122,22 @@ it('keeps synthetic and compaction summary user records neutral instead of assig
   ])
 })
 
+it('classifies Claude-produced user-role turns by their native origin, not as the user speaking', async () => {
+  const notification = '<task-notification><task-id>task-1</task-id><status>completed</status></task-notification>'
+  const f = await fixture(jsonl([
+    record('typed', 'user', 'Fix the bug', { origin: { kind: 'human' }, promptSource: 'typed' }),
+    record('task', 'user', notification, { origin: { kind: 'task-notification', producer: 'session-task' }, promptSource: 'system' }),
+    record('system-source', 'user', 'A future system-produced input', { promptSource: 'system' }),
+    record('unmarked', 'user', 'An older record without origin facts')
+  ]))
+  const page = await f.client.sessionHistoryPage('private-agent')
+  expect(page.items.map(item => [item.id, item.kind, item.title])).toEqual([
+    ['typed', 'user-message', undefined], ['task', 'system-message', 'Task notification'],
+    ['system-source', 'system-message', 'Claude system input'], ['unmarked', 'user-message', undefined]])
+  // The full original body is kept; only who produced it changes.
+  expect(page.items[1]!.contentParts).toEqual([{ kind: 'text', text: notification, contentEligibility: 'unconfirmed' }])
+})
+
 it('keeps long UTF8 records complete across range chunks and excludes a partial final append without repair', async () => {
   const exact = 'x'.repeat(65_500) + '中'.repeat(50)
   const complete = jsonl([record('long', 'assistant', exact)])
