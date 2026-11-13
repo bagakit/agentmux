@@ -44,7 +44,7 @@ import { BrowserPane } from './BrowserPane'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { NewTabSurface } from './NewTabSurface'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { PaneSplitMenu } from './PaneSplitMenu'
 import { RegionContextMenu } from './RegionContextMenu'
 import {
@@ -2176,7 +2176,7 @@ export function WorkspaceWorkbench({
         <div className="pane-body">{confirmed ? projectionNotice : projectionState}
         {confirmed ? <div key={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={reference.tabId} data-workbench-group-id={reference.groupId} className="workbench-region-slot" />
-          : projectionNotice ? null : <SurfaceState role="status" title="Original Region retained" description="The exact Region occurrence is not confirmed here. Its content and reference are kept; choose its original location." />}
+          : projectionNotice ? null : <SurfaceState role="status" title="Original Region retained" description="This Region is not confirmed here yet. Its content and reference are kept; choose its original location." />}
         </div>
       </div>
     </WorkbenchProjectionContext.Provider>

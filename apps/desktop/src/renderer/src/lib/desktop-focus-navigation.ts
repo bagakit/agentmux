@@ -4,7 +4,7 @@ import type { AgentMuxDesktopMainSurface, AgentMuxDesktopSelection, AgentMuxDesk
 import type { WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
-import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { projectWorkbenchProjection, resolveWorkbenchZone, sameWorkbenchProjectionSelection, workbenchProjectionLocationsMatchOwner,
   type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
@@ -211,7 +211,7 @@ export function projectWorkbenchSpaceSelection(layout: WorkspaceLayout | undefin
     location.zoneId === choice.zoneId && location.displayWorkspaceId === choice.workspaceId && location.groupId === choice.groupId &&
     location.tabId === choice.tabId && location.regionId === choice.regionId)
   return { layout: projected.layout, issues: exact ? projected.issues : [...projected.issues,
-    'The selected original occurrence is still restoring. Its exact reference is kept; choose its current position.'],
+    'The selected place is still restoring. Its exact reference is kept; choose its current position.'],
     confirmed: exact && projected.layout !== null }
 }
 function reject(code: string, message: string, candidates?: AgentMuxSpaceSelector[]): never {

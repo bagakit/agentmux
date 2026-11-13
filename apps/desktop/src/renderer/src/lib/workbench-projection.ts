@@ -98,7 +98,7 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
   const memberIds = workbenchProjectionTabIds(scope)
   const automaticZoneSelection = scope.entity.kind === 'zone' && scope.selectionMode === undefined
   const entityKnown = scope.entity.kind === 'zone' ? Boolean(workbenchProjectionZone(scope)) : memberIds.size > 0
-  if (!entityKnown || !layout) return { layout: null, issues: ['The original entity or its display layout is still restoring. Its exact reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
+  if (!entityKnown || !layout) return { layout: null, issues: ['The original item or its layout is still restoring. Its exact reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
   const members = new Map(scope.catalog.tabs.filter(tab => memberIds.has(tab.tabId)).map(tab => [tab.tabId, tab]))
   // Zero authoritative members is an empty Zone; missing loaded content is not.
   if (scope.entity.kind === 'zone' && members.size === 0 && scope.selection.length === 0) {
@@ -138,7 +138,7 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
     if (!inTree.has(groupId) || !layout.groups.some(group => group.id === groupId && group.tabOrder.includes(reference.tabId)) ||
       !parentConfirmed && (!scope.catalog.locations.some(location => workbenchProjectionMatches(scope, location) && sameWorkbenchProjectionSelection(location, reference)) ||
       !tabs[reference.tabId]?.regions[reference.regionId])) {
-      issues.push('The selected original Tab or Region occurrence is still restoring. Its exact reference is kept.')
+      issues.push('The selected Tab or Region is still restoring. Its exact reference is kept.')
       continue
     }
     selected.set(groupId, reference)
@@ -158,7 +158,7 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
       recentTabIds: group.recentTabIds.filter(id => tabOrder.includes(id)) }
   })
   if (!groups.some(group => group.tabOrder.length > 0)) return { layout: null,
-    issues: [...issues, 'This original entity has no confirmed display occurrence here. Its content and reference are kept.'], unsupportedTabIds: new Set(), selection: [] }
+    issues: [...issues, 'This original item has no confirmed place to show here. Its content and reference are kept.'], unsupportedTabIds: new Set(), selection: [] }
   let root = layout.root
   for (const group of groups) if (!group.tabOrder.length) root = removeLeaf(root, groupLeafId, group.id) ?? root
   const visibleGroupIds = new Set(groupIds(root))
