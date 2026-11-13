@@ -5,12 +5,12 @@ import type { Plugin, UserConfig } from 'vite'
 import { localizeExcalidrawFontUrls } from './excalidraw-local-fonts'
 
 /** Fixed official assets are local in both development and the installed private renderer. */
-export function fileDiagramAssets(desktopRoot: string): Plugin {
+export function fileDiagramAssets(): Plugin {
   const require = createRequire(import.meta.url)
   const plantuml = dirname(require.resolve('@plantuml/core/package.json'))
   const excalidrawFonts = join(dirname(require.resolve('@excalidraw/excalidraw')), 'fonts')
   const roots = [
-    { prefix: 'diagram-assets/drawio/', root: resolve(desktopRoot, 'vendor/drawio/v32.4.1') },
+    { prefix: 'diagram-assets/drawio/', root: resolve(dirname(require.resolve('@agentmux/editor-extensions/package.json')), 'vendor/drawio/v32.4.1') },
     { prefix: 'diagram-assets/plantuml/', root: plantuml, files: ['viz-global.js', 'plantuml.js', 'themes.js', 'emoji.js', 'openiconic.js', 'LICENSE'] },
     { prefix: 'excalidraw-assets/fonts/', root: excalidrawFonts }
   ]

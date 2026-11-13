@@ -1,9 +1,10 @@
+import '../styles/preview-common.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import type { ExcalidrawProps, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import '@excalidraw/excalidraw/index.css'
-import { mountExcalidrawIcons } from '../../lib/excalidraw-icons'
-import { validateExcalidrawScene } from '../../lib/file-formats/excalidraw-scene'
+import { mountExcalidrawIcons } from './excalidraw-icons'
+import { validateExcalidrawScene } from '../engines/excalidraw-scene'
 
 type Scene = Awaited<ReturnType<typeof import('@excalidraw/excalidraw')['loadFromBlob']>>
 type Loaded = { owner: object; Component: typeof import('@excalidraw/excalidraw')['Excalidraw']; scene: Scene }

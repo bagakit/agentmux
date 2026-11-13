@@ -1,10 +1,10 @@
+import '../styles/preview-common.css'
+import '../styles/media-player.css'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { api } from '../lib/api'
 import { classifyStream, describeMediaFailure, formatClock, liveEdgeState, nextPlaybackRate, resolveMediaKey, seekableWindow, spokenDuration,
-  type MediaFailureView, type MediaPlayerAction, type SeekableWindow } from '../lib/media-player'
-import type { WorkspaceMediaStreamKind } from '../../../shared/workspace-media-stream'
-import { formatFileBytes } from '../lib/format-file-bytes'
+  type MediaFailureView, type MediaPlayerAction, type SeekableWindow } from '../engines/media-player'
+import { formatFileBytes } from '../format-file-bytes'
 
 const PlayIcon = semanticIconComponent('control.media-play')
 const PauseIcon = semanticIconComponent('control.media-pause')
@@ -27,7 +27,7 @@ const ANNOUNCEMENT_MS = 1_000
 /** HTMLMediaElement.HAVE_METADATA and HAVE_CURRENT_DATA, spelled out: duration is known; the first frame is decoded. */
 const HAVE_METADATA = 1, HAVE_CURRENT_DATA = 2
 
-export type MediaLease = { id: string; url: string; kind: WorkspaceMediaStreamKind; byteLength: number }
+export type MediaLease = { id: string; url: string; kind: 'audio' | 'video' | 'playlist'; byteLength: number }
 /** Where a person left one File view's playback. Presentation state, so the Renderer keeps it across that view's leases. */
 export type MediaResume = { current: { time: number; volume: number; muted: boolean; rate: number } | null }
 
@@ -57,7 +57,7 @@ function readFacts(element: HTMLMediaElement, previous: Facts): Facts {
  * The File Region's media player. The native element plays; this owns the chrome around it.
  * Facts come only from the element's own events and the lease owner's status, never from text.
  */
-export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLease; name: string; onRetry: () => void; resume?: MediaResume }) {
+export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { lease: MediaLease; name: string; onRetry: () => void; resume?: MediaResume; readStatus(id: string): Promise<{ state: import('../engines/media-player').MediaStreamFactState }> }) {
   const root = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ width: number; height: number } | null>(null)
@@ -163,12 +163,12 @@ export function MediaPlayer({ lease, name, onRetry, resume }: { lease: MediaLeas
     const element = media.current
     if (released.current || !element?.error) return
     const code = element.error.code, asked = lease.id
-    const fact = await api.files.mediaStreamStatus(asked).then(value => value.state, () => 'unknown' as const)
+    const fact = await readStatus(asked).then(value => value.state, () => 'unknown' as const)
     if (released.current || currentLease.current !== asked) return
     const view = describeMediaFailure(fact, code, decodedOnce.current, lease.kind === 'playlist' ? 'playlist' : 'file')
     if (!view) return
     setDecode('error'); setFailure(view); setBuffering(false)
-  }, [lease.id, lease.kind])
+  }, [lease.id, lease.kind, readStatus])
 
   const run = useCallback((action: MediaPlayerAction, origin: 'key' | 'pointer') => {
     const element = media.current

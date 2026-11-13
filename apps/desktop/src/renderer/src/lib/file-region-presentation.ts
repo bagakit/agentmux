@@ -1,4 +1,4 @@
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { AgentMuxFileViewMode } from '@agentmux/core/control'
 
 export type EditorRegionMode = 'edit' | 'diff' | 'preview'

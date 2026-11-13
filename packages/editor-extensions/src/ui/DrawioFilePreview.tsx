@@ -1,12 +1,14 @@
+import '../styles/drawio-preview.css'
+import '../styles/preview-common.css'
 import { useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { DiagramFilePreview } from './DiagramFilePreview'
+import { DiagramFilePreview, type DiagramHost } from './DiagramFilePreview'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 
-export function DrawioFilePreview({ content, path, visible = true }: { content: string; path?: string; workspaceId?: string; visible?: boolean }) {
+export function DrawioFilePreview({ content, path, visible = true, host }: { host: DiagramHost; content: string; path?: string; workspaceId?: string; visible?: boolean }) {
   const [page, setPage] = useState(0)
   const [pageCount, setPageCount] = useState(1)
   useEffect(() => { setPage(0); setPageCount(1) }, [content])
@@ -17,6 +19,6 @@ export function DrawioFilePreview({ content, path, visible = true }: { content: 
       <output aria-live="polite" aria-label="Diagram page">{page + 1} / {pageCount}</output>
       <button type="button" className="icon-button" aria-label="Next diagram page" disabled={page + 1 >= pageCount} onClick={() => setPage(value => value + 1)}><ThemeNavigationDisclosureIcon size={14} /></button>
     </nav>}
-    <DiagramFilePreview content={content} kind="drawio" {...(path === undefined ? {} : { path })} visible={visible} page={page} onPageCount={setPageCount} />
+    <DiagramFilePreview host={host} content={content} kind="drawio" {...(path === undefined ? {} : { path })} visible={visible} page={page} onPageCount={setPageCount} />
   </div>
 }

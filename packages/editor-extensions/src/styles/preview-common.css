@@ -1,0 +1,7 @@
+.file-preview-state { flex:1; min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--sp-4); padding:var(--sp-7); color:var(--text-2); font-size:var(--fs-prose); line-height:1.6; text-align:center; overflow-wrap:anywhere; }
+.file-preview-state strong { color:var(--text); font-size:var(--fs-title); font-weight:600; }
+.file-preview-state > span { max-width:42ch; }
+.file-preview__metadata { color:var(--text-3); font-size:var(--fs-meta); font-variant-numeric:tabular-nums; }
+.file-preview__controls { display:flex; align-items:center; gap:var(--sp-2); }
+.file-preview__controls output { min-width:5ch; text-align:center; color:var(--text-2); font-size:var(--fs-meta); font-variant-numeric:tabular-nums; }
+.file-preview__controls [aria-pressed="true"] { color:var(--text); background:var(--surface-3); font-weight:600; box-shadow:inset 0 -2px var(--text-2); }

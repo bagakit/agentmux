@@ -1,5 +1,5 @@
-import { WORKSPACE_FILE_MAX_BYTES } from '../../../../shared/workspace-file-bytes'
-import type { DataPreviewFailure } from '../file-data-preview'
+import { EXTENSION_RESULT_MAX_BYTES } from '../limits'
+import type { DataPreviewFailure } from './file-data-preview'
 import type { DataNode } from './data-model'
 
 export const NOTEBOOK_PAGE_SIZE = 20
@@ -76,10 +76,10 @@ function outputModel(output: unknown, budget: PageBudget): NotebookOutput {
 /** Called by the dedicated worker. Its complete parsed object never crosses back to React. */
 export function createNotebookReader(content: string): { page(index: number): NotebookPreview } {
   const failure = (message: string, status: 'invalid' | 'too-large' = 'invalid') => ({ page: (): NotebookPreview => ({ status, message }) })
-  if (content.length > WORKSPACE_FILE_MAX_BYTES) return failure('Notebook preview is limited to 16 MiB. The complete source remains editable.', 'too-large')
-  const bytes = new Uint8Array(Math.min(WORKSPACE_FILE_MAX_BYTES + 1, content.length * 3))
+  if (content.length > EXTENSION_RESULT_MAX_BYTES) return failure('Notebook preview is limited to 16 MiB. The complete source remains editable.', 'too-large')
+  const bytes = new Uint8Array(Math.min(EXTENSION_RESULT_MAX_BYTES + 1, content.length * 3))
   const encoded = new TextEncoder().encodeInto(content, bytes)
-  if (encoded.read < content.length || encoded.written > WORKSPACE_FILE_MAX_BYTES) return failure('Notebook preview is limited to 16 MiB of UTF-8. The complete source remains editable.', 'too-large')
+  if (encoded.read < content.length || encoded.written > EXTENSION_RESULT_MAX_BYTES) return failure('Notebook preview is limited to 16 MiB of UTF-8. The complete source remains editable.', 'too-large')
   let notebook: unknown
   try { notebook = JSON.parse(content) }
   catch (error) { return failure(`Notebook JSON needs attention: ${error instanceof Error ? error.message : 'Invalid JSON'}. The source is unchanged.`) }

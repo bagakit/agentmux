@@ -1,0 +1,62 @@
+{
+  "name": "@agentmux/editor-extensions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    ".": "./src/catalog.ts",
+    "./catalog": "./src/catalog.ts",
+    "./bytes": "./src/bytes.ts",
+    "./engines/*": "./src/engines/*.ts",
+    "./ui/*": "./src/ui/*.tsx",
+    "./pdf": "./src/pdf/PdfReader.tsx",
+    "./books": "./src/books/index.ts",
+    "./styles/*": "./src/styles/*",
+    "./diagram": "./src/protocols/diagram.ts",
+    "./format-file-bytes": "./src/format-file-bytes.ts",
+    "./excalidraw-icons": "./src/ui/excalidraw-icons.ts",
+    "./build/*": "./src/build/*.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config vitest.config.mts"
+  },
+  "dependencies": {
+    "@viz-js/viz": "3.31.0",
+    "@excalidraw/excalidraw": "0.18.1",
+    "jsonc-parser": "3.3.1",
+    "mermaid": "12.1.0",
+    "papaparse": "5.5.3",
+    "pdfjs-dist": "6.3.289",
+    "prettier": "3.9.10",
+    "smol-toml": "1.9.1",
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.5.0",
+    "yaml": "2.9.0",
+    "@agentmux/client-ui": "workspace:*",
+    "@agentmux/core": "workspace:*",
+    "@zip.js/zip.js": "2.24.0",
+    "fflate": "0.8.3",
+    "djvu-rs": "0.43.0",
+    "@plantuml/core": "1.2026.8"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/papaparse": "5.5.2",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "electron": "43.7.7",
+    "vite": "^7.3.0"
+  }
+}

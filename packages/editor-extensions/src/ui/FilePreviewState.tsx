@@ -1,3 +1,4 @@
+import '../styles/preview-common.css'
 import type { ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 

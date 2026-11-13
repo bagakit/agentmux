@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { dataPreviewBudget } from '../file-data-preview'
+import { dataPreviewBudget } from './file-data-preview'
 import type { StructuredDataKind } from './data-parse'
 import type { StructuredPreview } from './data-model'
 

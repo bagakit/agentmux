@@ -1,4 +1,4 @@
-import type { FileDiagramRequest, FileDiagramResult } from '../../../../shared/file-diagram'
+import type { FileDiagramRequest, FileDiagramResult } from '../protocols/diagram'
 
 /** Called only in a disposable private WebContents, never in the App Renderer. */
 export async function render(request: FileDiagramRequest): Promise<FileDiagramResult> {

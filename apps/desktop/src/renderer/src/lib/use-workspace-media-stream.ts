@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api'
 import { workspaceResourceKey, useWorkspaceResourceKey } from './workspace-resource-key'
-import type { MediaLease, MediaResume } from '../components/MediaPlayer'
+import type { MediaLease, MediaResume } from '@agentmux/editor-extensions/ui/MediaPlayer'
 
 type Failure = { status: string; message: string }
 

@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow } from 'electron'
-import type { FileDiagramRequest, FileDiagramResult } from '../shared/file-diagram.js'
+import type { FileDiagramRequest, FileDiagramResult } from '@agentmux/editor-extensions/diagram'
 
 type Options = { rendererUrl?: string; rendererFile?: string }
 type Job = { request: FileDiagramRequest; window?: BrowserWindow; finished: boolean; finish(result: FileDiagramResult): void }

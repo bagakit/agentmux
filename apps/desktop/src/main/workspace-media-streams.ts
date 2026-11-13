@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WorkspaceRecord } from '../shared/contracts.js'
-import { workspaceFileExtension, workspaceFilePreviewFormat } from '../shared/workspace-file-preview.js'
+import { workspaceFileExtension, workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import { WORKSPACE_MEDIA_PLAYLIST_EXTENSION, type WorkspaceMediaStreamFact, type WorkspaceMediaStreamOpenResult } from '../shared/workspace-media-stream.js'
 import { LoopbackListener } from './loopback-listener.js'
 import { previewRelativePath, previewRequestPath, previewUrlPath, sameWorkspaceResource } from './preview-paths.js'

@@ -2,7 +2,7 @@ import * as Vega from 'vega'
 import { expressionInterpreter } from 'vega-interpreter'
 import { compileVegaRuntime } from './vega-spec'
 import type { ChartBinding, ChartEvent, ChartRequest, ChartSnapshot } from './vega-chart-protocol'
-import { WORKSPACE_FILE_MAX_BYTES } from '../../../../shared/workspace-file-bytes'
+import { EXTENSION_RESULT_MAX_BYTES } from '../limits'
 
 // Vega exports these mature runtime APIs; vega-typings omits their method signatures.
 type Item = any
@@ -31,7 +31,7 @@ const loader: Vega.Loader = { load: (...args) => resource('load', args), async s
   const result = await resource('sanitize', args)
   if (!result.bytes) return result
   const bytes = new Uint8Array(result.bytes)
-  if (!/^image\/(png|jpeg|gif|webp)$/.test(result.mimeType) || bytes.byteLength > WORKSPACE_FILE_MAX_BYTES) throw new Error('Chart image is unavailable or exceeds the preview budget.')
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(result.mimeType) || bytes.byteLength > EXTENSION_RESULT_MAX_BYTES) throw new Error('Chart image is unavailable or exceeds the preview budget.')
   let binary = ''
   for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
   return { href: `data:${result.mimeType};base64,${btoa(binary)}` }
@@ -81,7 +81,7 @@ async function render() {
   rendering = true
   try {
     const svg = await view.toSVG()
-    if (new TextEncoder().encode(svg).byteLength > WORKSPACE_FILE_MAX_BYTES) throw new Error('The chart SVG exceeds the 16 MiB preview budget. Source was kept.')
+    if (new TextEncoder().encode(svg).byteLength > EXTENSION_RESULT_MAX_BYTES) throw new Error('The chart SVG exceeds the 16 MiB preview budget. Source was kept.')
     const width = Number(svg.match(/\bwidth="([\d.]+)"/)?.[1]), height = Number(svg.match(/\bheight="([\d.]+)"/)?.[1])
     const snapshot: ChartSnapshot = { svg, width, height, bindings: bindings.map(binding => ({ ...binding, value: view!.signal(binding.signal) })), events: [...streams.map(({ source, type }) => ({ source, type })), { source: 'view', type: 'mousemove' }, { source: 'view', type: 'pointermove' }], tooltip }
     if (!disposed) self.postMessage({ snapshot })

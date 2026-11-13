@@ -18,7 +18,7 @@ import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { cancelFileRegionFormat, formatFileRegion, registerFileRegionFormatter } from '../lib/file-formats/format-file-region'
 import { monacoFormatAdapter } from '../lib/file-formats/monaco-format-adapter'
-import { canFormatFile } from '../lib/file-formats/format-support'
+import { canFormatFile } from '@agentmux/editor-extensions/engines/format-support'
 
 type MonacoStandaloneEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]

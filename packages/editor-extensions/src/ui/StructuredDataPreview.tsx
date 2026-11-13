@@ -1,11 +1,12 @@
+import '../styles/preview-common.css'
 import { useEffect, useMemo, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { DATA_PREVIEW_MAX_COLUMNS } from '../../lib/file-data-preview'
-import type { StructuredDataKind } from '../../lib/file-formats/data-parse'
-import { requestStructuredPreview } from '../../lib/file-formats/data-structured-request'
-import type { DataNode, DataRecord, StructuredPreview } from '../../lib/file-formats/data-model'
-import { FilePreviewState } from '../FilePreviewState'
-import '../../styles/file-data-preview.css'
+import { DATA_PREVIEW_MAX_COLUMNS } from '../engines/file-data-preview'
+import type { StructuredDataKind } from '../engines/data-parse'
+import { requestStructuredPreview } from '../engines/data-structured-request'
+import type { DataNode, DataRecord, StructuredPreview } from '../engines/data-model'
+import { FilePreviewState } from './FilePreviewState'
+import '../styles/file-data-preview.css'
 import './StructuredDataPreview.css'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')

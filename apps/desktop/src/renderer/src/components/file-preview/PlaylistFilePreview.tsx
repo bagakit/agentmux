@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { useWorkspaceMediaStream } from '../../lib/use-workspace-media-stream'
 import { documentKey } from '../../lib/workbench-tabs'
+import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
-import { FilePreviewState } from '../FilePreviewState'
+import { FilePreviewState } from '@agentmux/editor-extensions/ui/FilePreviewState'
 
-const MediaPlayer = lazy(async () => ({ default: (await import('../MediaPlayer')).MediaPlayer }))
+const MediaPlayer = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/MediaPlayer')).MediaPlayer }))
 
 /**
  * A playlist's preview plays the saved file through its playback lease; its source stays editable text.
@@ -24,7 +25,7 @@ export function PlaylistFilePreview({ workspaceId, path, visible }: { workspaceI
   return <div className="file-playlist-preview">
     {dirty ? <div className="file-html-preview__notice" role="status">Playing the saved playlist. Save to play your changes.</div> : null}
     <Suspense fallback={<FilePreviewState title="Preparing player" />}>
-      <MediaPlayer key={stream.lease.id} lease={stream.lease} name={path} onRetry={stream.reload} resume={stream.resume} />
+      <MediaPlayer readStatus={api.files.mediaStreamStatus} key={stream.lease.id} lease={stream.lease} name={path} onRetry={stream.reload} resume={stream.resume} />
     </Suspense>
   </div>
 }

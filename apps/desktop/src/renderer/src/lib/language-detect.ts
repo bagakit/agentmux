@@ -1,5 +1,5 @@
-import { workspaceFileFormat, WORKSPACE_SOURCE_LANGUAGE_IDS } from '../../../shared/workspace-file-format'
-import { workspaceFileExtension } from '../../../shared/workspace-file-preview'
+import { workspaceFileFormat, WORKSPACE_SOURCE_LANGUAGE_IDS } from '@agentmux/editor-extensions/catalog'
+import { workspaceFileExtension } from '@agentmux/editor-extensions/catalog'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   // Monaco maps TSX/CTS/MTS to typescript and JSX/MJS/CJS to javascript.

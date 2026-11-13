@@ -1,0 +1,9 @@
+.file-build-preview { display:flex; flex-direction:column; height:100%; min-width:0; min-height:0; color:var(--text); font-size:var(--fs-meta); line-height:1.5; }
+.file-build-preview__actions { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); }
+.file-build-preview__actions strong { font-weight:600; }
+.file-build-preview__actions [role="status"] { color:var(--text-2); }
+.file-build-preview__help { flex:none; margin:0; padding:0 var(--sp-4) var(--sp-4); color:var(--text-2); }
+.file-build-preview__log { flex:none; padding:0 var(--sp-4) var(--sp-3); color:var(--text-2); }
+.file-build-preview__log summary { cursor:pointer; }
+.file-build-preview__log pre { max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:var(--fs-micro); }
+.file-build-preview__artifact { display:flex; flex:1; min-width:0; min-height:0; }

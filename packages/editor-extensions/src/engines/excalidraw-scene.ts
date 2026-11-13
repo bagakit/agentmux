@@ -1,4 +1,4 @@
-import { DATA_PREVIEW_MAX_BYTES } from '../file-data-preview'
+import { DATA_PREVIEW_MAX_BYTES } from './file-data-preview'
 
 export const EXCALIDRAW_PREVIEW_MAX_ELEMENTS = 256
 export const EXCALIDRAW_PREVIEW_MAX_POINTS = 10_000

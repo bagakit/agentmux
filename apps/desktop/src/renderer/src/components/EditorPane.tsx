@@ -1,5 +1,5 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import { NoteRecoveryDrawer, NoteRecoverySummary, type NoteRecoverySection } from './NoteRecoveryDrawer'
 import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { RetainedDocumentDraftNotice, useNoteConversionObservation } from './RetainedDocumentDraftNotice'
@@ -21,7 +21,7 @@ import { EditorReleasedState } from './EditorReleasedState'
 import { loadFileSourceEditor } from '../lib/file-surface-loading'
 import type { FileEditorViewState } from './FileSourceEditor'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
-import { canFormatFile } from '../lib/file-formats/format-support'
+import { canFormatFile } from '@agentmux/editor-extensions/engines/format-support'
 import { cancelFileRegionFormat, formatFileRegion, type FileFormatResult } from '../lib/file-formats/format-file-region'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')

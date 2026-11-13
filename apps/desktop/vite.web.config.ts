@@ -3,7 +3,7 @@ import { radixOverlayAliases } from './scripts/radix-overlay-aliases'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
-import { pdfjsViewerAssets } from './scripts/pdfjs-viewer-assets'
+import { pdfjsViewerAssets } from '@agentmux/editor-extensions/build/pdfjs-viewer-assets'
 
 export default defineConfig({
   root: resolve(import.meta.dirname, 'src/renderer'),

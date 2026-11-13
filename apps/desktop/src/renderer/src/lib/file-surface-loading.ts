@@ -1,4 +1,4 @@
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { EditorRegionMode } from './file-region-presentation'
 
 export const loadFileSourceEditor = async () => ({ default: (await import('../components/FileSourceEditor')).FileSourceEditor })

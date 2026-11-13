@@ -1,5 +1,5 @@
-import type { FileDiagramRequest, FileDiagramResult } from '../../../../shared/file-diagram'
-import { WORKSPACE_FILE_MAX_BYTES } from '../../../../shared/workspace-file-bytes'
+import type { FileDiagramRequest, FileDiagramResult } from '../protocols/diagram'
+import { EXTENSION_RESULT_MAX_BYTES } from '../limits'
 import { loadDiagramScript } from './diagram-script'
 
 type PlantUmlEngine = {
@@ -21,6 +21,6 @@ export async function render(request: FileDiagramRequest): Promise<FileDiagramRe
     catch (error) { reject(error) }
   })
   if (!svg.trim().startsWith('<svg')) throw new Error('PlantUML did not produce an SVG diagram.')
-  if (new TextEncoder().encode(svg).byteLength > WORKSPACE_FILE_MAX_BYTES) throw new Error('The rendered PlantUML diagram exceeds the preview transfer budget.')
+  if (new TextEncoder().encode(svg).byteLength > EXTENSION_RESULT_MAX_BYTES) throw new Error('The rendered PlantUML diagram exceeds the preview transfer budget.')
   return { id: request.id, svg }
 }

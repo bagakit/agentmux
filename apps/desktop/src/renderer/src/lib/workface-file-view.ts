@@ -1,7 +1,7 @@
 import { regionIds } from '@agentmux/layout'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialSave } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { EditorRegionDiffState } from '../store'
 import type { FileWorkbenchState } from './file-workbench-state'
 import { effectiveFileRegionMode, fileSupportsInlinePreview, publicFileRegionMode, storedFileRegionMode, type EditorRegionMode } from './file-region-presentation'

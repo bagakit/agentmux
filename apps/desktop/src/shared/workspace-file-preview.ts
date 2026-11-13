@@ -1,47 +1,7 @@
 import type { WorkspaceFileByteRead } from './workspace-file-bytes'
+import type { WorkspaceFilePreviewKind } from '@agentmux/editor-extensions/catalog'
 
-/** File routing and declared MIME candidates. Read success does not prove codec support. */
-export const WORKSPACE_FILE_PREVIEW_FORMATS = {
-  png: { kind: 'image', mimeType: 'image/png', sourceEditable: false },
-  jpg: { kind: 'image', mimeType: 'image/jpeg', sourceEditable: false },
-  jpeg: { kind: 'image', mimeType: 'image/jpeg', sourceEditable: false },
-  gif: { kind: 'image', mimeType: 'image/gif', sourceEditable: false },
-  webp: { kind: 'image', mimeType: 'image/webp', sourceEditable: false },
-  bmp: { kind: 'image', mimeType: 'image/bmp', sourceEditable: false },
-  avif: { kind: 'image', mimeType: 'image/avif', sourceEditable: false },
-  ico: { kind: 'image', mimeType: 'image/x-icon', sourceEditable: false },
-  svg: { kind: 'image', mimeType: 'image/svg+xml', sourceEditable: true },
-  mp3: { kind: 'audio', mimeType: 'audio/mpeg', sourceEditable: false },
-  wav: { kind: 'audio', mimeType: 'audio/wav', sourceEditable: false },
-  ogg: { kind: 'audio', mimeType: 'audio/ogg', sourceEditable: false },
-  oga: { kind: 'audio', mimeType: 'audio/ogg', sourceEditable: false },
-  opus: { kind: 'audio', mimeType: 'audio/ogg', sourceEditable: false },
-  flac: { kind: 'audio', mimeType: 'audio/flac', sourceEditable: false },
-  m4a: { kind: 'audio', mimeType: 'audio/mp4', sourceEditable: false },
-  aac: { kind: 'audio', mimeType: 'audio/aac', sourceEditable: false },
-  mp4: { kind: 'video', mimeType: 'video/mp4', sourceEditable: false },
-  m4v: { kind: 'video', mimeType: 'video/mp4', sourceEditable: false },
-  webm: { kind: 'video', mimeType: 'video/webm', sourceEditable: false },
-  mov: { kind: 'video', mimeType: 'video/quicktime', sourceEditable: false },
-  ogv: { kind: 'video', mimeType: 'video/ogg', sourceEditable: false },
-  pdf: { kind: 'pdf', mimeType: 'application/pdf', sourceEditable: false }
-} as const
-
-export type WorkspaceFilePreviewFormat = (typeof WORKSPACE_FILE_PREVIEW_FORMATS)[keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS]
-export type WorkspaceFilePreviewKind = WorkspaceFilePreviewFormat['kind']
 export type WorkspaceFilePreviewReadOptions = { expectedRevision?: string; expectedResource?: { hostId: string; workspacePath: string } }
-
-export function workspaceFileExtension(path: string): string {
-  const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
-  const dot = name.lastIndexOf('.')
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
-}
-
-export function workspaceFilePreviewFormat(path: string): WorkspaceFilePreviewFormat | null {
-  const extension = workspaceFileExtension(path)
-  return Object.hasOwn(WORKSPACE_FILE_PREVIEW_FORMATS, extension)
-    ? WORKSPACE_FILE_PREVIEW_FORMATS[extension as keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS] : null
-}
 
 /** Kinds read as one bounded bytes snapshot. Audio and video stream through their playback lease. */
 export type WorkspaceFileSnapshotKind = Exclude<WorkspaceFilePreviewKind, 'audio' | 'video'>

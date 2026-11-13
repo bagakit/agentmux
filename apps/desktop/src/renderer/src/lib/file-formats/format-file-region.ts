@@ -1,5 +1,6 @@
+import { createFormatWorker } from '@agentmux/editor-extensions/engines/worker-clients'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { canFormatFile } from './format-support'
+import { canFormatFile } from '@agentmux/editor-extensions/engines/format-support'
 
 export type FileFormatResult = { status: 'formatted' | 'unchanged' | 'unsupported' | 'unavailable' | 'stale' | 'cancelled' | 'failed'; message?: string }
 export type FileFormatSnapshot = { path: string; content: string; model: object; version: number; generation: number }
@@ -39,7 +40,7 @@ export async function formatFileRegion(regionId: string, signal?: AbortSignal): 
   if (!canFormatFile(snapshot.path)) return { status: 'unsupported', message: 'This file has no source-preserving formatter.' }
   jobs.get(regionId)?.cancel()
   let worker: Worker
-  try { worker = new Worker(new URL('./format-worker.ts', import.meta.url), { type: 'module' }) }
+  try { worker = createFormatWorker() }
   catch { return { status: 'unavailable', message: 'The formatter could not start. The draft is unchanged.' } }
   return await new Promise(resolve => {
     const id = mintObjectId()

@@ -1,52 +1,33 @@
-import { mintObjectId } from '@agentmux/core/object-id'
-import { useEffect, useMemo, useState } from 'react'
-import { presentError } from '@agentmux/client-ui/error-presentation'
-import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
-import { DiagramImage } from '@agentmux/client-ui/components/DiagramImage'
-import { diagramSvgImage } from '@agentmux/client-ui/diagram-svg-image'
-import type { FileDiagramKind } from '../../../../shared/file-diagram'
+import { useMemo } from 'react'
+import { useClientUiOwnerDocument } from '@agentmux/client-ui/platform'
+import { DiagramFilePreview as Diagram, type DiagramHost } from '@agentmux/editor-extensions/ui/DiagramFilePreview'
+import { DrawioFilePreview as Drawio } from '@agentmux/editor-extensions/ui/DrawioFilePreview'
+import { PlantUmlFilePreview as PlantUml } from '@agentmux/editor-extensions/ui/PlantUmlFilePreview'
 import { api } from '../../lib/api'
 import { APP_APPEARANCE_DATASET_KEY } from '../../lib/theme-contract'
+import type { ComponentProps } from 'react'
 
-/** One transient host job for the current source. Standalone files and Markdown use this consumer. */
-export function DiagramFilePreview({ content, kind, path, visible = true, page, onPageCount }: {
-  content: string; kind: FileDiagramKind; path?: string | undefined; visible?: boolean; page?: number; onPageCount?(count: number): void
-}) {
-  const { ref, visible: inView } = useVisibleWork<HTMLDivElement>(visible)
-  const [attempt, setAttempt] = useState(0)
-  const [, setAppearanceRevision] = useState(0)
-  const theme = document.documentElement.dataset[APP_APPEARANCE_DATASET_KEY] === 'light' ? 'light' : 'dark'
-  useEffect(() => {
-    if (!inView) return
-    const observer = new MutationObserver(() => setAppearanceRevision(value => value + 1))
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: [`data-${APP_APPEARANCE_DATASET_KEY}`] })
-    return () => observer.disconnect()
-  }, [inView])
-  const owner = useMemo(() => ({}), [content, kind, page, theme, inView, attempt])
-  const [result, setResult] = useState<{ owner: object; source: string; kind: FileDiagramKind; page: number | undefined; attempt: number; url?: string; error?: string } | null>(null)
-  useEffect(() => {
-    if (!inView) return
-    let current = true, url: string | undefined
-    const id = mintObjectId()
-    void api.files.renderDiagram({ id, kind, content, theme, ...(page !== undefined ? { page } : {}) }).then(value => {
-      if (!current || value.id !== id) return
-      if (value.error) setResult({ owner, source: content, kind, page, attempt, error: value.error })
-      else {
-        url = URL.createObjectURL(diagramSvgImage(value.svg))
-        setResult({ owner, source: content, kind, page, attempt, url })
-        if (value.pageCount !== undefined) onPageCount?.(value.pageCount)
-      }
-    }).catch(error => { if (current) setResult({ owner, source: content, kind, page, attempt, error: presentError(error) }) })
-    return () => { current = false; void api.files.cancelDiagram(id).catch(() => {}); if (url) URL.revokeObjectURL(url) }
-  }, [content, kind, page, theme, inView, attempt])
-  const ready = inView && result?.owner === owner && result.source === content && result.kind === kind && result.page === page && result.attempt === attempt ? result : null
-  return <div ref={ref} className="file-diagram-preview" data-diagram-kind={kind} style={{ minHeight: 80, overflow: 'auto' }}>
-    {ready?.url ? <DiagramImage key={ready.url} src={ready.url} alt={`${path ?? kind} diagram`} onError={() => {
-      setResult(current => current === ready ? { owner, source: content, kind, page, attempt, error: 'Diagram image could not be decoded. Retry preview or return to Source.' } : current)
-    }} /> : <>
-      {ready?.error ? <div className="file-preview-state" role="alert"><strong>Diagram could not render</strong><span>{ready.error}</span>
-        <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : <div role="status">{inView ? 'Rendering diagram…' : 'Diagram preview'}</div>}
-      <pre className="md-block-code"><code>{content}</code></pre>
-    </>}
-  </div>
+/** The Desktop supplies its current theme and original isolated Main render operations. */
+function useDiagramHost(): DiagramHost {
+  const owner = useClientUiOwnerDocument() ?? document
+  return useMemo(() => ({
+    readTheme: () => owner.documentElement.dataset[APP_APPEARANCE_DATASET_KEY] === 'light' ? 'light' : 'dark',
+    subscribeTheme(listener) {
+      const Observer = owner.defaultView?.MutationObserver
+      if (!Observer) return () => {}
+      const observer = new Observer(listener)
+      observer.observe(owner.documentElement, { attributes: true, attributeFilter: [`data-${APP_APPEARANCE_DATASET_KEY}`] })
+      return () => observer.disconnect()
+    },
+    render: api.files.renderDiagram, cancel: api.files.cancelDiagram
+  }), [owner])
+}
+export function DiagramFilePreview(props: Omit<ComponentProps<typeof Diagram>, 'host'>) {
+  return <Diagram {...props} host={useDiagramHost()} />
+}
+export function DrawioFilePreview(props: Omit<ComponentProps<typeof Drawio>, 'host'>) {
+  return <Drawio {...props} host={useDiagramHost()} />
+}
+export function PlantUmlFilePreview(props: Omit<ComponentProps<typeof PlantUml>, 'host'>) {
+  return <PlantUml {...props} host={useDiagramHost()} />
 }

@@ -1,9 +1,10 @@
+import '../styles/preview-common.css'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { Node } from 'jsonc-parser'
-import { readJsonPreview } from '../lib/file-json-preview'
-import { readDelimitedPreview, type DelimitedDialect } from '../lib/file-delimited-preview'
+import { readJsonPreview } from '../engines/file-json-preview'
+import { readDelimitedPreview, type DelimitedDialect } from '../engines/file-delimited-preview'
 import { FilePreviewState } from './FilePreviewState'
 import '../styles/file-data-preview.css'
 

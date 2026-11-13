@@ -336,7 +336,7 @@ import {
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
-import { workspaceFilePreviewFormat } from '../../shared/workspace-file-preview'
+import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import { noteDirectorySourceKey, type NoteDirectoryRead } from './lib/note-directory-sources'
 import {
   advanceDocumentLifetime,

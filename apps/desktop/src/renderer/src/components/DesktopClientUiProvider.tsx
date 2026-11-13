@@ -19,8 +19,8 @@ import { api } from '../lib/api'
 import { createDesktopMoteInputReader, desktopMoteMemberName } from '../lib/mote-input-reader'
 
 const DiagramFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DiagramFilePreview })))
-const DotFilePreview = lazy(() => import('./file-preview/DotFilePreview').then(module => ({ default: module.DotFilePreview })))
-const DrawioFilePreview = lazy(() => import('./file-preview/DrawioFilePreview').then(module => ({ default: module.DrawioFilePreview })))
+const DotFilePreview = lazy(() => import('@agentmux/editor-extensions/ui/DotFilePreview').then(module => ({ default: module.DotFilePreview })))
+const DrawioFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DrawioFilePreview })))
 
 /** Focus intents are Desktop workface facts; a shared editor only registers its own DOM target. */
 export function bindDesktopComposerFocus(target: HTMLElement, focus: () => boolean): () => void {

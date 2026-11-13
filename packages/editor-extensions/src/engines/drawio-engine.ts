@@ -1,5 +1,5 @@
-import type { FileDiagramRequest, FileDiagramResult } from '../../../../shared/file-diagram'
-import { WORKSPACE_FILE_MAX_BYTES } from '../../../../shared/workspace-file-bytes'
+import type { FileDiagramRequest, FileDiagramResult } from '../protocols/diagram'
+import { EXTENSION_RESULT_MAX_BYTES } from '../limits'
 import { loadDiagramScript } from './diagram-script'
 
 type Viewer = {
@@ -57,7 +57,7 @@ export async function render(request: FileDiagramRequest): Promise<FileDiagramRe
       try { viewer!.editor.convertImages(viewer!.graph.getSvg(null, null, 8), resolve) } catch (error) { reject(error) }
     })
     const text = new XMLSerializer().serializeToString(svg)
-    if (new TextEncoder().encode(text).byteLength > WORKSPACE_FILE_MAX_BYTES) throw new Error('The rendered draw.io diagram exceeds the preview transfer budget.')
+    if (new TextEncoder().encode(text).byteLength > EXTENSION_RESULT_MAX_BYTES) throw new Error('The rendered draw.io diagram exceeds the preview transfer budget.')
     return { id: request.id, svg: text, pageCount: pages }
   } finally {
     if (viewer?.editor.destroy) viewer.editor.destroy()

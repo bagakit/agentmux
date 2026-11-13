@@ -1,0 +1,46 @@
+import '../styles/preview-common.css'
+const noSubscription = () => () => {}
+export type DiagramHost = { readTheme(): 'light' | 'dark'; subscribeTheme(listener: () => void): () => void; render(request: FileDiagramRequest): Promise<FileDiagramResult>; cancel(id: string): Promise<unknown> }
+import { mintObjectId } from '@agentmux/core/object-id'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
+import { DiagramImage } from '@agentmux/client-ui/components/DiagramImage'
+import { diagramSvgImage } from '@agentmux/client-ui/diagram-svg-image'
+import type { FileDiagramKind, FileDiagramRequest, FileDiagramResult } from '../protocols/diagram'
+
+/** One transient host job for the current source. Standalone files and Markdown use this consumer. */
+export function DiagramFilePreview({ content, kind, path, visible = true, page, onPageCount, host }: {
+  host: DiagramHost; content: string; kind: FileDiagramKind; path?: string | undefined; visible?: boolean; page?: number; onPageCount?(count: number): void
+}) {
+  const { ref, visible: inView } = useVisibleWork<HTMLDivElement>(visible)
+  const [attempt, setAttempt] = useState(0)
+  const theme = useSyncExternalStore(inView ? host.subscribeTheme : noSubscription, host.readTheme, host.readTheme)
+  const owner = useMemo(() => ({}), [content, kind, page, theme, inView, attempt, host.render, host.cancel])
+  const [result, setResult] = useState<{ owner: object; source: string; kind: FileDiagramKind; page: number | undefined; attempt: number; url?: string; error?: string } | null>(null)
+  useEffect(() => {
+    if (!inView) return
+    let current = true, url: string | undefined
+    const id = mintObjectId()
+    void host.render({ id, kind, content, theme, ...(page !== undefined ? { page } : {}) }).then(value => {
+      if (!current || value.id !== id) return
+      if (value.error) setResult({ owner, source: content, kind, page, attempt, error: value.error })
+      else {
+        url = URL.createObjectURL(diagramSvgImage(value.svg))
+        setResult({ owner, source: content, kind, page, attempt, url })
+        if (value.pageCount !== undefined) onPageCount?.(value.pageCount)
+      }
+    }).catch(error => { if (current) setResult({ owner, source: content, kind, page, attempt, error: presentError(error) }) })
+    return () => { current = false; void host.cancel(id).catch(() => {}); if (url) URL.revokeObjectURL(url) }
+  }, [content, kind, page, theme, inView, attempt, host.render, host.cancel])
+  const ready = inView && result?.owner === owner && result.source === content && result.kind === kind && result.page === page && result.attempt === attempt ? result : null
+  return <div ref={ref} className="file-diagram-preview" data-diagram-kind={kind} style={{ minHeight: 80, overflow: 'auto' }}>
+    {ready?.url ? <DiagramImage key={ready.url} src={ready.url} alt={`${path ?? kind} diagram`} onError={() => {
+      setResult(current => current === ready ? { owner, source: content, kind, page, attempt, error: 'Diagram image could not be decoded. Retry preview or return to Source.' } : current)
+    }} /> : <>
+      {ready?.error ? <div className="file-preview-state" role="alert"><strong>Diagram could not render</strong><span>{ready.error}</span>
+        <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : <div role="status">{inView ? 'Rendering diagram…' : 'Diagram preview'}</div>}
+      <pre className="md-block-code"><code>{content}</code></pre>
+    </>}
+  </div>
+}

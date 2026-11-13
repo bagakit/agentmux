@@ -7,7 +7,7 @@ import { api } from './api'
 import { noteResourceReadParams } from './note-history-target'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import { useAppStore } from '../store'
-import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
+import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 
 function base64(bytes: Uint8Array): string {
   let text = ''

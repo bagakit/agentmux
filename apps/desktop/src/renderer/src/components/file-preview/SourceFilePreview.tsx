@@ -1,22 +1,22 @@
 import { lazy, useEffect, useState } from 'react'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
-import type { WorkspaceSourcePreview } from '../../../../shared/workspace-file-format'
+import type { WorkspaceSourcePreview } from '@agentmux/editor-extensions/catalog'
 import { ImageContent } from '../FilePreviewPane'
 import { WorkspaceImage } from '../WorkspaceImage'
 import { MarkdownRemoteImage } from '@agentmux/client-ui/components/MarkdownRemoteImage'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { useMarkdownReadingLayout } from '../../lib/markdown-reading-layout'
 
-const FileDataPreview = lazy(async () => ({ default: (await import('../FileDataPreview')).FileDataPreview }))
+const FileDataPreview = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/FileDataPreview')).FileDataPreview }))
 const HtmlFilePreview = lazy(async () => ({ default: (await import('../HtmlFilePreview')).HtmlFilePreview }))
-const StructuredDataPreview = lazy(async () => ({ default: (await import('./StructuredDataPreview')).StructuredDataPreview }))
-const NotebookFilePreview = lazy(async () => ({ default: (await import('./NotebookFilePreview')).NotebookFilePreview }))
+const StructuredDataPreview = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/StructuredDataPreview')).StructuredDataPreview }))
+const NotebookFilePreview = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/NotebookFilePreview')).NotebookFilePreview }))
 const DiagramFilePreview = lazy(async () => ({ default: (await import('./DiagramFilePreview')).DiagramFilePreview }))
-const DotFilePreview = lazy(async () => ({ default: (await import('./DotFilePreview')).DotFilePreview }))
-const DrawioFilePreview = lazy(async () => ({ default: (await import('./DrawioFilePreview')).DrawioFilePreview }))
-const PlantUmlFilePreview = lazy(async () => ({ default: (await import('./PlantUmlFilePreview')).PlantUmlFilePreview }))
-const ExcalidrawFilePreview = lazy(async () => ({ default: (await import('./ExcalidrawFilePreview')).ExcalidrawFilePreview }))
+const DotFilePreview = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/DotFilePreview')).DotFilePreview }))
+const DrawioFilePreview = lazy(async () => ({ default: (await import('./DiagramFilePreview')).DrawioFilePreview }))
+const PlantUmlFilePreview = lazy(async () => ({ default: (await import('./DiagramFilePreview')).PlantUmlFilePreview }))
+const ExcalidrawFilePreview = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/ExcalidrawFilePreview')).ExcalidrawFilePreview }))
 const VegaFilePreview = lazy(async () => ({ default: (await import('./VegaFilePreview')).VegaFilePreview }))
 const BuildFilePreview = lazy(async () => ({ default: (await import('./BuildFilePreview')).BuildFilePreview }))
 const PlaylistFilePreview = lazy(async () => ({ default: (await import('./PlaylistFilePreview')).PlaylistFilePreview }))

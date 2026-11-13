@@ -1,6 +1,6 @@
 import { isAlias, isMap, isScalar, isSeq, LineCounter, parseAllDocuments, visit } from 'yaml'
 import { parse as parseToml, TomlError } from 'smol-toml'
-import { dataPreviewBudget, DATA_PREVIEW_MAX_ROWS } from '../file-data-preview'
+import { dataPreviewBudget, DATA_PREVIEW_MAX_ROWS } from './file-data-preview'
 import { DATA_TREE_DEPTH, DATA_TREE_NODES, type DataDiagnostic, type DataNode, type StructuredPreview } from './data-model'
 
 function yamlNode(value: unknown, source: string, depth: number, budget: { remaining: number }): DataNode {

@@ -1,5 +1,5 @@
 import { parseTree, printParseErrorCode, type ParseError } from 'jsonc-parser'
-import { dataPreviewBudget, DATA_PREVIEW_MAX_ROWS } from '../file-data-preview'
+import { dataPreviewBudget, DATA_PREVIEW_MAX_ROWS } from './file-data-preview'
 import { jsonDataNode, type DataDiagnostic, type DataRecord, type StructuredPreview } from './data-model'
 
 /** Strict JSON per physical line; a bad record never removes a neighbouring good one. */

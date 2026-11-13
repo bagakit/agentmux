@@ -1,5 +1,5 @@
 import type { Node as JsonNode } from 'jsonc-parser'
-import type { DataPreviewFailure } from '../file-data-preview'
+import type { DataPreviewFailure } from './file-data-preview'
 
 /** A bounded reader model, never a replacement for the editable source. */
 export type DataNode = {

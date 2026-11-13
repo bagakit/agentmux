@@ -1,9 +1,11 @@
+import '../styles/preview-common.css'
+import { createNotebookWorker } from '../engines/worker-clients'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { MarkdownCodeBlock } from '@agentmux/client-ui/components/MarkdownCodeBlock'
-import type { NotebookCell, NotebookMime, NotebookPreview, NotebookReply, NotebookRequest } from '../../lib/file-formats/data-notebook'
-import { FilePreviewState } from '../FilePreviewState'
+import type { NotebookCell, NotebookMime, NotebookPreview, NotebookReply, NotebookRequest } from '../engines/data-notebook'
+import { FilePreviewState } from './FilePreviewState'
 import { DataTree } from './StructuredDataPreview'
 import { StaticMarkupPreview } from '@agentmux/client-ui/components/StaticMarkupPreview'
 import './NotebookFilePreview.css'
@@ -77,7 +79,7 @@ export function NotebookFilePreview({ content, visible = true, ownerKey = '' }: 
     wantedPage.current = 0; setPage(0)
     const timer = setTimeout(() => {
       try {
-        worker = new Worker(new URL('../../lib/file-formats/data-notebook.worker.ts', import.meta.url), { type: 'module' })
+        worker = createNotebookWorker()
         const job = `notebook-${++nextJob}`
         active.current = { request, worker, job }
         worker.onmessage = (event: MessageEvent<NotebookReply>) => {
