@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { assertJoinedReferenceCandidate, assertReferenceProductCandidate, referenceProofSha as sha } from '../scripts/lib/a2a-reference-proof.mjs'
+import { assertJoinedReferenceCandidate, assertReferenceProductCandidate, assertNativeSourcePair, nativeSourceConditions, referenceProofSha as sha } from '../scripts/lib/a2a-reference-proof.mjs'
 
 function candidate(prepared = true) {
   const sources = Object.fromEntries(Array.from({ length: 40 }, (_, index) => ['packages/core/src/owner-' + index + '.ts', sha('source-' + index)]))
@@ -74,4 +74,33 @@ const drifts = [
 for (const [name, change] of drifts) test('rejects ' + name, () => {
   const facts = candidate(); change(facts)
   assert.throws(() => assertJoinedReferenceCandidate(facts), assert.AssertionError)
+})
+
+const mutation = 'final-input-fence-is-omitted'
+const dependency = () => ({ file: 'dependency.ts', originalSHA256: sha('dependency'), sha256: sha('dependency'), bytes: 10 })
+const target = edited => ({ file: 'prompt-submission.ts', originalSHA256: sha('original owner'), sha256: sha(edited ? 'edited owner' : 'original owner'),
+  bytes: Buffer.byteLength(edited ? 'edited owner' : 'original owner'), ...(edited ? { mutation } : {}) })
+
+test('pairs historical compiler conditions while allowing exactly the declared owner mutation', () => {
+  assert.doesNotThrow(() => assertNativeSourcePair([target(true), dependency()], [dependency(), target(false)], mutation))
+})
+
+test('rejects individually valid dependency versions that differ between RED and restore', () => {
+  const red = [target(true), dependency()], restored = [target(false), { ...dependency(), originalSHA256: sha('new dependency'), sha256: sha('new dependency') }]
+  assert.doesNotThrow(() => nativeSourceConditions(red, 'prompt-submission.ts'))
+  assert.doesNotThrow(() => nativeSourceConditions(restored, 'prompt-submission.ts'))
+  assert.throws(() => assertNativeSourcePair(red, restored, mutation), assert.AssertionError)
+})
+
+test('rejects missing conditions, changed non-target byte counts and multiple source versions in one run', () => {
+  assert.throws(() => assertNativeSourcePair([target(true), dependency()], [target(false)], mutation), assert.AssertionError)
+  assert.throws(() => assertNativeSourcePair([target(true), dependency()], [target(false), { ...dependency(), bytes: 11 }], mutation), assert.AssertionError)
+  assert.throws(() => nativeSourceConditions([dependency(), { ...dependency(), originalSHA256: sha('changed'), sha256: sha('changed') }]), assert.AssertionError)
+})
+
+test('rejects undeclared compilation edits and malformed source conditions', () => {
+  assert.throws(() => nativeSourceConditions([{ ...dependency(), sha256: sha('edited') }]), assert.AssertionError)
+  assert.throws(() => nativeSourceConditions([{ ...dependency(), file: '../foreign.ts' }]), assert.AssertionError)
+  assert.throws(() => nativeSourceConditions([{ ...dependency(), originalSHA256: 'invalid' }]), assert.AssertionError)
+  assert.throws(() => nativeSourceConditions([{ ...dependency(), bytes: 0 }]), assert.AssertionError)
 })
