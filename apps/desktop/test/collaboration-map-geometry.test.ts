@@ -54,12 +54,15 @@ it('joins visible overview points to the original directed route without moving 
   expect(Math.hypot(numbers[0]!-125, numbers[1]!-47)).toBeCloseTo(56)
   expect(Math.hypot(numbers.at(-2)!-625, numbers.at(-1)!-247)).toBeCloseTo(24)
   expect(route).toEqual(original)
-  // A point slot's largest face holds its screen size only until it spans twice the
-  // slot, so neighbours a layout gap apart never overlap; nearer, it is world-sized.
-  const closed = member('closed', 0, 0, 24, 24)
-  expect(collaborationOverviewScale(closed, .05) * 17).toBeCloseTo(48)
-  expect(collaborationOverviewScale(closed, .9)).toBeCloseTo(1 / .9)
-  expect(collaborationOverviewScale(closed, 1)).toBe(1)
+  // A point slot keeps each face at its design screen size while the slot plus half its
+  // outline margin has room; further out, a screen floor keeps steps ranked, never a speck.
+  const closed = member('closed', 0, 0, 24, 24), screen = (diameter: number, zoom: number) => collaborationOverviewScale(closed, zoom, diameter) * diameter * zoom
+  expect(screen(18, .9)).toBeCloseTo(18); expect(screen(18, 1)).toBeCloseTo(18)
+  // At .6 the room (24 + 18 world px) still holds the design size: 18 screen px.
+  expect(screen(18, .6)).toBeCloseTo(18)
+  for (const zoom of [.05, .1, .2]) {
+    expect(screen(18, zoom)).toBeCloseTo(16); expect(screen(15, zoom)).toBeCloseTo(14); expect(screen(12, zoom)).toBeCloseTo(12)
+  }
 })
 
 

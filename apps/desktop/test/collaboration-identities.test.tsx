@@ -70,6 +70,11 @@ it('joins only a confirmed Runtime creator while retaining one original creation
   expect(resolved.relations[0]!.source).toBe(collaborationSubjectKey({ hostId: 'original-parent-owner', agentSessionId: 'parent' }))
   expect(resolved.agents.has(collaborationSubjectKey({ hostId: 'child-owner', agentSessionId: 'parent' }))).toBe(false)
   expect(resolved.agents.get(resolved.relations[0]!.source)).toMatchObject({ providerId: 'parent-provider', executorId: 'parent-executor' })
+  // A retired late lookup carries its original retirement record, separately from observed activity.
+  const retiredRead = resolveCollaborationIdentities(original, new Map([[parent.id, { reference: peer, loading: false, issue: null,
+    source: { hostId: 'original-parent-owner', agentSessionId: 'parent', state: 'retired', retiredAt: 4242 } }]]))
+  const retiredMember = retiredRead.agents.get(retiredRead.relations[0]!.source)!
+  expect(retiredMember).toMatchObject({ tier: 'closed', retiredAt: 4242 }); expect(retiredMember.lastActivityAt).toBeUndefined()
   expect(resolved.relations[0]!.evidence[0]).toBe(original.relations[0]!.evidence[0])
   expect(project([], []).relations).toEqual([])
 })

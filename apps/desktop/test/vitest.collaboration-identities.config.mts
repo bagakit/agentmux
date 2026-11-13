@@ -17,7 +17,8 @@ export const identityMutations = [
   { name: 'semantic-owner-epoch', file: 'main/runtime-controller.ts', before: 'runtimeOwner(host.client)?.ownerInstanceId !== owner.ownerInstanceId', after: 'false' },
   { name: 'returned-session', file: 'main/runtime-controller.ts', before: 'sources.some(source => source.agentSessionId !== reference.agentSessionId)', after: 'false' },
   { name: 'demand-scope-churn', file: 'renderer/src/lib/use-collaboration-identities.ts', before: 'const current = () => enabled && currentOwner.current === ownerToken', after: 'const current = () => active' },
-  { name: 'retained-creation', file: 'renderer/src/lib/agent-collaboration.ts', before: 'for (const source of retained)', after: 'for (const source of [])' }
+  { name: 'retained-creation', file: 'renderer/src/lib/agent-collaboration.ts', before: 'for (const source of retained)', after: 'for (const source of [])' },
+  { name: 'late-retirement-time', file: 'renderer/src/lib/use-collaboration-identities.ts', before: "...(source.retiredAt ? { retiredAt: source.retiredAt } : {}),", after: '' }
 ] as const
 const selected = process.env.AGENTMUX_MAP_IDENTITY_MUTATION, mutation = identityMutations.find(item => item.name === selected)
 if (selected && !mutation) throw Error('Unknown identity mutation')

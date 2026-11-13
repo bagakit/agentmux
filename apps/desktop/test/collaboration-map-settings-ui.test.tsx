@@ -45,6 +45,10 @@ it('edits complete Map drafts with production preview geometry, keeps invalid in
   await select('LOD levels', '4')
   expect(dom.container.querySelectorAll('.focus-map-settings__levels details')).toHaveLength(4)
   expect(dom.container.querySelector('[aria-label="Level 1 start zoom"]')).toBeNull()
+  // The farthest form is named for what it draws, while its stored value stays the public enum.
+  const firstForm = dom.container.querySelector<HTMLSelectElement>('select[aria-label="Level 1 form"]')!
+  expect(firstForm.value).toBe('point'); expect(firstForm.selectedOptions[0]!.textContent).toBe('Icon')
+  expect(dom.container.querySelector('.focus-map-settings__levels details summary')?.textContent).toContain('Icon · Identity')
   expect(dom.container.querySelector('.focus-map-preview__canvas')?.getAttribute('data-levels')).toBe('4')
   await select('Level 4 information', 'identity')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('Level 4')

@@ -676,8 +676,8 @@ it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometr
   const now = 1_000_000_000, hour = 3_600_000
   vi.spyOn(Date, 'now').mockReturnValue(now)
   // Every tier, one Provider-less member, and all three recency steps (live, retired, unknown time).
-  const scene = scenario(6), tiers = ['active', 'idle', 'unknown', 'closed', 'unknown', 'closed'] as const
-  const times = [{ lastActivityAt: now - 2 * hour }, { lastActivityAt: now - 10 * 60_000 }, { lastActivityAt: now - 5 * hour }, { lastActivityAt: null, retiredAt: now - 3 * hour }, { lastActivityAt: null }, { lastActivityAt: null, retiredAt: now - 30 * 24 * hour }]
+  const scene = scenario(7), tiers = ['active', 'idle', 'unknown', 'closed', 'unknown', 'closed', 'closed'] as const
+  const times = [{ lastActivityAt: now - 2 * hour }, { lastActivityAt: now - 10 * 60_000 }, { lastActivityAt: now - 5 * hour }, { lastActivityAt: null, retiredAt: now - 3 * hour }, { lastActivityAt: null }, { lastActivityAt: null, retiredAt: now - 30 * 24 * hour }, { lastActivityAt: null, retiredAt: now - 20 * 60_000 }]
   scene.agents = new Map<string, CollaborationAgent>([...scene.agents].map(([id, agent], index) => {
     const { providerId: _providerId, ...withoutProvider } = agent
     return [id, { ...(index === 4 ? { ...withoutProvider, context: { ...agent.context!, providerId: null } } : agent), tier: tiers[index]!, ...times[index]! }]
@@ -695,7 +695,7 @@ it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometr
   }
   const step = (id: string) => (captured.nodes.find(node => node.id === id)!.data as { step: string }).step
   const agentNodes = () => captured.nodes.filter(node => node.type === 'agent')
-  expect(agentNodes().map(node => step(node.id))).toEqual(['recent', 'recent', 'today', 'today', 'older', 'older'])
+  expect(agentNodes().map(node => step(node.id))).toEqual(['recent', 'recent', 'today', 'today', 'older', 'older', 'recent'])
   let previousGlyphs: { avatar: number; disc: boolean; title: string }[] | undefined
   for (const zoom of [.319, .321, .44, .46, .69, .71, .9]) {
     await viewport(60, 60, 4000, 4000, zoom)
@@ -704,14 +704,15 @@ it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometr
       return { avatar: avatar ? Number.parseFloat(avatar.style.getPropertyValue('--agent-avatar-size')) : 0,
         disc: Boolean(element.querySelector('.collaboration-agent__point')), title: element.querySelector('button')!.title }
     })
-    // Every member is an identified face; only runnable members carry the disc's tier badge.
+    // Every member is an identified face; only states that need noticing (active, unconfirmed) carry a badge.
     expect(glyphs.every(glyph => glyph.avatar > 0)).toBe(true)
-    expect(glyphs.map(glyph => glyph.disc)).toEqual([true, true, true, false, true, false])
-    // Size ranks recency: same step, same face; a fresher step is strictly larger.
+    expect(glyphs.map(glyph => glyph.disc)).toEqual([true, false, true, false, true, false, false])
+    // Size ranks recency within each scale: same step, same face; a fresher step is strictly larger.
+    // Runnable members: recent, recent, today, older. Closed members: recent, today, older.
     expect(glyphs[0]!.avatar).toBe(glyphs[1]!.avatar); expect(glyphs[1]!.avatar).toBeGreaterThan(glyphs[2]!.avatar); expect(glyphs[2]!.avatar).toBeGreaterThan(glyphs[4]!.avatar)
-    expect(glyphs[3]!.avatar).toBeGreaterThan(glyphs[5]!.avatar)
-    // A retirement time is presented as closure, never as observed activity.
-    expect(glyphs[3]!.title).toContain('Closed '); expect(glyphs[3]!.title).not.toContain('Last activity')
+    expect(glyphs[6]!.avatar).toBeGreaterThan(glyphs[3]!.avatar); expect(glyphs[3]!.avatar).toBeGreaterThan(glyphs[5]!.avatar)
+    // A retirement time is presented as retirement, never as observed activity.
+    expect(glyphs[3]!.title).toMatch(/^Closed · Retired /); expect(glyphs[3]!.title).not.toContain('Last activity')
     expect(glyphs[4]!.title).toContain('Activity time unknown')
     if (zoom === .319) for (const node of agentNodes()) {
       const element = nodeElement(node.id)!, dot = element.querySelector<HTMLElement>('.collaboration-agent__dot')!

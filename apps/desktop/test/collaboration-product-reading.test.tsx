@@ -332,7 +332,8 @@ it('keeps a confirmed exited Agent a closed map point while preserving its origi
 })
 
 it('opens the shared reader for a retired map point without inventing a live Session or control', async () => {
-  const retired = { hostId: 'local', agentSessionId: 'retained-task', state: 'retired' as const }
+  const retiredAt = Date.now() - 3 * 3_600_000
+  const retired = { hostId: 'local', agentSessionId: 'retained-task', state: 'retired' as const, retiredAt }
   vi.mocked(api.sessions.historySources).mockResolvedValue({ sources: [retired], warnings: [] })
   await render({ kind: 'focus', subject: subject(retired.agentSessionId), name: 'Retained task' })
   let point: HTMLButtonElement | null = null
@@ -340,6 +341,9 @@ it('opens the shared reader for a retired map point without inventing a live Ses
     point = graph().querySelector<HTMLButtonElement>('.collaboration-agent__mark[data-tier="closed"][data-session-id="retained-task"]')
     expect(point).not.toBeNull()
   })
+  // The catalogue carries the original retirement record: a closed face in the day step, titled as retirement.
+  expect(point!.closest('[data-recency]')?.getAttribute('data-recency')).toBe('today')
+  expect(point!.title).toBe(`Closed · Retired ${new Date(retiredAt).toLocaleString()}`)
   await act(async () => { point!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
   await settleCollaborationCanvas(() => expect(document.querySelector('.agent-information-reader')).not.toBeNull())
   expect(agentInformationPreview.get()).toMatchObject({ context: { id: retired.agentSessionId, hostId: retired.hostId, actionable: false, liveAgent: false }, session: undefined, control: undefined })
