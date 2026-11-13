@@ -86,3 +86,16 @@ export function marqueeSelection(shapes: readonly ScreenshotShape[], marquee: No
     return box.x <= marquee.x + marquee.width && box.x + box.width >= marquee.x && box.y <= marquee.y + marquee.height && box.y + box.height >= marquee.y
   }).map(shape => shape.id)
 }
+
+/** The topmost locked mark whose bounds, grown by `tolerance`, hold the point: the mark a
+ * hovering pointer shows the lock of. Locked marks are never hit, so this is their only lookup. */
+export function lockedMarkAt(shapes: readonly ScreenshotShape[], at: ScreenshotPoint, tolerance: number,
+  textWidth?: (shape: TextShape) => number): ScreenshotShape | null {
+  for (let index = shapes.length - 1; index >= 0; index--) {
+    const shape = shapes[index]!
+    if (!shape.locked) continue
+    const box = shapeBounds(shape, textWidth)
+    if (at.x >= box.x - tolerance && at.x <= box.x + box.width + tolerance && at.y >= box.y - tolerance && at.y <= box.y + box.height + tolerance) return shape
+  }
+  return null
+}

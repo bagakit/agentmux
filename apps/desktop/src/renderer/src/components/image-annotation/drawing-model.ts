@@ -395,6 +395,14 @@ export function toggleShapeLock(shapes: ScreenshotShape[], ids: ReadonlySet<stri
   return shapes.map(shape => !ids.has(shape.id) || Boolean(shape.locked) === lock ? shape : setLocked(shape, lock))
 }
 
+/** Applies `update` to each listed mark; a mark it returns unchanged keeps its identity, and
+ * when none changes the same array returns so no empty Undo step is recorded. */
+export function restyleShapes(shapes: ScreenshotShape[], ids: ReadonlySet<string>,
+  update: (shape: ScreenshotShape) => ScreenshotShape): ScreenshotShape[] {
+  const next = shapes.map(shape => ids.has(shape.id) ? update(shape) : shape)
+  return next.every((shape, index) => shape === shapes[index]) ? shapes : next
+}
+
 export function unlockAllShapes(shapes: ScreenshotShape[]): ScreenshotShape[] {
   return shapes.some(shape => shape.locked) ? shapes.map(shape => shape.locked ? setLocked(shape, false) : shape) : shapes
 }
