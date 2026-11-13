@@ -1,17 +1,17 @@
 import Foundation
 
-/// The selector and the pixels produced from it are one capture resource. This
-/// lease never covers clipboard, AX observation or permission-status requests.
-public final class NativeSelectionCaptureLease: @unchecked Sendable {
+/// One display capture at a time owns the physical display grabs. This lease
+/// never covers clipboard, AX observation or permission-status requests.
+public final class NativeDisplayCaptureLease: @unchecked Sendable {
     public enum Failure: Error { case busy }
-    /// Shared by the requesting worker and its asynchronous pixel producer.
+    /// Shared by the requesting worker and its asynchronous pixel producers.
     /// Cancellation of an observer does not establish that the producer exited.
     public final class Ownership: @unchecked Sendable {
-        private let lease: NativeSelectionCaptureLease
-        fileprivate init(_ lease: NativeSelectionCaptureLease) { self.lease = lease }
+        private let lease: NativeDisplayCaptureLease
+        fileprivate init(_ lease: NativeDisplayCaptureLease) { self.lease = lease }
         deinit { lease.release() }
     }
-    public static let shared = NativeSelectionCaptureLease()
+    public static let shared = NativeDisplayCaptureLease()
     private let lock = NSLock()
     private var occupied = false
     public init() {}

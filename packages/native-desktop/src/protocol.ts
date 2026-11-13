@@ -5,7 +5,7 @@ export type JsonObject = { [key: string]: Json }
 export const NATIVE_METHODS = [
   'handshake', 'listApps', 'listWindows', 'listDisplays', 'getAppState', 'permissionStatus',
   'captureScreenshot', 'clipboardRead', 'clipboardWrite', 'click', 'performSecondaryAction',
-  'setValue', 'typeText', 'pressKey', 'hotkey', 'pasteText', 'scroll', 'drag', 'releaseSelectionBackdrop'
+  'setValue', 'typeText', 'pressKey', 'hotkey', 'pasteText', 'scroll', 'drag', 'captureDisplays'
 ] as const
 export type NativeMethod = typeof NATIVE_METHODS[number]
 export const NATIVE_MUTATIONS = new Set<NativeMethod>([
@@ -35,14 +35,9 @@ export interface NativeOperation {
   resultAvailability?: 'retained' | 'expired'
   result?: Json
 }
-export const CAPTURE_EDIT_TOOLS = ['rect', 'arrow', 'note', 'pixelate', 'text'] as const
-export type CaptureEditTool = typeof CAPTURE_EDIT_TOOLS[number]
 export type CaptureParams =
-  /**
-   * `initialRect` seeds the selection in global Quartz points; it must touch an active display.
-   * `inlineEditing` (requires `allowEditing`) keeps the selected display frozen behind the host editor.
-   */
-  | { mode: 'selection'; allowEditing?: boolean; inlineEditing?: boolean; initialRect?: { x: number; y: number; width: number; height: number } }
+  /** Always fails with `selection_moved_to_host`: the Desktop capture surface owns region selection. */
+  | { mode: 'selection' }
   | { mode: 'display'; displayId: number }
   | { mode: 'window'; windowId: number; app: string; processStartedAt: number }
   | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }
@@ -51,13 +46,25 @@ export interface CaptureResult {
   screenshot?: { format: 'png'; data: string; width: number; height: number; scale: number }
   engine?: string
   selectionRect?: { x: number; y: number; width: number; height: number }
-  /** Host opt-in selection intent; no editing or output delivery happens in Native. */
-  completionAction?: 'capture' | 'edit'
-  /** Quick-mark tool the editor starts with; only on an editable selection whose intent is `edit`. */
-  editTool?: CaptureEditTool
-  /** Frozen display kept behind an inline editor; release it with `releaseSelectionBackdrop`. */
-  backdrop?: { id: string }
   error?: NativeErrorData
+}
+/** One active display: its exact pixels from one grab, or the reason they are missing. */
+export type NativeDisplayFrame = {
+  displayId: number
+  /** Global Quartz points. */
+  frame: { x: number; y: number; width: number; height: number }
+  scale: number
+  isMain: boolean
+} & (
+  | { png: string; width: number; height: number; engine: string; issue?: never }
+  | { issue: string; png?: never; width?: never; height?: never; engine?: never }
+)
+export interface NativeDisplayFrames {
+  state: 'captured'
+  /** Milliseconds since the Unix epoch, taken before the first display grab. */
+  capturedAt: number
+  /** Every active display; at least one carries pixels. */
+  displays: NativeDisplayFrame[]
 }
 
 export function decodeResponse(input: unknown): NativeResponse {
