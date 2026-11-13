@@ -33,7 +33,7 @@ api.goals.execute = async request => {
   throw new Error('This private frame fixture allows only original Goal reads')
 }
 api.schedule.list = async () => ({ schedules: [], executionScope: 'connected-host' })
-const capture = (window as unknown as { moteCooperationCapture: { longNames(): void; restore(): void; reopen(): void; facts(): Record<string, unknown> } }).moteCooperationCapture
+const capture = (window as unknown as { moteCooperationCapture: { longNames(): void; restore(): void; reopen(): void; theme(light: boolean): void; facts(): Record<string, unknown> } }).moteCooperationCapture
 const longNames = capture.longNames, restore = capture.restore
 capture.longNames = () => { longNames(); refreshScope() }
 capture.restore = () => { restore(); refreshScope() }
@@ -162,4 +162,99 @@ if (new URLSearchParams(location.search).has('conversation')) {
     }
   } })
   requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID })
+}
+
+if (new URLSearchParams(location.search).has('evolution')) {
+  // Additional finite source facts for the same original complete App. No
+  // substitute navigation, Reader, Composer or animation lives in this port.
+  await import('../mote-discussion-threads/entry')
+  const { createWorkbenchTab } = await import('../../../src/renderer/src/lib/workbench-tabs')
+  const { directoryIdentity, homeZoneId } = await import('../../../src/shared/space-addresses')
+  const { requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } = await import('../../../src/renderer/src/lib/pmo-teams-topic-floating')
+  const { projectConversationReading, parseConversationReadPage } = await import('@agentmux/core/conversation')
+  const original = useAppStore.getState(), prototype = original.sessions.find(session => session.id === 'mote-neighbor')
+  const template = original.tabs['mote-neighbor-tab']!, topic = original.scratchTopicSnapshots[workspace.id]!.topics!.find(item => item.id === PMO_TEAMS_TOPIC_ID)!
+  if (!prototype || prototype.kind !== 'agent' || !template) throw Error('The original finite member is required')
+  const researchId = 'mote-research', researchTitle = '研究：让多项工作保持连续，并核对细节与交付边界'
+  const research = { ...prototype, id: researchId, label: researchTitle, pendingInteraction: undefined,
+    status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() },
+    semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: Date.now() },
+    control: { ...prototype.control, agentSessionId: researchId, run: { runId: 'original-run-' + researchId } } }
+  const researchTab = { ...createWorkbenchTab(researchId + '-tab', { regionId: researchId + '-region', workspaceId: workspace.id,
+    kind: 'agent', phase: 'attached', sessionId: researchId }, researchTitle), topicId: topic.id, space: template.space }
+  const emptyId = 'launcher:empty-evolution', emptyPath = workspace.path + '/' + scratchTopicDirectoryName(emptyId)
+  const emptyTopic = { ...topic, id: emptyId, title: '新搭档', directoryPath: emptyPath, physicalDirectoryPath: emptyPath,
+    confirmedDirectoryPaths: [emptyPath], topicPath: emptyPath + '/topic.md', summary: '',
+    quickMode: { status: 'saved' as const, version: 'original-empty-preference', defaults: {} } }
+  const emptySpace = directoryIdentity(workspace.hostId, emptyPath), emptyZone = homeZoneId(emptySpace)
+  const topicsRead = api.scratch.listTopics, oneTopic = api.scratch.readTopic
+  const ensureTopic = api.scratch.ensureMote
+  api.scratch.listTopics = async (...args) => [...await topicsRead(...args), emptyTopic]
+  api.scratch.readTopic = async (...args) => args[1] === emptyId ? emptyTopic : oneTopic(...args)
+  api.scratch.ensureMote = async (...args) => args[1] === emptyId ? emptyTopic : ensureTopic(...args)
+  useAppStore.setState(state => ({ sessions: [...state.sessions, research], tabs: { ...state.tabs, [researchTab.id]: researchTab },
+    layouts: { ...state.layouts, [workspace.id]: { ...state.layouts[workspace.id]!, groups: state.layouts[workspace.id]!.groups.map(group =>
+      group.id === 'original-mote-group' ? { ...group, tabOrder: [...group.tabOrder, researchTab.id] } : group) } },
+    agentNames: { ...state.agentNames, [researchId]: researchTitle }, viewModes: { ...state.viewModes, [researchId]: 'activity' as const },
+    agentComposerDrafts: { ...state.agentComposerDrafts, [researchId]: '研究草稿先保留，暂不发送。' },
+    scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!,
+      topics: [...state.scratchTopicSnapshots[workspace.id]!.topics!, emptyTopic] } },
+    spaceZoneBindings: { ...state.spaceZoneBindings, [emptyZone]: { spaceId: emptySpace, workspaceId: workspace.id,
+      topicId: emptyId, directoryPath: emptyPath, contentKind: 'mote' as const } } }))
+  const dialogues = api.moteDialogue.read, preferences = api.motePreferences.read
+  api.moteDialogue.read = async input => input.target.spaceId === emptySpace ? {
+    main: { target: input.target, identity: { hostId: workspace.hostId, moteId: emptyId }, status: 'ready', resource: null,
+      documentRevision: 'original-empty-main', roleRevision: null, current: null, issue: null }, links: [],
+    incarnation: 'original-empty-associations', throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null
+  } : dialogues(input)
+  api.motePreferences.read = async input => input.target.spaceId === emptySpace ? { ...await preferences(input), defaults: {}, main: false,
+    source: { resource: null, result: { status: 'deleted' } } } as Awaited<ReturnType<typeof api.motePreferences.read>> : preferences(input)
+  const reads: unknown[] = [], sourceHostId = 'host-original', createdAt = Date.now() - 600_000
+  const conversation = (input: Parameters<typeof api.conversation.readAgentConversation>[0]) => {
+    reads.push({ method: 'conversation.read', input })
+    const source = { providerId: 'codex', nativeSessionId: 'original-native-' + researchId }
+    const projected = projectConversationReading({ agentSessionId: researchId, routeHostId: input.hostId, executionHostId: sourceHostId,
+      historyPage: { agentSessionId: researchId, sourceHostId, source, nextCursor: null, items: [
+        { id: 'research-human', kind: 'user-message' as const, startedAt: createdAt,
+          contentParts: [{ kind: 'text' as const, text: '请研究怎样直接找到当前事情，同时保留原来源、草稿和阅读位置。' }] },
+        ...Array.from({ length: 10 }, (_, index) => ({ id: 'research-reply-' + index, kind: 'assistant-message' as const, startedAt: createdAt + index * 1000 + 1000,
+          contentParts: [{ kind: 'text' as const, text: index === 0 ? '我在原研究对话里继续。其他工作各自保留上下文，回主对话时再带回准确结果。'
+            : `第 ${index} 条研究记录：当前事情、准确来源和返回位置应当清楚。切换只改变展示，不会发送新消息，也不应该重建已经建立的阅读和输入。` }] }))
+      ] }, timeline: { agentSessionId: researchId, sourceHostId, revision: 1, items: [],
+        stream: { epoch: 'original-evolution-research', sequence: 0, revision: 1, origin: 'beginning', gaps: [], positions: [] } } }).timeline
+    const ref = { hostId: input.hostId, agentSessionId: researchId }, checkpoint = { ...ref, sourceHostId,
+      frontier: { ...ref, hostId: sourceHostId, scope: projected.scope, cuts: [] } }
+    const items = [...projected.events].reverse().map(event => ({ kind: 'item', item: { event, records: projected.records.filter(record => event.recordIds.includes(record.id)) } }))
+    return parseConversationReadPage({ ...ref, sourceHostId, ...(input.processDetails ? { processDetails: input.processDetails } : {}),
+      scope: projected.scope, coverage: projected.coverage, order: { ...projected.order, direction: 'newest-first' }, items,
+      nextCursor: null, budgetBytes: input.maxBytes ?? 64 * 1024, window: { id: 'original-research-window', revision: 1,
+        itemCount: items.length, complete: true, view: input.view ?? 'original-research-view', replay: 'original-research-replay',
+        checkpoint, outside: { older: null, newer: null }, navigation: { older: null, newer: null } } }, input)
+  }
+  const read = api.conversation.readAgentConversation, changes = api.conversation.readConversationChanges, observe = api.conversation.observeConversation
+  api.conversation.readAgentConversation = async input => input.agentSessionId === researchId ? conversation(input) : read(input)
+  api.conversation.readConversationChanges = async input => { if (input.agentSessionId !== researchId) return changes(input)
+    const page = conversation(input); return { ...page, checkpoint: page.window.checkpoint, more: false } }
+  api.conversation.observeConversation = async (input, listener) => { if (input.agentSessionId !== researchId) return observe(input, listener)
+    const page = conversation(input), controller = new AbortController()
+    return { hostId: input.hostId, sourceHostId, agentSessionId: researchId, scope: page.scope, coverage: page.coverage,
+      closed: controller.signal, dispose: () => controller.abort() } }
+  const stableTopics = useAppStore.getState().scratchTopicSnapshots[workspace.id]!
+  let directoryUnknown = false
+  Object.assign(window, { moteEvolutionCapture: { ready: true,
+    facts: () => ({ ...capture.facts(), sourceReads: reads, directoryUnknown, floating: readPmoTeamsTopicFloatingState(),
+      discussion: (window as unknown as { moteDiscussionCapture: { facts(): unknown } }).moteDiscussionCapture.facts() }),
+    unknown(value: boolean) { directoryUnknown = value
+      useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [workspace.id]: {
+        ...state.scratchTopicSnapshots[workspace.id]!, topics: stableTopics.topics!.map(item => item.id === topic.id && value
+          ? { ...item, readError: '原 Mote 资料暂未确认；原成员、工作和输入保留。' } : item) } } })) },
+    longNames() { useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [workspace.id]: {
+      ...state.scratchTopicSnapshots[workspace.id]!, topics: state.scratchTopicSnapshots[workspace.id]!.topics!.map(item => item.id === topic.id
+        ? { ...item, title: '长期合作伙伴：产品体验与可靠实现' } : item) } },
+      tabs: { ...state.tabs, [template.id]: { ...state.tabs[template.id]!, name: '实现与校验：跨客户端准确引用及原工作接续验证' } } })) },
+    reopen() { requestPmoTeamsTopicFloatingOpen({ targetTopicId: topic.id }) },
+    empty() { requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); requestPmoTeamsTopicFloatingOpen({ targetTopicId: emptyId }) },
+    theme: capture.theme
+  } })
+  requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); requestPmoTeamsTopicFloatingOpen({ targetTopicId: topic.id })
 }
