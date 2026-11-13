@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
+import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { basename, join, resolve } from 'node:path'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { LocalExecutionHost, AgentMuxControlServer } from '@agentmux/core'
@@ -93,6 +94,11 @@ import { BrowserTaskAssetEditor } from '../src/renderer/src/components/BrowserTa
 import type { BrowserTaskContent } from '../src/shared/browser-task-assets'
 import { renameBrowserTaskParameter } from '../src/shared/browser-task-assets'
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+// These tests read actual Workspace bytes, through the same Host-owned native artifact as Desktop.
+// A fresh worktree must prepare it rather than inherit an unrelated tree's generated executable.
+beforeAll(() => {
+  execFileSync(process.execPath, [resolve(import.meta.dirname, '../scripts/build-workspace-move-helper.mjs')], { timeout: 20_000 })
+})
 const url = 'https://files.invalid/form', browserId = 'browser-files', sentinel = 'private-prompt-sentinel'
 const roots: string[] = [], managers: BrowserViewManager[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const manager of managers.splice(0)) manager.dispose(); native.views.length = 0; for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })

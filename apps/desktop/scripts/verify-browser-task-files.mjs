@@ -15,6 +15,7 @@ let probe
 const uiIndex=process.argv.indexOf('--ui-only'),uiOnly=uiIndex>=0
 if(uiOnly){assert.ok(process.argv[uiIndex+1],'--ui-only requires the original validated asset file');const seed=process.argv[uiIndex+1];await copyFile(seed,join(home,'assets.json'));receipt.originalAssetSha256=sha(await readFile(seed))}
 try{
+ execFileSync(process.execPath,[join(repo,'apps/desktop/scripts/build-workspace-move-helper.mjs')],{cwd:repo,timeout:20000})
  await renderer({configFile:false,root:fixture,base:'./',logLevel:'warn',define:{__AGENTMUX_WEB_PREVIEW__:'true'},esbuild:{jsx:'automatic'},plugins:[{name:'task-files-renderer-source',async transform(code,id){const file=id.split('?')[0];if(file.startsWith(repo+'/')&&!file.includes('/node_modules/'))receipt.sourceBundleInputs[relative(repo,file)]=sha(await readFile(file))}}],build:{outDir:join(out,'renderer'),emptyOutDir:false}})
  await symlink(join(repo,'apps/desktop/node_modules'),join(out,'node_modules'))
  const native=join(out,'native'),main=join(native,'src/main/main.mjs');await mkdir(join(native,'src/main'),{recursive:true});await mkdir(join(native,'resources/bin'),{recursive:true})
