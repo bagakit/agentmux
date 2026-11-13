@@ -337,10 +337,12 @@ export class AgentMuxHostedRuntimeService {
     const first = invocation.args[0] as unknown
     // Match the public human question-reply owner. Only transport-approved
     // user/device intent supplies human authorship; a wire claim cannot name an Agent.
-    if (invocation.method === 'replySessionQuestion' && invocation.args[0].externalAction === undefined && context.caller === undefined && context.principal &&
+    // A permission decision is the same kind of human answer to an exact pending request.
+    if ((invocation.method === 'replySessionQuestion' || invocation.method === 'respondAgentInteraction') &&
+        invocation.args[0].externalAction === undefined && context.caller === undefined && context.principal &&
         ['user', 'device'].includes(context.principal.kind)) {
       if (invocation.args.length !== 1 || !first || typeof first !== 'object' || 'authorAgentSessionId' in first || 'caller' in first) {
-        throw new AgentMuxError('A human question reply cannot assert an Agent author or caller.', 'INVALID_CONTROL_REQUEST')
+        throw new AgentMuxError('A human answer cannot assert an Agent author or caller.', 'INVALID_CONTROL_REQUEST')
       }
       rpcString(context.principal.id, 'Transport principal')
       invocation.args[0] = { ...invocation.args[0], authorHuman: true }
