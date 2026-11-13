@@ -32,26 +32,26 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
   const finish = (method: string) => { flights.current.delete(method); setPending([...flights.current]) }
   async function readCurrent() {
     if (flights.current.has('read') || humanPending) return
-    if (!client?.forwardRpc) { setIssue('读取未发送：原目标公共端口暂不可用。原提案和记录保留。'); return }
+    if (!client?.forwardRpc) { setIssue('读取未发送：Mac 上的目标服务暂不可用。'); return }
     start('read')
     const before = JSON.stringify(currentGoal.current), recordId = owner.recordIdentity()
     try {
       if (retained) assertGoalIntentScope(client, owner, retained)
       const result = await client.forwardRpc('goal.inspect', { goalId: goal.id })
-      if (!result.goal || result.goal.id !== goal.id) throw new Error('原目标当前未确认；其他目标不能代签它的结果。')
+      if (!result.goal || result.goal.id !== goal.id) throw new Error('没有读到这个目标')
       const current = currentGoal.current
       const latest = JSON.stringify(current)
       const read = JSON.stringify(result.goal)
       if ((current.alignment?.revision ?? 0) > (result.goal.alignment?.revision ?? 0) || before !== latest && read !== latest && (result.goal.alignment?.revision ?? 0) <= (current.alignment?.revision ?? 0)) throw new Error('读取期间已显示较新提案或报告；迟到旧读取不能代签当前内容，请重新读取。')
       if (retained) await owner.settleGoalIntent(retained, 'confirmed', recordId, retained)
       updated(result.goal, ['alignment', 'grounding', 'title', 'description', 'status', 'sessionIds'])
-      setNeedsRead(false); setIssue('已读取原目标当前内容。请读过当前提案和结果后，再明确选择；原未知记录保留。')
-    } catch (error) { setIssue(`读取当前提案未确认：${error instanceof Error ? error.message : String(error)}。原内容和记录保留。`) }
+      setNeedsRead(false); setIssue('已读取当前目标。请看过提案和结果后再选择。')
+    } catch (error) { setIssue(`读取当前提案没有完成：${error instanceof Error ? error.message : String(error)}。可以再试一次。`) }
     finally { finish('read') }
   }
   async function invoke(method: 'goal.discuss' | 'goal.confirm' | 'goal.accept', params: AgentMuxRpcParams<typeof method>) {
     if (flights.current.has(method) || method !== 'goal.discuss' && (needsRead || humanPending || flights.current.has('read'))) return
-    if (!client?.forwardRpc) { setIssue('请求未发送：原目标公共端口暂不可用，原目标与会话保留。'); return }
+    if (!client?.forwardRpc) { setIssue('请求未发送：Mac 上的目标服务暂不可用。'); return }
     start(method)
     const input = { ...params, operationId: randomClientRequestId() }
     const present = beginPresentation(), recordId = owner.recordIdentity()
@@ -65,23 +65,23 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
       }
       if (method === 'goal.discuss') {
         const result = await client.forwardRpc(method, input as AgentMuxRpcParams<'goal.discuss'>)
-        if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== (params as AgentMuxRpcParams<'goal.discuss'>).mode) throw new Error('原讨论回执身份未匹配。')
-        setIssue(result.receipt.agentSessionId ? '原目标讨论工作面已打开；队列或导航回执不代表 Agent 已接受或完成请求。' : '原目标专属 Tab 已保留。Agent 尚未接上；请在 Mac 的原主 Mote 工作面选择 Agent 并启动。')
+        if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== (params as AgentMuxRpcParams<'goal.discuss'>).mode) throw new Error('返回的讨论与这次请求不一致')
+        setIssue(result.receipt.agentSessionId ? '已打开目标讨论。' : '讨论页已建好，还没有 Agent 接上；请在 Mac 上为主 Mote 选择 Agent 并启动。')
         if (present()) openDiscussion(result.receipt)
       } else if (method === 'goal.confirm') {
         const result = await client.forwardRpc(method, input as AgentMuxRpcParams<'goal.confirm'>)
-        if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.confirmedRevision !== alignment?.revision || result.goal.alignment?.confirmedAt !== result.receipt.confirmedAt) throw new Error('原目标确认回执未匹配当前提案。')
+        if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.confirmedRevision !== alignment?.revision || result.goal.alignment?.confirmedAt !== result.receipt.confirmedAt) throw new Error('Mac 返回的确认与当前提案不一致')
         owner.releaseGoalIntent(retainedIntent!, recordId); await owner.settleGoalIntent(retainedIntent!, 'confirmed', recordId, retainedIntent!)
         if ((currentGoal.current.alignment?.revision ?? 0) <= result.receipt.confirmedRevision) {
           updated(result.goal, ['alignment']); setIssue('已确认读过的当前目标提案。')
-        } else setIssue('原确认回执已收到；当前已有较新提案，保留较新内容，仍需重新阅读。')
+        } else setIssue('Mac 已确认，但现在有更新的提案，请重新阅读。')
       } else {
         const result = await client.forwardRpc(method, input as AgentMuxRpcParams<'goal.accept'>)
-        if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.submissionId !== grounding?.submissionId || result.receipt.alignmentRevision !== alignment?.revision || result.goal.grounding?.acceptedAt !== result.receipt.acceptedAt) throw new Error('原结果接受回执未匹配当前报告。')
+        if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.submissionId !== grounding?.submissionId || result.receipt.alignmentRevision !== alignment?.revision || result.goal.grounding?.acceptedAt !== result.receipt.acceptedAt) throw new Error('Mac 返回的验收与当前报告不一致')
         owner.releaseGoalIntent(retainedIntent!, recordId); await owner.settleGoalIntent(retainedIntent!, 'confirmed', recordId, retainedIntent!)
         if (currentGoal.current.alignment?.revision === result.receipt.alignmentRevision && currentGoal.current.grounding?.submissionId === result.receipt.submissionId) {
-          updated(result.goal, ['grounding', 'status']); setIssue(result.goal.status === 'done' ? '已接受并结束目标，原报告、差距与 Agent 保留。' : result.receipt.acceptedWithGaps ? '已接受原结果，报告差距仍保留；目标仍开放。' : '已接受当前原结果；目标仍开放。')
-        } else setIssue('原接受回执已收到；当前已有另一提案或报告，保留当前内容，不能用旧回执认可新结果。')
+          updated(result.goal, ['grounding', 'status']); setIssue(result.goal.status === 'done' ? '已验收并结束目标。' : result.receipt.acceptedWithGaps ? '已验收并保留差距。' : '已验收。')
+        } else setIssue('Mac 已确认验收，但现在有新的提案或报告，请重新阅读。')
       }
     } catch (error) {
       if (retainedIntent) {
@@ -91,27 +91,27 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
       const message = error instanceof Error ? error.message : String(error)
       setRecords(values => [...values, { method, params: input, message }])
       if (method !== 'goal.discuss') setNeedsRead(true)
-      setIssue(`原操作回执未确认：${message}。原提案、报告与会话保留；先读取当前内容，不会自动再次提交。`)
+      setIssue(`Mac 还没确认这次操作：${message}。请先读取当前提案与报告。`)
     } finally { if (retainedIntent) owner.releaseGoalIntent(retainedIntent, recordId); finish(method) }
   }
   const acknowledgementAvailable = !needsRead && !humanPending && !pending.includes('read')
-  return <section className="mobile-goal-alignment" aria-label="目标确认与原讨论">
+  return <section className="mobile-goal-alignment" aria-label="目标确认与讨论">
     {needsRead && <button type="button" disabled={pending.includes('read')} onClick={() => void readCurrent()}>读取当前提案与报告</button>}
     {!alignment?.confirmedAt && alignment && !confirmIssue && acknowledgementAvailable && <button type="button" className="mobile-goal-decision" onClick={() => void invoke('goal.confirm', { goalId: goal.id, expectedRevision: alignment.revision })}>确认当前目标</button>}
     {confirmIssue && alignment && <p>目标待明确：{confirmIssue}</p>}
     {alignment && grounding && gapIssue === null && goal.status !== 'done' && acknowledgementAvailable && <button type="button" className="mobile-goal-decision" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: grounding.checks.some(check => check.outcome === 'gap'), finish: true })}>{accepted ? '结束目标' : grounding.checks.some(check => check.outcome === 'gap') ? '接受差距并结束目标' : '接受并结束目标'}</button>}
-    {accepted && <p>{goal.status === 'done' ? '当前结果已接受，目标已结束。' : '当前结果已接受，目标仍开放。'}</p>}
+    {accepted && <p>{goal.status === 'done' ? '已验收，目标已结束。' : '已验收，目标仍开放。'}</p>}
     {!accepted && alignment && grounding && !acceptIssue && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: false })}>接受当前结果</button>}
     {!accepted && alignment && grounding && acceptIssue && gapIssue === null && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: true })}>接受结果并保留差距</button>}
     {acceptIssue && grounding && !accepted && <p>结果待核对：{acceptIssue}</p>}
-    {humanPending && <p role="status">原操作正在等待回执，原工作面保留。</p>}{issue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{issue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
-    {retained && !humanPending && <MobileNotice identity={[retained?.operationId]} role="status">原人认可回执未知，准确目标版本、结果和操作身份保留；先读取当前提案与报告，不会重复提交。</MobileNotice>}
+    {humanPending && <p role="status">正在等待 Mac 确认…</p>}{issue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{issue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
+    {retained && !humanPending && <MobileNotice identity={[retained?.operationId]} role="status">还不确定你的确认是否已生效；请先读取当前提案与报告。</MobileNotice>}
     <div className="mobile-goal-discussion-actions">
-      <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'open' })}>打开目标原讨论</button>
+      <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'open' })}>打开目标讨论</button>
       <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grill' })}>{alignment ? '讨论目标变更' : '澄清目标'}</button>
       {alignment?.confirmedAt && <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grounding' })}>{grounding ? '请求重新核对结果' : '请求核对结果'}</button>}
     </div>
-    {retained && <details><summary>原设备认可意图</summary><pre>{JSON.stringify(retained, null, 2)}</pre></details>}
-    {!!records.length && <details><summary>原操作未确认记录（{records.length}）</summary>{records.map((value, index) => <div key={index}><p>{value.message}</p><code>{value.method}</code><pre>{JSON.stringify(value.params, null, 2)}</pre></div>)}</details>}
+    {retained && <details><summary>本机记录的确认请求</summary><pre>{JSON.stringify(retained, null, 2)}</pre></details>}
+    {!!records.length && <details><summary>未确认的操作（{records.length}）</summary>{records.map((value, index) => <div key={index}><p>{value.message}</p><code>{value.method}</code><pre>{JSON.stringify(value.params, null, 2)}</pre></div>)}</details>}
   </section>
 }

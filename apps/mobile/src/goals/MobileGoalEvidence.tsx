@@ -20,15 +20,15 @@ function Evidence({ reference, client, copyText }: { reference: DemandEvidence; 
     if (typeof reference === 'string') return
     setBusy(true); setIssue(''); setContent(null)
     try {
-      if (!client?.forwardRpc) throw new Error('原文件读取服务暂不可用，原引用保留。')
+      if (!client?.forwardRpc) throw new Error('文件读取暂不可用。')
       const runtime = client.runtimeOwnerIdentity()
       const observed = await readGoalFileEvidence(reference, params => client.forwardRpc!('file.read', params))
-      if (client !== currentClient.current || JSON.stringify(client.runtimeOwnerIdentity()) !== JSON.stringify(runtime)) throw new Error('读取期间原连接发生变化，原引用保留，请重新读取。')
+      if (client !== currentClient.current || JSON.stringify(client.runtimeOwnerIdentity()) !== JSON.stringify(runtime)) throw new Error('读取期间连接已变化，请重新读取。')
       const result = observed.observation.result
       if (result.status === 'read') setContent(result.document.content)
-      else if (result.status !== 'binary') throw new Error(result.status === 'unknown' || result.status === 'error' ? result.message : `原文件状态：${result.status}`)
-      const format = result.status === 'binary' ? `原文件为二进制文件（${result.byteLength} 字节），可在桌面查看。` : ''
-      const version = observed.version === 'changed' ? '当前文件已不同于报告中的修订；原报告修订保留。' : observed.version === 'unrecorded' ? '报告未记录文件修订，读取的是当前内容。' : ''
+      else if (result.status !== 'binary') throw new Error(result.status === 'unknown' || result.status === 'error' ? result.message : `文件状态：${result.status}`)
+      const format = result.status === 'binary' ? `这是二进制文件（${result.byteLength} 字节），请在 Mac 上查看。` : ''
+      const version = observed.version === 'changed' ? '文件在报告之后已修改，读取的是当前内容。' : observed.version === 'unrecorded' ? '报告未记录文件修订，读取的是当前内容。' : ''
       setIssue(format + version)
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setBusy(false) }

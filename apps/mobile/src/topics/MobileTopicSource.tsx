@@ -46,7 +46,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
   const [notebookName, setNotebookName] = useState('笔记本'), [selectedPage, setSelectedPage] = useState<string | null>(selected?.noteId ?? null)
   const selectedPageRef = useRef(selectedPage); selectedPageRef.current = selectedPage
   const [notebookReady, setNotebookReady] = useState(false)
-  const [noteName, setNoteName] = useState('原 Note')
+  const [noteName, setNoteName] = useState('笔记')
   const [view, setView] = useState<SourceView | null>(null), [history, setHistory] = useState<SourceView[]>([])
   const [visitedPages, setVisitedPages] = useState<string[]>(selected ? [selected.noteId] : [])
   const [pageBack, setPageBack] = useState<{ noteId: string; back: () => void } | null>(null)
@@ -101,16 +101,16 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
         const result = await rpc('notebook.inspect', { notebookId: source.notebookId })
         if (!active()) return
         setQueryDiagnostic('')
-        setPages(result.pages); setNotebookName(result.notebook?.name ?? '原笔记本')
+        setPages(result.pages); setNotebookName(result.notebook?.name ?? '笔记本')
         const saved = reference.current.kind === 'notebook' ? reference.current.selectedNote : null
         if (saved) {
           const matches = result.pages.filter(page => page.noteId === saved.noteId)
           if (!result.notebook || matches.length !== 1 || !sameTopicNoteMapping(saved, pageMapping(matches[0]!, saved.blockId))) {
-            setNotebookReady(false); setIssue('原笔记本所选 Note 的资源映射尚未确认或已改变；原页引用、阅读与草稿保留，可重试目录读取。'); return
+            setNotebookReady(false); setIssue('所选笔记的文件位置还没确认或已变化，可以重试读取。'); return
           }
         }
         setNotebookReady(Boolean(result.notebook))
-        setIssue(result.notebook ? '' : '原笔记本尚未确认，原引用保留。')
+        setIssue(result.notebook ? '' : '还没确认这个笔记本，可以重试读取。')
         return
       }
       let page: Page | undefined
@@ -120,11 +120,11 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
         setQueryDiagnostic('')
         const matches = result.pages.filter(value => value.noteId === source.noteId)
         page = matches.length === 1 ? matches[0] : undefined
-        if (!page) { setIssue('此 Note 未在原持久目录中确认唯一资源文件；当前公共读取不能仅凭 Note ID 定位正文。原引用保留，可重试目录读取。'); return }
+        if (!page) { setIssue('没有在目录里找到这条笔记对应的文件，可以重试读取。'); return }
         const mapping = pageMapping(page, source.blockId)
         const saved = reference.current.kind === 'note' ? reference.current.mapping : null
         if (saved && !sameTopicNoteMapping(saved, mapping)) {
-          setIssue('原 Note 的资源映射已改变；原引用、阅读与草稿保留，可重试目录读取。'); return
+          setIssue('这条笔记的文件位置已变化，可以重试读取。'); return
         }
         setNoteName(page.title)
         if (reference.current.kind === 'note') publish({ ...reference.current, mapping })
@@ -152,12 +152,12 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
         if (path !== null) candidates.push({ zoneId: zone.zoneId, path, workspace, directoryPath: zone.directoryPath })
       }
       const unavailable = snapshot.unavailable.map(value => `${value.message} ${value.recovery ?? ''}`).join('\n')
-      setIssue(candidates.length ? unavailable : `${unavailable ? unavailable + '\n' : ''}原来源的 Host、资源 Workspace 与 Zone 尚未共同确认。原路径引用保留，可重试；不会按当前项目或首个 Zone 猜读。`)
+      setIssue(candidates.length ? unavailable : `${unavailable ? unavailable + '\n' : ''}还没确认来源所在的 Mac 和工作区，可以重试。`)
       const previous = viewRef.current?.scope
       if (previous && !candidates.some(candidate => candidate.zoneId === previous.zoneId && candidate.workspace.hostId === previous.workspace.hostId
         && candidate.workspace.workspaceId === previous.workspace.workspaceId && candidate.workspace.path === previous.workspace.path
         && candidate.directoryPath === previous.directoryPath)) {
-        setIssue('原来源资源映射已改变；已确认范围、引用与已有正文（如有）保留，请重新选择准确来源。'); return
+        setIssue('来源位置已变化，请重新选择来源。'); return
       }
       setScopes(candidates)
       if (previous) await read(previous, active)
@@ -167,14 +167,14 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
         if (!candidates.some(scope => scope.zoneId === first.target.zoneId && scope.path === first.target.path
           && scope.workspace.hostId === first.resource.hostId && scope.workspace.workspaceId === first.resource.workspaceId
           && scope.workspace.path === first.resource.workspacePath && scope.directoryPath === first.resource.zonePath)) {
-          setIssue('原来源资源映射已改变或尚未确认；原内层引用保留，请重试准确来源。'); return
+          setIssue('来源位置已变化或还没确认，可以重试。'); return
         }
         for (const pin of trail) {
           const zone = spatial.catalog.zones.find(zone => zone.zoneId === pin.target.zoneId && zone.hostId === pin.resource.hostId
             && zone.workspaceId === pin.resource.workspaceId && zone.directoryPath === pin.resource.zonePath)
           const workspace = snapshot.workspaces.find(workspace => workspace.workspaceId === pin.resource.workspaceId
             && workspace.hostId === pin.resource.hostId && workspace.path === pin.resource.workspacePath)
-          if (!zone || !workspace) { setIssue('原来源资源映射已改变或尚未确认；原内层引用保留，请重试准确来源。'); return }
+          if (!zone || !workspace) { setIssue('来源位置已变化或还没确认，可以重试。'); return }
           const next = await read({ zoneId: zone.zoneId, path: pin.target.path, workspace, directoryPath: pin.resource.zonePath }, active, false, pin)
           if (!next || !active()) return
           restored.push(next)
@@ -184,7 +184,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
       else if (candidates.length === 1) await read(candidates[0]!, active)
     }
     void discover().catch(error => { if (active()) {
-      setQueryDiagnostic(message(error)); setIssue('原来源范围查询尚未重新核实；原引用、已确认范围和已有正文（如有）保留，可重试查询。')
+      setQueryDiagnostic(message(error)); setIssue('来源范围还没重新确认，可以重试。')
     } })
       .finally(() => { if (active()) setLoading(false) })
     return () => { live = false; intent.current += 1 }
@@ -196,23 +196,23 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
     try {
       const result = await rpc('file.read', params(scope))
       if (!live() || token !== intent.current) return
-      if (pin && result.resource && !sameTopicFileResource(pin.resource, result.resource)) throw new Error('原来源的 Zone 文件映射已改变；原内层引用、阅读与草稿保留')
+      if (pin && result.resource && !sameTopicFileResource(pin.resource, result.resource)) throw new Error('来源文件位置已变化')
       const previous = viewRef.current
       const originalResource = previous?.read.resource
       if (previous?.scope.zoneId === scope.zoneId && originalResource && result.resource
         && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'logicalDirectory'].some(key =>
           originalResource[key as keyof typeof originalResource] !== result.resource![key as keyof typeof originalResource])) {
-        throw new Error('原来源的 Zone 文件映射已改变；原引用、阅读与草稿保留，请重新选择准确来源')
+        throw new Error('来源文件位置已变化，请重新选择来源')
       }
-      if (result.result.status === 'unknown' || result.result.status === 'error') { setReadIssue(`原文件读取未确认：${result.result.message}。原引用和已有正文（如有）保留，可重试。`); return }
+      if (result.result.status === 'unknown' || result.result.status === 'error') { setReadIssue(`文件读取没有完成：${result.result.message}。可以重试。`); return }
       if (source.kind === 'note' && result.result.status === 'read') {
         const note = readNoteDocument(result.result.document.content)
-        if (note.status !== 'valid' || note.note.noteId !== source.noteId) throw new Error('原文件未确认同一 Note 身份；原引用保留')
+        if (note.status !== 'valid' || note.note.noteId !== source.noteId) throw new Error('文件内容不是这条笔记')
       }
       if (result.result.status === 'directory') {
         const listing = await rpc('file.list', params(scope))
         if (!live() || token !== intent.current) return
-        if (result.resource && listing.resource && !sameTopicFileResource(result.resource, listing.resource)) throw new Error('原来源目录的 Zone 文件映射已改变；原内层引用、阅读与草稿保留')
+        if (result.resource && listing.resource && !sameTopicFileResource(result.resource, listing.resource)) throw new Error('来源目录位置已变化')
         if (listing.result.status === 'unknown') { setReadIssue(`目录读取未确认：${listing.result.message}。上次阅读保留。`); return }
         const next = { scope, read: result, listing }
         if (!pin) retain(next)
@@ -222,7 +222,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
       if (!pin) retain(next)
       setReadIssue('')
       return next
-    } catch (error) { if (live() && token === intent.current) setReadIssue(`原文件读取失败：${message(error)}。原引用和已有正文（如有）保留，可重试。`) }
+    } catch (error) { if (live() && token === intent.current) setReadIssue(`文件读取失败：${message(error)}。可以重试。`) }
     function retain(next: SourceView) {
       const previous = viewRef.current
       const child = descend && previous && JSON.stringify(params(previous.scope)) !== JSON.stringify(params(scope))
@@ -247,31 +247,31 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
   }, [])
   function selectPage(page: Page) {
     const original = noteReferences.current.get(page.noteId), mapping = pageMapping(page, original?.blockId)
-    if (original && !sameTopicNoteMapping(original, mapping)) { setIssue('此 Note 的资源映射已改变；原页引用、阅读与草稿保留。'); return }
+    if (original && !sameTopicNoteMapping(original, mapping)) { setIssue('这条笔记的文件位置已变化，可以重试读取。'); return }
     const selected = original ?? { ...mapping, trail: [] }
     noteReferences.current.set(page.noteId, selected); selectedPageRef.current = page.noteId; setSelectedPage(page.noteId)
     setVisitedPages(values => values.includes(page.noteId) ? values : [...values, page.noteId])
     publish({ kind: 'notebook', selectedNote: selected })
   }
   function open(scope: MobileTopicSourceScope) {
-    void Promise.resolve().then(() => openScope(scope)).catch(error => setReadIssue(`原工作面打开失败：${message(error)}。当前阅读保留。`))
+    void Promise.resolve().then(() => openScope(scope)).catch(error => setReadIssue(`工作面打开失败：${message(error)}。`))
   }
-  return <section className="mobile-topics mobile-topic-source-reader" aria-label="原来源阅读" hidden={!visible}>
+  return <section className="mobile-topics mobile-topic-source-reader" aria-label="来源阅读" hidden={!visible}>
     <div hidden={Boolean(selectedPage)}>
-    <header className="mobile-topics-actions"><button onClick={activeBack}>{history.length ? '返回上层来源' : view && scopes.length > 1 ? '返回来源范围' : backLabel}</button><div className="mobile-topics-heading"><small>{source.kind === 'notebook' ? '原笔记本' : '知识来源'}</small><h1>{source.kind === 'notebook' ? notebookName : source.kind === 'note' ? noteName : currentFilePath.split('/').at(-1) || '原文件'}</h1></div><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></header>
-    {loading && <p role="status">正在读取原来源…</p>}
+    <header className="mobile-topics-actions"><button onClick={activeBack}>{history.length ? '返回上层来源' : view && scopes.length > 1 ? '返回来源范围' : backLabel}</button><div className="mobile-topics-heading"><small>{source.kind === 'notebook' ? '笔记本' : '知识来源'}</small><h1>{source.kind === 'notebook' ? notebookName : source.kind === 'note' ? noteName : currentFilePath.split('/').at(-1) || '文件'}</h1></div><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></header>
+    {loading && <p role="status">正在读取来源…</p>}
     {issue && <MobileNotice identity={[JSON.stringify(source),issue]} className="mobile-topics-issue" role="status">{issue}</MobileNotice>}
     {queryDiagnostic && <details><summary>上次来源查询诊断</summary><p>{queryDiagnostic}</p></details>}
-    {readIssue && <MobileNotice identity={[JSON.stringify(requestedScope),readIssue]} className="mobile-topics-issue" role="status">{readIssue}<button onClick={() => { if (requestedScope && !restoring.current) void read(requestedScope, undefined, Boolean(view && requestedScope.path !== view.scope.path)); else setRefresh(value => value + 1) }}>重试原文件</button></MobileNotice>}
+    {readIssue && <MobileNotice identity={[JSON.stringify(requestedScope),readIssue]} className="mobile-topics-issue" role="status">{readIssue}<button onClick={() => { if (requestedScope && !restoring.current) void read(requestedScope, undefined, Boolean(view && requestedScope.path !== view.scope.path)); else setRefresh(value => value + 1) }}>重试此文件</button></MobileNotice>}
     <details><summary>来源引用</summary>{source.kind === 'file' ? <p>{pathLabel(source.path, source.hostId)}</p> : <code>{source.kind === 'note' ? source.noteId : source.notebookId}</code>}</details>
     {source.kind === 'notebook' && <ul className="mobile-topics-list">{pages.map(page => <li key={page.noteId}><button onClick={() => selectPage(page)}><strong>{page.title}</strong><small>{pathLabel(page.resource.path, page.resource.hostId)}{page.archivedAt !== undefined ? ' · 已归档' : ''}</small></button></li>)}</ul>}
-    {scopes.length === 1 && <div className="mobile-topics-actions"><strong>{scopes[0]!.workspace.name}</strong><button onClick={() => open(view?.scope ?? scopes[0]!)}>打开原工作面</button>{view && <button onClick={() => { void read(view.scope) }}>刷新原文件</button>}</div>}
-    {scopes.length > 1 && <><p>原来源有多个准确资源范围，请选择：</p><ul className="mobile-topics-list">{scopes.map(scope => <li key={scope.zoneId}><button onClick={() => { void read(scope) }}><strong>{scope.workspace.name}</strong><small>{pathLabel(scope.directoryPath, scope.workspace.hostId)}</small></button><button onClick={() => open(scope)}>打开此原工作面</button></li>)}</ul></>}
+    {scopes.length === 1 && <div className="mobile-topics-actions"><strong>{scopes[0]!.workspace.name}</strong><button onClick={() => open(view?.scope ?? scopes[0]!)}>打开工作面</button>{view && <button onClick={() => { void read(view.scope) }}>刷新文件</button>}</div>}
+    {scopes.length > 1 && <><p>来源有多个位置，请选择：</p><ul className="mobile-topics-list">{scopes.map(scope => <li key={scope.zoneId}><button onClick={() => { void read(scope) }}><strong>{scope.workspace.name}</strong><small>{pathLabel(scope.directoryPath, scope.workspace.hostId)}</small></button><button onClick={() => open(scope)}>打开此工作面</button></li>)}</ul></>}
     {view && <article className="mobile-topic-reading">
       {scopes.length > 1 && <strong>{view.scope.workspace.name}</strong>}
       <details><summary>当前文件位置</summary><p>{pathLabel(view.scope.directoryPath, view.scope.workspace.hostId)} / {view.scope.path}</p></details>
       {view.read.result.status === 'read' && <>
-        {source.kind === 'file' && source.revision && scopes.some(scope => JSON.stringify(params(scope)) === JSON.stringify(params(view.scope))) && source.revision !== view.read.result.document.revision && <MobileNotice identity={[JSON.stringify(source),JSON.stringify(view.scope),view.read.result.document.revision]} role="status">当前保存版本与来源记录的版本不同；以下为原文件当前正文。</MobileNotice>}
+        {source.kind === 'file' && source.revision && scopes.some(scope => JSON.stringify(params(scope)) === JSON.stringify(params(view.scope))) && source.revision !== view.read.result.document.revision && <MobileNotice identity={[JSON.stringify(source),JSON.stringify(view.scope),view.read.result.document.revision]} role="status">文件在记录之后已修改，下面是当前内容。</MobileNotice>}
         {source.kind === 'note' || view.read.result.document.path.endsWith(NOTE_FILE_EXTENSION)
           ? <MobileNoteFile rpc={rpc} params={params(view.scope)} read={view.read}
             visible={visible && !selectedPage} {...(source.kind === 'note' && source.blockId ? { target: { noteId: source.noteId, blockId: source.blockId } } : {})} />
@@ -279,13 +279,13 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
             openWorkspaceFile={path => { const relative = relativeTo(view.scope.directoryPath, path); if (relative !== null) void read({ ...view.scope, path: relative }, undefined, true) }}
             {...(openHttpLink ? { openHttpLink } : {})} />}
       </>}
-      {view.read.result.status === 'binary' && <p role="status">原文件是二进制内容（{view.read.result.byteLength} bytes），公共文本 reader 不返回正文；可打开原工作面。</p>}
-      {view.read.result.status === 'deleted' && <p role="status">原 Files owner 确认此路径已不存在，原来源引用仍保留。</p>}
-      {view.listing?.result.status === 'listed' && <><p>{view.listing.result.complete ? '已确认目录' : `目录部分可读 · ${view.listing.result.partialReason}`}{view.listing.result.omitted === 'git-ignored' ? ' · 沿原 Git ignore 规则' : ''}</p>
+      {view.read.result.status === 'binary' && <p role="status">这是二进制文件（{view.read.result.byteLength} 字节），这里无法显示；可以打开工作面查看。</p>}
+      {view.read.result.status === 'deleted' && <p role="status">这个文件已不存在。</p>}
+      {view.listing?.result.status === 'listed' && <><p>{view.listing.result.complete ? '已确认目录' : `目录部分可读 · ${view.listing.result.partialReason}`}{view.listing.result.omitted === 'git-ignored' ? ' · 已按 Git ignore 规则省略' : ''}</p>
         <ul className="mobile-topics-list">{view.listing.result.files.map(path => <li key={path}><button onClick={() => { void read({ ...view.scope, path: view.scope.path === '.' ? path : view.scope.path.replace(/\/+$/u, '') + '/' + path }, undefined, true) }}>{path}</button></li>)}</ul></>}
     </article>}
     </div>
-    {selectedPage && !notebookReady && <section aria-label="原笔记页待核实"><button onClick={backToNotebook}>返回笔记本</button><MobileNotice dismissible={Boolean(issue)} kind={issue ? "warning" : "feedback"} identity={[JSON.stringify(source),selectedPage,issue]} role="status">{issue || '正在核对原笔记本所选页引用…'}</MobileNotice><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></section>}
+    {selectedPage && !notebookReady && <section aria-label="笔记页待核实"><button onClick={backToNotebook}>返回笔记本</button><MobileNotice dismissible={Boolean(issue)} kind={issue ? "warning" : "feedback"} identity={[JSON.stringify(source),selectedPage,issue]} role="status">{issue || '正在核对所选笔记页…'}</MobileNotice><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></section>}
     {visitedPages.map(noteId => <div key={noteId} hidden={selectedPage !== noteId || !notebookReady}><NotebookSourcePage source={{ kind: 'note', noteId, ...(noteReferences.current.get(noteId)!.blockId ? { blockId: noteReferences.current.get(noteId)!.blockId! } : {}) }} noteId={noteId} reportBack={reportPageBack} reportReference={reportNoteReference} rpc={rpc} onBack={backToNotebook} visible={visible && notebookReady && selectedPage === noteId} backLabel="返回笔记本" openScope={openScope}
       initialReference={{ kind: 'note', mapping: noteMapping(noteReferences.current.get(noteId)!), trail: noteReferences.current.get(noteId)!.trail }}
       {...(displayPath ? { displayPath } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}

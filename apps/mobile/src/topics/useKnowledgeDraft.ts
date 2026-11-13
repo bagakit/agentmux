@@ -29,7 +29,7 @@ export function mobileKnowledgeDraftSource(client: AgentMuxHostedClient | null, 
 }
 function restore(draft: MobileKnowledgeDraft): MobileKnowledgeDraft {
   return { ...draft, attempts: draft.attempts.map(attempt => attempt.phase === 'sending'
-    ? { ...attempt, phase: 'unknown', issue: attempt.issue ?? '原页面的保存回执尚未确认；完整原请求保留，重开不会重发。' } : attempt) }
+    ? { ...attempt, phase: 'unknown', issue: attempt.issue ?? '上次保存还没确认。' } : attempt) }
 }
 
 /** One scoped device draft. Public reads never settle its unknown attempts. */
@@ -92,27 +92,27 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (originalOwner && !originalOwner()) {
-        if (mounted.current) setStorageIssue('新建知识的原 Host 或设备记录已变化；原 ID 与本页正文保留，尚未确认进入设备备份。')
+        if (mounted.current) setStorageIssue('Mac 连接或设备记录已变化，新知识的正文还没备份。')
         return { canForward: false, committed: false }
       }
       if (!next.scope) {
-        if (mounted.current) setStorageIssue('原 Host 身份尚未核实；本页正文可编辑和复制，尚未进入设备备份。请连接原 Host 或明确选择原已存草稿。')
+        if (mounted.current) setStorageIssue('还没确认当前连接的 Mac，正文还没备份；请连回原来的 Mac，或选择已存的草稿。')
         return { canForward: false, committed: false }
       }
       if (conflict.current) return { canForward: false, committed: false }
       try {
         const acknowledgement = await owner.editKnowledgeDraft(durable.current, parseMobileKnowledgeDraft(next), recordId)
-        if (acknowledgement.recordId !== recordId || owner.recordIdentity() !== recordId) throw new DeviceWorkfaceRecordChangedError('原设备记录已替换；此页正文未写入新工作面。')
+        if (acknowledgement.recordId !== recordId || owner.recordIdentity() !== recordId) throw new DeviceWorkfaceRecordChangedError('设备记录已更换，本页正文没有写入新记录。')
         if (!acknowledgement.applied) {
           conflict.current = { canonical: acknowledgement.draft }
-          if (mounted.current) setStorageIssue('另一页面已保存同一知识草稿。双方正文和完整原请求已分别保全；本次请求未发送，请复制或明确保留版本。')
+          if (mounted.current) setStorageIssue('另一个页面已保存这份草稿，这次未发送；请先复制正文，或选择要保留的版本。')
           return { canForward: false, committed: false }
         }
         durable.current = acknowledgement.draft
         if (mounted.current) setStorageIssue('')
         return { canForward: true, committed: true }
       } catch (error) {
-        if (mounted.current) setStorageIssue(`${message(error)} 本页正文与完整请求保留；备份尚未确认包含本次输入，请复制保全。`)
+        if (mounted.current) setStorageIssue(`${message(error)} 备份里可能没有这次输入，请先复制正文。`)
         if (error instanceof DeviceWorkfaceRecordChangedError || error instanceof MobileKnowledgeDraftInvalidError) return { canForward: false, committed: false }
         return { canForward: owner.recordIdentity() === recordId && owner.canRetrySave() && owner.snapshot().issue !== null, committed: false }
       }
@@ -127,13 +127,13 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
     const source = mobileKnowledgeDraftSource(originalClient, owner)
     if (!connected || !source || !old.scope || !sameMobileKnowledgeDraftScope(old.scope, source.scope)
       || owner.recordIdentity() !== recordId) {
-      setStorageIssue('新建知识的原 ID 与本页正文保留；原 Host 身份尚未核实，尚未确认进入设备备份。')
+      setStorageIssue('还没确认当前连接的 Mac，新知识的正文还没备份。')
       return
     }
     // The user's explicit New action minted this ID. Retain even an empty
     // draft, without creating a Host entry or treating a read as a write ACK.
     newIntentRetained.current = true
-    setStorageIssue('新建知识的原 ID 与空草稿正在设备保全中；尚未写入 Host。')
+    setStorageIssue('正在把新知识存到这台手机…')
     void retain(old, () => {
       const now = mobileKnowledgeDraftSource(context.current.client, owner)
       return mounted.current && context.current.client === originalClient && context.current.epoch === epoch
@@ -147,12 +147,12 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
   }
   function keepDeviceConflict() {
     if (!conflict.current) return
-    if (owner.recordIdentity() !== recordId) { setStorageIssue('原记录已替换；本页正文与原请求未进入新备份，请先复制保全。'); return }
+    if (owner.recordIdentity() !== recordId) { setStorageIssue('设备记录已更换，本页正文没有写入新记录；请先复制正文。'); return }
     const old = current.current, canonical = conflict.current.canonical, attempts = [...(canonical?.attempts ?? [])]
     for (const attempt of old.attempts) {
       const existing = attempts.find(value => value.attemptId === attempt.attemptId)
       if (existing && (!same(existing.input, attempt.input) || existing.ownerInstanceId !== attempt.ownerInstanceId)) {
-        setStorageIssue('同一本地尝试的完整原请求不同；双方仍保全，未发送新保存。'); return
+        setStorageIssue('同一次保存出现了两份不同的请求，已都保留；请核对后再保存。'); return
       }
       if (!existing) attempts.push(attempt)
     }
@@ -165,14 +165,14 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
     // version available for copying before adopting the selected stored key.
     reloadCopies.current = true
     setLocalCopies(values => [...values, current.current])
-    durable.current = value; conflict.current = null; setChecked(null); setNotice('已明确采用这份原草稿；其 Host 未匹配时不会发送。')
+    durable.current = value; conflict.current = null; setChecked(null); setNotice('已采用这份草稿。')
     baselineKnown.current = true
     display(restore(value))
   }
   async function inspect() {
     const old = current.current, originalClient = context.current.client, source = mobileKnowledgeDraftSource(originalClient, owner), epoch = context.current.epoch
     if (!originalClient?.forwardRpc || !latest.current.connected || !old.scope || !source || !sameMobileKnowledgeDraftScope(old.scope, source.scope)
-      || owner.recordIdentity() !== recordId) { setNotice('核对未完成：原条目与 Host 尚未匹配，正文和原请求保留。'); return }
+      || owner.recordIdentity() !== recordId) { setNotice('没能核对：当前连接的 Mac 与这条知识不一致。'); return }
     const valid = () => {
       const now = mobileKnowledgeDraftSource(context.current.client, owner)
       return mounted.current && context.current.client === originalClient && context.current.epoch === epoch && latest.current.connected
@@ -182,14 +182,14 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
     try {
       const input = { topicId: old.topicId, entryId: old.entryId }
       const result = parseTopicResult('topic.knowledge.read', await originalClient.forwardRpc('topic.knowledge.read', input), input)
-      if (valid()) { setChecked({ entry: result.entry, ...source }); setNotice('已读回原条目当前版本；草稿和未知请求仍保留。') }
-    } catch (error) { if (valid()) setNotice(`检查原保存结果失败：${message(error)}。草稿与完整请求保留。`) }
+      if (valid()) { setChecked({ entry: result.entry, ...source }); setNotice('已读到 Mac 上的当前版本。') }
+    } catch (error) { if (valid()) setNotice(`检查保存结果失败：${message(error)}。可以重试。`) }
   }
   async function adoptChecked() {
     const old = current.current, source = mobileKnowledgeDraftSource(context.current.client, owner)
     if (!checked || !old.scope || !source || !latest.current.connected || owner.recordIdentity() !== recordId
       || source.ownerInstanceId !== checked.ownerInstanceId || !sameMobileKnowledgeDraftScope(old.scope, checked.scope)
-      || !sameMobileKnowledgeDraftScope(old.scope, source.scope)) { setNotice('采用版本未完成：原条目、Host 或设备记录已变化，原稿和请求保留。'); return }
+      || !sameMobileKnowledgeDraftScope(old.scope, source.scope)) { setNotice('没能采用这个版本：知识、Mac 或设备记录已变化。'); return }
     const originalCheck = checked
     const result = await retain({ ...old, expectedRevision: checked.entry?.revision ?? null, blockedAttemptId: null })
     const now = mobileKnowledgeDraftSource(context.current.client, owner)
@@ -199,20 +199,20 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
       const held = { ...current.current, expectedRevision: old.expectedRevision, blockedAttemptId: old.blockedAttemptId }
       if (mounted.current && owner.recordIdentity() === recordId && !conflict.current) await retain(held)
       else display(held)
-      if (mounted.current) setNotice('采用版本尚未持久确认；原 unknown 请求、revision 与后来正文保留，请先复制或重试明确采用。')
+      if (mounted.current) setNotice('这个版本还没存到这台手机；请先复制正文，或重新采用。')
       return
     }
     baselineKnown.current = true
-    setChecked(null); setNotice('已采用刚读回的 revision；原未知请求与后来正文保留，下次保存须明确提交。')
+    setChecked(null); setNotice('已采用刚读到的版本，需要时再保存。')
   }
   async function save() {
     const old = current.current
     if (flight.current || old.blockedAttemptId) return
-    if (!baselineKnown.current) { setNotice('原条目基线尚未确认；先检查并明确采用原版本，正文保留。'); return }
+    if (!baselineKnown.current) { setNotice('还没确认编辑前的版本；请先检查保存结果并采用一个版本。'); return }
     const originalClient = context.current.client, source = mobileKnowledgeDraftSource(originalClient, owner)
     if (!originalClient?.forwardRpc || !latest.current.connected || !source || !old.scope
       || !sameMobileKnowledgeDraftScope(old.scope, source.scope) || owner.recordIdentity() !== recordId) {
-      setNotice('保存未发送：原知识、Host 或设备记录尚未匹配；正文仍可编辑和复制保全。'); return
+      setNotice('保存未发送：知识、Mac 或设备记录不一致；正文仍可编辑和复制。'); return
     }
     let input
     try { input = freezeMobileKnowledgeInput({ topicId: old.topicId, entryId: old.entryId, ...authored(old), expectedRevision: old.expectedRevision }) }
@@ -232,26 +232,26 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
     flight.current = true; setSaving(true); setChecked(null); setNotice('')
     try {
       const preserved = await retain({ ...old, attempts: [...old.attempts, attempt], blockedAttemptId: attempt.attemptId })
-      if (!preserved.canForward || !active()) { setNotice('保存未发送：完整请求的保全或归属尚未核实，正文仍保留。'); return }
+      if (!preserved.canForward || !active()) { setNotice('保存未发送：请求还没存到这台手机，或连接已变化。'); return }
       const result = parseTopicResult('topic.knowledge.write', await originalClient.forwardRpc('topic.knowledge.write', input), input)
       if (!active()) return
       const now = current.current
       const settled = await retain({ ...now, expectedRevision: result.entry.revision, blockedAttemptId: null,
         attempts: now.attempts.filter(value => value.attemptId !== attempt.attemptId) })
       if (!sameOwner()) {
-        const held = hold('原 Host 已回应，但页面归属已变化；原完整请求继续保留，未作为新工作面的确认。')
+        const held = hold('Mac 已确认，但页面所属的连接已变化，这次确认没有写入新记录。')
         if (owner.recordIdentity() === recordId && mounted.current) await retain(held)
         else display(held)
         return
       }
       if (!settled.committed) {
-        await retain(hold('原 Host 已回应，但设备尚未持久确认该回执；完整原请求继续保留。'))
-        if (sameOwner()) setNotice('原 Host 已回应；设备回执保全尚未完成，请核对原请求。')
+        await retain(hold('Mac 已确认保存，但这台手机还没记下确认。'))
+        if (sameOwner()) setNotice('Mac 已确认保存，但这台手机还没记下确认；请核对请求。')
         return
       }
       if (sameOwner()) {
         const now = current.current, keepEditing = !same(authored(now), authored({ ...now, ...input, scope: now.scope, authoringScope: input.scope ?? '' }))
-        setNotice('原知识已确认保存；后来正文与其他原未知请求仍保留。'); latest.current.onSaved(result.entry, keepEditing)
+        setNotice('知识已保存。'); latest.current.onSaved(result.entry, keepEditing)
       }
     } catch (error) {
       if (!active()) return

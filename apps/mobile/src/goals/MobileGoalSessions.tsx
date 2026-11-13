@@ -30,17 +30,17 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
       pending = true
       try {
         const before = mobileGoalDraftSource(client, getDeviceWorkface())
-        if (goal && (!before || !factScope || !sameMobileGoalDraftScope(before.scope, factScope))) throw new Error('原目标与 Host 呈现来源尚未匹配，原会话引用保留。')
+        if (goal && (!before || !factScope || !sameMobileGoalDraftScope(before.scope, factScope))) throw new Error('目标与当前连接的 Mac 不一致。')
         const result = await client.forwardRpc!('space.ls', { target: {}, presentation: true })
         if (live) {
-          if (goal && JSON.stringify(before) !== JSON.stringify(mobileGoalDraftSource(client, getDeviceWorkface()))) throw new Error('读取期间原 Runtime 或 Host 实例已变化；未采用另一来源的名称。')
+          if (goal && JSON.stringify(before) !== JSON.stringify(mobileGoalDraftSource(client, getDeviceWorkface()))) throw new Error('读取期间 Mac 连接已变化。')
           const related = result.catalog.agentPresentation?.filter(row => references.includes(row.agentSessionId)) ?? []
           const retainPrevious = !goal || !!rowsScope.current && !!factScope && sameMobileGoalDraftScope(rowsScope.current, factScope)
           rowsScope.current = before?.scope ?? null
           setRows(previous => references.flatMap(id => { const row = related.find(value => value.agentSessionId === id) ?? (retainPrevious ? previous.find(value => value.agentSessionId === id) : undefined); return row ? [row] : [] }))
-          setIssue(related.length < references.length ? '部分关联 Agent 当前呈现尚未确认；已有呈现保留，仍可打开原会话。' : '')
+          setIssue(related.length < references.length ? '部分关联 Agent 的名称和状态还没确认，仍可打开会话。' : '')
         }
-      } catch (error) { if (live) setIssue(`读取关联 Agent 呈现失败：${error instanceof Error ? error.message : String(error)}。上次呈现保留，仍可打开原会话或刷新。`) }
+      } catch (error) { if (live) setIssue(`读取关联 Agent 失败：${error instanceof Error ? error.message : String(error)}。仍可打开会话或刷新。`) }
       finally { pending = false }
     }
     void read()
@@ -56,7 +56,7 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
       const originalSource = () => {
         const source = mobileGoalDraftSource(client, getDeviceWorkface())
         if (!goal || source && factScope && sameMobileGoalDraftScope(source.scope, factScope)) return true
-        setIssue('打开未完成：原目标与当前 Host 尚未匹配，未将同名 Session 当作原会话。原引用与呈现保留，可接回原 Host 后重试。')
+        setIssue('没有打开：当前连接的 Mac 与这个目标不一致，连回原来的 Mac 后再试。')
         return false
       }
       return <div key={id} className="mobile-goal-session"><strong>{identity.name}</strong><p>{identity.project}{row?.state ? ` · ${row.state}` : ''}</p>
@@ -72,23 +72,23 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
     {!sessionIds.length && <p>暂无关联会话。</p>}
   </section>
   if (!goal) return sessions
-  const stages = { prepared: '已准备，尚未提交', submitted: '已提交，确认未到', unknown: '原输入回执未知', confirmed: '原输入已确认' }
+  const stages = { prepared: '已准备，尚未提交', submitted: '已提交，确认未到', unknown: '输入未确认', confirmed: '输入已确认' }
   const dispatches = goal.dispatches ?? []
   return <section aria-label="目标协作与输入记录"><h3>协作与推进依据</h3>
     <p>负责人：{goal.assigneeSessionIds?.length ? goal.assigneeSessionIds.map(name).join('、') : '未分配'}</p>
     <p>Supervisor：{goal.supervisorSessionId ? name(goal.supervisorSessionId) : '未指定'}</p>
     {!dispatches.length ? <p>尚无公开输入记录。工作状态、关联历史与 Agent 活跃不证明目标已开始推进。</p>
-      : <><p>{dispatches.length} 条原输入记录 · {dispatches.filter(value => value.stage === 'confirmed').length} 条已确认</p>
+      : <><p>{dispatches.length} 条输入记录 · {dispatches.filter(value => value.stage === 'confirmed').length} 条已确认</p>
         <p>输入确认不代表工作完成或结果接受。多条记录分别保留，不推断唯一当前执行。</p>
         {dispatches.filter(value => value.stage !== 'confirmed').map(value => <MobileNotice kind={value.stage === "unknown" || value.issue ? "warning" : "feedback"} dismissible={value.stage === "unknown" || Boolean(value.issue)} identity={[value.operationId,value.stage,value.issue]} key={value.operationId} role="status">{name(value.agentSessionId)} · {stages[value.stage]}{value.issue ? `：${value.issue}` : ''}</MobileNotice>)}
-        <details><summary>全部原输入与确认依据</summary>{dispatches.map(value => <div key={value.operationId}>
-          <p>{name(value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '原续跑输入' : '原单次输入'}</p>
+        <details><summary>全部输入与确认依据</summary>{dispatches.map(value => <div key={value.operationId}>
+          <p>{name(value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '续跑输入' : '单次输入'}</p>
           <p className="mobile-goals-body">{value.prompt}</p><pre>{JSON.stringify(value, null, 2)}</pre>
         </div>)}</details></>}
-    <details><summary>负责人身份与原参与来源</summary><dl><dt>负责人 Session</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd>
-      <dt>Supervisor Session</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd></dl>
+    <details><summary>负责人身份与参与来源</summary><dl><dt>负责人会话</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd>
+      <dt>Supervisor 会话</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd></dl>
       {(goal.participations ?? []).map(value => <div key={value.id}><p>{name(value.agentSessionId)} · {value.kind === 'create' ? '创建参与' : value.kind === 'requirements' ? '需求整理参与' : '讨论参与'}</p><pre>{JSON.stringify(value, null, 2)}</pre></div>)}
-      {goal.creationOrigin && <><p>原创建策略仅表示来源；设置 Supervisor 不自动开始执行。</p><pre>{JSON.stringify(goal.creationOrigin, null, 2)}</pre></>}
+      {goal.creationOrigin && <><p>创建策略只表示来源；设置 Supervisor 不会自动开始执行。</p><pre>{JSON.stringify(goal.creationOrigin, null, 2)}</pre></>}
     </details>
     <details><summary>关联会话与历史</summary>{sessions}</details>
   </section>

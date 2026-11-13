@@ -41,7 +41,7 @@ export async function finishGoalOperation(value: Pending, confirmed: boolean): P
   if (value.discarded) {
     if (!confirmed) return false
     value.discarded = false; value.inFlight = false; value.confirmed = true; value.saved = false
-    value.issue = '原 RPC 在本页副本移除后已收到回执；请保存确认，或重新复制保全。'
+    value.issue = 'Mac 在本页副本移除后确认了这个操作；请更新设备记录，或重新复制。'
     operations.add(value); notify()
     await persist(value)
     return value.saved
@@ -72,7 +72,7 @@ export function MobileGoalOperationSafety() {
     }))
     for (const item of operations) {
       const record = retained.get(JSON.stringify(item.item))
-      if (!item.saved || current.issue || (current.record.recordId ?? null) !== item.recordId || !record || item.confirmed && record.confirmation !== 'confirmed') return '目标原请求或已收到的回执尚未保存在当前设备工作面；请在提醒与诊断中重试保存，当前页面可继续使用。'
+      if (!item.saved || current.issue || (current.record.recordId ?? null) !== item.recordId || !record || item.confirmed && record.confirmation !== 'confirmed') return '目标操作还没存到这台手机；请在提醒与诊断中重试保存。'
     }
     return null
   })
@@ -106,39 +106,39 @@ export function MobileGoalOperationRecovery({ copyText }: { copyText: ClientUiPl
   for (const pending of operations) if (!used.has(pending)) records.push({ item: pending.item, pending })
   if (!records.length) return copyIssue ? <p role="status">{copyIssue}</p> : null
   const action = { 'goal.assign': '分配负责人', 'goal.start': '开始执行', 'goal.handoff': '交接', 'goal.delete': '删除', 'goal.link-session': '关联会话', 'goal.link-project': '关联项目' }
-  return <section className="mobile-web-diagnostics mobile-goal-recovery" aria-label="未确认的目标操作"><h3>目标操作记录</h3><p>回执未确认时，请核对原请求；不会自动重发。</p>
+  return <section className="mobile-web-diagnostics mobile-goal-recovery" aria-label="未确认的目标操作"><h3>目标操作记录</h3><p>操作还没确认时，请先核对请求。</p>
     {records.map(({ item, pending }, index) => {
       const { request, method } = item
-      const content = JSON.stringify({ ...item, result: pending?.confirmed || item.confirmation === 'confirmed' ? '原 RPC 已收到回执' : '原 RPC 回执未确认' }, null, 2)
+      const content = JSON.stringify({ ...item, result: pending?.confirmed || item.confirmation === 'confirmed' ? 'Mac 已确认' : 'Mac 还没确认' }, null, 2)
       const retained = pending && !current.issue && pending.saved && used.has(pending)
-      return <details key={`${request.operationId}:${index}`}><summary>{action[method]} · {request.goalId} · {pending?.inFlight ? '等待回执' : pending?.confirmed || item.confirmation === 'confirmed' ? '已收到原回执' : '回执未确认'}</summary>
-        <pre>{content}</pre><button className="mobile-text-button" onClick={() => { void copyText(content, error => setCopyIssue(`复制未完成：${error instanceof Error ? error.message : String(error)}；原请求可手动选取。`)).then(success => { if (success && pending && operations.has(pending)) { setCopied({ pending, content }); setConfirmingExit(null); setCopyIssue('完整原请求已复制。') } }).catch(error => setCopyIssue(`复制未完成：${error instanceof Error ? error.message : String(error)}；原请求可手动选取。`)) }}>复制原请求</button>
-        {pending && !retained && <><p>设备记录尚未确认：{pending.recordId !== (current.record.recordId ?? null) ? '设备工作面身份已变化；原请求不会写入其他记录。' : pending.issue ?? '请保全原请求'}</p><button className="mobile-text-button" disabled={Boolean(pending.saving) || !owner.canRetrySave()} onClick={() => {
-          if (owner.recordIdentity() !== pending.recordId) { pending.issue = '设备工作面已替换；原请求不写入其他记录，请恢复原工作面后重试。'; notify(); return }
+      return <details key={`${request.operationId}:${index}`}><summary>{action[method]} · {request.goalId} · {pending?.inFlight ? '等待确认' : pending?.confirmed || item.confirmation === 'confirmed' ? '已收到确认' : '还没确认'}</summary>
+        <pre>{content}</pre><button className="mobile-text-button" onClick={() => { void copyText(content, error => setCopyIssue(`复制未完成：${error instanceof Error ? error.message : String(error)}；可以手动选取请求。`)).then(success => { if (success && pending && operations.has(pending)) { setCopied({ pending, content }); setConfirmingExit(null); setCopyIssue('已复制完整请求。') } }).catch(error => setCopyIssue(`复制未完成：${error instanceof Error ? error.message : String(error)}；可以手动选取请求。`)) }}>复制请求</button>
+        {pending && !retained && <><p>设备记录尚未确认：{pending.recordId !== (current.record.recordId ?? null) ? '这台手机的工作面已更换，请求不会写入新记录。' : pending.issue ?? '请保存这个请求'}</p><button className="mobile-text-button" disabled={Boolean(pending.saving) || !owner.canRetrySave()} onClick={() => {
+          if (owner.recordIdentity() !== pending.recordId) { pending.issue = '这台手机的工作面已更换，请恢复原来的工作面后重试。'; notify(); return }
           void persist(pending)
-        }}>{pending.confirmed ? '重试更新设备记录' : '保存原设备工作面'}</button></>}
+        }}>{pending.confirmed ? '重试更新设备记录' : '保存设备记录'}</button></>}
         {pending && !retained && copied?.pending === pending && copied.content === content && (confirmingExit !== pending
           ? <button className="mobile-text-button" onClick={() => setConfirmingExit(pending)}>已另行保全，移除本页副本…</button>
-          : <><p>确认已在别处保全完整原请求及当前回执状态？设备记录状态可能未知，未确认的回执需自行核对；设备存储故障仍需恢复。此操作不改动设备记录、不重发也不确认原操作。</p><button className="mobile-text-button" onClick={() => {
+          : <><p>确认已在别处保存完整请求和当前确认状态？移除后不改设备记录、不重发，也不会确认这个操作；未确认的结果需要你自己核对。</p><button className="mobile-text-button" onClick={() => {
             const copiedContent = copied.content
-            if (copiedContent !== JSON.stringify({ ...pending.item, result: pending.confirmed ? '原 RPC 已收到回执' : '原 RPC 回执未确认' }, null, 2)) { setCopied(null); setConfirmingExit(null); setCopyIssue('原操作状态已变化，请重新复制后再核对。'); return }
+            if (copiedContent !== JSON.stringify({ ...pending.item, result: pending.confirmed ? 'Mac 已确认' : 'Mac 还没确认' }, null, 2)) { setCopied(null); setConfirmingExit(null); setCopyIssue('操作状态已变化，请重新复制后再核对。'); return }
             pending.exitRequested = true; pending.abort?.abort()
             void (async () => {
               await pending.saving
               const actual = owner.readGoalRequest(pending.item, pending.recordId)
-              const currentContent = JSON.stringify({ ...pending.item, result: pending.confirmed ? '原 RPC 已收到回执' : '原 RPC 回执未确认' }, null, 2)
+              const currentContent = JSON.stringify({ ...pending.item, result: pending.confirmed ? 'Mac 已确认' : 'Mac 还没确认' }, null, 2)
               if (currentContent !== copiedContent) {
-                pending.exitRequested = false; setCopyIssue('原操作状态已变化，请重新复制后再核对。')
+                pending.exitRequested = false; setCopyIssue('操作状态已变化，请重新复制后再核对。')
               } else if (actual === 'confirmed') {
                 pending.saved = true; pending.confirmed = true; pending.exitRequested = false; operations.delete(pending)
-                setCopyIssue('原设备记录已保存该操作的确认状态，记录保留。')
+                setCopyIssue('设备记录已保存这个操作的确认状态。')
               } else if (actual === 'saved') {
                 pending.saved = !pending.confirmed; pending.exitRequested = false
-                pending.issue = pending.confirmed ? '原请求已保存；已收到回执的确认状态尚未保存，请重试更新设备记录。' : null
-                setCopyIssue('原请求已写入设备记录，未移除。')
+                pending.issue = pending.confirmed ? '请求已保存，但 Mac 的确认还没存进设备记录；请重试更新设备记录。' : null
+                setCopyIssue('请求已写入设备记录，本页副本没有移除。')
               } else {
                 pending.discarded = true; operations.delete(pending)
-                setCopyIssue(actual === 'absent' ? '本页副本已移除；设备已有记录未删除，原操作没有重发。' : '本页副本已移除；设备原记录状态未知，未确认的回执需自行核对，设备存储故障仍需恢复。原操作没有重发。')
+                setCopyIssue(actual === 'absent' ? '已移除本页副本，操作没有重发。' : '已移除本页副本；设备记录状态未知，请自行核对操作结果并恢复设备存储。')
               }
               setConfirmingExit(null); setCopied(null); notify()
             })()

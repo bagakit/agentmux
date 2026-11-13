@@ -13,7 +13,7 @@ export type MobileTopicSourceContentReference =
   | { kind: 'note'; mapping: MobileTopicNoteMapping | null; trail: MobileTopicFileReference[] }
   | { kind: 'notebook'; selectedNote: (MobileTopicNoteMapping & { trail: MobileTopicFileReference[] }) | null }
 
-function invalid(): never { throw new Error('原来源内层引用无法完整核实；原记录、阅读与草稿保留。') }
+function invalid(): never { throw new Error('来源引用不完整，无法读取。') }
 function object(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
   const v = value as Record<string, unknown>

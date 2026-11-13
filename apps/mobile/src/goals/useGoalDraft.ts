@@ -63,17 +63,17 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (!next.scope) {
-        if (mounted.current) setStorageIssue('原 Host 身份尚未核实；正文仍在本页可编辑，尚未进入工作面备份。请先复制保全，再连接原 Host。')
+        if (mounted.current) setStorageIssue('还没确认当前连接的 Mac，正文还没备份；请先复制正文，再连回原来的 Mac。')
         return { canForward: false, committed: false }
       }
       if (conflict.current) return { canForward: false, committed: false }
       try {
         const parsed = parseMobileGoalDraft(next)
         const acknowledgement = await owner.editGoalDraft(durable.current, parsed, recordId)
-        if (acknowledgement.recordId !== recordId || owner.recordIdentity() !== recordId) throw new DeviceWorkfaceRecordChangedError('原记录已替换；此页正文未写入新工作面。')
+        if (acknowledgement.recordId !== recordId || owner.recordIdentity() !== recordId) throw new DeviceWorkfaceRecordChangedError('设备记录已更换，本页正文没有写入新记录。')
         if (!acknowledgement.applied) {
           conflict.current = { canonical: acknowledgement.draft }
-          if (mounted.current) setStorageIssue('另一页面已保存这份目标草稿。原稿与本次完整正文／未知请求已分别保全；后来输入仍在本页，先复制或明确采用版本。本次请求未发送。')
+          if (mounted.current) setStorageIssue('另一个页面已保存这份草稿，这次未发送；请先复制正文，或选择要保留的版本。')
           return { canForward: false, committed: false }
         }
         // Only this transaction's committed draft advances the durable baseline.
@@ -81,7 +81,7 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
         if (mounted.current) setStorageIssue('')
         return { canForward: true, committed: true }
       } catch (error) {
-        if (mounted.current) setStorageIssue(`${message(error)} 本页正文与原请求仍保留；请复制保全，备份中未确认包含本次输入。`)
+        if (mounted.current) setStorageIssue(`${message(error)} 备份里可能没有这次输入，请先复制正文。`)
         if (error instanceof DeviceWorkfaceRecordChangedError || error instanceof MobileGoalDraftInvalidError) return { canForward: false, committed: false }
         // A same-record I/O failure retains the original in-memory intent. It
         // does not deny an explicit original-Host request or local editing.
@@ -106,7 +106,7 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
       const at = operations.findIndex(value => value.request.operationId === operation.request.operationId)
       const existing = operations[at]
       if (existing && (!same(existing.request, operation.request) || existing.ownerInstanceId !== operation.ownerInstanceId)) {
-        setStorageIssue('同一原操作有不同完整请求；双方仍保全，请核对原请求，未发送新保存。'); return null
+        setStorageIssue('同一个操作出现了两份不同的请求，已都保留；请核对后再保存。'); return null
       }
       if (!existing) operations.push(operation)
       else if (operation.phase === 'unknown') operations[at] = operation
@@ -117,7 +117,7 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
     const held = conflict.current, old = current.current
     if (!held) return
     if (owner.recordIdentity() !== recordId) {
-      setStorageIssue('原设备记录已替换；本页正文与原请求保留，未写入新工作面。请先复制保全。'); return
+      setStorageIssue('设备记录已更换，本页正文没有写入新记录；请先复制正文。'); return
     }
     const operations = combinedOperations(held.canonical, old)
     if (!operations) return
@@ -131,7 +131,7 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
     const old = current.current, facts = latest.current, source = mobileGoalDraftSource(client, owner)
     if (!facts.goal || !facts.factScope || !source || !sameMobileGoalDraftScope(facts.factScope, source.scope)
       || old.scope && !sameMobileGoalDraftScope(old.scope, source.scope) || owner.recordIdentity() !== recordId) {
-      setStorageIssue('采用版本未完成：原目标与 Host 尚未匹配；当前正文和原请求保留。'); return
+      setStorageIssue('没能采用新版本：当前连接的 Mac 与这个目标不一致。'); return
     }
     const canonical = conflict.current?.canonical
     if (conflict.current) durable.current = canonical ?? null
@@ -151,7 +151,7 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
     const source = mobileGoalDraftSource(client, owner), facts = latest.current
     if (!client?.forwardRpc || !facts.connected || !source || !old.scope || !sameMobileGoalDraftScope(old.scope, source.scope)
       || !facts.factScope || !sameMobileGoalDraftScope(facts.factScope, source.scope) || owner.recordIdentity() !== recordId) {
-      report('保存未发送：原目标、Host 或设备记录尚未匹配；正文仍可编辑和复制保全。'); return
+      report('保存未发送：目标、Mac 或设备记录不一致；正文仍可编辑和复制。'); return
     }
     let request
     try { request = freezeMobileGoalUpdateRequest({ goalId, operationId: randomClientRequestId(), patch,
@@ -169,11 +169,11 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
     flight.current = true; setSaving(true)
     try {
       const preserved = await retain({ ...old, operations: [...old.operations, operation] })
-      if (!preserved.canForward || !active()) { report('保存未发送：原请求的保全或归属尚未核实，正文和完整请求保留。'); return }
+      if (!preserved.canForward || !active()) { report('保存未发送：请求还没存到这台手机，或连接已变化。'); return }
       const result = await originalClient.forwardRpc!('goal.update', request)
       if (!active()) return
       if (result.goal.id !== goalId || result.receipt.goalId !== goalId || result.receipt.updatedAt !== result.goal.updatedAt
-        || result.goal.updatedAt < request.expectedUpdatedAt) throw new Error('原保存回执的目标或版本未匹配。')
+        || result.goal.updatedAt < request.expectedUpdatedAt) throw new Error('Mac 返回的目标或版本与这次保存不一致。')
       const now = current.current, newest = latest.current.goal
       const stale = newest && newest.updatedAt > result.goal.updatedAt
       const bodyWrite = patch.title !== undefined || patch.description !== undefined
@@ -182,12 +182,12 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
         ...(!stale && patch.description !== undefined && now.description === patch.description ? { description: result.goal.description } : {}),
         baseline: stale || !bodyWrite && dirty(now) ? now.baseline : body(result.goal) }
       const settled = await retain(next)
-      const unknown = { ...operation, phase: 'unknown' as const, issue: '原 Host 已回应保存，但设备记录尚未确认保存该回执；完整原请求继续保留。' }
+      const unknown = { ...operation, phase: 'unknown' as const, issue: 'Mac 已确认保存，但这台手机还没记下确认。' }
       if (!sameOwner()) {
         // The old page keeps its guard; this branch cannot write the new
         // record/Host or publish the old response as their current facts.
         display({ ...current.current, operations: [...current.current.operations.filter(value => value.request.operationId !== operation.request.operationId), unknown] })
-        if (mounted.current) setStorageIssue('原设备记录或 Host 已变化；本页正文与完整原请求保留，未将原回执写入新工作面。请先复制保全。')
+        if (mounted.current) setStorageIssue('设备记录或 Mac 连接已变化，这次确认没有写入新记录；请先复制正文。')
         return
       }
       if (!settled.committed) {
@@ -195,11 +195,11 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
         // record. A failed settlement must not remove it from backup bytes.
         await retain({ ...current.current, operations: [...current.current.operations.filter(value => value.request.operationId !== operation.request.operationId), unknown] })
         if (!sameOwner()) return
-        report('原 Host 已确认此次保存；设备回执保全尚未完成，请复制当前正文并核对原请求。')
+        report('Mac 已确认保存，但这台手机还没记下确认；请复制当前正文。')
         return
       }
       if (!stale) updated(result.goal, Object.keys(patch) as Array<keyof AgentMuxRpcGoal>)
-      report(stale ? '原保存回执已收到；较新版本与后来正文仍保留。' : '原目标已确认保存；后来正文与其他未确认请求保留。')
+      report(stale ? 'Mac 已确认保存，目标已有更新的版本。' : '目标已保存。')
     } catch (error) {
       if (!active()) return
       await retain({ ...current.current, operations: current.current.operations.map(value => same(value, operation)

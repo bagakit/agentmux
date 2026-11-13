@@ -60,7 +60,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   const source = () => mobileGoalDraftSource(client, getDeviceWorkface())
   const readScope = (before: ReturnType<typeof source>) => {
     const after = source()
-    if (before && JSON.stringify(before) !== JSON.stringify(after)) throw new Error('原 Host 在读取期间已变化；原目标与草稿保留，请刷新核对。')
+    if (before && JSON.stringify(before) !== JSON.stringify(after)) throw new Error('Mac 连接在读取期间已变化，请刷新核对。')
     return before && after ? before.scope : null
   }
   const [decisions, setDecisions] = useState<Record<string, Decisions>>({})
@@ -91,7 +91,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
         const before = source()
         const result = await client.forwardRpc!('goal.ls', { limit: 1000, ...(status ? { status } : {}) })
         if (live && epoch === factEpoch.current.list) { listScope.current = readScope(before); setGoals(result.goals); setIssue('') }
-      } catch (error) { if (live) setIssue(`读取目标失败：${message(error)}。原目标保留，可刷新重试。`) }
+      } catch (error) { if (live) setIssue(`读取目标失败：${message(error)}。可以刷新重试。`) }
       finally { pending = false }
     }
     void read()
@@ -112,7 +112,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
         const result = await client.forwardRpc!('goal.inspect', { goalId: selected })
         if (!live || epoch !== (factEpoch.current.goals[selected] ?? 0)) return
         if (result.goal) { const scope = readScope(before); setDetails(values => ({ ...values, [result.goal!.id]: result.goal! })); setDetailScopes(values => ({ ...values, [result.goal!.id]: scope })); setDetailIssue('') }
-        else setDetailIssue('原目标当前未找到；保留已读正文与引用，可刷新核对。')
+        else setDetailIssue('Mac 上没有找到这个目标，可以刷新核对。')
       } catch (error) { if (live) setDetailIssue(`读取详情失败：${message(error)}。已读正文与草稿保留，可刷新重试。`) }
       finally { pending = false }
     }
@@ -142,15 +142,15 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   const openDiscussion = (receipt: GoalDiscussionReceipt) => {
     if (!navigation.current.visible || selectedRef.current !== receipt.goalId) return
     setContext(value => ({ ...value, discussion: { goalId: receipt.goalId, tabId: receipt.tabId, regionId: receipt.regionId, hostId: receipt.hostId, agentSessionId: receipt.agentSessionId } }))
-    if (receipt.agentSessionId && receipt.hostId === 'local' && openSession) openSession(receipt.agentSessionId, { name: '目标原 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
+    if (receipt.agentSessionId && receipt.hostId === 'local' && openSession) openSession(receipt.agentSessionId, { name: '目标 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <MobileNoticeScope owner={client}><section className="mobile-goals" aria-label="Goals" hidden={!visible}>
-    <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(selected || discussionTab)} />{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回原目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
+    <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(selected || discussionTab)} />{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
     {!connected && <MobileNotice owner={client} identity={[connected]} role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</MobileNotice>}
-    {!client?.forwardRpc && <MobileNotice owner={client} role="status">目标公共端口暂不可用，已读目标与会话保留。</MobileNotice>}
+    {!client?.forwardRpc && <MobileNotice owner={client} role="status">Mac 上的目标服务暂不可用，已读目标仍可查看。</MobileNotice>}
     {issue && <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice>}
-    {goals?.length === 1000 && <MobileNotice identity={[goals?.length]} role="status">目录已达到原服务单次返回范围，搜索仅覆盖已读目标；可按准确 Goal ID 打开其他目标。完整翻页仍待原服务提供。</MobileNotice>}
+    {goals?.length === 1000 && <MobileNotice identity={[goals?.length]} role="status">目录只读到前 1000 个目标，搜索只覆盖这些；其他目标可按 Goal ID 打开。</MobileNotice>}
       <MobileGoalCreate client={client} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
         factEpoch.current.list += 1
         setGoals(previous => previous ? [...previous.filter(value => value.id !== goal.id), goal] : previous)
@@ -176,13 +176,13 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
       </>}
       <details><summary>按 Goal ID 打开</summary><form onSubmit={event => {
         event.preventDefault()
-        if (!client?.forwardRpc) { setLookupIssue('读取未发送：目标公共端口暂不可用。'); return }
+        if (!client?.forwardRpc) { setLookupIssue('读取未发送：Mac 上的目标服务暂不可用。'); return }
         const goalId = lookup, sequence = ++lookupRead.current, epoch = factEpoch.current.goals[lookup] ?? 0, before = source()
         void client.forwardRpc('goal.inspect', { goalId }).then(result => {
           if (sequence !== lookupRead.current || epoch !== (factEpoch.current.goals[goalId] ?? 0)) return
           if (result.goal) { choose(result.goal, readScope(before)); setLookupIssue('') }
-          else setLookupIssue('未找到这个准确 Goal ID；原列表与输入保留。')
-        }).catch(error => { if (sequence === lookupRead.current && epoch === (factEpoch.current.goals[goalId] ?? 0)) setLookupIssue(`读取目标失败：${message(error)}。原列表与输入保留，可重试。`) })
+          else setLookupIssue('没有找到这个 Goal ID。')
+        }).catch(error => { if (sequence === lookupRead.current && epoch === (factEpoch.current.goals[goalId] ?? 0)) setLookupIssue(`读取目标失败：${message(error)}。可以重试。`) })
       }}><label>Goal ID<TextInput aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <MobileNotice identity={[lookup,lookupIssue]} role="status">{lookupIssue}</MobileNotice>}</details>
     </div>
     {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[id,value]} key={index} role="status">{value}</MobileNotice>)}
@@ -198,10 +198,10 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
       </details></>}
     </div> })}
     {discussionTab && <div>{discussionTab.regionId && discussionTab.hostId !== undefined
-      ? <MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} regionId={discussionTab.regionId}
+      ? <MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标主 Mote" tabId={discussionTab.tabId} regionId={discussionTab.regionId}
         expectedAgent={discussionTab.agentSessionId && discussionTab.hostId ? { agentSessionId: discussionTab.agentSessionId, hostId: discussionTab.hostId } : null} visible={visible}
-        openSession={(id, identity) => { if (id !== discussionTab.agentSessionId || discussionTab.hostId !== 'local') { setIssue('原讨论位于其他执行 Host，当前手机连接尚不提供该会话；原目标、工作面与身份保留。'); return }; openSession?.(id, identity) }} />
-      : <MobileNotice identity={[discussionTab.goalId, discussionTab.tabId, discussionTab.regionId, discussionTab.hostId, discussionTab.agentSessionId]} role="status">原讨论的准确 Region 与执行 Host 尚未核实；原 Tab 引用保留，返回目标后重新打开原讨论。</MobileNotice>}</div>}
+        openSession={(id, identity) => { if (id !== discussionTab.agentSessionId || discussionTab.hostId !== 'local') { setIssue('这个讨论在另一台 Mac 上，当前连接还打不开。'); return }; openSession?.(id, identity) }} />
+      : <MobileNotice identity={[discussionTab.goalId, discussionTab.tabId, discussionTab.regionId, discussionTab.hostId, discussionTab.agentSessionId]} role="status">还没确认讨论所在的 Mac 和位置，请返回目标后重新打开讨论。</MobileNotice>}</div>}
   </section></MobileNoticeScope>
 }
 
@@ -212,19 +212,19 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
 }) {
   const model = useGoalDraft(goalId, goal, factScope, client, connected, updated)
   const editor = <MobileGoalDraftEditor model={model} editing={editing} onEditingChange={edit} refresh={refresh} copyText={copyText} />
-  if (!goal) return <article aria-label="目标详情" hidden={!visible}><h2>原目标</h2><MobileNotice identity={[goalId]} role="status">当前目标尚未读回；原引用、正文与请求保留。</MobileNotice><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
+  if (!goal) return <article aria-label="目标详情" hidden={!visible}><h2>目标</h2><MobileNotice identity={[goalId]} role="status">还没读到这个目标，可以重新读取。</MobileNotice><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
   const { saving, save } = model
   const alignment = goal.alignment, grounding = goal.grounding
   const currentReport = !!alignment && grounding?.alignmentRevision === alignment.revision
   return <article aria-label="目标详情" hidden={!visible}>
-    {!editing && <><h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '目标原意尚未整理。'}</p></>}
+    {!editing && <><h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '还没有目标说明。'}</p></>}
     {editor}
     <section aria-label="目标与成功标准"><h3>目标与成功标准</h3>
       {alignment ? <><p className="mobile-goals-body">{alignment.summary}</p><ul>{alignment.criteria.map(criterion => <li key={criterion.id}>{criterion.text}</li>)}</ul>
         {!alignment.criteria.length && <p>尚无成功标准。</p>}
         {!!alignment.openQuestions.length && <><h4>待决定事项</h4><ul>{alignment.openQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul></>}
         <p>{alignment.confirmedAt === null ? '目标尚未确认。' : withMobileTime('目标已确认', alignment.confirmedAt)}</p>
-      </> : <p>尚无目标提案，原意与关联会话仍可阅读。</p>}
+      </> : <p>还没有目标提案。</p>}
     </section>
     <section aria-label="结果与证据"><h3>结果与证据</h3>
       {grounding ? <><p className="mobile-goals-body">{grounding.summary}</p>
@@ -232,7 +232,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
         {(currentReport ? alignment?.criteria : [])?.filter(criterion => !grounding.checks.some(check => check.criterionId === criterion.id)).map(criterion => <p key={criterion.id}>缺少结果检查：{criterion.text}</p>)}
         <ul>{grounding.checks.map(check => <li key={check.criterionId}><strong>{currentReport ? alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId : `旧报告标准 ${check.criterionId}`}</strong><p>{mobileGoalOutcome[check.outcome]}</p><p>{check.note}</p>
           <MobileGoalEvidence evidence={check.evidence} client={client} copyText={copyText} />{!check.evidence.length && <p>暂无定位证据。</p>}
-        </li>)}</ul><p>{grounding.acceptedAt === null ? '结果尚未接受。' : withMobileTime(currentReport ? '当前结果已接受' : '旧报告曾被接受，不代表当前结果接受', grounding.acceptedAt)}</p>
+        </li>)}</ul><p>{grounding.acceptedAt === null ? '尚未验收。' : withMobileTime(currentReport ? '已验收' : '旧报告曾通过验收，当前结果尚未验收', grounding.acceptedAt)}</p>
       </> : <p>{goal.status === 'done' ? '工作状态已完成，结果尚未核验。' : '尚无结果报告。'}</p>}
     </section>
     {children}

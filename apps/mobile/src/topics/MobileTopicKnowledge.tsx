@@ -19,7 +19,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 const certaintyLabels = { fact: '事实', inference: '推断', proposal: '提案', decision: '决定' }
 function sourceLabel(source: TopicKnowledgeSource): string {
   return source.kind === 'url' ? source.url : source.kind === 'file' ? source.path
-    : ({ topic: '原讨论', note: '原笔记 / 块', notebook: '原笔记本', survey: '原研究', space: '原工作面' } as const)[source.kind]
+    : ({ topic: '讨论', note: '笔记 / 块', notebook: '笔记本', survey: '研究', space: '工作面' } as const)[source.kind]
 }
 const referenceKey = (value: MobileKnowledgeReference) => JSON.stringify({ topicId: value.topicId, entryId: value.entryId,
   view: value.view, ...(value.query ? { query: value.query } : {}), ...(value.draftKey ? { draftKey: value.draftKey } : {}) })
@@ -84,7 +84,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     void request.then(result => {
       if (!live || latestConnection.current === false) return
       setEntries(result.entries); setIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n'))
-    }).catch(error => { if (live && latestConnection.current !== false) setIssue(`知识读取失败：${errorText(error)}。原阅读保留，可重试。`) })
+    }).catch(error => { if (live && latestConnection.current !== false) setIssue(`知识读取失败：${errorText(error)}。可以重试。`) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [rpc, topicId, search, refresh, visible, connected])
@@ -101,12 +101,12 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     void rpc('topic.knowledge.read', { topicId: selection.topicId, entryId: selection.entryId }).then(result => {
       if (!valid()) return
       if (!result.entry || result.entry.topicId !== selection.topicId || result.entry.entryId !== selection.entryId) {
-        setIssue('原知识条目尚未确认；准确引用和本机草稿保留，可重试读取。'); return
+        setIssue('没有读到这条知识，可以重试。'); return
       }
       setSelected(result.entry); setSelectedScope(source?.scope ?? null); setIssue('')
       setEdit(previous => previous?.topicId === result.entry!.topicId && previous.entryId === result.entry!.entryId
         ? { ...previous, entry: result.entry!, scope: source?.scope ?? null } : previous)
-    }).catch(error => { if (valid()) setIssue(`正文读取失败：${errorText(error)}。原引用与草稿保留。`) })
+    }).catch(error => { if (valid()) setIssue(`正文读取失败：${errorText(error)}。可以重试。`) })
     return () => { live = false; readIntent.current += 1 }
   }, [visible, rpc, selection, selected, client, refresh, connected])
   useEffect(() => () => { readIntent.current += 1 }, [])
@@ -125,7 +125,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     setEditorVisible(true)
   }
   const draftKeyChanged = useCallback((draftKey: string) => setEdit(previous => previous && previous.draftKey !== draftKey ? { ...previous, draftKey } : previous), [])
-  const readIssue = connected === false ? '原知识目录与正文尚未重新读取；准确引用与本机草稿保留。' : issue
+  const readIssue = connected === false ? '连接中断，知识还没重新读取。' : issue
   return <section className="mobile-topic-knowledge" aria-label={`${title}知识`}>
     <form className="mobile-topics-search" hidden={Boolean(selection) || editorVisible} onSubmit={event => { event.preventDefault(); setSearch(query.trim()) }}>
       <TextInput aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => setQuery(event.target.value)} />
@@ -148,8 +148,8 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
         {selected.scope && <p>{selected.scope}</p>}
         <AgentMarkdown content={selected.content} documentMode {...(openHttpLink ? { openHttpLink } : {})} />
         {selected.sources.length > 0 && <details className="mobile-topic-sources" open><summary>来源 · {selected.sources.length}</summary>{selected.sources.map((source, index) =>
-          <button className="mobile-topic-source" key={index} onClick={() => { void Promise.resolve().then(() => openSource(source)).catch(error => setIssue(`原来源打开失败：${errorText(error)}。当前阅读保留。`)) }}>{sourceLabel(source)}</button>)}</details>}
-      </> : connected !== false && <MobileNotice identity={[]} role="status">原条目正文待重新读取；准确引用与本机草稿保留。</MobileNotice>}
+          <button className="mobile-topic-source" key={index} onClick={() => { void Promise.resolve().then(() => openSource(source)).catch(error => setIssue(`来源打开失败：${errorText(error)}。`)) }}>{sourceLabel(source)}</button>)}</details>}
+      </> : connected !== false && <MobileNotice identity={[]} role="status">正文还没读到。</MobileNotice>}
     </article>}
     {edit && <div hidden={!editorVisible}><MobileTopicKnowledgeEditor key={editorKey} target={edit} client={client} connected={connected ?? false}
       rpc={rpc} onDraftKeyChange={draftKeyChanged} onClose={backToReading} onSaved={(entry, keepEditing) => {
@@ -172,7 +172,7 @@ export function MobileTopicKnowledgeEditor({ rpc: _rpc, target, onClose, onSaved
   useEffect(() => { if (key) onDraftKeyChange?.(key) }, [key, onDraftKeyChange])
   const blocked = draft.attempts.find(value => value.attemptId === draft.blockedAttemptId)
   return <section className="mobile-topic-editor" aria-label="知识编辑">
-    <h2>{original.entry ? '编辑知识' : original.isNew ? '新建知识' : '原知识草稿'}</h2>
+    <h2>{original.entry ? '编辑知识' : original.isNew ? '新建知识' : '知识草稿'}</h2>
     <form onSubmit={event => { event.preventDefault(); void editor.save() }}>
       <label>标题<TextInput aria-label="知识标题" value={draft.title} maxLength={120} onChange={event => editor.edit('title', event.target.value)} /></label>
       <label>正文<ComposerTextarea aria-label="知识正文" value={draft.content} rows={10} onValueChange={value => editor.edit('content', value)} /></label>
@@ -181,17 +181,17 @@ export function MobileTopicKnowledgeEditor({ rpc: _rpc, target, onClose, onSaved
       <label>适用范围<TextInput aria-label="知识适用范围" value={draft.authoringScope} onChange={event => editor.edit('authoringScope', event.target.value)} /></label>
       {editor.storageIssue && <MobileNotice identity={[draft.entryId,editor.storageIssue]} className="mobile-topics-issue" role="status">{editor.storageIssue}</MobileNotice>}
       {editor.notice && <MobileNotice kind="feedback" identity={[draft.entryId,editor.notice]} className="mobile-topics-issue" role="status">{editor.notice}</MobileNotice>}
-      {!draft.scope && <MobileNotice identity={[draft.entryId,JSON.stringify(draft.scope)]} role="status">原 Host 身份尚未核实；本页正文可编辑和复制，尚未确认持久保全。</MobileNotice>}
-      {blocked && !saving && <div className="mobile-topics-issue"><MobileNotice identity={[draft.entryId,draft.blockedAttemptId]} role="status">保存未确认；原请求与后来正文保留，先检查同一条目。</MobileNotice></div>}
-      {draft.attempts.length > 0 && <details><summary>原保存请求与诊断 · {draft.attempts.length}</summary>{draft.attempts.map(attempt =>
-        <div key={attempt.attemptId}><p>{attempt.issue ?? (saving && attempt.attemptId === blocked?.attemptId ? '此页明确保存进行中。' : '原保存回执尚未确认，重开不会重发。')}</p><pre>{JSON.stringify(attempt.input, null, 2)}</pre></div>)}</details>}
-      {(blocked && !saving || !original.isNew) && <button type="button" onClick={() => { void editor.inspect() }}>检查原保存结果</button>}
-      {checked && <div><p>{checked.entry ? '已读回原条目的当前保存版本；草稿尚未替换。' : '已确认当前没有此条目；草稿仍保留。'}</p>
+      {!draft.scope && <MobileNotice identity={[draft.entryId,JSON.stringify(draft.scope)]} role="status">还没确认当前连接的 Mac，正文还没备份；仍可编辑和复制。</MobileNotice>}
+      {blocked && !saving && <div className="mobile-topics-issue"><MobileNotice identity={[draft.entryId,draft.blockedAttemptId]} role="status">保存未确认，请先检查保存结果。</MobileNotice></div>}
+      {draft.attempts.length > 0 && <details><summary>保存请求与诊断 · {draft.attempts.length}</summary>{draft.attempts.map(attempt =>
+        <div key={attempt.attemptId}><p>{attempt.issue ?? (saving && attempt.attemptId === blocked?.attemptId ? '此页明确保存进行中。' : '保存还没确认。')}</p><pre>{JSON.stringify(attempt.input, null, 2)}</pre></div>)}</details>}
+      {(blocked && !saving || !original.isNew) && <button type="button" onClick={() => { void editor.inspect() }}>检查保存结果</button>}
+      {checked && <div><p>{checked.entry ? '已读到 Mac 上保存的版本，草稿没有被替换。' : '已确认当前没有此条目；草稿仍保留。'}</p>
         {checked.entry && <details><summary>查看已保存正文</summary><pre>{checked.entry.content}</pre></details>}
         <button type="button" onClick={editor.adoptChecked}>以检查结果为基准继续编辑</button></div>}
-      {editor.storageConflict && <button type="button" onClick={editor.keepDeviceConflict}>明确保留本页正文与双方原请求</button>}
-      {[...editor.choices, ...editor.copies].map((copy, index) => <details key={index}><summary>原设备保全副本 · {index + 1}</summary>
-        <pre>{JSON.stringify(copy, null, 2)}</pre>{!draft.scope && <button type="button" onClick={() => editor.chooseStored(copy)}>明确采用这份原草稿</button>}</details>)}
+      {editor.storageConflict && <button type="button" onClick={editor.keepDeviceConflict}>保留本页正文和两边的请求</button>}
+      {[...editor.choices, ...editor.copies].map((copy, index) => <details key={index}><summary>设备上的副本 · {index + 1}</summary>
+        <pre>{JSON.stringify(copy, null, 2)}</pre>{!draft.scope && <button type="button" onClick={() => editor.chooseStored(copy)}>采用这份草稿</button>}</details>)}
       {editor.localCopies.map((copy, index) => <details key={index}><summary>本页先前正文 · {index + 1}</summary><pre>{JSON.stringify(copy, null, 2)}</pre></details>)}
       <div className="mobile-topics-actions"><button type="button" onClick={onClose}>返回阅读</button><button type="submit" disabled={saving || Boolean(draft.blockedAttemptId)}>{saving ? '保存中…' : '保存知识'}</button></div>
     </form>
