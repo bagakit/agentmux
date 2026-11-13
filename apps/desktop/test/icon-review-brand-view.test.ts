@@ -76,6 +76,7 @@ it('opens on the Brand view, shows every realm through the product resolver and 
   }
   // The search row filters only the sections below; the realms stay first on this view.
   expect(document.querySelector<HTMLElement>('.inventory-tools')?.hidden).toBe(true)
+  expect(document.querySelector<HTMLElement>('.result-toolbar')?.hidden).toBe(true)
   expect(document.querySelectorAll('.brand-vendor')).toHaveLength(BUILT_IN_AGENT_PROVIDER_IDS.length)
   // Each slot holds the product's own drawing of that vendor's mark.
   for (const slot of document.querySelectorAll<HTMLElement>('[data-provider-mark]')) expect(slot.querySelector('svg, img'), slot.dataset.providerMark).not.toBeNull()
