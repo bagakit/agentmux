@@ -63,6 +63,10 @@ The three tools are:
   observation window with the unmodified initial Gap and ordered events. Window expiry,
   reader cancellation or stream closure does not mean that the operation completed.
 
+The 256 KiB limit applies to newly collected events. The original initial operation and
+Gap are returned intact under Core's original response budget; the whole MCP reply is
+not capped at 256 KiB. A byte-limited window keeps the last included event's sequence.
+
 All requests use the configured endpoint. Tools cannot supply a replacement endpoint,
 caller credentials or human approval. A managed Agent's original
 `AGENTMUX_AGENT_SESSION_ID` and `AGENTMUX_AGENT_CAPABILITY` must travel together through
