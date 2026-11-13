@@ -328,7 +328,7 @@ export class ExternalBrowserBridge {
       control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unsupported' },
       url: row.url, title: row.title, navigationId: row.navigationId,
       // A shared tab has no page-dialog owner (its extension cannot answer dialogs), so it does not offer the answers.
-      capabilities: BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['download', 'readDownload', 'acceptDialog', 'dismissDialog'].includes(name)),
+      capabilities: BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['download', 'readDownload', 'acceptDialog', 'dismissDialog', 'routeRequests', 'unrouteRequests', 'setNetworkConditions', 'clearNetworkConditions'].includes(name)),
       cdpMethods: EXTERNAL_CDP_METHODS,
       ...(row.warning || this.persistenceWarning ? { warning: row.warning ?? this.persistenceWarning! } : {}) }))
   }

@@ -1,6 +1,6 @@
 import type { WebContents } from 'electron'
 import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
-import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
+import type { BrowserPageTransport, BrowserNetworkSession } from '@agentmux/browser/browser-page-transport'
 
 /**
  * 一次驱动期间的 CDP 会话：attach、拿到每个 frame 的 sender、用完 detach。
@@ -126,6 +126,34 @@ export class BrowserCdpSession implements BrowserPageTransport {
   observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  async openNetworkSession(): Promise<BrowserNetworkSession> {
+    const { targetInfo } = await this.sendCommand('Target.getTargetInfo') as { targetInfo: { targetId: string } }
+    if (this.endedReason) throw new Error(this.endedReason)
+    const { sessionId } = await this.sendCommand('Target.attachToTarget', { targetId: targetInfo.targetId, flatten: true }) as { sessionId: string }
+    if (!sessionId) throw new Error('The original native network session acknowledgement is unavailable.')
+    const contents = this.contents, listeners = new Set<(method: string, params: unknown) => void>()
+    let ended: string | null = null
+    const release = () => { if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }; listeners.clear() }
+    const detached = (_event: unknown, reason: string) => { ended = reason; release() }
+    const message = (_event: unknown, method: string, params: unknown, sourceId?: string) => {
+      if (sourceId === sessionId) for (const listener of listeners) listener(method, params)
+      if (method === 'Target.detachedFromTarget' && (params as { sessionId?: string }).sessionId === sessionId) { ended = 'The original network session detached.'; release() }
+    }
+    contents.debugger.on('message', message); contents.debugger.on('detach', detached)
+    const close = async () => {
+      if (ended || contents.isDestroyed()) { ended ??= 'The original network target ended.'; release(); return }
+      await contents.debugger.sendCommand('Target.detachFromTarget', { sessionId })
+      ended = 'The original network session detached.'; release()
+    }
+    if (this.endedReason) { await close(); throw new Error(this.endedReason) }
+    const sendCommand: BrowserCdpSender = async (method, params) => {
+      if (ended || contents.isDestroyed()) throw new Error(ended ?? 'The original network target ended.')
+      return await contents.debugger.sendCommand(method, params, sessionId)
+    }
+    try { await sendCommand('Page.enable') } catch (error) { await close(); throw error }
+    return { sendCommand, get endedReason() { return ended }, observe(fn) { listeners.add(fn); return () => { listeners.delete(fn) } }, close }
   }
 
   private async sendTo(

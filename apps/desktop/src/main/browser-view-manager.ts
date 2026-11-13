@@ -2642,6 +2642,7 @@ export class BrowserViewManager {
     const stopController = new AbortController()
     let stopRequested = false
     let interrupts: BrowserPageInterrupts | undefined
+    const pageCleanups: (() => Promise<void>)[] = []
     const localOperation: BrowserOperation = {
       // 非空白 id 保留原值；缺席或全空白才由 journal 的 `start` 唯一铸造。
       // 这里不写 `?? mintObjectId()`：那会是第二个铸造点，而它造出来的 id 与 journal 记下的那个可能
@@ -2789,7 +2790,7 @@ export class BrowserViewManager {
       if (!Number.isFinite(remainingMillis) || remainingMillis <= 0) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
         timeoutMs: remainingMillis,
-        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis, pageInterrupts),
+        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis, pageInterrupts, cleanup => pageCleanups.push(cleanup)),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) => {
           if (!this.owns(entry, feedbackView) || entry.activeRun?.operationId !== operation.id || stopController.signal.aborted) throw new Error('The original Browser operation changed before retaining its result.')
           const context: BrowserResultContext = { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId }
@@ -2927,6 +2928,7 @@ export class BrowserViewManager {
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
       stopController.abort()
+      for (const cleanup of pageCleanups) await cleanup()
       // Execution ends independently of Browser ownership. Only an explicit human
       // handoff releases the page's input shield and ownership decoration.
       entry.driving = false
@@ -3746,7 +3748,8 @@ export class BrowserViewManager {
     signal?: AbortSignal,
     taskPage?: BrowserTaskPageExecution,
     deadlineMillis = taskPage?.cursor.deadlineMillis ?? Infinity,
-    interrupts?: BrowserPageInterrupts
+    interrupts?: BrowserPageInterrupts,
+    registerCleanup?: (cleanup: () => Promise<void>) => void
   ): (name: string, args: unknown[]) => Promise<unknown> {
     const controlRevision = entry.controlRevision
     let activeStep: BrowserOperationStep | null = null
@@ -3778,6 +3781,7 @@ export class BrowserViewManager {
     }
     const dispatch = createBrowserPageDispatch({
       session,
+      ...(registerCleanup ? { registerCleanup } : {}),
       beforeAction,
       beginNativeInput: () => this.beginAgentInput(entry, observingView),
       ...(signal ? { signal } : {}),
