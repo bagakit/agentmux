@@ -1,5 +1,7 @@
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
 import type { AgentSessionRecordDeleteInput } from '@agentmux/core/agent-session-record'
+import { readingProjection, sameReadingPosition, type FileViewReadingBinding, type FileViewReadingProjection, type FileViewReadings } from './lib/file-view-reading'
+import { encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, type FileViewReadingOwner } from '../../shared/workbench-user-state'
 import type { AgentOperationReferences } from './lib/agent-operation'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput } from '../../shared/browser-task-creation'
 import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
@@ -1464,6 +1466,10 @@ export type AppState = GitReadingActions & {
    * 把一个文件 Region 切到 diff 模式并（若还没有）加载它的 diff；再次调用（mode 'edit'）切回编辑。
    * diff 两侧走既有 git.diff 桥，不新开 shell-out。regionId 承载模式，workspaceId+path 定位文件。
    */
+  fileViewReading: FileViewReadings
+  loadFileViewReading(binding: FileViewReadingBinding, retry?: boolean): Promise<void>
+  setFileViewReading(binding: FileViewReadingBinding, position: import('../../shared/workbench-user-state').FileViewReadingPosition, initial?: boolean): void
+  retryFileViewReading(binding: FileViewReadingBinding): Promise<void>
   setEditorRegionMode(regionId: string, workspaceId: string, path: string, mode: EditorRegionMode): Promise<void>
   /** 重新拉取一个已在 diff 模式的 Region 的 diff（用户点「刷新」，或改动落盘后想看最新差异）。 */
   reloadRegionDiff(regionId: string, workspaceId: string, path: string): Promise<void>
@@ -4637,7 +4643,7 @@ let workbenchSaveRequest = 0
 let workbenchSaveFailureRevision = 0
 let spatialSaveRequest = 0
 let localSaveRequest = 0
-async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void> {
+async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileViewReading = false): Promise<void> {
   ++workbenchSaveRequest
   const failureRevision = workbenchSaveFailureRevision
   const request = includeSpatial ? ++spatialSaveRequest : ++localSaveRequest
@@ -4646,7 +4652,7 @@ async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void
     await runIndependentCheckpoints([
       ...(includeSpatial ? [checkpointSpatialWorkbench, checkpointWorkbenchUserState]
         : __AGENTMUX_WEB_PREVIEW__ ? [] : [() => persistentWorkbenchStorage.flush()]),
-      () => api.ui.requestStorageFlush()
+      () => includeFileViewReading ? api.ui.requestStorageFlush({ includeFileViewReading: true }) : api.ui.requestStorageFlush()
     ])
     if (current() && failureRevision === workbenchSaveFailureRevision &&
         (__AGENTMUX_WEB_PREVIEW__ || desktopUserDocument.unreadFragments().length === 0) &&
@@ -8013,6 +8019,46 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   toggleExplorerShowIgnored() {
     set((state) => ({ explorerShowIgnored: !state.explorerShowIgnored }))
+  },
+  fileViewReading: {},
+  async loadFileViewReading(binding, retry = false) {
+    if (!binding.current()) return
+    const owner = binding.owner, key = fileViewReadingOwnerKey(owner), previous = readingProjection(get().fileViewReading, owner)
+    if (previous && !retry && (previous.loaded || previous.binding.current())) {
+      if (previous.binding !== binding) editFileReading(owner, value => ({ ...value, binding }))
+      return
+    }
+    const token = ++fileReadingToken
+    set(state => ({ fileViewReading: { ...state.fileViewReading, [key]: { owner, position: previous?.position ?? null, loaded: false,
+      phase: 'loading', error: null, token, restoration: previous?.restoration ?? 0, input: previous?.input ?? 0, acknowledged: previous?.acknowledged ?? 0, pending: false, binding } } }))
+    try {
+      const saved = await api.ui.readFileViewReading(owner)
+      if (!binding.current() || readingProjection(get().fileViewReading, owner)?.token !== token) return
+      if (saved && (fileViewReadingOwnerKey(saved.owner) !== key || !isFileViewReadingPosition(saved.position))) throw new Error('The saved position belongs to another original File binding. It was not restored.')
+      editFileReading(owner, value => ({ ...value, loaded: true, phase: 'ready', error: null,
+        restoration: value.input > value.acknowledged ? value.restoration : value.restoration + 1,
+        position: value.input > value.acknowledged ? value.position : saved?.position ?? value.position }))
+      await writeFileReading(owner)
+    } catch (error) {
+      if (binding.current()) editFileReading(owner, value => value.token === token ? { ...value, phase: 'error', error: presentError(error), pending: false } : value)
+    }
+  },
+  setFileViewReading(binding, position, initial = false) {
+    if (!binding.current() || !isFileViewReadingPosition(position)) return
+    const value = readingProjection(get().fileViewReading, binding.owner)
+    if (!value) return
+    // Initial layout is an observation, not an edit of an unread native preference.
+    if (initial) { if (!value.position) editFileReading(binding.owner, current => ({ ...current, position: { ...position }, binding })); return }
+    if (sameReadingPosition(value.position, position)) {
+      if (value.binding !== binding) editFileReading(binding.owner, current => ({ ...current, binding }))
+      return
+    }
+    editFileReading(binding.owner, current => ({ ...current, position: { ...position }, input: current.input + 1, binding }))
+    if (value.loaded && value.phase !== 'error') void writeFileReading(binding.owner)
+  },
+  async retryFileViewReading(binding) {
+    if (!binding.current()) return
+    await get().loadFileViewReading(binding, true)
   },
   async setEditorRegionMode(regionId, workspaceId, path, mode) {
     set((state) => ({ editorRegionModes: { ...state.editorRegionModes, [regionId]: mode } }))
@@ -13176,6 +13222,66 @@ export function initializeAgentInputOccupation(): () => void {
   })
 }
 
+let fileReadingToken = 0
+const fileReadingWrites = new Map<string, Promise<void>>()
+function editFileReading(owner: FileViewReadingOwner, change: (value: FileViewReadingProjection) => FileViewReadingProjection) {
+  const key = fileViewReadingOwnerKey(owner)
+  useAppStore.setState(state => {
+    const value = readingProjection(state.fileViewReading, owner)
+    return value ? { fileViewReading: { ...state.fileViewReading, [key]: change(value) } } : state
+  })
+}
+async function writeFileReading(owner: FileViewReadingOwner): Promise<void> {
+  const key = fileViewReadingOwnerKey(owner), active = fileReadingWrites.get(key)
+  if (active) return active
+  const operation = (async () => {
+    for (;;) {
+      const value = readingProjection(useAppStore.getState().fileViewReading, owner)
+      if (!value?.loaded || !value.position || value.phase === 'error' || value.input === value.acknowledged) return
+      const record = { owner: value.owner, position: { ...value.position } }, token = value.token, input = value.input
+      editFileReading(owner, now => ({ ...now, pending: true }))
+      try {
+        const receipt = await api.ui.writeFileViewReading(record)
+        const encoded = new TextEncoder().encode(encodeFileViewReading(record))
+        const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', encoded))].map(byte => byte.toString(16).padStart(2, '0')).join('')
+        if (!receipt || fileViewReadingOwnerKey(receipt.owner) !== key || receipt.contentDigest !== digest || receipt.sizeBytes !== encoded.byteLength || receipt.diskDurability !== 'confirmed' || !receipt.path || !Number.isFinite(receipt.confirmedAt)) throw new Error('The reading-position writer did not confirm this exact input. The current position is retained; retry saving it.')
+        editFileReading(owner, now => now.token === token ? { ...now, acknowledged: Math.max(now.acknowledged, input), pending: false, phase: 'ready', error: null } : now)
+      } catch (error) {
+        editFileReading(owner, now => now.token === token ? { ...now, pending: false, phase: 'error', error: presentError(error) } : now)
+        return
+      }
+    }
+  })()
+  fileReadingWrites.set(key, operation)
+  try { await operation } finally {
+    if (fileReadingWrites.get(key) === operation) {
+      fileReadingWrites.delete(key)
+      const latest = readingProjection(useAppStore.getState().fileViewReading, owner)
+      if (latest?.loaded && latest.phase === 'ready' && latest.input > latest.acknowledged) void writeFileReading(owner)
+    }
+  }
+}
+/** Explicit controlled-update frontier only. Ordinary messages never join a reading preference. */
+export async function checkpointFileViewReading(): Promise<void> {
+  const values = Object.values(useAppStore.getState().fileViewReading)
+  for (const value of values) if (value.binding.current()) value.binding.capture()
+  // This explicit retry owns already accepted input, even after its original display closed.
+  // It never invokes an expired reader or changes the resource to the currently displayed File.
+  for (const value of Object.values(useAppStore.getState().fileViewReading)) {
+    if (value.input <= value.acknowledged || value.loaded && value.phase !== 'error') continue
+    try {
+      const saved = await api.ui.readFileViewReading(value.owner)
+      if (saved && (fileViewReadingOwnerKey(saved.owner) !== fileViewReadingOwnerKey(value.owner) || !isFileViewReadingPosition(saved.position))) throw new Error('The original reading preference could not be confirmed. Its current position is retained.')
+      editFileReading(value.owner, now => now.token === value.token ? { ...now, loaded: true, phase: 'ready', error: null } : now)
+    } catch (error) { editFileReading(value.owner, now => now.token === value.token ? { ...now, phase: 'error', error: presentError(error) } : now) }
+  }
+  for (const value of Object.values(useAppStore.getState().fileViewReading)) if (value.loaded && value.phase === 'ready' && value.input > value.acknowledged) void writeFileReading(value.owner)
+  while (fileReadingWrites.size) await Promise.all([...fileReadingWrites.values()])
+  for (const value of Object.values(useAppStore.getState().fileViewReading)) {
+    if (value.input > value.acknowledged) throw new Error(value.error ?? 'The original reading position is not yet confirmed. Current reading is retained; retry its storage before updating.')
+  }
+}
+
 /** Capture current workfaces and await native spatial/user-document writers. */
 export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'): Promise<void> {
   // No writes have been admitted during cold hydration. Quitting must preserve that durable record,
@@ -13186,7 +13292,8 @@ export async function prepareRendererUpdate(intent: 'reload' | 'quit' = 'reload'
   }
   if (useAppStore.getState().loading) throw new Error('The interface is still loading; retry the update when ready.')
   if (Object.values(useAppStore.getState().savingDocuments).some(Boolean)) throw new Error('A file save is in progress; retry the update after it completes.')
-  await requestWorkbenchStorageFlush()
+  await checkpointFileViewReading()
+  await requestWorkbenchStorageFlush(true, true)
 }
 
 

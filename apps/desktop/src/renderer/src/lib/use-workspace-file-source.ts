@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { RandomAccessSource } from '@agentmux/editor-extensions/bytes'
 import { WORKSPACE_FILE_SOURCE_CHUNK_BYTES, type WorkspaceFileSourceFailure, type WorkspaceFileSourceReadResult } from '../../../shared/workspace-file-source'
 import { api } from './api'
+import { useAppStore } from '../store'
 import { useWorkspaceResourceKey, workspaceResourceKey } from './workspace-resource-key'
+
+export type WorkspaceFileSourceBinding = { resource: { workspaceId: string; hostId: string; workspacePath: string }; current(): boolean }
 
 const aborted = () => new DOMException('This original file read was cancelled.', 'AbortError')
 function span(id: string, offset: number, length: number, lifetime: AbortSignal, signal?: AbortSignal): Promise<WorkspaceFileSourceReadResult> {
@@ -26,11 +29,12 @@ export function useWorkspaceFileSource(workspaceId: string, path: string, enable
   const [attempt, setAttempt] = useState(0)
   const reload = useCallback(() => setAttempt(value => value + 1), [])
   const owner = useMemo(() => ({ resource }), [resource, workspaceId, path, enabled, attempt])
-  const [opened, setOpened] = useState<{ owner: typeof owner; id: string; source: RandomAccessSource } | null>(null)
+  const [opened, setOpened] = useState<{ owner: typeof owner; id: string; source: RandomAccessSource; binding: WorkspaceFileSourceBinding | null } | null>(null)
   const [failed, setFailed] = useState<{ owner: typeof owner; failure: WorkspaceFileSourceFailure } | null>(null)
   useEffect(() => {
     if (!enabled) return
     const lifetime = new AbortController()
+    const originalResource = useAppStore.getState().config?.workspaces.find(item => item.id === workspaceId)
     let id: string | null = null
     const current = () => !lifetime.signal.aborted && workspaceResourceKey(workspaceId) === owner.resource
     const fail = (failure: WorkspaceFileSourceFailure) => { if (current()) setFailed({ owner, failure }) }
@@ -57,10 +61,11 @@ export function useWorkspaceFileSource(workspaceId: string, path: string, enable
           throw error
         }
       } }
-      setOpened({ owner, id, source })
+      const binding: WorkspaceFileSourceBinding | null = originalResource ? { resource: { workspaceId, hostId: originalResource.hostId, workspacePath: originalResource.path }, current } : null
+      setOpened({ owner, id, source, binding })
     }).catch(error => fail({ status: 'unavailable', code: 'WORKSPACE_FILE_SOURCE_OPEN_FAILED', message: error instanceof Error ? error.message : String(error) }))
     return () => { lifetime.abort(); if (id) void api.files.releaseSource(id).catch(() => {}) }
   }, [owner, workspaceId, path, enabled])
   const active = enabled && opened?.owner === owner ? opened : null
-  return { source: active?.source ?? null, id: active?.id ?? null, failure: enabled && failed?.owner === owner ? failed.failure : null, reload }
+  return { source: active?.source ?? null, id: active?.id ?? null, failure: enabled && failed?.owner === owner ? failed.failure : null, binding: active?.binding ?? null, reload }
 }

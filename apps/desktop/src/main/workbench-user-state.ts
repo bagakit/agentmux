@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
-import { dirname, isAbsolute } from 'node:path'
+import { mkdir, open, readFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile, DurableWriteError } from '@agentmux/core'
 
 import type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
 export type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
+import { captureFileViewReadingOwner, encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, type FileViewReadingOwner, type FileViewReadingRecord, type FileViewReadingReceipt } from '../shared/workbench-user-state.js'
 
 type UserStateIo = {
   read?: (path: string, encoding: 'utf8') => Promise<string>
   write?: typeof durableWriteFile
+  syncDirectory?: (path: string) => Promise<void>
 }
 
 function invalid(): Error & { code: string } {
@@ -29,6 +31,10 @@ function validate(value: unknown): asserts value is string {
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 const size = (value: string) => Buffer.byteLength(value)
+async function syncDirectory(path: string): Promise<void> {
+  const directory = await open(path, 'r')
+  try { await directory.sync() } finally { await directory.close() }
+}
 
 /**
  * One Main-owned document for the Desktop's existing persisted user projection.
@@ -36,6 +42,9 @@ const size = (value: string) => Buffer.byteLength(value)
  */
 export class WorkbenchUserStateStore {
   private tail: Promise<void> = Promise.resolve()
+  private readonly readingTails = new Map<string, Promise<void>>()
+  private readonly readingReady = new Set<string>()
+  private readonly readingFailures = new Map<string, unknown>()
   private diagnosticRead = false
   private diagnosticReading: Promise<void> | null = null
   private diagnosticWrite: Promise<void> | null = null
@@ -49,6 +58,62 @@ export class WorkbenchUserStateStore {
   }
 
   observe(): WorkbenchUserStateObservation { return structuredClone(this.observation) }
+
+  private readingPath(owner: FileViewReadingOwner): string {
+    return join(this.path + '.file-view-reading', digest(fileViewReadingOwnerKey(owner)) + '.json')
+  }
+
+  private async readReadingCurrent(captured: FileViewReadingOwner): Promise<FileViewReadingRecord | null> {
+    const key = fileViewReadingOwnerKey(captured)
+    try {
+      let raw: string
+      try { raw = await (this.io.read ?? readFile)(this.readingPath(captured), 'utf8') }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.readingReady.add(key); return null }; throw error }
+      const value = JSON.parse(raw)
+      if (value?.schema !== 'agentmux.file-view-reading.v1' || fileViewReadingOwnerKey(value.owner) !== key || !isFileViewReadingPosition(value.position)) throw new Error('The saved reading preference could not be confirmed. Its original bytes are retained.')
+      this.readingReady.add(key)
+      return { owner: captured, position: { ...value.position } }
+    } catch (error) { this.readingReady.delete(key); throw error }
+  }
+
+  /** One physical member: neither the root document nor unrelated drafts are read or encoded. */
+  async readFileViewReading(owner: FileViewReadingOwner): Promise<FileViewReadingRecord | null> {
+    const captured = captureFileViewReadingOwner(owner)
+    return this.readingQueue(fileViewReadingOwnerKey(captured), () => this.readReadingCurrent(captured))
+  }
+
+  /** Same native owner/ordered queue and durable receipt, with an exact-member write boundary. */
+  async writeFileViewReading(record: FileViewReadingRecord): Promise<FileViewReadingReceipt> {
+    const encoded = encodeFileViewReading(record), owner = captureFileViewReadingOwner(record.owner)
+    return this.readingQueue(fileViewReadingOwnerKey(owner), async () => {
+      const path = this.readingPath(owner)
+      try {
+        if (!this.readingReady.has(fileViewReadingOwnerKey(owner))) throw Object.assign(new Error('The original reading preference has not been read. Its bytes and current position are retained; retry reading it first.'), { code: 'FILE_VIEW_READING_READ_UNCONFIRMED' })
+        await this.readReadingCurrent(owner)
+        // The App user-state root already exists. Confirm the namespace's directory entry too;
+        // syncing only the new member's immediate parent does not make that entry durable.
+        await mkdir(dirname(path), { mode: 0o700 }).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error })
+        await (this.io.syncDirectory ?? syncDirectory)(dirname(dirname(path)))
+        await (this.io.write ?? durableWriteFile)(path, encoded, { requireDirectorySync: true })
+        this.readingFailures.delete(fileViewReadingOwnerKey(owner))
+        return { owner, path, contentDigest: digest(encoded), sizeBytes: size(encoded), diskDurability: 'confirmed', confirmedAt: Date.now() }
+      } catch (error) { this.readingFailures.set(fileViewReadingOwnerKey(owner), error); throw error }
+    })
+  }
+
+
+  /** Only an explicit reading checkpoint consumes this frontier; root-message fences stay independent. */
+  async flushFileViewReadings(): Promise<void> {
+    await Promise.all(this.readingTails.values())
+    if (this.readingFailures.size) throw Object.assign(new Error('A reading position has no confirmed writer acknowledgement. Its current position and original bytes are retained; retry saving that position.'), { code: 'FILE_VIEW_READING_SAVE_UNCONFIRMED' })
+  }
+
+  private readingQueue<T>(key: string, action: () => Promise<T>): Promise<T> {
+    const result = (this.readingTails.get(key) ?? Promise.resolve()).then(action)
+    const tail = result.then(() => {}, () => {}).finally(() => { if (this.readingTails.get(key) === tail) this.readingTails.delete(key) })
+    this.readingTails.set(key, tail)
+    return result
+  }
 
   private queue<T>(action: () => Promise<T>): Promise<T> {
     const result = this.tail.then(action)
