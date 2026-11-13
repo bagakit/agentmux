@@ -301,6 +301,22 @@ describe('live playlist pacing', () => {
     const changed = await pending
     expect(changed.at - started).toBeLessThan(900)
     expect(changed.body.toString()).toBe(live(1, 'live1.ts'))
+    // The list that arrived while held is the one scanned: what it names is admitted.
+    await f.put('hls/live1.ts', segment(4))
+    expect((await get(new URL('live1.ts', opened.url).href)).body).toEqual(segment(4))
+  })
+
+  it('stops holding once the encoder ends the list', async () => {
+    const f = await fixture()
+    await f.put('hls/live.m3u8', live(0, 'live0.ts'))
+    const opened = await ready(f, 'hls/live.m3u8')
+    await get(opened.url)
+    await f.put('hls/live.m3u8', live(0, 'live0.ts') + '#EXT-X-ENDLIST\n')
+    const ended = await get(opened.url)
+    expect(ended.body.toString()).toContain('#EXT-X-ENDLIST')
+    const again = await get(opened.url)
+    expect(again.status).toBe(200)
+    expect(again.at - ended.at).toBeLessThan(500)
   })
 
   it('never holds an unchanged master playlist reload', async () => {
