@@ -10,7 +10,7 @@ type Internals = {
   registry: { load(hostId: string): Promise<void> }
   kernel: Record<string, unknown>
   connected: boolean
-  endedRuns: Map<string, undefined>
+  endedRuns: Map<string, { exitReason: undefined; endedAt: number }>
   promptSubmission: { observeReadiness(...args: unknown[]): void }
   acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void>
 }
@@ -77,7 +77,7 @@ describe('Core Hook outcome history ownership', () => {
     const f = await fixture()
     await f.accept(f.hook('start', 'turn.start', 1, 'original-turn'))
     const before = await f.store.readMetadata(f.session.agentSessionId)
-    f.inner.endedRuns.set(f.session.run.runId, undefined)
+    f.inner.endedRuns.set(f.session.run.runId, { exitReason: undefined, endedAt: Date.now() })
     const failure = f.hook('ended-failure', 'turn.complete', 2, 'original-turn')
     await f.accept(failure)
     await f.accept(failure)

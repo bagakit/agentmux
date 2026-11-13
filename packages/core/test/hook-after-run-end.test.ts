@@ -87,7 +87,7 @@ type Internals = {
   acceptKernelEvent(event: CtxmuxAdapterExitEvent): void
   acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void>
   stopRequestedRuns: Set<string>
-  endedRuns: Map<string, unknown>
+  endedRuns: Map<string, { exitReason?: string; endedAt: number }>
 }
 
 async function harness(): Promise<{
@@ -246,7 +246,7 @@ describe('hook events arriving after the run already ended', () => {
     try {
       kernelReporting(internals, { type: 'exited', code: 0, signal: null })
       await internals.open(internals.connectionEpoch)
-      expect(internals.endedRuns.get('run-1')).toBe('unknown')
+      expect(internals.endedRuns.get('run-1')?.exitReason).toBe('unknown')
     } finally {
       await client.dispose()
     }
@@ -259,7 +259,7 @@ describe('hook events arriving after the run already ended', () => {
     try {
       kernelReporting(internals, { type: 'exited', code: 0, signal: 'SIGKILL' })
       await internals.open(internals.connectionEpoch)
-      expect(internals.endedRuns.get('run-1')).toBe('crashed')
+      expect(internals.endedRuns.get('run-1')?.exitReason).toBe('crashed')
     } finally {
       await client.dispose()
     }
@@ -275,19 +275,19 @@ describe('hook events arriving after the run already ended', () => {
       // 实时路径：先记下停止意图，再收到裸 0 的退出——合成出 user-stopped。
       internals.stopRequestedRuns.add('run-1')
       internals.acceptKernelEvent(exit({ type: 'exited', code: 0, signal: null }))
-      expect(internals.endedRuns.get('run-1')).toBe('user-stopped')
+      expect(internals.endedRuns.get('run-1')?.exitReason).toBe('user-stopped')
 
       // 掉线这一步同步做完的部分里，台账必须还在——这正是上面那段前提，也是本场景可达的理由。
       internals.reconnectSleep = async () => {}
       internals.open = async () => {}
       kernelReporting(internals, { type: 'exited', code: 0, signal: null })
       internals.handleConnectionLost(internals.connectionEpoch)
-      expect(internals.endedRuns.get('run-1'), '掉线不该清掉已知的终结事实').toBe('user-stopped')
+      expect(internals.endedRuns.get('run-1')?.exitReason, '掉线不该清掉已知的终结事实').toBe('user-stopped')
 
       // 重连后走的就是这个方法（reconnectLoop 里那一处）。此时停止意图已被读走删掉，重算只能得到
       // unknown——所以它必须认出「已经知道了」而跳过，而不是拿一个更差的答案盖上去。
       await internals.republishLiveRunState()
-      expect(internals.endedRuns.get('run-1')).toBe('user-stopped')
+      expect(internals.endedRuns.get('run-1')?.exitReason).toBe('user-stopped')
     } finally {
       await client.dispose()
     }
