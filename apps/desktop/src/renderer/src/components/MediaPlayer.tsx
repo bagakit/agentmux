@@ -22,7 +22,8 @@ const LoadingIcon = semanticIconComponent('status.loading')
 const IDLE_HIDE_MS = 2_000
 /** Waiting shorter than this is ordinary seeking; only longer stalls show the spinner. */
 const BUFFERING_DELAY_MS = 500
-const INDICATOR_MS = 800
+/** How long a spoken status stays in the live region before it clears for the next one. */
+const ANNOUNCEMENT_MS = 1_000
 /** HTMLMediaElement.HAVE_CURRENT_DATA, spelled out: the first frame is decoded. */
 const HAVE_CURRENT_DATA = 2
 
@@ -111,8 +112,8 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   }, [lease.id])
 
   useEffect(() => () => { if (idle.current) clearTimeout(idle.current); if (waiting.current) clearTimeout(waiting.current) }, [])
-  useEffect(() => { if (!indicator) return; const timer = setTimeout(() => setIndicator(null), INDICATOR_MS); return () => clearTimeout(timer) }, [indicator])
-  useEffect(() => { if (!announcement) return; const timer = setTimeout(() => setAnnouncement(null), INDICATOR_MS); return () => clearTimeout(timer) }, [announcement])
+  // The indicator leaves when its own --dur-indicator animation ends, in both the moving and the still variant.
+  useEffect(() => { if (!announcement) return; const timer = setTimeout(() => setAnnouncement(null), ANNOUNCEMENT_MS); return () => clearTimeout(timer) }, [announcement])
 
   // The free box the picture can use; the stage is fitted to the picture inside it.
   useEffect(() => {
@@ -320,7 +321,8 @@ export function MediaPlayer({ lease, name, onRetry }: { lease: MediaLease; name:
   const videoChrome = <>
     {!facts.started && !failure ? <button type="button" className="media-player__start" aria-label="Play" title="Play (k)" onClick={() => run({ kind: 'toggle-play' }, 'pointer')}><PlayIcon size={22} /></button> : null}
     {buffering && !failure ? <span className="media-player__buffering" aria-hidden="true"><LoadingIcon size={20} animation="spin" /></span> : null}
-    {indicator ? <span key={indicator.key} className="media-player__indicator" data-side={indicator.side ?? 'top'} aria-hidden="true">
+    {indicator ? <span key={indicator.key} className="media-player__indicator" data-side={indicator.side ?? 'top'} aria-hidden="true"
+      onAnimationEnd={() => setIndicator(current => current?.key === indicator.key ? null : current)}>
       {indicator.icon === 'play' ? <PlayIcon size={22} /> : indicator.icon === 'pause' ? <PauseIcon size={22} /> : indicator.text}</span> : null}
     {failurePanel}
     <div className="media-player__scrim" aria-hidden="true" />
