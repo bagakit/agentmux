@@ -28,7 +28,9 @@
 }
 .browser-profile-editor__name:hover { background: var(--wash-1); }
 .browser-profile-editor__name:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
-.browser-profile-editor__who input { font-size: var(--fs-title); font-weight: 650; }
+/* Renaming swaps the name for an input of the same box, so the header row does not move. */
+.browser-profile-editor__who input { box-sizing: border-box; height: auto; min-height: 0; margin: 0 calc(-1 * var(--sp-2)); padding: 1px var(--sp-2);
+  font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; line-height: inherit; }
 .browser-profile-editor__who small { color: var(--text-3); font-size: var(--fs-meta); }
 .browser-profile-editor__saved { display: inline-flex; align-items: center; gap: 3px; color: var(--green-text); font-size: var(--fs-meta); font-weight: 450; }
 
@@ -57,14 +59,18 @@
 .browser-profile-editor__notes:focus { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 
 .browser-profile-editor__section { display: grid; gap: var(--sp-3); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
+/* Sections sit at one rhythm: the editor's gap above each divider, the section's padding below it. */
+.browser-profile-editor__section > :last-child { margin-bottom: 0; }
 .browser-profile-editor__section h4 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
 .browser-profile-editor__quiet { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .browser-profile-editor__skips { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 /* The Agents switch reuses the shared toggle; inside the editor it sits on the section's edge, not in a card. */
-.browser-profile-editor__agents { padding: 0; }
+.browser-profile-editor__agents { padding: 0; align-items: center; }
+/* The shared toggle's checkbox margin does not apply to a switch; keep the row on the section's left edge. */
+.browser-profile-editor__agents > input[role="switch"] { margin: 0; }
 .browser-profile-editor__agents:has(input:disabled) { cursor: default; opacity: .55; }
 .browser-profile-editor__route { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
-.browser-profile-editor__route > span:first-child { color: var(--text); }
+.browser-profile-editor__route > span:first-child { color: var(--text-2); }
 .browser-profile-editor__route > button { margin-left: auto; }
 .browser-profile-editor__route-unknown { color: var(--text-3); }
 .browser-profile-editor__sign-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; align-items: center; gap: var(--sp-3); }

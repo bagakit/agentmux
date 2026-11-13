@@ -60,7 +60,7 @@ export function ProfileExitCheck({ profile, address }: { profile: BrowserProfile
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'checking' } | { kind: 'done'; result: Awaited<ReturnType<typeof api.browser.checkProfileExit>> } | { kind: 'failed'; message: string }>({ kind: 'idle' })
   const settings = useContext(SettingsNavigation)
   const route = profile.network?.mode === 'proxy' ? `${profile.network.server.scheme}://${profile.network.server.host}:${profile.network.server.port}`
-    : profile.network?.mode === 'direct' ? 'Direct' : 'System settings'
+    : profile.network?.mode === 'direct' ? 'Connects directly' : 'Follows the system proxy'
   const check = async () => {
     setState({ kind: 'checking' })
     try { setState({ kind: 'done', result: await api.browser.checkProfileExit(profile.id) }) }
