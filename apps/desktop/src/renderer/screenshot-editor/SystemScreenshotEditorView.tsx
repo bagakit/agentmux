@@ -16,6 +16,7 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
   const [delivered, setDelivered] = useState(false)
   const active = useRef(true), pending = useRef(false), editVersion = useRef(0)
   useEffect(() => () => { active.current = false }, [])
+  useEffect(() => api.onNotice(setStatus), [api])
   const pin = useScreenshotPin({ pin: request => api.pin(input.requestId, request.operationId, request.image), inspect: operationId => api.inspectPin(input.requestId, operationId) })
   const original = useSystemScreenshotOriginal({ image: input.image,
     api: {

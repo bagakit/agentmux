@@ -9,6 +9,8 @@ type Ports = {
   focusedWindow(): BrowserWindow | null
   windowForDocument(document: WorkbenchWindowDocument): BrowserWindow
   capture(attachToDraft: boolean): Promise<string | null>
+  /** The shortcut was pressed again while this capture is open; show the user where it is. */
+  remindPending(): void
   reportIssue(error: unknown): void
 }
 
@@ -18,7 +20,10 @@ export class GlobalScreenshot {
   constructor(private readonly ports: Ports) {}
 
   run(): Promise<void> {
-    if (this.pending) return this.pending
+    if (this.pending) {
+      try { this.ports.remindPending() } catch (error) { this.ports.reportIssue(error) }
+      return this.pending
+    }
     const action = this.runOnce().finally(() => { if (this.pending === action) this.pending = null })
     this.pending = action
     return action

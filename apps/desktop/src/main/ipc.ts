@@ -1368,6 +1368,9 @@ export async function registerIpc(args: {
   const inspectScreenshotPin = (operationId: string) => screenshotPins.call('image.inspect', { hostId: 'local', operationId },
     { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance, { pin: pinScreenshot, inspectPin: inspectScreenshotPin,
+    // app.hide() is how macOS returns to the previously active app; it never minimizes or closes a window.
+    // It hides every AgentMux window, so an open pin keeps the app visible instead.
+    returnFocus: () => { if (!screenshotPins.hasOpenPins()) app.hide() },
     copyText: text => getDesktopNativeUiOwner().writeClipboardText(text),
     originalFiles: window => new ScreenshotOriginalFiles({
       chooseOpen: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Open editable original', filters: [{ name: 'Editable annotation', extensions: ['json'] }], properties: ['openFile'] }); return choice.canceled ? null : choice.filePaths[0] ?? null },
@@ -1392,12 +1395,13 @@ export async function registerIpc(args: {
     if (!BrowserWindow.getFocusedWindow() && Notification.isSupported())
       new Notification({ title: 'Screen capture needs attention', body: message }).show()
   }
-  const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner,
+  const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner, appActive: () => BrowserWindow.getFocusedWindow() !== null,
     edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), reportIssue: reportScreenshotIssue,
     chooseSource: mode => screenshotSources.choose(mode) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
-    capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue })
+    capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue,
+    remindPending: () => { screenshotEditor.notice('Finish or cancel this screenshot first') } })
   registerNativeDesktopIpc({ capture: mode => screenCapture.capture(true, mode), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {

@@ -1,9 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, type SystemScreenshotEditorApi } from '../shared/system-screenshot-editor'
+import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, SYSTEM_SCREENSHOT_EDITOR_NOTICE, type SystemScreenshotEditorApi } from '../shared/system-screenshot-editor'
 
 if (process.isMainFrame) {
   const api: SystemScreenshotEditorApi = {
     load: () => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'load'),
+    onNotice: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, message: unknown) => { if (typeof message === 'string') listener(message) }
+      ipcRenderer.on(SYSTEM_SCREENSHOT_EDITOR_NOTICE, receive)
+      return () => { ipcRenderer.removeListener(SYSTEM_SCREENSHOT_EDITOR_NOTICE, receive) }
+    },
     finish: (requestId, operationId, image) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'finish', { requestId, operationId, image }),
     cancel: requestId => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'cancel', { requestId }),
     savePng: (requestId, image, options) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'save-png', { requestId, image, ...options }),

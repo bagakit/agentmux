@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
-import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, type ScreenshotEditContext, type SystemScreenshotEditorFinish, type SystemScreenshotEditorInput } from '../shared/system-screenshot-editor'
+import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, SYSTEM_SCREENSHOT_EDITOR_NOTICE, type ScreenshotEditContext, type SystemScreenshotEditorFinish, type SystemScreenshotEditorInput } from '../shared/system-screenshot-editor'
 import { themeBootstrap } from './theme-bootstrap'
 import { saveScreenshotPng } from './screenshot-files'
 import type { ScreenshotOriginalApi, ScreenshotOriginalReadResult, ScreenshotOriginalSaveInput, ScreenshotOriginalSaveResult } from '../shared/screenshot-original'
@@ -32,11 +32,13 @@ export class SystemScreenshotEditor {
     private readonly outputs?: { pin(image: BrowserPng, operationId: string, origin?: import('@agentmux/core').ImageOrigin): Promise<import('@agentmux/core').ImageResult>;
       inspectPin?(operationId: string): Promise<import('@agentmux/core').ImageResult>;
       copyText?(text: string): Promise<void>;
+      /** Give the previous app focus back; called when the last editor of a capture taken from another app closes. */
+      returnFocus?(): void;
       originalFiles?(window: BrowserWindow): ScreenshotOriginalApi & { dispose?(): void } }) {
     ipcMain.handle(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
 
-  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { initialIssue, source }: ScreenshotEditContext = {}): Promise<void> {
+  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { initialIssue, source, returnFocus }: ScreenshotEditContext = {}): Promise<void> {
     if (this.disposed) throw new Error('The screenshot editor is closed. Start a new capture to edit another image.')
     pngBytes(image)
     let theme: SystemScreenshotEditorInput['theme']
@@ -63,6 +65,12 @@ export class SystemScreenshotEditor {
       if (this.requests.get(contents) === request) this.requests.delete(contents)
       request.originals?.dispose?.()
       request.settle()
+    })
+    // Closed from the editor itself (not after the user moved to another AgentMux window), and no
+    // other editor is left: hand focus back instead of letting macOS raise the workbench.
+    if (returnFocus) window.once('close', () => {
+      const focused = BrowserWindow.getFocusedWindow()
+      if (focused === null || focused === window) window.once('closed', () => { if (this.requests.size === 0 && !this.disposed) this.outputs?.returnFocus?.() })
     })
     window.once('ready-to-show', () => {
       if (this.requests.get(window.webContents) === request && !window.isDestroyed()) { window.show(); window.focus() }
@@ -175,6 +183,15 @@ export class SystemScreenshotEditor {
     } catch (error) {
       return { status: 'failed', message: message(error) }
     } finally { request.pending = false }
+  }
+
+  /** Bring the newest editor forward with a status; false when no editor is open. */
+  notice(message: string): boolean {
+    const request = [...this.requests.values()].at(-1)
+    if (!request || request.window.isDestroyed()) return false
+    request.window.show(); request.window.focus()
+    request.window.webContents.send(SYSTEM_SCREENSHOT_EDITOR_NOTICE, message)
+    return true
   }
 
   dispose(): void {

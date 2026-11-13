@@ -2,6 +2,8 @@ import type { BrowserPng } from './contracts'
 import type { ThemeBootstrap } from './theme-bootstrap'
 
 export const SYSTEM_SCREENSHOT_EDITOR_CHANNEL = 'screenshot:editor'
+/** Main to editor: a short status, for example when the capture shortcut is pressed while this editor is open. */
+export const SYSTEM_SCREENSHOT_EDITOR_NOTICE = 'screenshot:editor-notice'
 
 /** Where and when the image was captured. `rect` is in global logical points (Electron DIP on macOS). */
 export type ScreenshotCaptureSource = {
@@ -11,8 +13,9 @@ export type ScreenshotCaptureSource = {
   /** Epoch milliseconds when capture started. */
   capturedAt: number
 }
-/** Optional facts of one edit: a delivery problem to show at open, and where the image came from. */
-export type ScreenshotEditContext = { initialIssue?: string; source?: ScreenshotCaptureSource }
+/** Optional facts of one edit: a delivery problem to show at open, where the image came from, and
+ * `returnFocus` when another app was active at capture start, so closing the editor goes back to it. */
+export type ScreenshotEditContext = { initialIssue?: string; source?: ScreenshotCaptureSource; returnFocus?: boolean }
 
 export type SystemScreenshotEditorInput = {
   requestId: string
@@ -27,6 +30,8 @@ export type SystemScreenshotEditorFinish = { status: 'completed' } | { status: '
 /** This isolated bridge binds image outputs, file grants and completion to the original editor request. */
 export type SystemScreenshotEditorApi = {
   load(): Promise<SystemScreenshotEditorInput>
+  /** Listen for Main notices; returns the unsubscribe. */
+  onNotice(listener: (message: string) => void): () => void
   finish(requestId: string, operationId: string, image: BrowserPng): Promise<SystemScreenshotEditorFinish>
   cancel(requestId: string): Promise<void>
   /** Each call opens one save sheet. `logicalSize` saves at 1× logical points using `source.scale`. */

@@ -187,6 +187,10 @@ export class ScreenshotPins implements AgentMuxRpcImageOwner {
     return await result
   }
 
+  hasOpenPins(): boolean {
+    return [...this.pins.values()].some(pin => !pin.window.isDestroyed())
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true

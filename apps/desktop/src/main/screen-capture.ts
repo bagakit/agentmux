@@ -7,6 +7,8 @@ import { savePastedImage, type PastedImageWriteReceipt } from './pasted-image-wr
 type Ports = {
   home: string
   native(): Pick<NativeDesktop, 'captureScreenshot' | 'writeClipboardImage'>
+  /** Whether an AgentMux window has focus, read once at capture start. */
+  appActive(): boolean
   edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, context: ScreenshotEditContext): Promise<void>
   reportIssue(error: unknown): void
   chooseSource?(mode: 'display' | 'window'): Promise<CaptureParams | null>
@@ -21,6 +23,8 @@ export class ScreenCapture {
     if (this.busy) throw new Error('A screen capture is already in progress. Finish or cancel that selection or editor, then try again.')
     this.busy = true
     try {
+      // Read before the source picker or selection takes focus.
+      const returnFocus = !this.ports.appActive()
       const native = this.ports.native()
       if (!['selection', 'display', 'window'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
       if (mode !== 'selection' && !this.ports.chooseSource) throw new Error('Source selection is unavailable in this host. Region capture and your draft remain available.')
@@ -37,8 +41,8 @@ export class ScreenCapture {
       pngBytes(image)
       // Native reports the selection in Quartz global points, which equal Electron DIP on macOS.
       const rect = result.selectionRect
-      const context: ScreenshotEditContext = rect && rect.width > 0 && rect.height > 0 && shot.scale > 0
-        ? { source: { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, scale: shot.scale, capturedAt } } : {}
+      const context: ScreenshotEditContext = { ...(returnFocus ? { returnFocus } : {}), ...(rect && rect.width > 0 && rect.height > 0 && shot.scale > 0
+        ? { source: { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, scale: shot.scale, capturedAt } } : {}) }
       let path: string | null = null
       // This is one capture's destination receipt, never a second image/document store.
       let delivery: { pixels: string; clipboard: PromiseSettledResult<void>; saved: PromiseSettledResult<PastedImageWriteReceipt | null> } | null = null
