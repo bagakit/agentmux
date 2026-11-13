@@ -4,7 +4,7 @@ import type { WorkspaceFilePreviewKind } from '@agentmux/editor-extensions/catal
 export type WorkspaceFilePreviewReadOptions = { expectedRevision?: string; expectedResource?: { hostId: string; workspacePath: string } }
 
 /** Kinds read as one bounded bytes snapshot. Audio and video stream through their playback lease. */
-export type WorkspaceFileSnapshotKind = Exclude<WorkspaceFilePreviewKind, 'audio' | 'video'>
+export type WorkspaceFileSnapshotKind = Exclude<WorkspaceFilePreviewKind, 'audio' | 'video' | 'book'>
 
 export type WorkspaceFilePreviewResult =
   | { status: 'ready'; kind: WorkspaceFileSnapshotKind; mimeType: string; bytes: Uint8Array;

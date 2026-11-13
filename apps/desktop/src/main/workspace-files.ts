@@ -1194,6 +1194,7 @@ export class WorkspaceFiles {
       const format = workspaceFilePreviewFormat(requestedPath)
       if (!format) return { status: 'unsupported', message: 'This file format has no built-in bytes preview.' }
       // Audio and video stream by range through their playback lease; a whole-file snapshot is never their path.
+      if (format.kind === 'book') return { status: 'unsupported', message: 'Books are read by section from the original file source, not a whole-file snapshot.' }
       if (format.kind === 'audio' || format.kind === 'video') return { status: 'unsupported', message: 'Media plays through its playback stream, not a bytes snapshot.' }
       const resolved = await localExistingPathWithin(workspace, requestedPath)
       if ((await stat(resolved.target)).isDirectory()) return { status: 'directory' }

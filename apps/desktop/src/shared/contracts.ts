@@ -1795,6 +1795,11 @@ export type AgentMuxDesktopApi = {
     releaseMediaStream(id: string): Promise<void>
     /** The lease owner's own record of why it stopped serving bytes. */
     mediaStreamStatus(id: string): Promise<import('./workspace-media-stream').WorkspaceMediaStreamFact>
+    openBook(request: import('@agentmux/editor-extensions/book-reader/protocol').BookOpenRequest): Promise<import('@agentmux/editor-extensions/book-reader/protocol').OpenedBook>
+    loadBookSection(id: string, index: number): Promise<string>
+    unloadBookSection(id: string, index: number): Promise<void>
+    resolveBookHref(id: string, href: string, fromSection?: number): Promise<import('@agentmux/editor-extensions/books').BookLocation | null>
+    closeBook(id: string): Promise<void>
     openSource(workspaceId: string, path: string): Promise<import('./workspace-file-source').WorkspaceFileSourceOpenResult>
     readSource(id: string, readId: string, offset: number, length: number): Promise<import('./workspace-file-source').WorkspaceFileSourceReadResult>
     cancelSourceRead(id: string, readId: string): Promise<void>
@@ -1899,11 +1904,13 @@ export type AgentMuxDesktopApi = {
     onNativeBrowserInput(listener: (input: import('./native-overlay').NativeBrowserInput) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     nativeOverlayFocus(document?: import('./workbench-windows').WorkbenchWindowDocument): boolean
     /** The fixed Main-owned Desktop user projection; no arbitrary path or key. */
+    readFileViewReading(owner: import('./workbench-user-state').FileViewReadingOwner): Promise<import('./workbench-user-state').FileViewReadingRecord | null>
+    writeFileViewReading(record: import('./workbench-user-state').FileViewReadingRecord): Promise<import('./workbench-user-state').FileViewReadingReceipt | null>
     readWorkbenchState(): Promise<string | null>
     importWorkbenchState(value: string): Promise<string>
     writeWorkbenchState(value: string): Promise<import('./workbench-user-state').WorkbenchUserStateReceipt | null>
     /** Await the native user-state owner queue after Renderer batches settle. */
-    requestStorageFlush(): Promise<void>
+    requestStorageFlush(options?: { includeFileViewReading?: true }): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
     workbenchWindows: {
       ready(): Promise<import('./workbench-windows').WorkbenchWindowDocument | null>

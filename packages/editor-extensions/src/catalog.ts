@@ -25,7 +25,14 @@ export const WORKSPACE_FILE_PREVIEW_FORMATS = {
   mov: { kind: 'video', mimeType: 'video/quicktime', sourceEditable: false },
   ogv: { kind: 'video', mimeType: 'video/ogg', sourceEditable: false },
   pdf: { kind: 'pdf', mimeType: 'application/pdf', sourceEditable: false },
+  epub: { kind: 'book', engine: 'epub', mimeType: 'application/epub+zip', sourceEditable: false },
+  mobi: { kind: 'book', engine: 'mobi', mimeType: 'application/x-mobipocket-ebook', sourceEditable: false },
+  azw3: { kind: 'book', engine: 'azw3', mimeType: 'application/vnd.amazon.ebook', sourceEditable: false },
   fb2: { kind: 'book', engine: 'fb2', mimeType: 'application/x-fictionbook+xml', sourceEditable: true, language: 'xml' },
+  cbz: { kind: 'book', engine: 'cbz', mimeType: 'application/vnd.comicbook+zip', sourceEditable: false },
+  cbr: { kind: 'book', engine: 'cbr', mimeType: 'application/vnd.comicbook-rar', sourceEditable: false },
+  djvu: { kind: 'book', engine: 'djvu', mimeType: 'image/vnd.djvu', sourceEditable: false },
+  djv: { kind: 'book', engine: 'djvu', mimeType: 'image/vnd.djvu', sourceEditable: false }
 } as const
 
 export type WorkspaceFilePreviewFormat = (typeof WORKSPACE_FILE_PREVIEW_FORMATS)[keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS]

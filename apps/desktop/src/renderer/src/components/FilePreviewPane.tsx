@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { revealInFileManagerLabel } from '../lib/host-platform'
@@ -8,14 +8,15 @@ import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
 import { usePreviewObjectUrl, useWorkspaceFilePreview } from '../lib/use-workspace-file-preview'
 import { useWorkspaceMediaStream } from '../lib/use-workspace-media-stream'
+import { usePreparePdfReader } from '../lib/use-prepare-pdf-reader'
+import { BookPreview } from './BookPreview'
 import { useWorkspaceFileSource } from '../lib/use-workspace-file-source'
 import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 import { FilePathLabel } from './FilePathLabel'
 import { FilePreviewState } from '@agentmux/editor-extensions/ui/FilePreviewState'
+import { ImageContent } from '@agentmux/editor-extensions/ui/ImageContent'
 import { formatFileBytes } from '@agentmux/editor-extensions/format-file-bytes'
 
-const ThemeActionZoomOutIcon = semanticIconComponent('action.zoom-out')
-const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
@@ -25,96 +26,8 @@ const PdfReader = lazy(async () => ({ default: (await import('@agentmux/editor-e
 const MediaPlayer = lazy(async () => ({ default: (await import('@agentmux/editor-extensions/ui/MediaPlayer')).MediaPlayer }))
 
 
-/** Image viewing only. Decode, zoom and failure state belong to one content mount;
- * both file routes key it by source URL. Native load can finish before passive effects. */
-export function ImageContent({ src, name, byteLength, onDecodeError }: {
-  src: string; name: string; byteLength?: number; onDecodeError?: () => void
-}) {
-  const viewport = useRef<HTMLDivElement>(null)
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
-  const [bounds, setBounds] = useState({ width: 0, height: 0 })
-  const [zoom, setZoom] = useState<number | 'fit'>('fit')
-  const [failed, setFailed] = useState(false)
-  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
-  useEffect(() => {
-    const element = viewport.current
-    if (!element) return
-    const measure = () => setBounds({ width: element.clientWidth, height: element.clientHeight })
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-  const fit = natural ? Math.min(1, Math.max(1, bounds.width - 32) / natural.width, Math.max(1, bounds.height - 32) / natural.height) : 1
-  const scale = zoom === 'fit' ? fit : zoom
-  const changeZoom = (value: number | 'fit') => {
-    const element = viewport.current
-    const nextScale = value === 'fit' ? fit : Math.min(20, Math.max(0.1, value))
-    const centerX = element ? (element.scrollLeft + element.clientWidth / 2) / scale : 0
-    const centerY = element ? (element.scrollTop + element.clientHeight / 2) / scale : 0
-    setZoom(value === 'fit' ? value : nextScale)
-    requestAnimationFrame(() => {
-      if (viewport.current !== element || !element) return
-      element.scrollLeft = centerX * nextScale - element.clientWidth / 2
-      element.scrollTop = centerY * nextScale - element.clientHeight / 2
-    })
-  }
-  return (
-    <div className="image-preview" data-decode-state={failed ? 'error' : natural ? 'decoded' : 'loading'}>
-      <div className="image-preview__viewport" ref={viewport} tabIndex={0} aria-label={`Image ${name}`}
-        onKeyDown={event => {
-          if (event.target !== event.currentTarget || event.metaKey || event.ctrlKey || event.altKey) return
-          if (event.key === '+' || event.key === '=') changeZoom(scale * 1.25)
-          else if (event.key === '-') changeZoom(scale / 1.25)
-          else if (event.key === '0' || event.key.toLowerCase() === 'f') changeZoom('fit')
-          else if (event.key === '1') changeZoom(1)
-          else return
-          event.preventDefault()
-        }}
-        onPointerDown={event => {
-          const element = event.currentTarget
-          if (event.button !== 0 || (element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight)) return
-          drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop }
-          element.setPointerCapture(event.pointerId)
-          element.focus()
-          event.preventDefault()
-        }}
-        onPointerMove={event => {
-          const start = drag.current
-          if (!start) return
-          event.currentTarget.scrollLeft = start.left - event.clientX + start.x
-          event.currentTarget.scrollTop = start.top - event.clientY + start.y
-        }}
-        onPointerUp={() => { drag.current = null }} onLostPointerCapture={() => { drag.current = null }}>
-        {failed ? <div className="file-preview-state" role="alert"><strong>Image could not be decoded</strong><span>The current engine cannot display these bytes. The original file is unchanged.</span></div> : <>
-          {!natural ? <div className="file-preview-state" role="status">Decoding image…</div> : null}
-          <div className="image-preview__stage" style={natural ? { minWidth: natural.width * scale + 32, minHeight: natural.height * scale + 32 } : undefined}>
-            <img src={src} alt={name} draggable={false} style={natural ? { width: natural.width * scale, height: natural.height * scale } : { maxWidth: '100%', maxHeight: '100%' }}
-              onLoad={event => {
-                const image = event.currentTarget
-                // SVG without intrinsic dimensions has a rendered viewport; do not invent natural pixels.
-                const width = image.naturalWidth, height = image.naturalHeight
-                if (width && height) setNatural({ width, height })
-                else { setFailed(true); onDecodeError?.() }
-              }} onError={() => { setFailed(true); onDecodeError?.() }} />
-          </div>
-        </>}
-      </div>
-      <footer className="image-preview__tools">
-        <div className="file-preview__controls" role="group" aria-label="Image zoom">
-          <button className="small-button" aria-pressed={zoom === 'fit'} disabled={!natural} title="Fit image (F or 0)" onClick={() => changeZoom('fit')}>Fit</button>
-          <button className="small-button" aria-pressed={zoom === 1} disabled={!natural} title="Original size (1)" onClick={() => changeZoom(1)}>1:1</button>
-          <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><ThemeActionZoomOutIcon size={13} /></button>
-          <output aria-label="Image zoom level">{natural ? `${Math.round(scale * 100)}%` : '—'}</output>
-          <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" disabled={!natural || scale >= 20} onClick={() => changeZoom(scale * 1.25)}><ThemeActionZoomInIcon size={13} /></button>
-        </div>
-        <span className="file-preview__metadata">{natural ? `${natural.width.toLocaleString()} × ${natural.height.toLocaleString()}` : 'Dimensions unconfirmed'}{byteLength !== undefined ? ` · ${formatFileBytes(byteLength)}` : ''}</span>
-      </footer>
-    </div>
-  )
-}
-
-export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { surface: FileWorkbenchSurface; visible?: boolean; onRetryBinary?: () => void }) {
+export function FilePreviewPane({ tabId, surface, visible = true, onRetryBinary, onShowSource, hasUnsavedSource }: { tabId: string; surface: FileWorkbenchSurface; visible?: boolean; onRetryBinary?: () => void; onShowSource?: () => void; hasUnsavedSource?: boolean }) {
+  const [bookAttempt, setBookAttempt] = useState(0)
   const key = documentKey(surface.workspaceId, surface.path)
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary' ? state.documentIssues[key] : null)
   const canOpenExternally = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
@@ -122,12 +35,14 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
   const playable = workspaceFilePreviewFormat(surface.path)
   const isMedia = playable?.kind === 'audio' || playable?.kind === 'video'
   const isPdf = playable?.kind === 'pdf'
-  const snapshot = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary && !isMedia && !isPdf)
+  const isBook = playable?.kind === 'book'
+  const snapshot = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary && !isMedia && !isPdf && !isBook)
   const stream = useWorkspaceMediaStream(surface.workspaceId, surface.path, visible && !binary && isMedia)
+  usePreparePdfReader(visible && !binary && isPdf)
   const pdf = useWorkspaceFileSource(surface.workspaceId, surface.path, visible && !binary && isPdf)
   const { preview } = snapshot
   const failure = isMedia ? stream.failure : isPdf ? pdf.failure : snapshot.failure
-  const reload = isMedia ? stream.reload : isPdf ? pdf.reload : snapshot.reload
+  const reload = isMedia ? stream.reload : isPdf ? pdf.reload : isBook ? () => setBookAttempt(value => value + 1) : snapshot.reload
   const url = usePreviewObjectUrl(preview)
   const external = async (action: 'openSystem' | 'reveal') => {
     try { await api.files[action](surface.workspaceId, surface.path) } catch (error) { reportError(error) }
@@ -136,6 +51,7 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
     <header className="editor-header file-preview__header">
       <FilePathLabel path={surface.path} />
       <div className="editor-header__actions">
+        {onShowSource ? <button className="small-button" onClick={onShowSource}>Source</button> : null}
         {!binary || onRetryBinary ? <button className="icon-button" aria-label="Reload file preview" title="Reload file preview" onClick={() => binary ? onRetryBinary?.() : reload()}><ThemeActionRefreshIcon size={13} /></button> : null}
         {canOpenExternally ? <>
           <button className="icon-button" aria-label="Open file in system application" title="Open in system application" onClick={() => void external('openSystem')}><ThemeActionOpenExternalIcon size={13} /></button>
@@ -143,8 +59,10 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
         </> : null}
       </div>
     </header>
+    {hasUnsavedSource ? <div className="file-preview__source-notice" role="status">Preview reads the saved file. Unsaved source changes are retained.</div> : null}
     {binary ? <div className="file-preview-state"><strong>Binary file</strong><span>This file has no editable text content. Open it in a system application to inspect it.</span>{binary.kind === 'binary' ? <span className="file-preview__metadata">{formatFileBytes(binary.byteLength)}</span> : null}</div>
       : failure ? <div className="file-preview-state" role="alert"><strong>{failure.status === 'too-large' ? 'File exceeds the preview budget' : failure.status === 'deleted' ? 'File was deleted' : failure.status === 'changed' ? 'File changed while reading' : failure.status === 'directory' ? 'This path is a directory' : 'Preview unavailable'}</strong><span>{failure.message}</span><button className="small-button" onClick={() => reload()}>Retry</button></div>
+      : isBook ? <BookPreview key={bookAttempt} tabId={tabId} surface={surface} visible={visible && !binary} format={playable.engine} />
       : isMedia ? stream.lease ? <Suspense fallback={<FilePreviewState title="Preparing player" />}><MediaPlayer readStatus={api.files.mediaStreamStatus} key={stream.lease.id} lease={stream.lease} name={surface.path} onRetry={reload} resume={stream.resume} /></Suspense>
         : <div className="file-preview-state" role="status">{visible ? 'Opening media…' : 'Playback paused while hidden'}</div>
       : isPdf ? pdf.source ? <Suspense fallback={<FilePreviewState title="Loading PDF reader" />}><PdfReader source={pdf.source} name={surface.path} visible={visible} /></Suspense>

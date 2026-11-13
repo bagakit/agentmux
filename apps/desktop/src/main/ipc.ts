@@ -86,6 +86,7 @@ import { registerMoteDialogueIpc } from './mote-dialogue-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { WorkspaceMediaStreams } from './workspace-media-streams.js'
 import { FilePreviewResources } from './file-preview-resources.js'
+import { FileBookRealms } from './file-book-realms.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
 import { FileBuilds } from './file-builds.js'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
@@ -436,7 +437,8 @@ export async function registerIpc(args: {
   const mediaStreams = new WorkspaceMediaStreams(files, id => config.workspaces.find(item => item.id === id))
   const fileSources = new WorkspaceFileSources(files, id => config.workspaces.find(item => item.id === id))
   const comicArchives = new WorkspaceCbrArchives(fileSources)
-  const releaseFileSources = () => { void fileSources.releaseCaller(contents.id).catch(error => process.stderr.write('File source cleanup failed: ' + String(error) + '\n')) }
+  const bookRealms = new FileBookRealms(fileSources, comicArchives)
+  const releaseFileSources = () => { bookRealms.releaseCaller(contents.id); void fileSources.releaseCaller(contents.id).catch(error => process.stderr.write('File source cleanup failed: ' + String(error) + '\n')) }
   const previewResources = new FilePreviewResources(files, id => config.workspaces.find(item => item.id === id))
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
@@ -1166,9 +1168,14 @@ export async function registerIpc(args: {
   handleWithEvent('files:openSource', async (event, workspaceId: string, path: string) => fileSources.open(event.sender.id, workspace(config, workspaceId), path))
   handleWithEvent('files:readSource', async (event, id: string, readId: string, offset: number, length: number) => fileSources.read(event.sender.id, id, readId, offset, length))
   handleWithEvent('files:cancelSourceRead', async (event, id: string, readId: string) => { fileSources.cancel(event.sender.id, id, readId) })
-  handleWithEvent('files:releaseSource', async (event, id: string) => { await fileSources.release(event.sender.id, id) })
+  handleWithEvent('files:releaseSource', async (event, id: string) => { bookRealms.releaseSource(event.sender.id, id); await fileSources.release(event.sender.id, id) })
   handleWithEvent('files:comicArchiveEntries', async (event, id: string, operationId: string) => comicArchives.entries(event.sender.id, id, operationId))
   handleWithEvent('files:readComicArchiveEntry', async (event, id: string, operationId: string, path: string) => comicArchives.readEntry(event.sender.id, id, operationId, path))
+  handleWithEvent('files:openBook', (event, request: import('@agentmux/editor-extensions/book-reader/protocol').BookOpenRequest) => ipcResult(() => bookRealms.open(event.sender.id, request)))
+  handleWithEvent('files:loadBookSection', (event, id: string, index: number) => ipcResult(() => bookRealms.load(event.sender.id, id, index)))
+  handleWithEvent('files:unloadBookSection', (event, id: string, index: number) => ipcResult(() => bookRealms.unload(event.sender.id, id, index)))
+  handleWithEvent('files:resolveBookHref', (event, id: string, href: string, fromSection?: number) => ipcResult(() => bookRealms.resolve(event.sender.id, id, href, fromSection)))
+  handleWithEvent('files:closeBook', (event, id: string) => ipcResult(() => bookRealms.close(event.sender.id, id)))
   handleWithEvent('files:renderDiagram', async (event, request: import('@agentmux/editor-extensions/diagram').FileDiagramRequest) => {
     return await diagramPreviews.render(request)
   })
@@ -1443,10 +1450,17 @@ export async function registerIpc(args: {
     if (typeof operationId !== 'string' || !operationId) throw new Error('An exact original name operation is required.')
     return spatialState.confirmNameCommit(operationId)
   })
+  handleWithEvent('ui:readFileViewReading', (_event, owner: import('../shared/workbench-user-state').FileViewReadingOwner) => ipcResult(() => {
+    return workbenchUserState.readFileViewReading(owner)
+  }))
+  handleWithEvent('ui:writeFileViewReading', (_event, record: import('../shared/workbench-user-state').FileViewReadingRecord) => ipcResult(() => {
+    return workbenchUserState.writeFileViewReading(record)
+  }))
   handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
   handleWithEvent('ui:writeWorkbenchState', (_event, value: string) => workbenchUserState.write(value))
-  handleWithEvent('ui:requestStorageFlush', async () => {
+  handleWithEvent('ui:requestStorageFlush', async (_event, options?: { includeFileViewReading?: true }) => {
+    if (options?.includeFileViewReading === true) await workbenchUserState.flushFileViewReadings()
     // All Renderer batches await the real writer before this checkpoint. Reads
     // share that owner's queue; Chromium directory presence is no save receipt.
     const current = await workbenchUserState.read()
@@ -2565,6 +2579,7 @@ export async function registerIpc(args: {
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
       { owner: 'html-previews', dispose: () => htmlPreviews.dispose() },
       { owner: 'media-streams', dispose: () => mediaStreams.dispose() },
+      { owner: 'book-realms', dispose: () => bookRealms.dispose() },
       { owner: 'file-sources', dispose: () => fileSources.dispose() },
       { owner: 'file-builds', dispose: () => builds.dispose() },
       { owner: 'diagram-previews', dispose: () => diagramPreviews.dispose() },

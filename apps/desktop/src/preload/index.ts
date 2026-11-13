@@ -1,3 +1,4 @@
+import { unwrapIpcResult } from '../shared/ipc-result'
 import { executeRendererCache } from './renderer-cache'
 import { createExecutionBindingApi } from './execution-binding'
 import { unwrapSessionInputOperationResult } from '../shared/session-input-result.js'
@@ -325,6 +326,11 @@ const api: AgentMuxPreloadApi = {
     openMediaStream: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openMediaStream', workspaceId, path),
     releaseMediaStream: (id: string) => ipcRenderer.invoke('files:releaseMediaStream', id),
     mediaStreamStatus: (id: string) => ipcRenderer.invoke('files:mediaStreamStatus', id),
+    openBook: request => ipcRenderer.invoke('files:openBook', request).then(unwrapIpcResult<import('@agentmux/editor-extensions/book-reader/protocol').OpenedBook>),
+    loadBookSection: (id, index) => ipcRenderer.invoke('files:loadBookSection', id, index).then(unwrapIpcResult<string>),
+    unloadBookSection: (id, index) => ipcRenderer.invoke('files:unloadBookSection', id, index).then(unwrapIpcResult<void>),
+    resolveBookHref: (id, href, fromSection) => ipcRenderer.invoke('files:resolveBookHref', id, href, fromSection).then(unwrapIpcResult<import('@agentmux/editor-extensions/books').BookLocation | null>),
+    closeBook: id => ipcRenderer.invoke('files:closeBook', id).then(unwrapIpcResult<void>),
     openSource: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSource', workspaceId, path),
     readSource: (id: string, readId: string, offset: number, length: number) => ipcRenderer.invoke('files:readSource', id, readId, offset, length),
     cancelSourceRead: (id: string, readId: string) => ipcRenderer.invoke('files:cancelSourceRead', id, readId),
@@ -461,10 +467,12 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
     },
+    readFileViewReading: owner => ipcRenderer.invoke('ui:readFileViewReading', owner).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingRecord | null>),
+    writeFileViewReading: record => ipcRenderer.invoke('ui:writeFileViewReading', record).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingReceipt | null>),
     readWorkbenchState: () => ipcRenderer.invoke('ui:readWorkbenchState'),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),
     writeWorkbenchState: value => ipcRenderer.invoke('ui:writeWorkbenchState', value),
-    requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
+    requestStorageFlush: options => options ? ipcRenderer.invoke('ui:requestStorageFlush', options) : ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     recordStartupFailure: input => ipcRenderer.invoke('ui:recordStartupFailure', input),
     inspectDefaultBrowser: () => ipcRenderer.invoke('ui:inspectDefaultBrowser'),

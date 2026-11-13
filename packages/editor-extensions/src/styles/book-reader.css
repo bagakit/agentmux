@@ -1,0 +1,17 @@
+@import './preview-common.css';
+.book-reader{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+.book-reader__body{position:relative;flex:1;min-width:0;min-height:0;background:var(--surface-0)}
+.book-reader__body>iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--surface-0)}
+.book-reader__state{position:absolute;inset:0;display:flex;background:var(--surface-0)}
+.book-reader__tools{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-4);border-top:1px solid var(--line-soft);background:var(--surface-1);font-size:var(--fs-meta);color:var(--text-3)}
+.book-reader__navigation,.book-reader__text-size{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2)}
+.book-reader__tools .small-button{min-height:24px;padding:0 var(--sp-2);font-size:var(--fs-meta)}
+.book-reader__tools input{width:5ch;margin-left:var(--sp-1);padding:var(--sp-1);border:1px solid var(--line-soft);border-radius:var(--radius-sm);background:var(--surface-0);color:var(--text);text-align:center;font:inherit;font-variant-numeric:tabular-nums}
+.book-reader__outline{position:absolute;inset:0 auto 0 0;width:min(280px,85%);overflow:auto;padding:var(--sp-4);background:var(--surface-0);border-right:1px solid var(--line);box-shadow:4px 0 12px var(--wash-1);font-size:var(--fs-meta)}
+.book-reader__outline>div{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-4)}
+.book-reader__outline ol{list-style:none;padding:0;margin:0}.book-reader__outline ol ol{padding-left:var(--sp-4)}
+.book-reader__outline li button{display:block;width:100%;padding:var(--sp-2);border:0;border-radius:var(--radius-sm);background:transparent;color:var(--text);font:inherit;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+.book-reader__outline li button:hover{background:var(--wash-1)}.book-reader__outline button:focus-visible{outline:1px solid var(--focus-line)}
+.book-reader__notice{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);padding:var(--sp-2) var(--sp-4);border-top:1px solid var(--line-soft);color:var(--text-3);font-size:var(--fs-meta)}
+
+@media(max-width:480px){.book-reader__section-label{display:none}}
