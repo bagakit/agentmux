@@ -25,6 +25,9 @@ const tab = (id: string, title: string, profileId: string, deferred: boolean) =>
   Object.assign(region, { browserId: id, profileId, title, url: 'https://app.northwind.example/launch', ...(deferred ? { nativeOwnerDeferred: true } : {}) })
   return created
 }
+// Agents on globally, so the Profile switch shows its own effect; one Profile keeps Agents out.
+config.browser = { ...config.browser, agentAutomation: true }
+await api.browser.updateProfile(client.id, { agentAccess: false }, (await api.browser.readProfiles()).revision)
 useAppStore.setState({ config, loading: false, tabs: {
   a: tab('b-launch', 'Launch board', client.id, false), b: tab('b-notes', 'Release notes', client.id, true), c: tab('b-inbox', 'Inbox', personal.id, false)
 } as never })
