@@ -45,3 +45,10 @@
 .mobile-goals .mobile-goal-decision:active:not(:disabled) { background: var(--green-2); }
 .mobile-goals .mobile-goal-alignment { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
 .mobile-goals .mobile-goal-alignment > p, .mobile-goals .mobile-goal-alignment > [role=status] { flex-basis: 100%; }
+
+/* Grouped list: one surface, hairlines between goals, 56px rows with a readable title. */
+.mobile-app .mobile-goals-list { margin-block: var(--sp-4); border-radius: var(--mobile-radius-group); background: var(--mobile-group); overflow: hidden; }
+.mobile-app .mobile-goals-list li + li { margin-top: 0; border-top: 1px solid var(--mobile-hairline); }
+.mobile-app .mobile-goals-list button { min-height: 56px; padding: 10px 14px; border-radius: 0; gap: 3px 10px; }
+.mobile-app .mobile-goals-list button:active { background: var(--mobile-group-press); }
+.mobile-app .mobile-goals-list strong { font-size: var(--fs-lead); font-weight: 600; line-height: 1.35; }

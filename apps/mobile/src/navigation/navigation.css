@@ -56,3 +56,10 @@
 .mobile-session-state > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-session-state[data-state='done'] { color: var(--status-success-text, var(--green)); }
 
+/* Space and Mote trees read as grouped surfaces with 52px rows. */
+.mobile-app .mobile-space-tree { margin-block: var(--sp-2) var(--sp-4); padding: 4px 0; border-radius: var(--mobile-radius-group); background: var(--mobile-group); }
+.mobile-app .mobile-space-tree > .mobile-space-node + .mobile-space-node { border-top: 1px solid var(--mobile-hairline); }
+.mobile-app .mobile-space-entry .mobile-space-row { min-height: 52px; padding: 6px 10px; }
+.mobile-app .mobile-space-row > strong { font-size: var(--fs-lead); font-weight: 600; }
+.mobile-app .mobile-space-row[aria-expanded='true']::before { background: transparent; }
+.mobile-app .mobile-tree-section > summary, .mobile-app .mobile-tree-folder-group > summary { min-height: 36px; padding: 4px 2px; font-size: var(--fs-meta); font-weight: 600; color: var(--text-2); }
