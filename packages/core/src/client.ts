@@ -187,6 +187,7 @@ import {
   parseAgentCreationSpatialIntent,
   loadSessionHistorySources,
   type AgentMuxAgentSessionStore,
+  type AgentMuxMetadataTimelineResult,
   type AgentMuxLifecycleReservation,
   type AgentMuxPreparedCreation
 } from './agent-session-store.js'
@@ -11238,14 +11239,32 @@ export class AgentMuxClient {
       }
       return next
     }
+    const toolMutation = normalized.timeline.length === 1 && normalized.timeline[0]?.type !== 'update' &&
+      normalized.timeline[0]?.item.kind === 'tool_call' ? normalized.timeline[0] : undefined
+    let batchedTimeline: AgentMuxMetadataTimelineResult | undefined
+    const saveReceipt = async (): Promise<AgentMuxStoredAgentSession> => {
+      batchedTimeline = undefined
+      const result = await this.registry.updateWithTimeline(session.agentSessionId, session.run, current => {
+        const next = persistReceipt(current)
+        // The original CAS state decides this optimization; a prior snapshot cannot qualify it.
+        const steady = toolMutation && (normalized.lifecycleEvent === 'tool-use-start' || normalized.lifecycleEvent === 'tool-use-end') &&
+          normalized.mainSubject && normalized.subject?.kind === 'main' && !witnessTargetMismatch &&
+          !normalized.interaction && !normalized.continuity && !normalized.continuityObservationFailure && !normalized.childActivity &&
+          isDeepStrictEqual(current.pendingInteraction, next.pendingInteraction) &&
+          isDeepStrictEqual(current.nativeInteractionEnds, next.nativeInteractionEnds) &&
+          isDeepStrictEqual(current.interactionOperations, next.interactionOperations) &&
+          next !== current && next.hookReceipt?.id === receipt.id && current.hookReceipt?.id !== receipt.id &&
+          sameNativeHandle(current.nativeHandle, next.nativeHandle) && isDeepStrictEqual(current.activityCommit, next.activityCommit) &&
+          !next.activityCommit?.pending && (!next.activityCommit || next.activityCommit.latestCommitted) &&
+          isDeepStrictEqual(current.terminalPromptReadiness, next.terminalPromptReadiness)
+        return { session: next, ...(steady ? { mutation: toolMutation } : {}) }
+      }, signal)
+      batchedTimeline = result.timeline
+      return result.session
+    }
     let next: AgentMuxStoredAgentSession
     try {
-      next = await this.registry.update(
-        session.agentSessionId,
-        session.run,
-        persistReceipt,
-        signal
-      )
+      next = await saveReceipt()
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
       await this.registry.load(session.hostId)
@@ -11259,12 +11278,7 @@ export class AgentMuxClient {
       }
       next = canonical.hookReceipt?.id === receipt.id
         ? canonical
-        : await this.registry.update(
-            session.agentSessionId,
-            session.run,
-            persistReceipt,
-            signal
-          )
+        : await saveReceipt()
     }
     signal.throwIfAborted()
     if (nativeActivity && next.recoveryActivity?.hookReceiptId !== receipt.id) {
@@ -11337,7 +11351,12 @@ export class AgentMuxClient {
     if (next.activityCommit?.latest.id === activityId) await this.flushAgentActivity(next)
     for (const mutation of normalized.timeline) {
       if (outcomeMutations.includes(mutation)) continue
-      try { await this.persistAndPublishTimeline(mutation, evidence, next.hostId, signal) }
+      try {
+        if (mutation === toolMutation && batchedTimeline) {
+          if ('timelineFailure' in batchedTimeline) throw batchedTimeline.timelineFailure
+          if (batchedTimeline.timeline.changed) this.publisher.publishTimeline(batchedTimeline.timeline, evidence, next.hostId)
+        } else await this.persistAndPublishTimeline(mutation, evidence, next.hostId, signal)
+      }
       catch (error) {
         if (signal.aborted || (error instanceof AgentMuxError &&
           error.code !== 'INVALID_AGENT_TIMELINE_STORE' && error.code !== 'AGENT_TIMELINE_TOO_LARGE')) throw error

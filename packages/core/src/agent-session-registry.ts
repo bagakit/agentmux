@@ -18,6 +18,7 @@ import {
   stopRetiredRuns,
   stoppablePreparedResume,
   type AgentMuxAgentSessionStore,
+  type AgentMuxMetadataTimelineResult,
   type AgentMuxLifecycleReservation,
   type AgentMuxPreparedCreation,
   type AgentMuxPreparedResumeDispatch,
@@ -27,7 +28,8 @@ import {
 import type {
   AgentMuxRunRef,
   AgentMuxAgentSession,
-  AgentMuxStoredAgentSession
+  AgentMuxStoredAgentSession,
+  AgentTimelineMutation
 } from './types.js'
 
 function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
@@ -586,6 +588,21 @@ export class AgentMuxAgentSessionRegistry {
     futureIntentId?: string,
     author?: Readonly<AgentCapabilityBinding>
   ): Promise<AgentMuxStoredAgentSession> {
+    const result = await this.updateSession(agentSessionId, expectedCurrentRun,
+      current => ({ session: operation(current) }), signal, futureIntentId, author)
+    return result.session
+  }
+
+  async updateWithTimeline(agentSessionId: string, expectedCurrentRun: AgentMuxRunRef,
+    operation: (current: AgentMuxStoredAgentSession) => { session: AgentMuxStoredAgentSession; mutation?: AgentTimelineMutation },
+    signal?: AbortSignal): Promise<{ session: AgentMuxStoredAgentSession; timeline?: AgentMuxMetadataTimelineResult }> {
+    return await this.updateSession(agentSessionId, expectedCurrentRun, operation, signal)
+  }
+
+  private async updateSession(agentSessionId: string, expectedCurrentRun: AgentMuxRunRef,
+    operation: (current: AgentMuxStoredAgentSession) => { session: AgentMuxStoredAgentSession; mutation?: AgentTimelineMutation },
+    signal?: AbortSignal, futureIntentId?: string, author?: Readonly<AgentCapabilityBinding>
+  ): Promise<{ session: AgentMuxStoredAgentSession; timeline?: AgentMuxMetadataTimelineResult }> {
     return await this.enqueue(agentSessionId, async (writeSignal) => {
       writeSignal.throwIfAborted()
       const previous = this.get(agentSessionId)
@@ -597,7 +614,8 @@ export class AgentMuxAgentSessionRegistry {
       }
       const future = futureIntentId === undefined ? undefined : await this.store.readFuturePromptIntent(agentSessionId, futureIntentId)
       const current = { ...previous, ...(futureIntentId === undefined || !future ? {} : { futurePromptIntents: { [futureIntentId]: future } }) }
-      const normalized = normalizeStoredAgentSession(operation(structuredClone(current)))
+      const selected = operation(structuredClone(current))
+      const normalized = normalizeStoredAgentSession(selected.session)
       if (normalized.futurePromptIntents && (futureIntentId === undefined || Object.keys(normalized.futurePromptIntents).some(id => id !== futureIntentId))) {
         throw new AgentMuxError('A future-message update must name its exact intent.', 'INVALID_AGENT_SESSION_STORE')
       }
@@ -608,20 +626,26 @@ export class AgentMuxAgentSessionRegistry {
         )
       }
       this.assertAvailable(normalized)
-      if (futureIntentId === undefined && !author && isDeepStrictEqual(previous, agentSessionMetadata(normalized))) {
+      if (!selected.mutation && futureIntentId === undefined && !author && isDeepStrictEqual(previous, agentSessionMetadata(normalized))) {
         // A read-only claim fence still checks the original Store, not this
         // registry's cache. Author/future admissions keep their atomic CAS.
         const canonical = await this.store.readMetadata(agentSessionId)
         writeSignal.throwIfAborted()
         if (!isDeepStrictEqual(canonical, previous)) throw new AgentMuxError(
           'Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
-        return this.get(agentSessionId)
+        return { session: this.get(agentSessionId) }
       }
-      await this.persist(agentSessionMetadata(normalized), () => this.store.compareAndSwapMetadata(previous, agentSessionMetadata(normalized), writeSignal,
-        futureIntentId === undefined ? undefined : { intentId: futureIntentId, expected: future ?? null, next: normalized.futurePromptIntents?.[futureIntentId] ?? null }, author))
+      let timeline: AgentMuxMetadataTimelineResult | undefined
+      await this.persist(agentSessionMetadata(normalized), async () => {
+        if (selected.mutation) timeline = await this.store.compareAndSwapMetadataWithTimeline(previous,
+          agentSessionMetadata(normalized), selected.mutation, writeSignal)
+        else await this.store.compareAndSwapMetadata(previous, agentSessionMetadata(normalized), writeSignal,
+          futureIntentId === undefined ? undefined : { intentId: futureIntentId, expected: future ?? null, next: normalized.futurePromptIntents?.[futureIntentId] ?? null }, author)
+      })
       this.forget(previous)
       this.remember(normalized)
-      return futureIntentId === undefined ? this.get(agentSessionId) : normalized
+      return { session: futureIntentId === undefined ? this.get(agentSessionId) : normalized,
+        ...(timeline === undefined ? {} : { timeline }) }
     }, signal)
   }
 
