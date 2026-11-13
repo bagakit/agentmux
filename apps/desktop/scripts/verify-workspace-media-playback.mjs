@@ -19,10 +19,24 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const evidence = arg('--output') ? resolve(repository, arg('--output')) : join(repository, '.tmp/workspace-media-playback')
 const review = arg('--review') ? resolve(repository, arg('--review')) : join(evidence, 'visual-review.json')
 const receiptOnly = process.argv.includes('--receipt')
-const sourceFiles = ['src/main/workspace-media-streams.ts', 'src/main/workspace-files.ts', 'src/main/preview-paths.ts', 'src/preload/index.ts',
-  'src/renderer/src/components/MediaPlayer.tsx', 'src/renderer/src/components/FilePreviewPane.tsx', 'src/renderer/src/lib/media-player.ts',
-  'src/renderer/src/lib/use-workspace-media-stream.ts', 'src/renderer/src/styles/media-player.css', 'src/shared/workspace-file-preview.ts']
-async function sources() { const out = {}; for (const file of sourceFiles) out[file] = sha(await readFile(join(desktop, file))); return out }
+// Every file whose change can alter playback or a captured frame, so a review is never reused across them.
+const sourceFiles = ['apps/desktop/src/main/workspace-media-streams.ts', 'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/preview-paths.ts',
+  'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/index.html',
+  'apps/desktop/src/renderer/src/components/MediaPlayer.tsx', 'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',
+  'apps/desktop/src/renderer/src/components/file-preview/PlaylistFilePreview.tsx', 'apps/desktop/src/renderer/src/lib/media-player.ts',
+  'apps/desktop/src/renderer/src/lib/use-workspace-media-stream.ts', 'apps/desktop/src/renderer/src/styles/media-player.css',
+  'apps/desktop/src/renderer/src/styles/tokens.css', 'apps/desktop/src/shared/workspace-file-preview.ts', 'apps/desktop/src/shared/workspace-file-format.ts',
+  'packages/client-ui/src/theme/icon-authored.ts', 'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts']
+async function sources() { const out = {}; for (const file of sourceFiles) out[file] = sha(await readFile(join(repository, file))); return out }
+
+/** The production renderer's own Content-Security-Policy, read from the page the app loads. */
+async function productionCsp() {
+  const page = await readFile(join(desktop, 'src/renderer/index.html'), 'utf8')
+  const csp = /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(page)?.[1]
+  assert.ok(csp, 'The production renderer declares a Content-Security-Policy')
+  assert.match(csp, /media-src[^;]*http:\/\/127\.0\.0\.1:\*/, 'The production CSP admits the loopback playback lease')
+  return csp
+}
 const ffmpeg = (args, options = {}) => execFileSync('ffmpeg', ['-v', 'error', '-y', ...args], { stdio: 'ignore', ...options })
 
 if (receiptOnly) {
@@ -53,7 +67,10 @@ try {
   ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=25', '-f', 'lavfi', '-i', 'sine=frequency=550', '-t', '24', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-f', 'hls', '-hls_time', '4', '-hls_playlist_type', 'vod', join(workspace, 'hls/index.m3u8')])
   await writeFile(join(workspace, 'notes.md'), '# Notes\n\nA neighbour File for the narrow Region.\n')
 
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, build: { outDir, emptyOutDir: true } })
+  // The fixture page carries the production CSP verbatim, so a blocked media request here is blocked in the app.
+  const csp = await productionCsp()
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
+    plugins: [{ name: 'production-csp', transformIndexHtml: html => html.replace('__PRODUCTION_CSP__', csp) }], define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, build: { outDir, emptyOutDir: true } })
   // Externals and the Host's native addon resolve through the desktop package's own dependencies.
   await symlink(join(desktop, 'node_modules'), join(privateRoot, 'node_modules'))
   // Same layout as the product: the file owner finds its native helper relative to its own module.

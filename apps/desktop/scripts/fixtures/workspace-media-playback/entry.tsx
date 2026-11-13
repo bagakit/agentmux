@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { FileExplorer } from '../../../src/renderer/src/components/FileExplorer'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
-import { useAppStore } from '../../../src/renderer/src/store'
+import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { addWorkbenchRegion, fileTabId } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
@@ -82,6 +82,8 @@ const probe = {
     return true
   },
   facts() { const state = useAppStore.getState(); return { tabs: state.tabs, layouts: state.layouts, activeWorkspaceId: state.activeWorkspaceId } },
+  /** What quitting the app does: commit the current workface to durable storage. */
+  flush() { return prepareRendererUpdate('quit') },
   async layoutDiagnosis() {
     const { workbenchObjectLayout } = await import('../../../src/renderer/src/lib/desktop-focus-navigation')
     const state = useAppStore.getState(), result = workbenchObjectLayout({ ...state, sessions: [] } as never, workspaceId)

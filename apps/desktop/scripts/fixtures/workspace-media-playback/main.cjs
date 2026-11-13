@@ -32,7 +32,7 @@ function meter() {
       const entry = { path: decodeURIComponent(request.url.slice(45).split('?')[0]), range: request.headers.range ?? null, status: 0, bytes: 0, at: Date.now() }
       report.requests.push(entry)
       const write = response.write.bind(response), end = response.end.bind(response), head = response.writeHead.bind(response)
-      response.writeHead = (status, ...rest) => { entry.status = status; return head(status, ...rest) }
+      response.writeHead = (status, ...rest) => { entry.status = status; entry.repliedAt = Date.now(); return head(status, ...rest) }
       response.write = (chunk, ...rest) => { if (chunk) entry.bytes += chunk.length; return write(chunk, ...rest) }
       response.once('close', () => { entry.closed = true })
       response.end = (chunk, ...rest) => { if (chunk && typeof chunk !== 'function') entry.bytes += chunk.length; entry.status ||= response.statusCode; return end(chunk, ...rest) }
@@ -107,19 +107,19 @@ async function capture() {
   for (let waited = 0; waited < 30000; waited += 250) { try { if ((await fs.readFile(path.join(workspacePath, 'live/live.m3u8'), 'utf8')).split('#EXTINF').length > 6) break } catch {} await sleep(250) }
   report.checks.openPlayersBeforeLive = await evaluate(`[...document.querySelectorAll('.media-player video, .media-player audio')].map(m=>({src:(m.getAttribute('src')||'').split('/').pop(),net:m.networkState,paused:m.paused,parked:Boolean(m.closest('[data-active="false"],.workspace-workbench-slot--parked'))}))`)
   report.checks.openSocketsBeforeLive = report.requests.filter(entry => !entry.closed).length
-  const liveStart = Date.now()
   await evaluate(`mediaPlaybackProbe.open("live/live.m3u8")`)
-  await evaluate(`(()=>{window.liveEvents=[];const t0=performance.now();const tap=()=>{const m=document.querySelector('[data-workbench-region-id] .media-player video[src*="live.m3u8"]');if(!m){setTimeout(tap,20);return}for(const e of ['loadstart','loadedmetadata','loadeddata','canplay','play','playing','waiting','stalled','suspend','abort','emptied','error','durationchange','seeking','seeked','pause'])m.addEventListener(e,()=>window.liveEvents.push([e,Math.round(performance.now()-t0),m.readyState,m.error&&m.error.code,m.currentTime.toFixed(2)]))};tap()})()`)
+  await evaluate(`(()=>{window.liveEvents=[];const t0=performance.now();const tap=()=>{const m=document.querySelector('[data-workbench-region-id] .media-player video[src*="live.m3u8"]');if(!m){setTimeout(tap,20);return}for(const e of ['loadstart','loadedmetadata','loadeddata','canplay','play','playing','waiting','stalled','suspend','abort','emptied','error','durationchange','seeking','seeked','pause'])m.addEventListener(e,()=>window.liveEvents.push([e,Math.round(performance.now()-t0),m.readyState,m.error&&m.error.code,m.currentTime.toFixed(2),m.error&&m.error.message]))};tap()})()`)
   try { await wait(`mediaPlaybackProbe.player("live/live.m3u8")?.decode === 'ready'`, 30000) } finally { report.checks.liveEvents = await evaluate('window.liveEvents') }
   await evaluate(`mediaPlaybackProbe.play("live/live.m3u8")`)
   try { await wait(`mediaPlaybackProbe.player("live/live.m3u8")?.currentTime > 2`, 30000) } finally { report.checks.liveEvents = await evaluate('window.liveEvents') }
   const live = await player('live/live.m3u8')
   assert.equal(live.duration, 'Infinity'); assert.match(live.stream, /^live/); assert.ok(!/Infinity|NaN/.test(live.text), 'No fake duration is shown')
   report.checks.live = live
-  await sleep(15000)
-  const listRequests = requestsFor('live/live.m3u8').filter(entry => entry.at >= liveStart)
+  // While it plays, the list is reloaded at a paced rate instead of spinning on an unchanged list.
+  const windowStart = Date.now(); await sleep(15000)
+  const listRequests = requestsFor('live/live.m3u8').filter(entry => entry.at >= windowStart)
   report.checks.livePlaylistRequests = listRequests.length
-  assert.ok(listRequests.length <= 40, `Live list reloads stay paced: ${listRequests.length}`)
+  assert.ok(listRequests.length <= 20, `Live list reloads stay paced: ${listRequests.length} in 15 s`)
   await evaluate(`mediaPlaybackProbe.showControls("live/live.m3u8")`); await frame('live-dark')
   await evaluate(`mediaPlaybackProbe.theme("light")`); await evaluate(`mediaPlaybackProbe.showControls("live/live.m3u8")`); await frame('live-light'); await evaluate(`mediaPlaybackProbe.theme("dark")`)
 
@@ -137,6 +137,7 @@ async function capture() {
 
   // Leave the player on screen for the restart phase.
   await evaluate(`mediaPlaybackProbe.open("promo.mp4")`); await wait(`mediaPlaybackProbe.player("promo.mp4")?.decode === 'ready'`)
+  await evaluate('mediaPlaybackProbe.flush()')
   await fs.writeFile(path.join(evidence, 'expected-durable.json'), JSON.stringify(await evaluate('mediaPlaybackProbe.facts()')))
 }
 
