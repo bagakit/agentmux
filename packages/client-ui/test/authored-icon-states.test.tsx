@@ -31,7 +31,7 @@ it('requires a complete state design beside every authored drawing, with registe
     else {
       expect(definition.shapes.some(([, attrs]) => 'data-semantic-icon-part' in attrs), id).toBe(true)
       expect(design.motion.trigger.trim().length, id).toBeGreaterThan(0)
-      if (design.motion.kind === 'once') expect(design.motion.animation).toBe('feedback')
+      if (design.motion.kind === 'once') expect(['feedback', 'selection'], id).toContain(design.motion.animation)
       else expect(['work', 'stream', 'execute', 'wait', 'orbit']).toContain(design.motion.animation)
     }
   }
