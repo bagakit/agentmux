@@ -149,6 +149,6 @@ function CardTool({ label, onClick, expanded, pressed, children }: { label: stri
 function CapsuleNativePage({ browser, presentation, release }: { browser: BrowserSnapshot; presentation: BrowserStagePresentation; release(): void }) {
   const media = useBrowserPresentationCapture(browser.id)
   const [selected, setSelected] = useState(false)
-  return <BrowserPresentationStage browserId={browser.id} navigationId={browser.navigationId} presentation={presentation}
+  return <BrowserPresentationStage browserId={browser.id} navigationId={browser.navigationId} presentation={presentation} notice="overlay"
     inputSelected={selected} blocked={false} media={media} onInputSelected={() => setSelected(true)} onPresentationRemoved={release} />
 }
