@@ -85,7 +85,9 @@
 .git-workbench__review { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0; }
 .git-workbench__review--diff { grid-template-columns: minmax(200px, 35%) minmax(0, 1fr); }
 .git-workbench__diff { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); }
-.git-workbench__files button[aria-pressed="true"] { color: var(--text); background: var(--surface-1); }
+/* The open file uses History's selection, so it never reads as the hovered row. */
+.git-workbench__files button[aria-pressed="true"] { color: var(--text); background: color-mix(in srgb, var(--blue) 16%, var(--surface-1)); }
+.git-workbench__files button[aria-pressed="true"] .git-workbench__file-name { font-weight: 500; }
 .git-workbench__locating { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); border-bottom: 1px solid var(--line); }
 @container git-workbench (max-width: 620px) {
   .git-workbench__header { flex-wrap: wrap; }
