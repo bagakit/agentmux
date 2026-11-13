@@ -1,4 +1,5 @@
 import type { Demand } from './demand-types.js'
+import { delegationWorkerHostId } from './delegations.js'
 
 /** Business responsibility references original execution; it never owns Runtime state. */
 export type DemandExecutionReference = {
@@ -100,7 +101,7 @@ export function demandExecutionReferences(goal: Pick<Demand, 'dispatches' | 'del
     ...(goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => ({ kind: 'start' as const,
       operationId: item.operationId, hostId: item.hostId, agentSessionId: item.agentSessionId, runId: item.runId })),
     ...(goal.delegations ?? []).map(item => ({ kind: 'delegation' as const, operationId: item.operationId,
-      hostId: item.hostId, agentSessionId: item.workerAgentSessionId, runId: item.workerRunId }))
+      hostId: delegationWorkerHostId(item), agentSessionId: item.workerAgentSessionId, runId: item.workerRunId }))
   ]
 }
 export function sameDemandExecution(left: DemandExecutionReference, right: DemandExecutionReference): boolean {
@@ -145,6 +146,6 @@ export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | '
   return JSON.stringify({ id: goal.id, status: goal.status, supervisor: goal.supervisorSessionId,
     alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: goal.grounding?.submissionId ?? null, acceptedAt: goal.grounding?.acceptedAt ?? null,
     starts: (goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => [item.operationId, item.hostId, item.agentSessionId, item.runId, item.stage, item.receipt ?? null]),
-    delegations: (goal.delegations ?? []).map(item => [item.operationId, item.hostId, item.workerAgentSessionId, item.workerRunId, item.linkedAt ?? null, item.report?.operationId ?? null, item.collection?.operationId ?? null]),
+    delegations: (goal.delegations ?? []).map(item => [item.operationId, item.hostId, delegationWorkerHostId(item), item.workerAgentSessionId, item.workerRunId, item.linkedAt ?? null, item.report?.operationId ?? null, item.collection?.operationId ?? null]),
     progress: (goal.progressUpdates ?? []).map(item => item.operationId) })
 }

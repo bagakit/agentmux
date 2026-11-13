@@ -1,5 +1,5 @@
 import type { DemandCriterion } from './goals.js'
-import type { DemandDelegation } from './delegations.js'
+import { delegationWorkerHostId, type DemandDelegation } from './delegations.js'
 
 /**
  * A Goal's plan: a dependency graph of nodes inside one Goal. The plan holds only structure,
@@ -34,7 +34,7 @@ export type GoalPlanReviewInput = {
   check: { command: string; result: string; evidence: string[] }
   note: string
 }
-export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string }
+export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string; hostId?: string }
 export type GoalPlanReview = GoalPlanReviewInput & { reviewer: GoalPlanReviewer; reviewedAt: number }
 export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number }
 export type GoalPlan = {
@@ -74,9 +74,9 @@ function identities(value: unknown, label: string): string[] {
   return result
 }
 function actor(value: unknown, label: string): GoalPlanReviewer {
-  const data = object(value, label, ['kind', 'id'])
+  const data = object(value, label, ['kind', 'id', 'hostId'], ['hostId'])
   if (data.kind !== 'agent' && data.kind !== 'user' && data.kind !== 'device') throw new Error(`${label}.kind is invalid`)
-  return { kind: data.kind, id: identity(data.id, `${label}.id`) }
+  return { kind: data.kind, id: identity(data.id, `${label}.id`), ...(data.hostId === undefined ? {} : { hostId: identity(data.hostId, `${label}.hostId`) }) }
 }
 
 export function parseGoalPlanNode(value: unknown): GoalPlanNodeInput {
@@ -251,7 +251,8 @@ export function goalPlanDelegationIssue(plan: GoalPlan, delegations: readonly De
   const executor = projection.node.executor
   if (executor && (executor.hostId !== worker.hostId || executor.agentSessionId !== worker.agentSessionId))
     return `Plan node ${nodeId} names ${executor.agentSessionId} on ${executor.hostId} as its executor; revise the plan to reassign it.`
-  if (projection.state === 'changes' && projection.delegation && projection.delegation.workerAgentSessionId !== worker.agentSessionId && !executor)
+  if (projection.state === 'changes' && projection.delegation &&
+      (projection.delegation.workerAgentSessionId !== worker.agentSessionId || delegationWorkerHostId(projection.delegation) !== worker.hostId) && !executor)
     return `Rework of ${nodeId} goes to its original executor unless the plan reassigns it.`
   return null
 }

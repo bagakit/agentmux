@@ -2,7 +2,7 @@ import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './disc
 import { assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
-  parseDemandDelegationAttentionInput, sameDemandDelegationAttention,
+  parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
@@ -716,14 +716,15 @@ export class DemandStore {
         if (owner!.id !== id || !sameDemandDelegationIntent(original, intent)) this.rejectDelegation('The original delegation identity belongs to a different Goal, worker, Run or frozen input. Inspect it without resending.')
         return { unchanged: demand }
       }
-      if (demand.supervisorSessionId !== actorSessionId || !demand.assigneeSessionIds.includes(intent.workerAgentSessionId) || !demand.sessionIds.includes(intent.workerAgentSessionId) || intent.workerAgentSessionId === actorSessionId)
+      if (demand.supervisorSessionId !== actorSessionId || !demand.assigneeSessionIds.includes(intent.workerAgentSessionId) || !demand.sessionIds.includes(intent.workerAgentSessionId) ||
+          intent.workerAgentSessionId === actorSessionId && delegationWorkerHostId(intent) === intent.hostId)
         this.rejectDelegation('A new delegation requires the current Supervisor and a distinct accurate assigned worker Session.')
       const alignment = demand.alignment
       if (!alignment || alignment.revision !== intent.alignmentRevision || intent.criterionIds.some(criterionId => !alignment.criteria.some(criterion => criterion.id === criterionId)))
         this.rejectDelegation('A new delegation must reference the current proposal and its original success criteria.')
       if (intent.planNodeId !== undefined) {
         if (!demand.plan) this.rejectDelegation('This Goal has no plan; delegate without a plan node or revise the plan first.')
-        const issue = goalPlanDelegationIssue(demand.plan, demand.delegations ?? [], alignment.criteria, intent.planNodeId, { hostId: intent.hostId, agentSessionId: intent.workerAgentSessionId })
+        const issue = goalPlanDelegationIssue(demand.plan, demand.delegations ?? [], alignment.criteria, intent.planNodeId, { hostId: delegationWorkerHostId(intent), agentSessionId: intent.workerAgentSessionId })
         if (issue) this.rejectDelegation(issue)
         const node = demand.plan.nodes.find(item => item.id === intent.planNodeId)!
         if (intent.criterionIds.length !== node.criterionIds.length || node.criterionIds.some(id => !intent.criterionIds.includes(id)))
@@ -777,7 +778,9 @@ export class DemandStore {
       const original = plan.reviews.find(item => item.operationId === review.operationId)
       if (original) {
         const { reviewer: before, reviewedAt: _time, ...saved } = original
-        if (JSON.stringify(saved) !== JSON.stringify(review) || before.kind !== reviewer.kind || before.id !== reviewer.id)
+        const ownerHost = demand.delegations?.find(entry => entry.operationId === review.delegationOperationId)?.hostId
+        if (JSON.stringify(saved) !== JSON.stringify(review) || before.kind !== reviewer.kind || before.id !== reviewer.id ||
+            (before.hostId ?? ownerHost) !== (reviewer.hostId ?? ownerHost))
           this.rejectDelegation('This review operation was already recorded with a different verdict or reviewer.')
         return { unchanged: demand }
       }
@@ -786,7 +789,8 @@ export class DemandStore {
       if (!projection.delegation || projection.delegation.operationId !== review.delegationOperationId)
         this.rejectDelegation('A review must judge the node\'s current attempt.')
       if (projection.state !== 'review') this.rejectDelegation(`Plan node ${review.nodeId} is ${projection.state}; only a reported attempt can be reviewed.`)
-      if (reviewer.kind === 'agent' && reviewer.id === projection.delegation.workerAgentSessionId)
+      if (reviewer.kind === 'agent' && reviewer.id === projection.delegation.workerAgentSessionId &&
+          (reviewer.hostId ?? projection.delegation.hostId) === delegationWorkerHostId(projection.delegation))
         this.rejectDelegation('The executor of a node cannot review its own work.')
       const now = Date.now()
       plan.reviews = [...plan.reviews, { ...clone(review), reviewer, reviewedAt: now }]

@@ -13,7 +13,10 @@ export type DemandDelegationContextSource = {
 export type DemandDelegationIntent = {
   operationId: string
   sourceMessageId: string
+  /** Original Goal/owner Host route. Runtime authentication remains with Core. */
   hostId: string
+  /** Exact worker route. Absence in an original record means its original shared Host. */
+  workerHostId?: string
   ownerAgentSessionId: string
   workerAgentSessionId: string
   ownerRunId: string
@@ -84,9 +87,13 @@ function positive(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer`)
   return value
 }
-const intentKeys = ['operationId', 'sourceMessageId', 'hostId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRunId', 'workerRunId', 'threadId', 'text', 'requestText', 'alignmentRevision', 'criterionIds', 'planNodeId', 'context']
+/** The original schema used hostId for both participants; it never meant an unknown worker Host. */
+export function delegationWorkerHostId(intent: Pick<DemandDelegationIntent, 'hostId' | 'workerHostId'>): string {
+  return intent.workerHostId ?? intent.hostId
+}
+const intentKeys = ['operationId', 'sourceMessageId', 'hostId', 'workerHostId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRunId', 'workerRunId', 'threadId', 'text', 'requestText', 'alignmentRevision', 'criterionIds', 'planNodeId', 'context']
 export function parseDemandDelegationIntent(value: unknown): DemandDelegationIntent {
-  const data = record(value, 'delegation', intentKeys, ['context', 'requestText', 'planNodeId'])
+  const data = record(value, 'delegation', intentKeys, ['context', 'requestText', 'planNodeId', 'workerHostId'])
   if (typeof data.text !== 'string' || !data.text.trim() || data.text.includes('\0')) throw new Error('delegation.text must be a nonempty frozen body')
   if (data.requestText !== undefined && (typeof data.requestText !== 'string' || !data.requestText.trim() || data.requestText.includes('\0'))) throw new Error('delegation.requestText must be the nonempty original task request')
   if (!Array.isArray(data.criterionIds) || data.criterionIds.length === 0) throw new Error('delegation requires at least one success criterion')
@@ -106,6 +113,7 @@ export function parseDemandDelegationIntent(value: unknown): DemandDelegationInt
   }
   return { operationId: identity(data.operationId, 'delegation.operationId'), sourceMessageId: identity(data.sourceMessageId, 'delegation.sourceMessageId'),
     hostId: identity(data.hostId, 'delegation.hostId'), ownerAgentSessionId: identity(data.ownerAgentSessionId, 'delegation.ownerAgentSessionId'),
+    ...(data.workerHostId === undefined ? {} : { workerHostId: identity(data.workerHostId, 'delegation.workerHostId') }),
     workerAgentSessionId: identity(data.workerAgentSessionId, 'delegation.workerAgentSessionId'), ownerRunId: identity(data.ownerRunId, 'delegation.ownerRunId'),
     workerRunId: identity(data.workerRunId, 'delegation.workerRunId'), threadId: identity(data.threadId, 'delegation.threadId'), text: data.text,
     ...(data.requestText === undefined ? {} : { requestText: data.requestText as string }),
@@ -138,10 +146,11 @@ export function sameDemandDelegationAttention(left: DemandDelegationAttentionInp
   return attentionKeys.every(key => left[key as keyof DemandDelegationAttentionInput] === right[key as keyof DemandDelegationAttentionInput])
 }
 export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: DemandDelegationIntent): boolean {
-  return intentKeys.every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
+  return delegationWorkerHostId(left) === delegationWorkerHostId(right) && intentKeys.filter(key => key !== 'workerHostId')
+    .every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection', 'attention'], ['context', 'requestText', 'planNodeId', 'linkedAt', 'report', 'collection', 'attention'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'report', 'collection', 'attention'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'report', 'collection', 'attention'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
