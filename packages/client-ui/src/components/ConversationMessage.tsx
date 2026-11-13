@@ -8,7 +8,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useContentCopyAction, ContentCopyIntentContext } from '../lib/use-content-copy-action.js'
-import { useClientUiPlatform, useMarkdownCopyText } from '../platform.js'
+import { useClientUiPlatform, useConversationToolLabels, useMarkdownCopyText } from '../platform.js'
 import { externalSpeakerLabel, conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
@@ -209,6 +209,7 @@ export function ConversationMessage({
 }: ConversationMessageProps) {
   const nativeCollaboration = explicitNativeCollaboration ?? recordedSpeaker?.nativeCollaboration
   const platform = useClientUiPlatform()
+  const selfLabel = useConversationToolLabels().self ?? 'You'
   const renderClock = timeFormatter ?? formatClock
   const isStringContent = typeof content === 'string'
   const parts: readonly AgentSessionHistoryContentPart[] = isStringContent
@@ -273,9 +274,9 @@ export function ConversationMessage({
     ? described?.providerId ?? (!agentReference.declared && agentReference.speaker.id === conversationSessionId ? providerId : undefined)
     : providerId
   const displayName = recordedSpeaker?.role === 'unknown'
-    ? recordedIdentity ? conversationEvent?.role === 'observation' ? '作者未记录' : 'Author unknown' : 'You'
+    ? recordedIdentity ? conversationEvent?.role === 'observation' ? '作者未记录' : 'Author unknown' : selfLabel
     : speaker?.role === 'external' ? described?.name ?? externalSpeakerLabel(speaker)
-    : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
+    : described?.name ?? name ?? (speaker?.role === 'human' ? selfLabel : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
   const platformCopy = useMarkdownCopyText()

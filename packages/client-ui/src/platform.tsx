@@ -17,6 +17,8 @@ export type MoteInputNoticeOwner = { routeHostId: string; sourceHostId: string; 
 
 export type ConversationToolLabels = {
   copy: string; copying: string; copied: string; retryCopy: string; formatJson: string; formatJsonHint: string
+  /** How this client names its own person as a speaker; recorded identity is unchanged. */
+  self?: string
 }
 const defaultConversationToolLabels: ConversationToolLabels = {
   copy: 'Copy', copying: 'Copying…', copied: 'Copied', retryCopy: 'Retry copy',
