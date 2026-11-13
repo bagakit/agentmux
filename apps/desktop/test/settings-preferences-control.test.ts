@@ -17,6 +17,7 @@ async function entries(owner: Awaited<ReturnType<typeof configOwnerFixture>>['ow
 
 
 function alternate(entry: AgentMuxControlSettingEntry) {
+  if (entry.key === 'browser.exitCheckUrl') return 'https://example.invalid/check'
   if (entry.key === 'browser.agentControl.glowOpacity') return 0.8
   if (entry.key === 'browser.agentControl.glowColor') return '#c78cfa'
   if (entry.kind === 'boolean') return !entry.value
