@@ -11,7 +11,7 @@ app.on('window-all-closed', () => {})
 const receipt: any = { passed: false, captureOnly: true, aestheticReview: 'not-performed', cases: [], screenshots: [],
   boundary: 'Actual production Main source owner, BrowserWindow, isolated preload and SourceView with trusted CDP input. Native discovery is controlled; desktop pixels, TCC, clipboard, existing Sessions, packaging and installation are outside this proof.' }
 let picker: ScreenshotSourcePicker, window: BrowserWindow, appearance: 'light' | 'dark' = 'dark'
-let failNextDisplay = false, heldApps: (() => void) | null = null, holdApps = false
+let failNextDisplay = false, failNextWindows = false, heldApps: (() => void) | null = null, holdApps = false
 const calls: { method: string; params?: unknown }[] = []
 const displays = [
   { id: 11, width: 1440, height: 900, scale: 2, isMain: true },
@@ -30,7 +30,10 @@ const native = { async request(method: string, params?: unknown) {
     if (holdApps) await new Promise<void>(resolve => { heldApps = resolve })
     return { apps }
   }
-  if (method === 'listWindows') return { windows }
+  if (method === 'listWindows') {
+    if (failNextWindows) { failNextWindows = false; throw new Error('The private window discovery is unavailable. Retry this original application.') }
+    return { windows }
+  }
   throw new Error('Unexpected native discovery: ' + method)
 } } as unknown as Pick<NativeDesktop, 'request'>
 
@@ -131,6 +134,21 @@ async function run() {
   await until('selected application window closes', async () => application.window.isDestroyed())
   receipt.cases.push({ name: 'same-label-application-filter-and-exact-window', target })
   process.stdout.write('source-view: exact process and window receipt accepted\n')
+
+  failNextWindows = true
+  const failedWindows = await open('window')
+  await textIncludes('Process 84'); await click('Process 84', '.screenshot-source__choices button')
+  await textIncludes('private window discovery is unavailable')
+  assert.equal(await evaluate('!![...document.querySelectorAll(".screenshot-source__choices button")].find(button=>button.textContent.includes("Process 42")&&!button.disabled)'), true, 'A failed window read keeps other confirmed applications selectable')
+  const beforeWindowsRetry = calls.length
+  await click('Retry')
+  const retried = await until('the original window discovery retry is observed', async () => calls.length > beforeWindowsRetry ? calls.at(-1) : null)
+  assert.equal(retried.method, 'listWindows', 'Retry must retain the selected application window discovery target')
+  assert.deepEqual(retried.params, { app: 'pid:84', processStartedAt: 208 }, 'Retry must retain the exact original process incarnation')
+  await textIncludes('Capture review · Delivery checklist')
+  await click('Cancel'); assert.equal(await failedWindows.result, null)
+  await until('the retried window chooser closes', async () => failedWindows.window.isDestroyed())
+  receipt.cases.push({ name: 'failed-window-discovery-retries-exact-original-application', retried })
 
   appearance = 'dark'; failNextDisplay = true
   const failed = await open('display')
