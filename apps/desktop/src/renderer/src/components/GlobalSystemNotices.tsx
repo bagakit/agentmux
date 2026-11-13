@@ -185,7 +185,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     }))
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
   const endedSessions = sessions.filter((session): session is Extract<typeof sessions[number], { kind: 'agent' }> =>
-    session.kind === 'agent' && runEndedByRuntimeRestart(session))
+    session.kind === 'agent' && runEndedByRuntimeRestart(session) && !dormantByRecoveryPolicy(session))
   const endedRunKey = (session: typeof endedSessions[number]) => JSON.stringify([session.control.hostId, session.id, session.control.run.runId])
   const endedRunFacts = Object.fromEntries(endedSessions.map(session => [endedRunKey(session), 'runtime-restart']))
   const endedRunInbox = useReadReceipts('global:ended-runs', endedRunFacts, !loading)
