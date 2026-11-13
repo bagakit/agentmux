@@ -1250,7 +1250,8 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
-  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference'; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean> }): Promise<AgentMuxMessageReceipt> {
+  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference'; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean>;
+    conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind'] }): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
       await newMessage?.reauthorize?.()
       const messageId = input.messageId ?? mintObjectId()
@@ -1294,7 +1295,7 @@ export class DurableAgentMuxMessageQueue {
         if (!this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))) await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, at: envelope.createdAt,
           intent: { key, admissionIntent: frozenIntent, execution: 'immediate', environment: structuredClone(newMessage.inputEnvironment),
             source: { kind: 'message', messageId, originalControlOperationId: envelope.operationId,
-              ...(envelope.sender.kind === 'external' ? prepareMessageInputRepresentation(envelope)
+              ...(envelope.sender.kind === 'external' ? prepareMessageInputRepresentation(envelope, newMessage.conversationKind)
                 : envelope.channelQuote ? { promptWire: renderAgentMuxMessageEnvelope(envelope) } : {}) } } })
       }
       return this.receipt(this.message(messageId)!)

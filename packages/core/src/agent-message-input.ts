@@ -3,6 +3,8 @@ import { renderAgentMuxMessageEnvelope, channelQuoteWireMatchesEnvelope, parseAg
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { DOMParser, onWarningStopParsing } from '@xmldom/xmldom'
 import { channelTranscriptQuoteJson } from './channel-quote.js'
+import { AGENTMUX_CHANNEL_INSTANT_REPLY } from './agent-messaging-guidance.js'
+import type { ConnectionIngressMessage } from './ingress-contract.js'
 
 /** A presentation choice for one original input, not another delivery or message. */
 export type AgentMessageInputRepresentation = {
@@ -15,8 +17,15 @@ export type AgentMessageInputRepresentation = {
 // This bounds unsolicited model context, never the retained message or its readability.
 const INLINE_MESSAGE_BYTES = 16 * 1024
 const bytes = (text: string): number => new TextEncoder().encode(text).byteLength
+// The adapter's typed conversation kind selects the reply note; an absent or unknown kind adds none.
+const CONVERSATION_NOTE: Readonly<Record<string, string>> = {
+  direct: 'This message came from a direct chat with one person.',
+  group: 'This message came from a group chat; everyone there can read your replies, so keep unrelated private material out.'
+}
 
-function reminder(envelope: AgentMuxMessageEnvelope, body: AgentMessageInputRepresentation['body'], quote: AgentMessageInputRepresentation['quote']): string {
+function reminder(envelope: AgentMuxMessageEnvelope, body: AgentMessageInputRepresentation['body'], quote: AgentMessageInputRepresentation['quote'],
+  conversationKind?: ConnectionIngressMessage['conversationKind']): string {
+  const note = conversationKind === undefined ? undefined : CONVERSATION_NOTE[conversationKind]
   const quotedId = "'" + envelope.messageId.replaceAll("'", "'\"'\"'") + "'"
   const read = (field: string) => `"$AGENTMUX_CLI" message read --message-id ${quotedId} --field ${field}`
   return [
@@ -24,6 +33,7 @@ function reminder(envelope: AgentMuxMessageEnvelope, body: AgentMessageInputRepr
     body === 'reference' ? `The original request body is retained, not included here. Read it before acting: ${read('body')}.` : undefined,
     quote === 'reference' ? `Earlier channel context is retained separately. Read it only when needed: ${read('channelQuote')}.` : undefined,
     body === 'reference' || quote === 'reference' ? 'Use message --skill and message read --help for bounded continuation. References and reads are not Inbox acknowledgements or task acceptance.' : undefined,
+    note, note === undefined ? undefined : AGENTMUX_CHANNEL_INSTANT_REPLY,
     'For reactions, read connection --skill and use this Session’s original bound identity and the original platform message ID. The connector manages waiting and input-delivered markers; choose any processing or result reaction yourself within the task’s authorization.'
   ].filter(Boolean).join('\n')
 }
@@ -37,11 +47,11 @@ export function renderMessageInputRepresentation(envelope: AgentMuxMessageEnvelo
 }
 
 /** Only called for a newly accepted external message. Existing input recipes stay original. */
-export function prepareMessageInputRepresentation(envelope: AgentMuxMessageEnvelope): { promptWire: string; representation: AgentMessageInputRepresentation } {
+export function prepareMessageInputRepresentation(envelope: AgentMuxMessageEnvelope, conversationKind?: ConnectionIngressMessage['conversationKind']): { promptWire: string; representation: AgentMessageInputRepresentation } {
   let body: AgentMessageInputRepresentation['body'] = 'inline'
   let quote: AgentMessageInputRepresentation['quote'] = envelope.channelQuote ? 'inline' : 'absent'
   const selected = () => {
-    const representation = { body, quote, reminder: reminder(envelope, body, quote) }
+    const representation = { body, quote, reminder: reminder(envelope, body, quote, conversationKind) }
     return { representation, promptWire: renderMessageInputRepresentation(envelope, representation) }
   }
   let value = selected()
