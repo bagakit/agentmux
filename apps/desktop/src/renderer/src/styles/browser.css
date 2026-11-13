@@ -305,3 +305,23 @@
 .profile-mark[data-size='large'] { width: 36px; height: 36px; border-radius: var(--radius); font-size: var(--fs-title); box-shadow: var(--hl); }
 :root[data-appearance='light'] .profile-mark { color: hsl(var(--profile-hue) 46% 32%); background: hsl(var(--profile-hue) 40% 46% / .14); }
 @media (prefers-reduced-motion: reduce) { .profile-mark { transition: none; } }
+
+/* The toolbar Profile chip: the identity mark and name; quiet until hovered, never a status. */
+.browser-profile-chip {
+  flex: 0 1 auto; min-width: 0; max-width: 168px; display: inline-flex; align-items: center; gap: var(--sp-2);
+  height: 24px; padding: 0 var(--sp-2) 0 1px; border: 0; border-radius: var(--radius-sm);
+  color: var(--text-2); background: transparent; font-size: var(--fs-meta); font-weight: 550; cursor: pointer;
+}
+.browser-profile-chip > .profile-mark { width: 20px; height: 20px; font-size: var(--fs-micro); }
+.browser-profile-chip > span:not(.profile-mark) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-profile-chip > svg { flex: none; color: var(--text-3); }
+.browser-profile-chip:hover, .browser-profile-chip[data-state='open'] { color: var(--text); background: var(--wash-2); }
+.browser-profile-chip:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.browser-profile-chip[data-pending] > .profile-mark { animation: browser-profile-arrive var(--dur-enter) var(--ease-enter); }
+@keyframes browser-profile-arrive { from { transform: scale(.82); opacity: .4; } }
+@container browser-pane (width < 520px) { .browser-profile-chip > span:not(.profile-mark) { display: none; } .browser-profile-chip { padding-right: var(--sp-1); } }
+@media (prefers-reduced-motion: reduce) { .browser-profile-chip[data-pending] > .profile-mark { animation: none; } }
+.browser-profile-switcher .tab-context-menu__item > .profile-mark { width: 18px; height: 18px; font-size: var(--fs-micro); }
+.browser-profile-switcher .tab-context-menu__item > small { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
+.browser-profile-chip__failure { flex: none; color: var(--amber-text); font-size: var(--fs-meta); white-space: nowrap; }
+.browser-profile-chip__failure button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; font: inherit; cursor: pointer; }
