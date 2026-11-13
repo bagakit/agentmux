@@ -197,8 +197,6 @@ amux space rename --tab '<tab-id>' --name-revision M --name '评审'
 
 表中入口的能力边界与接线见[公共能力来源导航](../specs/public-capabilities.md#cli-与服务的当前来源)及[公共控制合同](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。源码、构建、安装与实际运行分别核对；入口清单不代签具体 UI 控件的可操作性，不在当前执行版本 help 中的能力不要猜命令。
 
-共享实体与展示关系由 Core 的同一持久空间 owner 提供；Desktop Store 消费并投影这些事实，CLI 接入同一公共服务，不另建一套空间模型。
-
 ## 查看消息等待，停止本条退避
 
 Message Tool 的待发意图由原 Client owner 持有。先按原 Session 读取 `pendingId` 和等待进度，再停止这一条正在退避的消息：
