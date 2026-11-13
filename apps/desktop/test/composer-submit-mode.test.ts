@@ -163,4 +163,31 @@ describe('composerSubmitMode', () => {
       expect(mode.placeholder).toBe(availability.placeholder)
     }
   })
+
+  it('reports a Session with no native conversation as unavailable to other input surfaces', () => {
+    // Browser annotations and similar senders read availability: they must not pick this Session.
+    const absent = agentSession({ processState: 'exited',
+      status: { state: 'error', source: 'run-process', observedAt: 3, continuity: 'unavailable', continuityReason: 'native-conversation-absent' } })
+    expect(agentComposerAvailability(absent).disabled).toBe(true)
+    expect(agentComposerAvailability(absent).placeholder).toBe(composerSubmitMode(absent).placeholder)
+  })
+
+  it('keeps the draft but does not offer Send when there is no native conversation to continue', () => {
+    // Send would only drive a recovery Core has already answered with a final fact. The draft stays
+    // writable and kept; the surface's one primary action starts a new conversation instead.
+    const mode = composerSubmitMode(agentSession({ processState: 'exited',
+      status: { state: 'error', source: 'run-process', observedAt: 3, continuity: 'unavailable', continuityReason: 'native-conversation-absent' } }))
+
+    expect(mode.canType).toBe(true)
+    expect(mode.canSubmit).toBe(false)
+    expect(mode.primaryAction).toBe('send')
+    expect(mode.placeholder).not.toMatch(/restore/iu)
+  })
+
+  it('still offers Send to restore an ended Session whose native conversation exists', () => {
+    const mode = composerSubmitMode(agentSession({ processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 3 } }))
+
+    expect(mode.canSubmit).toBe(true)
+    expect(mode.placeholder).toBe('Send to restore this Agent…')
+  })
 })
