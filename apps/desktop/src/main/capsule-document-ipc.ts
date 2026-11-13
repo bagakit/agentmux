@@ -48,7 +48,8 @@ export function capsuleDocumentIpc(options: {
       const record = await admit(event.sender, event.senderFrame)
       const capsuleId = record.capsuleId
       switch (action) {
-        case 'capabilities': return { version: 1, theme: record.theme === 'follow', interaction: true, humanReply: false }
+        // A question can be answered only when the page has a recipient Agent.
+        case 'capabilities': return { version: 1, theme: record.theme === 'follow', interaction: Boolean(record.target), humanReply: false }
         case 'theme': return projectedTheme(record)
         case 'request': return (await options.capsules.call('capsule.interaction.request', { capsuleId,
           ...params } as never)).interaction
