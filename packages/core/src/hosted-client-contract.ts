@@ -181,6 +181,8 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   readonly providers: { catalog(): AgentCatalogEntry[]; get(id: string): { catalog: AgentCatalogEntry } }
   connect(): Promise<void>
   dispose(): Promise<void>
+  /** Low-frequency owner facts only; ordered Run bytes never visit these listeners. */
+  onStatusEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null

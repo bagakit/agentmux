@@ -3,7 +3,7 @@ import type { AgentMuxHostedClient } from './hosted-client-contract.js'
 import type { ExecutionHost } from './execution-host.js'
 import { mintObjectId } from './object-id.js'
 import type { CommandResult, RunCommandOptions } from './process-runner.js'
-import type { AgentMuxRun, AgentMuxRunAttachment } from './types.js'
+import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxRunAttachment } from './types.js'
 
 /** A private Terminal Run protocol, independent of the command's human output. */
 const commandScript = `
@@ -33,7 +33,7 @@ printf '%s:done\\n' "$token"
 `
 
 type TerminalPort = Pick<AgentMuxHostedClient, 'prepareTerminal' | 'createPreparedTerminal' | 'attachTerminal' |
-  'writeTerminal' | 'readRunReplay' | 'releaseRunAttachment' | 'removeTerminal' | 'stopTerminal' | 'runtimeIdentity' | 'onEvent' | 'dispose'>
+  'writeTerminal' | 'readRunReplay' | 'releaseRunAttachment' | 'removeTerminal' | 'stopTerminal' | 'runtimeIdentity' | 'onStatusEvent' | 'onRunEvent' | 'dispose'>
 
 /** Transient commands consume existing Core Terminal APIs and the selected Host's RPC transport. */
 export class HostedExecutionHost implements ExecutionHost {
@@ -117,10 +117,13 @@ export class HostedExecutionHost implements ExecutionHost {
         if (ended && !finished) failure(new AgentMuxError('The original command ended without a complete result. No command was replayed.', 'COMMAND_UNCONFIRMED'))
       }).catch(failure)
     }
-    const unsubscribe = client.onEvent(event => {
+    const unsubscribeStatus = client.onStatusEvent(event => {
+      if (!finished && event.type === 'connection-state' && event.state !== 'restored') failure(new AgentMuxError('The command connection is unconfirmed. Keep its original Run and operation IDs; no command was replayed.', 'COMMAND_UNCONFIRMED'))
+    })
+    let unsubscribeRun = () => {}
+    const receiveRun = (event: AgentMuxClientEvent) => {
       if (!run || finished) return
-      if (event.type === 'connection-state' && event.state !== 'restored') failure(new AgentMuxError('The command connection is unconfirmed. Keep its original Run and operation IDs; no command was replayed.', 'COMMAND_UNCONFIRMED'))
-      else if ('run' in event && event.run.runId === run.runId) {
+      if ('run' in event && event.run.runId === run.runId) {
         if (event.type === 'terminal-output') {
           const start = event.evidence.outputByteRange.startByte
           if (opening) pending.push({ start, data: event.dataBytes }); else accept(start, event.dataBytes)
@@ -128,7 +131,7 @@ export class HostedExecutionHost implements ExecutionHost {
         else if (event.type === 'attachment-state' && event.state === 'unavailable') failure(new AgentMuxError(event.diagnostic.message, 'COMMAND_UNCONFIRMED'))
         else if (event.type === 'terminal-snapshot' && !opening) snapshot(event)
       }
-    })
+    }
     const cancel = (code: string, message: string) => {
       failure(new AgentMuxError(message, code))
       if (run) void client.stopTerminal(run).catch(() => {})
@@ -139,6 +142,10 @@ export class HostedExecutionHost implements ExecutionHost {
       creationSent = true
       run = await client.createPreparedTerminal(prepared)
       if (options.signal?.aborted) abort()
+      if (failedError) throw failedError
+      // The original zero-byte attachment replays anything produced before the create reply.
+      // Index this Run before opening its attachment so in-flight events retain their order.
+      unsubscribeRun = client.onRunEvent(run.runId, receiveRun)
       if (options.timeoutMs !== undefined) timeout = setTimeout(() => cancel('COMMAND_TIMEOUT', 'The original command timed out; no command was replayed.'), options.timeoutMs)
       const initial = await client.attachTerminal(run.runId, 0, 'raw'); attached = true
       snapshot(initial); opening = false
@@ -175,7 +182,7 @@ export class HostedExecutionHost implements ExecutionHost {
       failure(error)
       throw failedError ?? identityError(error)
     } finally {
-      clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); unsubscribe()
+      clearTimeout(timeout); options.signal?.removeEventListener('abort', abort); unsubscribeRun(); unsubscribeStatus()
       if (run && attached) await client.releaseRunAttachment(run).catch(() => {})
       // Unknown or live Runs retain their original evidence and recovery path.
       if (run && ended && confirmed) await client.removeTerminal(run).catch(() => {})
