@@ -25,6 +25,8 @@ Inputs 的纯呈现投影、Mobile 操作编排及宿主浮层几何的目标职
 
 原生送达与采用聚合分别确认。采用还要求原保存源声明并保有可读取的 canonical 输入及准确 client correlation；当前 Codex 已资格的保存源在创建时声明 `history_mode='paginated'`。旧 legacy 或未确认格式不能因使用新版 CLI 就被称为聚合已修，也不因此关闭原健康终端、迁移格式或回填旧输入关联。
 
+创建及恢复的用户输入记录保留 Core 已确认的原输入引用，沿原记录身份表达提交与投递；缺少原生采用凭据时仍保持未确认。平台上下文保留自身贡献和内容资格，不因与用户输入由同次启动携带就成为同一条公开用户消息。
+
 ### Agent 输入行与视图切换
 
 - Agent/Session 的单一身份位置归[《Agent Region 关闭与身份入口》](spaces-and-layout.md#agent-region-关闭与身份入口)：Region 顶部标明正在观察哪个 Agent，输入区不再复制名称与身份条。输入区继续表达输入模式与输入动作；Message Tools 保留现有 Agent 头像及其完整提示/可访问名称，让用户辨认消息接收者。
