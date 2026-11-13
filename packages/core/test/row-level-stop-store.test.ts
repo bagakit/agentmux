@@ -126,14 +126,17 @@ describe('a user Stop retires one Session by its own rows', () => {
     const target = session('target', 'run-now')
     await store.compareAndSwap(null, target)
     await store.compareAndSwap(null, session('damaged', 'run-damaged'))
+    // SQLite expression indexes refuse non-JSON rows, so the damaged neighbour is valid JSON that
+    // fails the strict Session shape: it cannot be normalized if the Stop ever reads it.
+    const damaged = '{"kind":"agent","agentSessionId":"damaged"}'
     const db = new DatabaseSync(path)
-    db.prepare('UPDATE sessions SET json=? WHERE id=?').run('{"kind":"agent"', 'damaged')
+    db.prepare('UPDATE sessions SET json=? WHERE id=?').run(damaged, 'damaged')
     db.close()
     const reservation = stop(target)
     await store.reserveLifecycle(reservation)
     await expect(store.commitLifecycle(reservation, null)).resolves.toEqual(expect.objectContaining({ agentSessionId: 'target' }))
     const check = new DatabaseSync(path, { readOnly: true })
-    expect(check.prepare('SELECT json FROM sessions WHERE id=?').get('damaged')?.json).toBe('{"kind":"agent"')
+    expect(check.prepare('SELECT json FROM sessions WHERE id=?').get('damaged')?.json).toBe(damaged)
     check.close()
   })
 

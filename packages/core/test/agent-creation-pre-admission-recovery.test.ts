@@ -334,7 +334,7 @@ it.each(['unknown', 'foreign', 'exact-negative'] as const)('preserves the entire
 })
 
 it('settles the original SQLite close and lock handle before retrying, while retaining historical cleanup diagnostics', async () => {
-  const f = await fixture(), owner = f.store as any, originalWrite = owner.write.bind(owner)
+  const f = await fixture(), owner = f.store as any, originalReplace = owner.replaceReservation.bind(owner)
   const capacity = errno('ENOSPC'), failedClose = errno('ENOSPC')
   let closed: any, originalFailure: any, returnedFailure: any
   const attempt = f.inner.createAgentWithDeliveryAttempt.bind(f.inner)
@@ -345,13 +345,13 @@ it('settles the original SQLite close and lock handle before retrying, while ret
   vi.spyOn(f.store, 'prepareCreate').mockImplementationOnce(async (...args) => {
     try { return await prepare(...args) } catch (error) { originalFailure = error; throw error }
   })
-  vi.spyOn(owner, 'write').mockImplementation(async (document: any, ...rest: unknown[]) => {
-    if (!closed && document.reservations.some((reservation: any) => reservation.preparedCreation)) {
+  vi.spyOn(owner, 'replaceReservation').mockImplementation((db: any, reservation: any) => {
+    if (!closed && reservation.preparedCreation) {
       closed = vi.spyOn(owner.db, 'close').mockImplementationOnce(() => { throw failedClose })
         .mockImplementationOnce(() => { throw failedClose })
       throw capacity
     }
-    return await originalWrite(document, ...rest)
+    return originalReplace(db, reservation)
   })
   const created = await f.create()
   expect(closed).toHaveBeenCalledTimes(3)

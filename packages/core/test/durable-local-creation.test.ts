@@ -234,7 +234,7 @@ it.each(['managed-hooks', 'prepared-seed'] as const)('preserves exact pre-Start 
 })
 
 it('attests only a locked unused reservation write failure, preserves its errno, and releases its exact owner', async () => {
-  const f = await fixture(), cause = errno('EIO'), write = vi.spyOn(f.store as any, 'write').mockRejectedValueOnce(cause)
+  const f = await fixture(), cause = errno('EIO'), write = vi.spyOn(f.store as any, 'insertReservation').mockImplementationOnce(() => { throw cause })
   const failure = await f.create().catch(error => error)
   expect(write).toHaveBeenCalled()
   expect(failure).toMatchObject({ code: 'AGENT_SESSION_STORE_UNAVAILABLE',
@@ -247,7 +247,7 @@ it('attests only a locked unused reservation write failure, preserves its errno,
 
 it.each(['reservation', 'preparation', 'native-start'] as const)('automatically continues the frozen original creation after %s storage recovers', async stage => {
   const f = await fixture(), prepare = vi.spyOn(f.store, 'prepareCreate')
-  if (stage === 'reservation') vi.spyOn(f.store as any, 'write').mockRejectedValueOnce(errno('ENOSPC'))
+  if (stage === 'reservation') vi.spyOn(f.store as any, 'insertReservation').mockImplementationOnce(() => { throw errno('ENOSPC') })
   else if (stage === 'preparation') prepare.mockRejectedValueOnce(errno('ENOSPC'))
   else f.start.mockImplementationOnce(async (input: any) => {
     throw new core.AgentMuxError('Native storage is full', 'CTXMUX_storage', undefined, undefined, undefined,
@@ -329,7 +329,7 @@ it('retries only failed exact cleanup actions before the original capacity-block
 })
 
 it('settles the original SQLite close and lock handle before retrying, while retaining historical cleanup diagnostics', async () => {
-  const f = await fixture(), owner = f.store as any, originalWrite = owner.write.bind(owner)
+  const f = await fixture(), owner = f.store as any, originalReplace = owner.replaceReservation.bind(owner)
   const capacity = errno('ENOSPC'), failedClose = errno('ENOSPC')
   let closed: any, originalFailure: any, returnedFailure: any
   const attempt = f.inner.createAgentWithDeliveryAttempt.bind(f.inner)
@@ -340,13 +340,13 @@ it('settles the original SQLite close and lock handle before retrying, while ret
   vi.spyOn(f.store, 'prepareCreate').mockImplementationOnce(async (...args) => {
     try { return await prepare(...args) } catch (error) { originalFailure = error; throw error }
   })
-  vi.spyOn(owner, 'write').mockImplementation(async (document: any, ...rest: unknown[]) => {
-    if (!closed && document.reservations.some((reservation: any) => reservation.preparedCreation)) {
+  vi.spyOn(owner, 'replaceReservation').mockImplementation((db: any, reservation: any) => {
+    if (!closed && reservation.preparedCreation) {
       closed = vi.spyOn(owner.db, 'close').mockImplementationOnce(() => { throw failedClose })
         .mockImplementationOnce(() => { throw failedClose })
       throw capacity
     }
-    return await originalWrite(document, ...rest)
+    return originalReplace(db, reservation)
   })
   const created = await f.create()
   expect(closed).toHaveBeenCalledTimes(3)
@@ -357,21 +357,21 @@ it('settles the original SQLite close and lock handle before retrying, while ret
 })
 
 it('recovers from real SQLite page exhaustion in the original FileStore preparation transaction', async () => {
-  const f = await fixture(), owner = f.store as any, originalWrite = owner.write.bind(owner)
+  const f = await fixture(), owner = f.store as any, originalReplace = owner.replaceReservation.bind(owner)
   const prompt = 'original frozen storage task '.repeat(2_048)
   let constrained = false, nativeFailure: any
-  vi.spyOn(owner, 'write').mockImplementation(async (document: any, ...rest: unknown[]) => {
-    if (!constrained && document.reservations.some((reservation: any) => reservation.preparedCreation)) {
+  vi.spyOn(owner, 'replaceReservation').mockImplementation((db: any, reservation: any) => {
+    if (!constrained && reservation.preparedCreation) {
       constrained = true
       const pages = Number(owner.db.prepare('PRAGMA page_count').get().page_count)
       expect(pages).toBeGreaterThan(0)
       expect(Number(owner.db.prepare(`PRAGMA max_page_count=${pages}`).get().max_page_count)).toBe(pages)
       // The real prepared original exceeds this test-owned SQLite connection's page budget.
       // Closing this failed transaction removes the injected connection constraint.
-      try { return await originalWrite(document, ...rest) }
+      try { return originalReplace(db, reservation) }
       catch (error) { nativeFailure = error; throw error }
     }
-    return await originalWrite(document, ...rest)
+    return originalReplace(db, reservation)
   })
   const pending = f.create({ prompt })
   await vi.waitFor(() => expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_CREATION_WAITING_FOR_STORAGE' })))

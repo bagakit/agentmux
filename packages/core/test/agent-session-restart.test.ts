@@ -203,12 +203,13 @@ it('exact restart receipt writes do not scan unrelated Sessions', async () => {
   vi.spyOn(f.inner.registry, 'reserveRestart').mockImplementationOnce(async (...args: any[]) => { await reserve(...args); throw new Error('Pause admitted restart') })
   await expect(f.restart()).rejects.toThrow('Pause admitted restart')
   const reservation = await f.store.readLifecycleReservation(f.original.agentSessionId)
-  const read = vi.spyOn(f.store as any, 'read'), write = vi.spyOn(f.store as any, 'write')
+  // The whole-catalog reader is the only path that reads every Session row; an exact write never calls it.
+  const catalog = vi.spyOn(f.store as any, 'sessionCatalog')
   const metadata = vi.spyOn(f.store as any, 'sessionMetadata'), save = vi.spyOn(f.store as any, 'saveSession')
   const measure = async () => {
-    read.mockClear(); write.mockClear(); metadata.mockClear(); save.mockClear()
+    catalog.mockClear(); metadata.mockClear(); save.mockClear()
     await f.store.recordRestartAdmission(reservation)
-    expect(read).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+    expect(catalog).not.toHaveBeenCalled()
     return [metadata.mock.calls.length, save.mock.calls.length]
   }
   const baseline = await measure()
@@ -222,14 +223,14 @@ it('restart admission touches only the target as unrelated Session count grows',
     const f = await fixture()
     for (let i = 0; i < size; i++) await f.store.compareAndSwap(null, { ...f.original, agentSessionId: `admission-other-${i}`,
       run: { runId: `admission-other-run-${i}` }, nativeHandle: { ...f.original.nativeHandle!, sessionId: `admission-other-native-${i}` } })
-    const read = vi.spyOn(f.store as any, 'read'), write = vi.spyOn(f.store as any, 'write')
+    const catalog = vi.spyOn(f.store as any, 'sessionCatalog')
     const metadata = vi.spyOn(f.store as any, 'sessionMetadata'), save = vi.spyOn(f.store as any, 'saveSession')
     const reserve = f.store.reserveLifecycle.bind(f.store)
     let counts: number[] = []
     vi.spyOn(f.store, 'reserveLifecycle').mockImplementationOnce(async (value: any) => {
-      read.mockClear(); write.mockClear(); metadata.mockClear(); save.mockClear()
+      catalog.mockClear(); metadata.mockClear(); save.mockClear()
       await reserve(value)
-      counts = [read.mock.calls.length, write.mock.calls.length, metadata.mock.calls.length, save.mock.calls.length]
+      counts = [catalog.mock.calls.length, metadata.mock.calls.length, save.mock.calls.length]
       throw new Error('Private interrupted admission')
     })
     await expect(f.restart()).rejects.toThrow('Private interrupted admission')
@@ -237,7 +238,7 @@ it('restart admission touches only the target as unrelated Session count grows',
   }
   const baseline = await measure(0)
   expect(await measure(20)).toEqual(baseline)
-  expect(baseline).toEqual([0, 0, 1, 1])
+  expect(baseline).toEqual([0, 1, 1])
 })
 it('Memory Store atomically publishes admission and fences a superseding Stop', async () => {
   const f = await fixture(), reserve = f.inner.registry.reserveRestart.bind(f.inner.registry)
