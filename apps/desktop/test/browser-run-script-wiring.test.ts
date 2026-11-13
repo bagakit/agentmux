@@ -3084,3 +3084,30 @@ describe('a run owns the page’s dialogs only while it runs', () => {
     } finally { f.manager.close('b1'); createDispatch.mockReset() }
   })
 })
+
+describe('a step says what it caused', () => {
+  it('a click that opens a page and moves this one records the opened Browser and the new document', async () => {
+    const f = await managerWithBrowser()
+    try {
+      let open: (() => void) | undefined
+      createDispatch.mockImplementation((_context: BrowserPageContext) => async (name: string) => {
+        if (name === 'click') {
+          open?.()
+          // The page moves to a new document while the click runs.
+          for (const listener of f.contents.listeners.get('did-start-navigation') ?? []) listener({ url: 'https://example.invalid/next', isMainFrame: true, isSameDocument: false })
+          for (const listener of f.contents.listeners.get('did-navigate') ?? []) listener({}, 'https://example.invalid/next')
+        }
+        return `dispatched:${name}`
+      })
+      // Main creating a child for this page during the call is what "the page opened a Browser" means.
+      open = () => (f.manager as unknown as { createNativeChild(parent: unknown, view: unknown, options: unknown): unknown })
+        .createNativeChild((f.manager as unknown as { entries: Map<string, { view: unknown }> }).entries.get('b1'),
+          (f.manager as unknown as { entries: Map<string, { view: unknown }> }).entries.get('b1')!.view, { width: 400, height: 300 })
+      const report = await f.manager.runScript('b1', `await snapshot(); await click('@e1'); return 1`)
+      const [snapshotStep, clickStep] = report.runOperation.steps
+      expect(snapshotStep!.effects).toBeUndefined()
+      expect(clickStep!.effects?.opened).toHaveLength(1)
+      expect(clickStep!.effects?.navigatedTo).toEqual(expect.any(String))
+    } finally { f.manager.close('b1'); createDispatch.mockReset() }
+  })
+})
