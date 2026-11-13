@@ -725,6 +725,9 @@ export class DemandStore {
         if (!demand.plan) this.rejectDelegation('This Goal has no plan; delegate without a plan node or revise the plan first.')
         const issue = goalPlanDelegationIssue(demand.plan, demand.delegations ?? [], alignment.criteria, intent.planNodeId, { hostId: intent.hostId, agentSessionId: intent.workerAgentSessionId })
         if (issue) this.rejectDelegation(issue)
+        const node = demand.plan.nodes.find(item => item.id === intent.planNodeId)!
+        if (intent.criterionIds.length !== node.criterionIds.length || node.criterionIds.some(id => !intent.criterionIds.includes(id)))
+          this.rejectDelegation('A node delegation must carry the same success criteria as its plan node. The original node and Agents are retained.')
       }
       demand.delegations = [...(demand.delegations ?? []), { ...intent, preparedAt: Date.now(), capturedCriteria: clone(alignment.criteria.filter(criterion => intent.criterionIds.includes(criterion.id))) }]
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)

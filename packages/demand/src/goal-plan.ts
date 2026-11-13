@@ -163,20 +163,27 @@ export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInpu
     alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes }
 }
 
-/** Nodes with recorded work cannot disappear; they are cancelled and keep their records. */
+/** Recorded work keeps its task contract; replacing that work means cancelling the old node. */
 export function assertGoalPlanKeepsRecordedNodes(previous: GoalPlan | undefined, next: readonly GoalPlanNodeInput[], delegations: readonly DemandDelegation[]): void {
   if (!previous) return
-  const kept = new Set(next.map(node => node.id))
+  const kept = new Map(next.map(node => [node.id, node]))
   for (const node of previous.nodes) {
-    if (kept.has(node.id)) continue
     const recorded = delegations.some(delegation => delegation.planNodeId === node.id) || previous.reviews.some(review => review.nodeId === node.id)
-    if (recorded) throw new Error(`Plan node ${node.id} has delegations or reviews; mark it cancelled instead of removing it`)
+    if (!recorded) continue
+    const replacement = kept.get(node.id)
+    if (!replacement) throw new Error(`Plan node ${node.id} has delegations or reviews; mark it cancelled instead of removing it`)
+    if (replacement.outcome !== node.outcome || replacement.check !== node.check || replacement.criterionIds.length !== node.criterionIds.length ||
+      node.criterionIds.some(id => !replacement.criterionIds.includes(id)))
+      throw new Error(`Plan node ${node.id} has recorded work; cancel it and add a new node to change its outcome, check or criteria`)
   }
 }
 
-/** Criteria of the node that the current proposal no longer has; the plan keeps them, and the reader is told. */
-export function staleGoalPlanCriteria(node: GoalPlanNodeInput, criteria: readonly DemandCriterion[]): string[] {
-  return node.criterionIds.filter(id => !criteria.some(criterion => criterion.id === id))
+/** Compare the current task's frozen standards, not an unrelated Goal revision number. */
+export function staleGoalPlanCriteria(node: GoalPlanNodeInput, criteria: readonly DemandCriterion[], attempt?: Pick<DemandDelegation, 'capturedCriteria'> | null): string[] {
+  return node.criterionIds.filter(id => {
+    const current = criteria.find(criterion => criterion.id === id)
+    return !current || Boolean(attempt && !attempt.capturedCriteria.some(criterion => criterion.id === id && criterion.text === current.text))
+  })
 }
 
 export type GoalPlanNodeProjection = {
@@ -194,8 +201,8 @@ export type GoalPlanProjection = { revision: number; nodes: GoalPlanNodeProjecti
 
 /**
  * The only place node state is decided. It reads the plan, this Goal's delegations and the
- * current criteria; delivery or Agent idleness never reaches it. Unknown means the delegation
- * was prepared but its Core dispatch link is not confirmed, so the Supervisor must reconcile.
+ * current criteria; delivery or Agent idleness never reaches it. Unknown means the original
+ * dispatch link or the work's applicability to current standards needs reconciliation.
  */
 export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: readonly DemandCriterion[]): GoalPlanProjection {
   const byId = new Map(plan.nodes.map(node => [node.id, node]))
@@ -217,6 +224,7 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
     const attempts = attemptsOf(node.id), current = attempts.at(-1)
     const review = current ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === current.operationId).at(-1) : undefined
     if (node.cancelled) state = 'cancelled'
+    else if (staleGoalPlanCriteria(node, criteria, current).length) state = 'unknown'
     else if (review?.verdict === 'pass') state = 'done'
     else if (review?.verdict === 'changes') state = 'changes'
     else if (current) state = current.linkedAt === undefined ? 'unknown' : current.report ? 'review' : 'working'
@@ -227,7 +235,7 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
   const nodes = plan.nodes.map(node => {
     const attempts = attemptsOf(node.id), current = attempts.at(-1) ?? null
     const review = current ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === current.operationId).at(-1) ?? null : null
-    return { node, state: stateOf(node), column: depth(node.id), delegation: current, attempts: attempts.length, review, staleCriteria: staleGoalPlanCriteria(node, criteria) }
+    return { node, state: stateOf(node), column: depth(node.id), delegation: current, attempts: attempts.length, review, staleCriteria: staleGoalPlanCriteria(node, criteria, current) }
   })
   const live = nodes.filter(item => item.state !== 'cancelled')
   return { revision: plan.revision, nodes, done: live.filter(item => item.state === 'done').length, total: live.length,
