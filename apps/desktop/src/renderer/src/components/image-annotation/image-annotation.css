@@ -125,37 +125,49 @@
 }
 
 /* Capture: one display's frozen frame; the selection's toolbar, popover, size chip, loupe and hint float over it. */
-.image-annotation-editor--capture { background: transparent; container: none; }
+.image-annotation-editor--capture { background: transparent; container: none;
+  /* One dark chrome in both appearances: every control here sits on arbitrary frozen screen content, not on the app surface. */
+  --capture-chrome: rgba(28, 28, 28, .92); --capture-chrome-text: rgba(255, 255, 255, .9); --capture-chrome-muted: rgba(255, 255, 255, .6);
+  --capture-chrome-line: rgba(255, 255, 255, .12); --capture-chrome-hover: rgba(255, 255, 255, .1); --capture-chrome-pressed: rgba(255, 255, 255, .16);
+  --capture-chrome-shadow: 0 3px 12px rgba(0, 0, 0, .25); }
 .image-annotation-editor--capture .image-annotation-editor__canvas-area { background: transparent; }
-.image-annotation-editor__size-chip { position: absolute; z-index: 3; height: 20px; padding: 0 6px; border-radius: 5px; background: rgba(28, 28, 28, .92); color: rgba(255, 255, 255, .9); font-size: 11px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.image-annotation-editor__size-chip { position: absolute; z-index: 3; height: 20px; padding: 0 6px; border-radius: 5px; background: var(--capture-chrome); color: var(--capture-chrome-text); font-size: 11px; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .image-annotation-editor__capture-bar { position: absolute; z-index: 4; }
 /* Presses on the hint text still reach the frame beneath; only its Cancel button takes them. */
-.image-annotation-editor__capture-hint { position: absolute; z-index: 4; top: 12px; left: 50%; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 10px; border-radius: 8px; background: rgba(28, 28, 28, .92); box-shadow: 0 3px 12px rgba(0, 0, 0, .25); color: rgba(255, 255, 255, .9); font-size: 11px; white-space: nowrap; transform: translateX(-50%); pointer-events: none; }
-.image-annotation-editor .image-annotation-editor__capture-hint button { min-width: 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; color: rgba(255, 255, 255, .9); background: transparent; pointer-events: auto; }
-.image-annotation-editor .image-annotation-editor__capture-hint button:hover { color: #ffffff; background: rgba(255, 255, 255, .1); }
-/* One dark bar in both appearances: it sits on arbitrary frozen screen content, not on the app surface. */
-.image-annotation-capture-toolbar { display: flex; align-items: center; gap: 2px; height: 36px; padding: 4px; border-radius: 10px; background: rgba(28, 28, 28, .92); box-shadow: 0 3px 12px rgba(0, 0, 0, .25); color: rgba(255, 255, 255, .9); white-space: nowrap; }
+.image-annotation-editor__capture-hint { position: absolute; z-index: 4; top: 12px; left: 50%; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 10px; border-radius: 8px; background: var(--capture-chrome); box-shadow: var(--capture-chrome-shadow); color: var(--capture-chrome-text); font-size: 11px; white-space: nowrap; transform: translateX(-50%); pointer-events: none; }
+.image-annotation-editor .image-annotation-editor__capture-hint button { min-width: 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; color: var(--capture-chrome-text); background: transparent; pointer-events: auto; }
+.image-annotation-editor .image-annotation-editor__capture-hint button:hover { color: #ffffff; background: var(--capture-chrome-hover); }
+.image-annotation-capture-toolbar { display: flex; align-items: center; gap: 2px; height: 36px; padding: 4px; border-radius: 10px; background: var(--capture-chrome); box-shadow: var(--capture-chrome-shadow); color: var(--capture-chrome-text); white-space: nowrap; }
 .image-annotation-capture-toolbar__group { display: flex; align-items: center; gap: 2px; }
 .image-annotation-capture-toolbar__divider { display: flex; flex: none; justify-content: center; width: 13px; }
-.image-annotation-capture-toolbar__divider::before { content: ''; width: 1px; height: 16px; background: rgba(255, 255, 255, .12); }
-.image-annotation-editor .image-annotation-capture-toolbar button { min-width: 28px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: rgba(255, 255, 255, .9); background: transparent; }
-.image-annotation-editor .image-annotation-capture-toolbar button:hover:not(:disabled) { color: #ffffff; background: rgba(255, 255, 255, .1); }
-.image-annotation-editor .image-annotation-capture-toolbar button:not(.primary-button, .danger-button):is(:active, [aria-pressed='true']):not(:disabled) { color: #ffffff; background: rgba(255, 255, 255, .16); }
+.image-annotation-capture-toolbar__divider::before { content: ''; width: 1px; height: 16px; background: var(--capture-chrome-line); }
+.image-annotation-editor .image-annotation-capture-toolbar button { min-width: 28px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; color: var(--capture-chrome-text); background: transparent; }
+.image-annotation-editor .image-annotation-capture-toolbar button:hover:not(:disabled) { color: #ffffff; background: var(--capture-chrome-hover); }
+.image-annotation-editor .image-annotation-capture-toolbar button:not(.primary-button, .danger-button):is(:active, [aria-pressed='true']):not(:disabled) { color: #ffffff; background: var(--capture-chrome-pressed); }
 .image-annotation-editor .image-annotation-capture-toolbar .primary-button { width: auto; gap: 6px; margin-left: 2px; padding: 0 10px; color: var(--bg); background: var(--green); font-weight: 600; }
 .image-annotation-editor .image-annotation-capture-toolbar .primary-button:hover:not(:disabled) { color: var(--bg); background: var(--green-text); }
 .image-annotation-capture-toolbar .primary-button kbd { font: inherit; opacity: .7; }
-.image-annotation-capture-toolbar .image-annotation-editor__discard { padding: 0 4px; color: rgba(255, 255, 255, .9); }
+.image-annotation-capture-toolbar .image-annotation-editor__discard { padding: 0 4px; color: var(--capture-chrome-text); }
 .image-annotation-editor .image-annotation-capture-toolbar .image-annotation-editor__discard button { width: auto; padding: 0 8px; }
 .image-annotation-editor .image-annotation-capture-toolbar .image-annotation-editor__discard .danger-button { color: var(--bg); background: var(--red); }
 .image-annotation-editor .image-annotation-capture-toolbar .image-annotation-editor__discard .danger-button:hover:not(:disabled) { color: var(--bg); background: var(--red-text); }
 /* The 34 px height and 4 px gap are CAPTURE_PROPERTIES_REACH in capture-geometry.ts; change them together. */
-.image-annotation-editor__capture-properties { position: absolute; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); box-shadow: 0 6px 20px var(--scrim-2); color: var(--text-2); white-space: nowrap; }
+.image-annotation-editor__capture-properties { position: absolute; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border-radius: 8px; background: var(--capture-chrome); box-shadow: var(--capture-chrome-shadow); color: var(--capture-chrome-text); white-space: nowrap; }
 .image-annotation-editor__capture-properties[data-side='below'] { top: calc(100% + 4px); }
 .image-annotation-editor__capture-properties[data-side='above'] { bottom: calc(100% + 4px); }
 .image-annotation-editor__capture-properties label { display: flex; align-items: center; gap: 5px; font-size: 10px; }
-.image-annotation-editor__capture-properties select { height: 24px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--surface-1); color: var(--text-2); font: inherit; }
+.image-annotation-editor__capture-properties select { height: 24px; border: 1px solid var(--capture-chrome-line); border-radius: 4px; padding: 0 4px; background: transparent; color: var(--capture-chrome-text); font: inherit; }
+.image-annotation-editor__capture-properties option { color: initial; background: initial; }
+.image-annotation-editor .image-annotation-editor__capture-properties .image-annotation-toolbar__colors button { border-color: var(--capture-chrome-line); box-shadow: 0 0 0 1px var(--capture-chrome); }
+.image-annotation-editor__capture-properties .image-annotation-toolbar__colors button.selected { box-shadow: 0 0 0 2px var(--capture-chrome), 0 0 0 3px var(--capture-chrome-text); }
+.image-annotation-editor__capture-properties .image-annotation-editor__custom-color { color: var(--capture-chrome-muted); }
+.image-annotation-editor__capture-properties .image-annotation-editor__custom-color input { border-color: var(--capture-chrome-line); background: transparent; }
+.image-annotation-editor__capture-properties .image-annotation-editor__mode { border-color: var(--capture-chrome-line); background: transparent; }
+.image-annotation-editor .image-annotation-editor__capture-properties button { color: var(--capture-chrome-text); }
+.image-annotation-editor .image-annotation-editor__capture-properties button:hover:not(:disabled) { color: #ffffff; background: var(--capture-chrome-hover); }
+.image-annotation-editor__capture-properties .image-annotation-editor__mode button[aria-pressed=true] { border-color: transparent; color: #ffffff; background: var(--capture-chrome-pressed); box-shadow: none; }
 /* 136 × 150: a 120 px grid of 15 × 15 frozen pixels, then the color and coordinate rows. */
-.image-annotation-editor__loupe { position: absolute; z-index: 5; box-sizing: border-box; display: flex; flex-direction: column; width: 136px; height: 150px; padding: 8px 8px 3px; border-radius: 8px; background: rgba(28, 28, 28, .92); box-shadow: 0 3px 12px rgba(0, 0, 0, .25); color: rgba(255, 255, 255, .9); pointer-events: none; }
+.image-annotation-editor__loupe { position: absolute; z-index: 5; box-sizing: border-box; display: flex; flex-direction: column; width: 136px; height: 150px; padding: 8px 8px 3px; border-radius: 8px; background: var(--capture-chrome); box-shadow: var(--capture-chrome-shadow); color: var(--capture-chrome-text); pointer-events: none; }
 .image-annotation-editor__loupe canvas { display: block; flex: none; width: 120px; height: 120px; image-rendering: pixelated; }
 .image-annotation-editor__loupe span { overflow: hidden; font-size: 9px; line-height: 9.5px; font-variant-numeric: tabular-nums; white-space: pre; text-overflow: ellipsis; }
-.image-annotation-editor--capture > .image-annotation-editor__status { position: absolute; left: 8px; bottom: 8px; width: auto; max-width: 60%; padding: 2px 6px; border-radius: 4px; background: var(--surface-1); pointer-events: none; }
+.image-annotation-editor--capture > .image-annotation-editor__status { position: absolute; left: 8px; bottom: 8px; width: auto; height: auto; max-width: 60%; padding: 2px 6px; border-radius: 4px; background: var(--capture-chrome); color: var(--capture-chrome-text); pointer-events: none; }
