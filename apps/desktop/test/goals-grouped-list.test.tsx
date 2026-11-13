@@ -91,6 +91,13 @@ describe('Goals list grouped by whose turn it is', () => {
     expect(groups()[0]!.querySelector('[data-demand-id="review"]')).not.toBeNull()
   })
 
+  it('opens a Goal on the same stage and next step its row showed', async () => {
+    seed(); useAppStore.setState({ selectedDemandId: 'confirm' }); await dom.render(<GlobalBoardSurface />)
+    const stage = dom.container.querySelector<HTMLElement>('.goals-detail [data-goal-detail-stage]')!
+    expect(stage.querySelector<HTMLElement>('[data-goal-stage]')!.dataset.goalStage).toBe('you')
+    expect(stage.textContent).toBe('Needs you · Goal ready for confirmation')
+  })
+
   it('does no grouping render work for unrelated Session output', async () => {
     seed()
     const commits = vi.fn()
