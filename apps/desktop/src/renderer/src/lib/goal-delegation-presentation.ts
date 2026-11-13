@@ -28,10 +28,14 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
     }
     if (report) return { ...original, state: 'report', next: 'Report ready to collect', replyMessageId: report.replyMessageId }
     if (!delegation.linkedAt) return { ...original, state: 'unknown', next: 'Delegation observation unknown' }
-    const replies = new Set((observation?.communication?.replies ?? []).filter(reply =>
+    const ownerReplies = (observation?.communication?.replies ?? []).filter(reply =>
       reply.envelope.sender.kind === 'agent-session' && reply.envelope.sender.agentSessionId === delegation.ownerAgentSessionId &&
       reply.envelope.senderSessionId === delegation.ownerAgentSessionId && reply.envelope.recipientSessionId === delegation.workerAgentSessionId &&
-      reply.envelope.threadId === delegation.threadId).map(reply => reply.envelope.replyTo))
+      (!delegation.runtimeIdentity || reply.envelope.senderRuntimeId === delegation.runtimeIdentity.ownerRuntimeId &&
+        reply.envelope.recipientRuntimeId === delegation.runtimeIdentity.workerRuntimeId) &&
+      reply.envelope.threadId === delegation.threadId)
+    const replies = new Set(ownerReplies.filter(reply => reply.deliveryMode !== 'outbox' || reply.peerInbox !== undefined).map(reply => reply.envelope.replyTo))
+    const preparedReplies = new Set(ownerReplies.filter(reply => reply.deliveryMode === 'outbox' && reply.peerInbox === undefined).map(reply => reply.envelope.replyTo))
     const questions = observation?.communication?.dispatch.originAwaits
       ? [...observation.communication.dispatch.events].reverse().filter(event => event.kind === 'question' || event.kind === 'escalation') : []
     const awaiting = questions.find(event => !replies.has(event.replyMessageId)) ?? questions[0]
@@ -43,6 +47,8 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
       return { ...original, state: 'question', next: 'Interrupted · Continue the original Agent' }
     if (awaiting) {
       const answered = replies.has(awaiting.replyMessageId)
+      if (!answered && preparedReplies.has(awaiting.replyMessageId)) return { ...original, state: 'question',
+        next: 'Reply prepared · Delivery unconfirmed', replyMessageId: awaiting.replyMessageId }
       return { ...original, state: answered && awaiting.kind === 'question' ? 'working' : 'question',
         next: answered ? awaiting.kind === 'question' ? 'Task owner replied · Awaiting worker' : 'Follow-up sent · Blocker needs verification'
           : awaiting.kind === 'question' ? 'Question needs a reply' : 'Blocked · Needs follow-up', replyMessageId: awaiting.replyMessageId }
