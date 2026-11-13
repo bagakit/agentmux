@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeDocument, TopicKnowledgeItem, TopicUnavailable } from '@agentmux/core/control'
+import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeDocument, TopicKnowledgeItem, TopicKnowledgeSource, TopicUnavailable } from '@agentmux/core/control'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -25,7 +25,15 @@ const ThemeNavigationReturnIcon = semanticIconComponent('navigation.return')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const KNOWLEDGE_SOURCE_ICONS: Record<TopicKnowledgeSource['kind'], typeof TopicIcon> = {
+  topic: TopicIcon,
+  file: semanticIconComponent('object.file'),
+  note: semanticIconComponent('object.note'),
+  notebook: semanticIconComponent('object.notebook'),
+  survey: semanticIconComponent('navigation.survey'),
+  space: semanticIconComponent('navigation.space'),
+  url: semanticIconComponent('action.open-external')
+}
 
 const BOUNDED_DISCOVERY_CODES = new Set(['TOPIC_KNOWLEDGE_PARTIAL', 'TOPIC_DOCUMENTS_GIT_IGNORED',
   'TOPIC_DOCUMENT_DISCOVERY_LIMIT', 'TOPIC_DOCUMENT_DISCOVERY_BUDGET'])
@@ -176,7 +184,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
         sourcePath: rootPath + '/knowledge/' + selected.entryId + '.json',
         openWorkspaceFile: (path: string) => { void useAppStore.getState().openFile(path, undefined, undefined, workspace.id).catch(cause => setError(presentError(cause))) }
       } : {})} />
-      {selected.sources.length ? <details className="topic-knowledge-sources" open><summary>Sources</summary>{selected.sources.map((source, index) => <button type="button" className="topic-knowledge-source" key={index} title={knowledgeSourceLabel(source)} onClick={() => { void openKnowledgeSource(source).catch(cause => setError(presentError(cause))) }}><ThemeActionOpenExternalIcon size={12} /><span>{knowledgeSourceLabel(source)}</span></button>)}</details> : null}
+      {selected.sources.length ? <details className="topic-knowledge-sources" open><summary>Sources</summary>{selected.sources.map((source, index) => { const SourceIcon = KNOWLEDGE_SOURCE_ICONS[source.kind]; return <button type="button" className="topic-knowledge-source" key={index} title={knowledgeSourceLabel(source)} onClick={() => { void openKnowledgeSource(source).catch(cause => setError(presentError(cause))) }}><SourceIcon size={12} /><span>{knowledgeSourceLabel(source)}</span></button> })}</details> : null}
       </div>
     </article> : null}
     {selectedDocument ? <TopicKnowledgeDocumentReader key={JSON.stringify(selectedDocument.target)} document={selectedDocument} refresh={attempt} onClose={closeDetail} /> : null}
