@@ -198,12 +198,15 @@ export class HostedExecutionHost implements ExecutionHost {
       failure(new AgentMuxError(message, code))
       if (run) stopping ??= client.stopTerminal(runRef(run)).then(() => { stopped = true }, () => {})
     }
-    let cleaned: Promise<void> | undefined, createSettled = false
+    let cleaned: Promise<void> | undefined, createSettled = false, attaching: Promise<AgentMuxRunAttachment> | undefined
     const cleanup = (): Promise<void> => {
       const own = run
       // Without a Run yet, a create still in flight finishes this cleanup when it settles.
       if (!own) { if (createSettled) release(); return Promise.resolve() }
       return cleaned ??= (async () => {
+        // The call may already have timed out while its original attachment is still opening.
+        // Keep this connection until that reader settles, then release it before removing its Run.
+        await attaching?.catch(() => {})
         if (attached) await client.releaseRunAttachment(runRef(own)).catch(() => {})
         if (!confirmed) { await stopping; if (stopped) ended ||= await runEnded(client, own) }
         if (ended && (confirmed || stopped)) await client.removeTerminal(runRef(own)).catch(() => {})
@@ -228,7 +231,8 @@ export class HostedExecutionHost implements ExecutionHost {
       // The original zero-byte attachment replays anything produced before the create reply.
       // Index this Run before opening its attachment so in-flight events retain their order.
       unsubscribeRun = client.onRunEvent(run.runId, receiveRun)
-      const initial = await client.attachTerminal(run.runId, 0, 'raw'); attached = true
+      attaching = client.attachTerminal(run.runId, 0, 'raw').then(initial => { attached = true; return initial })
+      const initial = await Promise.race([attaching, done.then(() => { throw failedError })])
       snapshot(initial); opening = false
       for (const event of pending) accept(event.start, event.data)
       pending.length = 0
@@ -240,10 +244,14 @@ export class HostedExecutionHost implements ExecutionHost {
       const parts: string[] = base64.match(/.{1,16384}/gu) ?? []
       parts.push(`${token}:end`)
       for (const part of parts) {
-        if (finished) await done
+        if (finished) { await done; break }
         inputOperationId = mintObjectId()
-        const receipt = await client.writeTerminal(run, { ownerInstanceId: client.runtimeIdentity().instanceId,
+        const writing = client.writeTerminal(run, { ownerInstanceId: client.runtimeIdentity().instanceId,
           operationId: inputOperationId, expectedByte, data: part + '\n' })
+        // Native result completion can precede its last input ACK. It ends this command without
+        // issuing any further input; cancellation instead preserves that original ACK as unknown.
+        const receipt = await Promise.race([writing, done.then(() => undefined)])
+        if (receipt === undefined) break
         if (receipt.acceptedThroughByte === null) throw new AgentMuxError('The command input receipt is unconfirmed.', 'CTXMUX_INPUT_CURSOR_MISSING')
         expectedByte = receipt.acceptedThroughByte
       }
