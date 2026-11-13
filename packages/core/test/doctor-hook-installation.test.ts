@@ -1,7 +1,7 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -20,6 +20,7 @@ const runtime: AgentMuxRuntimeDiagnostics = { nodeVersion: '24.0.0', platform: '
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'amx-doctor-hook-'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   const providers = new AgentProviderRegistry()
   installer = new AgentManagedHookInstaller(join(root, 'receipts'))
   client = new AgentMuxClient({ providers: ['claude', 'kimi', 'traex'].map(id => providers.get(id)), hookInstaller: installer, store: new AgentMuxMemoryAgentSessionStore() })
@@ -29,7 +30,7 @@ beforeEach(async () => {
   vi.spyOn(client, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: providers.get(id).executable, installed: true, capabilities: providers.get(id).catalog.capabilities }))
   vi.spyOn(client, 'probeExecutorAvailability').mockResolvedValue({ executable: 'codex', availability: 'available' })
 })
-afterEach(async () => { await client.dispose(); await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { await client.dispose(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) })
 
 describe('actual Core disk observations consumed by Doctor', () => {
   it('captures pre-connect absence then preserves it when ordinary connection repairs the same private files', async () => {
@@ -43,20 +44,21 @@ describe('actual Core disk observations consumed by Doctor', () => {
     expect(report.ok).toBe(true)
     expect(inspected.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.connect).mock.invocationCallOrder[0]!)
     expect(await client.inspectManagedHooks('claude', { workspacePath: root })).toMatchObject({ status: 'installed', workspacePath: root })
-    expect(report.agents[0]!.hookInstallation.targets).toEqual([{ path: resolved.mutations[0]!.path, status: 'not_present' }])
+    expect(report.agents[0]!.hookInstallation.targets).toEqual(resolved.mutations.map(mutation => ({ path: mutation.path, status: 'not_present' })))
     expect(report.agents[0]!.hookInstallation.checkedAt).toBeGreaterThan(0)
   })
 
-  it('keeps malformed scoped facts on unreachable Runtime and never prints config content or command', async () => {
+  it('keeps a damaged exclusive plugin observable on unreachable Runtime without printing its content', async () => {
     const resolved = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
-    await mkdir(join(root, '.claude'))
+    await mkdir(dirname(resolved.mutations[0]!.path), { recursive: true })
     await writeFile(resolved.mutations[0]!.path, '{private-credential-do-not-report')
     vi.mocked(client.connect).mockRejectedValue(new Error('synthetic Runtime unavailable'))
     const report = await diagnoseAgentMux({ client, workspacePath: root })
     expect(report.agents.map(agent => [agent.id, agent.probe, agent.hookInstallation.status])).toEqual([
-      ['claude', 'blocked', 'error'], ['kimi', 'blocked', 'skipped'], ['traex', 'blocked', 'skipped']
+      ['claude', 'blocked', 'partial'], ['kimi', 'blocked', 'skipped'], ['traex', 'blocked', 'skipped']
     ])
-    expect(report.agents[0]!.hookInstallation.targets).toEqual([{ path: resolved.mutations[0]!.path, status: 'error', code: 'HOOK_TARGET_UNPARSEABLE' }])
+    expect(report.agents[0]!.hookInstallation).toMatchObject({ code: 'MANAGED_HOOK_INCOMPLETE', targets: resolved.mutations.map((mutation, index) => ({
+      path: mutation.path, status: index === 0 ? 'partial' : 'not_present' })) })
     expect(report.agents[0]!.hookInstallation.phase).toBe('pre-connect')
     expect(report.host.reachable).toBe(false)
     expect(JSON.stringify(report)).not.toContain('private-credential-do-not-report')
@@ -96,7 +98,7 @@ describe('actual Core disk observations consumed by Doctor', () => {
     const connect = vi.spyOn(other, 'connect'), stop = vi.spyOn(other, 'stopAgent'), create = vi.spyOn(other, 'createAgent')
     try {
       const result = await other.inspectManagedHooks('claude', { workspacePath: root })
-      expect(result).toMatchObject({ status: 'error', code: 'HOOK_ACTIVATION_CHECK_FAILED', targets: [{ path: resolved.mutations[0]!.path, status: 'current' }] })
+      expect(result).toMatchObject({ status: 'error', code: 'HOOK_ACTIVATION_CHECK_FAILED', targets: resolved.mutations.map(mutation => ({ path: mutation.path, status: 'current' })) })
       expect(JSON.stringify(result)).not.toContain('private-native-stderr')
       expect(connect).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled()
     } finally { await other.dispose() }

@@ -12,6 +12,7 @@ import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
+import { withCodexLaunchHooks } from '../src/providers/codex-launch-hooks.js'
 import { runProcess } from '../src/process-runner.js'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
@@ -41,7 +42,7 @@ it.each(['--version', 'resume', sid, 'quoted "text"\nand another line'])('keeps 
     for (const [kind, plan] of [['create', provider.buildLaunch(context)], ['resume', provider.buildResumeLaunch(context)],
       ['fork', provider.buildForkLaunch!(context)]] as const) {
       expect(plan.command).toBe(context.commandOverride); expect(plan.env).toEqual(context.env)
-      expect(plan.args).toEqual([...args, '--dangerously-bypass-hook-trust', ...(kind === 'create' ? [] : [kind, sid]), '--', prompt])
+      expect(plan.args).toEqual([...withCodexLaunchHooks(args).args, '--dangerously-bypass-hook-trust', ...(kind === 'create' ? [] : [kind, sid]), '--', prompt])
     }
   }
 })

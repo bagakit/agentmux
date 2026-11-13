@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { CODEX_HOOK_EVENTS, CODEX_HOOKS, createCodexManagedHookPlan } from '../../src/providers/codex.js'
+import { CODEX_HOOK_EVENTS, CODEX_HOOKS } from '../../src/providers/codex.js'
 import type { AgentSessionHistoryPageOptions } from '../../src/types.js'
 
 type ProtocolRequest = { id?: number; method: string; params?: Record<string, unknown> }
@@ -543,10 +543,9 @@ describe('Codex provider completeness & session analysis', () => {
     }, {})
     expect(normalizedStop.semanticState).toBe('done')
 
-    // Managed hook plan verification
-    const plan = createCodexManagedHookPlan(fixturePath("mock/workspace"))
-    expect(plan.providerId).toBe('codex')
-    expect(plan.mutations[0]!.path).toBe(fixturePath("mock/workspace/.codex/hooks.json"))
+    // Hook declarations travel with the launch; no project configuration is installed.
+    expect(codex.planManagedHooks).toBeUndefined()
+    expect(codex.catalog.hookStrategy).toEqual({ kind: 'native', installation: 'launch-carried' })
   })
 
   it('reads chronological native items with structured trace blocks for reasoning, commands, patches, and tools', async () => {

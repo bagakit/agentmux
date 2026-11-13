@@ -8,6 +8,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { runAgentHookCommand } from '../src/agent-hook-command.js'
+import { LAUNCH_SCOPED_HOOK_FLAG } from '../src/launch-scoped-hook.js'
 import type { AgentExecutorId, AgentProviderId } from '../src/types.js'
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,33 @@ describe('catalog → hook 环境的 usage 格式注入', () => {
     })
   })
 
+  it('writes an explicit launch scope for every Provider even when Core inherited another Run’s scope', async () => {
+    vi.stubEnv('AGENTMUX_HOOK_LAUNCH_SCOPED', '1')
+    vi.stubEnv('AGENTMUX_HOOK_NODE', '/old-core/node')
+    vi.stubEnv('AGENTMUX_HOOK_RUNNER', '/old-core/agentmux-hook.js')
+    try {
+      await withClient(client => {
+        const scoped = registry.list().filter(provider => provider.hook.launchCarried === true)
+        const ordinary = registry.list().filter(provider => provider.hook.launchCarried !== true)
+        expect(scoped.length).toBeGreaterThan(0)
+        expect(ordinary.length).toBeGreaterThan(0)
+        for (const provider of scoped) {
+          const env = spawnEnvironmentFor(client, provider.id)
+          expect(env.AGENTMUX_HOOK_LAUNCH_SCOPED).toBe('1')
+          expect(env.AGENTMUX_HOOK_NODE).toBe(process.execPath)
+          expect(env.AGENTMUX_HOOK_RUNNER).toContain('agentmux-hook.js')
+          expect(env.AGENTMUX_HOOK_RUNNER).not.toBe('/old-core/agentmux-hook.js')
+        }
+        for (const provider of ordinary) {
+          const env = spawnEnvironmentFor(client, provider.id)
+          expect(env.AGENTMUX_HOOK_LAUNCH_SCOPED).toBe('0')
+          expect(env.AGENTMUX_HOOK_NODE).toBe('')
+          expect(env.AGENTMUX_HOOK_RUNNER).toBe('')
+        }
+      })
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('注入的每个格式值都是 hook 进程认得的那两种之一（值域两侧同源）', async () => {
     // 注入侧写出一个 hook 进程不认识的值，等于静默失效：`resolveUsageCapability` 只放行这两个字面量。
     await withClient((client) => {
@@ -197,8 +225,11 @@ describe('hook 子进程跑在 Core 注入的环境里，用量才真的到得�
       await writeFile(transcriptPath, transcriptContent)
       const { bodies } = capture
       feedStdin(JSON.stringify({ hook_event_name: 'Stop', session_id: 'sess', transcript_path: transcriptPath }))
-
-      await runAgentHookCommand()
+      // A Provider whose Hooks travel with the launch is invoked with the launch mark, exactly as its
+      // generated command passes it; without the mark its Run treats the call as a workspace leftover.
+      const original = process.argv
+      if (env.AGENTMUX_HOOK_LAUNCH_SCOPED === '1') process.argv = [original[0]!, original[1]!, LAUNCH_SCOPED_HOOK_FLAG]
+      try { await runAgentHookCommand() } finally { process.argv = original }
 
       // POST 真发出去了才谈得上里面有没有用量——URL 与 token 也来自那份注入的环境。
       expect(bodies).toHaveLength(1)

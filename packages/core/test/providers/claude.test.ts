@@ -6,10 +6,11 @@ const canonicalHookLifecycleEvent = (name: string) => {
 }
 const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizationEvents ?? [])
 import { fixturePath } from '../helpers/fixture-values.js'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { basename, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
@@ -25,13 +26,29 @@ import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentSemanticState } from '../../src/types.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
-  claudeNativeActivityDirectory,
   claudeNativeActivitySource,
   CLAUDE_NOTICE_ADMISSION_EVENT,
   CLAUDE_TURN_END_EVENT
 } from '../../src/providers/claude-native-activity.js'
+import { claudeManagedPlugin } from '../../src/providers/claude.js'
 
 type NativeModHandler = (client: unknown, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown
+
+let privateState: string
+beforeEach(async () => {
+  privateState = await mkdtemp(join(tmpdir(), 'amux-claude-hook-test-'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', privateState)
+})
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await rm(privateState, { recursive: true, force: true })
+})
+
+const moduleRunner = { node: fixturePath('runtime with spaces/node'), script: fixturePath('runtime with spaces/agentmux-hook.js') }
+const moduleEnvironment = { get: async (name: string) => ({
+  AGENTMUX_ENV: '1', AGENTMUX_HOOK_NODE: moduleRunner.node,
+  AGENTMUX_HOOK_RUNNER: moduleRunner.script, AGENTMUX_HOOK_LAUNCH_SCOPED: '1'
+} as Record<string, string>)[name] }
 
 /** Load the generated mod from a fresh directory and hand its registered callbacks to `use`. */
 async function withNativeActivityMod(prefix: string, use: (handlers: ReadonlyMap<string, NativeModHandler>) => Promise<void>): Promise<void> {
@@ -53,14 +70,24 @@ describe('Claude native mod activity', () => {
     const provider = new AgentProviderRegistry().get('claude')
     const workspacePath = fixturePath('tmp/native-mod-work')
     const plan = provider.planManagedHooks!({ workspacePath })!
-    const directory = claudeNativeActivityDirectory()
-    // AgentMux's own state directory holds the module; nothing is written into the workspace.
-    expect(directory).toBe(join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'native-activity'))
-    expect(plan.mutations.filter(item => item.path.includes(`${sep}agentmux${sep}native-activity${sep}`) && !item.path.startsWith(directory + sep))).toEqual([])
+    const { directory } = claudeManagedPlugin()
+    // AgentMux's own state directory holds the plugin; nothing is written into the workspace.
+    expect(directory).toContain(join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'plugins'))
+    expect(plan.mutations.filter(item => !item.path.startsWith(directory + sep))).toEqual([])
     const modules = plan.mutations.find(item => item.path === join(directory, 'hooks', 'hooks.json'))!
-    expect(JSON.parse(modules.content)).toEqual({ modules: ['./register.js'] })
+    expect(JSON.parse(modules.content)).toMatchObject({ modules: ['./register.js'] })
     expect(plan.mutations.find(item => item.path === join(directory, 'hooks', 'register.js'))?.content)
       .toBe(claudeNativeActivitySource())
+    expect(provider.planManagedHooks!({ workspacePath: fixturePath('a different workspace') })).toEqual(plan)
+    expect(plan.mutations).toHaveLength(3)
+    const digest = createHash('sha256')
+    for (const mutation of plan.mutations) {
+      digest.update(relative(directory, mutation.path)).update('\0').update(mutation.content).update('\0')
+      expect(mutation.content).not.toContain(workspacePath)
+      expect(mutation.content).not.toContain(process.execPath)
+      expect(mutation.mode).toBe(0o600)
+    }
+    expect(basename(directory)).toBe(digest.digest('hex'))
     const base = { workspacePath, args: ['--model', 'test-model'], env: {} }
     const nativeHandle = { kind: 'provider' as const, providerId: 'claude', sessionId: 'native-original' }
     for (const launch of [
@@ -73,6 +100,36 @@ describe('Claude native mod activity', () => {
     }
     expect(provider.buildLaunch({ ...base, prompt: 'prompt', args: ['--', 'literal'] }).args)
       .toEqual(['--plugin-dir', directory, '--', 'literal', 'prompt'])
+  })
+
+  it('uses the launching Run runner for activity, asked ends, turn-end asks and notice admission', async () => {
+    const calls: Array<{ argv: string[]; payload: Record<string, unknown> }> = []
+    const submit = vi.fn(async () => ({}))
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
+      process: { run: async (argv: string[], init: { stdin: string }) => {
+        const payload = JSON.parse(init.stdin) as Record<string, unknown>
+        calls.push({ argv, payload })
+        return { exitCode: 0, stderr: '', stdout: payload.hook_event_name === CLAUDE_TURN_END_EVENT
+          ? JSON.stringify({ agentmuxNotice: { notificationId: 'notice-original', text: 'Read original Inbox messages.' } }) : '{}\n' }
+      } }, prompt: { submit }, ui: { log: vi.fn() } }
+    await withNativeActivityMod('amux-launch-marked-module-', async handlers => {
+      const next = (event: Record<string, unknown>) => event
+      await handlers.get('session.start')!(api, {}, next)
+      handlers.get('turn.start')!(api, { turnId: 'native-turn' }, next)
+      await handlers.get('tool.check')!(api, { tool: 'AskUserQuestion', tool_use_id: 'asked-original' }, async () => ({ decision: 'ask' }))
+      await handlers.get('tool.call')!(api, { tool: 'AskUserQuestion', tool_use_id: 'asked-original' }, async () => ({ result: 'declined' }))
+      handlers.get('turn.complete')!(api, { turnId: 'native-turn', reason: 'answer', isAborted: false }, next)
+      await vi.waitFor(() => expect(calls).toHaveLength(5))
+      expect(calls.map(call => call.payload.hook_event_name).sort()).toEqual([
+        CLAUDE_ASKED_TOOL_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT, CLAUDE_TURN_END_EVENT, 'turn.complete', 'turn.start'
+      ].sort())
+      for (const call of calls) expect(call.argv).toEqual([moduleRunner.node, moduleRunner.script, '--launch-scoped'])
+      expect(submit).toHaveBeenCalledExactlyOnceWith({ text: 'Read original Inbox messages.' })
+      expect(calls.find(call => call.payload.hook_event_name === CLAUDE_NOTICE_ADMISSION_EVENT)?.payload)
+        .toMatchObject({ session_id: 'original-native', notificationId: 'notice-original', entered: true })
+      expect(calls.find(call => call.payload.hook_event_name === CLAUDE_ASKED_TOOL_END_EVENT)?.payload)
+        .toMatchObject({ session_id: 'original-native', tool_use_id: 'asked-original', tool_name: 'AskUserQuestion' })
+    })
   })
 
   it('projects native active and idle without declaring success, input readiness or main child completion', () => {
@@ -141,7 +198,7 @@ describe('Claude native mod activity', () => {
       if (failure === 'throws') throw new Error('Original actor getter unavailable')
       return ' '
     })
-    const api = { env: { get: async () => '1' }, session: { id: sessionId },
+    const api = { env: moduleEnvironment, session: { id: sessionId },
       process: { run: async (_argv: string[], init: { stdin: string }) => {
         calls.push(init); return { exitCode: 0, stdout: '{}\n', stderr: '' }
       } }, ui: { log: vi.fn() } }
@@ -190,7 +247,7 @@ describe('Claude native mod activity', () => {
     let processCalls = 0
     let failNext = false
     const api = {
-      env: { get: async () => '1' }, session: { id: async () => currentSessionId },
+      env: moduleEnvironment, session: { id: async () => currentSessionId },
       process: { run: async (argv: string[], init: { stdin: string; env: Record<string, string> }) => {
         const body = JSON.parse(init.stdin) as Record<string, unknown>
         if (body.hook_event_name === CLAUDE_TURN_END_EVENT) { asks.push(body); return { exitCode: 0, stdout: '{}\n', stderr: '' } }
@@ -216,7 +273,7 @@ describe('Claude native mod activity', () => {
         await vi.waitFor(() => expect(calls).toHaveLength(2))
         expect(calls.map(call => JSON.parse(call.init.stdin).sequence)).toEqual([1, 2])
         expect(calls.map(call => JSON.parse(call.init.stdin).turnId)).toEqual(['actual-turn-A', 'actual-turn-A'])
-        expect(calls[0]!.argv.at(-1)).toContain('agentmux-hook.js')
+        expect(calls[0]!.argv.at(-1)).toBe('--launch-scoped')
         expect(calls[0]!.init.env.AGENTMUX_HOOK_PROVIDER).toBe('claude')
         handlers.get('turn.complete')!(api, { ...complete, agentId: 'child-A' }, next)
         await vi.waitFor(() => expect(calls).toHaveLength(3))
@@ -257,7 +314,7 @@ describe('Claude native mod activity', () => {
 
   it('reports the exact end of a main call Claude asked about, without touching native results or other tools', async () => {
     const calls: Array<{ argv: string[]; init: { stdin: string; env: Record<string, string> } }> = []
-    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
       process: { run: async (argv: string[], init: { stdin: string; env: Record<string, string> }) => {
         calls.push({ argv, init }); return { exitCode: 0, stdout: '{}\n', stderr: '' } } },
       ui: { log: vi.fn(async () => {}) } }
@@ -284,7 +341,7 @@ describe('Claude native mod activity', () => {
         { hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_question', tool_name: 'AskUserQuestion' },
         { hook_event_name: CLAUDE_ASKED_TOOL_END_EVENT, session_id: 'original-native', tool_use_id: 'toolu_bash', tool_name: 'Bash' }
       ])
-      expect(calls[0]!.argv.at(-1)).toContain('agentmux-hook.js')
+      expect(calls[0]!.argv.at(-1)).toBe('--launch-scoped')
       expect(calls[0]!.init.env.AGENTMUX_HOOK_PROVIDER).toBe('claude')
       // Each asked call ends once; a repeated call settle for the same id reports nothing new.
       await call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_question' }, async () => rejected)
@@ -294,7 +351,7 @@ describe('Claude native mod activity', () => {
   })
 
   it('gives Claude’s classic ask the identity of the one exact asked main call, and none when ambiguous', async () => {
-    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
       process: { run: async () => ({ exitCode: 0, stdout: '{}\n', stderr: '' }) }, ui: { log: vi.fn(async () => {}) } }
     await withNativeActivityMod('agentmux-claude-ask-identity-', async handlers => {
       await handlers.get('session.start')!(api, {}, event => event)
@@ -334,7 +391,7 @@ describe('Claude native mod activity', () => {
     const runs: Array<Record<string, unknown>> = []
     let release: (() => void) | undefined
     const held = new Promise<void>(resolve => { release = resolve })
-    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
       process: { run: async (_argv: string[], init: { stdin: string }) => {
         const body = JSON.parse(init.stdin) as Record<string, unknown>
         if (body.hook_event_name === CLAUDE_TURN_END_EVENT) return { exitCode: 0, stdout: '{}\n', stderr: '' }
@@ -364,7 +421,7 @@ describe('Claude native mod activity', () => {
     const runs: Array<Record<string, unknown>> = []
     // The first send and the next two resends fail; the third resend is confirmed.
     let endFailures = 3
-    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
       process: { run: async (_argv: string[], init: { stdin: string }) => {
         const body = JSON.parse(init.stdin) as Record<string, unknown>
         if (body.hook_event_name === CLAUDE_TURN_END_EVENT) return { exitCode: 0, stdout: '{}\n', stderr: '' }
@@ -403,7 +460,7 @@ describe('Claude native mod activity', () => {
     const runs: Array<Record<string, unknown>> = []
     let release: (() => void) | undefined
     const held = new Promise<void>(resolve => { release = resolve })
-    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
       process: { run: async (_argv: string[], init: { stdin: string }) => {
         const body = JSON.parse(init.stdin) as Record<string, unknown>
         if (body.hook_event_name === CLAUDE_TURN_END_EVENT) return { exitCode: 0, stdout: '{}\n', stderr: '' }
@@ -429,7 +486,7 @@ describe('Claude native mod activity', () => {
   })
 
   it('a call whose end is not yet confirmed cannot make a new identical ask ambiguous', async () => {
-    const api = { env: { get: async () => '1' }, session: { id: async () => 'original-native' },
+    const api = { env: moduleEnvironment, session: { id: async () => 'original-native' },
       process: { run: async (_argv: string[], init: { stdin: string }) => {
         const body = JSON.parse(init.stdin) as Record<string, unknown>
         return { exitCode: 0, stdout: '{}\n', stderr: body.hook_event_name === CLAUDE_ASKED_TOOL_END_EVENT ? 'receipt delivery unconfirmed' : '' }
@@ -526,14 +583,22 @@ describe('Claude provider', () => {
       expect(declaredButNotInstalled).toEqual([])
     })
 
-    it('三个补装的事件确实写进了 settings.json，而不只是进了常量清单', () => {
+    it('三个补装的事件确实写进了 hooks/hooks.json，而不只是进了常量清单', () => {
       // 常量清单绿了但计划没渲染出来，等于装了个假。这条读真实渲染结果。
       const plan = (new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)
-      const written = JSON.parse(plan!.mutations[0]!.content) as {
+      const hooksJson = plan!.mutations.find(m => m.path.endsWith('hooks/hooks.json'))!
+      const written = JSON.parse(hooksJson.content) as {
         hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>>
       }
       for (const eventName of ['PostToolUseFailure', 'StopFailure', 'PreCompact']) {
-        expect(written.hooks[eventName]?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
+        expect(written.hooks[eventName]?.[0]?.hooks?.[0]?.command).toContain('AGENTMUX_HOOK_RUNNER')
+      }
+      for (const [eventName, groups] of Object.entries(written.hooks)) {
+        expect(groups).toHaveLength(1)
+        expect(groups[0]?.hooks).toHaveLength(1)
+        expect(groups[0]?.hooks?.[0]?.command).toContain('"$AGENTMUX_HOOK_NODE" "$AGENTMUX_HOOK_RUNNER" --launch-scoped')
+        if (eventName === 'PermissionRequest') expect(groups[0]?.hooks?.[0]).not.toHaveProperty('timeout')
+        else expect(groups[0]?.hooks?.[0]).toHaveProperty('timeout', 10)
       }
       // 安装的事件集恰好等于声明的清单——没有多写没有少写。
       expect(Object.keys(written.hooks).sort()).toEqual([...CLAUDE_HOOK_EVENTS].sort())
@@ -542,7 +607,8 @@ describe('Claude provider', () => {
     it('三个 tool 事件都带 matcher，其余生命周期事件都不带', () => {
       // 本机 bundle 内嵌文档的 Hook Events 表里，PreToolUse/PostToolUse/PostToolUseFailure 的
       // Matcher 列都是 "Tool name"。缺了 matcher，Claude 对 tool 事件不会分派到我们这条。
-      const written = JSON.parse(createClaudeManagedHookPlan(fixturePath("tmp/work")).mutations[0]!.content) as {
+      const hooksJson = createClaudeManagedHookPlan().mutations.find(m => m.path.endsWith('hooks/hooks.json'))!
+      const written = JSON.parse(hooksJson.content) as {
         hooks: Record<string, Array<{ matcher?: string }>>
       }
       const withMatcher = Object.entries(written.hooks)

@@ -1,9 +1,10 @@
+import { parse as parseToml } from 'smol-toml'
 import { fixturePath } from './helpers/fixture-values.js'
 import { Readable } from 'node:stream'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { runAgentHookCommand } from '../src/agent-hook-command.js'
 import { HOOK_EVENT_NAME_PAYLOAD_KEYS } from '../src/agent-hook-event.js'
@@ -37,6 +38,16 @@ import { HOOK_EVENT_NAME_PAYLOAD_KEYS } from '../src/agent-hook-event.js'
  * 两族必须**并集等于 explicit-managed 全集、交集为空**——否则新接一家既不进命令面也不进代码面时，
  * 它会从两边的 `it.each` 里同时消失、一条断言都不红（本仓「守卫按出口数不按条件数」那族假绿）。
  */
+
+let privateState: string
+beforeEach(async () => {
+  privateState = await mkdtemp(join(tmpdir(), 'amux-event-source-state-'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(privateState, 'state'))
+})
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await rm(privateState, { recursive: true, force: true })
+})
 
 const registry = new AgentProviderRegistry()
 
@@ -163,7 +174,7 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
   const managed = registry.list().filter(
     (provider) =>
       provider.catalog.hookStrategy.kind === 'native' &&
-      provider.catalog.hookStrategy.installation === 'explicit-managed'
+      provider.catalog.hookStrategy.installation !== 'unmanaged'
   )
   /** 命令面：装的是一条命令，事件名由 `agent-hook-command` 子进程从 argv 或负载里解析。 */
   const commandFamily = managed.filter((provider) => provider.hook.eventNameSource?.kind !== 'generated-code')
@@ -197,9 +208,21 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
       // 缺声明就是本 task 要挡的漏配：AgentMux 亲手写它的配置，却没人保证子进程解析得出事件名。
       expect(source, `${providerId} 是 explicit-managed，必须声明 eventNameSource`).toBeDefined()
 
-      const plan = (new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: fixturePath("repo/app"), env: { HERMES_HOME: fixturePath("tmp/hermes") } }) ?? null)
-      expect(plan, `${providerId} 应有安装计划`).not.toBeNull()
-      const commands = plan!.mutations.flatMap((mutation) => commandsFromPlan(mutation.content))
+      const carried = provider.catalog.hookStrategy.kind === 'native' && provider.catalog.hookStrategy.installation === 'launch-carried'
+      const plan = provider.planManagedHooks?.({ workspacePath: fixturePath("repo/app"), env: { HERMES_HOME: fixturePath("tmp/hermes") } })
+      const declarations = providerId === 'claude'
+        ? plan?.mutations.filter(mutation => mutation.path.endsWith('/hooks/hooks.json')) : plan?.mutations
+      const launch = carried ? provider.buildLaunch({ workspacePath: fixturePath("repo/app"), prompt: '', args: [], env: {} }) : undefined
+      const values = launch?.args.filter(arg => arg.startsWith('hooks.')) ?? []
+      const commands = carried ? values.flatMap(value => {
+        const parsed = parseToml(value)
+        return commandsFromPlan(JSON.stringify(parsed))
+      }) : (declarations ?? []).flatMap(mutation => commandsFromPlan(mutation.content))
+      if (carried) expect(values.length).toBeGreaterThan(0)
+      else {
+        expect(plan, `${providerId} should own a disk plan`).toBeDefined()
+        expect(declarations!.length).toBeGreaterThan(0)
+      }
       expect(commands.length, `${providerId} 的安装计划里应有 hook 命令`).toBeGreaterThan(0)
 
       if (source!.kind === 'flag') {
@@ -318,7 +341,7 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
         // 就落在 `{kind:'none'}` 变体上而 tsc 报错（vitest 只转译不查类型，那个错不会让测试变红）。
         const strategy = provider.catalog.hookStrategy
         return strategy.kind === 'native' &&
-          strategy.installation !== 'explicit-managed' &&
+          strategy.installation === 'unmanaged' &&
           Boolean(provider.hook?.eventNameSource)
       })
       .map((provider) => provider.id)
@@ -384,7 +407,7 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
   const subprocessDelivered = registry.list().filter(
     (provider) =>
       provider.catalog.hookStrategy.kind === 'native' &&
-      provider.catalog.hookStrategy.installation === 'explicit-managed' &&
+      provider.catalog.hookStrategy.installation !== 'unmanaged' &&
       provider.hook.eventNameSource?.kind !== 'generated-code'
   )
 

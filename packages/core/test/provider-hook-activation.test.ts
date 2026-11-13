@@ -8,20 +8,23 @@ import { AgentProviderRegistry, type AgentProviderHookActivationContext } from '
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { withAppServerNativeRead } from '../src/providers/app-server-native-read.js'
+import { CODEX_HOOK_SOURCE_PATH, codexManagedHooks } from '../src/providers/codex-launch-hooks.js'
+import { inspectCodexHookActivation } from '../src/providers/codex-hook-activation.js'
 
 let root: string, client: AgentMuxClient
 beforeEach(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'amx-hook-activation-')))
+  vi.stubEnv('HOME', root)
+  vi.stubEnv('CLAUDE_CONFIG_DIR', join(root, 'private-claude'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   client = new AgentMuxClient({ hookInstaller: new AgentManagedHookInstaller(join(root, 'receipts')), store: new AgentMuxMemoryAgentSessionStore() })
 })
-afterEach(async () => { await client.dispose(); await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { await client.dispose(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) })
 
 async function nativeFixture(mode = 'normal') {
-  const plan = (new AgentProviderRegistry().get('codex').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
-  for (const mutation of plan.mutations) { await mkdir(join(root, '.codex'), { recursive: true }); await writeFile(mutation.path, mutation.content) }
   const hooks: Record<string, unknown>[] = []
-  for (const mutation of plan.mutations) for (const [event, groups] of Object.entries(JSON.parse(mutation.content).hooks) as [string, { matcher?: string; hooks: { command: string; timeout: number }[] }[]][]) {
-    for (const group of groups) for (const hook of group.hooks) hooks.push({ source: 'project', sourcePath: mutation.path,
+  for (const [event, groups] of Object.entries(codexManagedHooks())) {
+    for (const group of groups) for (const hook of group.hooks) hooks.push({ source: 'sessionFlags', sourcePath: CODEX_HOOK_SOURCE_PATH,
       handlerType: 'command', eventName: event[0]!.toLowerCase() + event.slice(1), command: hook.command,
       matcher: group.matcher ?? null, timeoutSec: hook.timeout, async: false, enabled: true, currentHash: 'synthetic-native-hash', trustStatus: 'trusted' })
   }
@@ -50,11 +53,14 @@ input.on('line',line=>{
   const options = { workspacePath: root, command: '  ' + process.execPath + '  ', args: [script, 'configured-arg'],
     env: { CODEX_HOME: join(root, 'private-codex'), HOOK_MODE: mode, HOOK_RESPONSES: responses, HOOK_REQUESTS: requests, HOOK_PIDS: pids } }
   const calls = async () => (await readFile(requests, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) as {method: string; params?: unknown}[]
-  const assertCleanup = async () => {
+  const assertCleanup = async (expectedHookFlags = 9) => {
     const helpers = (await readFile(pids, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) as {pid:number;cwd:string;home:string;args:string[]}[]
     expect(helpers.length).toBeGreaterThan(0)
     for (const helper of helpers) {
-      expect(helper).toMatchObject({cwd:root,home:options.env.CODEX_HOME,args:['configured-arg','-s','read-only','-a','never','app-server','--stdio']})
+      expect(helper).toMatchObject({cwd:root,home:options.env.CODEX_HOME})
+      expect(helper.args[0]).toBe('configured-arg')
+      expect(helper.args.slice(-6)).toEqual(['-s','read-only','-a','never','app-server','--stdio'])
+      expect(helper.args.filter(value => value.startsWith('hooks.'))).toHaveLength(expectedHookFlags)
       await vi.waitFor(() => expect(() => process.kill(helper.pid, 0)).toThrowError(/ESRCH/), {timeout:4000,interval:10})
     }
   }
@@ -62,12 +68,31 @@ input.on('line',line=>{
 }
 
 describe('native Hook activation through public scoped Core API', () => {
+  it('keeps explicit environment unsets while inspecting the actual next launch flags', async () => {
+    vi.stubEnv('CODEX_HOME', '/private/inherited-unrelated-codex')
+    const provider = new AgentProviderRegistry().get('codex')
+    let observed: AgentProviderHookActivationContext | undefined
+    const other = new AgentMuxClient({ providers: [{ ...provider, inspectHookActivation: async context => {
+      observed = context
+      return { active: true, code: 'PRIVATE_NATIVE_CURRENT', action: null }
+    } }], store: new AgentMuxMemoryAgentSessionStore() })
+    try {
+      expect(await other.inspectManagedHooks('codex', { workspacePath: root, env: { CODEX_HOME: undefined } }))
+        .toMatchObject({ status: 'installed', code: 'PRIVATE_NATIVE_CURRENT', targets: [] })
+      expect(observed).toBeDefined()
+      expect(Object.hasOwn(observed!.env, 'CODEX_HOME')).toBe(true)
+      expect(observed!.env.CODEX_HOME).toBeUndefined()
+      expect(observed!.args).toContain('--dangerously-bypass-hook-trust')
+      expect(observed!.args.filter(value => value.startsWith('hooks.'))).toHaveLength(9)
+    } finally { await other.dispose(); vi.unstubAllEnvs() }
+  })
+
   it('confirms exact generated source, event, command, matcher and timeout through a private read-only native helper', async () => {
     const fixture = await nativeFixture()
     const controls = [vi.spyOn(client, 'connect'), vi.spyOn(client, 'createAgent'), vi.spyOn(client, 'stopAgent')]
     const result = await client.inspectManagedHooks('codex', fixture.options)
     expect(result).toMatchObject({ status: 'installed', code: 'HOOK_NATIVE_CURRENT_AND_TRUSTED', workspacePath: root,
-      targets: [{path:join(root,'.codex/hooks.json'),status:'current'}] })
+      targets: [] })
     expect((await fixture.calls()).map(call=>call.method)).toEqual(['initialize','initialized','hooks/list'])
     expect((await fixture.calls())[2]!.params).toEqual({cwds:[root]})
     for (const control of controls) expect(control).not.toHaveBeenCalled()
@@ -82,7 +107,7 @@ describe('native Hook activation through public scoped Core API', () => {
     await fixture.update()
     const result = await client.inspectManagedHooks('codex', fixture.options)
     expect(result).toMatchObject({status:'partial',code:'HOOK_NATIVE_DEFINITIONS_UNCONFIRMED'})
-    expect(result.targets).toEqual([{path:join(root,'.codex/hooks.json'),status:'current'}])
+    expect(result.targets).toEqual([])
     expect(JSON.stringify(result)).not.toContain('foreign-native-value')
     await fixture.assertCleanup()
   })
@@ -98,11 +123,21 @@ describe('native Hook activation through public scoped Core API', () => {
     if(mode==='wrong-cwd') fixture.result.data[0]!.cwd=fixturePath("other-private-scope")
     await fixture.update()
     const result=await client.inspectManagedHooks('codex',fixture.options)
-    expect(result.status).toBe(mode.startsWith('invalid')||mode==='errors'||mode==='wrong-cwd'?'error':'partial')
-    expect(result.code).toBe(mode==='untrusted'||mode==='stale'?'HOOK_NATIVE_TRUST_UNCONFIRMED':mode==='disabled'?'HOOK_NATIVE_DISABLED'
+    expect(result.status).toBe(mode==='untrusted'?'installed':mode.startsWith('invalid')||mode==='errors'||mode==='wrong-cwd'?'error':'partial')
+    expect(result.code).toBe(mode==='untrusted'?'HOOK_NATIVE_CURRENT_AND_TRUSTED':mode==='stale'?'HOOK_NATIVE_TRUST_UNCONFIRMED':mode==='disabled'?'HOOK_NATIVE_DISABLED'
       :mode==='feature-off'?'HOOK_NATIVE_DEFINITIONS_UNCONFIRMED':'HOOK_ACTIVATION_CHECK_FAILED')
-    expect(result.targets).toEqual([{path:join(root,'.codex/hooks.json'),status:'current'}])
+    expect(result.targets).toEqual([])
     expect(JSON.stringify(result)).not.toContain('private-native-secret')
+    await fixture.assertCleanup()
+  })
+
+  it('requires an actual bypass flag before accepting untrusted session declarations', async () => {
+    const fixture = await nativeFixture()
+    for (const hook of fixture.hooks) hook.trustStatus = 'untrusted'
+    await fixture.update()
+    expect(await inspectCodexHookActivation({ ...fixture.options, command: process.execPath,
+      plan: { providerId: 'codex', mutations: [] }, signal: new AbortController().signal }))
+      .toMatchObject({ active: false, code: 'HOOK_NATIVE_TRUST_UNCONFIRMED' })
     await fixture.assertCleanup()
   })
 
@@ -129,7 +164,7 @@ describe('native Hook activation through public scoped Core API', () => {
     await expect(withAppServerNativeRead({...fixture.options,command:process.execPath,signal:new AbortController().signal},'hooks', request=>
       request('turn/start' as 'hooks/list',{}))).rejects.toMatchObject({code:'INVALID_AGENT_HOOK_RESPONSE'})
     expect((await fixture.calls()).map(call=>call.method)).toEqual(['initialize','initialized'])
-    await fixture.assertCleanup()
+    await fixture.assertCleanup(0)
   })
 
   it('bounds a Provider which ignores cancellation, retains its live slots and recovers admission only after real settlement', async () => {
@@ -174,7 +209,8 @@ describe('native Hook activation through public scoped Core API', () => {
     const env=providerId==='droid'?{FACTORY_HOME_OVERRIDE:root}:{}
     const plan=(new AgentProviderRegistry().get(providerId).planManagedHooks?.({ workspacePath: root, env: env }) ?? null)!
     await new AgentManagedHookInstaller(join(root,'receipts')).ensure(plan)
-    const path=plan.mutations[0]!.path
+    const path=providerId==='claude'?join(root,'.claude','settings.json'):plan.mutations[0]!.path
+    if(providerId==='claude'){await mkdir(join(root,'.claude'),{recursive:true});await writeFile(path,'{}')}
     const parsed=JSON.parse(await readFile(path,'utf8'))
     parsed[key]=true;await writeFile(path,JSON.stringify(parsed))
     expect(await client.inspectManagedHooks(providerId,{workspacePath:root,env})).toMatchObject({status:'partial',code:'HOOK_CONFIGURATION_DISABLED'})

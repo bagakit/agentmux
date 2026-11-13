@@ -1,8 +1,11 @@
+import { codexManagedHooks, withCodexLaunchHooks } from '../src/providers/codex-launch-hooks.js'
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
+import { claudeManagedPlugin } from '../src/providers/claude.js'
+import { defaultAgentMuxStateDirectory } from '../src/runtime-paths.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID } from '../src/providers/launch-options.js'
 
@@ -16,7 +19,7 @@ describe('built-in agent providers', () => {
     expect(before.map(provider => provider.id)).toEqual(['pi', 'codex'])
     const incompleteClaude = { ...claude }, incompleteCodex = { ...codex }
     delete incompleteClaude.planManagedHooks
-    delete incompleteCodex.planManagedHooks
+    incompleteCodex.planManagedHooks = claude.planManagedHooks
     expect(() => registry.register(incompleteClaude))
       .toThrow(expect.objectContaining({ code: 'INVALID_AGENT_PROVIDER' }))
     expect(registry.catalog()).toEqual(before)
@@ -144,9 +147,10 @@ describe('built-in agent providers', () => {
     // install needs no folder-trust grant) — see createGrokManagedHookPlan.
     // cursor joins them with TWO mutations: the user-layer ~/.cursor/hooks.json plus the workspace
     // trust marker — see createCursorManagedHookPlan.
-    for (const id of ['codex', 'claude', 'antigravity', 'hermes', 'grok', 'gemini', 'cursor'] as const) {
+    for (const id of ['claude', 'antigravity', 'hermes', 'grok', 'gemini', 'cursor'] as const) {
       expect(catalog.get(id)).toEqual({ kind: 'native', installation: 'explicit-managed' })
     }
+    expect(catalog.get('codex')).toEqual({ kind: 'native', installation: 'launch-carried' })
     // pi 也在这一档：它的扩展面是 in-process JS，AgentMux 往 `<agent-dir>/extensions/agentmux.js`
     // 写一份自己独占的扩展（见 createPiManagedHookPlan）。此前它记 unmanaged，理由写的是"pi TS
     // extension has no surface AgentMux writes"——那句话是在没有第一方证据时下的判断，已被上游源码
@@ -177,7 +181,7 @@ describe('built-in agent providers', () => {
     })
     expect(plan).toEqual({
       command: id,
-      args: ['--model', 'demo', 'fix "quoted"\ntext'],
+      args: ['--model', 'demo', 'fix "quoted"\ntext', ...(id === 'claude' ? ['--plugin-dir', claudeManagedPlugin().directory] : [])],
       env: {}
     })
   })
@@ -191,7 +195,7 @@ describe('built-in agent providers', () => {
     })
     expect(plan).toEqual({
       command: 'codex',
-      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', '--', 'fix "quoted"\ntext'],
+      args: [...withCodexLaunchHooks(['--model', 'demo']).args, '--dangerously-bypass-hook-trust', '--', 'fix "quoted"\ntext'],
       env: {}
     })
   })
@@ -219,7 +223,7 @@ describe('built-in agent providers', () => {
       commandOverride: fixturePath("opt/tools/codex")
     })
     expect(plan.command).toBe(fixturePath("opt/tools/codex"))
-    expect(plan.args).toEqual(['--dangerously-bypass-hook-trust', '--', ("$(touch " + (fixturePath("tmp/not-executed)")))])
+    expect(plan.args).toEqual([...withCodexLaunchHooks([]).args, '--dangerously-bypass-hook-trust', '--', ("$(touch " + (fixturePath("tmp/not-executed)")))])
   })
 
   it('launches Grok with the argv separator that guards flag-looking prompts', () => {
@@ -255,7 +259,12 @@ describe('built-in agent providers', () => {
     // claude 一族多出一个空白位置参数（被当成一条"内容是空格"的用户请求），
     // grok 会多出一个 `--` 分隔符，gemini 会多出 `--prompt-interactive '   '`。
     // 这三种形态各错各的，所以按 Provider 分组断言，而不是笼统说一句"参数没变"。
-    for (const id of ['claude', 'traex', 'pi', 'cursor'] as const) {
+    const pluginDir = claudeManagedPlugin().directory
+    // Claude carries its plugin dir via --plugin-dir even with no prompt.
+    expect(providers.get('claude').buildLaunch({
+      workspacePath: fixturePath("tmp/work"), prompt: ' \t\n ', args: ['--model', 'demo'], env: {}
+    }).args).toEqual(['--model', 'demo', '--plugin-dir', pluginDir])
+    for (const id of ['traex', 'pi', 'cursor'] as const) {
       expect(providers.get(id).buildLaunch({
         workspacePath: fixturePath("tmp/work"), prompt: ' \t\n ', args: ['--model', 'demo'], env: {}
       }).args).toEqual(['--model', 'demo'])
@@ -270,7 +279,7 @@ describe('built-in agent providers', () => {
     // 内部的换行与引号逐字节保留（上面 positional-argv 那组已钉住内部字节）。
     expect(providers.get('claude').buildLaunch({
       workspacePath: fixturePath("tmp/work"), prompt: '  fix it  ', args: [], env: {}
-    }).args).toEqual(['  fix it  '])
+    }).args).toEqual(['  fix it  ', '--plugin-dir', pluginDir])
   })
 
   // grok、gemini、cursor 都已离开这一组：grok 的 `--resume <SESSION_ID_OR_TITLE>` 来自本机 `--help`；
@@ -470,7 +479,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', 'resume', 'native-1', '--', 'continue now'],
+      args: [...withCodexLaunchHooks(['--model', 'demo']).args, '--dangerously-bypass-hook-trust', 'resume', 'native-1', '--', 'continue now'],
       env: {}
     })
     expect(() => providers.get('pi').buildResumeLaunch({
@@ -497,7 +506,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'codex',
-      args: ['--model', 'demo', '--dangerously-bypass-hook-trust', 'resume', 'native-1'],
+      args: [...withCodexLaunchHooks(['--model', 'demo']).args, '--dangerously-bypass-hook-trust', 'resume', 'native-1'],
       env: {}
     })
     expect(providers.get('claude').buildResumeLaunch({
@@ -507,7 +516,7 @@ describe('built-in agent providers', () => {
       env: {}
     })).toEqual({
       command: 'claude',
-      args: ['--resume', 'native-2', '--model', 'demo'],
+      args: ['--resume', 'native-2', '--model', 'demo', '--plugin-dir', claudeManagedPlugin().directory],
       env: {}
     })
     expect(providers.get('pi').buildResumeLaunch({
@@ -543,7 +552,7 @@ describe('built-in agent providers', () => {
     })).toEqual({
       command: 'codex',
       args: [
-        '--sandbox', 'read-only', '--ask-for-approval', 'never',
+        ...withCodexLaunchHooks(['--sandbox', 'read-only', '--ask-for-approval', 'never']).args,
         '--dangerously-bypass-hook-trust', 'resume', 'native-1', '--', 'resume now'
       ],
       env: {}
@@ -562,7 +571,7 @@ describe('built-in agent providers', () => {
       command: 'claude',
       // Claude places args before the positional prompt, so the flag pair precedes it — still valid.
       args: ['--resume', 'native-2', '--permission-mode', 'plan', 'resume now', '--plugin-dir',
-        join(fixturePath('tmp/work'), '.claude', 'agentmux', 'native-activity')],
+        claudeManagedPlugin().directory],
       env: {}
     })
   })
@@ -640,43 +649,42 @@ describe('built-in agent providers', () => {
     expect(mutation?.merge).toEqual({ kind: 'json-owned-key', key: 'agentmux-status' })
   })
 
-  it('declares Codex hooks as a current-declaration merge so committed project hooks survive', () => {
-    const mutation = (new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!).mutations[0]
-    expect(mutation?.merge).toEqual({ kind: 'json-managed-events' })
-    // 子代理在途压制的产品接线：SubagentStop 必须被真正安装，否则 Provider CLI 永不发这个事件，
-    // 花名册永不减一，主 Stop 被永远压住，Agent 卡在 working 出不来。start 同样必须在，否则记不上。
-    const parsed = JSON.parse(mutation?.content ?? '{}') as {
-      hooks: Record<string, unknown>
-    }
-    expect(parsed.hooks['SubagentStart']).toBeDefined()
-    expect(parsed.hooks['SubagentStop']).toBeDefined()
+  it('declares Codex Hooks on the launch, without a workspace config plan', () => {
+    const provider = new AgentProviderRegistry().get('codex')
+    expect(provider.planManagedHooks).toBeUndefined()
+    const hooks = codexManagedHooks()
+    expect(hooks.SubagentStart).toHaveLength(1)
+    expect(hooks.SubagentStop).toHaveLength(1)
+    expect(provider.buildLaunch({workspacePath:fixturePath('tmp/work'),prompt:'',args:[],env:{}}).args)
+      .toContainEqual(expect.stringContaining('hooks.SubagentStop='))
   })
 
-  it('generates a workspace-scoped Claude settings.json merge that preserves foreign settings', () => {
-    const plan = (new AgentProviderRegistry().get("claude").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!)
+  it('carries every Claude Hook in a plugin under AgentMux state, never in the workspace', () => {
+    const provider = new AgentProviderRegistry().get('claude')
+    const plan = provider.planManagedHooks!({ workspacePath: fixturePath('tmp/work') })!
     expect(plan.providerId).toBe('claude')
-    const mutation = plan.mutations[0]
-    expect(mutation?.path).toBe(fixturePath("tmp/work/.claude/settings.json"))
-    // Claude keeps hooks under a top-level `hooks` key alongside permissions/model/MCP — like Codex,
-    // Only missing current declarations are appended; existing shared entries cannot be replaced.
-    expect(mutation?.merge).toEqual({ kind: 'json-managed-events' })
-    const parsed = JSON.parse(mutation?.content ?? '{}') as {
-      hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string; timeout?: number }> }>>
+    // The plan does not depend on the workspace: a different workspace yields the same plan.
+    expect(provider.planManagedHooks!({ workspacePath: fixturePath('tmp/other') })).toEqual(plan)
+    const plugin = join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'plugins') + sep
+    expect(plan.mutations.length).toBeGreaterThan(0)
+    for (const mutation of plan.mutations) expect(mutation.path.startsWith(plugin)).toBe(true)
+    const hooksFile = plan.mutations.find(mutation => mutation.path.endsWith(join('hooks', 'hooks.json')))!
+    const parsed = JSON.parse(hooksFile.content) as {
+      modules: string[]; hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string; timeout?: number }> }>>
     }
-    expect(parsed.hooks['SessionStart']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
-    expect(parsed.hooks['PermissionRequest']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
+    expect(parsed.modules).toEqual(['./register.js'])
+    for (const eventName of ['SessionStart', 'PermissionRequest', 'SubagentStart', 'SubagentStop']) {
+      expect(parsed.hooks[eventName]?.[0]?.hooks?.[0]?.command).toContain('"$AGENTMUX_HOOK_RUNNER" --launch-scoped')
+    }
     expect(parsed.hooks['PreToolUse']?.[0]?.matcher).toBe('*')
     // Non-tool lifecycle events carry no matcher.
     expect(parsed.hooks['SessionStart']?.[0]?.matcher).toBeUndefined()
-    // 同 Codex：子代理 start/stop 都要安装，否则子代理在途压制在产品上是死的。
-    expect(parsed.hooks['SubagentStart']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
-    expect(parsed.hooks['SubagentStop']?.[0]?.hooks?.[0]?.command).toContain('agentmux-hook.js')
   })
 
   it('resolves the managed hook plan for JSON- and YAML-config native providers, null for the rest', () => {
-    // JSON-config providers: codex and claude write into the workspace, antigravity into global ~/.gemini.
-    expect((new AgentProviderRegistry().get('codex').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.mutations[0]?.path).toBe(fixturePath("tmp/work/.codex/hooks.json"))
-    expect((new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.mutations[0]?.path).toBe(fixturePath("tmp/work/.claude/settings.json"))
+    // Codex has no workspace plan; Claude owns plugin files under AgentMux state; Antigravity owns its global config fragment.
+    expect(new AgentProviderRegistry().get('codex').planManagedHooks).toBeUndefined()
+    expect((new AgentProviderRegistry().get('claude').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.mutations[0]?.path.startsWith(join(defaultAgentMuxStateDirectory(), 'providers', 'claude', 'plugins'))).toBe(true)
     expect((new AgentProviderRegistry().get('antigravity').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)?.providerId).toBe('antigravity')
     // hermes writes into its global ~/.hermes: the YAML config plus the consent allowlist (two mutations).
     const hermesPlan = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: fixturePath("tmp/work") }) ?? null)
@@ -710,14 +718,10 @@ describe('built-in agent providers', () => {
     // process.execPath is the Electron app binary when packaged; ELECTRON_RUN_AS_NODE=1 makes it run
     // the .js as Node (and a real node binary ignores the var). AGENTMUX_HOOK_PROVIDER lets the shared
     // hook binary emit the provider-correct decision schema without confusing antigravity with gemini.
-    const codexCommand = (
-      JSON.parse((new AgentProviderRegistry().get("codex").planManagedHooks!({ workspacePath: fixturePath("tmp/work") })!).mutations[0]?.content ?? '{}') as {
-        hooks: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>
-      }
-    ).hooks['SessionStart']?.[0]?.hooks?.[0]?.command ?? ''
+    const codexCommand = codexManagedHooks().SessionStart[0]!.hooks[0]!.command
     expect(codexCommand).toContain('ELECTRON_RUN_AS_NODE=1')
     expect(codexCommand).toContain("AGENTMUX_HOOK_PROVIDER='codex'")
-    expect(codexCommand).toContain('agentmux-hook.js')
+    expect(codexCommand).toContain('"$AGENTMUX_HOOK_RUNNER" --launch-scoped')
 
     const antigravityCommand = (
       JSON.parse((new AgentProviderRegistry().get("antigravity").planManagedHooks!({ workspacePath: fixturePath("unused-workspace") })!).mutations[0]?.content ?? '{}') as {

@@ -6,7 +6,6 @@ import { parseDocument } from 'yaml'
 import { afterEach, describe, expect, it } from 'vitest'
 import { inspectManagedHookContent, renderMergedHookContent, type AgentHookMergeStrategy } from '../src/hook-config-merge.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
-import { createCodexManagedHookPlan } from '../src/providers/codex.js'
 import { createHermesManagedHookPlan } from '../src/providers/hermes.js'
 
 const nested = { type: 'command', command: ("node '" + reshapeFixturePath("owned/agentmux-hook.js") + "'"), timeout: 10 }
@@ -120,9 +119,9 @@ describe('current Hook declaration presence preserves shared content', () => {
     expect(() => inspectManagedHookContent(current, content, strategy as AgentHookMergeStrategy)).toThrowError(expect.objectContaining({ code: 'HOOK_TARGET_UNPARSEABLE' }))
   })
 
-  it.each(['codex', 'hermes'] as const)('real Installer consumes the %s Provider plan while keeping foreign content and no-write repeats', async provider => {
+  it('real Installer consumes the Hermes Provider plan while keeping foreign content and no-write repeats', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-hook-preserve-')); roots.push(root)
-    const plan = provider === 'codex' ? createCodexManagedHookPlan(root) : createHermesManagedHookPlan({ HERMES_HOME: root })
+    const plan = createHermesManagedHookPlan({ HERMES_HOME: root })
     const original = new Map<string, unknown>()
     for (const mutation of plan.mutations) {
       await mkdir(join(mutation.path, '..'), { recursive: true })
