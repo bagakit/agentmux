@@ -43,8 +43,11 @@ export function workspaceFilePreviewFormat(path: string): WorkspaceFilePreviewFo
     ? WORKSPACE_FILE_PREVIEW_FORMATS[extension as keyof typeof WORKSPACE_FILE_PREVIEW_FORMATS] : null
 }
 
+/** Kinds read as one bounded bytes snapshot. Audio and video stream through their playback lease. */
+export type WorkspaceFileSnapshotKind = Exclude<WorkspaceFilePreviewKind, 'audio' | 'video'>
+
 export type WorkspaceFilePreviewResult =
-  | { status: 'ready'; kind: WorkspaceFilePreviewKind; mimeType: string; bytes: Uint8Array;
+  | { status: 'ready'; kind: WorkspaceFileSnapshotKind; mimeType: string; bytes: Uint8Array;
       revision: string; byteLength: number; readCost: WorkspaceFileByteRead['readCost'] }
   | { status: 'directory' }
   | { status: 'deleted'; message: string }

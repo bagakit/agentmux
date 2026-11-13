@@ -6,7 +6,9 @@ import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
-import { usePreviewObjectUrl, useWorkspaceFilePreview, type ReadyFilePreview } from '../lib/use-workspace-file-preview'
+import { usePreviewObjectUrl, useWorkspaceFilePreview } from '../lib/use-workspace-file-preview'
+import { useWorkspaceMediaStream } from '../lib/use-workspace-media-stream'
+import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
 import { FilePathLabel } from './FilePathLabel'
 import { FilePreviewState } from './FilePreviewState'
 
@@ -18,7 +20,7 @@ const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 
 
 const PdfContent = lazy(async () => ({ default: (await import('./PdfContent')).PdfContent }))
-type LoadedPreview = ReadyFilePreview & { url: string }
+const MediaPlayer = lazy(async () => ({ default: (await import('./MediaPlayer')).MediaPlayer }))
 
 export function formatFileBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -117,34 +119,18 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
   )
 }
 
-function MediaContent({ preview, name }: { preview: LoadedPreview; name: string }) {
-  const player = useRef<HTMLMediaElement>(null)
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [duration, setDuration] = useState<number | null>(null)
-  useEffect(() => {
-    const element = player.current
-    return () => { element?.pause(); element?.removeAttribute('src'); element?.load() }
-  }, [preview.url])
-  const events = { onLoadedMetadata: () => {
-    const seconds = player.current?.duration
-    setDuration(seconds !== undefined && Number.isFinite(seconds) ? Math.floor(seconds) : null)
-    if (preview.kind === 'audio') setState('ready')
-  }, onLoadedData: () => setState('ready'), onError: () => setState('error') }
-  return <div className={`file-media file-media--${preview.kind}`} data-decode-state={state}>
-    {state === 'error' ? <div className="file-preview-state" role="alert"><strong>Media could not be decoded</strong><span>The current engine cannot play this file’s format or codec. Try opening it in a system application.</span></div> : null}
-    {preview.kind === 'audio'
-      ? <audio ref={element => { player.current = element }} aria-label={name} src={preview.url} controls preload="metadata" {...events} />
-      : <video ref={element => { player.current = element }} aria-label={name} src={preview.url} controls preload="auto" {...events} />}
-    <span className="file-preview__metadata">{state === 'loading' ? 'Reading media metadata · ' : ''}{duration !== null ? `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')} · ` : ''}{formatFileBytes(preview.byteLength)}</span>
-  </div>
-}
-
 export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { surface: FileWorkbenchSurface; visible?: boolean; onRetryBinary?: () => void }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary' ? state.documentIssues[key] : null)
   const canOpenExternally = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
   const reportError = useAppStore(state => state.reportError)
-  const { preview, failure, reload } = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary)
+  const playable = workspaceFilePreviewFormat(surface.path)
+  const isMedia = playable?.kind === 'audio' || playable?.kind === 'video'
+  const snapshot = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary && !isMedia)
+  const stream = useWorkspaceMediaStream(surface.workspaceId, surface.path, visible && !binary && isMedia)
+  const { preview } = snapshot
+  const failure = isMedia ? stream.failure : snapshot.failure
+  const reload = isMedia ? stream.reload : snapshot.reload
   const url = usePreviewObjectUrl(preview)
   const external = async (action: 'openSystem' | 'reveal') => {
     try { await api.files[action](surface.workspaceId, surface.path) } catch (error) { reportError(error) }
@@ -162,10 +148,11 @@ export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { su
     </header>
     {binary ? <div className="file-preview-state"><strong>Binary file</strong><span>This file has no editable text content. Open it in a system application to inspect it.</span>{binary.kind === 'binary' ? <span className="file-preview__metadata">{formatFileBytes(binary.byteLength)}</span> : null}</div>
       : failure ? <div className="file-preview-state" role="alert"><strong>{failure.status === 'too-large' ? 'File exceeds the preview budget' : failure.status === 'deleted' ? 'File was deleted' : failure.status === 'changed' ? 'File changed while reading' : failure.status === 'directory' ? 'This path is a directory' : 'Preview unavailable'}</strong><span>{failure.message}</span><button className="small-button" onClick={() => reload()}>Retry</button></div>
+      : isMedia ? stream.lease ? <Suspense fallback={<FilePreviewState title="Preparing player" />}><MediaPlayer key={stream.lease.id} lease={stream.lease} name={surface.path} onRetry={reload} /></Suspense>
+        : <div className="file-preview-state" role="status">{visible ? 'Opening media…' : 'Playback paused while hidden'}</div>
       : !preview ? <div className="file-preview-state" role="status">{visible ? 'Reading file…' : 'Preview paused while hidden'}</div>
       : preview.kind === 'pdf' ? <Suspense fallback={<FilePreviewState title="Loading PDF reader" />}><PdfContent data={preview.bytes} name={surface.path} visible={visible} /></Suspense>
       : !url ? <FilePreviewState title="Preparing file preview" />
-      : preview.kind === 'image' ? <ImageContent key={url} src={url} name={surface.path} byteLength={preview.byteLength} />
-      : <MediaContent key={url} preview={{ ...preview, url }} name={surface.path} />}
+      : <ImageContent key={url} src={url} name={surface.path} byteLength={preview.byteLength} />}
   </section>
 }
