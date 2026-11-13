@@ -22,8 +22,9 @@ const bridge = vi.hoisted(() => ({
   previews: null as BrowserRecoveryPreviewStore | null, manager: null as unknown
 }))
 vi.mock('electron', () => ({
-  nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => bridge.root || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false },
+  nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { getPath: () => bridge.root || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false, on: vi.fn(), off: vi.fn(), once: vi.fn() },
+  globalShortcut: { register: () => true, unregister: vi.fn(), isRegistered: () => false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
@@ -43,7 +44,7 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
     constructor(...args: ConstructorParameters<typeof actual.BrowserViewManager>) {
       super(...args)
       bridge.manager = this
-      bridge.previews = args.at(-1) as BrowserRecoveryPreviewStore
+      bridge.previews = Reflect.get(this, 'recoveryPreviews') as BrowserRecoveryPreviewStore
       // Only native owner Sources are doubled. Production scope resolution and Main handlers stay real.
       Object.assign(this, { entries: bridge.owners, releasedEntries: bridge.released })
     }
@@ -195,7 +196,7 @@ describe('actual preload and registered Main recovery-preview read', () => {
       const failure: unknown = await f.invoke('browser:getRecoveryPreview', [f.scope.browserId], { id: f.sender.id })
         .then(() => null, error => error)
       expect(failure).toBeInstanceOf(Error)
-      expect(failure).toMatchObject({ message: 'Untrusted Browser recovery preview sender' })
+      expect(failure).toMatchObject({ message: 'Untrusted application main document sender' })
       expect(scope).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); expect(f.spatialRead).not.toHaveBeenCalled()
     } finally { await f.dispose() }
   })
