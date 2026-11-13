@@ -26,6 +26,9 @@ export const ScreenshotEditor = forwardRef<ScreenshotEditorHandle, {
   onCancel(): void
   onComplete(input: ScreenshotCompleteInput): void
   onCopyContext?(input: ScreenshotCompleteInput): void
+  onSavePng?(input: ScreenshotCompleteInput): void
+  onPin?(input: ScreenshotCompleteInput): void
+  onCheckPin?(): void
   onEdited?(): void
   onOriginalOpened?(): void
   onError?(error: unknown): void
@@ -142,6 +145,9 @@ export const ScreenshotEditor = forwardRef<ScreenshotEditorHandle, {
       busy={props.busy} copied={props.copied ?? null} active={props.active ?? true} documentStatus={status}
       onCancel={cancel} onComplete={input => props.onComplete(output(input))}
       {...(props.onCopyContext ? { onCopyContext: (input: ImageAnnotationInput) => props.onCopyContext!(output(input)) } : {})}
+      {...(props.onSavePng ? { onSavePng: (input: ImageAnnotationInput) => props.onSavePng!(output(input)) } : {})}
+      {...(props.onPin ? { onPin: (input: ImageAnnotationInput) => props.onPin!(output(input)) } : {})}
+      {...(props.onCheckPin ? { onCheckPin: props.onCheckPin } : {})}
       onSaveOriginal={saveOriginal} onOpenOriginal={() => { operation.current += 1; setDialog('open') }} onEdited={edited}
       {...(props.onError ? { onError: props.onError } : {})} /> : null}
     {dialog && props.active !== false ? <AnnotationFileDialog key={dialog + ':' + generation} mode={dialog}

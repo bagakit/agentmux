@@ -475,6 +475,9 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off('ui:spatialLinkIssue', wrapped)
     },
     captureScreenshot: mode => ipcRenderer.invoke('ui:captureScreenshot', mode),
+    exportScreenshot: input => ipcRenderer.invoke('ui:exportScreenshot', input),
+    pinScreenshot: input => ipcRenderer.invoke('ui:pinScreenshot', input),
+    inspectScreenshotPin: operationId => ipcRenderer.invoke('ui:inspectScreenshotPin', operationId),
     screenshotShortcutStatus: () => ipcRenderer.invoke('ui:screenshotShortcutStatus'),
     onScreenshotIssue: listener => {
       const receive = (_event: Electron.IpcRendererEvent, message: string) => listener(message)

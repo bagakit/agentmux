@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { isTerminalMouseReportPayload } from '@agentmux/core'
 import { bindAppBrandIcon } from './app-brand-icon.js'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
@@ -124,7 +125,10 @@ import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/c
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
 import { ScreenCapture } from './screen-capture.js'
+import { exportScreenshotPng, writeScreenshotFile } from './screenshot-files.js'
+import { ScreenshotPins } from './screenshot-pins.js'
 import { ScreenshotSourcePicker } from './screenshot-source-picker.js'
+import { ScreenshotOriginalFiles } from './screenshot-original-files.js'
 import { GlobalScreenshot } from './global-screenshot.js'
 import { SystemScreenshotEditor } from './system-screenshot-editor.js'
 import { getDesktopNativeUiOwner, getNativeDesktopOwner } from './native-desktop-owner.js'
@@ -259,7 +263,7 @@ import { desktopBusinessSocketPath } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
-import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
+import { WorkspaceFiles, workspaceFileObserverCount, LOCAL_WORKER_SOURCE } from './workspace-files.js'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 
 import { WorktreeService } from './worktree-service.js'
@@ -1356,8 +1360,45 @@ export async function registerIpc(args: {
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
     args.webFiles?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
-  const screenshotEditor = new SystemScreenshotEditor(() => config.appearance)
+  const screenshotPins = new ScreenshotPins({ hostId: 'local', appearance: () => config.appearance,
+    copy: image => getDesktopNativeUiOwner().writeClipboardImage(image) })
+  const pinScreenshot = (image: import('../shared/contracts').BrowserPng, operationId: string) => screenshotPins.call('image.pin', {
+    hostId: 'local', operationId, image: { format: 'png', data: image.dataUrl.slice('data:image/png;base64,'.length), width: image.width, height: image.height, scale: 1 }
+  }, { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
+  const inspectScreenshotPin = (operationId: string) => screenshotPins.call('image.inspect', { hostId: 'local', operationId },
+    { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
+  const screenshotEditor = new SystemScreenshotEditor(() => config.appearance, { pin: pinScreenshot, inspectPin: inspectScreenshotPin,
+    copyText: text => getDesktopNativeUiOwner().writeClipboardText(text),
+    originalFiles: window => new ScreenshotOriginalFiles({
+      chooseOpen: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Open editable original', filters: [{ name: 'Editable annotation', extensions: ['json'] }], properties: ['openFile'] }); return choice.canceled ? null : choice.filePaths[0] ?? null },
+      chooseSave: async defaultName => { const choice = await dialog.showSaveDialog(window, { title: 'Save editable original · contains the source image', defaultPath: defaultName, filters: [{ name: 'Editable annotation', extensions: ['json'] }] }); return choice.canceled ? null : choice.filePath ?? null },
+      worker: { helperPath: join(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'), workerSource: LOCAL_WORKER_SOURCE }
+    }) })
   const screenshotSources = new ScreenshotSourcePicker({ native: getNativeDesktopOwner, appearance: () => config.appearance })
+  handleWithEvent('ui:pinScreenshot', async (event, input: import('../shared/screenshot-output').ScreenshotPngExport) => {
+    return await pinScreenshot(input.image, input.operationId)
+  })
+  handleWithEvent('ui:inspectScreenshotPin', async (_event, operationId: string) => await inspectScreenshotPin(operationId))
+  const screenshotExports = new Map<string, { pixels: string; result: Promise<import('../shared/screenshot-output').ScreenshotFileResult> }>()
+  handleWithEvent('ui:exportScreenshot', async (event, input: import('../shared/screenshot-output').ScreenshotPngExport) => {
+    if (!input || typeof input.operationId !== 'string' || !input.operationId.trim()) throw new Error('Keep the original PNG export operation.')
+    const key = JSON.stringify([event.sender.id, input.operationId]), pixels = createHash('sha256').update(JSON.stringify(input.image)).digest('hex')
+    const previous = screenshotExports.get(key)
+    if (previous) {
+      if (previous.pixels !== pixels) throw new Error('The original PNG export cannot change its image.')
+      return await previous.result
+    }
+    const result = exportScreenshotPng(input.image, {
+      chooseFile: async filename => {
+        const parent = BrowserWindow.fromWebContents(event.sender)
+        if (!parent || parent.isDestroyed()) throw new Error('The original image window closed. Your image is kept.')
+        const choice = await dialog.showSaveDialog(parent, { title: 'Save processed PNG', defaultPath: filename, filters: [{ name: 'PNG image', extensions: ['png'] }] })
+        return choice.canceled ? null : choice.filePath ?? null
+      }, writeFile: writeScreenshotFile
+    })
+    screenshotExports.set(key, { pixels, result })
+    return await result
+  })
   const reportScreenshotIssue = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
     console.warn('Screen capture:', error)
@@ -2202,6 +2243,7 @@ export async function registerIpc(args: {
     agentLearning: agentLearningAuthority,
     inputContextCaptures,
     nativeDesktop: createNativeDesktopPublicOwner(getNativeDesktopOwner(), { hostId: 'local' }),
+    images: screenshotPins,
     windows: args.workbenchWindows,
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: () => args.clientIncidents! } : {}),
@@ -2281,6 +2323,7 @@ export async function registerIpc(args: {
     await runOwnerDisposals([
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
+      { owner: 'screenshot-pins', dispose: () => screenshotPins.dispose() },
       { owner: 'screenshot-sources', dispose: () => screenshotSources.dispose() },
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'app-brand-icon', dispose: appBrandIcon.dispose },

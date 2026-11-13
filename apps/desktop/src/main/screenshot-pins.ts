@@ -135,7 +135,7 @@ export class ScreenshotPins implements AgentMuxRpcImageOwner {
         throw new Error('The pinned image layout has no finite control height.')
       const work = screen.getDisplayMatching(pin.window.getBounds()).workArea
       const extra = Math.min(Math.ceil(params.chromeHeight), Math.max(0, work.height - 120))
-      const [width, height] = pin.window.getContentSize(), ratio = pin.image.width / pin.image.height
+      const [width, height] = pin.window.getContentSize() as [number, number], ratio = pin.image.width / pin.image.height
       const imageHeight = Math.min(width / ratio, Math.max(1, work.height - extra))
       const targetWidth = Math.max(220, Math.round(imageHeight * ratio)), targetHeight = Math.max(120, Math.round(imageHeight) + extra)
       pin.window.setAspectRatio(ratio, { width: 0, height: extra })

@@ -21,6 +21,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { narrowBrowserOperation, narrowBrowserReplayPlan, type BrowserOperation } from '../../../shared/browser-operation'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { useScreenshotPin } from '../lib/use-screenshot-pin'
 import { useBrowserAnnotationMarkers } from '../hooks/useBrowserAnnotationMarkers'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
@@ -423,6 +424,7 @@ function BrowserPaneContent({
   const [screenshotBusy, setScreenshotBusy] = useState(false)
   const [screenshotCopied, setScreenshotCopied] = useState<string | null>(null)
   const screenshotEdited = useCallback(() => setScreenshotCopied(null), [])
+  const screenshotPin = useScreenshotPin({ pin: input => api.ui.pinScreenshot(input), inspect: operationId => api.ui.inspectScreenshotPin(operationId) })
   const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
   const [selectionBusy, setSelectionBusy] = useState(false)
   // 「记住」的勾选是**这一问的草稿**，不是已保存的状态——真正记住发生在主进程，由回答那一次带过去。
@@ -797,7 +799,7 @@ function BrowserPaneContent({
     setScreenshotCopied(null)
   }
 
-  async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' = 'png'): Promise<void> {
+  async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' | 'save-png' | 'pin' = 'png'): Promise<void> {
     if (!screenshot || screenshotBusy) return
     const token = screenshotToken.current
     setScreenshotBusy(true)
@@ -812,15 +814,38 @@ function BrowserPaneContent({
         crop: input.crop
       })
       if (screenshotToken.current !== token) return
-      if (kind === 'png') await api.ui.writeClipboardImage(image)
+      let feedback = kind === 'png' ? 'PNG copied' : 'Context copied'
+      if (kind === 'save-png') {
+        const result = await api.ui.exportScreenshot({ operationId: mintObjectId(), image })
+        if (result.status === 'cancelled') return
+        if (result.status !== 'saved') throw new Error(result.message)
+        feedback = 'PNG saved · ' + result.path
+      } else if (kind === 'pin') {
+        const result = await screenshotPin.pin(image)
+        if (result.recordedOperation?.state !== 'completed') throw new Error(result.recordedOperation?.message ?? 'The original pin is unconfirmed. Inspect that operation before another pin.')
+        feedback = result.state === 'open' ? 'Reference pinned' : 'Pinned reference closed'
+      } else if (kind === 'png') await api.ui.writeClipboardImage(image)
       else if (!await copyTextToClipboard(formatScreenshotContext(input.capture, input, image, input.source), error => { if (screenshotToken.current === token) reportError(error) })) return
       if (screenshotToken.current !== token) return
-      setScreenshotCopied(kind === 'png' ? 'PNG copied' : 'Context copied')
+      setScreenshotCopied(feedback)
     } catch (error) {
       if (screenshotToken.current === token) reportError(error)
     } finally {
       if (screenshotToken.current === token) setScreenshotBusy(false)
     }
+  }
+
+  async function checkScreenshotPin(): Promise<void> {
+    if (screenshotBusy) return
+    const token = screenshotToken.current
+    setScreenshotBusy(true)
+    try {
+      const result = await screenshotPin.checkPin()
+      if (screenshotToken.current !== token || !result) return
+      if (result.recordedOperation?.state === 'completed') setScreenshotCopied(result.state === 'open' ? 'Original reference pinned' : 'Original pinned reference closed')
+      else reportError(new Error(result.recordedOperation?.message ?? 'The original pin did not complete. Your image is kept.'))
+    } catch (cause) { if (screenshotToken.current === token) reportError(cause) }
+    finally { if (screenshotToken.current === token) setScreenshotBusy(false) }
   }
 
   async function loadOperationHistory(): Promise<void> {
@@ -1094,6 +1119,9 @@ function BrowserPaneContent({
             onCancel={cancelScreenshot}
             onComplete={(input) => void copyScreenshot(input)}
             onCopyContext={(input) => void copyScreenshot(input, 'context')}
+            onSavePng={(input) => void copyScreenshot(input, 'save-png')}
+            onPin={(input) => void copyScreenshot(input, 'pin')}
+            {...(screenshotPin.uncertain ? { onCheckPin: () => void checkScreenshotPin() } : {})}
             onEdited={screenshotEdited}
             onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}
             onError={reportError}

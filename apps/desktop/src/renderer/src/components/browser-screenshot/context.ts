@@ -5,7 +5,7 @@ import type { ImageAnnotationInput } from '../image-annotation/types'
 import type { AnnotationHistoricalSource } from '../image-annotation/document'
 
 /** A description of this processed image, never a fresh read of the current tab. */
-export function formatScreenshotContext(capture: BrowserScreenshotCapture | null, input: ImageAnnotationInput, output: BrowserPng, historicalSource: AnnotationHistoricalSource = null): string {
+export function formatScreenshotContext(capture: BrowserScreenshotCapture | null, input: ImageAnnotationInput, output: BrowserPng, historicalSource: AnnotationHistoricalSource = null, origin: 'saved-document' | 'system' = 'saved-document'): string {
   const geometry = screenshotCropGeometry(input.displayWidth, input.displayHeight, 1, input.crop)
   const scaleX = output.width / geometry.cropWidth, scaleY = output.height / geometry.cropHeight
   const annotations = screenshotOutputShapes(input.shapes, input.crop).flatMap(shape => {
@@ -19,7 +19,7 @@ export function formatScreenshotContext(capture: BrowserScreenshotCapture | null
   })
   return 'Screenshot context\n\nCoordinates refer to this processed PNG and its original image.\n\n' + JSON.stringify({
     browserId: capture?.browserId ?? null, navigationId: capture?.navigationId ?? null, source: capture ? capture.source : historicalSource,
-    ...(capture ? {} : { sourceKind: 'saved-document' }),
+    ...(capture ? {} : { sourceKind: origin }),
     originalImagePixels: { width: input.displayWidth, height: input.displayHeight },
     outputPng: { width: output.width, height: output.height },
     crop: geometry.rect,

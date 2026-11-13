@@ -1,9 +1,9 @@
 .image-annotation-editor { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--surface-0); isolation: isolate; container: screenshot-editor / size; font-size: var(--fs-small); }
 .image-annotation-editor__header { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
-.image-annotation-editor__title { display: grid; grid-template-columns: max-content max-content; align-items: baseline; column-gap: 8px; flex: 1 1 135px; min-width: 0; margin-right: auto; white-space: nowrap; }
-.image-annotation-editor__title strong { color: var(--text); font-weight: 600; }
+.image-annotation-editor__title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 8px; flex: 1 1 135px; min-width: 0; margin-right: auto; overflow: hidden; white-space: nowrap; }
+.image-annotation-editor__title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; }
 .image-annotation-editor__title small { color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
-.image-annotation-editor__status { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; height: 15px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: 10px; }
+.image-annotation-editor__status { grid-column: 1 / -1; display: block; width: 100%; max-width: 100%; height: 15px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: 10px; }
 .image-annotation-editor__status--success { color: var(--green-text); }
 .image-annotation-toolbar { flex: none; position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 5px 10px; border-bottom: 1px solid var(--line-soft); }
 .image-annotation-toolbar__tools, .image-annotation-toolbar__history, .image-annotation-toolbar__actions, .image-annotation-toolbar__colors, .image-annotation-toolbar__group, .image-annotation-toolbar__output { display: flex; align-items: center; gap: 3px; min-width: 0; }
@@ -87,3 +87,5 @@
   .image-annotation-editor__notes > label > span { display: none; }
   .image-annotation-editor__notes textarea { height: 64px; min-height: 38px; max-height: 88px; }
 }
+
+.image-annotation-editor__status > svg { display: inline-block; margin-right: 4px; vertical-align: -2px; }

@@ -31,7 +31,7 @@ type TransformGesture = { original: ScreenshotShape; start: ScreenshotPoint; han
 
 export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel = 'Copy PNG', busyLabel = 'Copying…',
-  onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onEdited, onError }: {
+  onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onEdited, onError }: {
   image: AnnotationImage
   busy: boolean
   copied?: string | null
@@ -49,6 +49,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   onOpenOriginal?(): void
   onSavePng?(input: ImageAnnotationInput): void
   onPin?(input: ImageAnnotationInput): void
+  onCheckPin?(): void
   onEdited?(): void
   onError?(error: unknown): void
 }) {
@@ -390,14 +391,15 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   return <div ref={editorRef} className="image-annotation-editor" role="dialog" aria-label={title === 'Screenshot' ? 'Screenshot editor' : title} style={active ? undefined : { display: 'none' }}>
     <header className="image-annotation-editor__header">
       <span className="image-annotation-editor__title"><strong>{title}</strong><small>{image.width} × {image.height}</small>
-        <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status">{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
+        <span className={'image-annotation-editor__status' + (copied ? ' image-annotation-editor__status--success' : '')} role="status" title={copied ?? documentStatus ?? undefined}>{copied ? <><CheckIcon size={13} />{copied}</> : documentStatus}</span>
       </span>
       <div className="image-annotation-toolbar__actions">
         <button type="button" onClick={onCancel}><CancelIcon size={13} /> Cancel</button>
         <span className="image-annotation-toolbar__output" role="group" aria-label="Screenshot output">
           <AnnotationOriginalMenu active={active} busy={busy} loaded={loaded} onOpen={onOpenOriginal} onSave={onSaveOriginal ? () => complete('save') : undefined} />
           {onSavePng ? <button type="button" aria-label="Save PNG" title="Save the processed image as PNG" disabled={busy || !loaded} onClick={() => complete('save-png')}><SaveIcon size={13} /><span>Save PNG</span></button> : null}
-          {onPin ? <button type="button" aria-label="Pin image" title="Keep the processed image in a floating window" disabled={busy || !loaded} onClick={() => complete('pin')}><PinIcon size={13} /><span>Pin</span></button> : null}
+          {onPin ? <button type="button" aria-label="Pin image" title={onCheckPin ? 'Create a separate reference. Check pin cycles through unconfirmed original operations.' : 'Keep the processed image in a floating window'} disabled={busy || !loaded} onClick={() => complete('pin')}><PinIcon size={13} /><span>{onCheckPin ? 'Pin another' : 'Pin'}</span></button> : null}
+          {onCheckPin ? <button type="button" title="Cycle through unconfirmed original operations without creating another pin" disabled={busy} onClick={onCheckPin}>Check pin</button> : null}
         </span>
         {onCopyContext ? <button type="button" disabled={busy || !loaded} onClick={() => complete('context')}>Copy context</button> : null}
         <button className="primary-button" type="button" disabled={busy || !loaded} onClick={() => complete()}><ClipboardIcon size={13} />{busy ? busyLabel : completeLabel}</button>
