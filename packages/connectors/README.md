@@ -87,7 +87,8 @@ for the exact entry, permission and original-operation contract.
 ## Connector service policy
 
 The original `ConnectionHost.service` owns one endpoint-wide enabled/revision
-policy in the same SQLite database. Its strict public types and result validation
+policy and an independent enabled/revision policy per adapter in the same SQLite
+database; new automatic traffic requires both to be enabled. Its strict public types and result validation
 are defined in [the Core service contract](../core/src/connection-service-contract.ts)
 and [codec](../core/src/connection-service-codec.ts). An accurately absent row means
 enabled at revision zero; storage uncertainty cannot supply that default.
@@ -107,10 +108,10 @@ that exact input after a lost reply; current policy does not acknowledge the
 original operation. Service and application configure share the original
 configuration operation index and reject cross-method operation ID reuse.
 
-Desktop Settings → Mods → Agent Conversation Connector exposes the same policy
-through [the original settings module](../../apps/desktop/src/renderer/src/components/settings/modules/connections.tsx).
-Edit **Enable Agent Conversation Connector**, then choose **Save Connector service**.
-**Check current service** reads current policy; **Original service requests** keeps
+Desktop Settings → Conversation Channels → Lark exposes the same policy
+through [the original settings module](../../apps/desktop/src/renderer/src/components/settings/modules/lark.tsx).
+Edit **Enable**, then choose **Save changes**.
+**Refresh status** reads current policy; **Settings and history** keeps
 each submitted input and provides **Check original request** for its historical
 receipt. A new choice can explicitly use the current revision while earlier
 requests remain available. Read failures keep the last confirmed menu policy and
@@ -174,8 +175,8 @@ await runtime.stop()
 connections.close()
 ```
 
-Desktop contributes **Chat applications** to the existing **Connections** Settings
-group. Its trusted credential-entry IPC is separate from the public reference-only
+Desktop contributes **Lark** and **Discord** to the existing **Conversation Channels**
+Settings group. Its trusted credential-entry IPC is separate from the public reference-only
 connection methods. The Settings component reconciles the original operation after
 a lost save response rather than creating a second connection.
 
@@ -340,7 +341,8 @@ After that explicit shared cut, original Core-captured public input is relayed
 with its recorded human, Agent, external or unknown author. The same outbox
 retains each exact content reference and freezes `relay.sender: application`
 with the original target before dispatch. Feishu renders it as a read-only
-amux relay card; ordinary Agent speech keeps its existing format. The original
+role card for its recorded author; ordinary Agent speech uses the same card
+renderer. The original
 delivery SDK and CLI expose those typed source facts without body or credentials.
 This is application relay, not platform personal-send authority. It does not
 qualify missing native user spans or complete full-conversation coverage.
@@ -379,7 +381,7 @@ original Region and native source. For example:
   "regionAnchor": { "regionId": "original-region" },
   "externalConversationId": "room/project-alpha",
   "expectedSource": { "providerId": "provider", "nativeSessionId": "original-native" },
-  "scope": { "input": "mentions-and-replies", "publication": "future-native-user-facing" }
+  "scope": { "input": "mentions-and-replies", "publication": "future-shared-conversation" }
 }
 ```
 
