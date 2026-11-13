@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 import type { ContinuousProgressTaskSource } from '@agentmux/core'
+import type { DemandDelegation } from '@agentmux/demand/delegations'
+import { projectGoalPlan, type GoalPlan } from '@agentmux/demand/goal-plan'
 
 const execute = promisify(execFile)
 export function validateContinuousProgressTaskSource(value: unknown): asserts value is ContinuousProgressTaskSource {
@@ -47,7 +49,7 @@ export async function readContinuousProgressTaskSource(source: ContinuousProgres
   throw new Error('Task source lifecycle is unconfirmed; manual input remains available.')
 }
 
-export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; assigneeSessionIds: string[]; supervisorSessionId: string | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> } }
+export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: string[]; assigneeSessionIds: string[]; supervisorSessionId: string | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> }; plan?: GoalPlan; delegations?: DemandDelegation[] }
 export type GoalProgressReader = (goalId: string) => Promise<GoalProgressRecord | null>
 
 /** Main interprets the original Goal snapshot; this does not live in Core's scheduler. */
@@ -57,5 +59,22 @@ export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskS
   if (goal.status === 'done' || goal.status === 'cancelled') return { action: 'stop', reason: prefix + goal.status + '; the Agent Run is kept.' }
   if (goal.status === 'blocked') return { action: 'pause', reason: prefix + 'blocked; review the original Goal.' }
   if (goal.alignment?.revision !== source.alignmentRevision || goal.alignment.confirmedAt === null) return { action: 'pause', reason: prefix + 'the original confirmed scope changed. Stop this loop before explicitly starting the new scope.' }
+  if (goal.plan) return decideGoalPlanProgress(prefix, goal.plan, goal.delegations ?? [], goal.alignment.criteria)
   return { action: 'continue', reason: prefix + `confirmed scope r${source.alignmentRevision}; source checked.` }
+}
+
+/**
+ * Monitoring follows the plan: keep going while any node has work, including nodes whose facts
+ * are unknown (the Supervisor reconciles them from the original receipt); pause only when the
+ * human must accept results or the plan needs a revision to move.
+ */
+function decideGoalPlanProgress(prefix: string, plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: Array<{ id: string; text: string }>): { action: 'continue' | 'pause'; reason: string } {
+  const projection = projectGoalPlan(plan, delegations, criteria)
+  const named = (states: readonly string[]) => projection.nodes.filter(item => states.includes(item.state)).map(item => item.node.id)
+  const open = { ready: named(['ready']), changes: named(['changes']), working: named(['working']), review: named(['review']), unknown: named(['unknown']) }
+  const parts = Object.entries(open).filter(([, ids]) => ids.length).map(([state, ids]) => `${state}: ${ids.join(', ')}`)
+  const progress = `plan r${plan.revision} ${projection.done}/${projection.total} done`
+  if (parts.length) return { action: 'continue', reason: `${prefix}${progress}; ${parts.join('; ')}.${open.unknown.length ? ' Reconcile unknown nodes from their original delegation receipts before acting on them.' : ''}` }
+  if (projection.total > 0 && projection.done === projection.total) return { action: 'pause', reason: `${prefix}${progress}; every node passed review. Waiting for a person to accept the Goal results.` }
+  return { action: 'pause', reason: `${prefix}${progress}; remaining nodes wait on cancelled dependencies (${named(['waiting']).join(', ')}). Revise the plan to move them.` }
 }
