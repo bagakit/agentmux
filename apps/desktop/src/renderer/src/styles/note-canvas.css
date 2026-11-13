@@ -17,7 +17,7 @@
 .note-canvas-notice button, .note-canvas-empty button, .note-canvas-body-state button { border: 0; padding: 2px 0; background: transparent; color: var(--blue); text-decoration: underline; text-underline-offset: 3px; }
 .note-canvas-stage { position: relative; width: 100%; height: clamp(440px, 68vh, 820px); min-height: 360px; }
 .note-canvas[data-scope="note"] .note-canvas-stage { height: clamp(420px, 66vh, 780px); }
-.note-canvas .react-flow { background: var(--surface-1); --xy-edge-stroke: var(--text-3); --xy-node-color: var(--text); --xy-selection-background-color: var(--selection-bg); }
+.note-canvas .react-flow { background: var(--surface-1); --xy-edge-stroke: var(--text-3); --xy-node-color: var(--text); --xy-selection-background-color: var(--hl); }
 .note-canvas .react-flow__attribution { background: var(--surface-1); padding: 2px 6px; font-size: 9px; opacity: .7; }
 .note-canvas .react-flow__attribution a { color: var(--text-3); }
 .note-canvas .react-flow__handle { height: 5px; width: 5px; min-height: 5px; min-width: 5px; border: 1px solid var(--surface-2); background: var(--text-3); }

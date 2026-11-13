@@ -127,7 +127,7 @@
 .launcher-utility__head > span:first-child { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text-3); }
 .launcher-utility__head strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
 .launcher-utility__head small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); }
-.launch-terminal__body { height: clamp(156px, calc(var(--launcher-region-height, 800px) * .34), 320px); min-height: 0; margin-top: var(--sp-2); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--terminal-bg); }
+.launch-terminal__body { height: clamp(156px, calc(var(--launcher-region-height, 800px) * .34), 320px); min-height: 0; margin-top: var(--sp-2); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-0); }
 .launcher-terminal-pending { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) 0; color: var(--text-3); font-size: var(--fs-meta); }
 .launcher-terminal-pending:has(> .service-window) { display: block; padding: var(--sp-2) 0; }
 .launcher-terminal-pending > .service-window { margin: 0; }

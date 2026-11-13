@@ -1,4 +1,4 @@
-.connector-sharing-map { display: grid; gap: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: radial-gradient(ellipse at 12% 40%, color-mix(in srgb, var(--green) 6%, transparent), transparent 65%), var(--surface-2); min-width: 0; }
+.connector-sharing-map { display: grid; gap: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: radial-gradient(ellipse at 12% 40%, color-mix(in srgb, var(--green) 6%, transparent), transparent 65%), var(--surface-2); min-width: 0; }
 .connector-sharing-map__caption { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-body); }
 .connector-sharing-map__caption > span { font-weight: 600; letter-spacing: -.015em; }
 .connector-sharing-map__caption small { color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; }

@@ -37,12 +37,12 @@
 .mote-directory-settings__preview[data-view="list"] i { width: 13px; height: 13px; }
 .mote-directory-settings__preview[data-view="list"] b { width: 54px; }
 .mote-directory-settings__choice { display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--text-2); font-size: var(--fs-meta); }
-.mote-directory-settings__choice input { margin: 0; accent-color: var(--accent); }
+.mote-directory-settings__choice input { margin: 0; accent-color: var(--green); }
 .mote-directory-settings > legend, .mote-directory-sizes > legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .mote-directory-settings__preview[data-view="collaborators"] i { width: var(--mote-directory-avatar-size, 45px); height: var(--mote-directory-avatar-size, 45px); }
 .mote-directory-size { display: flex; align-items: center; gap: 12px; padding: 12px 0 2px; color: var(--text-2); font-size: var(--fs-meta); }
-.mote-directory-size input { flex: 1; min-width: 40px; accent-color: var(--accent); }
+.mote-directory-size input { flex: 1; min-width: 40px; accent-color: var(--green); }
 .mote-directory-size output { width: 34px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-3); }
 
 .mote-directory[data-mote-directory-view="list"] .space-mote-row { min-height: calc(var(--mote-directory-avatar-size, 45px) + 8px); gap: 8px; }

@@ -241,7 +241,7 @@
 }
 .mote-behavior-action { min-width: 32px; min-height: 32px; flex-shrink: 0; }
 .mote-behavior-summary .mote-behavior-action { width: 32px; height: 32px; }
-.mote-behavior-tooltip { position: fixed; z-index: var(--layer-tooltip); max-width: 208px; padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-soft); font-size: var(--fs-meta); pointer-events: none; overflow-wrap: anywhere; }
+.mote-behavior-tooltip { position: fixed; z-index: var(--layer-tooltip); max-width: 208px; padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text); box-shadow: var(--elev-3), var(--hl-strong); font-size: var(--fs-meta); pointer-events: none; overflow-wrap: anywhere; }
 .mote-behavior-dialog { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
 .mote-behavior-header { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; padding: 24px 24px 18px; }
 .mote-behavior-header > div { min-width: 0; }
@@ -297,7 +297,7 @@
 .mote-current-work__copy { appearance: none; border: 0; background: transparent; color: inherit; display: grid; gap: 3px; padding: 0; flex: 1; min-width: 0; text-align: start; cursor: pointer; }
 .mote-current-work__copy strong { font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
 .mote-current-work__copy span { font-size: 10px; color: var(--text-3); }
-.mote-current-work__copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
+.mote-current-work__copy:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; border-radius: 3px; }
 .mote-current-work__detail { margin: 5px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mote-current-work__chooser { display: grid; gap: 7px; padding-block: 7px; }
 .mote-current-work__navigation { display: flex; align-items: center; justify-content: space-between; gap: 6px; border: 0; background: transparent; padding: 4px 0; color: var(--text-2); font-size: 11px; cursor: pointer; text-align: start; }
@@ -316,7 +316,7 @@
 .mote-details__invitation:hover, .mote-details__navigation:hover { color: var(--text); }
 .mote-details__invitation:focus-visible, .mote-details__navigation:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: var(--radius-sm); }
 
-.mote-profile-popover { position: fixed; z-index: var(--layer-popover); display: flex; flex-direction: column; width: 320px; height: min(640px, calc(100dvh - 32px)); min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-popover, var(--shadow-soft)); overflow: hidden; }
+.mote-profile-popover { position: fixed; z-index: var(--layer-popover); display: flex; flex-direction: column; width: 320px; height: min(640px, calc(100dvh - 32px)); min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-3), var(--hl-strong); overflow: hidden; }
 .mote-profile-popover__close { position: absolute; top: 10px; right: 10px; z-index: 2; width: 24px; height: 24px; }
 .mote-profile-popover > .mote-details { min-width: 0; flex: 1; }
 .mote-profile-popover .mote-details__profile { padding-inline-end: 42px; }
@@ -405,7 +405,7 @@
 .mote-main-actions__trigger:hover, .mote-main-actions__trigger[data-state="open"] { color: var(--text); background: var(--surface-2); }
 .mote-main-actions__trigger:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 /* Shared non-modal popover: the native overlay projection sees its open dialog role and state. */
-.mote-main-actions__menu { position: fixed; z-index: var(--layer-popover); width: 360px; box-sizing: border-box; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--shadow-soft); color: var(--text); font-size: var(--fs-meta); }
+.mote-main-actions__menu { position: fixed; z-index: var(--layer-popover); width: 360px; box-sizing: border-box; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--elev-3), var(--hl-strong); color: var(--text); font-size: var(--fs-meta); }
 .mote-main-actions__title { margin: 0 4px 4px; font-size: var(--fs-meta); font-weight: 600; color: var(--text-2); }
 .mote-main-actions__menu button { margin: 4px; }
 .mote-main-actions[data-presentation="setup"] { position: absolute; top: 32px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; color: var(--text-2); font-size: var(--fs-body); }

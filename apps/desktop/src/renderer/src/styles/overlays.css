@@ -52,7 +52,7 @@
 .host-folder-dialog { --dialog-width: 480px; }
 .confirmation-dialog__cancel { margin-right: auto; }
 .annotation-file-dialog form { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-5); }
-.annotation-file-dialog form > label { color: var(--text-2); font-size: var(--fs-small); }
+.annotation-file-dialog form > label { color: var(--text-2); font-size: var(--fs-meta); }
 .annotation-file-dialog form > input { width: 100%; }
 .annotation-file-dialog form > footer { flex-wrap: wrap; margin-top: var(--sp-3); }
 .confirmation-dialog footer button[data-confirm-label] { display: grid; place-items: center; }

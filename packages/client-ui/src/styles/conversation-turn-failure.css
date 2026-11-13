@@ -1,4 +1,4 @@
-.conversation-turn-failure { min-width: 0; margin: var(--sp-2) var(--sp-4) var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-inline-start: 3px solid var(--red-text); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: var(--fs-meta)/1.5 var(--font-ui); }
+.conversation-turn-failure { min-width: 0; margin: var(--sp-2) var(--sp-4) var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-inline-start: 3px solid var(--red-text); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); }
 .conversation-turn-failure__heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .conversation-turn-failure__heading > svg { flex: 0 0 auto; color: var(--red-text); }
 .conversation-turn-failure__heading strong { font-weight: 550; }

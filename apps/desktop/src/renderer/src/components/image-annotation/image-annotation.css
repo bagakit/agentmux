@@ -1,4 +1,4 @@
-.image-annotation-editor { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--surface-0); isolation: isolate; container: screenshot-editor / size; font-size: var(--fs-small); }
+.image-annotation-editor { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; background: var(--surface-0); isolation: isolate; container: screenshot-editor / size; font-size: var(--fs-meta); }
 .image-annotation-editor__header { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 42px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
 .image-annotation-editor__title { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 8px; flex: 1 1 135px; min-width: 0; margin-right: auto; overflow: hidden; white-space: nowrap; }
 .image-annotation-editor__title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; }

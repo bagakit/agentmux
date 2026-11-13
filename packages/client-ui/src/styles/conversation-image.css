@@ -59,10 +59,10 @@
 @media (pointer: coarse) { .md-conversation-image__control { width: 44px; height: 44px; } }
 
 .md-conversation-image__reference { overflow-wrap: anywhere; }
-.md-conversation-image__failure { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11px; }
+.md-conversation-image__failure { display: block; margin-top: 4px; color: var(--text-3); font-size: 11px; }
 .md-conversation-image__retry { display: inline-flex; align-items: center; vertical-align: middle; padding: 3px; margin-left: 4px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
-.md-conversation-image__retry:hover { color: var(--ink-1); background: var(--surface-3); }
-.md-conversation-image__retry:focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
+.md-conversation-image__retry:hover { color: var(--text); background: var(--surface-3); }
+.md-conversation-image__retry:focus-visible { outline: 1px solid var(--text-3); outline-offset: 2px; }
 
 .md-conversation-image__navigation { display: flex; align-items: center; gap: var(--sp-1); }
 .md-conversation-image__position { min-width: 40px; text-align: center; color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }

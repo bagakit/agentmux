@@ -9,7 +9,7 @@
 .capsule-toolbar__button[data-attention='pending'] { color: var(--green-text); font-weight: 600; }
 .capsule-toolbar__button[data-attention='pending'] > svg { color: var(--green); }
 .capsule-toolbar__button[data-attention='pending'] > .capsule-toolbar__count { color: var(--bg); background: var(--green); }
-.capsule-chrome { flex: none; min-width: 0; max-height: min(320px, 40vh); overflow: auto; overscroll-behavior: contain; padding: var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); color: var(--text-1); font-size: var(--fs-meta); }
+.capsule-chrome { flex: none; min-width: 0; max-height: min(320px, 40vh); overflow: auto; overscroll-behavior: contain; padding: var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); color: var(--text); font-size: var(--fs-meta); }
 .capsule-chrome[hidden] { display: none; }
 .capsule-chrome button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-1); }
 .capsule-chrome__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); }
@@ -38,8 +38,8 @@
 .capsule-question code, .capsule-chrome__source code { overflow-wrap: anywhere; user-select: text; }
 .capsule-question__question { margin: 0 0 var(--sp-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .capsule-question__answer { display: grid; gap: var(--sp-1); color: var(--text-2); }
-.capsule-question__answer textarea { field-sizing: content; box-sizing: border-box; display: block; resize: vertical; min-height: 72px; max-height: 160px; width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-1); font: inherit; line-height: 1.6; }
-.capsule-question__answer textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.capsule-question__answer textarea { field-sizing: content; box-sizing: border-box; display: block; resize: vertical; min-height: 72px; max-height: 160px; width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font: inherit; line-height: 1.6; }
+.capsule-question__answer textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
 /* A saved answer is reading content, not an input that ignores typing. */
 .capsule-question__answer textarea:read-only { resize: none; border-color: transparent; background: var(--surface-1); color: var(--text); }
 .capsule-question__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }

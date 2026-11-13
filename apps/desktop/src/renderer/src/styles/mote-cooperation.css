@@ -30,7 +30,7 @@
 }
 
 .mote-cooperation--navigation { border: 0; background: transparent; flex: 0 0 auto; }
-.mote-cooperation__popover { position: fixed; z-index: var(--layer-popover); width: 400px; box-sizing: border-box; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-popover, var(--shadow-soft)); padding: 12px; }
+.mote-cooperation__popover { position: fixed; z-index: var(--layer-popover); width: 400px; box-sizing: border-box; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--elev-3), var(--hl-strong); padding: 12px; }
 .mote-cooperation__popover-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .mote-cooperation__popover-heading h2 { margin: 0; font-size: var(--fs-body); font-weight: 600; }
 .mote-cooperation__popover .mote-cooperation__team-body { padding: 8px 0; max-height: none; }

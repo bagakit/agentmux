@@ -337,11 +337,11 @@
 .composer-mailbox__notification-feedback > .composer-mailbox__notification-reason { flex-basis: 100%; text-align: start; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .composer-mailbox__notification-feedback .composer-tool { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 24px; min-height: 24px; padding: var(--sp-1); background: transparent; }
 .composer-mailbox__notification-history { margin-top: var(--sp-2); }
-.composer-mailbox__notification-history section { padding: var(--sp-2) 0; border-top: 1px solid var(--border); }
+.composer-mailbox__notification-history section { padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
 .composer-mailbox__notification-journal { max-width: 100%; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .composer-mailbox__notification-journal summary { cursor: pointer; text-align: end; }
 .composer-mailbox__notification-journal p { margin: var(--sp-1) 0; }
-.composer-mailbox__notification-journal section { padding-block: var(--sp-2); border-top: 1px solid var(--border); }
+.composer-mailbox__notification-journal section { padding-block: var(--sp-2); border-top: 1px solid var(--line); }
 .composer-mailbox__notification-journal .composer-tool { padding: var(--sp-1); }
 .composer-mailbox__navigation-feedback, .composer-mailbox__pending-location { color: var(--text-3); font-size: var(--fs-meta); }
 .composer-mailbox__pending-location { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
@@ -469,7 +469,7 @@
 @media (forced-colors: active), (prefers-reduced-transparency: reduce) {
   .composer-pending__card { opacity: 1; background: var(--surface-2); backdrop-filter: none; }
 }
-.composer-pending__recover.composer-tool { width: auto; padding: 0 6px; color: var(--text-1); font: inherit; font-size: var(--fs-micro); }
+.composer-pending__recover.composer-tool { width: auto; padding: 0 6px; color: var(--text); font: inherit; font-size: var(--fs-micro); }
 .composer-pending__more.composer-tool { width: auto; min-width: 24px; padding: 0 3px; font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-pending__more > span { position: relative; white-space: nowrap; }
 .composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: auto minmax(0, 1fr); padding: 7px; }

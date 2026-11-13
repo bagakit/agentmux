@@ -459,7 +459,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-directory-issues .mobile-directory-retry { min-height: 44px; gap: var(--sp-3); margin-block: var(--sp-3); }
 .mobile-directory-issue-list { display: grid; gap: var(--sp-5); padding-bottom: var(--sp-4); }
 .mobile-directory-issue-list > section { padding: var(--sp-5); background: var(--surface-2); border-radius: var(--mobile-radius); overflow-wrap: anywhere; }
-.mobile-directory-issue-list h3 { margin: 0; color: var(--text-1); font-size: var(--fs-body); font-weight: 600; }
+.mobile-directory-issue-list h3 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .mobile-directory-issue-list p, .mobile-session-diagnostic p { margin: var(--sp-3) 0 0; font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mobile-directory-technical > summary { display: flex; align-items: center; gap: var(--sp-3); min-height: 44px; color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; }
 .mobile-directory-technical > summary::before { content: '›'; font-size: var(--fs-body); }
