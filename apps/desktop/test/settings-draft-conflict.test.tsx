@@ -22,7 +22,7 @@ function mode(name: string) {
 }
 async function choose(name: string) { await act(async () => mode(name).click()) }
 const selected = (name: string) => String(mode(name).checked)
-const saveButton = () => dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!
+const saveButton = () => dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button.primary-button')!
 
 describe('Settings drafts across external commits', () => {
   it('refreshes clean fields, keeps dirty fields and saves only authored intent against the original baseline', async () => {
@@ -34,7 +34,7 @@ describe('Settings drafts across external commits', () => {
     expect(selected('Light')).toBe('true')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Terminal font size in pixels"]')?.value).toBe('21')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave).toHaveBeenCalledWith(
       { ...external, appAppearance: 'light' },
       { ...external, appAppearance: 'dark' }
@@ -50,12 +50,12 @@ describe('Settings drafts across external commits', () => {
     await choose('Light')
     current = { ...current, appearance: { ...initial, appAppearance: 'system' } }
     await dom.render(<AppearanceSettingsPane appearance={current.appearance} onSave={onSave} />)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('appearance.appAppearance')
     expect(selected('Light')).toBe('true')
     expect(saveButton().disabled).toBe(false)
     expect(current.appearance.appAppearance).toBe('system')
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave).toHaveBeenCalledTimes(2)
     expect(onSave.mock.calls.map(([, expected]) => expected.appAppearance)).toEqual(['dark', 'dark'])
   })
@@ -64,11 +64,11 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(async () => {}).mockRejectedValueOnce(new Error('disk full'))
     await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
     await choose('Light')
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('disk full')
     expect(selected('Light')).toBe('true')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave).toHaveBeenLastCalledWith(
       { ...initial, appAppearance: 'light', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT },
       { ...initial, terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT }
@@ -81,13 +81,13 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
     await choose('Light')
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(saveButton().disabled).toBe(true)
     await choose('System')
     await act(async () => finish())
     expect(selected('System')).toBe('true')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave.mock.calls[1]).toEqual([
       { ...initial, appAppearance: 'system', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT },
       { ...initial, appAppearance: 'light', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT }
@@ -111,14 +111,14 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
     await choose('Light')
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave).toHaveBeenCalledOnce()
     await choose('Dark')
     await dom.render(<AppearanceSettingsPane appearance={{ ...initial, appAppearance: 'light' }} onSave={onSave} />)
     await act(async () => finish())
     expect(selected('Dark')).toBe('true')
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave.mock.calls[1]).toEqual([
       { ...initial, terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT },
       { ...initial, appAppearance: 'light', terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT }
@@ -151,14 +151,14 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
     await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave).toHaveBeenCalledOnce()
     await dom.click('[type="checkbox"]')
     await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     await act(async () => finish())
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(false)
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave.mock.calls[1]).toEqual([
       { copyPathsAsAbsolute: false },
       { copyPathsAsAbsolute: true }
@@ -172,7 +172,7 @@ describe('Settings drafts across external commits', () => {
     await dom.click('[type="checkbox"]')
     await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={true} onSave={onSave} />)
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave).toHaveBeenCalledWith(
       { copyPathsAsAbsolute: true },
       { copyPathsAsAbsolute: false }
@@ -184,11 +184,11 @@ describe('Settings drafts across external commits', () => {
     const onSave = vi.fn(async () => {}).mockRejectedValueOnce(new Error('disk full'))
     await dom.render(<GeneralSettingsPane copyPathsAsAbsolute={false} onSave={onSave} />)
     await dom.click('[type="checkbox"]')
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('disk full')
     expect(dom.container.querySelector<HTMLInputElement>('[type="checkbox"]')?.checked).toBe(true)
     expect(saveButton().disabled).toBe(false)
-    await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button.primary-button')
     expect(onSave.mock.calls).toEqual(Array.from({ length: 2 }, () => [
       { copyPathsAsAbsolute: true },
       { copyPathsAsAbsolute: false }
@@ -248,5 +248,72 @@ describe('Settings drafts across external commits', () => {
     } })
     expect(useAppStore.getState().executorDetections).toEqual({})
     expect(useAppStore.getState().hostChecks).toEqual({})
+  })
+})
+
+describe('Resolving a same-field conflict in place', () => {
+  const conflict = () => Object.assign(new Error('“appearance.appAppearance” changed since you started editing. Your draft is kept. Review the current setting before saving again.'), { code: 'CONFIG_CONFLICT' })
+  const action = (name: 'use-saved' | 'keep-mine') => dom.container.querySelector<HTMLButtonElement>(`[data-settings-conflict-action="${name}"]`)
+
+  it('saves the person\'s value over the newer saved one after Keep mine', async () => {
+    let current = { ...composerConfig, appearance: initial }
+    const onSave = vi.fn(async (appearance: AppearanceConfig, expected: AppearanceConfig) => {
+      current = applyConfigEdit(current, { ...current, appearance: expected }, { ...current, appearance })
+    })
+    await dom.render(<AppearanceSettingsPane appearance={current.appearance} onSave={onSave} />)
+    await choose('Light')
+    current = { ...current, appearance: { ...initial, appAppearance: 'system' } }
+    await dom.render(<AppearanceSettingsPane appearance={current.appearance} onSave={onSave} />)
+    await dom.click('[data-settings-save-bar] button.primary-button')
+    expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('changed since you started editing')
+    expect(action('keep-mine')).not.toBeNull()
+    await act(async () => action('keep-mine')!.click())
+    expect(dom.container.querySelector('[role="alert"]')).toBeNull()
+    expect(selected('Light')).toBe('true')
+    await dom.click('[data-settings-save-bar] button.primary-button')
+    expect(current.appearance.appAppearance).toBe('light')
+    expect(onSave.mock.calls.at(-1)?.[1].appAppearance).toBe('system')
+  })
+
+  it('takes the newer saved value and leaves nothing unsaved after Use saved', async () => {
+    const onSave = vi.fn(async () => { throw conflict() })
+    await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
+    await choose('Light')
+    const newer = { ...initial, appAppearance: 'system' as const }
+    await dom.render(<AppearanceSettingsPane appearance={newer} onSave={onSave} />)
+    await dom.click('[data-settings-save-bar] button.primary-button')
+    await act(async () => action('use-saved')!.click())
+    expect(selected('System')).toBe('true')
+    expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')?.textContent).toBe('All changes saved')
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it('offers no recovery for an ordinary failure, only its reason', async () => {
+    const onSave = vi.fn(async () => { throw Object.assign(new Error('Disk full'), { code: 'CONFIG_WRITE_FAILED' }) })
+    await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
+    await choose('Light')
+    await dom.click('[data-settings-save-bar] button.primary-button')
+    expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('Disk full')
+    expect(action('keep-mine')).toBeNull()
+    expect(action('use-saved')).toBeNull()
+  })
+
+  it('recognizes the conflict by its code, not by the words of its message', async () => {
+    const onSave = vi.fn(async () => { throw Object.assign(new Error('Something else wording entirely'), { code: 'CONFIG_CONFLICT' }) })
+    await dom.render(<AppearanceSettingsPane appearance={initial} onSave={onSave} />)
+    await choose('Light')
+    await dom.click('[data-settings-save-bar] button.primary-button')
+    expect(action('keep-mine')).not.toBeNull()
+  })
+})
+
+describe('The config:save conflict across the IPC boundary', () => {
+  it('reaches the Renderer with its CONFIG_CONFLICT code through the structured result', async () => {
+    const { sessionInputOperationResult, unwrapSessionInputOperationResult } = await import('../src/shared/session-input-result')
+    const { ConfigConflict } = await import('../src/shared/config-edit')
+    // Main wraps the owner's edit; an IPC copy keeps only data, so the code must travel as data.
+    const result = structuredClone(await sessionInputOperationResult(async () => { throw new ConfigConflict('appearance.appAppearance') }))
+    expect(result).toMatchObject({ ok: false, error: { code: 'CONFIG_CONFLICT' } })
+    expect(() => unwrapSessionInputOperationResult(result)).toThrow(expect.objectContaining({ code: 'CONFIG_CONFLICT' }))
   })
 })
