@@ -26,6 +26,14 @@ describe('Goal plan guidance reaches its readers', () => {
     expect(manager).not.toContain('planNodeId delivers that plan node')
   })
 
+  it('source reports and receipts reach the actual module and executor guidance', () => {
+    const skill = agentMuxModuleSkill('goal')!, executor = goalRoleGuidance({ role: 'executor', goalId: 'goal' })
+    for (const fact of ['sourceMessageId', 'report-submission', 'outbox', 'do not create a duplicate Goal store', 'envelope.application'])
+      expect(executor, fact).toContain(fact)
+    for (const fact of ['intent.workerHostId', 'Runtime and', 'original signed replies']) expect(skill, fact).toContain(fact)
+    expect(agentMuxCommandHelp('goal.report')).toContain('sourceMessageId')
+  })
+
   it('every plan command has help that names its owner rules', () => {
     for (const [method, fact] of [['goal.plan', 'Node state is derived'], ['goal.plan.revise', 'expectedRevision'], ['goal.plan.review', 'cannot review its own work']] as const) {
       const help = agentMuxCommandHelp(method)
