@@ -8,6 +8,7 @@ import { BrowserAgentCreationOptionsDialog } from './BrowserAgentCreationOptions
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import { BrowserSourceNavigation } from './BrowserSourceNavigation'
 import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
+import { BrowserFindBar } from './BrowserFindBar'
 import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
@@ -479,6 +480,9 @@ function BrowserPaneContent({
     } catch (error) { setHandoffNotice(`Agent association check failed. The original page and relationship are kept. ${presentError(error)}`) }
   }
   const [menuOpen, setMenuOpen] = useState(false)
+  /** One find row per Browser, in the presentation that asked: Chromium keeps one find session per page. */
+  const [find, setFind] = useState<{ key: string; request: number } | null>(null)
+  const openFind = (key: string) => setFind(current => ({ key, request: (current?.request ?? 0) + 1 }))
   const [capsuleToolbarHost, setCapsuleToolbarHost] = useState<HTMLSpanElement | null>(null)
   const [customViewport, setCustomViewport] = useState<string | null>(null)
   const [managementOpen, setManagementOpen] = useState(false)
@@ -1548,6 +1552,9 @@ function BrowserPaneContent({
                 <DropdownMenu.Item className="browser-menu__item" disabled={busy} onSelect={() => void run(() => api.browser.reload(tab.browserId))}>
                   <ThemeActionRefreshIcon size={12} /><span>Reload page</span>
                 </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" onSelect={() => openFind(key)}>
+                  <ThemeActionSearchIcon size={12} /><span>Find in page…</span>
+                </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={() => openOperationTimeline(key)}>
                   <ThemeObjectHistoryIcon size={12} /><span>Demonstration</span>
                 </DropdownMenu.Item>
@@ -1593,6 +1600,8 @@ function BrowserPaneContent({
           </DropdownMenu.Root>
         {regionCloseButton}
       </form>
+      {find?.key === key ? <BrowserFindBar key={tab.browserId} browserId={tab.browserId} navigationId={tab.navigationId} loading={tab.loading}
+        agentControlled={tab.control?.owner === 'agent'} focusRequest={find.request} onClose={() => setFind(null)} /> : null}
       {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} browserId={tab.id} capsuleId={tab.capsuleId} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
       {bookmarkSaving ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusLoadingIcon size={12} animation="spin" aria-hidden="true" /><span>Saving bookmark…</span>

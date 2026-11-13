@@ -88,6 +88,26 @@
 .browser-address-history__delete { flex: none; display: grid; place-items: center; color: var(--text-3); }
 .browser-address-history > p { margin: var(--sp-2); color: var(--text-3); }
 .browser-toolbar > .browser-toolbar__more--optional { display: none; }
+.browser-find { flex: none; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); background: var(--surface-1); }
+.browser-find__field { min-width: 48px; height: 28px; flex: 0 1 280px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
+.browser-find__field:focus-within { border-color: var(--focus-line); color: var(--green); }
+.browser-find__field > svg { flex: none; }
+.browser-find__field input { min-width: 0; flex: 1; border: 0; padding: 0; outline: 0; color: var(--text-2); background: transparent; font: var(--fs-meta) var(--font-sans); }
+.browser-find__field:has(> input:disabled), .browser-find__field input:disabled { cursor: not-allowed; }
+.browser-find__field:has(> input:disabled) > * { opacity: .6; }
+/* One width for every find answer, so the input never moves while a person types. */
+.browser-find__count { flex: none; box-sizing: content-box; width: 9ch; padding-inline: var(--sp-2); overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; text-overflow: ellipsis; }
+.browser-find__count--note { color: var(--amber-text); }
+.browser-find__count--control { flex: 0 1 auto; width: auto; min-width: 0; color: var(--amber-text); }
+.browser-find > button { width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
+.browser-find > button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.browser-find > button:disabled { opacity: .3; cursor: default; }
+@container browser-pane (max-width: 380px) {
+  .browser-find { padding-inline: var(--sp-4) var(--sp-1); }
+  .browser-find__field { flex: 1 1 0; gap: var(--sp-1); padding-inline: var(--sp-2); }
+  .browser-find__field > svg { display: none; }
+  .browser-find__count { padding-inline: var(--sp-1); }
+}
 @container browser-pane (max-width: 620px) {
   .browser-toolbar > .browser-toolbar__secondary { display: none; }
   .browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }
