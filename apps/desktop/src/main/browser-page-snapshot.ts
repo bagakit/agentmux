@@ -40,10 +40,17 @@ type AxNode = {
  */
 const PASSTHROUGH_ROLES = new Set(['none', 'presentation', 'generic'])
 
-/** 可以被 Agent 操作的角色。只有这些拿 ref——给不可操作的节点发 ref 是在制造无效把手。 */
+/**
+ * 可以被 Agent 操作的角色。只有这些拿 ref——给不可操作的节点发 ref 是在制造无效把手。
+ *
+ * `Date`、`InputTime`、`DateTime`、`ColorWell` 是 Chromium 给 date / time / datetime-local / month /
+ * week / color 输入框的 AX 角色（没有对应的 ARIA 角色，CDP 报的是内部名）。它们是一个字段整体拿
+ * 一个 ref：不收的话快照里只剩年、月、日这些分段和弹出按钮，Agent 没法把一个日期当作一个值填进去。
+ */
 const INTERACTIVE_ROLES = new Set([
   'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch',
-  'slider', 'spinbutton', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'option', 'treeitem'
+  'slider', 'spinbutton', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'option', 'treeitem',
+  'Date', 'InputTime', 'DateTime', 'ColorWell'
 ])
 
 /** 结构地标。它们不拿 ref，但要占一行并让孩子缩进——Agent 靠这个理解页面分区。 */
@@ -59,7 +66,11 @@ const ROLE_LABELS: Record<string, string> = {
   menuitem: 'menu item',
   menuitemcheckbox: 'menu item',
   menuitemradio: 'menu item',
-  treeitem: 'tree item'
+  treeitem: 'tree item',
+  Date: 'date input',
+  InputTime: 'time input',
+  DateTime: 'date input',
+  ColorWell: 'color input'
 }
 
 /** 无名地标的展示名。有名字时直接用名字。 */
