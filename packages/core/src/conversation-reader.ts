@@ -467,7 +467,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   let state: Cursor
   if (input.cursor) {
     state = decode(input.cursor, ref, mode)
-    if (mode === 'changes' && (!same(state.through, (input as ConversationChangesInput).through) || !same(state.rewrite, (input as ConversationChangesInput).rewrite))) return fail('The continuation changed its original upper frontier or rewrite anchor.')
+    if (mode === 'changes' && (!same(state.through, (input as ConversationChangesInput).through) || !same(state.rewrite, (input as ConversationChangesInput).rewrite))) return fail('The continuation changed its original upper frontier or rewrite anchor.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
     if (mode === 'changes' && !same(state.checkpoint, (input as ConversationChangesInput).checkpoint.frontier) || ('record' in input && input.record ? !same(state.anchor?.record, input.record) : !same(state.anchor, 'anchor' in input ? input.anchor : undefined))) return fail('The continuation belongs to another original frontier or anchor.')
   } else if (mode === 'inspect' && input.view && !('anchor' in input && input.anchor) && !('record' in input && input.record) && !('nativeSource' in input && input.nativeSource)) {
     state = decode(input.view, ref, 'inspect')

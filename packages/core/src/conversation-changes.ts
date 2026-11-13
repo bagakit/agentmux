@@ -255,9 +255,10 @@ export function parseConversationChangesInput(value: unknown): ConversationChang
     if (!Array.isArray(r.anchors) || !r.anchors.length || r.anchors.length > CONVERSATION_REWRITE_MAX_ANCHORS || p.through !== undefined || p.view !== undefined ||
         checkpoint.frontier.cuts.filter(cut => cut.kind === 'native').length !== 1) return bad('A rewrite anchor requires one original native cut, no upper frontier or view, and 1 to 64 anchors.', 'INVALID_CONTROL_REQUEST')
     rewrite = { anchors: r.anchors.map(value => {
-      const a = rpcRecord(value, ['recordId', 'digest']), digest = text(a.digest)
-      if (!/^[a-f0-9]{64}$/u.test(digest)) return bad('A rewrite anchor requires the record digest from its original changes read.', 'INVALID_CONTROL_REQUEST')
-      return { recordId: text(a.recordId), digest }
+      const a = rpcRecord(value, ['recordId', 'digest'])
+      if (typeof a.recordId !== 'string' || !a.recordId || /[\0\r\n]/u.test(a.recordId) || new TextEncoder().encode(a.recordId).length > 16_384 ||
+          typeof a.digest !== 'string' || !/^[a-f0-9]{64}$/u.test(a.digest)) return bad('A rewrite anchor requires the original record ID and digest from its changes read.', 'INVALID_CONTROL_REQUEST')
+      return { recordId: a.recordId, digest: a.digest }
     }) }
   }
   return { ...ref, checkpoint, ...(p.through === undefined ? {} : { through: parseConversationCheckpoint(p.through, ref) }), ...options(p), ...(rewrite ? { rewrite } : {}) }
