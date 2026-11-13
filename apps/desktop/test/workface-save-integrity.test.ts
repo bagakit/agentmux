@@ -410,8 +410,8 @@ describe('a Launcher Agent position is recorded by Core at creation', () => {
   const launch = { launcher: { tabId: 'launch-tab', regionId: 'launch-region' }, executionWorkspaceId: 'project', executorId: 'codex',
     hostId: 'host', workspacePath: config.workspaces[0]!.path, prompt: 'Original first instruction', agentSessionId: 'created-agent',
     createOperationId: 'original-creation' } as never
-  const result = (runId = 'created-run') => ({ created: { kind: 'agent', agentSessionId: 'created-agent', hostId: 'host',
-    creation: { createOperationId: 'original-creation', createdRun: { runId } } }, projectionFailures: [] }) as never
+  const result = (runId = 'created-run', workspacePath = config.workspaces[0]!.path) => ({ created: { kind: 'agent', agentSessionId: 'created-agent', hostId: 'host',
+    workspacePath, creation: { createOperationId: 'original-creation', createdRun: { runId } } }, projectionFailures: [] }) as never
 
   it('attaches the exact Launcher Region with no Renderer save, and a repeat is settled without a new revision', async () => {
     const store = await owner()
@@ -431,7 +431,7 @@ describe('a Launcher Agent position is recorded by Core at creation', () => {
     await attachLauncherAgentPosition(launch, result(), null, config.workspaces, store)
     const before = (await store.read())!
     const other = { ...(launch as object), agentSessionId: 'another-agent' } as never
-    const otherResult = { created: { kind: 'agent', agentSessionId: 'another-agent', hostId: 'host',
+    const otherResult = { created: { kind: 'agent', agentSessionId: 'another-agent', hostId: 'host', workspacePath: config.workspaces[0]!.path,
       creation: { createOperationId: 'original-creation', createdRun: { runId: 'another-run' } } }, projectionFailures: [] } as never
     expect(await attachLauncherAgentPosition(other, otherResult, null, config.workspaces, store)).toMatch(/Launcher position is not yet recorded/)
     const gone = { ...(launch as object), launcher: { tabId: 'launch-tab', regionId: 'missing-region' } } as never
@@ -439,12 +439,28 @@ describe('a Launcher Agent position is recorded by Core at creation', () => {
     expect((await store.read())!).toEqual(before)
   })
 
+  it('records the directory the created Session runs in, such as its scratch Topic folder', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: launcherGraph() })
+    const topic = fixturePath('save-integrity/project/topics/first-topic')
+    expect(await attachLauncherAgentPosition(launch, result('created-run', topic), null, config.workspaces, store)).toBeUndefined()
+    expect((await store.read())!.graph.regions.find(region => region.regionId === 'launch-region')!.execution).toEqual({ hostId: 'host', cwd: topic })
+  })
+
   it('leaves a Goal discussion Launcher to its own owned binding commit', async () => {
     const store = await owner()
     await store.commit({ expectedRevision: 0, graph: launcherGraph() })
     const before = (await store.read())!
-    expect(await attachLauncherAgentPosition(launch, result(), { metadataIssue: 'owned elsewhere' }, config.workspaces, store)).toBeUndefined()
+    const goal = { originals: [], workspaceId: 'project', hostId: 'host', agentSessionId: 'created-agent', createOperationId: 'original-creation' } as never
+    expect(await attachLauncherAgentPosition(launch, result(), goal, config.workspaces, store)).toBeUndefined()
     expect((await store.read())!).toEqual(before)
+  })
+
+  it('still records an ordinary Launcher position when the Goal discussion check could not read its document', async () => {
+    const store = await owner()
+    await store.commit({ expectedRevision: 0, graph: launcherGraph() })
+    expect(await attachLauncherAgentPosition(launch, result(), { metadataIssue: 'The original Launcher placement could not be read.' }, config.workspaces, store)).toBeUndefined()
+    expect((await store.read())!.graph.regions.find(region => region.regionId === 'launch-region')).toMatchObject({ kind: 'agent', agentSessionId: 'created-agent' })
   })
 })
 
