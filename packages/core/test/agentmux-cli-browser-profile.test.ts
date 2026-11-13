@@ -129,6 +129,20 @@ describe('browser profile built CLI reaches the public Control owner', () => {
     expect((await run(['inspect', '--profile', WORK_ID])).body.error).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
   })
 
+  it('inspect shows a Profile’s network route and refuses one with an unknown key or a bad port', async () => {
+    profiles[1] = { ...profiles[1]!, network: { mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 }, bypass: ['*.corp.test'] } }
+    const inspected = await run(['inspect', '--profile', WORK_ID])
+    expect(inspected.code, inspected.stderr).toBe(0)
+    expect(inspected.body.result.profile.network).toEqual({ mode: 'proxy', server: { scheme: 'socks5', host: '10.0.0.2', port: 1080 }, bypass: ['*.corp.test'] })
+    profiles[1] = { ...profiles[1]!, network: { mode: 'direct' } }
+    expect((await run(['inspect', '--profile', WORK_ID])).body.result.profile.network).toEqual({ mode: 'direct' })
+    for (const bad of [{ mode: 'proxy', server: { scheme: 'http', host: 'gw', port: 0 } }, { mode: 'proxy', server: { scheme: 'http', host: 'gw', port: 80, password: 'x' } },
+      { mode: 'direct', server: { scheme: 'http', host: 'gw', port: 80 } }]) {
+      profiles[1] = { ...profiles[1]!, network: bad as never }
+      expect((await run(['inspect', '--profile', WORK_ID])).body.error, JSON.stringify(bad)).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    }
+  }, 20_000)
+
   it('opens a Browser in an exact Profile and the receipt names it; private and conflicting choices do not', async () => {
     const open = (extra: string[]) => runCompiledObjectCli(['browser', 'open', '--url', 'https://example.invalid/', '--in-region', 'r-1', ...extra], person())
       .then(output => ({ ...output, body: objectCliReceipt(JSON.parse(output.code === 0 ? output.stdout : output.stderr)) }))
