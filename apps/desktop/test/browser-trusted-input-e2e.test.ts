@@ -59,6 +59,15 @@ const FIXTURE_PAGE = `<!doctype html><html><body style="margin:0">
     <select id="pet" aria-label="Pet"><option value="cat">Cat</option><option value="dog" disabled>Dog</option><optgroup disabled label="Wild"><option value="fox">Fox</option></optgroup></select>
     <input id="doc" type="file" aria-label="Document" style="width:120px">
   </div>
+  <div style="position:absolute;left:420px;top:200px;width:150px;display:flex;flex-wrap:wrap;gap:2px;font-size:10px">
+    <input id="pw" type="password" aria-label="Password" style="width:60px">
+    <input id="q" type="search" aria-label="Query" style="width:60px">
+    <input id="site" type="url" aria-label="Site" style="width:60px">
+    <input id="phone" type="tel" aria-label="Phone" style="width:60px">
+    <input id="qty" type="number" value="4" aria-label="Quantity" style="width:60px">
+    <textarea id="memo" aria-label="Memo" rows="1" style="width:60px">old</textarea>
+    <div id="rich" contenteditable="true" aria-label="Rich" role="textbox" style="width:60px;min-height:14px;border:1px solid #999">old</div>
+  </div>
   <dialog id="modal"><button>Modal button</button></dialog>
   <button id="covered" style="position:absolute;left:240px;top:30px;width:120px;height:40px">Covered</button>
   <div style="position:absolute;left:230px;top:20px;width:150px;height:60px;background:rgba(0,0,0,.4)"></div>
@@ -169,6 +178,13 @@ app.whenReady().then(async () => {
     await act('rovingKey', 'pressKey', [ref('Fruits'), 'ArrowDown'], () => contents.executeJavaScript('document.activeElement && document.activeElement.id'))
     await contents.executeJavaScript('document.getElementById("under").focus()')
     await act('bounce', 'fillInput', [ref('Bounce'), 'Dee'], () => contents.executeJavaScript('({ bounce: document.getElementById("bounce").value, elsewhere: document.getElementById("elsewhere").value, focus: document.activeElement && document.activeElement.id })'))
+    // Every text kind a person types into takes the text through the same trusted insert.
+    for (const [label, name, method, text, id] of [['pw', 'Password', 'fillInput', 'secret', 'pw'], ['q', 'Query', 'fillInput', 'cats', 'q'],
+      ['site', 'Site', 'fillInput', 'https://example.test/', 'site'], ['phone', 'Phone', 'fillInput', '+1 555 0100', 'phone'],
+      ['qty', 'Quantity', 'typeText', '2', 'qty'], ['memo', 'Memo', 'fillInput', 'line one', 'memo']]) {
+      await act(label, method, [ref(name), text], () => value(id))
+    }
+    await act('rich', 'fillInput', [ref('Rich'), 'Bold idea'], () => contents.executeJavaScript('document.getElementById("rich").textContent'))
     // Every other refusal, each before anything reaches the field.
     const nothing = (id) => () => contents.executeJavaScript('document.getElementById(' + JSON.stringify(id) + ').value')
     await act('offText', 'fillInput', [ref('Off text'), 'x'], nothing('offtext'))
@@ -344,6 +360,16 @@ describe('real Electron: Agent page actions are trusted native input', () => {
     expect(actions.tint, actions.tint?.error).toMatchObject({ ok: true, value: '#ff0000', notes: [] })
     expect(actions.agree, actions.agree?.error).toMatchObject({ ok: false, effects: 'not-dispatched', value: false })
     expect(actions.agree!.error).toContain('checkbox input, which takes a click')
+  }, 240_000)
+
+  it('password, search, url, tel, number, textarea and contenteditable all take trusted text', async () => {
+    const { actions } = await probe()
+    // Number has no selection API, so typeText moves its caret with a native End key and appends.
+    for (const [label, expected] of [['pw', 'secret'], ['q', 'cats'], ['site', 'https://example.test/'], ['phone', '+1 555 0100'],
+      ['qty', '42'], ['memo', 'line one'], ['rich', 'Bold idea']] as const) {
+      expect(actions[label], `${label}: ${actions[label]?.error}`).toMatchObject({ ok: true, value: expected })
+      expect(trusted(actions[label]), `${label} was not trusted input`).toBe(true)
+    }
   }, 240_000)
 
   it('every field that cannot take this input is refused before it changes, and says what to do instead', async () => {
