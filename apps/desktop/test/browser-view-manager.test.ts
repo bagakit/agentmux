@@ -400,6 +400,74 @@ describe('Browser exact Agent association and trusted handoff', () => {
     } finally { await rpc.dispose(); await server.stop(); manager.dispose() }
   })
 })
+describe('a retired Agent releases only its own exact Browser associations', () => {
+  const agent = { hostId: 'original-host', agentSessionId: 'retiring-agent' }
+  const current = { kind: 'agent' as const, ...agent, run: { runId: 'retiring-run' } }
+  const retired = { kind: 'retired-agent' as const, ...agent, run: { runId: 'retiring-run' } }
+  const authority = (answer: () => Promise<unknown>) => ({ resolve: () => undefined, inspect: vi.fn(answer) }) as unknown as BrowserAgentAuthority & { inspect: ReturnType<typeof vi.fn> }
+  const saved = (id: string, association: typeof agent) => ({ id, workspaceId: 'workspace-a', url: `https://example.invalid/${id}`, title: '', mode: 'normal' as const, agent: association })
+
+  it('clears the exact Host and Session, hands input back to the person and keeps every other association', async () => {
+    const f = fakeWindow(), agents = authority(async () => current), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('held', async () => saved('held', agent))
+    await manager.ensure('same-host-other-session', async () => saved('same-host-other-session', { ...agent, agentSessionId: 'other-agent' }))
+    await manager.ensure('other-host-same-session', async () => saved('other-host-same-session', { ...agent, hostId: 'other-host' }))
+    await manager.returnControl('held')
+    expect(manager.target('held')?.control).toMatchObject({ owner: 'agent', agent })
+    const revision = manager.target('held')!.control!.revision
+    manager.releaseRetiredAgent(agent)
+    expect(manager.target('held')?.control).toMatchObject({ owner: 'human', agent: null })
+    expect(manager.target('held')!.control!.revision).toBeGreaterThan(revision)
+    expect(manager.target('same-host-other-session')?.control?.agent).toEqual({ ...agent, agentSessionId: 'other-agent' })
+    expect(manager.target('other-host-same-session')?.control?.agent).toEqual({ ...agent, hostId: 'other-host' })
+    for (const id of ['held', 'same-host-other-session', 'other-host-same-session']) manager.close(id)
+  })
+
+  it('refuses to hand a page back to a retired Agent, releases it and keeps the page with the person', async () => {
+    const f = fakeWindow(), agents = authority(async () => current), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('stopped', async () => saved('stopped', agent))
+    await vi.waitFor(() => expect(agents.inspect).toHaveBeenCalledTimes(1))
+    agents.inspect.mockImplementation(async () => retired)
+    await expect(manager.returnControl('stopped')).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION_BINDING', message: expect.stringContaining('create a new Agent') })
+    expect(manager.target('stopped')?.control).toMatchObject({ owner: 'human', agent: null })
+    await expect(manager.returnControl('stopped')).rejects.toThrow('no associated Agent')
+    manager.close('stopped')
+  })
+
+  for (const [name, answer] of [
+    ['a failed read', async () => { throw new Error('Core is unreachable') }],
+    ['an answer for another Session', async () => ({ ...retired, agentSessionId: 'other-agent' })],
+    ['an unrecognized answer', async () => ({ ...current, kind: 'created' })]
+  ] as const) it(`keeps the association and hands the page back after ${name}`, async () => {
+    const f = fakeWindow(), agents = authority(answer as () => Promise<unknown>), manager = browserManager(f.window, undefined, agents)
+    await manager.ensure('kept', async () => saved('kept', agent))
+    await vi.waitFor(() => expect(agents.inspect).toHaveBeenCalledTimes(1))
+    expect(manager.target('kept')?.control?.agent).toEqual(agent)
+    expect((await manager.returnControl('kept')).control).toMatchObject({ owner: 'agent', agent })
+    manager.close('kept')
+  })
+
+  it('a restored page whose saved Agent retired while closed offers a new Agent', async () => {
+    const f = fakeWindow(), agents = authority(async () => retired), manager = browserManager(f.window, undefined, agents)
+    const restored = await manager.ensure('restored', async () => saved('restored', agent))
+    expect(restored.control?.agent).toEqual(agent)
+    await vi.waitFor(() => expect(manager.target('restored')?.control?.agent).toBeNull())
+    manager.close('restored')
+  })
+
+  it('only a retirement event that names the Session releases it', async () => {
+    const { releaseBrowserAgentsOnRetirement } = await import('../src/main/browser-agent-authority.js')
+    let listener!: (hostId: string, event: unknown) => void
+    const observe = vi.fn((_types: readonly string[], next: typeof listener) => { listener = next; return () => {} })
+    const browsers = { releaseRetiredAgent: vi.fn() }
+    releaseBrowserAgentsOnRetirement({ observeCoreEvents: observe } as never, browsers)
+    expect(observe).toHaveBeenCalledWith(['run-removed'], expect.any(Function))
+    listener('original-host', { type: 'run-removed', run: { runId: 'low-level-stop' } })
+    expect(browsers.releaseRetiredAgent).not.toHaveBeenCalled()
+    listener('original-host', { type: 'run-removed', agentSessionId: 'retiring-agent', run: { runId: 'retiring-run' } })
+    expect(browsers.releaseRetiredAgent).toHaveBeenCalledExactlyOnceWith(agent)
+  })
+})
 
 /**
  * 一个记账的应用链接宿主。`openExternal` **必须**是假的——真的 `shell.openExternal` 会在跑测试的
