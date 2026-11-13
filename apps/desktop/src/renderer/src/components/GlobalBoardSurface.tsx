@@ -1,13 +1,12 @@
 import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
-import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
-import { goalNextStepFact, type GoalStage } from '../lib/goal-presentation'
-import { GOAL_GROUP_LABELS, GoalStageMark, goalGroupSummary, groupGoals } from '../lib/goal-groups'
+import type { GoalStage } from '../lib/goal-presentation'
+import { goalGroupSummary, groupGoals } from '../lib/goal-groups'
 import { adjacentGoalId, goalQueuePosition, stageIndex, stageTransitions } from '../lib/goal-navigation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
@@ -16,18 +15,15 @@ import { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS, demandColumns, projectDemands,
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { DIRECT_GOAL_TITLE, directGoalRequest, retryDirectGoal, saveDirectGoal, startDirectGoal, subscribeDirectGoalRequest } from '../lib/goals-direct-pmo'
 import { GoalDetail } from './GoalDetail'
-import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
+import { GoalRow, GoalsCollectionBody } from './GoalsCollection'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { GoalsCommonActions } from './GoalsCommonActions'
 import { GlobalGoalPatrolControl } from './GlobalGoalPatrolControl'
 import { SelectionField } from './SelectionField'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
-import goalsArtUrl from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 import goalsHeaderArtUrl from '@agentmux/client-ui/brand/illustrations/goals/goals-companions-header.png'
 
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
-const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
@@ -38,35 +34,6 @@ const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
 
-
-function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, stageChanged, onSelect }: { demand: DemandProjection; selected: boolean; selectedSessionId: string | null; acknowledgementFailed: boolean; stageChanged: boolean; onSelect: () => void }) {
-  const execution = useAppStore(useShallow((state) => {
-    const byId = agentSessionPresentationIndex(state.sessions)
-    let count = 0, unconfirmed = 0; const statuses = new Set<string>()
-    for (const id of demand.sessionIds) {
-      const matches = byId.get(id), session = matches?.length === 1 ? matches[0] : undefined
-      if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } else unconfirmed++
-    }
-    const focused = selectedSessionId ? byId.get(selectedSessionId) : undefined
-    const source = focused?.length === 1 && focused[0]?.kind === 'agent' ? focused[0] : undefined
-    const work = source ? currentDemandIndex(state.demands).get(currentDemandKey(source.control.hostId, source.control.agentSessionId)) : undefined
-    const fact = work?.goals.find(goal => goal.goalId === demand.id)
-    const context = !fact ? null : work?.state === 'current' && fact.confirmed ? 'Current execution'
-      : fact.confirmed ? work?.state === 'ambiguous' ? fact.attributionAmbiguous ? 'Multiple original executions' : 'Multiple confirmed Goals' : 'Last confirmed input · input unconfirmed' : 'Input unconfirmed'
-    return { count, unconfirmed, status: [...statuses].join(' / '), context }
-  }))
-  const fact = goalNextStepFact(demand)
-  const nextStep = acknowledgementFailed ? 'Acknowledgement unconfirmed' : fact.text
-  const stage = acknowledgementFailed ? 'you' : fact.stage
-  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(stageChanged ? { 'data-goal-stage-changed': true } : {})} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
-    if (event.target !== event.currentTarget) return
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
-  }}>
-    <GoalStageMark stage={stage} />
-    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts">{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span><GoalResponsibilitySummary demand={demand} compact /></div>
-    {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
-  </div>
-}
 
 export function GlobalBoardSurface() {
   const config = useAppStore((state) => state.config)
@@ -203,11 +170,28 @@ export function GlobalBoardSurface() {
         {creation.error ? <><span>{creation.error}</span><button type="button" className="primary-button" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? '保存这个目标' : '重新读取目标' : '重试专属讨论'}<ThemeActionOpenExternalIcon size={13} /></button></> : null}
       </div> : null}
       <div className={`goals-collection goals-collection--${view}`} role="region" aria-label="Global goals">
-        {filteredDemands.length === 0 ? <div className="goals-empty">{projectedDemands.length ? <><strong>No goals match this view.</strong><p>{query.trim() ? `No match for “${query.trim()}”${appliedFilters.length ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}</p>{query.trim() || appliedFilters.length ? <button type="button" className="small-button" onClick={clearConditions}>Clear search & filters<ThemeActionOpenExternalIcon size={13} /></button> : <button type="button" className="small-button" onClick={() => setShowHistory(true)}>Show finished</button>}</> : creation?.phase === 'save' && !creation.notSaved ? null : <div className="goals-empty__start"><img src={goalsArtUrl} alt="" aria-hidden="true" draggable={false} onError={event => { event.currentTarget.hidden = true }} /><div><strong>No goals yet</strong><p>Start from a common action above, or create a goal and shape it with the agent in its own discussion.</p></div></div>}</div> : view === 'list' ? <div className="goals-list">{groups.map(group => <section key={group.stage} className="goals-group" data-goal-group={group.stage} aria-labelledby={`goals-group-${group.stage}`}><h2 id={`goals-group-${group.stage}`} className="goals-group__heading"><GoalStageMark stage={group.stage} size={11} /><span>{GOAL_GROUP_LABELS[group.stage]}</span><span className="goals-group__count">{group.goals.length}</span></h2>{group.goals.map(renderRow)}</section>)}</div> : <div className="goals-board" aria-label="Goals by work status">{visibleStatuses.filter((status) => columns[status].length > 0 || !['done', 'cancelled'].includes(status)).map((status) => <section className={`goals-board-column${columns[status].length ? '' : ' goals-board-column--empty'}`} key={status} data-status={status}><header><strong>{DEMAND_STATUS_LABELS[status]}</strong><span>{columns[status].length}</span></header>{columns[status].map(renderRow)}{columns[status].length === 0 ? <p className="goals-board-column__empty">No goals</p> : null}</section>)}</div>}
+        <GoalsCollectionBody view={view} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={filteredDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />
       </div>
       <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals{view === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
     </div>
-    {selectedDemand ? <GoalDetail key={selectedDemand.id} demand={selectedDemand} acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={(patch) => setAcknowledgementFeedback(current => ({ ...current, [selectedDemand.id]: { ...(current[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT), ...patch } }))} draft={goalDrafts.current.get(selectedDemand.id) ?? {}} onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }} onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }} onClose={closeDetail} onOpenMote={() => void openMote(selectedDemand.id)} onGrill={() => void openMote(selectedDemand.id, 'grill')} onGrounding={() => void openMote(selectedDemand.id, 'grounding')} motePending={motePending[selectedDemand.id] ?? null} moteError={moteErrors[selectedDemand.id] ?? null} onRetryMote={() => { const mode = moteErrors[selectedDemand.id]?.mode; void openMote(selectedDemand.id, mode === 'open' ? undefined : mode) }} queue={queue} onOpenGoal={setSelectedDemand} /> : selectedDemandId ? <aside className="goals-detail"><button className="small-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
+    {selectedDemand ? <GoalDetail
+      key={selectedDemand.id}
+      demand={selectedDemand}
+      acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT}
+      onAcknowledgementFeedbackChange={(patch) => setAcknowledgementFeedback(current => ({ ...current, [selectedDemand.id]: { ...(current[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT), ...patch } }))}
+      draft={goalDrafts.current.get(selectedDemand.id) ?? {}}
+      onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }}
+      onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }}
+      onClose={closeDetail}
+      onOpenMote={() => void openMote(selectedDemand.id)}
+      onGrill={() => void openMote(selectedDemand.id, 'grill')}
+      onGrounding={() => void openMote(selectedDemand.id, 'grounding')}
+      motePending={motePending[selectedDemand.id] ?? null}
+      moteError={moteErrors[selectedDemand.id] ?? null}
+      onRetryMote={() => { const mode = moteErrors[selectedDemand.id]?.mode; void openMote(selectedDemand.id, mode === 'open' ? undefined : mode) }}
+      queue={queue}
+      onOpenGoal={setSelectedDemand}
+    /> : selectedDemandId ? <aside className="goals-detail"><button className="small-button" onClick={closeDetail}>Back to goals</button><p className="goals-service">The selected goal is not available yet. Its identity is kept while recovery continues.</p></aside> : null}
     </div>
   </section>
 }
