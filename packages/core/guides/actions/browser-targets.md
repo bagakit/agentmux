@@ -1,7 +1,7 @@
 # browser targets
 
 <!-- amux:content -->
-For an unspecified Browser request, start from your own exact Tab and first consider
+For an unspecified Browser request in a presented AgentMux task, start from your own exact Tab and first consider
 this task's same-Tab neighbor Regions,
 then verify the exact typed Browser binding. Multiple candidates or an unknown task
 relationship remain explicit; do not select by title, recent use or human focus, or create
@@ -13,8 +13,22 @@ Use `amux browser targets` to discover original available Browser targets and th
 `agent: {hostId, agentSessionId}` identifies the associated original Session; null confirms none,
 and omission means unknown. Association is separate from input ownership and a live Run. A retained operation or
 Agent working status does not acquire webpage input. Human handoff remains a trusted UI action;
-ordinary CLI input cannot grant it. External targets report unsupported isolation;
+ordinary CLI input cannot grant it. External and standalone targets report unsupported isolation;
 an AgentMux visual border cannot block human input in an external browser.
+A standalone host can own Browser objects without any Desktop window or Region.
+Use `amux browser create --url URL --operation-id ID` against that exact host endpoint;
+its configured local executable and private storage belong to the host, never request parameters.
+The returned `source: standalone` target has `workspaceId: null` when no Workspace is authorized;
+file capabilities are not granted by choosing a directory, and no spatial binding is fabricated.
+Use the exact returned Browser id with targets/run/history/inspect/follow/stop.
+Create and `amux browser close --browser ID --navigation NAV --operation-id ID` retain typed
+lifecycle intents and receipts in the original operation journal. Inspect the original operation
+when a result is unknown; neither a dropped ACK nor current discovery authorizes another launch.
+Close acts only on this host's exact owned target and original document. A beforeunload request
+keeps the original page and unsaved input; it cannot be approved by a managed Agent.
+Operation stop leaves the native page and its input available; release is a separate resource action.
+Host process restart reconnects its saved Browser id to the same engine endpoint and target id,
+without replaying a program. Missing original targets stay unavailable; they are not selected by URL or title.
 An optional `certificateRequest` describes the original pending main-document TLS request,
 including its navigation, address, error and SHA256 fingerprint. It is observation, not trust.
 Its `profile-connections` scope means other pages sharing that network context may reuse an accepted connection;
