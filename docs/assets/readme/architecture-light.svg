@@ -5,22 +5,22 @@
 <text x="152.0" y="44" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="400" fill="#6b776f" text-anchor="start" letter-spacing="0">presentation · focus · host I/O</text>
 <rect x="48.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
 <text x="70.0" y="102" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Desktop</text>
-<text x="70.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">Electron · first-party client</text>
+<text x="70.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">Electron · first-party client</text>
 <line x1="178.5" y1="158" x2="178.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
 <polygon points="172.5,200 184.5,200 178.5,210" fill="#6b776f"/>
 <rect x="329.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
 <text x="351.0" y="102" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Mobile</text>
-<text x="351.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">end-to-end encrypted Relay</text>
+<text x="351.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">end-to-end encrypted Relay</text>
 <line x1="459.5" y1="158" x2="459.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
 <polygon points="453.5,200 465.5,200 459.5,210" fill="#6b776f"/>
 <rect x="610.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
 <text x="632.0" y="102" font-family="'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">amux CLI</text>
-<text x="632.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">25 modules · 400+ commands</text>
+<text x="632.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">25 modules · 400+ commands</text>
 <line x1="740.5" y1="158" x2="740.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
 <polygon points="734.5,200 746.5,200 740.5,210" fill="#6b776f"/>
 <rect x="891.0" y="60" width="261.0" height="96" rx="14" fill="#ffffff" stroke="#d5ddd7" stroke-width="1.5"/>
 <text x="913.0" y="102" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="600" fill="#17201a" text-anchor="start" letter-spacing="0">Your program</text>
-<text x="913.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="17" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">@agentmux/core SDK</text>
+<text x="913.0" y="134" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="400" fill="#46554b" text-anchor="start" letter-spacing="0">@agentmux/core SDK</text>
 <line x1="1021.5" y1="158" x2="1021.5" y2="201" stroke="#6b776f" stroke-width="1.6"/>
 <polygon points="1015.5,200 1027.5,200 1021.5,210" fill="#6b776f"/>
 <text x="48.0" y="234" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" fill="#2f9a5c" text-anchor="start" letter-spacing="2.6">CORE</text>
