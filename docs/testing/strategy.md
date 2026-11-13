@@ -167,7 +167,7 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 
 ## 证据边界
 
-- 真实 Codex `0.147.0` 与原位认证 E2E 覆盖 create、reconnect、resume 和 natural-retire；该结果只证明被执行的 Agent Session vertical；
+- opt-in 真实 Codex lifecycle E2E（`pnpm test:real-codex`，隔离前提与清理见[真实 Codex lifecycle 的隔离输入与清理](../guides/real-codex-private-lifecycle-test.md)）覆盖 create、reconnect、resume 和 natural-retire；某次结果只证明该次实际 Codex 版本下被执行的 Agent Session vertical；
 - 固定规模的 security/fuzz、slow consumer、daemon crash/restart、chaos/stress 和 Core/Desktop resource ceiling 证明 correctness 与资源边界，不构成性能排名；
 - latency、throughput、CPU/RSS 的对比结论需要独立的重复样本、outlier policy 和同条件 Benchmark，不能从 correctness/resource receipt 外推“全面胜出”；
 - 当前 Core 已消费公开 `basic-vt` checkpoint、restore bytes 与 ordered Resize 的 continuation；来源为 terminal-continuation.ts、screen-evidence.ts 和 CtxmuxRunAdapter。存在这条实现不证明新候选画面或长期 scrollback 已验收；restore bytes 不能冒充新的 PTY output，缺失 checkpoint/历史或观察未知须如实表达；
