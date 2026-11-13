@@ -1,6 +1,6 @@
 import { parseDocument } from 'yaml'
-export const NOTE_MARKDOWN_SCHEMA = 'agentmux.note.md.v1'
-export const NOTE_FILE_EXTENSION = '.note.md'
+import { NOTE_MARKDOWN_SCHEMA, NOTE_FILE_EXTENSION } from './note-format-metadata.js'
+export { NOTE_MARKDOWN_SCHEMA, NOTE_FILE_EXTENSION } from './note-format-metadata.js'
 export type NoteSharedOrigin = { operationId: string; sourceNoteId: string; sourcePath: string; sourceRevision: string; sourceBlockId: string;
   requestFingerprint?: string; sourceOperationId?: string; destination?: { noteId: string; path: string; operationId: string; expectedRevision: string } }
 export type NoteSharedMetadata = { kind?: 'shared-block'; origin?: NoteSharedOrigin }

@@ -22,7 +22,10 @@
       "types": "./dist/agent-execution-guide.d.ts",
       "import": "./dist/agent-execution-guide.js"
     },
-    "./pasted-images": { "types": "./dist/pasted-images.d.ts", "import": "./dist/pasted-images.js" },
+    "./pasted-images": {
+      "types": "./dist/pasted-images.d.ts",
+      "import": "./dist/pasted-images.js"
+    },
     "./agent-learning": {
       "types": "./dist/agent-learning.d.ts",
       "import": "./dist/agent-learning.js"
@@ -95,7 +98,10 @@
       "types": "./dist/mote-connections.d.ts",
       "import": "./dist/mote-connections.js"
     },
-    "./automatic-input-source": { "types": "./dist/automatic-input-source.d.ts", "import": "./dist/automatic-input-source.js" },
+    "./automatic-input-source": {
+      "types": "./dist/automatic-input-source.d.ts",
+      "import": "./dist/automatic-input-source.js"
+    },
     "./mote-dialogue-store": {
       "types": "./dist/mote-dialogue-store.d.ts",
       "import": "./dist/mote-dialogue-store.js"
@@ -407,6 +413,10 @@
     "./browser-site-permissions": {
       "types": "./dist/browser-site-permissions.d.ts",
       "import": "./dist/browser-site-permissions.js"
+    },
+    "./note-format-metadata": {
+      "types": "./dist/note-format-metadata.d.ts",
+      "import": "./dist/note-format-metadata.js"
     }
   },
   "bin": {
