@@ -1169,3 +1169,125 @@ it('keeps both original Mote regions after human Focus navigation cancels a pend
     } finally { document.removeEventListener('focusin',observeEditableFocus) }
   } finally { if(pending)await act(async()=>{await pending});targetRegion.removeAttribute('inert') }
 })
+
+describe('Settings semantic navigation', () => {
+  async function readSettings() {
+    const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'inspect.client' })
+    if (result.operation !== 'inspect.client') throw new Error('Expected original client inspection')
+    return desktopWorkbenchObservationSchema.parse(result.observation).desktop
+  }
+  it('consumes the actual public CLI and Settings owner, observes manual selection and keeps original drafts', async () => {
+    await control({ kind: 'space', regionId: 'source-region' })
+    const original = useAppStore.getState()
+    const lifecycle = [vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'stop')]
+    const first = await readSettings()
+    expect(first.overlays.settingsPage).toMatchObject({ sectionId: null, visible: false })
+    expect(first.overlays.settingsPage!.sectionIds.length).toBeGreaterThan(10)
+    expect(first.overlays.settingsPage!.sectionIds).toEqual(expect.arrayContaining(['overview', 'appearance', 'profile']))
+    const directory = await mkdtemp(join(tmpdir(), 'settings-navigation-consumer-'))
+    const cli = join(directory, 'amux.mjs')
+    const require = createRequire(import.meta.url), core = dirname(require.resolve('../../../packages/core/package.json'))
+    await symlink(join(core, 'node_modules'), join(directory, 'node_modules'), 'dir')
+    await require(join(core, 'node_modules/esbuild')).build({ entryPoints: [join(core, 'src/agentmux.ts')],
+      outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
+    const requests: string[] = []
+    const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), coreClients: () => [], async execute(request) {
+      requests.push(request.operation)
+      let pending!: Promise<AgentMuxControlResult>
+      await act(async () => { pending = useAppStore.getState().executeControl(request); await Promise.resolve() })
+      return await pending
+    } })
+    await server.start()
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const invoke = async (...args: string[]) => await new Promise<any>((resolve, reject) => {
+      const child = spawn(process.execPath, [cli, ...args], { env: objectCliEnvironment(directory), stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''
+      const deadline = setTimeout(() => { child.kill(); reject(new Error('Original Settings CLI request exceeded its deadline.')) }, 10000)
+      child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+      child.once('error', error => { clearTimeout(deadline); reject(error) })
+      child.once('close', code => { clearTimeout(deadline); try { resolve({ code, stderr, body: JSON.parse(stdout || stderr) }) } catch (error) { reject(error) } })
+    })
+    try {
+      const response = await invoke('app', 'focus', '--settings-section', 'appearance')
+      expect(response.stderr).toBe('')
+      expect(response.body).toMatchObject({ ok: true, operation: 'app.focus', result: {
+        navigation: { state: 'applied', requested: { kind: 'settings', sectionId: 'appearance' } },
+        presentation: { state: 'covered', blockers: ['settings'] },
+        overlays: { settingsPage: { sectionId: 'appearance', visible: true } }, input: { outcome: 'preserved' } } })
+      expect(response.code).toBe(0)
+      expect(container.querySelector('[data-settings-pane="appearance"]')!.hasAttribute('hidden')).toBe(false)
+      const inspect = await invoke('app', 'inspect')
+      expect(inspect.code).toBe(0)
+      expect(inspect.body.result.observation.desktop.overlays.settingsPage.sectionIds).toEqual(first.overlays.settingsPage!.sectionIds)
+      const profile = container.querySelector<HTMLButtonElement>('[data-settings-target="profile"]')!
+      expect(profile).not.toBeNull()
+      await act(async () => profile.click()); await settle()
+      expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'profile', visible: true })
+      const field = container.querySelector<HTMLInputElement>('#profile-display-name')!
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Original unsaved profile')
+        field.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      const unknown = await client.call('app.focus', { target: { kind: 'settings', sectionId: 'not-registered' }, inputPolicy: 'preserve' })
+      expect(unknown).toMatchObject({ navigation: { state: 'rejected' }, overlays: { settingsPage: { sectionId: 'profile', visible: true } },
+        issues: expect.arrayContaining([expect.objectContaining({ code: 'SETTINGS_SECTION_UNKNOWN' })]) })
+      expect(container.querySelector('#profile-display-name')).toBe(field)
+      expect(field.value).toBe('Original unsaved profile')
+      await control({ kind: 'settings', sectionId: 'appearance' })
+      await control({ kind: 'settings', sectionId: 'profile' })
+      expect(container.querySelector('#profile-display-name')).toBe(field)
+      expect(field.value).toBe('Original unsaved profile')
+      const current = useAppStore.getState()
+      expect(current.mainSurface).toBe(original.mainSurface)
+      expect(current.tabs).toBe(original.tabs); expect(current.layouts).toBe(original.layouts)
+      expect(current.agentComposerDrafts).toBe(original.agentComposerDrafts)
+      expect(current.workbenchSpaceSelection).toBe(original.workbenchSpaceSelection)
+      expect(document.activeElement).toBe(outside)
+      expect([outside.selectionStart, outside.selectionEnd]).toEqual([2, 5])
+      const closed = await invoke('app', 'focus', '--close-settings')
+      expect(closed.body.result.overlays.settings).toBe(false)
+      expect(closed.body.result.overlays.settingsPage.visible).toBe(false)
+      expect(field.value).toBe('Original unsaved profile')
+      expect(document.activeElement).toBe(outside)
+      const mixed = await invoke('app', 'focus', '--settings-section', 'profile', '--surface', 'space')
+      expect(mixed.body).toMatchObject({ ok: false, error: { code: 'INVALID_CLI_ARGUMENT' } })
+      expect(requests).toEqual(['focus', 'inspect.client', 'focus', 'focus'])
+      for (const operation of lifecycle) expect(operation).not.toHaveBeenCalled()
+    } finally { await client.dispose(); await server.stop(); await rm(directory, { recursive: true }) }
+  })
+  it('preserves the real Mote caret and composition while hidden main input is reported unavailable', async () => {
+    // A human opening first exercises transition from the Panel's normal focus policy.
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click()); await settle()
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="Search settings"]'))
+    const { input } = await arrangePrimaryInputMote()
+    expect(input).not.toBeNull()
+    input.focus()
+    const selection = document.getSelection()!, text = input.firstChild!.firstChild
+    expect(text).not.toBeNull()
+    const range = document.createRange(); range.setStart(text!, 2); range.setEnd(text!, 5)
+    selection.removeAllRanges(); selection.addRange(range)
+    const focus = vi.spyOn(input, 'focus'), blur = vi.spyOn(input, 'blur')
+    const composition = vi.fn(); input.addEventListener('compositionend', composition)
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '组' }))
+    const first = await control({ kind: 'settings', sectionId: 'overview' })
+    expect(first.input).toMatchObject({ outcome: 'preserved', after: { scope: 'floating', ownerKind: 'composer' } })
+    expect(document.activeElement).toBe(input)
+    expect(selection.getRangeAt(0).startContainer).toBe(text); expect(selection.getRangeAt(0).startOffset).toBe(2)
+    expect(selection.getRangeAt(0).endOffset).toBe(5)
+    expect(focus).not.toHaveBeenCalled(); expect(blur).not.toHaveBeenCalled(); expect(composition).not.toHaveBeenCalled()
+    await control({ kind: 'settings', sectionId: 'appearance' })
+    expect(document.activeElement).toBe(input)
+    expect(focus).not.toHaveBeenCalled(); expect(blur).not.toHaveBeenCalled(); expect(composition).not.toHaveBeenCalled()
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '组' }))
+    const closed = await control({ kind: 'settings', sectionId: null })
+    expect(closed.overlays.settings).toBe(false)
+    expect(document.activeElement).toBe(input); expect(focus).not.toHaveBeenCalled()
+    await control({ kind: 'space', regionId: 'source-region' }, 'target')
+    const mainInput = container.querySelector<HTMLElement>('[data-workbench-region-id="source-region"] .xterm-helper-textarea')!
+    expect(document.activeElement).toBe(mainInput)
+    const hidden = await control({ kind: 'settings', sectionId: 'overview' })
+    expect(hidden.input.outcome).toBe('unavailable')
+    expect(hidden.input.after.inert).toBe(true)
+    expect(useAppStore.getState().agentComposerDrafts[source.id]).toBe('Unsent original draft')
+  })
+})
