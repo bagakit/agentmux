@@ -21,7 +21,9 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   const [list, setList] = useState<DeviceList | null>(null), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const [url, setUrl] = useState(''), [readIssue, setReadIssue] = useState('')
   // The Mac's local-network addresses from the last link read; the chosen one stays until changed.
-  const [candidates, setCandidates] = useState<AgentMuxRpcResult<'device.link'>['candidates']>([]), [address, setAddress] = useState<string | null>(null)
+  const [candidates, setCandidates] = useState<AgentMuxRpcResult<'device.link'>['candidates']>([])
+  // `chosen` is the person's explicit pick; `shown` is the address the current link actually uses.
+  const [chosen, setChosen] = useState<string | null>(null), [shown, setShown] = useState<string | null>(null)
   const [linkAction, setLinkAction] = useState<'scan' | 'copy' | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<{ deviceId: string; text: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false), [observedAt, setObservedAt] = useState<number | null>(null)
@@ -40,17 +42,30 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     const timer = setInterval(() => { void read(generation.current) }, 5000)
     return () => { generation.current++; clearInterval(timer) }
   }, [active])
-  const link = async (action: 'scan' | 'copy', chosen = address) => {
+  // Only an address the person picked is requested again; the Host's own preferred address is never
+  // pinned, so a network change that removes it does not make every later refresh fail.
+  const link = async (action: 'scan' | 'copy', picked = chosen) => {
     if (pending.current) return
     pending.current = true; setBusy(true); setLinkAction(action); setNotice('')
     const epoch = generation.current
     try {
       let connectionUrl = url
-      if (action !== 'copy' || !url || chosen !== address) {
-        const result = await api.deviceManagement.link(chosen ? { address: chosen } : {})
+      if (action !== 'copy' || !url || picked !== chosen) {
+        const request = picked && (!candidates.length || candidates.some(candidate => candidate.address === picked)) ? picked : null
+        // A pick can leave this Mac with a network change. Electron IPC keeps only an error's message, so a
+        // failed pick is followed by one read of the default link, which also brings the current candidates;
+        // a pick that is no longer among them is then dropped. Any other failure still reaches the notice below.
+        let result: Awaited<ReturnType<typeof api.deviceManagement.link>>
+        try { result = await api.deviceManagement.link(request ? { address: request } : {}) }
+        catch (error) {
+          if (!request) throw error
+          result = await api.deviceManagement.link({})
+          if (result.candidates.some(candidate => candidate.address === request)) throw error
+        }
         if (epoch !== generation.current) return
         connectionUrl = result.url; setCandidates(result.candidates)
-        setAddress(new URL(result.pageUrl).hostname)
+        setChosen(request && result.candidates.some(candidate => candidate.address === request) ? request : null)
+        setShown(new URL(result.pageUrl).hostname)
       }
       if (epoch !== generation.current) return
       setUrl(connectionUrl)
@@ -90,9 +105,9 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
         <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : url ? <ThemeActionRefreshIcon size={16} /> : <ThemeObjectConnectionCodeIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : url ? 'Refresh code' : 'Scan to connect'}</button>
         <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
       </div>
-      {candidates.length > 1 && address && <label className="settings-compact-field device-management__address">
+      {candidates.length > 1 && shown && <label className="settings-compact-field device-management__address">
         <span>Network</span>
-        <select aria-label="Connection network" value={address} disabled={busy} onChange={event => { void link('scan', event.target.value) }}>
+        <select aria-label="Connection network" value={shown} disabled={busy} onChange={event => { void link('scan', event.target.value) }}>
           {candidates.map(candidate => <option key={candidate.address} value={candidate.address}>
             {`${candidate.label ?? candidate.interface} · ${candidate.address}${candidate.preferred ? ' · default' : ''}`}</option>)}
         </select>
