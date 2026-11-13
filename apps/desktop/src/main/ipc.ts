@@ -131,6 +131,7 @@ import { ScreenshotCountdown } from './screenshot-countdown.js'
 import { ScreenshotOriginalFiles } from './screenshot-original-files.js'
 import { GlobalScreenshot } from './global-screenshot.js'
 import { SystemScreenshotEditor } from './system-screenshot-editor.js'
+import { CaptureSurface } from './capture-surface.js'
 import { getDesktopNativeUiOwner, getNativeDesktopOwner } from './native-desktop-owner.js'
 import { createNativeDesktopPublicOwner } from './native-desktop-public.js'
 import { readBookmark } from './bookmark-file.js'
@@ -1375,13 +1376,16 @@ export async function registerIpc(args: {
   }, { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
   const inspectScreenshotPin = (operationId: string) => screenshotPins.call('image.inspect', { hostId: 'local', operationId },
     { actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } })
+  // Gives focus back to the app that was in front when the capture started. app.hide() is macOS ⌘H for AgentMux:
+  // it hides every AgentMux window, including a workbench that was visible but not in front, which comes back
+  // from the Dock or ⌘Tab. Nothing is minimized or closed. An open pin must stay on screen, so AgentMux is not hidden then.
+  const returnScreenshotFocus = () => { if (!screenshotPins.hasOpenPins()) app.hide() }
+  const copyScreenshotText = (text: string) => getDesktopNativeUiOwner().writeClipboardText(text)
+  const captureSurface = new CaptureSurface({ native: getNativeDesktopOwner, appearance: () => config.appearance, pin: pinScreenshot,
+    copyText: copyScreenshotText, returnFocus: returnScreenshotFocus })
+  // The editor returns focus only when no other AgentMux window has focus.
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance, { pin: pinScreenshot, inspectPin: inspectScreenshotPin,
-    // Gives focus back to the app that was in front when the capture started. The editor calls this only
-    // when no other AgentMux window has focus. app.hide() is macOS ⌘H for AgentMux: it hides every AgentMux
-    // window, including a workbench that was visible but not in front, which comes back from the Dock or ⌘Tab.
-    // Nothing is minimized or closed. An open pin must stay on screen, so AgentMux is not hidden then.
-    returnFocus: () => { if (!screenshotPins.hasOpenPins()) app.hide() },
-    copyText: text => getDesktopNativeUiOwner().writeClipboardText(text),
+    returnFocus: returnScreenshotFocus, copyText: copyScreenshotText,
     originalFiles: window => new ScreenshotOriginalFiles({
       chooseOpen: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Open editable original', filters: [{ name: 'Editable annotation', extensions: ['json'] }], properties: ['openFile'] }); return choice.canceled ? null : choice.filePaths[0] ?? null },
       chooseSave: async defaultName => { const choice = await dialog.showSaveDialog(window, { title: 'Save editable original · contains the source image', defaultPath: defaultName, filters: [{ name: 'Editable annotation', extensions: ['json'] }] }); return choice.canceled ? null : choice.filePath ?? null },
@@ -1407,12 +1411,13 @@ export async function registerIpc(args: {
       new Notification({ title: 'Screen capture needs attention', body: message }).show()
   }
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner, appActive: () => BrowserWindow.getFocusedWindow() !== null,
-    edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), reportIssue: reportScreenshotIssue,
+    edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), present: session => captureSurface.present(session),
+    reportIssue: reportScreenshotIssue,
     chooseSource: mode => screenshotSources.choose(mode), countdown: seconds => screenshotCountdown.wait(seconds) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
     capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue,
-    remindPending: () => { screenshotEditor.notice('Finish or cancel this screenshot first') } })
+    remindPending: () => { if (!captureSurface.notice('Finish or cancel this screenshot first')) screenshotEditor.notice('Finish or cancel this screenshot first') } })
   registerNativeDesktopIpc({ capture: (mode, options) => screenCapture.capture(true, mode, options), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
@@ -2259,7 +2264,8 @@ export async function registerIpc(args: {
     capsuleInput: capsuleReplies,
     agentLearning: agentLearningAuthority,
     inputContextCaptures,
-    nativeDesktop: createNativeDesktopPublicOwner(getNativeDesktopOwner(), { hostId: 'local' }),
+    nativeDesktop: createNativeDesktopPublicOwner(getNativeDesktopOwner(), { hostId: 'local' },
+      { captureSelection: () => captureSurface.captureSelection(BrowserWindow.getFocusedWindow() === null) }),
     images: screenshotPins,
     windows: args.workbenchWindows,
     deliveryAttempts,
@@ -2339,6 +2345,7 @@ export async function registerIpc(args: {
     acceptingControl = false
     await runOwnerDisposals([
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
+      { owner: 'capture-surface', dispose: () => captureSurface.dispose() },
       { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
       { owner: 'screenshot-pins', dispose: () => screenshotPins.dispose() },
       { owner: 'screenshot-sources', dispose: () => screenshotSources.dispose() },

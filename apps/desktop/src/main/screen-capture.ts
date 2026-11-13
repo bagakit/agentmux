@@ -2,6 +2,7 @@ import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { BrowserPng } from '../shared/contracts.js'
 import type { ScreenshotEditContext } from '../shared/system-screenshot-editor.js'
+import type { CaptureSurfaceOutcome, CaptureSurfaceSession } from './capture-surface.js'
 import { SCREENSHOT_DELAYS, type ScreenshotDelaySeconds } from '../shared/screenshot-countdown.js'
 import type { ScreenshotCaptureMode, ScreenshotCaptureOptions } from '../shared/screenshot-source.js'
 import { savePastedImage, type PastedImageWriteReceipt } from './pasted-image-write.js'
@@ -12,13 +13,15 @@ type Ports = {
   /** Whether an AgentMux window has focus, read once at capture start. */
   appActive(): boolean
   edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, context: ScreenshotEditContext): Promise<void>
+  /** The per-display capture surface; selection, marks and the primary delivery happen there. */
+  present(session: CaptureSurfaceSession): Promise<CaptureSurfaceOutcome>
   reportIssue(error: unknown): void
   chooseSource?(mode: 'display' | 'window'): Promise<CaptureParams | null>
   /** Shows the countdown; resolves false when the user cancelled it. */
   countdown?(seconds: ScreenshotDelaySeconds): Promise<boolean>
 }
 
-/** One Desktop capture and delivery owner. Native retains the physical selector's lifetime. */
+/** One Desktop capture and delivery owner: a region goes through the capture surface, a display or window through the editor. */
 export class ScreenCapture {
   private busy = false
   constructor(private readonly ports: Ports) {}
@@ -37,22 +40,6 @@ export class ScreenCapture {
       // front at that moment is the one the user is capturing and returns to.
       const returnFocus = !this.ports.appActive()
       const native = this.ports.native()
-      if (mode !== 'selection' && !this.ports.chooseSource) throw new Error('Source selection is unavailable in this host. Region capture and your draft remain available.')
-      const target = mode === 'selection' ? { mode: 'selection' as const, allowEditing: true } : await this.ports.chooseSource?.(mode)
-      if (!target) return null
-      if (target.mode !== mode) throw new Error('The selected capture source does not match the original request. Your draft is kept.')
-      const capturedAt = Date.now(), result = await native.captureScreenshot(target)
-      if (result.state === 'cancelled') return null
-      if (result.state === 'failed') throw new Error(`Screen capture failed (${result.error?.code ?? 'unknown'}): ${result.error?.message ?? 'No failure details were returned'}. Your work remains available.`)
-      if (result.state !== 'captured' || !result.screenshot) throw new Error('The original screen capture result is unconfirmed. Check that operation before taking another screenshot.')
-      const shot = result.screenshot
-      const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data,
-        width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }
-      pngBytes(image)
-      // Native reports the selection in Quartz global points, which equal Electron DIP on macOS.
-      const rect = result.selectionRect
-      const context: ScreenshotEditContext = { ...(returnFocus ? { returnFocus } : {}), ...(rect && rect.width > 0 && rect.height > 0 && shot.scale > 0
-        ? { source: { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, scale: shot.scale, capturedAt } } : {}) }
       let path: string | null = null
       // This is one capture's destination receipt, never a second image/document store.
       let delivery: { pixels: string; clipboard: PromiseSettledResult<void>; saved: PromiseSettledResult<PastedImageWriteReceipt | null> } | null = null
@@ -87,14 +74,28 @@ export class ScreenCapture {
         void result.catch(() => {}) // The editor consumes this same receipt; closing it cannot erase submission.
         return result
       }
-      if (result.completionAction === 'edit' || mode !== 'selection') await this.ports.edit(image, attachToDraft, complete, context)
-      else {
-        try { await deliver(image) }
-        catch (error) {
-          // A failed delivery keeps this image in the shared result surface. No recapture,
-          // new target or repeated successful/unknown destination is involved.
-          await this.ports.edit(image, attachToDraft, complete, { ...context, initialIssue: error instanceof Error ? error.message : String(error) })
-        }
+      if (mode === 'selection') {
+        // A failed delivery keeps the surface, its selection and marks; Done retries only the unconfirmed destination.
+        const outcome = await this.ports.present({ attachToDraft, expandable: true, returnFocus, complete })
+        if (outcome.state === 'expanded') await this.ports.edit(outcome.image, attachToDraft, complete,
+          { source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool, ...(returnFocus ? { returnFocus } : {}) })
+      } else {
+        if (!this.ports.chooseSource) throw new Error('Source selection is unavailable in this host. Region capture and your draft remain available.')
+        const target = await this.ports.chooseSource(mode)
+        if (!target) return null
+        if (target.mode !== mode) throw new Error('The selected capture source does not match the original request. Your draft is kept.')
+        const capturedAt = Date.now(), result = await native.captureScreenshot(target)
+        if (result.state === 'cancelled') return null
+        if (result.state === 'failed') throw new Error(`Screen capture failed (${result.error?.code ?? 'unknown'}): ${result.error?.message ?? 'No failure details were returned'}. Your work remains available.`)
+        if (result.state !== 'captured' || !result.screenshot) throw new Error('The original screen capture result is unconfirmed. Check that operation before taking another screenshot.')
+        const shot = result.screenshot
+        const image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data,
+          width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }
+        pngBytes(image)
+        // Native reports the source in Quartz global points, which equal Electron DIP on macOS.
+        const rect = result.selectionRect
+        await this.ports.edit(image, attachToDraft, complete, { ...(returnFocus ? { returnFocus } : {}), ...(rect && rect.width > 0 && rect.height > 0 && shot.scale > 0
+          ? { source: { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, scale: shot.scale, capturedAt } } : {}) })
       }
       // Cancel closes UI, not a clipboard/save that has already been submitted.
       if (submitted) await Promise.resolve(submitted).catch(() => {})

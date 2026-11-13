@@ -1,5 +1,6 @@
 import type { BrowserPng } from './contracts'
 import type { ThemeBootstrap } from './theme-bootstrap'
+import type { CaptureSurfaceHandoff } from './capture-surface'
 
 export const SYSTEM_SCREENSHOT_EDITOR_CHANNEL = 'screenshot:editor'
 /** Main to editor: a short status, for example when the capture shortcut is pressed while this editor is open. */
@@ -13,18 +14,19 @@ export type ScreenshotCaptureSource = {
   /** Epoch milliseconds when capture started. */
   capturedAt: number
 }
-/** Optional facts of one edit: a delivery problem to show at open, where the image came from, and
- * `returnFocus` when another app was active at capture start, so closing the editor goes back to it. */
-export type ScreenshotEditContext = { initialIssue?: string; source?: ScreenshotCaptureSource; returnFocus?: boolean }
+/** The marks a capture surface hands over on ⌘E, on that display's full frozen frame. */
+export type ScreenshotEditMarks = { initialState: Pick<CaptureSurfaceHandoff, 'shapes' | 'crop'>; initialTool: CaptureSurfaceHandoff['tool'] }
+/** Optional facts of one edit: where the image came from, marks to continue, and `returnFocus` when another app
+ * was active at capture start, so closing the editor goes back to it. */
+export type ScreenshotEditContext = { source?: ScreenshotCaptureSource; returnFocus?: boolean } & (ScreenshotEditMarks | { initialState?: undefined; initialTool?: undefined })
 
 export type SystemScreenshotEditorInput = {
   requestId: string
   image: BrowserPng
   attachToDraft: boolean
   theme: ThemeBootstrap
-  initialIssue?: string
   source?: ScreenshotCaptureSource
-}
+} & (ScreenshotEditMarks | { initialState?: undefined; initialTool?: undefined })
 export type SystemScreenshotEditorFinish = { status: 'completed' } | { status: 'failed'; message: string }
 
 /** This isolated bridge binds image outputs, file grants and completion to the original editor request. */

@@ -1,9 +1,11 @@
 import { AgentMuxError, parseNativeDesktopParams, parseNativeDesktopResult, NATIVE_DESKTOP_WRITES,
   type AgentMuxRpcNativeDesktopOwner, type AgentMuxRpcCallContext, type NativeDesktopMethod,
   type NativeDesktopParamsMap, type NativeDesktopReply, type NativeDesktopJson } from '@agentmux/core'
-import { NativeRequestError, type NativeDesktop, type NativeMethod, type JsonObject } from '@agentmux/native-desktop'
+import { NativeRequestError, type CaptureResult, type NativeDesktop, type NativeMethod, type JsonObject } from '@agentmux/native-desktop'
 
 type NativePort = Pick<NativeDesktop, 'request' | 'inspectOperation'>
+/** Region selection is a Desktop surface over native frozen frames, not a native picker. */
+type SelectionPort = { captureSelection(): Promise<CaptureResult> }
 function actor(context?: AgentMuxRpcCallContext): string {
   if (context?.caller) return `agent:${context.caller.agentSessionId}`
   if (context?.principal && ['user', 'device'].includes(context.principal.kind)) return `${context.principal.kind}:${context.principal.id}`
@@ -15,9 +17,11 @@ function nativeTarget(target: { pid: number; processStartedAt: number; windowId?
 }
 
 /** Host adapter only: all OS state and operation results stay at the shared native owner. */
-export function createNativeDesktopPublicOwner(native: NativePort, host: { hostId: string }): AgentMuxRpcNativeDesktopOwner {
+export function createNativeDesktopPublicOwner(native: NativePort, host: { hostId: string }, selection: SelectionPort): AgentMuxRpcNativeDesktopOwner {
   // These are receipt access bindings, not another operation/result store.
   const receiptActors = new Map<string, { actor: string; instanceId: string }>()
+  // Selection receipts: the surface answers them, so the native owner never saw these operation IDs.
+  const selections = new Map<string, { actor: string; instanceId: string; state: 'pending' | 'completed' }>()
   return {
     async call<M extends NativeDesktopMethod>(method: M, value: NativeDesktopParamsMap[M], context?: AgentMuxRpcCallContext): Promise<NativeDesktopReply> {
       const input = parseNativeDesktopParams<NativeDesktopMethod>(method, value)
@@ -26,9 +30,11 @@ export function createNativeDesktopPublicOwner(native: NativePort, host: { hostI
       context?.signal?.throwIfAborted(); await context?.assertCurrent?.()
       if (method === 'native.operation.inspect') {
         const p = input as NativeDesktopParamsMap['native.operation.inspect']
-        const binding = receiptActors.get(p.operationId)
+        const binding = receiptActors.get(p.operationId) ?? selections.get(p.operationId)
         if (binding && (binding.actor !== actorId || binding.instanceId !== p.instanceId)) throw new AgentMuxError('The original native operation belongs to another actor or instance.', 'CONTROL_PERMISSION_DENIED')
-        const operation = binding ? native.inspectOperation(p.operationId, p.instanceId) : {
+        const chosen = selections.get(p.operationId)
+        const operation = chosen ? { operationId: p.operationId, instanceId: p.instanceId, method: 'captureScreenshot', state: chosen.state }
+          : binding ? native.inspectOperation(p.operationId, p.instanceId) : {
           operationId: p.operationId, instanceId: p.instanceId, state: 'unknown', reason: 'original_receipt_unavailable'
         }
         return parseNativeDesktopResult(method, { hostId: host.hostId, instanceId: p.instanceId, state: 'responded', result: operation }, value)
@@ -45,6 +51,15 @@ export function createNativeDesktopPublicOwner(native: NativePort, host: { hostI
       } else if (method === 'native.snapshot') {
         const p = input as NativeDesktopParamsMap['native.snapshot']
         nativeMethod = 'getAppState'; params = { ...nativeTarget(p.target), clientScope, noScreenshot: true }
+      } else if (method === 'native.capture' && (input as NativeDesktopParamsMap['native.capture']).capture.mode === 'selection') {
+        const p = input as NativeDesktopParamsMap['native.capture']
+        // A repeated operation is refused in the same shape as a native write; it never opens a second surface.
+        if (receiptActors.has(p.operationId) || selections.has(p.operationId)) return parseNativeDesktopResult(method, { hostId: host.hostId, instanceId: p.instanceId, state: 'responded',
+          operationId: p.operationId, error: { code: 'duplicate_operation', message: 'Inspect the original operation; it will not be executed again' } }, value)
+        const receipt = { actor: actorId, instanceId: p.instanceId, state: 'pending' as 'pending' | 'completed' }
+        selections.set(p.operationId, receipt)
+        const result = await selection.captureSelection().finally(() => { receipt.state = 'completed' })
+        return parseNativeDesktopResult(method, { hostId: host.hostId, instanceId: p.instanceId, state: 'responded', operationId: p.operationId, result: result as unknown as NativeDesktopJson }, value)
       } else if (method === 'native.capture') {
         const p = input as NativeDesktopParamsMap['native.capture']
         nativeMethod = 'captureScreenshot'

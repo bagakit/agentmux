@@ -38,7 +38,7 @@ export class SystemScreenshotEditor {
     ipcMain.handle(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
 
-  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { initialIssue, source, returnFocus }: ScreenshotEditContext = {}): Promise<void> {
+  async edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, { source, returnFocus, initialState, initialTool }: ScreenshotEditContext = {}): Promise<void> {
     if (this.disposed) throw new Error('The screenshot editor is closed. Start a new capture to edit another image.')
     pngBytes(image)
     let theme: SystemScreenshotEditorInput['theme']
@@ -53,7 +53,7 @@ export class SystemScreenshotEditor {
     })
     let settle!: () => void
     const closed = new Promise<void>(resolve => { settle = resolve })
-    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(initialIssue ? { initialIssue } : {}), ...(source ? { source } : {}) }, complete, settle,
+    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(source ? { source } : {}), ...(initialState ? { initialState, initialTool } : {}) }, complete, settle,
       pending: false, attempts: new Map(), attemptFingerprints: new Map(), originals: this.outputs?.originalFiles?.(window), originalReads: new Map(), originalSaves: new Map(), contexts: new Map() }
     const contents = window.webContents
     this.requests.set(contents, request)

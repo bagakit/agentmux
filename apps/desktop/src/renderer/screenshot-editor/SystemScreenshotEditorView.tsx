@@ -11,7 +11,7 @@ import { formatScreenshotContext } from '../src/components/browser-screenshot/co
 
 /** Pixel editing is shared with Browser capture; this host owns only final delivery and cancellation. */
 export function SystemScreenshotEditorView({ input, api }: { input: SystemScreenshotEditorInput; api: SystemScreenshotEditorApi }) {
-  const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(input.initialIssue ?? null)
+  const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [delivered, setDelivered] = useState(false)
   const active = useRef(true), pending = useRef(false), editVersion = useRef(0)
@@ -84,7 +84,8 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
     finally { pending.current = false; if (active.current) setBusy(false) }
   }
   return <main className="system-screenshot-editor">
-    <ImageAnnotationEditor key={original.generation} image={original.image} {...(original.initialState ? { initialState: original.initialState } : {})} busy={busy} title="Screenshot"
+    <ImageAnnotationEditor key={original.generation} image={original.image} busy={busy}
+      {...(original.initialState ? { initialState: original.initialState } : input.initialState ? { initialState: input.initialState, initialTool: input.initialTool } : {})} title="Screenshot"
       completeLabel={input.attachToDraft && !delivered ? 'Copy & attach' : 'Copy'} busyLabel="Copying…"
       documentStatus={status ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       {...(pin.uncertain ? { onCheckPin: () => void checkPin() } : {})}
